@@ -70,7 +70,13 @@ import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage, driv
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
 import * as actionExec from '../action-execution.js';
-import { actionInvocationBranch, recordActionInvocation, withActionSurface } from '../action-invocation-audit.js';
+import {
+    actionInvocationBranch,
+    actionInvocationForwardedFrom,
+    actionInvocationTarget,
+    recordActionInvocation,
+    withActionSurface,
+} from '../action-invocation-audit.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { validationFailure, validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 // [#25976] The one value-shape check the run doors share — the trigger and
@@ -793,6 +799,11 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         outcome: answeredOk ? 'succeeded' : 'failed',
         ...(answeredOk ? {} : { status: answeredStatus }),
         ...(!answeredOk && typeof answeredCode === 'string' ? { errorCode: answeredCode } : {}),
+        // An api forward's two rows name each other: this row, as the OUTER
+        // door, the declared target; as the INNER door, the forward mark it
+        // arrived carrying (a hint — see `../action-invocation-audit.ts`).
+        target: actionInvocationTarget(actionDef, actionExec.isDeclarativeUpdateAction(actionDef)),
+        forwardedFrom: actionInvocationForwardedFrom(_context, actionExec.API_FORWARD_MARK_HEADER),
     });
     return answer;
 }
@@ -896,7 +907,7 @@ async function dispatchAdmittedRestAction(
             if ('message' in built) {
                 return { handled: true, response: deps.error(built.message, built.status) };
             }
-            const answer = await actionExec.forwardApiAction(inject, _context, built, { objectName, actionName });
+            const answer = await actionExec.forwardApiAction(inject, _context, built, { objectName, actionName, target: actionDef?.target });
             const relayed = Object.keys(answer.headers).length > 0 ? { headers: answer.headers } : {};
             if (answer.status >= 200 && answer.status < 300) {
                 return { handled: true, response: { ...deps.success(actionExec.apiActionResultOf(answer)), ...relayed } };

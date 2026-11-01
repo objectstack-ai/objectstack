@@ -184,6 +184,7 @@
     "automation/Flow:label",
     "automation/Flow:name",
     "automation/Flow:nodes",
+    "automation/Flow:overrides",
     "automation/Flow:protection",
     "automation/Flow:requiredPermissions",
     "automation/Flow:runAs",

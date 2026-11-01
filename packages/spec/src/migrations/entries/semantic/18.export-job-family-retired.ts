@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'export-job-family-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'the export-job API family, retired whole: the twelve defs api/ExportJobStatus, '
     + 'api/CreateExportJobRequest, api/CreateExportJobResponse, api/ExportJobProgress, '

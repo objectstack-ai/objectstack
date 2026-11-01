@@ -535,8 +535,9 @@ describe('5. MasterDetailForm — the path that made this user-visible', () => {
     // so the seam is consulted first (block 1) and `submitViaBatch` gets to
     // state the precise reason. The renderer's generic refusal is what a form
     // with no seam at all falls through to (block 2).
-    await waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
-    expect(String(toastError.mock.calls[0][0])).toBe('MasterDetailForm: dataSource is required');
+    // Said once, by the form's banner (objectstack-ai/objectstack#27520).
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('MasterDetailForm: dataSource is required'));
+    expect(toastError).not.toHaveBeenCalled();
     expect(toastSuccess).not.toHaveBeenCalled();
 
     // …and the submitter's input is still there. `handleSaved` bumps `formKey`

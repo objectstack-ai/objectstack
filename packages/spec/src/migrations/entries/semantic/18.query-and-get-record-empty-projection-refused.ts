@@ -7,8 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // drop the key, which reads every column, the widening the rule refuses.
 export const entry: SemanticMigration = {
   id: 'query-and-get-record-empty-projection-refused',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span already, and a nested backtick would close it.
   surface:
     'QuerySchema.fields (the QueryAST projection, and so every nested expand entry, including '
     + 'EngineQueryOptionsSchema.expand and the canonical fields of a POST /data/:object/query body) and '

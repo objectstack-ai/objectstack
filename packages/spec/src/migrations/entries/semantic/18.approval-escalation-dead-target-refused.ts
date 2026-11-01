@@ -7,9 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // removed, so there is no tombstone and no RETIRED_KEYS_BY_MAJOR row. There is
 // no D2 conversion either: which position or person a team, department or
 // membership tier was meant to stand for is the author's judgment.
-//
-// No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-// inside a code span and a table cell.
 export const entry: SemanticMigration = {
   id: 'approval-escalation-dead-target-refused',
   surface:

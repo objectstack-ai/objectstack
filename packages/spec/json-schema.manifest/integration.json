@@ -15,6 +15,7 @@
     "integration/ConnectorInstanceOAuth2Auth",
     "integration/ConnectorInstanceOAuth2AuthorizationCodeAuth",
     "integration/ConnectorInstanceOAuth2ClientCredentialsAuth",
+    "integration/ConnectorInstanceSignedAlipayV3Auth",
     "integration/ConnectorInstanceSignedAliyunAcs3Auth",
     "integration/ConnectorInstanceSignedAuth",
     "integration/ConnectorInstanceSignedTencentCloudTc3Auth",

@@ -1,5 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { resolveAllowDriverConnectFailure } from '@objectstack/types';
+
 /** One boot-registered driver whose `connect()` rejected during engine init. */
 export interface DriverConnectFailure {
   driverName: string;
@@ -231,8 +233,10 @@ export const DATASOURCE_UNAVAILABLE_CODE = 'ERR_DATASOURCE_UNAVAILABLE' as const
  * is not registered.`:
  *
  *  1. the host's connect policy refused it (plan / egress isolation),
- *  2. it failed to connect at boot and `OS_ALLOW_DRIVER_CONNECT_FAILURE` let
- *     the server start anyway,
+ *  2. its connect failed — at boot under `OS_ALLOW_DRIVER_CONNECT_FAILURE`, when
+ *     a package declaring it was installed into the running server, or when it
+ *     was created in Setup (the record does not say which; see
+ *     `degradedBootNote`),
  *  3. the app misspelled the datasource name, and
  *  4. it is declared `active: false`.
  *
@@ -266,14 +270,44 @@ export class DatasourceUnavailableError extends Error {
           `error. It may clear; retry later.`
         : kind === 'blocked'
         ? `: the host's datasource connect policy refused it.`
-        : `: it failed to connect at startup and the server was started with ` +
-          `OS_ALLOW_DRIVER_CONNECT_FAILURE. Nothing re-runs the connect — the server must be ` +
-          `restarted once the datasource is reachable.`;
+        : `: its last connect attempt failed, so no driver serves it.` + degradedBootNote();
     const detail = publicDetail ? ` ${publicDetail}` : '';
-    const where = kind === 'remote' ? 'the server log' : 'the startup logs or Setup → Datasources';
+    const where =
+      kind === 'remote'
+        ? 'the server log'
+        : kind === 'blocked'
+        ? 'the startup logs or Setup → Datasources'
+        : 'Setup → Datasources or the server log';
     super(`${head}${why}${detail} See ${where} for the cause.`);
     this.name = 'DatasourceUnavailableError';
   }
+}
+
+/**
+ * The `failed` arm's restart sentence, or nothing.
+ *
+ * A `failed` record is the same `{ kind: 'failed' }` whatever produced it: a
+ * code datasource whose boot connect failed under
+ * `OS_ALLOW_DRIVER_CONNECT_FAILURE`, one declared by a package installed into
+ * the running server, and one created in Setup. A restart re-runs each of
+ * them, but only the first has no other door — saving re-runs a Setup
+ * datasource's connect, reinstalling re-runs a package's — and only the first
+ * can exist only while the flag is set, because without it that boot is
+ * refused. So the flag is the one fact that can make the sentence true, and it
+ * is said conditionally: with the flag set, the record may still come from
+ * either of the other two.
+ *
+ * The flag is read through `resolveAllowDriverConnectFailure`, the one parse
+ * the boot paths use, which answers `false` where there is no `process`, so
+ * this never throws inside the constructor.
+ */
+function degradedBootNote(): string {
+  if (!resolveAllowDriverConnectFailure()) return '';
+  return (
+    ` OS_ALLOW_DRIVER_CONNECT_FAILURE is set on this server: if this datasource is declared in code ` +
+    `and its connect failed at startup, the flag let the server start without it, and nothing re-runs ` +
+    `that connect until the server is restarted.`
+  );
 }
 
 /**

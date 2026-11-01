@@ -78,7 +78,7 @@
       "title": "Per-group sign-off (会签) needs one approval from EACH group",
       "since": "v16",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
@@ -117,9 +117,9 @@
           "evidence": "before/after request reads"
         },
         {
-          "clause": "the request page's group chips are server-computed and match the API at each stage",
+          "clause": "the request page's group chips are server-computed and match the API at each PENDING stage; once the request is decided, neither the page nor the read carries them",
           "oracle": "screenshot",
-          "verify": "chip screenshot at each stage alongside the API read — chips are keyed by (name, group) from pending_approver_groups (#2762), not a client recount",
+          "verify": "chip screenshot at each stage alongside the API read — chips are keyed by (name, group) from pending_approver_groups (#2762), not a client recount. The chips and the tally exist only while the request is pending: the approvals read attaches decision_progress and pending_approver_groups to a pending row only (approval-service.ts attachDecisionProgress returns on any other status), and the request page draws them only from those fields (ui/packages/app-shell/src/views/approval-decision/ApprovalDecisionPanel.tsx). So after the final decision the page shows neither and the paired read carries neither. That absence on both sides is the match, not a missing render (QA run #27441)",
           "evidence": "screenshots + paired reads"
         },
         {
@@ -177,6 +177,12 @@
           "date": "2026-10-26",
           "change": "three checklist-accuracy findings of the 18.2.0 sweep's QA run #25817, manual set, at framework 6679644a (findings card #25838, wave anchor #25807): steps[3]–[4] no longer say 'drawer' — the inbox row opens the served sys_approval_request record page (objectui#12484) — and steps[3] names the English tab 'My Pending'; acceptance[3] reads the approve branch off its logged mark_approved step instead of calling the edge unobservable; negative[0] names the stock contrast, the unanimous invoice request (admin×2), since no stock per_group request collapses its slate. acceptance[2]'s 'drawer' changed with steps[3]–[4] so the item does not contradict itself. Re-read at base 9753d163",
           "ref": "#26116"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-31",
+          "change": "acceptance[2] said the chips match the API 'at each stage'. QA run #27441 found the tally and chips render only while the request is pending. Source agrees: attachDecisionProgress (approval-service.ts) sets decision_progress and pending_approver_groups on a pending row only, and ApprovalDecisionPanel.tsx draws from them alone. The clause now binds each PENDING stage, and adds that after the decision neither the page nor the read carries them. That is a stronger claim than before. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726",
+          "ref": "#27441"
         }
       ]
     },
@@ -185,7 +191,7 @@
       "title": "M-of-N quorum approves at the threshold; one rejection vetoes",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "browser",
       "personas": ["three DISTINCT users each holding one of the approver positions"],
@@ -237,9 +243,9 @@
           "evidence": "request read + inbox count"
         },
         {
-          "clause": "the request page's M-of-N tally is server-computed and matches the API at each stage",
+          "clause": "the request page's M-of-N tally is server-computed and matches the API at each PENDING stage; once the request is decided, neither the page nor the read carries a tally",
           "oracle": "screenshot",
-          "verify": "after each decision, the request page's 'Approvals — x of y' tally line (followed by the eligible-approver count) alongside the paired API read; a '(2 of 3)' in the flow's step text is static and is never read as the tally",
+          "verify": "after each decision, the request page's 'Approvals — x of y' tally line (followed by the eligible-approver count) alongside the paired API read; a '(2 of 3)' in the flow's step text is static and is never read as the tally. The tally exists only while the request is pending: the approvals read attaches decision_progress to a pending row only (approval-service.ts attachDecisionProgress returns on any other status), and the request page draws the tally only from that field (ui/packages/app-shell/src/views/approval-decision/ApprovalDecisionPanel.tsx). So after the final decision the page shows no tally and the paired read carries no decision_progress. That absence on both sides is the match, not a missing render (QA run #27441)",
           "evidence": "screenshots + reads"
         }
       ],
@@ -287,6 +293,12 @@
           "date": "2026-10-28",
           "change": "steps[8] and acceptance[4] read the request page, not the retired drawer, and fixtures.requires[1] names the admin's double role. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, manual browser set, at 756220c4; wave anchor #25807, slice B): the inbox's Request cell opens the sys_approval_request record page, where the tally reads 'Approvals — x of 2 · N eligible approvers', and the fixture's admin-created reports make the admin both submitter and third holder. Re-read at base fd246c22: ui/apps/console/src/pages/system/ApprovalsInboxPage.tsx requestPagePath navigates to /apps/APP/sys_approval_request/record/ID, and ui/packages/i18n/src/locales/en.ts approvalProgress 'Approvals — {{got}} of {{need}}'. The clause's assertion (server-computed tally equals the API) is unchanged",
           "ref": "#25807"
+        },
+        {
+          "revision": 9,
+          "date": "2026-10-31",
+          "change": "acceptance[4] said the tally matches the API 'at each stage'. QA run #27441 found the tally renders only while the request is pending. Source agrees: attachDecisionProgress (approval-service.ts) sets decision_progress on a pending row only, and ApprovalDecisionPanel.tsx draws the tally from it alone. The clause now binds each PENDING stage, and adds that after the decision neither the page nor the read carries a tally. That is a stronger claim than before. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726",
+          "ref": "#27441"
         }
       ]
     },
@@ -295,7 +307,7 @@
       "title": "Inbox actions are metadata-driven and gated by the viewer's relationship",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "browser",
       "personas": ["an approver who is NOT the submitter and NOT an override actor (no platform-admin or tenant-admin standing), so record.viewer.can_override is false on the request", "the dev admin: the submitter of the invoice request (the own-request case) and an OVERRIDE actor (a platform admin — record.viewer.can_override is true on any PENDING request), for the override half of clause 2"],
@@ -304,7 +316,7 @@
         "requires": [
           "requests with a real (non-null) submitter — seeded since #3411 (invoice submitted by admin, others by a no-position persona)",
           "seed-approval-demo.ts: the invoice dual sign-off request is submitted BY the admin (their own request, so the Submitted by me tab — 我发起的 on zh-CN — is non-empty), while EXP-2001 / EXP-DEMO are submitted by Mei Phone (other-submitter requests the admin approves)",
-          "a non-override approver on an other-submitter PENDING request: the seeded approver of EXP-2001 / EXP-DEMO is the dev admin, an override actor, so invite a plain member and make them an approver of one such request (for example through the request's reassign action as the admin) before step 2"
+          "a non-override approver on an other-submitter PENDING request. EXP-2001, the per_group Expense Sign-off, routes the seeded Ada Auditor (demo) persona for its finance group (ExpenseSignoffFlow: position 'auditor', group 'finance'; seed-approval-demo.ts gives Ada the auditor position), beside the dev admin's manager group. Ada is a plain organization member, so viewer.can_override is false for her. She is this persona ready-made, and she signs in with the demo persona password (examples/app-showcase/src/security/demo-personas.ts). EXP-DEMO, the quorum committee over manager / finance / legal, routes only the dev admin, an override actor. A run that uses EXP-DEMO for the other-submitter case still makes a plain member its approver first, e.g. through the request's reassign action as the admin, before step 2"
         ]
       },
       "steps": [
@@ -371,6 +383,12 @@
           "date": "2026-10-28",
           "change": "acceptance[1].verify names the override label. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26456, manual browser set, at 756220c4; wave anchor #25807, slice B): on the dev admin's view of another submitter's pending request the button reads 'Override Recall', not 'Recall', and the decision buttons read 'Override Approve/Reject/Reassign'. Re-read at base fd246c22: ui/packages/app-shell/src/views/DeclaredActionsBar.tsx overrideLabel (defaultValue 'Override {{action}}'). The clause is unchanged",
           "ref": "#25807"
+        },
+        {
+          "revision": 8,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[2] said the seeded approver of EXP-2001 / EXP-DEMO is only the dev admin, so a plain member had to be invited and reassigned in. QA run #27441 found EXP-2001 also routes Ada. Source agrees: ExpenseSignoffFlow's finance group is position 'auditor', which seed-approval-demo.ts assigns to Ada Auditor, a plain member (role 'member', so can_override false). Ada is now named as the ready-made non-override approver on EXP-2001. The reassign detour stays only for EXP-DEMO, whose quorum slate (manager / finance / legal) is all the admin's. No clause changed. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6490438726",
+          "ref": "#27441"
         }
       ]
     },
@@ -932,7 +950,7 @@
       "title": "Approve/Reject render on the record page from sys_approval_request's declared actions; Reject fires after ONE dialog; a locking approval hides inline edit",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "browser",
       "personas": ["dev admin (holds the manager position, so showcase_budget_approval's manager_review routes to them — a pending approver standing on the record page)"],
@@ -947,13 +965,13 @@
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "PATCH a showcase_project budget to e.g. 200000 over /api/v1/data — showcase_budget_approval opens and parks at manager_review (routed to manager = admin), lockRecord:false; the admin is the request's submitter as well as its approver",
         "open that project's record page — /_console/apps/showcase_app/showcase_project/record/:id, the served record route (the shorthand /apps/showcase_app/showcase_project/:id still lands there: the console's ShorthandRecordRedirect rewrites it); once it settles, screenshot the decision bar ABOVE the page body, not the record header: DeclaredActionsBar renders sys_approval_request's declared record_section actions against the pending request row. For the admin (pending approver and submitter) that is Approve (approval_approve, declared variant 'primary' → filled), Reject (approval_reject, 'danger' → destructive), Reassign, Send back, Request info, Recall and Reply, in declaration order, each a button whose data-testid is declared-action- plus the action name; Send reminder is left to the approvals panel (approval_remind is excluded) and Resubmit stays hidden (the request is not 'returned'). Capture the read the bar ran on: GET /api/v1/approvals/requests?object=showcase_project&recordId=:id answers the pending row with viewer.can_act true and viewer.is_submitter true",
-        "because manager_review is lockRecord:false (the request row reads lock_record: false), confirm inline-edit affordances remain live on this record (the editable contrast)",
+        "because manager_review is lockRecord:false (the request row reads lock_record: false), confirm the edit affordances remain live on this record (the editable contrast): the header's Edit button is enabled, the inline-edit pencils are present, and the approval band reads 'In approval · editable' (sky, a clock icon; ui/packages/plugin-detail/src/DetailView.tsx, detail.approvalPendingEditable)",
         "click Reject (declared-action-approval_reject): assert exactly ONE dialog opens — the param dialog titled by the declared label, Reject, with the declared confirm question as its description ('Reject this request? A rejection is final for every approver.'), carrying the optional Comment textarea and Attachments file input inline; there is NO confirm dialog in front of it and no second comment dialog after it (approval_reject declares its question as description and no confirmText, so the runtime chains nothing, #7278; objectui#3126)",
         "fill the comment and Confirm; capture POST /api/v1/approvals/requests/:id/reject — :id is the REQUEST's id, never the project's — with the comment in its body; re-read GET /api/v1/approvals/requests/:id (status=rejected) and GET /api/v1/approvals/requests/:id/actions (the reject row carries the comment). The bar re-reads the approvals after the decision (refreshAfter) and draws nothing once no request is pending",
         "approve path: PATCH another project's budget to e.g. 200000; on its record page click Approve → one dialog (titled Approve, described 'Approve this request? Your approval is recorded, and the request moves on once this step has the approvals it requires.', optional Comment and Attachments) → Confirm → POST /api/v1/approvals/requests/:id/approve → re-read (status=approved; at or under 500000, needs_exec ends the run at approved)",
-        "lock contrast: PATCH a third project's budget above 500000 (e.g. 600000) and approve its manager_review from the record page as in step 7 — needs_exec routes the run to exec_review (position 'exec', the admin again; lockRecord:true), a NEW pending request whose row reads lock_record: true; once the page re-reads (the decision's refresh, or a reload), screenshot — the inline-edit affordances are HIDDEN (approvalLocked, from resolveApprovalLock over recordLockedByApproval of the pending request → canEdit suppressed) and the approval band shows its locked state",
+        "lock contrast: PATCH a third project's budget above 500000 (e.g. 600000) and approve its manager_review from the record page as in step 7 — needs_exec routes the run to exec_review (position 'exec', the admin again; lockRecord:true), a NEW pending request whose row reads lock_record: true; once the page re-reads (the decision's refresh, or a reload), screenshot — the header's Edit button stays RENDERED but DISABLED (disabled, not hidden, so the user sees the affordance is off: RecordDetailView.tsx, framework#3794), the inline-edit pencils are gone (approvalLocked, from resolveApprovalLock over recordLockedByApproval of the pending request → InlineEditProvider canEdit false), and the approval band reads 'Locked for approval' (amber, a lock icon; detail.lockedByApproval)",
         "both-sides gate, closed side: open the step-8 project's record page (its exec_review is pending) as a member who can READ the project but is not on the slate, did not submit and holds no override — e.g. a contributor-bound member (the search:qa-contributor-bound-member recipe; RUNNER.md's self-registration entry says how to mint one). Capture the member's own GET /api/v1/approvals/requests?object=showcase_project&recordId=:id: it serves no row for this record (the approvals door serves a request to its participants and the override actor, and the record-reader tier is off: no showcase object declares enable.approvalsVisibleToReaders), so the page draws no declared decision action at all. Then forge the decision: as the member, POST /api/v1/approvals/requests/:id/approve with the id from the admin's read → 403, code FORBIDDEN ('is not a pending approver'), and the request re-reads still pending. ⛔ Not the dev admin: the admin holds the override (step 10), so the admin cannot prove the gate's closed side",
-        "override contrast (the admin off the slate): on a pending manager_review (PATCH a fourth project to e.g. 200000), Reassign the step to another user through the bar's New approver picker — e.g. the seeded Ada Auditor (demo) persona (examples/app-showcase/src/security/demo-personas.ts) — so the request waits on that user and the admin holds no slot. Re-read the row (viewer.can_act false, viewer.can_override true) and screenshot the bar: Approve, Reject and Reassign render as 'Override Approve' / 'Override Reject' / 'Override Reassign' (amber outline, a shield icon, data-override-decision='true'), Send back and Request info are gone (their predicate reads can_act alone), and Recall and Reply stay plain (the admin holds them as the submitter). That is the override arm of the same declared predicates, not the gate failing"
+        "override contrast (the admin off the slate): on a pending manager_review (PATCH a fourth project to e.g. 200000), Reassign the step to another user through the bar's New approver picker — e.g. the seeded Ada Auditor (demo) persona (examples/app-showcase/src/security/demo-personas.ts) — so the request waits on that user and the admin holds no slot. Re-read the row (viewer.can_act false, viewer.can_override true) and screenshot the bar. The record page FOLDS the override levers for an override-only viewer (RecordDetailView.tsx passes foldOverrides; DeclaredActionsBar.tsx, objectstack#25877). The bar shows a 'Pending · Waiting on …' status line naming the approver the override would bypass, Reply as a plain button (the admin holds it as the submitter), and ONE amber menu trigger, a shield plus an overflow glyph, data-testid declared-actions-override-menu, labelled 'Admin override'. Open that menu and screenshot it. It lists 'Override Approve', 'Override Reject' and 'Override Reassign' (data-override-decision='true'), and Recall under its plain label: the admin holds Recall as the submitter, so it carries no override framing, yet it folds with the rest because its declared visible gate ORs in can_override. Send back and Request info are gone (their predicate reads can_act alone). That is the override arm of the same declared predicates, not the gate failing"
       ],
       "acceptance": [
         {
@@ -975,16 +993,16 @@
           "evidence": "before/after request reads + the POST body + the decision action row"
         },
         {
-          "clause": "a LOCKING pending approval hides the record's inline-edit affordances; a non-locking one keeps them",
+          "clause": "a LOCKING pending approval turns the record's edit affordances off and says so: the header's Edit is disabled, the inline-edit pencils are gone and the band reads 'Locked for approval'. A non-locking one keeps them live and the band reads 'In approval · editable'",
           "oracle": "screenshot",
-          "verify": "under exec_review (lockRecord:true) the request row reads lock_record: true and the inline-edit affordances are absent (approvalLocked from resolveApprovalLock over recordLockedByApproval of the pending request → canEdit false, objectui#2902; the approval band shows its locked state); under manager_review (lockRecord:false) the row reads lock_record: false and they remain — both sides, on the same flow",
+          "verify": "under exec_review (lockRecord:true) the request row reads lock_record: true; the header's Edit button is rendered and DISABLED (an Edit that is hidden instead fails this read too: the lock shows the affordance as off, framework#3794); the inline-edit pencils are absent (approvalLocked from resolveApprovalLock over recordLockedByApproval of the pending request → canEdit false, objectui#2902); and the approval band reads 'Locked for approval'. Under manager_review (lockRecord:false) the row reads lock_record: false, Edit is enabled, the pencils remain and the band reads 'In approval · editable'. Both sides, on the same flow",
           "evidence": "two record-page screenshots (locked vs editable) + the two request rows' lock_record"
         },
         {
           "clause": "the decision actions are gated by the SERVER's viewer block, not by a client check: a viewer who is not a pending approver, not the submitter and holds no override is offered no decision action, and the server refuses the decision a forged request makes; an organization administrator off the slate is offered the OVERRIDE framing of the levers the override arm admits, which is a different control, not this gate failing",
           "oracle": "api",
-          "verify": "as the member (step 9): the member's GET /api/v1/approvals/requests?object=showcase_project&recordId=:id serves no row for the record; after a screenshot confirms the page rendered, its DOM holds no declared-action-* button; a forged POST /api/v1/approvals/requests/:id/approve answers 403 with code FORBIDDEN, and the request re-reads pending. As the admin off the slate (step 10): the row's viewer block reads can_act false and can_override true, and the bar shows the Override framing on Approve, Reject and Reassign (data-override-decision='true') with Send back and Request info absent — record it separately",
-          "evidence": "the member's approvals read + the record-page screenshot and its declared-action DOM list + the forged POST's 403 body; the admin's off-slate row read + bar screenshot"
+          "verify": "as the member (step 9): the member's GET /api/v1/approvals/requests?object=showcase_project&recordId=:id serves no row for the record; after a screenshot confirms the page rendered, its DOM holds no declared-action-* button; a forged POST /api/v1/approvals/requests/:id/approve answers 403 with code FORBIDDEN, and the request re-reads pending. As the admin off the slate (step 10): the row's viewer block reads can_act false and can_override true, and the bar folds the override levers into the 'Admin override' menu (declared-actions-override-menu). Opened, the menu lists Override Approve, Override Reject and Override Reassign (data-override-decision='true') and a plain Recall, while Reply stays an inline button and Send back and Request info are absent. Record it separately",
+          "evidence": "the member's approvals read + the record-page screenshot and its declared-action DOM list + the forged POST's 403 body; the admin's off-slate row read + the bar and the opened override menu screenshots"
         }
       ],
       "negative": [
@@ -1005,7 +1023,8 @@
         { "revision": 1, "date": "2026-08-08", "change": "initial — the record-page approval surface (distinct from the inbox-drawer items): header Approve/Reject, one-dialog Reject (#3126), decision round-trip, and the lockRecord-driven inline-edit hide (#2902)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-10-17", "change": "the both-sides clause and step 9 named no persona, and the natural choice — the dev admin on a record routed away from them — sees 'Override Approve' / 'Override Reject' (#23878 checklist-accuracy finding), so it can never show the closed side; the step and clause 5 now name a non-override member. The record route in step 3 is the served /_console/apps/showcase_app/showcase_project/record/:id (the shorthand form redirects to it). Re-run on main c91af8ed6 with the console at objectui f8267df93aba: on a project whose budget approval is pending for the admin, the admin's header shows Approve and Reject; a contributor-bound member's header shows neither; with the admin's slot reassigned away the admin's header shows Override Approve and Override Reject", "ref": "#24036" },
         { "revision": 3, "date": "2026-10-20", "change": "source[2] re-pointed, and fixtures.knownGaps[0] added. PR #24982's pin finding: source[2] cited objectui's RecordDetailView.approvalDecisionActions.test.tsx, absent at both console pins. Read in a full objectui clone: objectui 99782f961 (objectui#3055) deleted it, and that commit is an ancestor of 616df6598b42 and of cf153eb2e535 (exit 0 both; control, cf153eb2e535 as an ancestor of 99782f961: exit 1). The same commit retired buildApprovalDecisionActions and moved the record page's decisions onto sys_approval_request's declared actions. At cf153eb2e535, RecordDetailView.approvalDeclaredActions.test.tsx holds the params half (the comment and declared outputs reach the POST to the request), and this repository's sys-approval-request.object.test.ts holds the one-dialog half. The knownGap tells a runner that the rest of the item still describes the retired header buttons. steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
-        { "revision": 4, "date": "2026-10-21", "change": "Re-derived against the shipped record page. PR #25003's carried finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): the steps, clauses, fixtures.requires[1] and source[0]–[1] still described the record header's hand-written Approve/Reject — buildApprovalDecisionActions, approve_request / reject_request in record_header, ordered -100 / -99, behind a client-side canDecide — which objectui 99782f961 (objectui#3055) retired before both console pins. Read at objectui cf153eb2e535 (RecordDetailView.tsx, DeclaredActionsBar.tsx, recordApprovalActions.ts, useRecordApprovals.ts, useConsoleActionRuntime.tsx, approvalOverride.ts) and at base 93e6c1a5f8 (sys-approval-request.object.ts; approval-service.ts attachViewers and decide; request-read-gate.ts; approvals-routes.ts; the showcase budget flow and approval seed): the record page runs sys_approval_request's declared record_section actions through DeclaredActionsBar above the page body, each gated by its visible predicate over the server's viewer block. title, fixtures.requires[0]–[1], steps[1]–[8], the verify and evidence of every clause, clauses [0], [1], [2] and [4] (whose oracle moves dom → api: the gate is the server's), negative[2] and source[0]–[1] rewritten; steps[9] (the off-slate admin's override framing) and source[4]–[5] (the server's declarations, viewer block, read gate and refusal) added; fixtures.knownGaps[0] removed, the retired text it warned about being gone. No automated ref is added: neither pin holds a clause whole at its layer (the objectui test mounts the page in jsdom over a fetch double, with a hand-written definition and the param dialog mocked; sys-approval-request.object.test.ts reads the declarations). The live verdicts at the pin are NOT MEASURED: the sources were read, not run", "ref": "#25018" }
+        { "revision": 4, "date": "2026-10-21", "change": "Re-derived against the shipped record page. PR #25003's carried finding (round 17 of wave anchor #24579; ACCEPT 6304389370, landing record 6304641541): the steps, clauses, fixtures.requires[1] and source[0]–[1] still described the record header's hand-written Approve/Reject — buildApprovalDecisionActions, approve_request / reject_request in record_header, ordered -100 / -99, behind a client-side canDecide — which objectui 99782f961 (objectui#3055) retired before both console pins. Read at objectui cf153eb2e535 (RecordDetailView.tsx, DeclaredActionsBar.tsx, recordApprovalActions.ts, useRecordApprovals.ts, useConsoleActionRuntime.tsx, approvalOverride.ts) and at base 93e6c1a5f8 (sys-approval-request.object.ts; approval-service.ts attachViewers and decide; request-read-gate.ts; approvals-routes.ts; the showcase budget flow and approval seed): the record page runs sys_approval_request's declared record_section actions through DeclaredActionsBar above the page body, each gated by its visible predicate over the server's viewer block. title, fixtures.requires[0]–[1], steps[1]–[8], the verify and evidence of every clause, clauses [0], [1], [2] and [4] (whose oracle moves dom → api: the gate is the server's), negative[2] and source[0]–[1] rewritten; steps[9] (the off-slate admin's override framing) and source[4]–[5] (the server's declarations, viewer block, read gate and refusal) added; fixtures.knownGaps[0] removed, the retired text it warned about being gone. No automated ref is added: neither pin holds a clause whole at its layer (the objectui test mounts the page in jsdom over a fetch double, with a hand-written definition and the param dialog mocked; sys-approval-request.object.test.ts reads the declarations). The live verdicts at the pin are NOT MEASURED: the sources were read, not run", "ref": "#25018" },
+        { "revision": 5, "date": "2026-10-31", "change": "Two findings of QA run #27441. First, steps[9] and acceptance[4]: for the override-only admin, who is also the submitter, the record page folds the override levers into one 'Admin override' menu (data-testid declared-actions-override-menu; RecordDetailView.tsx foldOverrides, DeclaredActionsBar.tsx, objectstack#25877). The menu holds Override Approve, Override Reject, Override Reassign and a plain Recall. The bar keeps the status line and Reply. The items said the three Override buttons rendered in the bar. Second, steps[3], steps[7] and acceptance[3]: under a locking approval the header Edit stays rendered but disabled (framework#3794) while the inline pencils are hidden, and the band text is named: 'Locked for approval' locked, 'In approval · editable' not locked (DetailView.tsx). The items said the affordances were absent. acceptance[3] is stronger, not weaker: a hidden Edit now fails it. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); findings parked in anchor comment 6490438726", "ref": "#27441" }
       ]
     },
     {
@@ -1336,7 +1355,7 @@
       "title": "The anonymous /approvals/act door: a minted one-tap token renders a confirm page and one POST decides as exactly the bound approver — every dead-token shape is a designed refusal page with no state change",
       "since": "v16",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (submitter of the seeded invoice request — remind is submitter-only). Since PR #24620 the remind fan-out mints no token, so the admin drives only the live legs: the reminder at-rest read and the server reads beside the anonymous probes", "the ANONYMOUS bearer of an action link: a clean HTTP client holding NO session cookie and NO bearer token"],
@@ -1354,7 +1373,7 @@
       },
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
-        "at-rest leg: POST /api/v1/approvals/requests/:id/remind on the admin-submitted invoice request — the answer's notified is positive and GET /:id/actions gains one remind row (notified counts the pending SLOTS fanned out to: a slot listed twice counts twice while messaging dedups the second emit, so read it as a positive count, never as distinct people — QA run #24542, PR #24620's acceptance notes); then GET /api/v1/data/sys_notification (topic approval.reminder, source_id = the request id) as the admin and confirm each reminder payload carries NO actions list and no /api/v1/approvals/act URL — only its title, its body and the /system/approvals deep link. ⛔ Do NOT read sys_approval_token through the data API: since PR #22633 the object is apiEnabled: false with apiMethods: [], so GET /api/v1/data/sys_approval_token answers 404 OBJECT_API_DISABLED for every caller (the administrator included) — that 404 is the designed answer, not a finding",
+        "at-rest leg: POST /api/v1/approvals/requests/:id/remind on the admin-submitted invoice request — the answer's notified is positive and GET /:id/actions gains one remind row (notified counts the reminders handed over, ONE per distinct concrete address on pending_approvers: an approver the slate lists twice — a per_group slate keeps one slot per group they resolved into — is reminded once and counted once, a position:* literal adds nothing, and a user id and the same account's email are two addresses, counted twice exactly as at the opening. approval-service.ts remind; pinned by remind-notified-per-person.integration.test.ts. So expect notified to equal the number of distinct concrete addresses, never the slot count: QA run #27409 read notified:1 for the admin listed twice); then GET /api/v1/data/sys_notification (topic approval.reminder, source_id = the request id) as the admin and confirm each reminder payload carries NO actions list and no /api/v1/approvals/act URL — only its title, its body and the /system/approvals deep link. ⛔ Do NOT read sys_approval_token through the data API: since PR #22633 the object is apiEnabled: false with apiMethods: [], so GET /api/v1/data/sys_approval_token answers 404 OBJECT_API_DISABLED for every caller (the administrator included) — that 404 is the designed answer, not a finding",
         "the live-token legs — the per-approver mint (one approve + one reject row per concrete pending approver, SHA-256 at rest, FORBIDDEN for a non-pending approver), the confirm page that never mutates, the redemption as the bound approver (comment 'Via action link'), the replay, the dead-slot and expired shapes and the bearer probe — need a raw token no stock door mints (knownGaps[0]): run the pins in automated.ref and cite each file's summary line, per clause as each verify names them",
         "switch to a CLEAN anonymous client (no cookies, no Authorization header — prove it: GET /api/v1/approvals/requests from the same client answers 401); GET and then POST (form body token=garbage) /api/v1/approvals/act?token=garbage — both answer the 'Invalid link · 链接无效' page, 200 text/html, with no request summary rows, and the admin's before/after reads of the invoice request show no change. It is the one dead-token shape a live boot can still produce without a minted token",
         "expiry: no live door on this build (see knownGaps) — cite the pinned unit test's 'expired' reason and the RESULT_COPY.expired page copy ('Link expired · 链接已过期'), and record the leg as blocked(fixture)"
@@ -1429,7 +1448,8 @@
         { "revision": 6, "date": "2026-10-20", "change": "automated.ref names a pin for negative[2] — carried finding 2 of round 12's report on PR #24824 (wave anchor #24579 round 13), against QA run #24779's 'unpinned' score. action-page-member.integration.test.ts's dead-link case compares the invalid, expired and consumed pages, through GET and POST, byte for byte with renderResultPage(kind) and no request, which renders no summary rows (action-link-pages.ts at base 7697ddcf94); a page leaking the summary fails it. That is negative[2]'s full clause on the member door, and the file's parity cases hold the mount to the same bytes. No clause changed", "ref": "#24850" },
         { "revision": 7, "date": "2026-10-20", "change": "fixtures.knownGaps[0] and knownGaps[2] score each live-token leg at its own clause's layer. PR #24891's carried finding (round 15's acceptance notes: legs scored from pins, mixed clause oracles), read under RUNNER rule 6. Read at base feb09db14a: acceptance[0]–[3] are test-oracle clauses and their pins are their oracle; acceptance[4] is a network clause, and action-page-member.integration.test.ts renders its invalid, expired and consumed pages through the plugin's page member and mount on a started kernel (driver-sql over in-memory SQLite, a real Hono app), while its not_pending / not_approver pages and acceptance[5]'s bearer probe have no pin at their door. knownGaps[0] said every such leg is scored from the pins, and knownGaps[2] scored the expired shape from the service test; both now say this, as acceptance[4].verify already did. No clause changed", "ref": "#24963" },
         { "revision": 8, "date": "2026-10-20", "change": "steps[0] respelled: 'boot showcase isolated' → 'boot the showcase on its own port and DB'. Round 12's out-of-scope finding (landing record 6287983829 on wave anchor #24579): the phrase 'showcase isolated' named the dogfood §0 own-port boot, and a runner read it as the `isolated` tenancy posture (OS_TENANCY_POSTURE=isolated). The new spelling names that boot by what it is, in RUNNER.md's own words for it (the trap table's counter: own port/DB, skill §0), and names no posture. Read at base e4d604efd3. No clause changed", "ref": "#25003" },
-        { "revision": 9, "date": "2026-10-26", "change": "three checklist-accuracy findings of the 18.2.0 sweep's QA run #25815, Tier 1 set, at framework 6679644a (findings card #25838, wave anchor #25807): acceptance[0]'s FORBIDDEN arm is pinned with 'stranger', no approver at all, not a non-pending approver, and its live at-rest sys_notification read stays a run leg; acceptance[1]'s pins read status pending and no decisions, not the byte-identity of the actions timeline or the token's consumed_at; acceptance[3]'s 'a decide that fails still burns it' has no named pin. Each verify now names its unpinned half, and automated.ref and knownGaps[0] no longer call acceptance[0], [1] and [3] fully pinned. Pins re-read at base 9753d163. No clause changed", "ref": "#26116" }
+        { "revision": 9, "date": "2026-10-26", "change": "three checklist-accuracy findings of the 18.2.0 sweep's QA run #25815, Tier 1 set, at framework 6679644a (findings card #25838, wave anchor #25807): acceptance[0]'s FORBIDDEN arm is pinned with 'stranger', no approver at all, not a non-pending approver, and its live at-rest sys_notification read stays a run leg; acceptance[1]'s pins read status pending and no decisions, not the byte-identity of the actions timeline or the token's consumed_at; acceptance[3]'s 'a decide that fails still burns it' has no named pin. Each verify now names its unpinned half, and automated.ref and knownGaps[0] no longer call acceptance[0], [1] and [3] fully pinned. Pins re-read at base 9753d163. No clause changed", "ref": "#26116" },
+        { "revision": 10, "date": "2026-10-31", "change": "steps[1] said notified counts pending SLOTS, a slot listed twice counting twice. QA run #27409 read notified:1 with the admin listed twice in pending_approvers. remind() now counts one reminder per distinct concrete address (approval-service.ts remind: a Set over pending_approvers, position:* literals not counted), pinned by remind-notified-per-person.integration.test.ts. The step now states that count, which is more precise than 'a positive count'. No clause changed: no clause asserts notified. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6488948228", "ref": "#27409" }
       ]
     },
     {
@@ -1574,14 +1594,14 @@
       "title": "approvalStatusField mirrors every request transition onto the business record — through the record lock's whitelist, attributed to the acting user",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "api",
-      "personas": ["dev admin (authors the scratch flow; decides and recalls)", "a second real login (Ada) as submitter where the recall/pending attribution needs a non-deciding identity"],
+      "personas": ["dev admin (authors the scratch flow; decides and recalls)", "a second real login as submitter where the recall/pending attribution needs a non-deciding identity. The submitter is whoever creates the trigger record, so this login needs create on the trigger object (fixtures.requires[0]). On stock showcase_field_zoo neither seeded demo persona (Ada Auditor, Mei Phone) has it"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch ACTIVE flow whose approval node declares config.approvalStatusField naming a text field on the trigger object, registered on the STOCK boot through POST /api/v1/automation (no writable package is needed) and record-triggered on a stock object — e.g. start {objectName: 'showcase_field_zoo', triggerType: 'record-after-create'}, approvalStatusField 'f_textarea'. The spec says the field 'should be readonly on the object'; a stock field cannot be redeclared, and the mirror lands either way — author a scratch object in a writable package only if the readonly declaration itself is under test. Plus a SECOND flow WITHOUT the key for the never-writes side; register one flow at a time and DELETE /api/v1/automation/<name> between legs, so two flows never fire on one create",
+          "a scratch ACTIVE flow whose approval node declares config.approvalStatusField naming a text field on the trigger object, registered on the STOCK boot through POST /api/v1/automation (no writable package is needed) and record-triggered on a stock object — e.g. start {objectName: 'showcase_field_zoo', triggerType: 'record-after-create'}, approvalStatusField 'f_textarea'. The spec says the field 'should be readonly on the object'; a stock field cannot be redeclared, and the mirror lands either way — author a scratch object in a writable package only if the readonly declaration itself is under test. Plus a SECOND flow WITHOUT the key for the never-writes side; register one flow at a time and DELETE /api/v1/automation/<name> between legs, so two flows never fire on one create. The request's SUBMITTER is the identity whose create fires the record-triggered flow (the approval node takes the trigger user: approval-service.ts, submitterId falls back to context.userId), so it must hold create on the trigger object. On stock showcase_field_zoo that is the dev admin or a contributor-bound member: showcase_contributor grants create on it (examples/app-showcase/src/security/permission-sets.ts), and the search:qa-contributor-bound-member recipe mints such a member. The seeded demo personas are refused that create with 403 (QA run #27409). Mei Phone reads showcase_field_zoo only through showcase_member_default, and Ada Auditor's showcase_auditor grants nothing on it",
           "for the failure-tolerance clause: a third scratch flow whose approvalStatusField names a NONEXISTENT field"
         ],
         "knownGaps": [
@@ -1654,6 +1674,12 @@
           "date": "2026-10-28",
           "change": "automated.ref names three corroborating pins. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26468, Tier 1 half A, at 756220c4; wave anchor #25807, slice B): the ref read as if no pin touched the record lock or the mirror values, while record-lock-multi-update.integration.test.ts pins the mirror-only exemption at the engine, status-mirror-declared-values.integration.test.ts pins the values, and approval-service.test.ts carries the mirror cases including 'returned'. Re-read at base fd246c22 (record-lock-multi-update.integration.test.ts's mirror-exemption case; approval-service.test.ts's open, decide and recall mirror cases). No clause changed, and no clause scores higher: the oracles are api and log",
           "ref": "#25807"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-31",
+          "change": "fixtures.requires[0] and personas[1] now say who may submit. QA run #27409 found the seeded member personas refused create on showcase_field_zoo (403). The submitter of a record-triggered request is the identity whose create fires the flow (approval-service.ts takes context.userId), so it must hold create on the trigger object. On stock that is the dev admin or a showcase_contributor-bound member (permission-sets.ts). Mei Phone holds only showcase_member_default (read) and Ada Auditor's showcase_auditor grants nothing on the object. personas[1] named Ada as the submitter and no longer does. No clause changed. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6488948228",
+          "ref": "#27409"
         }
       ]
     },
@@ -1736,7 +1762,7 @@
       "title": "Approval requests on v18: the request record page serves record:approval_decision and a Reply action that lands in its timeline, `enable.approvalsVisibleToReaders` lets a plain record reader see the record's requests read-only (and only then), the generic /data door serves request rows by approvals visibility, and titles shown to a reader use only what that reader may read",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1757,7 +1783,7 @@
       "steps": [
         "GET /api/v1/meta/page/sys_approval_request_detail and find record:approval_decision",
         "as the pending approver POST /api/v1/approvals/requests/ID/comment {comment} (the key is `comment` — a {body} is refused 400 VALIDATION_FAILED, packages/plugins/plugin-approvals/src/approval-service.ts comment); read the timeline",
-        "as the member (non-participant) GET /api/v1/data/sys_approval_request/ID and list with a total",
+        "as the member (non-participant) GET /api/v1/data/sys_approval_request/ID and list with a total. On stock this member holds no read on sys_approval_request: the object is engine-owned (ADR-0103, apiMethods get and list) and no stock permission set grants a non-admin read on it, so the member answers 403 PERMISSION_DENIED at the object gate (QA run #27409). The 404 and total leg of acceptance[2] needs a persona the app grants that read",
         "flip approvalsVisibleToReaders on the scratch object; as a plain reader list that record's requests; flip it off and repeat without restart"
       ],
       "acceptance": [
@@ -1774,9 +1800,9 @@
           "evidence": "the page excerpt + the timeline reads + the member's refused POST"
         },
         {
-          "clause": "a non-participant's by-id read on /data/sys_approval_request → 404 and list totals exclude it",
+          "clause": "for a caller the app grants read on sys_approval_request, a non-participant's by-id read on /data/sys_approval_request → 404 and list totals exclude it; a caller without that grant, participants included, is refused 403 PERMISSION_DENIED at the object gate and is served no row and no total",
           "oracle": "api",
-          "verify": "status + total",
+          "verify": "status + total, per leg. The 404 leg needs a persona granted read on sys_approval_request; no stock permission set grants one, so without a scratch grant record that leg blocked(fixture) with the request-read-gate pin beside it. The stock member's 403 PERMISSION_DENIED is the no-grant leg answering, not a FAIL of the 404 and not a finding: the object is engine-owned (ADR-0103) and the console request page reads through the approvals API, never this door",
           "evidence": "answers"
         },
         {
@@ -1798,7 +1824,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/plugins/plugin-approvals/src/sys-approval-request-page.test.ts + packages/spec/src/ui/component-record-approval-decision-22472.test.ts + packages/plugins/plugin-approvals/src/record-reader-opt-in.integration.test.ts + packages/plugins/plugin-approvals/src/request-read-gate.integration.test.ts (acceptance[2] in part: the REQUEST object's own generic-door gate — a hidden request answers by id exactly as a missing one, 404, and list / count exclude it — driven through a real ObjectQL engine and the data protocol's findData / getData in-process, never /api/v1/data/sys_approval_request over HTTP, so the clause's door read stays the run's) + packages/plugins/plugin-approvals/src/request-child-read-gate.integration.test.ts (the sys_approval_action / approver-index CHILD tables only) + packages/plugins/plugin-approvals/src/subject-title-reader-fls.integration.test.ts"
+        "ref": "packages/plugins/plugin-approvals/src/sys-approval-request-page.test.ts + packages/spec/src/ui/component-record-approval-decision-22472.test.ts + packages/plugins/plugin-approvals/src/record-reader-opt-in.integration.test.ts + packages/plugins/plugin-approvals/src/request-read-gate.integration.test.ts (acceptance[2] in part: the REQUEST object's own generic-door gate — for a caller holding read on the object (the pin mounts no security plugin, so every caller there holds it), a hidden request answers by id exactly as a missing one, 404, and list / count exclude it — driven through a real ObjectQL engine and the data protocol's findData / getData in-process, never /api/v1/data/sys_approval_request over HTTP, so the clause's door read stays the run's) + packages/plugins/plugin-approvals/src/request-child-read-gate.integration.test.ts (the sys_approval_action / approver-index CHILD tables only) + packages/plugins/plugin-approvals/src/subject-title-reader-fls.integration.test.ts"
       },
       "source": [
         "packages/plugins/plugin-approvals/src/sys-approval-request.page.ts",
@@ -1830,6 +1856,12 @@
           "date": "2026-10-27",
           "change": "fixtures.knownGaps[0]: the retired pin-file name dropped from the description of the gap that no longer arises (#26626, maintainer-directed). No clause changed, no status changed",
           "ref": "#26626"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-31",
+          "change": "acceptance[2], its verify, steps[2] and the request-read-gate pin's claim in automated.ref now say whom the 404 binds. QA run #27409 measured every non-admin, participants included, refused 403 PERMISSION_DENIED on /api/v1/data/sys_approval_request on the stock showcase. That is by design: the object is engine-owned (ADR-0103, enable.apiMethods get and list in sys-approval-request.object.ts), no stock permission set grants a non-admin read, and the console request page reads only the approvals API. The pin mounts no security plugin, so its callers all hold read. The 404 and total leg now binds a caller the app grants read, and the no-grant caller's 403 with no row is its own leg. Neither leg is looser than the old clause, which no stock persona could reach. Read from source at base 22ce3d13. Wave anchor #27377, wave-3 accuracy slice S5 (#28339); finding parked in anchor comment 6488948228",
+          "ref": "#27409"
         }
       ]
     },

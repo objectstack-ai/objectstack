@@ -5,6 +5,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { retiredKey } from '../shared/retired-key';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 
 /**
  * Package Documentation Navigation — the `book` element (ADR-0046 §6).
@@ -172,6 +173,8 @@ export const BookSchema = lazySchema(() =>
     // were dropped on every parse — protection metadata lost on round-trip, and
     // a hard 422 waiting for the day this shape is closed.
     ...MetadataProtectionFields,
+    // ADR-0146 D2 — the override declaration (authored; travels with the item).
+    ...OverrideDeclarationFields,
   }),
 );
 

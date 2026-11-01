@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // MongoDB a stored query filter.
 export const entry: SemanticMigration = {
   id: 'cel-predicate-list-comparand-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'security.PermissionSet rowLevelSecurity[].using and .check, and sharingRules[].condition — a '
     + 'CEL predicate comparing a field with != or == against a list, either a list literal or a '

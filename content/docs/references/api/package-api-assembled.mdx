@@ -122,7 +122,7 @@ Installed package row whose manifest is the assembled package body
 | **dashboards** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; header?: object; … }[]` | optional | Dashboards |
 | **reports** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'tabular' \| 'summary' \| 'matrix' \| 'joined'>; … }[]` | optional | Analytics Reports |
 | **datasets** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; object: string; … }[]` | optional | Analytics semantic-layer datasets (ADR-0021) |
-| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by its owning object's name (or 'global' when object-less), a colon, then the action name, and defineStack refuses two declarations that resolve to one key — both here, both on one object's actions, or one in each position, identical twins included (an embedded action is keyed by the object it is written on, not by its own objectName). One global and one object-bound action may share a name; on that object's route the object's own actions take precedence for by-name readers. composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) and names both source stacks on a collision. |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| object \| string \| Record<string, string>; objectName?: string; … }[]` | optional | Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by its owning object's name (or 'global' when object-less), a colon, then the action name, and defineStack refuses two declarations that resolve to one key — both here, both on one object's actions, or one in each position, identical twins included (an embedded action is keyed by the object it is written on, not by its own objectName). One global and one object-bound action may share a name; on that object's route the object's own actions take precedence for by-name readers. composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) and names both source stacks on a collision. |
 | **flows** | `{ name: string; label: string; description?: string; successMessage?: string; … }[]` | optional | Screen Flows |
 | **jobs** | `{ name: string; label?: string; description?: string; schedule: object \| object \| object; … }[]` | optional | Background / Scheduled Jobs (run by IJobService on cron/interval/once schedules) |
 | **emailTemplates** | `{ name: string; label: string; locale?: string; subject: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |
@@ -211,6 +211,7 @@ Get installed package response
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 | **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
+| **disableable** | `boolean` | ✅ | Whether this server lets an org disable this package: the disable door's own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `GetInstalledPackageResponse.data[option 2]`
 
@@ -230,6 +231,7 @@ Get installed package response
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 | **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
+| **disableable** | `boolean` | ✅ | Whether this server lets an org disable this package: the disable door's own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server's own predicate, never stored |
 
 
 ---
@@ -262,6 +264,7 @@ This schema accepts one of the following structures:
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 | **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
+| **disableable** | `boolean` | ✅ | Whether this server lets an org disable this package: the disable door's own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `InstalledPackageAtEitherStage[option 1].manifest`
 
@@ -325,6 +328,7 @@ This schema accepts one of the following structures:
 | **upgradeHistory** | `{ fromVersion: string; toVersion: string; upgradedAt: string; status: Enum<'success' \| 'failed' \| 'rolled_back'>; … }[]` | optional | Version upgrade history |
 | **registeredNamespaces** | `string[]` | optional | Namespace prefixes registered by this package |
 | **writable** | `boolean` | ✅ | Whether this server lets an org author into and manage this package (a writable base); false for a read-only package. Computed per read by the server's own predicate, never stored |
+| **disableable** | `boolean` | ✅ | Whether this server lets an org disable this package: the disable door's own verdict, true for a writable base and for a module of an installed app, false for every other read-only package. A client offers Disable / Enable from it, never from writable. Computed per read by the server's own predicate, never stored |
 
 ### Nested Shape: `InstalledPackageAtEitherStage[option 2].manifest`
 
@@ -368,7 +372,7 @@ This schema accepts one of the following structures:
 | **dashboards** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; header?: object; … }[]` | optional | Dashboards |
 | **reports** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; type?: Enum<'tabular' \| 'summary' \| 'matrix' \| 'joined'>; … }[]` | optional | Analytics Reports |
 | **datasets** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; object: string; … }[]` | optional | Analytics semantic-layer datasets (ADR-0021) |
-| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; objectName?: string; … }[]` | optional | Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by its owning object's name (or 'global' when object-less), a colon, then the action name, and defineStack refuses two declarations that resolve to one key — both here, both on one object's actions, or one in each position, identical twins included (an embedded action is keyed by the object it is written on, not by its own objectName). One global and one object-bound action may share a name; on that object's route the object's own actions take precedence for by-name readers. composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) and names both source stacks on a collision. |
+| **actions** | `{ name: string; label: string \| Record<string, string>; description?: string \| object \| string \| Record<string, string>; objectName?: string; … }[]` | optional | Global and Object Actions. Unique per scope, not per stack: the runtime keys every action by its owning object's name (or 'global' when object-less), a colon, then the action name, and defineStack refuses two declarations that resolve to one key — both here, both on one object's actions, or one in each position, identical twins included (an embedded action is keyed by the object it is written on, not by its own objectName). One global and one object-bound action may share a name; on that object's route the object's own actions take precedence for by-name readers. composeStacks runs the same key rule across its input stacks (counting distinct stacks, not sites) and names both source stacks on a collision. |
 | **flows** | `{ name: string; label: string; description?: string; successMessage?: string; … }[]` | optional | Screen Flows |
 | **jobs** | `{ name: string; label?: string; description?: string; schedule: object \| object \| object; … }[]` | optional | Background / Scheduled Jobs (run by IJobService on cron/interval/once schedules) |
 | **emailTemplates** | `{ name: string; label: string; locale?: string; subject: string; … }[]` | optional | Email Templates resolved by IEmailService.sendTemplate(`{ template, locale }`) |

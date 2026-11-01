@@ -20,6 +20,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { DEFAULT_VALUE_TOKENS } from '@objectstack/spec/data';
+import type { FormField } from '@object-ui/types';
 import { isRuntimeDefault, isServerOwnedValue } from '../server-owned-value.js';
 
 /** A CEL Expression envelope — the non-token half of "the server resolves it". */
@@ -71,7 +72,8 @@ describe('isServerOwnedValue (#4085)', () => {
 
   it('a field declaring no default is never server-owned', () => {
     expect(isServerOwnedValue(withDefault(undefined), true)).toBe(false);
-    expect(isServerOwnedValue({ name: 'title' }, true)).toBe(false);
+    const declaresNoStash: FormField = { name: 'title' };
+    expect(isServerOwnedValue(declaresNoStash, true)).toBe(false);
   });
 
   it('a hand-authored FormField carries no object metadata, so it is untouched', () => {

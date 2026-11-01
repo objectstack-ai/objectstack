@@ -178,9 +178,11 @@ export type {
 } from './app-artifact-handlers.js';
 // [#28039] The ONE path that registers, records and connects the datasources a
 // package declares — called by `AppPlugin.start` and by the install-local plugin
-// (`@objectstack/cloud-connection`) on install and rehydrate.
-export { connectPackageDatasources } from './declared-datasources.js';
+// (`@objectstack/cloud-connection`) on install and rehydrate — and [#28143] the
+// ONE judge of who holds a datasource name, which the install door refuses on.
+export { connectPackageDatasources, datasourceNameHolder } from './declared-datasources.js';
 export type {
+    DatasourceNameHolding,
     DeclaredDatasourceOwner,
     OwnedDatasources,
     PackageDatasourceOptions,

@@ -141,8 +141,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
-          sent: "已向 ${result.email} 发送邀请",
-          link_only: "已为 ${result.email} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          sent: "已向 {{ result.email }} 发送邀请",
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
         },
         params: {
           role: {
@@ -581,8 +581,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
-          sent: "已向 ${result.email} 发送邀请",
-          link_only: "已为 ${result.email} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          sent: "已向 {{ result.email }} 发送邀请",
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
         },
         params: {
           role: {
@@ -673,8 +673,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
-          sent: "已向 ${result.email} 发送邀请",
-          link_only: "已为 ${result.email} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          sent: "已向 {{ result.email }} 发送邀请",
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
         },
         params: {
           role: {
@@ -700,10 +700,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       update_member_role: {
         label: "更改角色",
-        description: "为 ${record.user_id?.name ?? '该成员'} 选择新的组织角色。",
+        description: "为 {{ record.user_id.name | default:'该成员' }} 选择新的组织角色。",
         successMessage: "成员角色已更新",
         outcomeMessages: {
-          permission_set_granted: "成员角色已更新。新角色还授予了权限集 ${result.grantedPermissionSet.label}。"
+          permission_set_granted: "成员角色已更新。新角色还授予了权限集 {{ result.grantedPermissionSet.label }}。"
         },
         params: {
           role: {
@@ -721,7 +721,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         confirmText: "确定要将所选成员设为该组织的所有者吗？对方将获得所有者的全部权限，包括删除该组织。您仍是所有者；如需卸任，请在您自己的成员记录上使用“更改角色”。",
         successMessage: "该成员现已成为所有者",
         outcomeMessages: {
-          permission_set_granted: "该成员现已成为所有者。新角色还授予了权限集 ${result.grantedPermissionSet.label}。"
+          permission_set_granted: "该成员现已成为所有者。新角色还授予了权限集 {{ result.grantedPermissionSet.label }}。"
         }
       }
     }
@@ -825,8 +825,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
         successMessage: "已向 {{ result.email }} 发送邀请",
         outcomeMessages: {
-          sent: "已向 ${result.email} 发送邀请",
-          link_only: "已为 ${result.email} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          sent: "已向 {{ result.email }} 发送邀请",
+          link_only: "已为 {{ result.email }} 创建邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
         },
         params: {
           role: {
@@ -848,11 +848,11 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "重新发送邀请",
-        description: "要重新发送邀请给 ${record.email} 吗？邀请的有效期将重新计算。",
+        description: "要重新发送邀请给 {{ record.email }} 吗？邀请的有效期将重新计算。",
         successMessage: "邀请已重新发送",
         outcomeMessages: {
-          sent: "已向 ${result.email} 重新发送邀请",
-          link_only: "已为 ${result.email} 续期邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
+          sent: "已向 {{ result.email }} 重新发送邀请",
+          link_only: "已为 {{ result.email }} 续期邀请。此服务器未配置邮件，因此没有发出任何邮件。请在该邀请上使用“复制邀请链接”分享给对方。"
         }
       },
       copy_invitation_link: {

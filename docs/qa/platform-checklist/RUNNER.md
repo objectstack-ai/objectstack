@@ -384,6 +384,27 @@ contradicts it, and correct it here when it does.
   An empty `.objectstack/data/` left by a tree boot is harmless and is not the
   installed-packages trap.
 
+- **On a shared checkout, boot with `--no-compile`: a default `os dev` rewrites the app's
+  `dist/objectstack.json` that every other runner on the tree serves — `--fresh` does not
+  isolate it either.** Since #26130 `os dev` compiles `objectstack.config.ts` into
+  `<cwd>/dist/objectstack.json` before it starts whenever a config exists (the `compile`
+  flag, default on; `devCompilesAtBoot()` in `packages/cli/src/utils/dev-compile-at-boot.ts`),
+  under that boot's own environment, and its watch loop recompiles into the same file on a
+  source save (`startWatchRecompile()` in `packages/cli/src/commands/dev.ts`). The path
+  resolves against the server's working directory, not `OS_HOME`, so the boot line many
+  items carry in `fixtures.requires`, `pnpm dev -- --fresh -p PORT --seed-admin`, writes
+  `examples/app-showcase/dist/objectstack.json` on every boot, and two runners booting it
+  concurrently rewrite the artifact under each other. **So:** when other runners share the
+  tree, boot once with the compile beforehand to bring the artifact current, then boot every
+  run with `--no-compile` added to that line (the root `pnpm dev` forwards its arguments to
+  the showcase's `objectstack dev`), or as
+  `pnpm -C examples/app-showcase exec objectstack dev --fresh --no-compile -p PORT`.
+  `--no-compile` serves the existing artifact as built; it still compiles when the artifact
+  is missing, and warns at boot when the artifact is older than the sources. Add
+  `--no-watch` too while anyone may edit the app's sources: `--no-compile` stops only the
+  boot compile, not the watch loop's recompiles. This one rule covers every item whose
+  `fixtures.requires` carries that boot line; an item need not repeat it (QA run #27481).
+
 - **`ss` is not installed in these containers — read liveness with `curl`, never a socket
   table.** `ss` and `netstat` are both absent (`command not found`); `lsof` and `fuser`
   are present. The trap is that the usual spelling hides the cause: `ss -ltn | grep`
@@ -439,7 +460,15 @@ contradicts it, and correct it here when it does.
      bearer seam. So a session driven with the localStorage token alone gets **401
      `AUTH_REQUIRED`** from `POST /api/v1/storage/upload/presigned` while
      `GET /auth/get-session` on the same page returns 200 — a convincing fake "avatar
-     upload is broken". ⛔ Do not drive any storage/upload surface from an injected
+     upload is broken". The Setup app's **Packaged Automation** page (component ref
+     `automation:packaged`) needs it too: every request it makes, its
+     `GET /api/v1/automation/_status` and `GET /api/v1/meta/flow` loads and its toggle
+     and clone writes, is a bare `fetch` with `credentials: 'include'` and no
+     `Authorization` header (`ui/packages/app-shell/src/views/setup/PackagedAutomationPage.tsx`),
+     so a token-only session renders a load failure ending `HTTP 401` (`automation
+     status HTTP 401` or `flow metadata HTTP 401`, whichever load is refused first) in
+     the page's `role="alert"` box instead of the flow list (QA run #27409). ⛔ Do not
+     drive any storage/upload surface or the Packaged Automation page from an injected
      token: **sign in through the form** so both halves exist.
 
 - **A stock showcase boot refuses self-registration — no item can mint a member by
@@ -556,8 +585,12 @@ contradicts it, and correct it here when it does.
   `pnpm console:build`. There is no pinned objectui revision any more. Some refs and
   `fixtures.knownGaps` written before the import still spell the path without `ui/`, or
   still say such a pin is not runnable from this checkout; read the first as `ui/<path>`
-  and the second as stale. A jsdom unit suite runs with
-  `pnpm --filter @object-ui/<pkg> exec vitest run --maxWorkers=2 <file>`; a live e2e spec
+  and the second as stale. A jsdom unit suite runs from `ui/`, the objectui root, with
+  `cd ui && pnpm exec vitest run --maxWorkers=2 packages/<pkg>/src/<file>.test.ts`. ⛔ Not
+  `pnpm --filter @object-ui/<pkg> exec vitest run <file>`: that runs in the package
+  directory, and the objectui vitest guard (`ui/scripts/vitest-invocation-guard.mjs`,
+  which `ui/vitest.config.mts` calls) refuses any run whose Vitest root is not `ui/` (QA
+  run #27409 met it). A live e2e spec
   runs from `ui/` with `pnpm test:e2e:live <spec>` against a live backend and the console
   dev server (`ui/playwright.live.config.ts` names both). Items whose `automated.ref`
   names an objectui spec **alongside** a framework pin (`packages/qa/dogfood/**`,
@@ -725,18 +758,23 @@ contradicts it, and correct it here when it does.
   answers 200 (#24579 §6). ⛔ That 403 says nothing about access to the repository: run the
   roll-up where the proxy is not in the path, or read the pages by number.
 
-- **A map view draws its markers under a "Map failed to load" banner here, because the
-  default base style is unreachable — an environment fact, not a product defect.** The
+- **A map view shows its records as a list under a "Map failed to load" banner here, because
+  the default base style is unreachable — an environment fact, not a product defect.** The
   console's map uses `https://demotiles.maplibre.org/style.json` unless the view declares a
-  style (objectui `packages/plugin-map/src/ObjectMap.tsx`, `DEFAULT_MAP_STYLE`, the same at
-  the pin `4016370a` QA run #24616 ran and at the pin `12dc7b47c340` #24660 moved it to), and
+  style or the deployment sets `OS_CONSOLE_MAP_STYLE_URL`
+  (`ui/packages/plugin-map/src/ObjectMap.tsx`, `DEFAULT_MAP_STYLE` and `drawnMapStyle`), and
   this container's egress proxy refuses that host
   (`curl https://demotiles.maplibre.org/style.json` → `CONNECT tunnel failed, response 403`,
-  at `bfc1539fe0`). The map's `error` event then renders an amber `role="alert"` banner,
-  "Map failed to load (…). Markers below are still listed in the search box", over a canvas
-  that still carries the markers (QA run #24616, `records-forms.view-type-gallery`).
-  **So:** score the markers and the record list. ⛔ Do not file the missing tiles, and do
-  not read the banner as the map failing.
+  at `bfc1539fe0`). Since #25889 the map's `error` event unmounts the map and swaps it for
+  the record list a browser without WebGL2 gets (`data-testid="map-style-fallback"`): an
+  amber `role="alert"` banner, "Map failed to load (…). The records are listed below; …",
+  with a "Try the map again" button, above a list labelled "Locations" holding one row per
+  marker the search box leaves (`filteredMarkers`). There is no canvas and no marker
+  element. QA run #24616 (`records-forms.view-type-gallery`) saw the older shape, a banner
+  over a canvas that still carried the markers; QA run #27438 met the list.
+  **So:** score the listed rows against the records that carry a location, and the search
+  box against the list. ⛔ Do not file the missing tiles, do not read the banner as the map
+  failing, and do not wait for markers on a canvas that is never drawn.
 
 ### Trap vocabulary (`traps` field)
 

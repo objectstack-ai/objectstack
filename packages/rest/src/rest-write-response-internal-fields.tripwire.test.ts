@@ -345,15 +345,19 @@ const DISPOSITIONS: Record<string, Disposition> = {
     },
   },
 
-  // ── NO RECORD ECHO: no user-object record in the body ─────────────────────
-  // [#22437] This route used to 201 `createData`'s whole answer and was a
-  // `protocol-ingress` disposition. It now answers the created id alone, which
-  // `public-form-submit-answer.test.ts` pins exactly (and its dogfood twin on a
-  // real boot), so no stored row — flagged column or not — rides the body.
+  // ── PROTOCOL INGRESS: the body's values come off a protocol `*Data` answer ─
+  // [#22437] This route used to 201 `createData`'s whole answer. It now answers
+  // the created id, plus (#28005) the values of the engine-generated fields the
+  // form's thank-you panel names, read off `createData`'s `record` — the row
+  // that face already strips of `internal: true` fields (#7823). Both are
+  // pinned in `public-form-submit-answer.test.ts`; no other stored value rides
+  // the body.
   'POST /api/v1/forms/:slug/submit': {
-    kind: 'no-record-echo',
-    why: 'Public form submit answers the created record\'s id only (`{ id }`), never the stored row.',
+    kind: 'protocol-ingress',
+    why: 'Public form submit answers the created id plus the panel-named runtime-owned values, read off createData\'s stripped record.',
   },
+
+  // ── NO RECORD ECHO: no user-object record in the body ─────────────────────
   // Metadata plane: bodies carry metadata ITEMS. `internal: true` is a field
   // flag on a data object's field, and a metadata item is not a data record.
   'POST /api/v1/meta/_migrate-stored': { kind: 'no-record-echo', why: 'Metadata plane: migration receipt.' },

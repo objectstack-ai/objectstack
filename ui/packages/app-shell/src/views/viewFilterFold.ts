@@ -14,7 +14,8 @@
  * spec's own canonical spellings since objectui#9306 (they were camelCase
  * before, and a group read from older storage may still carry those).
  * `@objectstack/spec`'s `ListViewSchema.filter` / `ViewTab.filter` declare
- * `z.array(ViewFilterRuleSchema)`: a FLAT list of `{ field, operator, value }`.
+ * `z.array(ViewFilterElementSchema)`: an AND list of flat `{ field, operator,
+ * value }` rules, any element of which may be an any-of group `{ or: [rule, ...] }`.
  * Persisting the builder's group verbatim is a type error the server rejects
  * with a `invalid_union` 422 — objectstack#5159, reproduced in a real browser
  * on the list toolbar's `Filter → Add filter → save`.
@@ -32,18 +33,16 @@
  */
 
 import { normalizeFilterOperator } from '@objectstack/spec/ui';
-import type { ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterElement, ViewFilterRule } from '@objectstack/spec/ui';
 import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete } from '@object-ui/components';
 
-/** Why a group could not be folded to a flat spec rule list. */
+/** Why a group could not be folded to a spec view filter list. */
 export type FilterFoldRefusal =
-    /** `logic: 'or'` over 2+ conditions — a flat rule array is AND-only. */
-    | 'or_logic'
-    /** A condition that is itself a group — the spec rule list has no nesting. */
+    /** A condition that is itself a group — the builder edits one level only. */
     | 'nested_group';
 
 export type FilterFoldResult =
-    | { ok: true; rules: ViewFilterRule[] }
+    | { ok: true; rules: ViewFilterElement[] }
     | { ok: false; reason: FilterFoldRefusal };
 
 /** Loose shape of what the FilterBuilder hands back through `onChange`. */
@@ -184,15 +183,16 @@ function isGroupLike(value: unknown): value is FilterGroupLike {
  *   and is kept; only a row that WANTS a
  *   value and has none is dropped.
  *
- * Refusals (objectstack#5159, maintainer adjudication A1): a shape that cannot
- * fold LOSSLESSLY is refused, never downgraded. `logic: 'or'` has no at-rest
- * representation in a flat rule array, so quietly writing those conditions as
- * AND would return a different record set than the one on screen.
+ * - **`logic: 'or'` over two or more rules folds to ONE any-of group
+ *   element**, `[{ or: rules }]` (`ViewFilterOrGroupSchema`, objectstack#28020):
+ *   the list ANDs its elements and the group ORs its rules, so the stored view
+ *   selects the records on screen. Over fewer than two rules OR and AND select
+ *   the same records, so the rules are written flat, as an AND group's are.
  *
- * `logic: 'or'` over FEWER than two effective rules is folded rather than
- * refused: with 0 or 1 condition, OR and AND select exactly the same records,
- * so there is nothing to lose and nothing to downgrade. The refusal starts
- * where the semantics actually diverge.
+ * Refusals (objectstack#5159, maintainer adjudication A1): a shape that cannot
+ * fold LOSSLESSLY is refused, never downgraded. A nested group has no at-rest
+ * representation (the any-of group holds flat rules only), so it is refused
+ * rather than written as something that returns a different record set.
  */
 export function foldFilterGroupToSpecRules(group: unknown): FilterFoldResult {
     if (group == null) return { ok: true, rules: [] };
@@ -225,13 +225,12 @@ export function foldFilterGroupToSpecRules(group: unknown): FilterFoldResult {
     }
 
     const logic = isGroupLike(group) ? group.logic : undefined;
-    if (logic === 'or' && rules.length > 1) return { ok: false, reason: 'or_logic' };
+    if (logic === 'or' && rules.length > 1) return { ok: true, rules: [{ or: rules }] };
 
     return { ok: true, rules };
 }
 
 /** i18n key carrying the user-readable refusal for each {@link FilterFoldRefusal}. */
 export const FILTER_FOLD_REFUSAL_KEYS: Record<FilterFoldRefusal, string> = {
-    or_logic: 'console.objectView.filterOrNotSavable',
     nested_group: 'console.objectView.filterNestedNotSavable',
 };

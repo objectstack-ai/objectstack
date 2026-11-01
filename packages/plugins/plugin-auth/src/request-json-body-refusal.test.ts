@@ -380,6 +380,10 @@ interface SecondSpellingRoute {
   truncated: string;
   echo: string;
   empty: string;
+  /** The empty body's code, where it is not `INVALID_REQUEST` (#28289: Create User's field-level refusal). */
+  emptyCode?: string;
+  /** The empty body's `error.fields`, where the refusal is field-level. */
+  emptyFields?: unknown[];
   /** `admin-set-user-manager.ts` discriminates its refusals by `error.details.reason`. */
   reason?: string;
 }
@@ -407,7 +411,8 @@ const SECOND_SPELLING: Array<{ reader: string; routes: SecondSpellingRoute[] }> 
   {
     reader: 'G. admin-user-endpoints.ts parseJson',
     routes: [
-      { path: '/admin/create-user', truncated: '{"email": "pin-new@example.test", "name": "Pin New"', echo: 'pin-new@example.test', empty: 'Email is required' },
+      { path: '/admin/create-user', truncated: '{"email": "pin-new@example.test", "name": "Pin New"', echo: 'pin-new@example.test', empty: 'Email is required',
+        emptyCode: 'VALIDATION_FAILED', emptyFields: [{ field: 'email', code: 'required', message: 'Email is required' }] },
       { path: '/admin/set-user-password', truncated: '{"userId": "usr_pin_target", "newPassword": "Pin-Passw0rd!"', echo: 'usr_pin_target', empty: 'userId is required' },
     ],
   },
@@ -445,7 +450,11 @@ for (const { reader, routes } of SECOND_SPELLING) {
             const peek = (await res.clone().json()) as { error?: { details?: { reason?: string } } };
             expect(peek.error?.details?.reason).toBe(route.reason);
           }
-          await expectAnswer(res, 400, 'INVALID_REQUEST', route.empty);
+          if (route.emptyFields) {
+            const peek = (await res.clone().json()) as { error?: { fields?: unknown[] } };
+            expect(peek.error?.fields).toEqual(route.emptyFields);
+          }
+          await expectAnswer(res, 400, route.emptyCode ?? 'INVALID_REQUEST', route.empty);
           nothingActed();
         });
       }

@@ -2,7 +2,7 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { effectiveTenancyPosture, isServiceNotRegisteredError, resolveLocalizationContext, resolveUserAuthzGrants } from '@objectstack/core';
-import type { IJobService, IPubSub } from '@objectstack/spec/contracts';
+import type { IClusterService, IJobService, IPubSub } from '@objectstack/spec/contracts';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 import type {
     Connector,
@@ -11,6 +11,8 @@ import type {
     ConnectorProviderContext,
     ConnectorMaterializationHandler,
     ConnectorRequestSigner,
+    ConnectorCredentialHandle,
+    ConnectorCredentialRequest,
 } from '@objectstack/spec/integration';
 import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
@@ -28,9 +30,14 @@ import { SysAutomationRun } from './sys-automation-run.object.js';
 import { SysFlowDispatch } from './sys-flow-dispatch.object.js';
 import { SysFlowCredential } from './sys-flow-credential.object.js';
 import { SysConnectorCredential } from './sys-connector-credential.object.js';
+import { SysConnectorConnection } from './sys-connector-connection.object.js';
 import type {
     ConnectorCredentialRef,
     ConnectorCredentialSetRequest,
+    ConnectorConnectionBegin,
+    ConnectorConnectionCallbackRequest,
+    ConnectorConnectionRequest,
+    ConnectorConnectionState,
     ConnectorCredentialClearRequest,
 } from '@objectstack/spec/contracts';
 import {
@@ -60,6 +67,30 @@ import {
 import { CONNECTOR_CREDENTIAL_SOURCE_SERVICE } from '@objectstack/types';
 import { createConnectorCredentialSource } from './connector-credential-source.js';
 import { createConnectorRequestSigner } from './request-signing/index.js';
+import { ConnectorConnectionStore, type ConnectorConnectionRecord } from './connector-connections.js';
+import {
+    buildAuthorizationUrl,
+    createAppCredentialHandle,
+    createAuthorizationState,
+    createOAuth2GrantHandle,
+    createPkcePair,
+    discoverMcpAuthorization,
+    insecureOAuth2EndpointFields,
+    isSecureOAuth2Endpoint,
+    McpAuthorizationRefusedError,
+    parseMcpAuthorizationClient,
+    kvPendingAuthorizationStore,
+    memoryPendingAuthorizationStore,
+    notConnectedReason,
+    OAuth2GrantRefusedError,
+    PENDING_AUTHORIZATION_TTL_SECONDS,
+    reconnectRequiredReason,
+    requestOAuth2Token,
+    retryOnVendorTokenRefusal,
+    type McpAuthorizationClient,
+    type OAuth2GrantHandle,
+    type PendingAuthorizationStore,
+} from './oauth2-grant/index.js';
 import { CONNECTOR_CREDENTIALS_UI_BUNDLE } from './connector-credentials-ui.js';
 import {
     FlowCredentialChannel,
@@ -223,6 +254,15 @@ export interface AutomationServicePluginOptions {
      * as unavailable (`503`), never verifies it.
      */
     credentialResolver?: CredentialResolver;
+    /**
+     * ADR-0143 D5 — the redirect URI an `authorization_code` connect names,
+     * fixed per deployment and never taken from a request: the absolute URL
+     * at which this deployment serves `GET /api/v1/automation/connectors/oauth/callback`.
+     * Absent, it is that path under the deployment's public origin
+     * (`OS_AUTH_URL`, then `OS_BASE_URL`); with neither, a connect is refused
+     * `503` naming them. Register this exact URI with each vendor's OAuth client.
+     */
+    connectorOAuthRedirectUri?: string;
     /**
      * Root directory of the stack/package whose metadata this kernel serves —
      * the base that relative file refs in declarative connector entries resolve
@@ -397,6 +437,19 @@ function credentialRefOf(auth: ConnectorInstanceAuth | undefined): string | unde
     return auth.credentialRef;
 }
 
+/**
+ * ADR-0143 D2.3 — the vendor public-key reference a `signed` instance names
+ * beside its key, for a scheme whose vendor signs its responses (`alipay-v3`).
+ */
+function vendorPublicKeyRefOf(auth: ConnectorInstanceAuth | undefined): string | undefined {
+    return auth?.type === 'signed' && auth.scheme === 'alipay-v3' ? auth.vendorPublicKeyRef : undefined;
+}
+
+/** [#27237] Every reference an instance's `auth` names: its `credentialRef`, and a vendor public key's. */
+function credentialRefsOf(auth: ConnectorInstanceAuth | undefined): string[] {
+    return [credentialRefOf(auth), vendorPublicKeyRefOf(auth)].filter((ref): ref is string => ref !== undefined);
+}
+
 /** The `basic` username an instance sends beside its secret — what its `Authorization` header encodes with it. */
 function basicUsernameOf(auth: ConnectorInstanceAuth | undefined): string | undefined {
     return auth?.type === 'basic' ? auth.username : undefined;
@@ -405,18 +458,145 @@ function basicUsernameOf(auth: ConnectorInstanceAuth | undefined): string | unde
 /** The grant-bearing instance auth kinds (ADR-0143 D2.1, D2.2): resolved per dispatch, never once at materialization. */
 type GrantBearingInstanceAuth = Extract<ConnectorInstanceAuth, { type: 'oauth2' | 'app-credential' }>;
 
+/** The `oauth2` instance auth kind (ADR-0143 D2.1). */
+type OAuth2InstanceAuth = Extract<ConnectorInstanceAuth, { type: 'oauth2' }>;
+
 /**
- * ADR-0143 D4 — why a grant-bearing instance is not served by this server.
- * The per-dispatch resolution these kinds need is not here yet, so the
- * reconcile holds such an instance degraded with this reason rather than
- * materializing it with no credential: it is never called upstream
- * unauthenticated.
+ * ADR-0143 D4 — why a grant-bearing instance cannot be served through
+ * `provider`: the provider was not registered as asking the per-dispatch
+ * credential handle on every request (`registerConnectorProvider(…, {
+ * credentialHandle: true })` — the built-in `rest` and `openapi` providers
+ * are), so its calls would go out without the token. The instance is held
+ * degraded with this reason, never called unauthenticated.
  */
-function grantBearingNotServedReason(name: string, auth: GrantBearingInstanceAuth): string {
-    return `connector instance '${name}' declares auth type '${auth.type}', a grant-bearing kind whose token is obtained `
-        + 'and refreshed per dispatch (ADR-0143 D4). This server does not run that resolution yet, so the instance is '
-        + 'not served and is never called without its credential. Declare a static kind (bearer, api-key or basic) '
-        + 'to dispatch it now.';
+function credentialHandleNotAppliedReason(name: string, provider: string, kind: GrantBearingInstanceAuth['type']): string {
+    return `connector instance '${name}' declares auth type '${kind}', but provider '${provider}' does not yet ask the `
+        + 'per-dispatch credential handle a grant-bearing instance is served through (ADR-0143 D4), so its calls would go '
+        + 'out without the token. The instance is not served and is never called without its credential.';
+}
+
+/**
+ * ADR-0143 D2.1 — the MCP server URL of an `oauth2` instance whose endpoints or
+ * client the MCP authorization flow discovers: `provider: 'mcp'` over an http
+ * transport, the `authorization_code` grant, and at least one of
+ * `authorizationUrl`, `tokenUrl` and `clientId` left undeclared. `undefined`
+ * for every other instance, which declares what its handle needs.
+ */
+function mcpDiscoveryServerUrl(entry: { provider?: unknown; providerConfig?: Record<string, unknown> }, auth: OAuth2InstanceAuth): string | undefined {
+    if (entry.provider !== 'mcp' || auth.grant !== 'authorization_code') return undefined;
+    if (auth.authorizationUrl !== undefined && auth.tokenUrl !== undefined && auth.clientId !== undefined) return undefined;
+    const transport = entry.providerConfig?.transport as { kind?: unknown; url?: unknown } | undefined;
+    if (transport?.kind !== 'http' || typeof transport.url !== 'string' || transport.url.length === 0) return undefined;
+    return transport.url;
+}
+
+/**
+ * ADR-0143 D4 — why an `oauth2` instance cannot be served by this server
+ * through `provider`, or `undefined` when it can. Two things are needed: a
+ * provider registered as asking the per-dispatch credential handle on every
+ * request (`registerConnectorProvider(…, { credentialHandle: true })`), and
+ * the endpoints and client the handle sends a token request with. On
+ * `provider: 'mcp'` over http with the `authorization_code` grant they may be
+ * omitted: each connect runs the MCP authorization flow
+ * (`./oauth2-grant/mcp-authorization.ts`), and the connection keeps the client
+ * it found. An endpoint over plain `http:` off loopback, or any other scheme,
+ * is refused by field (`./oauth2-grant/endpoint-transport.ts`): the client
+ * secret and the refresh token would cross the network in the clear — and so
+ * is such an MCP server's own URL, which the access token travels to.
+ */
+function oauth2NotServableReason(
+    name: string,
+    entry: { provider: string; providerConfig?: Record<string, unknown> },
+    auth: OAuth2InstanceAuth,
+    providerApplies: boolean,
+): string | undefined {
+    const provider = entry.provider;
+    if (!providerApplies) return credentialHandleNotAppliedReason(name, provider, 'oauth2');
+    const discoveredAt = mcpDiscoveryServerUrl(entry, auth);
+    if (discoveredAt !== undefined && !isSecureOAuth2Endpoint(discoveredAt)) {
+        return `connector instance '${name}' declares auth type 'oauth2' on an MCP server whose transport \`url\` is not over https: `
+            + 'the access token would cross the network in the clear (ADR-0143 D4), so the instance is not served. Declare an '
+            + 'https:// server; plain http:// is accepted only to a loopback host.';
+    }
+    const missing = discoveredAt !== undefined ? [] : [
+        auth.tokenUrl === undefined ? 'tokenUrl' : undefined,
+        auth.clientId === undefined ? 'clientId' : undefined,
+        auth.grant === 'authorization_code' && auth.authorizationUrl === undefined ? 'authorizationUrl' : undefined,
+    ].filter((k): k is string => k !== undefined);
+    if (missing.length > 0) {
+        return `connector instance '${name}' declares auth type 'oauth2' without ${missing.map((k) => `\`${k}\``).join(', ')}: `
+            + 'only an `authorization_code` instance on `provider: \'mcp\'` over an http transport discovers them (the MCP '
+            + 'authorization flow, ADR-0143 D2.1), so the instance is not served. Declare them to dispatch it.';
+    }
+    const insecure = insecureOAuth2EndpointFields(auth as Partial<Record<'tokenUrl' | 'authorizationUrl', unknown>>);
+    if (insecure.length === 0) return undefined;
+    return `connector instance '${name}' declares auth type 'oauth2' with ${insecure.map((k) => `\`${k}\``).join(', ')} `
+        + 'not over https: the client secret, the refresh token and the authorization redirect would cross the network in '
+        + 'the clear (ADR-0143 D4), so the instance is not served. Declare an https:// endpoint; plain http:// is accepted '
+        + 'only to a loopback host.';
+}
+
+/**
+ * ADR-0143 D4 — the connections of every `authorization_code` instance, read
+ * once per reconcile: the organizations each is `connected` in, and whether
+ * any connection is `reconnect_required`. `unreadable` when the store could
+ * not be read.
+ */
+type ConnectionStateOfInstance =
+    | {
+        readonly kind: 'read';
+        readonly connected: readonly string[];
+        readonly reconnectRequired: readonly string[];
+        /** The organization whose connection is the oldest standing one: see {@link discoveryOrganizationOf}. */
+        readonly discovery?: string;
+    }
+    | { readonly kind: 'unreadable' };
+
+/**
+ * ADR-0143 D4, ruled B on #26702 — the organization whose connection an
+ * instance's materialization asks for when it asks with none: the one
+ * connected earliest (`connected_at`, ties by organization id). A provider
+ * that reads the upstream while it materializes (the `mcp` provider lists
+ * the server's tools) does so outside any run, so there is no run
+ * organization to select; this keeps a working instance listing however many
+ * organizations connected it. Every dispatch still asks in its own run's
+ * organization, and a run with none is still answered as D4 answers it.
+ */
+function discoveryOrganizationOf(rows: readonly ConnectorConnectionRecord[]): string | undefined {
+    let pick: ConnectorConnectionRecord | undefined;
+    for (const row of rows) {
+        if (row.status !== 'connected') continue;
+        if (!pick) { pick = row; continue; }
+        // A row with no `connected_at` sorts after every row that has one.
+        const a = row.connectedAt ?? '\uffff';
+        const b = pick.connectedAt ?? '\uffff';
+        if (a < b || (a === b && row.organizationId < pick.organizationId)) pick = row;
+    }
+    return pick?.organizationId;
+}
+
+/**
+ * The handle a provider is given while it materializes an instance whose
+ * materialization asks name {@link discoveryOrganizationOf}: until `settle()`
+ * (the factory has answered), an ask that names no organization is made in
+ * `organizationId`'s name; after it, every ask goes to `handle` as made, so
+ * a dispatch that names none is answered as D4 answers a run with none.
+ */
+function askingDuringMaterializationAs(
+    handle: OAuth2GrantHandle,
+    organizationId: string,
+): { readonly handle: ConnectorCredentialHandle; settle(): void } {
+    let materializing = true;
+    const as = (request?: ConnectorCredentialRequest): ConnectorCredentialRequest | undefined =>
+        materializing && request?.organizationId === undefined ? { ...request, organizationId } : request;
+    return {
+        handle: {
+            connector: handle.connector,
+            get: (request) => handle.get(as(request)),
+            refresh: (request) => handle.refresh(as(request)),
+        },
+        settle() { materializing = false; },
+    };
 }
 
 /** The per-request signing instance auth kind (ADR-0143 D2.3): bound to a signer, never handed over as a value. */
@@ -439,7 +619,8 @@ function requestSignerNotAppliedReason(name: string, provider: string, auth: Sig
  * resolved to (ADR-0097 §3). `secret` is present whenever `auth` names a
  * reference — an unresolved one never reaches here: the reconcile degrades
  * the instance first (#27237). A grant-bearing kind never reaches here either:
- * the reconcile holds it degraded ({@link grantBearingNotServedReason}); nor
+ * `oauth2` and `app-credential` are served through their credential handle
+ * (ADR-0143 D4); nor
  * does `signed`, whose key is bound to a request signer instead
  * (`./request-signing/index.ts`).
  */
@@ -850,6 +1031,20 @@ export class AutomationServicePlugin implements Plugin {
      */
     private connectorCredentialStore?: ConnectorCredentialStore;
     /**
+     * ADR-0143 D3 — the connector connection store (`sys_connector_connection`):
+     * the refresh token and status of every `authorization_code` instance an
+     * organization connected. See `./connector-connections.ts`.
+     */
+    private connectorConnectionStore?: ConnectorConnectionStore;
+    /**
+     * ADR-0143 D4 — the per-dispatch credential handle of every materialized
+     * `oauth2` instance, by name: what its provider was handed, and what a
+     * completed connect seeds and a revoke drops a token from.
+     */
+    private grantHandles = new Map<string, OAuth2GrantHandle>();
+    /** ADR-0143 D5 — where begun connects wait without a cluster service (a single node). */
+    private memoryPendingAuthorizations?: PendingAuthorizationStore;
+    /**
      * [#27428] The cluster transport the credential door's writes fan out on,
      * this node's id (stamps `originNode`), and the subscription's disposer —
      * set by {@link attachCredentialClusterPubSub}.
@@ -950,8 +1145,9 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                // [#27237] The connector credential store rides it too.
-                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential, SysConnectorCredential],
+                // [#27237] The connector credential store rides it too, and
+                // (ADR-0143 D3) the connector connection store.
+                objects: [SysAutomationRun, SysFlowDispatch, SysFlowCredential, SysConnectorCredential, SysConnectorConnection],
             });
             return true;
         } catch (err) {
@@ -1019,7 +1215,7 @@ export class AutomationServicePlugin implements Plugin {
                 scope: 'system',
                 defaultDatasource: 'cloud',
                 namespace: 'sys',
-                objects: [SysFlowCredential, SysConnectorCredential],
+                objects: [SysFlowCredential, SysConnectorCredential, SysConnectorConnection],
             });
             return true;
         } catch (err) {
@@ -1149,6 +1345,15 @@ export class AutomationServicePlugin implements Plugin {
         // declared instances it lists and the reconcile a write runs are this
         // plugin's, while the registered service is the engine.
         this.connectorCredentialStore = new ConnectorCredentialStore(() => this.resolveDataEngine(ctx));
+        // ADR-0143 D3 / D5 — the connector connection store, and the door the
+        // `automation` service's connection members answer through.
+        this.connectorConnectionStore = new ConnectorConnectionStore(() => this.resolveDataEngine(ctx));
+        this.engine.setConnectorConnectionDoor({
+            get: (request) => this.getConnectorConnection(ctx, request),
+            begin: (request) => this.beginConnectorConnection(ctx, request),
+            complete: (request) => this.completeConnectorConnection(ctx, request),
+            revoke: (request) => this.revokeConnectorConnection(ctx, request),
+        });
         this.engine.setConnectorCredentialDoor({
             list: () => this.listConnectorCredentialRefs(ctx),
             set: (request) => this.setConnectorCredential(ctx, request),
@@ -2091,14 +2296,21 @@ export class AutomationServicePlugin implements Plugin {
      *
      * Two modes:
      *  - **Boot** (`fatal: true`, called from `start()`): any problem — unknown
-     *    provider, invalid `providerConfig`, unresolvable `credentialRef`, name
-     *    conflict, duplicate — **throws**, which is fatal to bootstrap under both
-     *    LiteKernel and ObjectKernel (the ADR's "fail loudly" contract).
+     *    provider, invalid `providerConfig`, a host credential resolver that
+     *    throws, name conflict, duplicate — **throws**, which is fatal to
+     *    bootstrap under both LiteKernel and ObjectKernel (the ADR's "fail
+     *    loudly" contract).
      *  - **Reload** (`fatal: false`, called from `metadata:reloaded`): the same
      *    problems are **logged and the offending entry is skipped**, so a bad
      *    Studio publish / dev reload never crashes a live server. A changed
      *    entry's old connector keeps serving until the new one materializes
      *    successfully.
+     *
+     * A `credentialRef` no source answers for is in neither list: in both modes
+     * it degrades its instance, naming the reference, and a live connector under
+     * that name is torn down first, since the value it was materialized with is
+     * gone ({@link degradeConnectorForCredential}; ADR-0097's notes under §6 and
+     * under "Runtime reconcile").
      *
      * Reads the same declaration the descriptor audit does
      * ({@link readDeclaredConnectorItems}); with nothing declared there is
@@ -2211,7 +2423,7 @@ export class AutomationServicePlugin implements Plugin {
         // read is not one that is absent, so the rows count as unreadable then.
         let chain: ConnectorCredentialChain = { vault: this.options.credentialResolver };
         let credentialRows: Map<string, ConnectorCredentialRecord> | undefined = new Map();
-        if ([...desired.values()].some((d) => credentialRefOf(d.entry.auth) !== undefined)) {
+        if ([...desired.values()].some((d) => credentialRefsOf(d.entry.auth).length > 0)) {
             try {
                 chain = await this.connectorCredentialChain(ctx);
                 if (chain.store) credentialRows = await chain.store.list();
@@ -2227,11 +2439,50 @@ export class AutomationServicePlugin implements Plugin {
         }
         const credentialSources = new Map<string, string>();
         for (const d of desired.values()) {
-            const ref = credentialRefOf(d.entry.auth);
-            if (ref === undefined) continue;
-            const fingerprint = connectorCredentialFingerprint(chain, ref, credentialRows);
-            credentialSources.set(ref, fingerprint);
-            d.signature += `|credential:${fingerprint}`;
+            for (const ref of credentialRefsOf(d.entry.auth)) {
+                const fingerprint = connectorCredentialFingerprint(chain, ref, credentialRows);
+                credentialSources.set(ref, fingerprint);
+                d.signature += `|credential:${fingerprint}`;
+            }
+        }
+        // ADR-0143 D4 — whether an `authorization_code` instance has a working
+        // connection joins its signature, so the first connect materializes it
+        // and the last revoke or refused grant holds it again. A connect,
+        // revoke or refusal in one organization while another stays connected
+        // re-materializes nothing (the handle reads the row per dispatch, and
+        // the other organizations keep their cached tokens), and neither does
+        // a refresh that rotates the token.
+        const connectionStates = new Map<string, ConnectionStateOfInstance>();
+        for (const [name, d] of desired) {
+            const auth = d.entry.auth;
+            if (auth?.type !== 'oauth2' || auth.grant !== 'authorization_code') continue;
+            let state: ConnectionStateOfInstance;
+            try {
+                const rows = await this.connectorConnectionStoreOrNone().listFor(name);
+                state = {
+                    kind: 'read',
+                    connected: rows.filter((r) => r.status === 'connected').map((r) => r.organizationId).sort(),
+                    reconnectRequired: rows.filter((r) => r.status === 'reconnect_required').map((r) => r.organizationId).sort(),
+                    discovery: discoveryOrganizationOf(rows),
+                };
+            } catch (err) {
+                state = { kind: 'unreadable' };
+                ctx.logger.warn(
+                    `[Automation] the connections of connector instance '${name}' could not be read; it retries.`,
+                    describeThrownForLog(err),
+                );
+            }
+            connectionStates.set(name, state);
+            d.signature += state.kind === 'unreadable'
+                ? '|connections:unreadable'
+                : state.connected.length > 0
+                    // An `mcp` instance lists its tools as the discovery
+                    // organization (ruled B on #26702): when that changes (its
+                    // connection is revoked, refused or connected again), the
+                    // instance materializes again and lists as the next one.
+                    ? d.entry.provider === 'mcp' ? `|connections:connected:discovery:${state.discovery ?? ''}` : '|connections:connected'
+                    // Held: which reason it is held with moves with the refused organizations.
+                    : `|connections:none:${state.reconnectRequired.join(',')}`;
         }
         // A refusal of a value the door does not hold stands until an upstream
         // accepts the reference — or the reference stops resolving from the
@@ -2306,17 +2557,27 @@ export class AutomationServicePlugin implements Plugin {
                 continue;
             }
 
-            // ADR-0143 D4 — a grant-bearing kind (`oauth2`, `app-credential`)
-            // is held degraded with a named reason until per-dispatch
-            // resolution lands, never materialized without its credential.
-            if (entry.auth?.type === 'oauth2' || entry.auth?.type === 'app-credential') {
+            // ADR-0143 D4 — a grant-bearing instance (`oauth2`,
+            // `app-credential`) is served only through a provider that asks
+            // its credential handle, and an `oauth2` one only with the
+            // endpoints the handle sends a token request to.
+            const grantRefusal = entry.auth?.type === 'app-credential'
+                ? engine.providerAppliesCredentialHandle(provider)
+                    ? undefined
+                    : credentialHandleNotAppliedReason(name, provider, 'app-credential')
+                : entry.auth?.type === 'oauth2'
+                    ? oauth2NotServableReason(name, { ...entry, provider }, entry.auth, engine.providerAppliesCredentialHandle(provider))
+                    : undefined;
+            if (grantRefusal !== undefined) {
+                if (existing) await this.dematerializeConnector(engine, name, existing, ctx, 'no longer servable');
+                this.grantHandles.delete(name);
                 this.failDegradedConnectorInstance(engine, ctx, {
                     name,
                     entry,
                     provider,
                     signature,
-                    hasLive: existing !== undefined,
-                    reason: grantBearingNotServedReason(name, entry.auth),
+                    hasLive: false,
+                    reason: grantRefusal,
                     cause: undefined,
                 });
                 continue;
@@ -2355,24 +2616,105 @@ export class AutomationServicePlugin implements Plugin {
                 }
                 credential = resolution;
             }
-            // ADR-0143 D2.3, D4 — a `signed` instance's key is bound to the
-            // signer its scheme names, here, and the provider receives only
-            // the signer: the key never crosses into a provider package. A key
-            // that cannot sign at all is a configuration fault, like an
-            // unparseable retry policy below.
-            let auth: ResolvedConnectorAuth | undefined;
-            let requestSigner: ConnectorRequestSigner | undefined;
-            if (entry.auth?.type === 'signed') {
+            // ADR-0143 D2.3 — a scheme that verifies responses names the
+            // vendor's public key beside the signing key; it resolves through
+            // the same chain and degrades the instance the same way, so a
+            // response is never accepted unverified for want of it.
+            const vendorRef = vendorPublicKeyRefOf(entry.auth);
+            let vendorPublicKey: string | undefined;
+            if (vendorRef !== undefined) {
+                let resolution: ConnectorCredentialResolution;
                 try {
-                    requestSigner = createConnectorRequestSigner(name, entry.auth, credential?.value ?? '');
+                    resolution = await resolveConnectorCredential(chain, vendorRef, credentialRows);
                 } catch (err) {
                     fail(
-                        `[Automation] connector instance '${name}' (provider '${provider}'): its signing key cannot sign ` +
-                            `(ADR-0143 D2.3).`,
+                        `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
                         err,
                     );
                     continue;
                 }
+                if (resolution.kind !== 'resolved') {
+                    await this.degradeConnectorForCredential(engine, ctx, {
+                        name, entry, provider, signature, existing, ref: vendorRef, resolution,
+                    });
+                    continue;
+                }
+                vendorPublicKey = resolution.value;
+            }
+            // ADR-0143 D2.3, D4 — a `signed` instance's key is bound to the
+            // signer its scheme names, here, and the provider receives only
+            // the signer: the key never crosses into a provider package. A key
+            // that cannot sign (or a vendor key that cannot verify) is a
+            // configuration fault, like an unparseable retry policy below.
+            let auth: ResolvedConnectorAuth | undefined;
+            let requestSigner: ConnectorRequestSigner | undefined;
+            let credentialHandle: OAuth2GrantHandle | undefined;
+            // The handle the provider is given while it materializes an `mcp`
+            // `authorization_code` instance: see `askingDuringMaterializationAs`.
+            let materializingHandle: ReturnType<typeof askingDuringMaterializationAs> | undefined;
+            if (entry.auth?.type === 'signed') {
+                try {
+                    requestSigner = createConnectorRequestSigner(name, entry.auth, {
+                        key: credential?.value ?? '',
+                        ...(vendorPublicKey === undefined ? {} : { vendorPublicKey }),
+                    });
+                } catch (err) {
+                    fail(
+                        `[Automation] connector instance '${name}' (provider '${provider}'): a key it names cannot sign or ` +
+                            `verify (ADR-0143 D2.3).`,
+                        err,
+                    );
+                    continue;
+                }
+            } else if (entry.auth?.type === 'oauth2') {
+                // ADR-0143 D4 — an `authorization_code` instance with no
+                // working connection in any organization is not an authoring
+                // fault and never fails a boot: it is held degraded, "not
+                // connected" or "reconnect required", until a connect.
+                if (entry.auth.grant === 'authorization_code') {
+                    const state = connectionStates.get(name);
+                    if (state?.kind === 'unreadable') {
+                        this.degradeConnectorInstance(engine, ctx, {
+                            name,
+                            entry,
+                            provider,
+                            signature,
+                            hasLive: existing !== undefined,
+                            reason: `the connections of connector instance '${name}' could not be read; it retries on its own`,
+                            cause: undefined,
+                        });
+                        continue;
+                    }
+                    if (state === undefined || state.connected.length === 0) {
+                        await this.holdConnectorUntilConnected(engine, ctx, {
+                            name,
+                            entry,
+                            provider,
+                            signature,
+                            existing,
+                            reason: state && state.reconnectRequired.length > 0
+                                ? reconnectRequiredReason(name, state.reconnectRequired[0])
+                                : notConnectedReason(name),
+                        });
+                        continue;
+                    }
+                }
+                credentialHandle = this.createGrantHandle(ctx, name, entry, entry.auth, credential?.value);
+                const discovery = entry.auth.grant === 'authorization_code' && provider === 'mcp'
+                    ? (() => { const state = connectionStates.get(name); return state?.kind === 'read' ? state.discovery : undefined; })()
+                    : undefined;
+                if (discovery !== undefined) materializingHandle = askingDuringMaterializationAs(credentialHandle, discovery);
+            } else if (entry.auth?.type === 'app-credential') {
+                // ADR-0143 D2.2 — the vendor exchange the closed `vendor` names,
+                // run from the app secret its `credentialRef` resolved to; the
+                // token lives in the handle's memory only (D3).
+                credentialHandle = createAppCredentialHandle({
+                    connector: name,
+                    vendor: entry.auth.vendor,
+                    appId: entry.auth.appId,
+                    appSecret: credential?.value ?? '',
+                    ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
+                });
             } else {
                 auth = resolveInstanceAuth(entry.auth, credential?.value);
             }
@@ -2408,6 +2750,9 @@ export class AutomationServicePlugin implements Plugin {
                 providerConfig: entry.providerConfig ?? {},
                 auth,
                 ...(requestSigner === undefined ? {} : { requestSigner }),
+                // ADR-0143 D4 — the per-dispatch credential of an `oauth2`
+                // instance; `auth` is then `undefined`.
+                ...(credentialHandle === undefined ? {} : { credentialHandle: materializingHandle?.handle ?? credentialHandle }),
                 // ADR-0049 · #18975 — the declared resilience policy reaches the
                 // factory. The built-in HTTP providers hand it to
                 // `connectorFetchOptions()` → `resilientFetch()`; a custom
@@ -2425,7 +2770,11 @@ export class AutomationServicePlugin implements Plugin {
 
             let materialization;
             try {
-                materialization = await factory(providerCtx);
+                try {
+                    materialization = await factory(providerCtx);
+                } finally {
+                    materializingHandle?.settle();
+                }
                 // ADR-0143 D2.3 / ADR-0049 — a `signed` instance is served only
                 // by a provider that says it signs every request. One that does
                 // not (it predates the member, or its upstream never signs, as
@@ -2528,13 +2877,24 @@ export class AutomationServicePlugin implements Plugin {
             // and — unless the provider proved the credential while
             // materializing — for the first one it accepts.
             const proven = materialization.credentialVerified === true;
-            const handlers = credential && ref !== undefined
+            // ADR-0143 D4 — an `oauth2` instance's upstream `401` refuses the
+            // access token the handle answered, never the client secret its
+            // `credentialRef` names, so its calls are not watched for it: the
+            // provider refreshes once and retries (`callWithBorrowedCredential`).
+            // ADR-0143 D4 — a vendor that refuses an early-invalidated token
+            // inside an ordinary answer (WeCom) gets the refresh-once rule on
+            // that answer too; the provider's own covers a `401`.
+            const handlers = credential && ref !== undefined && credentialHandle === undefined
                 ? this.watchForCredentialRejection(engine, ctx, {
                     name, entry, provider, signature, ref, credential, tracked, proven,
                 }, materialization.handlers)
-                : materialization.handlers;
+                : credentialHandle && entry.auth?.type === 'app-credential'
+                    ? retryOnVendorTokenRefusal(name, entry.auth.vendor, credentialHandle, materialization.handlers)
+                    : materialization.handlers;
             engine.registerConnector(def, handlers, 'declarative');
             this.materializedConnectors.set(name, tracked);
+            if (credentialHandle) this.grantHandles.set(name, credentialHandle);
+            else this.grantHandles.delete(name);
             // Success clears any pending degraded retry — including replacing a
             // registered husk (registerConnector above overwrote it).
             const recovered = this.degradedInstances.delete(name);
@@ -2548,7 +2908,7 @@ export class AutomationServicePlugin implements Plugin {
             // upstream accepted it. rest and openapi first send it on a call,
             // where a `2xx` only stamps a `set` row's time; neither that nor a
             // materialization alone turns a `rejected` row back to `set`.
-            if (credential && ref !== undefined && proven) {
+            if (credential && ref !== undefined && proven && credentialHandle === undefined) {
                 await this.recordCredentialProven(ctx, name, ref, credential);
             }
         }
@@ -2735,6 +3095,450 @@ export class AutomationServicePlugin implements Plugin {
         return this.connectorCredentialStore ?? new ConnectorCredentialStore(() => undefined);
     }
 
+    /** ADR-0143 D3 — the connection store, or one over no engine (every read empty). */
+    private connectorConnectionStoreOrNone(): ConnectorConnectionStore {
+        return this.connectorConnectionStore ?? new ConnectorConnectionStore(() => undefined);
+    }
+
+    /** The cluster service, when the deployment composes one; resolved at use. */
+    private clusterService(ctx: PluginContext): IClusterService | undefined {
+        try {
+            return ctx.getService<IClusterService>('cluster');
+        } catch {
+            return undefined;
+        }
+    }
+
+    /**
+     * ADR-0143 D4 — the credential handle a materializing `oauth2` instance's
+     * provider is handed. Its refreshes run under the cluster lock when there
+     * is one; a refused grant re-judges the instance on the reconcile queue.
+     */
+    private createGrantHandle(
+        ctx: PluginContext,
+        name: string,
+        entry: DeclaredConnectorItem,
+        auth: OAuth2InstanceAuth,
+        clientSecret: string | undefined,
+    ): OAuth2GrantHandle {
+        // `oauth2NotServableReason` passed: both are declared, or each
+        // connection keeps the client the MCP authorization flow found.
+        return createOAuth2GrantHandle({
+            connector: name,
+            config: {
+                grant: auth.grant,
+                ...(auth.tokenUrl === undefined ? {} : { tokenUrl: auth.tokenUrl }),
+                ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
+                ...(clientSecret === undefined ? {} : { clientSecret }),
+                ...(auth.scopes === undefined ? {} : { scopes: auth.scopes }),
+                ...(auth.resource === undefined ? {} : { resource: auth.resource }),
+            },
+            connections: this.connectorConnectionStoreOrNone(),
+            lock: () => this.clusterService(ctx)?.lock,
+            onGrantRefused: (organizationId) => {
+                ctx.logger.warn(
+                    `[Automation] connector instance '${name}': the authorization server refused the grant of organization `
+                        + `'${organizationId}'; it needs to be reconnected there (ADR-0143 D4).`,
+                );
+                void this.materializeDeclaredConnectors(ctx, { fatal: false }).catch(() => { /* logged by the reconcile */ });
+            },
+            ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
+        });
+    }
+
+    /**
+     * ADR-0143 D4 — hold an `authorization_code` instance with no working
+     * connection degraded: "not connected" (never authorized) or "reconnect
+     * required" (its grant was refused). Not an authoring fault, so it never
+     * fails a boot and is never retried on the backoff; a connect changes its
+     * signature, which re-attempts it. A live connector is torn down first, so
+     * the registry shows the instance degraded rather than ready.
+     */
+    private async holdConnectorUntilConnected(
+        engine: AutomationEngine,
+        ctx: PluginContext,
+        info: {
+            name: string;
+            entry: DeclaredConnectorItem;
+            provider: string;
+            signature: string;
+            existing: { close?: () => void | Promise<void> } | undefined;
+            reason: string;
+        },
+    ): Promise<void> {
+        if (info.existing) await this.dematerializeConnector(engine, info.name, info.existing, ctx, 'no working connection');
+        this.degradedInstances.set(info.name, { attempts: 1, signature: info.signature, reason: info.reason, held: true });
+        try {
+            engine.registerDegradedConnector(
+                this.buildDegradedHuskDef(info.name, info.entry),
+                info.reason,
+                'declarative',
+                undefined,
+                { kind: 'connection' },
+            );
+        } catch (err) {
+            ctx.logger.warn(
+                `[Automation] could not register degraded husk for '${info.name}' — the instance stays absent from the ` +
+                    'connector registry until it is connected.',
+                describeThrownForLog(err),
+            );
+        }
+        ctx.logger.warn(`[Automation] connector instance '${info.name}' (provider '${info.provider}') is degraded: ${info.reason}.`);
+    }
+
+    /** ADR-0143 D5 — where begun connects wait: the cluster KV, or this process on a single node. */
+    private pendingAuthorizations(ctx: PluginContext): PendingAuthorizationStore {
+        const kv = this.clusterService(ctx)?.kv;
+        if (kv) return kvPendingAuthorizationStore(kv);
+        this.memoryPendingAuthorizations ??= memoryPendingAuthorizationStore();
+        return this.memoryPendingAuthorizations;
+    }
+
+    /** ADR-0143 D5 — the deployment's fixed redirect URI, or the `503` naming how to configure one. */
+    private connectorOAuthRedirectUri(): string {
+        if (this.options.connectorOAuthRedirectUri) return this.options.connectorOAuthRedirectUri;
+        const env = typeof process !== 'undefined' ? process.env : undefined;
+        const origin = (env?.OS_AUTH_URL || env?.OS_BASE_URL || '').trim().replace(/\/+$/, '');
+        if (/^https?:\/\//i.test(origin)) return `${origin}/api/v1/automation/connectors/oauth/callback`;
+        throw credentialDoorRefusal(
+            'This deployment has no fixed public origin for the OAuth redirect, so a connector instance cannot be connected: '
+                + 'set OS_BASE_URL (or OS_AUTH_URL) to the URL it is served at, or pass connectorOAuthRedirectUri to the '
+                + 'automation plugin. A redirect URI is never taken from the request (ADR-0143 D5).',
+            'SERVICE_UNAVAILABLE',
+            503,
+        );
+    }
+
+    /**
+     * ADR-0143 D2.1 — the client an MCP instance's connect authorizes with,
+     * or `undefined` for an instance that declares its endpoints and client.
+     * The organization's connection keeps the client it was connected with,
+     * reused on a reconnect while the declaration still leaves the same fields
+     * to discovery; otherwise the MCP authorization flow runs, registering a
+     * client when none is declared. Its refusals answer the door: `400` for a
+     * server that does not say what the flow needs, `503` for one that did not
+     * answer.
+     */
+    private async mcpAuthorizationClient(
+        ctx: PluginContext,
+        name: string,
+        entry: DeclaredConnectorItem,
+        auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>,
+        organizationId: string,
+        redirectUri: string,
+    ): Promise<McpAuthorizationClient | undefined> {
+        const serverUrl = mcpDiscoveryServerUrl(entry, auth);
+        if (serverUrl === undefined) return undefined;
+        const store = this.connectorConnectionStoreOrNone();
+        const existing = await store.readOrRefuse(organizationId, name);
+        if (existing?.hasRegisteredClient) {
+            let kept: McpAuthorizationClient | undefined;
+            try {
+                kept = parseMcpAuthorizationClient(await store.resolveRegisteredClient(existing));
+            } catch {
+                kept = undefined;
+            }
+            if (kept && kept.registered === (auth.clientId === undefined) && (auth.clientId === undefined || kept.clientId === auth.clientId)) {
+                return kept;
+            }
+        }
+        try {
+            const client = await discoverMcpAuthorization({
+                connector: name,
+                serverUrl,
+                declared: {
+                    ...(auth.authorizationUrl === undefined ? {} : { authorizationUrl: auth.authorizationUrl }),
+                    ...(auth.tokenUrl === undefined ? {} : { tokenUrl: auth.tokenUrl }),
+                    ...(auth.clientId === undefined ? {} : { clientId: auth.clientId }),
+                    ...(auth.resource === undefined ? {} : { resource: auth.resource }),
+                },
+                redirectUri,
+                ...(auth.scopes === undefined ? {} : { scopes: auth.scopes }),
+                ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
+            });
+            ctx.logger.info(
+                `[Automation] connector instance '${name}': the MCP authorization flow found its authorization server`
+                    + `${client.registered ? ' and registered a client' : ''} for organization '${organizationId}'.`,
+            );
+            return client;
+        } catch (err) {
+            if (err instanceof McpAuthorizationRefusedError) {
+                throw credentialDoorRefusal(`${err.message}. Nothing was connected.`, 'VALIDATION_ERROR', 400);
+            }
+            if (isConnectorUpstreamUnavailable(err)) {
+                throw credentialDoorRefusal(`${(err as Error).message}. Nothing was connected; begin the connect again.`, 'SERVICE_UNAVAILABLE', 503);
+            }
+            throw err;
+        }
+    }
+
+    /**
+     * ADR-0143 D5 — the declared `authorization_code` instance a connection
+     * door call names, servable, and the caller's organization and user.
+     */
+    private async connectionDoorSubject(
+        ctx: PluginContext,
+        request: ConnectorConnectionRequest | undefined,
+    ): Promise<{
+        name: string;
+        entry: DeclaredConnectorItem;
+        auth: Extract<OAuth2InstanceAuth, { grant: 'authorization_code' }>;
+        organizationId: string;
+        userId?: string;
+    }> {
+        const name = request?.connector;
+        if (typeof name !== 'string' || name.length === 0) {
+            throw credentialDoorRefusal('A connector instance name is required.', 'VALIDATION_ERROR', 400);
+        }
+        const declared = await this.readDeclaredConnectorItems(ctx, { post: true });
+        const entry = (declared ?? []).find((raw) => (raw as DeclaredConnectorItem | null)?.name === name) as DeclaredConnectorItem | undefined;
+        if (!entry || typeof entry.provider !== 'string' || entry.provider.length === 0) {
+            throw credentialDoorRefusal(
+                `No installed package declares a provider-bound connector instance '${name}'.`,
+                'RESOURCE_NOT_FOUND',
+                404,
+            );
+        }
+        const auth = entry.auth;
+        if (auth?.type !== 'oauth2' || auth.grant !== 'authorization_code') {
+            throw credentialDoorRefusal(
+                `Connector instance '${name}' does not use the oauth2 authorization_code grant, so it has no connection to `
+                    + "make: only an instance an administrator authorizes keeps one (ADR-0143 D3). A 'client_credentials' "
+                    + 'instance needs only the client secret its credentialRef names.',
+                'VALIDATION_ERROR',
+                400,
+            );
+        }
+        const notServable = oauth2NotServableReason(name, { ...entry, provider: entry.provider as string }, auth, true);
+        if (notServable !== undefined) throw credentialDoorRefusal(`${notServable}.`, 'VALIDATION_ERROR', 400);
+        const organizationId = request?.context?.tenantId;
+        if (typeof organizationId !== 'string' || organizationId.length === 0) {
+            throw credentialDoorRefusal(
+                `Connecting connector instance '${name}' needs an active organization: a connection belongs to the `
+                    + 'organization that makes it (ADR-0143 Q1). Switch to the organization first.',
+                'VALIDATION_ERROR',
+                400,
+            );
+        }
+        const userId = typeof request?.context?.userId === 'string' && request.context.userId.length > 0 ? request.context.userId : undefined;
+        return { name, entry, auth, organizationId, userId };
+    }
+
+    /** ADR-0143 D3 — a connection row (or its absence) as the door answers it. Never a token. */
+    private describeConnection(name: string, organizationId: string, record: ConnectorConnectionRecord | undefined): ConnectorConnectionState {
+        if (!record) return { connector: name, organizationId, status: 'not_connected' };
+        return {
+            connector: name,
+            organizationId,
+            status: record.status,
+            ...(record.statusReason ? { statusReason: record.statusReason } : {}),
+            ...(record.scopes ? { scopes: record.scopes } : {}),
+            ...(record.expiresAt ? { expiresAt: record.expiresAt } : {}),
+            ...(record.connectedAt ? { connectedAt: record.connectedAt } : {}),
+            ...(record.connectedBy ? { connectedBy: record.connectedBy } : {}),
+        };
+    }
+
+    /** ADR-0143 D3 — `IAutomationService.getConnectorConnection`. */
+    private async getConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
+        const { name, organizationId } = await this.connectionDoorSubject(ctx, request);
+        return this.describeConnection(name, organizationId, await this.connectorConnectionStoreOrNone().readOrRefuse(organizationId, name));
+    }
+
+    /**
+     * ADR-0143 D5 — `IAutomationService.beginConnectorConnection`: a fresh
+     * `state` and PKCE pair bound to the caller, kept until the callback, and
+     * the authorization URL. Nothing is written to the connection record.
+     */
+    private async beginConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin> {
+        const { name, entry, auth, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        if (userId === undefined) {
+            throw credentialDoorRefusal(
+                `Connecting connector instance '${name}' needs a signed-in user: the callback is accepted only from the user `
+                    + 'who began the connect (ADR-0143 D5).',
+                'VALIDATION_ERROR',
+                400,
+            );
+        }
+        const redirectUri = this.connectorOAuthRedirectUri();
+        const client = await this.mcpAuthorizationClient(ctx, name, entry, auth, organizationId, redirectUri);
+        const state = createAuthorizationState();
+        const { verifier, challenge } = createPkcePair();
+        const expiresAt = Date.now() + PENDING_AUTHORIZATION_TTL_SECONDS * 1000;
+        await this.pendingAuthorizations(ctx).put(state, {
+            connector: name, organizationId, userId, verifier, redirectUri, expiresAt, ...(client ? { client } : {}),
+        });
+        ctx.logger.info(`[Automation] connect of connector instance '${name}' begun for organization '${organizationId}' by user '${userId}'.`);
+        const resource = auth.resource ?? client?.resource;
+        return {
+            connector: name,
+            organizationId,
+            authorizationUrl: buildAuthorizationUrl({
+                authorizationUrl: client?.authorizationUrl ?? (auth.authorizationUrl as string),
+                clientId: client?.clientId ?? (auth.clientId as string),
+                redirectUri,
+                state,
+                challenge,
+                ...(auth.scopes === undefined ? {} : { scopes: auth.scopes }),
+                ...(resource === undefined ? {} : { resource }),
+            }),
+            expiresAt: new Date(expiresAt).toISOString(),
+        };
+    }
+
+    /**
+     * ADR-0143 D5 — `IAutomationService.completeConnectorConnection`: take the
+     * `state` once, check it against the caller, exchange the code with the
+     * verifier, store the connection and re-judge the instance.
+     */
+    private async completeConnectorConnection(ctx: PluginContext, request: ConnectorConnectionCallbackRequest): Promise<ConnectorConnectionState> {
+        const query = request?.query ?? {};
+        const refuse = (message: string): Error => credentialDoorRefusal(message, 'VALIDATION_ERROR', 400);
+        if (typeof query.state !== 'string' || query.state.length === 0) {
+            throw refuse('The OAuth callback carries no state, so it answers no connect this server began. Nothing was connected.');
+        }
+        const pending = await this.pendingAuthorizations(ctx).take(query.state);
+        if (!pending || pending.expiresAt <= Date.now()) {
+            throw refuse(
+                'The OAuth callback\'s state names no connect waiting here: it expired, was already used, or was never begun. '
+                    + 'Nothing was connected; begin the connect again.',
+            );
+        }
+        const callerOrganization = request.context?.tenantId;
+        const callerUser = request.context?.userId;
+        if (callerUser !== pending.userId || callerOrganization !== pending.organizationId) {
+            ctx.logger.warn(
+                `[Automation] an OAuth callback for connector instance '${pending.connector}' was refused: it did not come from `
+                    + 'the user and organization that began the connect.',
+            );
+            throw refuse(
+                'The OAuth callback was not completed by the user and organization that began this connect, so its code was '
+                    + 'not used. Nothing was connected; begin the connect again from your own session.',
+            );
+        }
+        if (typeof query.error === 'string' && query.error.length > 0) {
+            const registered = new Set([
+                'invalid_request', 'unauthorized_client', 'access_denied', 'unsupported_response_type', 'invalid_scope',
+                'server_error', 'temporarily_unavailable',
+            ]);
+            throw refuse(
+                `The authorization server did not authorize connector instance '${pending.connector}'`
+                    + `${registered.has(query.error) ? ` (${query.error})` : ''}. Nothing was connected.`,
+            );
+        }
+        if (typeof query.code !== 'string' || query.code.length === 0) {
+            throw refuse('The OAuth callback carries no code. Nothing was connected; begin the connect again.');
+        }
+        // RFC 9207: a callback naming an issuer must name the one the connect
+        // discovered, or the code may be another server's (a mix-up).
+        if (pending.client && typeof query.iss === 'string' && query.iss !== pending.client.issuer) {
+            throw refuse(
+                `The OAuth callback for connector instance '${pending.connector}' names an issuer other than the authorization `
+                    + 'server this connect was begun with, so its code was not used. Nothing was connected.',
+            );
+        }
+        // The declaration is read again: the instance may have changed while
+        // the browser was away.
+        const { name, auth, organizationId } = await this.connectionDoorSubject(ctx, {
+            connector: pending.connector,
+            context: request.context,
+        });
+        const client = pending.client;
+        let clientSecret: string | undefined = client?.registered ? client.clientSecret : undefined;
+        if (!client?.registered && auth.credentialRef !== undefined) {
+            const chain = await this.connectorCredentialChain(ctx);
+            const rows = chain.store ? await chain.store.list() : new Map();
+            const resolution = await resolveConnectorCredential(chain, auth.credentialRef, rows);
+            if (resolution.kind !== 'resolved') {
+                throw credentialDoorRefusal(
+                    `Connector instance '${name}' cannot exchange the code: ${missingCredentialReason(auth.credentialRef, this.options.credentialResolver !== undefined)}. `
+                        + 'Nothing was connected.',
+                    'SERVICE_UNAVAILABLE',
+                    503,
+                );
+            }
+            clientSecret = resolution.value;
+        }
+        const params: Record<string, string> = {
+            grant_type: 'authorization_code',
+            code: query.code,
+            redirect_uri: pending.redirectUri,
+            code_verifier: pending.verifier,
+        };
+        const resource = auth.resource ?? client?.resource;
+        if (resource) params.resource = resource;
+        let token;
+        try {
+            token = await requestOAuth2Token({
+                connector: name,
+                tokenUrl: client?.tokenUrl ?? (auth.tokenUrl as string),
+                client: { clientId: client?.clientId ?? (auth.clientId as string), ...(clientSecret === undefined ? {} : { clientSecret }) },
+                params,
+            });
+        } catch (err) {
+            if (isConnectorUpstreamUnavailable(err)) {
+                throw credentialDoorRefusal(`${(err as Error).message}. Nothing was connected; begin the connect again.`, 'SERVICE_UNAVAILABLE', 503);
+            }
+            if (err instanceof OAuth2GrantRefusedError) {
+                throw refuse(`The authorization server of connector instance '${name}' refused the code (invalid_grant). Nothing was connected; begin the connect again.`);
+            }
+            throw refuse(`${(err as Error).message}. Nothing was connected.`);
+        }
+        const userId = request.context?.userId;
+        const record = await this.onReconcileQueue(async () => {
+            const stored = await this.connectorConnectionStoreOrNone().connect({
+                organizationId,
+                connectorName: name,
+                ...(userId ? { userId } : {}),
+                ...(token.refreshToken === undefined ? {} : { refreshToken: token.refreshToken }),
+                ...(token.scope === undefined ? {} : { scopes: token.scope }),
+                ...(token.expiresAt === undefined ? {} : { expiresAt: new Date(token.expiresAt) }),
+                // A declared client's secret stays behind its credentialRef; only a registered one is kept.
+                ...(client
+                    ? {
+                        registeredClient: JSON.stringify(client.registered
+                            ? client
+                            : { ...client, clientSecret: undefined }),
+                    }
+                    : {}),
+            });
+            ctx.logger.info(
+                `[Automation] connector instance '${name}' connected for organization '${organizationId}'`
+                    + `${userId ? ` by user '${userId}'` : ''}; reconciling it.`,
+            );
+            await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+            return stored;
+        });
+        // The access token the exchange answered serves the next dispatch; it is
+        // never stored (D3).
+        this.grantHandles.get(name)?.seed(organizationId, record.revision, token);
+        return this.describeConnection(name, organizationId, record);
+    }
+
+    /** ADR-0143 D5 — `IAutomationService.revokeConnectorConnection`. */
+    private async revokeConnectorConnection(ctx: PluginContext, request: ConnectorConnectionRequest): Promise<ConnectorConnectionState> {
+        const { name, organizationId, userId } = await this.connectionDoorSubject(ctx, request);
+        const removed = await this.onReconcileQueue(async () => {
+            const gone = await this.connectorConnectionStoreOrNone().revoke(organizationId, name, userId);
+            if (!gone) return false;
+            this.grantHandles.get(name)?.forget(organizationId);
+            ctx.logger.info(
+                `[Automation] connection of connector instance '${name}' revoked for organization '${organizationId}'`
+                    + `${userId ? ` by user '${userId}'` : ''}; reconciling it.`,
+            );
+            await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+            return true;
+        });
+        if (!removed) {
+            throw credentialDoorRefusal(
+                `Connector instance '${name}' is not connected for organization '${organizationId}', so there is nothing to revoke.`,
+                'RESOURCE_NOT_FOUND',
+                404,
+            );
+        }
+        return this.describeConnection(name, organizationId, undefined);
+    }
+
     /**
      * [#27237] The deployment's effective tenancy posture, from the `tenancy`
      * service; `undefined` when none is registered (a single-organization
@@ -2873,12 +3677,12 @@ export class AutomationServicePlugin implements Plugin {
             const entry = raw as DeclaredConnectorItem & { _packageId?: unknown };
             if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
-            const ref = credentialRefOf(entry.auth);
-            if (ref === undefined) continue;
             const packageId = typeof entry._packageId === 'string' && entry._packageId.length > 0 ? entry._packageId : undefined;
-            const list = out.get(ref) ?? [];
-            if (!list.some((c) => c.name === entry.name)) list.push({ name: entry.name, ...(packageId ? { packageId } : {}) });
-            out.set(ref, list);
+            for (const ref of credentialRefsOf(entry.auth)) {
+                const list = out.get(ref) ?? [];
+                if (!list.some((c) => c.name === entry.name)) list.push({ name: entry.name, ...(packageId ? { packageId } : {}) });
+                out.set(ref, list);
+            }
         }
         return out;
     }
@@ -3468,6 +4272,7 @@ export class AutomationServicePlugin implements Plugin {
             try { await tracked.close(); } catch { /* best-effort */ }
         }
         this.materializedConnectors.delete(name);
+        this.grantHandles.delete(name);
         ctx.logger.info(`[Automation] unregistered declarative connector instance '${name}' (${why})`);
     }
 

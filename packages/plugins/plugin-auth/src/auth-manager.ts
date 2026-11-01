@@ -208,6 +208,7 @@ import { createAuthInstance, type AuthInstanceHost } from './auth-manager-auth-i
 // plugin's factory (cut 15) is now imported there, by the arrow that moved
 // with it.
 import { buildPluginList, type PluginListHost } from './auth-manager-plugin-list.js';
+import { resolveTurnstileKeys } from './turnstile-sign-up.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -4551,6 +4552,7 @@ export class AuthManager {
     const privacyUrl = resolveLegalUrl(rawPrivacyUrl, DEFAULT_PRIVACY_URL);
 
     const twoFactorFromEnv = readBooleanEnv('OS_AUTH_TWO_FACTOR');
+    const turnstileKeys = resolveTurnstileKeys();
 
     // [#7481, maintainer ruling 2026-08-11] `passkeys` / `magicLink` are
     // deliberately NOT advertised here — see PUBLIC_AUTH_FEATURES_NOT_ADVERTISED
@@ -4616,6 +4618,10 @@ export class AuthManager {
       cloudManaged: isCloudManaged(),
       ...(termsUrl ? { termsUrl } : {}),
       ...(privacyUrl ? { privacyUrl } : {}),
+      // The PUBLIC Turnstile site key, served only when the sign-up challenge
+      // is wired (both keys set; the resolver `buildPluginList()` mounts the
+      // plugin from). The secret is never part of this payload.
+      ...(turnstileKeys ? { turnstileSiteKey: turnstileKeys.siteKey } : {}),
     };
 
     // Dev-only login hint (15.1 third-party eval): the empty-DB auto-seeded

@@ -9,9 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 //
 // Form D: no tracker number anywhere in the author-shown text; the decision is
 // stated in words.
-//
-// No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-// span already, and a nested backtick would close it.
 export const entry: SemanticMigration = {
   id: 'flow-node-config-required-keys-refused',
   surface:

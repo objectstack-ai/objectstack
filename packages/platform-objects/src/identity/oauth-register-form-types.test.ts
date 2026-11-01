@@ -30,10 +30,33 @@ import { enObjects } from '../apps/translations/en.objects.generated.js';
 import { zhCNObjects } from '../apps/translations/zh-CN.objects.generated.js';
 import { jaJPObjects } from '../apps/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../apps/translations/es-ES.objects.generated.js';
+import { templateSlotSource } from '@objectstack/spec/automation';
+
+// [#27948] An action's `description`, each param's `helpText` and each
+// `outcomeMessages` entry are `template` slots: the parsed object carries the
+// `{ dialect: 'template', source }` envelope, so the copy is read as written
+// through the template judge's one reader, `templateSlotSource` (a locale map
+// is kept as it is).
+function copyAsWritten<T>(declared: T): T {
+  const a = declared as Record<string, any> | undefined;
+  if (!a) return declared;
+  const text = (v: unknown) => templateSlotSource(v) ?? v;
+  return {
+    ...a,
+    ...(a.description !== undefined ? { description: text(a.description) } : {}),
+    ...(Array.isArray(a.params)
+      ? { params: a.params.map((p: any) => (p && p.helpText !== undefined ? { ...p, helpText: text(p.helpText) } : p)) }
+      : {}),
+    ...(a.outcomeMessages && typeof a.outcomeMessages === 'object'
+      ? { outcomeMessages: Object.fromEntries(Object.entries(a.outcomeMessages).map(([k, v]) => [k, text(v)])) }
+      : {}),
+  } as T;
+}
+
 
 type Param = { name?: string; type?: string; required?: boolean; defaultValue?: unknown; helpText?: string; options?: unknown[] };
 
-const register = (SysOauthApplication.actions ?? []).find((a) => a.name === 'create_oauth_application');
+const register = copyAsWritten((SysOauthApplication.actions ?? []).find((a) => a.name === 'create_oauth_application'));
 const param = (name: string): Param | undefined =>
   ((register?.params ?? []) as Param[]).find((p) => p.name === name);
 const optionValues = (options: unknown[] | undefined): unknown[] =>

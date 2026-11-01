@@ -49,7 +49,14 @@
  *  - `metadata`: `surface`, `action_name`, `branch`, `outcome`, and on a
  *    failure the HTTP `status` and the error's machine code; `run_id` for a
  *    `resume_run`; and `performed_by` / `on_behalf_of` when an agent performed
- *    the call (ADR-0090 D10 rule 4, the same pair the CRUD mirror writes).
+ *    the call (ADR-0090 D10 rule 4, the same pair the CRUD mirror writes);
+ *  - [#28281] the two rows of an `api` forward to another action route name
+ *    each other: the outer row's `target` is the action's declared target
+ *    (the declaration, not the interpolated path, which can carry a param
+ *    value), and the inner row's `forwarded_from` is the forward mark it
+ *    arrived carrying (`<object>/<action>` of the outer action). The mark is
+ *    a HINT, not a surface: a caller can forge it, so it mislabels this key
+ *    and nothing else, and the inner row's `surface` stays its own door's.
  */
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
@@ -100,6 +107,10 @@ export interface ActionInvocationAuditEvent {
   errorCode?: string;
   /** `resume_run` only: the paused run the call continued. */
   runId?: string;
+  /** `api` branch only: the action's declared `target` (the outer row of a forward). */
+  target?: string;
+  /** The forward mark the call arrived carrying (the inner row of a forward) — a hint only. */
+  forwardedFrom?: string;
 }
 
 /** What {@link createActionInvocationAuditWriter} adds to the `audit` slot. */
@@ -158,6 +169,10 @@ export function buildActionInvocationAuditRow(
   }
   const runId = nonEmpty(event.runId);
   if (runId) metadata.run_id = runId;
+  const target = event.branch === 'api' ? nonEmpty(event.target) : undefined;
+  if (target) metadata.target = target;
+  const forwardedFrom = nonEmpty(event.forwardedFrom);
+  if (forwardedFrom) metadata.forwarded_from = forwardedFrom;
   // [ADR-0090 D10 rule 4] The same pair, under the same names, the CRUD mirror
   // writes for a delegated write — present only when an agent performed the
   // call, so the two shapes stay distinguishable by absence.

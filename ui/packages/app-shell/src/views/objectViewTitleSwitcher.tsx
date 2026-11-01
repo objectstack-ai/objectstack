@@ -18,8 +18,10 @@
  * Manage views (`ManageViewsDialog`): the rename, delete, shared default and
  * configure acts that each tab's ▾ menu used to carry.
  *
- * Below `sm` the page header is not drawn; the app bar's view switcher
- * (`MobileViewSwitcherContext`) stays the phone's control.
+ * Below `sm` the page header is not drawn. On a phone the same switcher leads
+ * the list's toolbar row (`ListView`'s `toolbarLeading`) or heads a chart
+ * (objectstack#27058): one switcher on every width, and the app bar draws no
+ * view dropdown of its own.
  */
 
 import { useMemo, useState, type ComponentType, type Dispatch, type ReactNode, type SetStateAction } from 'react';
@@ -431,11 +433,12 @@ export function useObjectViewTitleSwitcher({
 
     const openViewId = viewAccess.refusal ? '' : activeViewId ?? '';
     const openView = viewTabItems.find((item) => item.id === openViewId);
+    const titleLabel = openView?.label ?? unlabelledViewText;
     const titleSwitcher = views.length >= 1 ? (
         <ObjectViewTitleSwitcher
             views={switcherViews}
             activeViewId={openViewId}
-            activeLabel={openView?.label ?? unlabelledViewText}
+            activeLabel={titleLabel}
             count={viewTotal && viewTotal.viewId === openViewId ? viewTotal.total : undefined}
             description={openView?.type === 'chart' ? openView.description : undefined}
             onViewChange={handleViewChange}
@@ -449,5 +452,5 @@ export function useObjectViewTitleSwitcher({
         />
     ) : null;
 
-    return { viewTabItems, titleSwitcher };
+    return { viewTabItems, titleSwitcher, titleLabel };
 }

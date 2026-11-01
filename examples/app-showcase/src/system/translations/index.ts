@@ -543,7 +543,11 @@ export const ShowcaseTranslationBundle = {
           showcase_quick_view: { label: '快速查看' },
           showcase_log_time: { label: '记录工时' },
           showcase_new_task: { label: '新建任务' },
-          showcase_archive_task: { label: '归档', successMessage: "{{ record.title | default:'任务' }}已归档（演示——未修改任何数据）。" },
+          showcase_archive_task: {
+            label: '归档',
+            successMessage: "{{ record.title | default:'任务' }}已归档（演示——未修改任何数据）。",
+            disabledReason: '请先将任务标记为完成。',
+          },
         },
         // Section headings of the six form-view projections in
         // `ui/views/task.view.ts` (edit / tabbed / wizard / split / quick).

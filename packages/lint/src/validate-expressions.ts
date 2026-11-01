@@ -3542,6 +3542,24 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
   }
 
+  // ── App landing predicates (`app.landing[].visible`) ───────────────
+  // [#28022] An app's per-audience landing: the first entry whose predicate
+  // holds names the navigation entry the reader opens on. It reads the
+  // signed-in reader (`current_user`, `features`) and no record, so it gets
+  // the shared validator's data-independent verdicts (CEL syntax, size, an
+  // unknown function, a malformed `has()`) with no object and no bare-field
+  // judgement — a `record`-scoped call would prescribe `record.<x>` on a slot
+  // that binds no record. The parse already refused a dangling `item` and a
+  // `data` read (`checkAppLandingItems`). Apps are not an object's body, so
+  // an object write reads an empty list here.
+  for (const appDef of objectWrite ? [] : recordsOf(stack.apps)) {
+    const appName = typeof appDef.name === 'string' ? appDef.name : '?';
+    recordsOf(appDef.landing).forEach((landingEntry, index) => {
+      const item = typeof landingEntry.item === 'string' ? landingEntry.item : '?';
+      check(`app '${appName}' · landing[${index}] ('${item}') visible`, landingEntry.visible);
+    });
+  }
+
   // ── Sharing-rule predicates (security-critical, record-scoped) ─────
   // A criteria sharing rule's `condition` decides which rows a principal sees.
   // It is evaluated against the record, so a bare ref silently changes access.

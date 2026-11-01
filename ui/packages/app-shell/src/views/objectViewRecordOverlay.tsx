@@ -13,8 +13,9 @@
  *
  * Since objectstack#26679 the pane is the in-place stack of
  * `./recordDrawerStack.tsx`: its root is the list row `?recordId=` names, a
- * related row or a lookup inside it opens one level down, and its bar names
- * no object (maintainer ruling 2 on that card).
+ * related row or a lookup inside it opens one level down. Its top bar
+ * (objectstack#27524, Target 7) names the object and the record at the root,
+ * and its counter names the list's view (`stepScope`).
  */
 
 import type { ReactNode } from 'react';
@@ -37,6 +38,7 @@ export function ObjectViewRecordOverlay({
     drawerRoot,
     drawerRestore,
     handleRootStep,
+    stepScope,
     dataSource,
     objects,
     onEdit,
@@ -55,6 +57,8 @@ export function ObjectViewRecordOverlay({
     drawerRoot: RecordNavigation['drawerRoot'];
     drawerRestore: RecordNavigation['drawerRestore'];
     handleRootStep: RecordNavigation['handleRootStep'];
+    /** The list's name (its view), which the pane's counter says. */
+    stepScope?: string;
     dataSource: ConsoleObjectViewProps['dataSource'];
     objects: ConsoleObjectViewProps['objects'];
     onEdit: ConsoleObjectViewProps['onEdit'];
@@ -70,6 +74,7 @@ export function ObjectViewRecordOverlay({
                  mainContent={list}
                  onClose={handleDrawerClose}
                  onOpenAsPage={handleOpenAsPage}
+                 stepScope={stepScope}
                  storageKey={`drawer-width:${objectDef.name}`}
                  objects={objects}
                  renderRecord={(level) => (

@@ -151,6 +151,12 @@ export interface ReapOptions {
     now?: number;
 }
 
+/** [#28383] Options for {@link INotificationOutbox.hasDueWork}. */
+export interface DueWorkOptions {
+    /** "Now" reference, ms. Defaults to the store's clock. */
+    now?: number;
+}
+
 export interface AckSuccess {
     success: true;
     durationMs?: number;
@@ -273,6 +279,23 @@ export interface INotificationOutbox {
      * before — correct, at the per-claim cost. Both built-in stores implement it.
      */
     reap?(opts: ReapOptions): Promise<void>;
+    /**
+     * [#28383] Is ANY row due for dispatch — a `pending` row whose
+     * `nextAttemptAt` is unset or not after `now`, batched (digest) or not, in
+     * ANY partition and organization? The union of what {@link claim} and
+     * {@link claimDigest} would take, asked as one read before a dispatcher
+     * pays a claim and a digest probe per partition.
+     *
+     * A read and nothing more: it takes no claim and holds no row, so `false`
+     * may be stale the moment it returns. That is the staleness every claim
+     * probe already has — a row enqueued just after it is found by the next
+     * tick, or at once by the enqueuing process's `wake()`.
+     *
+     * Optional, so an outbox written before it keeps working unchanged: the
+     * dispatcher then probes every partition as before. Both built-in stores
+     * implement it.
+     */
+    hasDueWork?(opts: DueWorkOptions): Promise<boolean>;
     claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]>;
     /**
      * Record the outcome of ONE dispatch attempt on a row this caller claimed,

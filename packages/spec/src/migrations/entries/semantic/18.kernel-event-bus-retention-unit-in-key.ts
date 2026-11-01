@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'kernel-event-bus-retention-unit-in-key',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface: 'the two event-bus retention windows whose name carried no unit: '
     + 'EventPersistence.retention (kernel/events/handlers.zod.ts) and '
     + 'EventSourcingConfig.retention (kernel/events/queue.zod.ts)',

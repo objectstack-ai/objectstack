@@ -34,6 +34,7 @@
     "events-dlq",
     "events-handlers",
     "events-integrations",
-    "events-queue"
+    "events-queue",
+    "override-declaration"
   ]
 }

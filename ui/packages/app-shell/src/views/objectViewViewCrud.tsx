@@ -1,33 +1,28 @@
 /**
  * The view management handlers of the Console `ObjectView` (`./ObjectView.tsx`):
  * the view-config panel's save and create doors, the draft field update, view
- * switching, the mobile view switcher registration, and the view-tab CRUD
+ * switching, and the view-tab CRUD
  * callbacks (rename, delete, pin, set default, reorder, configure, add), moved
  * out of `ObjectViewInner` verbatim (objectstack#25992, slice 11b). The panel and
  * dialog state stays in the component; every input is passed in, and the
  * component reads the returned handlers.
  */
 
-import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, type Dispatch, type SetStateAction } from 'react';
 import type { useNavigate } from 'react-router-dom';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { toast } from 'sonner';
-import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import type { useObjectTranslation } from '@object-ui/i18n';
 import type { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
 import { PREVIEW_QUERY_FLAG, PREVIEW_QUERY_VALUE } from '../preview/PreviewModeContext.js';
 import type { usePreviewDrafts } from '../preview/PreviewModeContext.js';
-import { useMobileViewSwitcherRegistration } from '../layout/MobileViewSwitcherContext.js';
-import type { MobileViewSwitcherItem } from '../layout/MobileViewSwitcherContext.js';
 import { isSavedViewId } from '../utils/viewIdentity.js';
-import type { useServedViewItems } from '../hooks/useServedViewItems.js';
 import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
 import { persistRuntimeMetadata, createRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
-import { VIEW_TYPE_ICONS } from './objectViewHelpers.js';
 import { buildAddViewSpec, setDefaultViewPatches, buildViewConfigSaveBody } from './objectViewTabs.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import { dispatchViewPatches } from './objectViewOptions.js';
-import { viewTabLabel } from './viewTabLabel.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
 
 export function useObjectViewViewCrud({
@@ -37,17 +32,12 @@ export function useObjectViewViewCrud({
     objectName,
     viewId,
     t,
-    language,
-    viewLabel,
-    servedViews,
     metadataClient,
     previewDrafts,
     setShowViewConfigPanel,
     setViewConfigPanelMode,
     setShowCreateViewDialog,
     setViewDraft,
-    objectDef,
-    unlabelledViewText,
     setRefreshKey,
     confirmHandler,
     savedViews,
@@ -62,17 +52,12 @@ export function useObjectViewViewCrud({
     objectName: string | undefined;
     viewId: string | undefined;
     t: ReturnType<typeof useObjectTranslation>['t'];
-    language: ReturnType<typeof useObjectTranslation>['language'];
-    viewLabel: ReturnType<typeof useObjectLabel>['viewLabel'];
-    servedViews: ReturnType<typeof useServedViewItems>;
     metadataClient: ReturnType<typeof useMetadataClient>;
     previewDrafts: ReturnType<typeof usePreviewDrafts>;
     setShowViewConfigPanel: Dispatch<SetStateAction<boolean>>;
     setViewConfigPanelMode: Dispatch<SetStateAction<'create' | 'edit'>>;
     setShowCreateViewDialog: Dispatch<SetStateAction<boolean>>;
     setViewDraft: Dispatch<SetStateAction<Partial<ReturnType<typeof buildViewTabs>[number]> | null>>;
-    objectDef: ConsoleObjectViewProps['objects'][number];
-    unlabelledViewText: string;
     setRefreshKey: Dispatch<SetStateAction<number>>;
     confirmHandler: ReturnType<typeof useConsoleActionRuntime>['confirmHandler'];
     savedViews: Parameters<typeof buildViewTabs>[0]['savedViews'];
@@ -251,27 +236,6 @@ export function useObjectViewViewCrud({
              navigate(`view/${matchedView.id}`);
         }
     };
-
-    // Mobile view switcher — registers our view list with the AppHeader so
-    // the topbar can render a `<viewName> ▾` dropdown instead of the static
-    // page label. Desktop ignores this (the page title switches there,
-    // objectstack#27594).
-    const mobileViewSwitcherItems = useMemo<MobileViewSwitcherItem[]>(() => {
-        return (views || []).map((view: any) => {
-            const Icon = VIEW_TYPE_ICONS[view.type as keyof typeof VIEW_TYPE_ICONS];
-            return {
-                id: view.id,
-                label: viewTabLabel(view, objectDef.name, servedViews, viewLabel, unlabelledViewText, language),
-                icon: Icon ? <Icon className="h-4 w-4" /> : undefined,
-            };
-        });
-    }, [views, objectDef.name, viewLabel, unlabelledViewText, servedViews, language]);
-    useMobileViewSwitcherRegistration({
-        views: mobileViewSwitcherItems,
-        activeViewId: activeViewId ?? '',
-        onChange: handleViewChange,
-        enabled: mobileViewSwitcherItems.length > 0 && !!activeViewId,
-    });
 
     // ViewSwitcher callbacks — wired to both PluginObjectView instances
     const handleCreateView = useCallback(() => {

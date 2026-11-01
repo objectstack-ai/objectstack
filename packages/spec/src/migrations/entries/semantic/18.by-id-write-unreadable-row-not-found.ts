@@ -6,8 +6,7 @@ import type { SemanticMigration } from '../../types.js';
 // conversion and nothing for `objectstack migrate meta` to rewrite. The entry
 // carries the changed answer to the one reader the ledger serves here — the
 // upgrade guide — because a client that branched on the old 403 has no schema
-// error to find it by. No backticks in `surface`: the upgrade guide renders it
-// inside a code span and a table cell.
+// error to find it by.
 export const entry: SemanticMigration = {
   id: 'by-id-write-unreadable-row-not-found',
   surface:

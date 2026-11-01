@@ -97,6 +97,14 @@ export interface ParamDialogState {
   title?: string;
   description?: string;
   /**
+   * Label of the submit button — the action's declared `submitText`, already
+   * resolved by the caller (the translation bundle's
+   * `_actions.<action>.submitText` first, then the authored text collapsed to
+   * the active language). Absent, the button says the generic "Confirm"; while
+   * a file is uploading it says "Uploading…" either way.
+   */
+  submitText?: string;
+  /**
    * Fills the `${...}` holes of each param's `helpText` — the runner's
    * `ParamCollectionHandler` `interpolate` argument, passed through. It runs on
    * the text the user reads (after an inline per-locale map is picked), in the
@@ -913,7 +921,7 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
             aria-busy={submitting || undefined}
           >
             {submitting && <Loader2 className="mr-2 size-4 animate-spin" aria-hidden="true" />}
-            {anyUploading ? t('actionDialog.uploading') : t('actionDialog.confirm')}
+            {anyUploading ? t('actionDialog.uploading') : (state.submitText || t('actionDialog.confirm'))}
           </Button>
         </DialogFooter>
       </DialogContent>

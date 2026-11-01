@@ -212,10 +212,11 @@ export interface ActionLike {
   label?: string;
   /**
    * `ActionSchema.description` — the explanatory line under the title in the
-   * action's param dialog. Narrowed to `string` for the same reason `label` is:
-   * a resolver answers with ONE locale's string.
+   * action's param dialog. A `template` slot (#27948) like `confirmText`: the
+   * bare string, or the parsed envelope a served action carries; a
+   * translation replaces either with the bundle's sentence.
    */
-  description?: string;
+  description?: string | { dialect: 'template'; source: string };
   /**
    * `template` slots (#24814): the bare string, or the parsed
    * `{ dialect: 'template', source }` envelope a served action carries. A
@@ -226,19 +227,19 @@ export interface ActionLike {
   successMessage?: string | { dialect: 'template'; source: string };
   /**
    * `ActionSchema.disabledReason` (#26619) — the display-only reason a greyed
-   * action shows. Narrowed to `string` for the same reason `description` is.
+   * action shows. Narrowed to `string` for the same reason `label` is.
    */
   disabledReason?: string;
   /**
    * `ActionSchema.submitText` (#27944) — the param dialog's submit button
-   * label. Narrowed to `string` for the same reason `description` is.
+   * label. Narrowed to `string` for the same reason `label` is.
    */
   submitText?: string;
   /**
-   * `ActionSchema.outcomeMessages` — success copy per handler `outcome`,
-   * narrowed to `string` values for the same reason `successMessage` is.
+   * `ActionSchema.outcomeMessages` — success copy per handler `outcome`, each
+   * entry a `template` slot like `successMessage` (#27948).
    */
-  outcomeMessages?: Record<string, string>;
+  outcomeMessages?: Record<string, string | { dialect: 'template'; source: string }>;
   /** `ActionSchema.params` — the param dialog's own copy. */
   params?: ActionParamLike[];
   /** When omitted, the action is treated as global. */
@@ -265,8 +266,11 @@ export interface ActionParamLike {
   /** `ActionParamSchema.field` — the translation key when `name` is omitted. */
   field?: string;
   label?: string;
-  /** An ACTION param spells its hint `helpText`; a BULK param spells it `help`. */
-  helpText?: string;
+  /**
+   * An ACTION param spells its hint `helpText`; a BULK param spells it `help`.
+   * A `template` slot (#27948): the bare string or the parsed envelope.
+   */
+  helpText?: string | { dialect: 'template'; source: string };
   placeholder?: string;
   /**
    * `ActionParamSchema.options[]` is an ARRAY of entries while the translation
@@ -806,12 +810,12 @@ function resolveActionOutcomeMessages(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
   opts?: ResolveOptions,
-): Record<string, string> | undefined {
+): ActionLike['outcomeMessages'] {
   const declared = action.outcomeMessages;
   if (!declared || typeof declared !== 'object') return undefined;
   if (!bundle) return declared;
   const chain = localeChain(opts);
-  let out: Record<string, string> | undefined;
+  let out: NonNullable<ActionLike['outcomeMessages']> | undefined;
   for (const outcome of Object.keys(declared)) {
     for (const code of chain) {
       const candidate = actionTranslationNode(pickData(bundle, code), action)?.outcomeMessages?.[outcome];

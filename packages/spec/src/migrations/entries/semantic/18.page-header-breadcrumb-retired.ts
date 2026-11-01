@@ -9,8 +9,6 @@ import type { SemanticMigration } from '../../types.js';
 // the one visible trace either value had, the empty slot's spacing.
 export const entry: SemanticMigration = {
   id: 'page-header-breadcrumb-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'page.component.page:header.breadcrumb — the page header\'s "Show breadcrumb" switch',
   replacement:
     'Nothing: delete the key, whether it was `true` or `false`. The navigation trail is drawn once, '

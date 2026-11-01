@@ -98,7 +98,7 @@ A List View controls how a collection of records is presented. It supports multi
 | `label` | `string` | optional | Display label shown in the view switcher |
 | `type` | `enum` | optional | View type (see table above; default `'grid'`) |
 | `data` | `ViewData` | optional | Data source configuration (defaults to the `object` provider) |
-| `filter` | `array` | optional | Base filter criteria |
+| `filter` | `array` | optional | Base filter: rules that all must match, any of which may be an any-of group `{ or: [...] }` — see [Base filter](#base-filter-filter) below |
 | `sort` | `array` | optional | Sort configuration |
 | `searchableFields` | `string[]` | optional | Fields the toolbar search scans — **narrows** the set the object allows, never widens it (ADR-0061). Every entry must be in that allowed set, or every toolbar search on the list returns `400 INVALID_FIELD` (#4254) — see [Toolbar search](#toolbar-search-searchablefields) below |
 | `grouping` | `object` | optional | Row grouping configuration |
@@ -114,6 +114,30 @@ A List View controls how a collection of records is presented. It supports multi
 The view's machine name is its **key** in the container (`listViews.urgent` on
 object `task` becomes `task.urgent`); the default `list` claims `task.default`.
 List and form views share that one namespace — don't reuse a key.
+
+### Base filter (`filter`)
+
+A list view's `filter` is a list of conditions that **all** must match. Each
+element is a rule `{ field, operator, value }`, or an **any-of group**
+`{ or: [rule, ...] }` that matches a record when **any** of its rules does. A
+group holds flat rules only (no group inside a group), and the list still ANDs
+the group with the elements beside it:
+
+```typescript
+// open, or completed in the last 7 days — and owned by me
+filter: [
+  { or: [
+    { field: 'status', operator: 'equals', value: 'open' },
+    { field: 'completed_at', operator: 'after', value: '{7_days_ago}' },
+  ] },
+  { field: 'owner', operator: 'equals', value: '{current_user_id}' },
+],
+```
+
+The Console's filter builder saves its **OR** toggle as one such group, and
+opens a filter that is exactly one group as an OR group. A filter whose group
+sits beside other conditions is applied to the list as written, but the
+builder shows it read-only, because it edits one AND or OR over flat rows.
 
 ### Toolbar search (`searchableFields`)
 
@@ -360,7 +384,12 @@ gantt: {
 ### Switching views
 
 In the Console the list's title is the view switcher: it reads the open view's `label` and a
-▾, and on a grid the number of records the view holds. It opens a dropdown with a search box
+▾, and on a grid the number of records the view holds. Ahead of it the title names the object
+with its plural label, as **Leads / My Leads ▾ · 12**, so the page says which object it lists
+with the sidebar collapsed or the list opened from a link; the object's name leads back to its
+default list. A view with no `label` is already called by the plural and reads alone. Where the
+row is short (the split pane, a phone) the object's name stays whole and the view's label is
+cut first. The switcher opens a dropdown with a search box
 and three sections: **Pinned**, **Recent** (the user's last views of this object) and
 **All**, where the views you author come first and the views users save at runtime follow.
 The split pane beside an open record keeps the same switcher.

@@ -22,7 +22,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
-import { RelatedCardChromeContext, RelatedListCompactContext } from '../relatedListCompact';
+import { RelatedCardChromeContext, RelatedListCompactContext, RelatedListEnlargedContext } from '../relatedListCompact';
 
 vi.mock('@object-ui/react', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -32,9 +32,10 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 function StubNode({ schema }: { schema: any }) {
   const chrome = React.useContext(RelatedCardChromeContext);
   const compact = React.useContext(RelatedListCompactContext);
+  const enlarged = React.useContext(RelatedListEnlargedContext);
   const p = schema?.properties ?? {};
   return (
-    <section data-node={schema?.type} data-related-card-id={chrome?.id} data-compact={compact ? 'yes' : 'no'} data-limit={p.limit}>
+    <section data-node={schema?.type} data-related-card-id={chrome?.id} data-compact={compact ? 'yes' : 'no'} data-enlarged={enlarged ? 'yes' : 'no'} data-limit={p.limit}>
       {chrome?.onEnlarge && <button onClick={chrome.onEnlarge}>{`enlarge ${p.objectName}`}</button>}
       {p.objectName ?? schema?.type}
       {chrome?.onMoveUp && <button onClick={chrome.onMoveUp}>{`up ${p.objectName}`}</button>}
@@ -60,7 +61,7 @@ const columnsOf = (related = RELATED) =>
   buildDefaultPageColumns(buildDefaultPageSchema({ name: 'lead', fields: {} }, { related, hideDiscussion: true }))!;
 
 const cardOrder = (container: HTMLElement) =>
-  Array.from(container.querySelectorAll('[data-record-column="related"] [data-related-card-id]')).map((el) =>
+  Array.from(container.querySelectorAll('[data-record-column="right"] [data-related-card-id]')).map((el) =>
     el.getAttribute('data-related-card-id'),
   );
 
@@ -69,7 +70,7 @@ function Host({ initial, onWrite, related }: { initial?: RelatedArrangement; onW
   const [arrangement, setArrangement] = React.useState<RelatedArrangement | undefined>(initial);
   return (
     <RecordPageColumns
-      tier="three-column"
+      tier="wide"
       columns={columnsOf(related)}
       relatedArrangement={arrangement}
       onRelatedArrangementChange={(next) => {
@@ -129,7 +130,7 @@ describe('RelatedCardStack — the reader arranges the related cards (objectstac
     expect(container.querySelector('[data-related-foot-line]')).toBeNull();
     fireEvent.click(screen.getByText('down task'));
     expect(cardOrder(container)).toEqual(['note.parent_id', 'task.lead_id', 'call.lead_id']);
-    const foot = container.querySelector('[data-record-column="related"] [data-related-foot-line]')!;
+    const foot = container.querySelector('[data-record-column="right"] [data-related-foot-line]')!;
     expect(foot).not.toBeNull();
     // Not the changed-default hint: the author's default did not change.
     expect(container.querySelector('[data-related-default-changed]')).toBeNull();
@@ -182,89 +183,50 @@ describe('RelatedCardStack — the reader arranges the related cards (objectstac
 describe('the enlarged related list — ⤢ and ?related= (objectstack#27055, Target 9)', () => {
   it('⤢ asks the host to enlarge that relationship', () => {
     const onEnlarge = vi.fn();
-    render(<RecordPageColumns tier="three-column" columns={columnsOf()} onEnlargeRelated={onEnlarge} />);
+    render(<RecordPageColumns tier="wide" columns={columnsOf()} onEnlargeRelated={onEnlarge} />);
     fireEvent.click(screen.getByText('enlarge note'));
     expect(onEnlarge).toHaveBeenCalledWith('note.parent_id');
   });
 
   it('draws the full list over the page body: the header stays, the columns step aside', () => {
     const { container } = render(
-      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={vi.fn()} />,
+      <RecordPageColumns tier="wide" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={vi.fn()} />,
     );
     const enlarged = container.querySelector('[data-related-enlarged="note.parent_id"]')!;
     expect(enlarged).toBeTruthy();
     expect(container.querySelector('[data-record-columns]')).toBeNull();
-    // The FULL face, not the compact card — and paged.
+    // The FULL face, not the compact card — and paged. Since objectstack#27524
+    // it is drawn as the tab's face: the toolbar over the table, no card
+    // (`RelatedList.enlargedToolbar-27524`).
     const list = enlarged.querySelector('[data-node="record:related_list"]')!;
     expect(list.getAttribute('data-compact')).toBe('no');
+    expect(list.getAttribute('data-enlarged')).toBe('yes');
     expect(list.getAttribute('data-limit')).toBe('25');
     // The header nodes are still drawn above it.
     expect(container.querySelector('[data-node="page:header"]')).not.toBeNull();
   });
 
-  it('‹ and Esc return to the columns', () => {
+  it('「概览」 and Esc return to the columns (objectstack#27524, Target 9)', () => {
     const onClose = vi.fn();
     const { container } = render(
-      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="note.parent_id" onCloseEnlargedRelated={onClose} />,
+      <RecordPageColumns
+        tier="wide"
+        columns={columnsOf()}
+        enlargedRelated="note.parent_id"
+        onEnlargeRelated={vi.fn()}
+        onCloseEnlargedRelated={onClose}
+      />,
     );
-    fireEvent.click(container.querySelector('[data-related-enlarged-back]')!);
+    fireEvent.click(container.querySelector('[data-record-tab="overview"]')!);
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
   it('an id naming no related list draws the columns', () => {
     const { container } = render(
-      <RecordPageColumns tier="three-column" columns={columnsOf()} enlargedRelated="ghost.parent_id" />,
+      <RecordPageColumns tier="wide" columns={columnsOf()} enlargedRelated="ghost.parent_id" />,
     );
     expect(container.querySelector('[data-related-enlarged]')).toBeNull();
     expect(container.querySelector('[data-record-columns]')).not.toBeNull();
-  });
-});
-
-import { ArrangedRelatedTab, RelatedArrangementScopeContext } from '../ArrangedRelatedTab';
-
-describe('the tabbed tier 关联 tab reads the same arrangement (objectstack#27055, Target 7)', () => {
-  const pageOf = () => buildDefaultPageSchema({ name: 'lead', fields: {}, enable: { files: true } }, { related: RELATED });
-  const relatedTabOf = (page: any) =>
-    page.regions[0].components.find((c: any) => c.type === 'page:tabs').properties.items.find((i: any) => i.value === 'related');
-
-  it("orders the tab's lists by the reader, leaves the hidden out, keeps the attachments last", () => {
-    let stored = editRelatedArrangement(DEFAULT, undefined, { kind: 'move', id: 'call.lead_id', to: 0 }, Date.now());
-    stored = editRelatedArrangement(DEFAULT, stored, { kind: 'hide', id: 'note.parent_id' }, Date.now());
-    let arranged: any = null;
-    const onScope = vi.fn();
-    const Probe = ({ report }: { report: (value: unknown) => void }) => {
-      report(React.useContext(RelatedArrangementScopeContext));
-      return null;
-    };
-    render(
-      <ArrangedRelatedTab page={pageOf()} arrangement={stored} onArrangementChange={vi.fn()}>
-        {(page) => {
-          arranged = page;
-          return <Probe report={onScope} />;
-        }}
-      </ArrangedRelatedTab>,
-    );
-    const scope: any = onScope.mock.calls.at(-1)?.[0];
-    const children = relatedTabOf(arranged).children;
-    expect(children.map((n: any) => n.properties?.objectName ?? n.type)).toEqual(['call', 'task', 'record:attachments']);
-    expect(scope.lastId).toBe('task.lead_id');
-    expect(scope.hiddenCount).toBe(1);
-    expect(scope.chromeOf('call.lead_id').onMoveUp).toBeUndefined();
-    expect(scope.chromeOf('note.parent_id')).toBeNull();
-  });
-
-  it('leaves a page with no 关联 tab as it was', () => {
-    const page = buildDefaultPageSchema({ name: 'lead', fields: {} });
-    let arranged: any = null;
-    render(
-      <ArrangedRelatedTab page={page}>
-        {(next) => {
-          arranged = next;
-          return null;
-        }}
-      </ArrangedRelatedTab>,
-    );
-    expect(arranged).toBe(page);
   });
 });

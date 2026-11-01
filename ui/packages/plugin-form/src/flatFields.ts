@@ -36,6 +36,7 @@
 import type { FormField } from '@object-ui/types';
 import { fromObjectSchema, warnUnresolvedTopLevelField, type SectionFieldsContext } from './sectionFields';
 import { mergeCustomFields } from './customFieldsMerge';
+import type { FormFieldWithGroup } from './fieldGroups';
 
 export interface FlatFieldsContext extends SectionFieldsContext {
   /**
@@ -92,6 +93,6 @@ export function buildFlatFields(ctx: FlatFieldsContext): FormField[] {
       // it the moment explicit sections exist, so stamping `group` onto
       // section-built fields would add a key with no reader.
       group: (field as any).group,
-    };
+    } satisfies FormFieldWithGroup;
   });
 }

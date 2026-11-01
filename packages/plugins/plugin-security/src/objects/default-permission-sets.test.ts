@@ -390,7 +390,10 @@ describe('sys_comment_reaction delete is ownership-shaped (#22566)', () => {
  * identity object's `Admin` field group, which the `everyone` baseline withholds.
  * And `manage_mailboxes` (ruling 6116489638, Q4 → A on the inbound-mail record —
  * platform and organization administrators hold the mailbox administrator
- * capability by default).
+ * capability by default). And `manage_connector_connections` (ADR-0143 D5 —
+ * platform administrators hold the connector connection capability by default;
+ * so do both organization-administrator sets since ruling B, record
+ * 6545223261, pinned below).
  *
  * The set's `description` is admin-facing copy, not capability, so it is left
  * out of the comparison (its shape is pinned by
@@ -424,6 +427,8 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
         'view_all_audit_log',
         // added on purpose — see the docblock above.
         'manage_mailboxes',
+        // added on purpose (ADR-0143 D5) — see the docblock above.
+        'manage_connector_connections',
       ],
       // [#21237] added on purpose — see the docblock above. The group is read off
       // the identity object's declaration, never listed here.
@@ -442,6 +447,30 @@ describe('admin_full_access imports the kernel capability declaration unchanged 
       .filter((s) => (s.systemPermissions ?? []).includes('view_all_audit_log'))
       .map((s) => s.name);
     expect(holders).toEqual(['admin_full_access']);
+  });
+
+  it('[ADR-0143 D5] the connector connection capability ships with the platform administrator and both organization-administrator sets, and no other', () => {
+    // Ruling B (record 6545223261): the organization administrator connects
+    // their organization's OAuth2 vendors from day one. Every other shipped
+    // set, the member and read-only baselines included, holds it only by an
+    // explicit grant.
+    const holders = (defaultPermissionSets as any[])
+      .filter((s) => (s.systemPermissions ?? []).includes('manage_connector_connections'))
+      .map((s) => s.name);
+    expect(holders).toEqual(['admin_full_access', 'organization_admin', 'organization_admin_no_bypass']);
+    for (const withheld of ['member_default', 'viewer_readonly']) {
+      expect(setByName(withheld)).toBeDefined();
+      expect(setByName(withheld).systemPermissions ?? []).not.toContain('manage_connector_connections');
+    }
+  });
+
+  it('[ADR-0143 D5] the wall-less organization administrator inherits the capability through the derivation, not a second literal', () => {
+    // `deriveWallLessOrgAdmin` copies the parent's system permissions
+    // verbatim; the two lists are one list, so the grant reaches both
+    // variants from the parent's declaration alone.
+    expect(setByName('organization_admin_no_bypass').systemPermissions).toEqual(
+      setByName('organization_admin').systemPermissions,
+    );
   });
 
   it('the imported spec constant is the declaration content — no local fork', () => {

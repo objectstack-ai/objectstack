@@ -8,8 +8,6 @@ import type { SemanticMigration } from '../../types.js';
 // cannot decide is whether something the author built assumed the key hid rows.
 export const entry: SemanticMigration = {
   id: 'object-external-sharing-model-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'objects[].externalSharingModel — the external org-wide default for portal and partner principals',
   replacement:
     'Nothing: delete the key. sharingModel is the one org-wide default. A principal reaches a row it '

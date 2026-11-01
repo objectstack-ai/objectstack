@@ -30,10 +30,10 @@
  * `lookup`) FK on the child object.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BatchTransactionOperation, DataSource, GridFieldMetadata, I18nLabel } from '@object-ui/types';
 import { resolveAffordance, runBatchTransaction } from '@object-ui/core';
-import { LineItemsField, useBooleanValueLabel, type BooleanValueLabel, type GridColumn } from '@object-ui/fields';
+import { LineItemsField, lookupAutofillByField, useBooleanValueLabel, type BooleanValueLabel, type GridColumn, type LookupAutofillByField } from '@object-ui/fields';
 import { Button, Card, CardContent, CardHeader, CardTitle, cn, toast } from '@object-ui/components';
 import {
   formatDisplayNumber,
@@ -425,6 +425,14 @@ interface DetailEntry {
    * authored config.
    */
   columnsWith?: (booleanLabel: BooleanValueLabel) => GridColumn[];
+  /**
+   * The child fields' declared `lookupAutofill` pairs, by lookup field name,
+   * read from the schema the resolve effect loaded and handed to the line grid
+   * (`GridField`'s `lookupAutofill`): a grid column carries no field
+   * definition. Absent when no schema was loaded for this entry (a fully
+   * configured entry skips the fetch). Internal state, never authored.
+   */
+  lookupAutofill?: LookupAutofillByField;
 }
 
 /** The field shape `resolveFieldCurrency` reads — the one currency resolver. */
@@ -916,7 +924,20 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
       try { key = JSON.stringify(next); } catch { key = String(Math.random()); }
       if (key === editedKeyRef.current) return; // value-identical → no re-render
       editedKeyRef.current = key;
-      setEditedRecord(next);
+      // A TRANSITION, never a plain update (objectstack#28471). This listener
+      // sits on the host, INSIDE the React root, so a keystroke reaches it
+      // before React's own root listener has handed the value to the
+      // header's react-hook-form. A plain update here is sync priority (the
+      // event is `input`), and the browser's microtask checkpoint between
+      // two listeners flushes it right there, together with whatever
+      // default-priority work the page has pending (a fetch that just
+      // landed): that render repaints the header input with its old
+      // controlled value, React's value tracker then sees no change, and the
+      // keystroke is dropped without a word — measured on the showcase
+      // master-detail page, where a Create then failed "Project Name is
+      // required" with the name visibly typed. A transition is not flushed
+      // in that checkpoint, so React reads the keystroke first.
+      startTransition(() => setEditedRecord(next));
     };
     host.addEventListener('input', onEvt);
     host.addEventListener('change', onEvt);
@@ -1076,6 +1097,9 @@ const MasterDetailLines: React.FC<MasterDetailLinesProps> = ({
               // CEL rule evaluates against it as `parent` (e.g. lock when
               // parent.status == 'paid').
               contextRecord={parentRecord}
+              // The child fields' declared `lookupAutofill` pairs: a lookup
+              // cell's pick fills their targets in the row.
+              lookupAutofill={entry.lookupAutofill}
               // Per-row "expand to full form" is offered when it adds something:
               // always in form mode (it IS the editor), and in grid mode only
               // when the full form has fields the grid omits. A thin grid whose
@@ -1344,6 +1368,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
                 sortField: derived.sortField,
                 amountFieldDef: childFieldDef(childSchema, amountField),
                 columnsWith,
+                lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
               };
             }
             return {
@@ -1360,6 +1385,7 @@ export const MasterDetailForm: React.FC<MasterDetailFormProps> = ({
               sortField: derived.sortField,
               amountFieldDef: childFieldDef(childSchema, amountField),
               columnsWith,
+              lookupAutofill: lookupAutofillByField(childSchema?.fields as Record<string, unknown> | undefined),
             };
           } catch (err) {
             // THE DERIVE FAILED, on a schema that loaded fine — almost always

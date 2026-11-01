@@ -51,6 +51,16 @@
  * the counterpart of the record-save toasts; a record with nothing nameable
  * keeps the object-label toast.
  *
+ * ## The confirmation names what the delete cascades into (objectstack#28472)
+ *
+ * A delete can also delete child records (a `master_detail` child, a relation
+ * declared `deleteBehavior: 'cascade'`). The platform serves which objects, by
+ * name, beside the object read (`cascadeDeleteObjects`, carried to the client
+ * by `attachCascadeDeleteObjects`); the host resolves those names to labels in
+ * the user's language and hands them in as `cascadeLabels`, and the body gains
+ * one sentence naming them. No labels (an empty or absent served list) adds
+ * nothing, so the body is today's. ⛔ Nothing here derives the cascade itself.
+ *
  * ## The result shape is the action runner's, on purpose
  *
  * `run` returns what a registered `delete` handler returns, because the console
@@ -154,15 +164,24 @@ export const recordDelete = Object.freeze({
     deps: Pick<RecordDeleteDeps, 'objectName' | 't' | 'label'> & {
       /** The object definition, so the name follows its declared `nameField`. */
       objectDef?: unknown;
+      /**
+       * The labels of the objects the delete cascades into, resolved by the
+       * host from the served `cascadeDeleteObjects` (objectstack#28472). Empty
+       * or absent adds nothing to the body.
+       */
+      cascadeLabels?: readonly string[];
     },
     target: RecordDeleteConfirmTarget,
   ): RecordDeleteConfirmCopy {
     const { t, label } = deps;
     const confirmText = t('objectActions.deleteConfirmButton');
+    const cascade = deps.cascadeLabels && deps.cascadeLabels.length > 0
+      ? ` ${t('objectActions.deleteCascade', { objects: deps.cascadeLabels.join(', ') })}`
+      : '';
     if ('count' in target) {
       return {
         title: t('objectActions.bulkDeleteConfirmTitle', { count: target.count, label }),
-        message: t('console.objectView.bulkDeleteConfirm', { count: target.count }),
+        message: `${t('console.objectView.bulkDeleteConfirm', { count: target.count })}${cascade}`,
         confirmText,
       };
     }
@@ -171,7 +190,7 @@ export const recordDelete = Object.freeze({
         label,
         name: getRecordDisplayName(deps.objectDef, target.record),
       }),
-      message: recordDelete.confirmText(deps),
+      message: `${recordDelete.confirmText(deps)}${cascade}`,
       confirmText,
     };
   },

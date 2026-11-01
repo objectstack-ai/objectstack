@@ -49,6 +49,7 @@ import {
   resolveServerActionRecordId,
   type ActionContext,
   type ActionDef,
+  type ActionResult,
   type ServerActionFetch,
   type ServerActionHandler,
   type ServerActionRecordIdResolver,
@@ -56,15 +57,21 @@ import {
 import { takesNewTabUrlFastPath } from './newTabUrlFastPath.js';
 
 /**
- * i18next-style translate function: `t(key, englishDefault)` returns the
- * translation for `key` in the active locale, or `englishDefault` when the
- * key is missing. Injected from a hook context (`useObjectTranslation().t`)
- * because this wrapper is a plain function and cannot call hooks itself.
+ * i18next-style translate function: `t(key, englishDefault, values)` returns
+ * the translation for `key` in the active locale, or `englishDefault` when the
+ * key is missing, with its `{{name}}` holes filled from `values`. Injected from
+ * a hook context (`useObjectTranslation().t`) because this wrapper is a plain
+ * function and cannot call hooks itself.
  */
-export type ConsoleServerActionTranslate = (key: string, englishDefault: string) => string;
+export type ConsoleServerActionTranslate = (
+  key: string,
+  englishDefault: string,
+  values?: Record<string, string>,
+) => string;
 
-/** No-`t` fallback (tests / standalone): every string is its English default. */
-const defaultTranslate: ConsoleServerActionTranslate = (_key, englishDefault) => englishDefault;
+/** No-`t` fallback (tests / standalone): every string is its English default, holes filled. */
+const defaultTranslate: ConsoleServerActionTranslate = (_key, englishDefault, values) =>
+  values ? englishDefault.replace(/\{\{(\w+)\}\}/g, (hole, name: string) => values[name] ?? hole) : englishDefault;
 
 export interface ConsoleServerActionOptions {
   /** Authenticated fetch wrapper (Bearer + tenant + cookies). */
@@ -100,6 +107,37 @@ export interface ConsoleServerActionOptions {
    * arrival, never a new tab, so the handler's stated intent is never inverted.
    */
   navigate?: (url: string) => void;
+}
+
+/**
+ * A refusal that names required fields says what to do next after the
+ * server's own sentence: fill those fields in, then run the action again.
+ * The action route has no form to mark them on, so the hint names them.
+ * Only `required` entries located on a field count; any other refusal, and a
+ * record-level rule, keep the server's text alone.
+ */
+function withRequiredFieldsHint(
+  result: ActionResult,
+  action: ActionDef,
+  t: ConsoleServerActionTranslate,
+): ActionResult {
+  const names = [...new Set(
+    (result.fieldErrors ?? [])
+      .filter((entry) => entry.code === 'required' && entry.field !== '_record')
+      .map((entry) => entry.label || entry.field),
+  )];
+  if (names.length === 0 || !result.error) return result;
+  // The pack's list punctuation, the key the form's field lists join with.
+  const fields = names.join(t('validation.formInvalidJoiner', ', '));
+  const hint = action.label
+    ? t('console.serverAction.fillRequiredThenRetry', 'Fill in {{fields}}, then run “{{action}}” again.', { fields, action: action.label })
+    : t('console.serverAction.fillRequiredFirst', 'Fill in {{fields}} first.', { fields });
+  // The server's sentence ends before the hint starts: its own stop, else one
+  // in its script, and a CJK stop takes no space after it.
+  const error = result.error.trimEnd();
+  const stop = /[.!?。！？]$/u.test(error) ? '' : /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]$/u.test(error) ? '。' : '.';
+  const sentence = `${error}${stop}`;
+  return { ...result, error: `${sentence}${/[。！？]$/u.test(sentence) ? '' : ' '}${hint}` };
 }
 
 /** Minimal HTML escape for locale strings interpolated into the spinner document. */
@@ -221,7 +259,7 @@ export function createConsoleServerActionHandler(opts: ConsoleServerActionOption
         closeTab(preOpenedTab);
         // Don't toast here — the ActionRunner's post-execution hook surfaces
         // `error` as a toast; toasting here too double-fires it.
-        return result;
+        return withRequiredFieldsHint(result, action, t);
       }
       // ── redirectUrl convention ────────────────────────────────────────
       // Read off the HANDLER's return value, not the action envelope wrapping

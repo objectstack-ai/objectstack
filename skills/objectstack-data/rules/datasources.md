@@ -1,13 +1,11 @@
 # Datasources & Federation
 
 A **datasource** (`defineDatasource`, a `*.datasource.ts` file) is a
-connection to a data store. Objects route to one via their `datasource` field
-(default: `'default'`). `default` is host-reserved: the host connects it from
+connection to a data store. Objects route to one via their `datasource` field.
+`default` is host-reserved: the host connects it from
 `OS_DATABASE_URL`, and a stack that declares a datasource named `default` is
 refused. Declare a datasource under its own name only to read/write a
 **separate** or **external** store.
-
-Full field reference: `node_modules/@objectstack/spec/src/data/datasource.zod.ts`.
 
 ## `schemaMode` — who owns the schema
 
@@ -29,22 +27,18 @@ ObjectSchema.create({
     remoteName: 'customers',        // remote TABLE (object name may differ)
     // remoteSchema: 'public',      // optional schema/namespace (pg/mysql)
     // columnMap: { cust_region: 'region' }, // remoteColumn → localField
-    // writable: true,              // per-object write opt-in (see below)
   },
   fields: { id: { type: 'text' }, name: { type: 'text' }, region: { type: 'text' } },
 });
 ```
 
-### ✅ / ❌ Column mapping (ADR-0062 D7)
-
-- ✅ Map remote columns with **`external.columnMap`**.
 - ❌ **`field.columnName` does not exist — on ANY object.** Authoring it is a
   parse error everywhere, not only on a federated object.
 
 ## Auto-connect (no `onEnable`)
 
-A declared datasource is connected, and its federated objects registered,
-**automatically at boot** when it is **meaningfully addressed**:
+A declared datasource is connected **automatically at boot** when it is
+**meaningfully addressed**:
 
 1. it is **external** (`schemaMode !== 'managed'`), **or**
 2. an object **explicitly** binds via `object.datasource === <name>`, **or**
@@ -60,9 +54,15 @@ object throws.
 > `ctx.drivers.register(driver)` in `onEnable` is only an escape hatch for a
 > runtime-built driver; idempotent with auto-connect.
 
-## Credentials — one channel, fail-closed
+## Credentials — fail-closed
 
-Never inline a password. `external` names **one** credential channel:
+Never inline a password. A code-declared datasource reads one at connect from
+`OS_DATASOURCE_<NAME>_PASSWORD` (`NAME` = the name upper-cased) while the host
+switch `OS_DATASOURCE_ENV_CREDENTIALS` is `on` (`os serve`/`start`/`dev` default
+it on; a library composition is off; `on`/`off` only). Operator caution: an
+installed package may declare a datasource of any free name and so read that
+variable. `external` may instead name **one** channel, which wins and never
+falls back to the variable:
 
 - **`credentialsRef`** — a secret-store handle, resolved at connect, before the
   driver is built.
@@ -71,7 +71,7 @@ Never inline a password. `external` names **one** credential channel:
   with a `provider` and an `auth` other than `none`:
   `schemaMode: 'external', external: { connector: 'erp_api' }`. Refused beside
   `credentialsRef`, on a built-in driver, on a `managed` datasource, and naming
-  an undeclared instance (at `defineStack`, else at connect).
+  an undeclared instance.
 
 No secret store, an unresolvable handle, a disabled instance or no automation
 service leaves the datasource **unconnected with a clear error**. A connector
@@ -81,4 +81,3 @@ credential not set yet answers `503` per request.
 
 Federation is read-only by default. To write, **both** gates must be on:
 `datasource.external.allowWrites: true` **and** the object's `external.writable: true`.
-Otherwise every write to the object is rejected.

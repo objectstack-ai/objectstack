@@ -10,7 +10,7 @@ import { EVALUATED_EXPRESSION_SOURCE_REQUIRED, ExpressionInputSchema, ObjectStac
 import { FieldSchema, ObjectFieldGroupSchema, ObjectSchema, SelectOptionSchema } from '@objectstack/spec/data';
 import { EvalUserSchema } from '@objectstack/spec/identity';
 import { SharingRuleSchema } from '@objectstack/spec/security';
-import { BulkActionDefSchema } from '@objectstack/spec/ui';
+import { AppLandingEntrySchema, AppSchema, BulkActionDefSchema } from '@objectstack/spec/ui';
 // [#15137] The published refusal sentence a `value`-slot finding must lead
 // with — asserted from the spec's own export, never re-spelled in a test.
 import {
@@ -941,6 +941,24 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       const ok = validateStackExpressions({
         objects: [{ name: 'kb_article', fields: { my_vote: { type: 'text' } } }],
         actions: [{ name: 'mark_helpful', objectName: 'kb_article', type: 'script', target: 'fn', pressed: 'record.my_vote == "helpful"' }],
+      });
+      expect(ok).toHaveLength(0);
+    });
+
+    it('judges an app landing predicate with the data-independent verdicts and no record scope (#28022)', () => {
+      const nav = [{ id: 'nav_leads', type: 'object', label: 'Leads', objectName: 'lead' }];
+      // `===` is not CEL: the predicate can never evaluate, so the landing could never match.
+      const bad = validateStackExpressions({
+        apps: [{ name: 'crm', label: 'CRM', navigation: nav, landing: [{ item: 'nav_leads', visible: "current_user.positions === 'x'" }] }],
+      });
+      const landingIssues = bad.filter(i => i.where === "app 'crm' · landing[0] ('nav_leads') visible");
+      expect(landingIssues).toHaveLength(1);
+      expect(landingIssues[0].severity).toBe('error');
+
+      // A healthy reader predicate is clean, and the slot binds no record, so a
+      // bare identifier is not told to become `record.<x>`.
+      const ok = validateStackExpressions({
+        apps: [{ name: 'crm', label: 'CRM', navigation: nav, landing: [{ item: 'nav_leads', visible: "'sales_rep' in current_user.positions && features.crm != false" }] }],
       });
       expect(ok).toHaveLength(0);
     });
@@ -3357,9 +3375,22 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     receiver: 'stack',
     // `views` joined with #24798: the bulk `confirmText` pass walks the views'
     // list containers.
-    expected: ['actions', 'flows', 'hooks', 'objects', 'sharingRules', 'views'],
+    // `apps` joined with #28022: the landing predicates.
+    expected: ['actions', 'apps', 'flows', 'hooks', 'objects', 'sharingRules', 'views'],
     declaredBy: 'ObjectStackSchema',
     keys: () => Object.keys(ObjectStackSchema.shape),
+  },
+  {
+    receiver: 'appDef',
+    expected: ['landing', 'name'],
+    declaredBy: 'AppSchema',
+    keys: () => Object.keys(AppSchema.shape),
+  },
+  {
+    receiver: 'landingEntry',
+    expected: ['item', 'visible'],
+    declaredBy: 'AppLandingEntrySchema',
+    keys: () => Object.keys(AppLandingEntrySchema.shape),
   },
   {
     receiver: 'obj',

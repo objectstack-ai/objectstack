@@ -35,6 +35,12 @@ formViews: {
 
 The `submitBehavior` above sets the **copy**, not the behavior: `thank-you` is already the default on the public path, because an anonymous submitter may not read the record back. The internal path defaults the other way — a `type: 'form'` action lands the operator on the record it just created — so do not carry a public form's confirmation panel over to an internal one by habit. See [`submitBehavior` is mode-aware](/docs/ui/forms#the-default-is-mode-aware).
 
+The panel can also show the visitor a reference to the record they just created: name the field in `title` or `message` as `{{record.field_name}}`, and the Console fills it from the submit answer. Only an engine-generated field (an `autonumber` field, such as a case number) may be named; `os validate` and the publish gate refuse any other.
+
+```ts
+submitBehavior: { kind: 'thank-you', title: 'Thanks!', message: 'Your case number is {{record.case_number}}.' },
+```
+
 That `sharing` block wires the anonymous endpoints automatically:
 
 ```
@@ -48,7 +54,7 @@ Only the fields listed in `sections[].fields` are accepted on submit; everything
 
 The whitelist cannot hold a file field (`file`, `image`, `avatar`, `video`, `audio`): a visitor has no upload route, so a public form declaring one is refused at `os validate` / `os build` and at publish (`public-form-file-field`). Collect files from registered, signed-in users on an internal form instead.
 
-The submit's execution context also names a `guest_portal` permission set. That name authorizes nothing: the grant is decided before any permission set resolves, so the form works the same whether or not a set of that name exists, and such a set's object permissions (`allowCreate`, `allowRead`, …) are not read on this path. Where a deployment registers one, only its field permissions, and the capabilities it holds against a field's `requiredPermissions`, are read, to mask the created record the server hands back to the route. The visitor never sees that record: the submit answers with the new record's `id` only.
+The submit's execution context also names a `guest_portal` permission set. That name authorizes nothing: the grant is decided before any permission set resolves, so the form works the same whether or not a set of that name exists, and such a set's object permissions (`allowCreate`, `allowRead`, …) are not read on this path. Where a deployment registers one, only its field permissions, and the capabilities it holds against a field's `requiredPermissions`, are read, to mask the created record the server hands back to the route. The visitor never sees that record: the submit answers with the new record's `id`, plus only the engine-generated fields (an `autonumber` case number) the form's thank-you panel names.
 
 System-managed anchors (`owner_id`, `organization_id`, audit columns, `id`) are **never** accepted from a public submission — not even when a section declares them, and not through the zero-sections all-fields fallback. The route filter and the data layer enforce the same set (`PUBLIC_FORM_SERVER_MANAGED_FIELDS` from `@objectstack/spec/security`), so an anonymous visitor cannot forge record ownership or tenant placement regardless of how the form is declared (#3022).
 

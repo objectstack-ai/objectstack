@@ -304,6 +304,8 @@ import {
 import { registerDataActionEndpoints, type DataActionRouteHost } from './data-action-routes.js';
 // [#27627] The record page payload route — see its module header.
 import { registerRecordPageEndpoints, type RecordPageRouteHost } from './record-page-routes.js';
+// [#27627] The app metadata bundle route — see its module header.
+import { registerMetaAppBundleRoute, type MetaAppBundleRouteHost } from './meta-app-bundle-routes.js';
 // [#23050 slice 2] The batch routes' body moved to its own module — see its header.
 import { registerBatchEndpoints, type BatchRouteHost } from './batch-routes.js';
 // [#23050 slice 3] The approval routes' body moved to its own module — see its header.
@@ -4187,12 +4189,17 @@ export class RestServer {
      * exemption, as {@link metaItemReadGate} builds them), {@link extractLocale},
      * and the body through {@link translateMetaEnvelope}, handed the RAW
      * segment exactly as the plain read always called it.
+     *
+     * [#27627] `type` is that segment, `req.params.type` unless the door
+     * names it: the app metadata bundle answers several types on one request
+     * whose path has no `:type`, and hands each member's own.
      */
     private metaItemAnswerSources(
         environmentId: string | undefined,
         req: any,
         p: RestProtocol,
         policy: MetaReadGatePolicy,
+        type: string = req.params.type,
     ): metaReadGate.MetaItemAnswerSources {
         return {
             ...this.metaItemReadGateSources(environmentId, req, p, policy.app === 'author-exempt'),
@@ -4201,8 +4208,8 @@ export class RestServer {
             // reason the cached arm states (`GET /meta/:type/:name`).
             translateEnvelope: async (envelope, document, runtimeDocument) =>
                 this.translateMetaEnvelope(
-                    req, req.params.type, environmentId, envelope as Record<string, any>,
-                    RestServer.metaTypeSingular(req.params.type) === 'view'
+                    req, type, environmentId, envelope as Record<string, any>,
+                    RestServer.metaTypeSingular(type) === 'view'
                         ? stampAnonymousFormIntakeWarnings(
                             document, await this.anonymousFormIntakeWarnings(environmentId, req, p, document),
                         )
@@ -5432,6 +5439,20 @@ export class RestServer {
         };
         registerMetaItemReadRoutes.call(itemReadHost, scope);
 
+        // [#27627] The app metadata bundle (`GET {metaPath}/app/:appId/bundle`), in
+        // `meta-app-bundle-routes.ts`: every member is the item read's own answer,
+        // so it registers beside the item reads, through the per-item registrar
+        // (their switch, inside this umbrella). A deeper literal under `:name`
+        // than any per-item sub-resource, so it shadows none of them.
+        const appBundleHost: MetaAppBundleRouteHost = {
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveObjectMasker: (...a) => this.resolveObjectMasker(...a),
+            metaItemAnswerSources: (...a) => this.metaItemAnswerSources(...a),
+            metaListSource: (...a) => this.metaListSource(...a),
+            sendMetaReadRefusal: (...a) => RestServer.sendMetaReadRefusal(...a),
+        };
+        registerMetaAppBundleRoute.call(appBundleHost, scope);
+
         // [#23050 slice 13c] The per-item writes (`PUT` and `DELETE {metaPath}/:type/:name`,
         // the item save and the reset) moved to `meta-item-write-routes.ts`, and are
         // registered HERE so they keep their place in the order: after the per-item reads,
@@ -5973,7 +5994,10 @@ export class RestServer {
      *
      *   GET  {basePath}/forms/:slug          → resolved form spec
      *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required),
-     *                                          answering `{ id }` only (#22437)
+     *                                          answering `{ id }` (#22437), plus
+     *                                          `fields` when the form's
+     *                                          thank-you panel names
+     *                                          engine-generated fields (#28005)
      *
      * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
      * deployment (e.g. ObjectOS multi-tenant). The submit is authorized by the

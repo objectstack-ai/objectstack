@@ -15,6 +15,7 @@
 // that stopped being consulted shows up as English in the zh-CN case.
 
 import { describe, it, expect } from 'vitest';
+import { templateSlotSource } from '@objectstack/spec/automation';
 import { translateMetadataDocument } from '@objectstack/spec/system';
 import { ApprovalsTranslations } from './index.js';
 import { enObjects } from './en.objects.generated.js';
@@ -31,7 +32,10 @@ interface CopyAction {
 const action = (doc: unknown, name: string): CopyAction => {
   const found = ((doc as { actions?: CopyAction[] }).actions ?? []).find((a) => a.name === name);
   expect(found, `${name} is declared`).toBeDefined();
-  return found as CopyAction;
+  // `description` is a `template` slot (#27948): a parsed object carries the
+  // envelope, a translated one the bundle's string. Both read as the sentence.
+  const copy = found as CopyAction;
+  return { ...copy, description: templateSlotSource(copy.description) ?? copy.description };
 };
 
 const bundleDescription = (bundle: unknown, name: string): unknown =>

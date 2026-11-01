@@ -18,9 +18,9 @@
  * #27559 — the same holds for a rule the second package contributes: when the
  * tenant's overlay carries that rule reworded (the Studio GET → edit → PUT of
  * the folded object), the packaged message to compare with is the EXTENSION
- * package's, so the tenant's sentence is served as written. The fold still
- * appends the extension's own copy beside it (validations stay additive,
- * ADR-0029 D9.2a), and that copy, unchanged, is still translated.
+ * package's, so the tenant's sentence is served as written. Since the ADR-0029
+ * D9.2a 2026-10-30 note the fold merges rules by name, so the tenant's copy and
+ * the extension's rule are ONE rule: it runs once, with the tenant's sentence.
  *
  * Both readers are driven off ONE real registry: the refusal of a real write
  * (the engine's validator), and the served object as `/meta` translates it —
@@ -259,10 +259,11 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
         .map((r: any) => r.message);
     }
 
-    it('serves and refuses with the rewrite as written, and still translates the extension copy beside it', async () => {
-      // The fold is additive for validations: the overlay's reworded copy, then
-      // the extension's own rule. Only the reworded one diverges from the
-      // extension package's packaged message.
+    it('serves and refuses the one rule with the rewrite as written, on every header', async () => {
+      // [ADR-0029 D9.2a, 2026-10-30 note] The fold merges validations by name:
+      // the overlay's reworded copy and the extension's rule are one rule, run
+      // once, with the tenant's sentence — never translated, since it diverges
+      // from the extension package's packaged message.
       const out: Record<string, unknown> = {};
       for (const header of ['zh-CN', 'zh', 'en']) {
         out[header] = {
@@ -271,12 +272,9 @@ describe('ADR-0029 D9.2a a tenant-rewritten rule message, on the refusal and on 
         };
       }
       expect(out).toEqual({
-        'zh-CN': { served: [EXT_REWRITE, ZH.ext_blocked_needs_reason], refusal: `${EXT_REWRITE} | ${ZH.ext_blocked_needs_reason}` },
-        zh: { served: [EXT_REWRITE, ZH.ext_blocked_needs_reason], refusal: `${EXT_REWRITE} | ${ZH.ext_blocked_needs_reason}` },
-        en: {
-          served: [EXT_REWRITE, PACKAGED.ext_blocked_needs_reason],
-          refusal: `${EXT_REWRITE} | ${PACKAGED.ext_blocked_needs_reason}`,
-        },
+        'zh-CN': { served: [EXT_REWRITE], refusal: EXT_REWRITE },
+        zh: { served: [EXT_REWRITE], refusal: EXT_REWRITE },
+        en: { served: [EXT_REWRITE], refusal: EXT_REWRITE },
       });
     });
 

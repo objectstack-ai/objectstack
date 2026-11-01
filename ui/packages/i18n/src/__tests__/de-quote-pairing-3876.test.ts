@@ -369,7 +369,14 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 102 once objectstack-ai/objectstack#28241 added `setupAssignments.notFound`,
     // the Setup assignment pages' line that names an unknown item („{{name}}“) —
     // one interpolated span, runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(102);
+    // 103 once objectstack-ai/objectstack#27520 added
+    // `console.serverAction.fillRequiredThenRetry`, the refused action's hint
+    // that names the action to run again („{{action}}“) — one interpolated
+    // span, runtime data.
+    // 104 once objectstack-ai/objectstack#28382 added `form.requiredForAction`,
+    // the edit form's note that names the update action a field is required
+    // for („{{action}}“) — one interpolated span, runtime data.
+    expect(okSpans, 'correctly paired spans').toBe(104);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -442,8 +449,11 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 101 / 101 / 0 after objectstack-ai/objectstack#27823 added
     // `objectActions.deletedNamed`, one more matched pair. 102 / 102 / 0 after
     // objectstack-ai/objectstack#28241 added `setupAssignments.notFound`, one
-    // more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 102, close: 102, rdq: 0 });
+    // more matched pair. 103 / 103 / 0 after objectstack-ai/objectstack#27520
+    // added `console.serverAction.fillRequiredThenRetry`, one more matched pair.
+    // 104 / 104 / 0 after objectstack-ai/objectstack#28382 added
+    // `form.requiredForAction`, one more matched pair.
+    expect({ open, close, rdq }).toEqual({ open: 104, close: 104, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // (rls-predicate-array-comparand-refused, cel-predicate-list-comparand-refused).
 export const entry: SemanticMigration = {
   id: 'filter-ne-array-comparand-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'data.FilterCondition and the $ne slot of data.FieldOperators — an ARRAY as the comparand of '
     + '$ne. At the runtime filter doors (the shared comparand-shape face that parseFilterAST and '

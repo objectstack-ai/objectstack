@@ -7,9 +7,6 @@ import type { SemanticMigration } from '../../types.js';
 // to any metadata key, so there is nothing `objectstack migrate meta` could
 // rewrite in a stored row or a parsed stack — the fix is one wrapping call in
 // the author's source.
-//
-// No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-// span already, and a nested backtick would close it.
 export const entry: SemanticMigration = {
   id: 'stack-config-default-export-unbuilt-refused',
   surface:

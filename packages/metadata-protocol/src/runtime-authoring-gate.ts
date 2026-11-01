@@ -454,6 +454,84 @@ export function findPublicFormIntakeGaps(args: {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// #28448 — a tenant's copy of a packaged validation rule that changes what the
+// package owns.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The rule id of the finding below. Refused on publish, inside the gate's one
+ * 422 `INVALID_METADATA` envelope.
+ *
+ * [ADR-0029 D9.2a, 2026-10-30 note; ruling of record 6524229156, letter C′;
+ * ruling of record 6545641964, letter B] A validation rule's identity within an
+ * object is its `name`. A tenant's copy of a rule a code layer ships (the
+ * packaged owner's or an extension's) may change its `message` and `active`;
+ * its condition, its `type` and every other key belong to the package. The
+ * registry fold already runs the package's rule and reports such a copy at load
+ * (`validation_rule_copy_changed`), never refusing it there, so an upgrade never
+ * fails on stored data. This is the other half: the save door refuses the copy
+ * when the admin writes it, with the prescription.
+ *
+ * ## Why it is gate-local
+ *
+ * Its input is a fact about the DEPLOYMENT: which rules the code packages
+ * registered here ship, by name. A build machine cannot know what a tenant's
+ * copy is a copy of, so `AUTHORING_RULES` must not judge it — the reason the
+ * #6285 and #26188 rules live here. The judgement itself is the registry's
+ * (`SchemaRegistry.tenantRuleCopyRefusal`), the same predicate its load report
+ * reads, so the save and the load judge one way; the host asks it and hands
+ * the verdict in ({@link PackagedRuleCopyRefusal}), and this function stays
+ * pure.
+ */
+export const VALIDATION_RULE_COPY_CHANGED = 'validation-rule-copy-changed';
+
+/** The prescription ruling C′ names, word for word. */
+const VALIDATION_RULE_COPY_PRESCRIPTION =
+    'To change the condition, add a rule under a new name, or change it in the package.';
+
+/**
+ * The registry's verdict on a tenant `object` body's rule copies, as the host
+ * reads it from `SchemaRegistry.tenantRuleCopyRefusal`: the first copy that
+ * changes a key the package owns, the keys it changes (`type` first) and the
+ * registry's sentence. `null` when every copy changes at most `message` and
+ * `active`, or no code layer ships a rule of any name the body carries.
+ */
+export interface PackagedRuleCopyRefusal {
+    ruleName: string;
+    changedKeys: readonly string[];
+    message: string;
+}
+
+/**
+ * Judge one about-to-be-published `object` body against the registry's verdict
+ * on its rule copies: one `error` finding when the verdict refuses, located at
+ * the copy's first changed key.
+ *
+ * PURE — the verdict arrives as an argument. Absent (a host whose engine has no
+ * registry predicate, such as the CLI) nothing is judged.
+ */
+export function findPackagedRuleCopyGaps(args: {
+    type: string;
+    name: string;
+    body: unknown;
+    packagedRuleCopyRefusal?: PackagedRuleCopyRefusal | null;
+}): RuntimeAuthoringIssue[] {
+    if (args.type !== 'object' || !args.packagedRuleCopyRefusal) return [];
+    const { ruleName, changedKeys, message } = args.packagedRuleCopyRefusal;
+    const rules = isRec(args.body) && Array.isArray(args.body.validations) ? args.body.validations : [];
+    const index = rules.findIndex((rule) => isRec(rule) && rule.name === ruleName);
+    const rulePath = index >= 0 ? `validations[${index}]` : 'validations';
+    return [{
+        severity: 'error',
+        rule: VALIDATION_RULE_COPY_CHANGED,
+        where: `object "${args.name}" · validation rule "${ruleName}"`,
+        path: changedKeys.length > 0 && index >= 0 ? `${rulePath}.${changedKeys[0]}` : rulePath,
+        message,
+        hint: VALIDATION_RULE_COPY_PRESCRIPTION,
+    }];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // #26188 — a HIERARCHY scope on a runtime with no hierarchy resolver.
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1118,6 +1196,15 @@ export function evaluateRuntimeAuthoringGate(args: {
      * service registry), nothing is judged, as on the CLI.
      */
     hierarchyResolverMounted?: boolean;
+    /**
+     * [#28448] The registry's verdict on an `object` body's copies of packaged
+     * validation rules ({@link PackagedRuleCopyRefusal}). A fact only the host
+     * holds, of the #6285 kind: gathered by the impure caller and passed in so
+     * this function stays pure. A verdict arms {@link findPackagedRuleCopyGaps};
+     * `null` is a clean verdict; absent (a host whose engine has no registry
+     * predicate), nothing is judged.
+     */
+    packagedRuleCopyRefusal?: PackagedRuleCopyRefusal | null;
 }): RuntimeAuthoringVerdict {
     // [#26188] The one finding a draft hears: a hierarchy scope this runtime
     // cannot enforce. Same rule as the publish refusal below, `warning` here.
@@ -1204,8 +1291,19 @@ export function evaluateRuntimeAuthoringGate(args: {
             ? { tenancyPostureInForce: args.tenancyPostureInForce }
             : {}),
     });
+    // [#28448] The gate-local refusal of a tenant's rule copy that changes what
+    // the package owns — the registry's verdict, located on the body.
+    const packagedRuleCopyGaps = findPackagedRuleCopyGaps({
+        type: args.type,
+        name: args.name,
+        body: args.body,
+        ...(args.packagedRuleCopyRefusal !== undefined
+            ? { packagedRuleCopyRefusal: args.packagedRuleCopyRefusal }
+            : {}),
+    });
     const localIssues = [
         ...scheduleOrgGaps,
+        ...packagedRuleCopyGaps,
         ...hierarchyScopeGaps,
         ...(pageSourceFindings ?? []).filter((f) => f.severity === 'error').map(toIssue),
     ];
@@ -1272,6 +1370,7 @@ export function evaluateRuntimeAuthoringGate(args: {
             ? [HIERARCHY_SCOPE_CAPABILITY_REQUIRED]
             : []),
         ...(pageSourceFindings !== null ? [HTML_PAGE_SOURCE_COMPILE, PAGE_REQUIRES_DISAGREES_WITH_SOURCE] : []),
+        ...(args.type === 'object' && args.packagedRuleCopyRefusal !== undefined ? [VALIDATION_RULE_COPY_CHANGED] : []),
     ];
 
     if (unlintedWritesAllowed()) {

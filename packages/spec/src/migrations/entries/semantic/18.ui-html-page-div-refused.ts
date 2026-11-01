@@ -15,8 +15,6 @@ import type { SemanticMigration } from '../../types.js';
 // migration channel beside the changeset's FROM → TO table.
 export const entry: SemanticMigration = {
   id: 'ui-html-page-div-refused',
-  // No backticks and no pipes in `surface` — build-upgrade-guide.ts renders it
-  // inside a code span.
   surface:
     "kind:'html' page source in a project with no "
     + 'sdui.manifest.json of its own — the div tag, and any other tag or prop the SDUI '

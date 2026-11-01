@@ -211,7 +211,11 @@ describe('#6602 — WRITE seam: applyRegistryWriteThrough refuses org-scoped row
                 organizationId: ORG_A,
             } as any),
         ).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-        expect(engine.getRows().some((r: any) => r.name === 'org_grid')).toBe(false);
+        // [#28355] The refusal's own `denied` audit row is the only insert (this
+        // double keeps every table in one store); no metadata row is persisted.
+        expect(engine.insert.mock.calls.map(([table, row]: any[]) => [table, row.name, row.code]))
+            // adr0112-ok: D6b — persisted audit column, its own vocabulary
+            .toEqual([['sys_metadata_audit', 'org_grid', 'not_overridable']]);
 
         // Pre-fix: the body sits here under the PLAIN key, visible to every
         // registry-direct reader in the process.

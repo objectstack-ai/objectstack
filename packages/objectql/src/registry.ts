@@ -496,11 +496,23 @@ const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description'] as const
 type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
 
 /**
+ * [#28356] Which layer an object fold serves: `'served'`, what every read
+ * answers (the bound actions the registry serves, runtime-authored included),
+ * or `'code'`, the code-layer resolution {@link SchemaRegistry.getArtifactItem}
+ * answers (the code packages' bound actions alone).
+ */
+type ServedObjectLayer = 'served' | 'code';
+
+/**
  * Deep merge two ServiceObject definitions.
  *
  * The merge set is CLOSED and enumerable — this is NOT "every prop, later
  * value wins":
- *   - `fields`, `validations`, `indexes` are merged ADDITIVELY.
+ *   - `fields` and `indexes` are merged ADDITIVELY (`fields` keyed by name).
+ *   - `validations` are merged BY NAME ({@link mergeValidationsByName},
+ *     [ADR-0029 D9.2a, 2026-10-30 note]): rules of different names add, and a
+ *     rule of a name already folded replaces it — with `tenantRules`, carrying
+ *     the tenant's `message` and `active`, never the tenant's condition.
  *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
  *     `description`) are overridden last-writer-wins, subject to the
  *     `tenantAuthored` yield rule below.
@@ -541,12 +553,14 @@ type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
  * the scalars the fold's BASE has authored away from the packaged owner's
  * value; an extender yields on those. See
  * {@link SchemaRegistry.tenantAuthoredScalars} for why the set is computed once
- * over the base rather than re-derived from the running `merged`.
+ * over the base rather than re-derived from the running `merged`; `tenantRules`
+ * ({@link SchemaRegistry.tenantRuleSettings}) is computed once for the same reason.
  */
 function mergeObjectDefinitions(
   base: ServiceObject,
   extension: Partial<ServiceObject>,
   tenantAuthored?: ReadonlySet<ObjectFoldScalarKey>,
+  tenantRules?: ReadonlyMap<string, TenantRuleSettings>,
 ): ServiceObject {
   const merged = { ...base };
 
@@ -555,9 +569,13 @@ function mergeObjectDefinitions(
     merged.fields = { ...base.fields, ...extension.fields };
   }
 
-  // Merge validations additively
+  // [ADR-0029 D9.2a, 2026-10-30 note] Merge validations by name
   if (extension.validations) {
-    merged.validations = [...(base.validations || []), ...extension.validations];
+    merged.validations = mergeValidationsByName(
+      base.validations,
+      extension.validations,
+      tenantRules,
+    ) as ServiceObject['validations'];
   }
 
   // Merge indexes additively
@@ -580,9 +598,10 @@ function mergeObjectDefinitions(
 }
 
 /**
- * [#8027] Key-order-insensitive JSON, for comparing two `validations` /
- * `indexes` entries BY VALUE — see
- * {@link SchemaRegistry.subtractExtenderContributions}.
+ * [#8027] Key-order-insensitive JSON, for comparing two `indexes` entries, or
+ * two validation rules' keys, BY VALUE — see
+ * {@link SchemaRegistry.subtractExtenderContributions} and
+ * {@link changedPackagedRuleKeys}.
  *
  * Plain `JSON.stringify` would report the same rule as two different rules
  * whenever the two copies were built by different code paths (a stored overlay
@@ -598,6 +617,106 @@ function stableStringify(value: unknown): string {
     .filter(([, v]) => v !== undefined)
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableStringify(v)}`).join(',')}}`;
+}
+
+/**
+ * [ADR-0029 D9.2a, 2026-10-30 note] What a tenant's same-named copy of a
+ * packaged validation rule may set: its sentence and its switch. Every other key
+ * a rule carries — `type`, `condition` and each variant's own predicate keys,
+ * `events`, `severity`, `priority`, and the editor keys — is the package's.
+ */
+type TenantRuleSettings = { message?: string; active?: boolean };
+
+/** A rule's `name` when it has one; a rule without a string name has no identity to merge by and is always additive. */
+function validationRuleName(rule: unknown): string | undefined {
+  const name = (rule as { name?: unknown } | null | undefined)?.name;
+  return typeof name === 'string' && name !== '' ? name : undefined;
+}
+
+/**
+ * The tenant settings a base layer's rules carry, keyed by rule name — the
+ * first copy of a name wins, so a stored row that predates the by-name fold
+ * (the tenant's reworded copy, then the extension's original appended after
+ * it) still answers with the tenant's sentence.
+ */
+function tenantRuleSettingsOf(rules: unknown): Map<string, TenantRuleSettings> {
+  const out = new Map<string, TenantRuleSettings>();
+  if (!Array.isArray(rules)) return out;
+  for (const rule of rules) {
+    const name = validationRuleName(rule);
+    if (name === undefined || out.has(name)) continue;
+    const { message, active } = rule as { message?: unknown; active?: unknown };
+    out.set(name, {
+      ...(typeof message === 'string' ? { message } : {}),
+      ...(typeof active === 'boolean' ? { active } : {}),
+    });
+  }
+  return out;
+}
+
+/** The packaged rule, carrying the tenant's sentence and switch where the tenant's copy sets them. */
+function withTenantRuleSettings<R>(packaged: R, settings: TenantRuleSettings | undefined): R {
+  if (!settings || (settings.message === undefined && settings.active === undefined)) return packaged;
+  return { ...packaged, ...settings };
+}
+
+/**
+ * [ADR-0029 D9.2a, 2026-10-30 note] Merge `validations` BY NAME, the way
+ * `fields` merge by key: a later layer's rule replaces every earlier rule of its
+ * name and is appended in fold order, and a rule of a new name is added. With
+ * `tenantRules` (the fold's base is a tenant overlay), the rule carries the
+ * tenant's `message` and `active` for its name; its condition stays the
+ * later layer's.
+ */
+function mergeValidationsByName(
+  base: readonly unknown[] | undefined,
+  extension: readonly unknown[],
+  tenantRules: ReadonlyMap<string, TenantRuleSettings> | undefined,
+): unknown[] {
+  const names = new Set<string>();
+  for (const rule of extension) {
+    const name = validationRuleName(rule);
+    if (name !== undefined) names.add(name);
+  }
+  const kept = (base ?? []).filter((rule) => {
+    const name = validationRuleName(rule);
+    return name === undefined || !names.has(name);
+  });
+  const added = extension.map((rule) => {
+    const name = validationRuleName(rule);
+    return name === undefined ? rule : withTenantRuleSettings(rule, tenantRules?.get(name));
+  });
+  return [...kept, ...added];
+}
+
+/** The value a rule's key has when the rule leaves it out — `BASE_VALIDATION_SHAPE`'s defaults. */
+const VALIDATION_RULE_DEFAULTS: Readonly<Record<string, unknown>> = {
+  events: ['insert', 'update'],
+  priority: 100,
+  severity: 'error',
+};
+
+/**
+ * The keys on which a tenant's copy of a packaged rule differs from the
+ * package's, beyond the two it may set (`message`, `active`) and the loader's
+ * `_`-prefixed stamps. A key a rule leaves out is read at its schema default,
+ * so a stored copy whose parse stamped the defaults is not a change. Empty when
+ * the copy changes nothing but its sentence and its switch.
+ */
+function changedPackagedRuleKeys(copy: unknown, packaged: unknown): string[] {
+  const enforced = (rule: unknown): Record<string, unknown> => {
+    const out: Record<string, unknown> = { ...VALIDATION_RULE_DEFAULTS };
+    for (const [key, value] of Object.entries((rule ?? {}) as Record<string, unknown>)) {
+      if (key === 'message' || key === 'active' || key.startsWith('_') || value === undefined) continue;
+      out[key] = value;
+    }
+    return out;
+  };
+  const a = enforced(copy);
+  const b = enforced(packaged);
+  return [...new Set([...Object.keys(a), ...Object.keys(b)])]
+    .filter((key) => stableStringify(a[key]) !== stableStringify(b[key]))
+    .sort((x, y) => (x === 'type' ? -1 : y === 'type' ? 1 : x < y ? -1 : x > y ? 1 : 0));
 }
 
 /**
@@ -1714,6 +1833,52 @@ class ExtensionMembershipKeysRefusedError extends Error {
     this.name = 'ExtensionMembershipKeysRefusedError';
     this.objectName = objectName;
     this.packageId = packageId;
+  }
+}
+
+/**
+ * {@link ValidationRuleCopyRefusedError}'s code — `INVALID_METADATA`, for the
+ * reason {@link EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE} gives: a body this
+ * registry will not take as written. ⛔ Not a new code. The condition is named
+ * by the error's `name`.
+ */
+export const VALIDATION_RULE_COPY_REFUSED_CODE = 'INVALID_METADATA' as const;
+
+/**
+ * [ADR-0029 D9.2a, 2026-10-30 note; ruling of record 6524229156, letter C′] A
+ * tenant body carries a rule of the same `name` as a rule a code layer ships —
+ * the owner's or an extension's — and changes more than its `message` and
+ * `active`. A rule's identity within an object is its name, so the copy IS the
+ * packaged rule: the tenant may reword it or switch it off, and its condition
+ * and type belong to the package. Refused, never run beside the packaged rule
+ * and never silently replaced by it.
+ *
+ * The ADR-0112 envelope (`code` + `status: 422`), never a bare throw.
+ */
+class ValidationRuleCopyRefusedError extends Error {
+  readonly code = VALIDATION_RULE_COPY_REFUSED_CODE;
+  readonly status = 422;
+  /** The same number under ADR-0112 D5's spelling — what a consumer holding the THROWN error reads (the CLI `--json` envelope). `status` stays for the HTTP doors, which read it. */
+  readonly httpStatus = 422;
+  /** The object whose rule copy was refused. */
+  readonly objectName: string;
+  /** The packaged rule the copy shares its name with. */
+  readonly ruleName: string;
+  /** Every key the copy changes from the packaged rule, `type` first. */
+  readonly changedKeys: readonly string[];
+
+  constructor(objectName: string, ruleName: string, changedKeys: readonly string[]) {
+    const keys = changedKeys.map((k) => `\`${k}\``).join(', ');
+    super(
+      `Object "${objectName}": validation rule "${ruleName}" is a packaged rule, and this copy changes ` +
+        `${keys}. On a packaged rule only \`message\` and \`active\` may be changed; its condition and ` +
+        'type belong to the package. To change the condition, add a rule under a new name, or change it ' +
+        'in the package.',
+    );
+    this.name = 'ValidationRuleCopyRefusedError';
+    this.objectName = objectName;
+    this.ruleName = ruleName;
+    this.changedKeys = changedKeys;
   }
 }
 
@@ -3913,8 +4078,12 @@ export class SchemaRegistry {
    * code-layer resolution ({@link resolveOwnerLayer}) folds extenders exactly
    * the same way rather than growing a second, drifting copy.
    */
-  private foldExtenders(contributors: ObjectContributor[], base: ObjectContributor): ServiceObject {
-    return this.foldExtendersOntoDefinition(contributors, base.definition);
+  private foldExtenders(
+    contributors: ObjectContributor[],
+    base: ObjectContributor,
+    layer: ServedObjectLayer = 'served',
+  ): ServiceObject {
+    return this.foldExtendersOntoDefinition(contributors, base.definition, layer);
   }
 
   /**
@@ -3925,6 +4094,7 @@ export class SchemaRegistry {
   private foldExtendersOntoDefinition(
     contributors: ObjectContributor[],
     baseDefinition: ServiceObject,
+    layer: ServedObjectLayer = 'served',
   ): ServiceObject {
     // [ADR-0029 D9.2a] Computed ONCE, over the base the fold starts from — never
     // re-derived from the running `merged`, which would make an extender's own
@@ -3944,18 +4114,26 @@ export class SchemaRegistry {
     // access path, the claim and the assignment seam off on this object, while
     // the gate kept judging the extender's business column.
     const governQueue = resolveInjectedSystemColumns(baseDefinition).queue;
-    let merged = { ...baseDefinition };
+    // [ADR-0029 D9.2a, 2026-10-30 note] A tenant base's rules are copies: each
+    // one a code layer ships by name runs as the package declares it, with the
+    // tenant's `message` and `active`. Computed once, over the base, as the
+    // scalars above are.
+    const tenantRules = this.tenantRuleSettings(contributors, baseDefinition);
+    let merged = tenantRules
+      ? this.withPackagedOwnerRules(contributors, baseDefinition, tenantRules)
+      : { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
         let extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
         if (governQueue) extension = this.withoutExtensionQueueField(extension, contrib.packageId);
-        merged = mergeObjectDefinitions(merged, extension, tenantAuthored);
+        merged = mergeObjectDefinitions(merged, extension, tenantAuthored, tenantRules);
       }
     }
+    if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
     // A picklist-bound field is served with its list's options resolved onto
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
-    return this.finishServedObject(merged);
+    return this.finishServedObject(merged, layer);
   }
 
   /**
@@ -3997,11 +4175,15 @@ export class SchemaRegistry {
    * MetadataService layers run. A step added here reaches every one of them.
    *
    * 1. picklist-bound fields get their list's options resolved onto them;
-   * 2. [#24400] the code packages' bound top-level actions are attached
-   *    ({@link attachBoundActions}).
+   * 2. [#24400] the bound top-level actions are attached — the code
+   *    packages' and, [#28356], the runtime-authored ones
+   *    ({@link attachBoundActions}). The CODE layer
+   *    ({@link resolveOwnerLayer}, `layer: 'code'`) attaches the code
+   *    packages' alone: a tenant's action is not something a code package
+   *    ships, and `getArtifactItem('object')` answers exactly that question.
    */
-  private finishServedObject<T>(body: T): T {
-    return this.attachBoundActions(this.resolvePicklistFields(body));
+  private finishServedObject<T>(body: T, layer: ServedObjectLayer = 'served'): T {
+    return this.attachBoundActions(this.resolvePicklistFields(body), layer);
   }
 
   /**
@@ -4020,14 +4202,16 @@ export class SchemaRegistry {
    * the action may register in either order, and the cached fold is dropped
    * when an action registers ({@link registerItem}) or leaves.
    *
-   * What attaches: a standalone `action` item a CODE package shipped
-   * (`isCodeArtifactBody` — never a tenant-authored row), whose owner key
-   * ({@link standaloneActionOwnerKey}, the router's own test) is this object's
-   * name, and whose package is not disabled. Attached BY REFERENCE, so the
-   * served entry is the very declaration rung 2 resolves: its
-   * `requiredPermissions`, `requiresMembershipReach` and execution identity
-   * travel with it unchanged, and nothing about the object's own write policy
-   * moves.
+   * What attaches: a standalone `action` item this registry serves
+   * ({@link boundServedActions}) — one a code package shipped, or [#28356] one
+   * a runtime author saved through the metadata door, which the save's
+   * write-through and the boot's `sys_metadata` hydration register here —
+   * whose owner key ({@link standaloneActionOwnerKey}, the router's own test)
+   * is this object's name, and whose package is not disabled. Attached BY
+   * REFERENCE, so the served entry is the very declaration rung 2 resolves:
+   * its `requiredPermissions`, `requiresMembershipReach` and execution
+   * identity travel with it unchanged, and nothing about the object's own
+   * write policy moves.
    *
    * Deduplicated by NAME, which is also what makes the step idempotent over a
    * body that already carries the action — the same-stack merge's copy, a
@@ -4046,7 +4230,7 @@ export class SchemaRegistry {
    *
    * Returns `body` by reference when nothing attaches.
    */
-  private attachBoundActions<T>(body: T): T {
+  private attachBoundActions<T>(body: T, layer: ServedObjectLayer = 'served'): T {
     if (body === null || typeof body !== 'object') return body;
     const objectName = (body as { name?: unknown }).name;
     if (typeof objectName !== 'string' || objectName === '') return body;
@@ -4056,7 +4240,7 @@ export class SchemaRegistry {
     const base: any[] = Array.isArray(declared) ? declared : [];
     const present = new Set<unknown>(base.map((action) => action?.name));
     const fresh: any[] = [];
-    for (const action of this.boundCodeActions()) {
+    for (const action of layer === 'code' ? this.boundCodeActions() : this.boundServedActions()) {
       if (standaloneActionOwnerKey(action) !== objectName || present.has(action.name)) continue;
       present.add(action.name);
       fresh.push(action);
@@ -4068,10 +4252,51 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#28356] The standalone `action` items bound to an object that this
+   * registry SERVES — the population {@link attachBoundActions} attaches.
+   *
+   * Every bound item in the collection, whoever authored it: a code package's
+   * (under its `<packageId>:<name>` key) and a runtime author's, which the
+   * save door's write-through and the boot's `sys_metadata` hydration register
+   * (under the bare name, or a bound package's key with `_provenance: 'org'`).
+   * Leaving the runtime rows out made a bound action saved through the
+   * metadata door dispatchable (rung 2 reads {@link getItem}) yet listed by no
+   * served object, so no client drew it.
+   *
+   * One item per name where {@link getItem} would pick one: a bare-key entry
+   * (an ADR-0005 overlay) shadows the composite entries of its name, so a
+   * customised bound action is attached as customised — the declaration rung 2
+   * resolves — and never as the packaged default under it.
+   *
+   * The registry holds no org-scoped row (the protocol's hydration declines
+   * one), so nothing here crosses an organization. A disabled package's items
+   * are left out, as the rest of its items are withheld.
+   *
+   * ⛔ Not the boot audits' population: a runtime row naming an object no
+   * package registers must not fail a boot, so {@link findUnboundActionTargets}
+   * and {@link FIND_BOUND_ACTION_COLLISIONS} keep reading
+   * {@link boundCodeActions}.
+   */
+  private boundServedActions(): any[] {
+    const collection = this.metadata.get('action');
+    if (!collection) return [];
+    const out: any[] = [];
+    for (const [key, action] of collection) {
+      if (!action || typeof action !== 'object' || typeof (action as any).name !== 'string') continue;
+      const name: string = (action as any).name;
+      if (key !== name && collection.has(name)) continue;
+      if (isObjectLessActionKey(standaloneActionOwnerKey(action))) continue;
+      if (this.isPackageDisabled((action as any)._packageId)) continue;
+      out.push(action);
+    }
+    return out;
+  }
+
+  /**
    * [#24400] The standalone `action` items code packages ship that are bound
-   * to an object — the population {@link attachBoundActions} attaches and
-   * {@link findUnboundActionTargets} audits. A disabled package's actions are
-   * left out, as the rest of its items are withheld.
+   * to an object — the population {@link findUnboundActionTargets} and
+   * {@link FIND_BOUND_ACTION_COLLISIONS} audit. A disabled package's actions
+   * are left out, as the rest of its items are withheld.
    */
   private boundCodeActions(): any[] {
     const out: any[] = [];
@@ -4218,6 +4443,169 @@ export class SchemaRegistry {
   }
 
   /**
+   * [ADR-0029 D9.2a, 2026-10-30 note] The `message` / `active` a TENANT base
+   * sets on its rules, by name — `undefined` when the fold's base is a code
+   * layer, where a later layer's same-named rule replaces the earlier one
+   * whole, as a field does.
+   *
+   * The base is the tenant's when it is not the `own` contributor's body (the
+   * overlay layer, a stored row, a served copy — the identity test
+   * {@link tenantAuthoredScalars} makes), or when the owner itself is
+   * tenant-authored (a runtime-authored object). Idempotent over a folded body:
+   * its copies already carry what the first fold produced.
+   */
+  private tenantRuleSettings(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+  ): ReadonlyMap<string, TenantRuleSettings> | undefined {
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    if (!owner) return undefined;
+    if (owner === baseDefinition && !isTenantAuthored(baseDefinition)) return undefined;
+    return tenantRuleSettingsOf(baseDefinition.validations);
+  }
+
+  /**
+   * [ADR-0029 D9.2a, 2026-10-30 note] A tenant base whose rules include copies
+   * of the packaged OWNER's rules, with each copy replaced by the owner's rule
+   * carrying the copy's `message` and `active` — so a package fix to the rule
+   * reaches the tenant, and the copy's own condition never runs.
+   *
+   * Only names the base carries: a rule the overlay leaves out stays out, as
+   * D9.2's replace has always meant. A second copy of one name (a row stored
+   * while the fold still appended) is dropped. The base is returned as a fresh
+   * spread either way, as the fold has always started from one.
+   */
+  private withPackagedOwnerRules(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+    tenantRules: ReadonlyMap<string, TenantRuleSettings>,
+  ): ServiceObject {
+    const merged = { ...baseDefinition };
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    if (!owner || owner === baseDefinition || !isCodeArtifactBody(owner)) return merged;
+    const ownerRules = new Map<string, unknown>();
+    for (const rule of owner.validations ?? []) {
+      const name = validationRuleName(rule);
+      if (name !== undefined && !ownerRules.has(name)) ownerRules.set(name, rule);
+    }
+    const baseRules = baseDefinition.validations;
+    if (ownerRules.size === 0 || !Array.isArray(baseRules) || baseRules.length === 0) return merged;
+    const seen = new Set<string>();
+    const rules: unknown[] = [];
+    for (const rule of baseRules) {
+      const name = validationRuleName(rule);
+      const packaged = name === undefined ? undefined : ownerRules.get(name);
+      if (packaged === undefined) {
+        rules.push(rule);
+      } else if (!seen.has(name!)) {
+        seen.add(name!);
+        rules.push(withTenantRuleSettings(packaged, tenantRules.get(name!)));
+      }
+    }
+    merged.validations = rules as ServiceObject['validations'];
+    return merged;
+  }
+
+  /**
+   * [ADR-0029 D9.2a, 2026-10-30 note] Every rule a CODE layer of this object
+   * ships, by name, in fold order — the packaged owner's (when the owner is a
+   * code artifact), then each code `extend` contributor's, a later layer's
+   * rule replacing an earlier one of its name. What a tenant's copy of a rule
+   * is compared with ({@link tenantRuleCopyRefusal},
+   * {@link reportChangedRuleCopies}) and what {@link getPackagedObjectBase}
+   * serves as the packaged rule set.
+   */
+  private packagedRules(contributors: readonly ObjectContributor[]): unknown[] | undefined {
+    let rules: unknown[] | undefined;
+    const owner = contributors.find((c) => c.ownership === 'own');
+    if (owner && isCodeArtifactBody(owner.definition) && Array.isArray(owner.definition.validations)) {
+      rules = [...owner.definition.validations];
+    }
+    for (const contrib of contributors) {
+      if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
+      const list = contrib.definition.validations;
+      if (!Array.isArray(list) || list.length === 0) continue;
+      rules = mergeValidationsByName(rules, list, undefined);
+    }
+    return rules;
+  }
+
+  /**
+   * [ADR-0029 D9.2a, 2026-10-30 note] The refusal of a tenant body for object
+   * `name` that carries a copy of a packaged validation rule — same `name` as
+   * a rule a code layer ships — changing anything but the rule's `message` and
+   * `active`: its `type`, its condition, or any other key the package owns.
+   * `null` when every copy changes at most those two, and when no code layer
+   * ships a rule of any name the body carries (rules of new names add).
+   *
+   * Judged against the code layers registered NOW, the packaged rule set the
+   * fold enforces. The first changed rule is named, with every key it changes.
+   */
+  tenantRuleCopyRefusal(name: string, body: unknown): Error | null {
+    const fqn = this.resolveObjectKey(name);
+    const contributors = fqn === undefined ? undefined : this.objectContributors.get(fqn);
+    if (!contributors) return null;
+    const packaged = new Map<string, unknown>();
+    for (const rule of this.packagedRules(contributors) ?? []) {
+      const ruleName = validationRuleName(rule);
+      if (ruleName !== undefined) packaged.set(ruleName, rule);
+    }
+    if (packaged.size === 0) return null;
+    const rules = (body as { validations?: unknown } | null | undefined)?.validations;
+    if (!Array.isArray(rules)) return null;
+    for (const rule of rules) {
+      const ruleName = validationRuleName(rule);
+      if (ruleName === undefined || !packaged.has(ruleName)) continue;
+      const changed = changedPackagedRuleKeys(rule, packaged.get(ruleName));
+      if (changed.length > 0) return new ValidationRuleCopyRefusedError(fqn!, ruleName, changed);
+    }
+    return null;
+  }
+
+  /** `object|rule|copy|packaged` already reported — once per registry, as {@link shadowedExtensionQueueWarned} is. */
+  private reportedRuleCopyChanges = new Set<string>();
+
+  /**
+   * [ADR-0029 D9.2a, 2026-10-30 note] Say, once, that a tenant base carries a
+   * copy of a packaged rule that changes what the package owns. The fold has
+   * already enforced the package's rule; the stored copy's condition is not
+   * what runs, while the object serves normally, so this is an `error` with
+   * its consequence and its fix. Reported, never refused, here: a stored copy
+   * also differs after a package upgrade changes the rule, and refusing it
+   * would drop the tenant's whole layer at boot.
+   */
+  private reportChangedRuleCopies(contributors: ObjectContributor[], baseDefinition: ServiceObject): void {
+    const rules = baseDefinition.validations;
+    if (!Array.isArray(rules) || rules.length === 0) return;
+    const packaged = new Map<string, unknown>();
+    for (const rule of this.packagedRules(contributors) ?? []) {
+      const ruleName = validationRuleName(rule);
+      if (ruleName !== undefined) packaged.set(ruleName, rule);
+    }
+    if (packaged.size === 0) return;
+    const reported = new Set<string>();
+    for (const rule of rules) {
+      const ruleName = validationRuleName(rule);
+      if (ruleName === undefined || reported.has(ruleName) || !packaged.has(ruleName)) continue;
+      reported.add(ruleName);
+      const changed = changedPackagedRuleKeys(rule, packaged.get(ruleName));
+      if (changed.length === 0) continue;
+      const key = `${baseDefinition.name}|${ruleName}|${stableStringify(rule)}|${stableStringify(packaged.get(ruleName))}`;
+      if (this.reportedRuleCopyChanges.has(key)) continue;
+      this.reportedRuleCopyChanges.add(key);
+      const keys = changed.map((k) => `\`${k}\``).join(', ');
+      console.error(
+        `[Registry] [validation_rule_copy_changed] Object "${baseDefinition.name}": the tenant's copy of ` +
+          `validation rule "${ruleName}" changes ${keys} from the packaged rule. Only a packaged rule's ` +
+          '`message` and `active` follow the tenant, so the package\'s rule is enforced with the tenant\'s ' +
+          `message and switch, and the copy's ${keys} does not run, while the object serves normally. ` +
+          'To change the condition, add a rule under a new name, or change it in the package. To keep the ' +
+          'packaged rule, save the object again from its served definition.',
+      );
+    }
+  }
+
+  /**
    * [#7556] Fold this object's `extend` contributors onto a base body the
    * CALLER supplies — the same fold {@link resolveObject} (D9.2) and
    * {@link resolveOwnerLayer} (D9.6) apply, exposed for a base layer that did
@@ -4241,10 +4629,12 @@ export class SchemaRegistry {
    * "callers must only pass an unfolded base" precondition this method carried
    * when #7556 introduced it is not one any caller can honour.
    *
-   * {@link mergeObjectDefinitions} CONCATENATES `validations` and `indexes`
-   * (`fields` is a key-keyed spread and the scalar props are last-writer-wins,
-   * so those were always safe). A second fold therefore used to duplicate both,
-   * and two shipped call sites already handed it a folded base:
+   * {@link mergeObjectDefinitions} CONCATENATES `indexes`, and concatenated
+   * `validations` too until the ADR-0029 D9.2a 2026-10-30 note made them merge
+   * by name (`fields` is a key-keyed spread and the scalar props are
+   * last-writer-wins, so those were always safe). A second fold therefore used
+   * to duplicate both, and two shipped call sites already handed it a folded
+   * base:
    *
    *  1. The MetadataService body on an IN-PROCESS boot. ObjectQL's
    *     `bridgeObjectsToMetadataService` seeds that service from
@@ -4260,13 +4650,13 @@ export class SchemaRegistry {
    *     layer, but nothing enforces it, and legacy/seeded/imported rows are
    *     unconstrained besides.
    *
-   * So the precondition is dropped rather than documented harder: an entry the
+   * So the precondition is dropped rather than documented harder: an index the
    * `extend` contributors are about to add, already sitting in `base`, is
-   * removed from the base first and then re-added by the fold exactly once.
-   * Extenders are still concatenated against EACH OTHER — two contributors
-   * declaring an identical rule still yield two, matching {@link resolveObject}
-   * — so this narrows nothing the fold was doing on an unfolded base, and such
-   * a base is returned byte-identically to before.
+   * removed from the base first and then re-added by the fold exactly once,
+   * and a rule is merged by name, which replaces the base's copy in the same
+   * step. Extenders' indexes are still concatenated against EACH OTHER,
+   * matching {@link resolveObject}, so this narrows nothing the fold was doing
+   * on an unfolded base.
    */
   foldObjectExtendersOnto<T>(name: string, base: T): T {
     if (base === null || typeof base !== 'object') return base;
@@ -4387,8 +4777,8 @@ export class SchemaRegistry {
    * `syncSchema` therefore never created.
    *
    * ⛔ The fix cannot be to un-fold here: the fold's own idempotence
-   * ({@link subtractExtenderContributions}) reaches `validations` and `indexes`
-   * only — `fields` is a key-keyed spread with no inverse, because an extender
+   * ({@link subtractExtenderContributions} and the by-name rule merge) reaches
+   * `validations` and `indexes` only — `fields` is a key-keyed spread with no inverse, because an extender
    * may legitimately REPLACE a base field under the same key. Measured: after
    * `foldObjectExtendersOnto`, the extension's field is still in the map.
    *
@@ -4878,15 +5268,22 @@ export class SchemaRegistry {
   }
 
   /**
-   * [#8027] Remove from `base` the `validations` / `indexes` entries the
-   * `extend` contributors are about to contribute — the half of
-   * {@link foldObjectExtendersOnto} that makes the fold idempotent.
+   * [#8027] Remove from `base` the `indexes` entries the `extend` contributors
+   * are about to contribute — the half of {@link foldObjectExtendersOnto} that
+   * makes the fold idempotent.
    *
-   * Only the two CONCATENATING keys are considered; `fields` and the scalar
-   * props already re-apply cleanly. Matching is by deep value equality on the
+   * Only the CONCATENATING key is considered; `fields` and the scalar props
+   * already re-apply cleanly. Matching is by deep value equality on the
    * serialised entry, so it fires only on an entry byte-identical to the one
-   * the extender declares — an entry the author merely gave the same `name` is
-   * a different rule and is left where it is.
+   * the extender declares.
+   *
+   * [ADR-0029 D9.2a, 2026-10-30 note] `validations` are no longer subtracted
+   * here: the fold merges them BY NAME ({@link mergeValidationsByName}), which
+   * removes every base copy of an extender's rule name — reworded or not —
+   * before appending the extender's rule, so a folded base re-folds to itself
+   * with nothing taken off first. Subtracting first would also take the
+   * tenant's `message` / `active` off a reworded copy before the fold could
+   * read them.
    *
    * Returns `base` BY REFERENCE when nothing matched, which is the ordinary
    * case (an unfolded base), so the pre-#8027 body is preserved exactly.
@@ -4897,7 +5294,7 @@ export class SchemaRegistry {
   ): ServiceObject {
     const key = (entry: unknown): string => stableStringify(entry);
     let out: ServiceObject | undefined;
-    for (const listKey of ['validations', 'indexes'] as const) {
+    for (const listKey of ['indexes'] as const) {
       const baseList = (base as Record<string, unknown>)[listKey];
       if (!Array.isArray(baseList) || baseList.length === 0) continue;
       const contributed = new Set<string>();
@@ -4940,7 +5337,7 @@ export class SchemaRegistry {
     if (!contributors || contributors.length === 0) return undefined;
     const ownerContrib = contributors.find(c => c.ownership === 'own');
     if (!ownerContrib) return undefined;
-    return this.foldExtenders(contributors, ownerContrib);
+    return this.foldExtenders(contributors, ownerContrib, 'code');
   }
 
   /**
@@ -5077,7 +5474,8 @@ export class SchemaRegistry {
   /**
    * [ADR-0029 D9.2a, #27559] The packaged base a served object is compared
    * against: the {@link getPackagedObjectOwner} declaration, with the
-   * `validations` of every CODE `extend` contributor appended in fold order.
+   * `validations` of every CODE `extend` contributor merged on in fold order,
+   * by name ({@link packagedRules}).
    *
    * The packaged message of a rule is the message of whichever code layer
    * ships that rule name — the owner or a code extender — because the catalog
@@ -5099,17 +5497,15 @@ export class SchemaRegistry {
     const owner = this.getPackagedObjectOwner(name);
     if (!owner) return undefined;
     const fqn = this.resolveObjectKey(name);
-    let rules: unknown[] | undefined;
-    for (const contrib of (fqn === undefined ? undefined : this.objectContributors.get(fqn)) ?? []) {
-      if (contrib.ownership !== 'extend' || !isCodeArtifactBody(contrib.definition)) continue;
-      const list = contrib.definition.validations;
-      if (!Array.isArray(list) || list.length === 0) continue;
-      rules ??= [...(owner.definition.validations ?? [])];
-      rules.push(...list);
-    }
-    return rules === undefined
-      ? owner.definition
-      : { ...owner.definition, validations: rules as ServiceObject['validations'] };
+    const contributors = (fqn === undefined ? undefined : this.objectContributors.get(fqn)) ?? [];
+    // [ADR-0029 D9.2a, 2026-10-30 note] By name, as the fold merges them: an
+    // extender's rule of a name the owner already ships is one rule, not two.
+    const extended = contributors.some((c) =>
+      c.ownership === 'extend' && isCodeArtifactBody(c.definition)
+      && Array.isArray(c.definition.validations) && c.definition.validations.length > 0);
+    if (!extended) return owner.definition;
+    const rules = this.packagedRules(contributors) ?? [];
+    return { ...owner.definition, validations: rules as ServiceObject['validations'] };
   }
 
   /**
@@ -6151,6 +6547,9 @@ export class SchemaRegistry {
         const it = item as any;
         if (it && it._packageId && it._packageId !== 'sys_metadata') {
           collection.delete(name);
+          // [#28356] An object may carry the shadow as a bound action; the
+          // artifact it uncovers may bind elsewhere ({@link attachBoundActions}).
+          if (type === 'action') this.invalidateAll();
           this.log(`[Registry] Removed runtime shadow ${type}: ${name} (artifact ${it._packageId} restored)`);
           return true;
         }
@@ -6227,6 +6626,10 @@ export class SchemaRegistry {
       return false;
     }
     collection.delete(name);
+    // [#28356] …and an object may carry the retired entry as a bound action
+    // ({@link attachBoundActions}): drop the cached folds, as
+    // {@link unregisterItem} does, or a deleted runtime action stays listed.
+    if (type === 'action') this.invalidateAll();
     this.log(`[Registry] Removed overlay entry ${type}: ${name} (no layer serves it any more)`);
     return true;
   }

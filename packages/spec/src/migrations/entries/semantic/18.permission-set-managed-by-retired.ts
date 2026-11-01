@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // did.
 export const entry: SemanticMigration = {
   id: 'permission-set-managed-by-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a code
-  // span AND a table cell.
   surface: 'permissions[].managedBy — the authored per-record provenance (package / platform / user) on a '
     + 'permission set',
   replacement: 'Nothing: delete the key. A set\'s provenance is the package that ships it, decided from that '

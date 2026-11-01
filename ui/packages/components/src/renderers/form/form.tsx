@@ -6,7 +6,7 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue } from '@object-ui/core';
+import { ComponentRegistry, resolveFieldRuleState, evalFieldPredicate, resolveCascadingOptions, resolveDependsOnFields, CASCADE_OPTION_WIDGET_TYPES, EXPANDABLE_FIELD_TYPES, isValueStillOffered, isMissingForRequired, isServerOwnedValue, isActionSwitchedOff, type FieldRulePredicate } from '@object-ui/core';
 import type { FormSchema, FormField as FormFieldConfig, FormFieldTab, FormFieldPane, FieldCondition, SelectOption } from '@object-ui/types';
 import { useForm, type RefCallBack } from 'react-hook-form';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage, FormDescription } from '../../ui/form';
@@ -42,10 +42,11 @@ import { FullscreenEditor } from '../../custom/fullscreen-editor';
 import { CharacterCount } from '../../custom/character-count';
 import { cn } from '../../lib/utils';
 import React from 'react';
-import { SchemaRendererContext, usePredicateScope, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage, unmarkedRefusalLines } from '@object-ui/react';
+import { SchemaRendererContext, usePredicateScope, useCapabilityGate, isPermissionError, extractWriteErrorMessage, extractFieldErrors, declaredUserMessage, delegationScopeMessage, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation } from '@object-ui/i18n';
 import type { RendererHostProps } from '../../lib/renderer-host-props';
 import { currencyCodeFieldNames, useUsedCurrencyCodes, withUsedCurrencyCodes } from './usedCurrencyCodes';
+import { usePatchingUpdateActions } from './actionRequirements';
 
 /**
  * A submit refusal as the banner and the toast draw it: one string as itself,
@@ -508,6 +509,10 @@ const useSafeFormTranslation = createSafeTranslation(
     // objectui#12108 — the hint under an empty field the server fills at insert
     // (see `renderFieldDescription`). Byte-identical to the `en` pack.
     'form.serverDefaultHint': 'Set automatically when saved.',
+    // objectstack#28382 — the note under an empty field a visible update
+    // action's static `patch` would make required (see `actionOutcomes`).
+    // Byte-identical to the `en` pack.
+    'form.requiredForAction': 'Required to run “{{action}}”.',
   },
   'common.selectOption',
 );
@@ -821,7 +826,7 @@ function dependentLookupParents(f: FormFieldConfig | undefined): string[] {
   if (typeof widget !== 'string' || !EXPANDABLE_FIELD_TYPES.has(normalizeFieldType(widget))) {
     return [];
   }
-  const carrier: Record<string, unknown> = f.field || (f as Record<string, unknown>);
+  const carrier: Record<string, unknown> | FormFieldConfig = f.field || f;
   const inner = carrier.field;
   const meta =
     inner !== null && typeof inner === 'object' && ('reference' in inner || 'type' in inner)
@@ -1211,8 +1216,9 @@ const HORIZONTAL_FIELD_ITEM_CLASS =
 function renderFieldDescription(
   description: string | undefined,
   serverDefaultHint: string | undefined,
+  actionRequirementHints: readonly string[] = [],
 ): React.ReactNode {
-  if (!description && !serverDefaultHint) return null;
+  if (!description && !serverDefaultHint && actionRequirementHints.length === 0) return null;
   return (
     <FormDescription>
       {description}
@@ -1221,6 +1227,15 @@ function renderFieldDescription(
           {serverDefaultHint}
         </span>
       )}
+      {/* objectstack#28382 — one line per update action that would require
+          this empty field. Inside the same `<FormDescription>` for the
+          serverDefaultHint's reason: the control's `aria-describedby` names
+          it, so the note is announced with the field. */}
+      {actionRequirementHints.map((hint) => (
+        <span key={hint} className="block" data-required-for-action="true">
+          {hint}
+        </span>
+      ))}
     </FormDescription>
   );
 }
@@ -1246,6 +1261,7 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     dependsOnLabels,
     emptyHint,
     onInvalidInputChange,
+    onAutofill,
     // Renderer-only, and deliberately NOT a new key in the widget contract
     // (objectui#3393). The call site started forwarding `label` for the
     // built-in fullscreen dialog; registered widgets must keep receiving
@@ -1286,8 +1302,14 @@ function stripRegisteredFieldProps(type: string, props: RenderFieldProps): Rende
     // Only the widgets that report unparseable text read it; every other one
     // would spread an unknown handler onto its DOM (objectstack#27483).
     ...(INVALID_INPUT_REPORTING_WIDGET_TYPES.has(normalizedType) ? { onInvalidInputChange } : {}),
+    // Only a relationship pick fills sibling fields (`lookupAutofill`); every
+    // other widget would spread an unknown handler onto its DOM.
+    ...(LOOKUP_AUTOFILL_WIDGET_TYPES.has(normalizedType) ? { onAutofill } : {}),
   };
 }
+
+/** The registered widgets whose pick writes `lookupAutofill` targets through `onAutofill`. */
+const LOOKUP_AUTOFILL_WIDGET_TYPES: ReadonlySet<string> = new Set(['lookup', 'master_detail']);
 
 /** The registered widgets that fire `onInvalidInputChange`: the date picker's two faces. */
 const INVALID_INPUT_REPORTING_WIDGET_TYPES: ReadonlySet<string> = new Set(['date', 'datetime']);
@@ -1828,8 +1850,10 @@ ComponentRegistry.register('form',
     /**
      * The sonner id every OUTCOME toast of THIS form is published under.
      *
-     * The in-form banner (`submitError`) and its toast are raised together at
-     * each of the three points below, but only the banner was ever retired
+     * A refusal is no longer toasted at all (`raiseRefusal` below), but the id
+     * still retires whatever outcome toast an earlier attempt left. History:
+     * the in-form banner (`submitError`) and its toast were once raised together
+     * at each refusal point, but only the banner was ever retired
      * together: the toast went out under sonner's auto-generated id, so nothing
      * here held a handle on it and a refused submit's toast outlived the
      * attempt that raised it. A later SUCCESSFUL submit — whose success toast a
@@ -1848,6 +1872,25 @@ ComponentRegistry.register('form',
      */
     const formInstanceId = React.useId();
     const outcomeToastId = `form-outcome:${formInstanceId}`;
+    /**
+     * A refused submit is said ONCE, by the banner above the fields
+     * (objectstack-ai/objectstack#27520). The toast that used to repeat it word
+     * for word was there for the banner a long modal or drawer form had
+     * scrolled out of view; instead the banner is brought into view each time
+     * it is raised, so no second copy of the refusal is needed. The stale
+     * toast of an earlier attempt is still dismissed under the outcome id.
+     */
+    const submitBannerRef = React.useRef<HTMLDivElement>(null);
+    const [refusalRaised, setRefusalRaised] = React.useState(0);
+    const raiseRefusal = (message: string | string[]) => {
+      toast.dismiss(outcomeToastId);
+      setSubmitError(message);
+      setRefusalRaised((n) => n + 1);
+    };
+    React.useEffect(() => {
+      if (refusalRaised === 0) return;
+      submitBannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+    }, [refusalRaised]);
     // Active `fieldTabs` panel. Undefined until something picks one — the
     // effective tab falls back to `defaultFieldTab`, then to the first tab.
     // Which tab of an in-progress form is showing is presentational and dies
@@ -2307,6 +2350,57 @@ ComponentRegistry.register('form',
     // Read once per object and handed down on the field's own metadata.
     const codeFieldNames = React.useMemo(() => currencyCodeFieldNames(fields as unknown[]), [fields]);
     const usedCurrencyCodes = useUsedCurrencyCodes(contextDataSource, schema.objectName, codeFieldNames);
+
+    // The record as each visible update action would leave it
+    // (objectstack#28382). A declarative update action writes its static
+    // `patch` over the record, and the server runs `requiredWhen` over the
+    // result — so a field the patch makes required is refused on the first
+    // press while this form, judging the record as it stands, drew no mark.
+    // Each entry is `{ ...ruleRecord, ...patch }`, the merge the server makes;
+    // `renderFormField` evaluates the field's own `requiredWhen` over it and
+    // notes the action under an empty field that comes out required.
+    //
+    // EDIT forms only: an insert has no record for an action to run on. An
+    // action is kept when it is not switched off, the caller holds its
+    // `requiredPermissions` (the `action:bar` gate), and its `visible`
+    // predicate holds over the live record. That predicate fails CLOSED here
+    // (a rule that cannot be evaluated hides the button's note, never invents
+    // one), and quietly: the action's own button reports its fault. The note
+    // is a heads-up only — nothing here blocks a save.
+    //
+    // Asked only when some field declares a `requiredWhen`: with none, no field
+    // can come out required under any patch, so the form makes no read beyond
+    // the ones its host already made.
+    const declaresRequiredWhen = React.useMemo(
+      () => fields.some((f) => (f as { requiredWhen?: unknown } | null | undefined)?.requiredWhen != null),
+      [fields],
+    );
+    const patchingActions = usePatchingUpdateActions(
+      contextDataSource,
+      schema.objectName,
+      !isCreateForm && declaresRequiredWhen,
+    );
+    const mayInvokeAction = useCapabilityGate();
+    const actionOutcomes = React.useMemo(() => {
+      if (isCreateForm || patchingActions.length === 0) return [] as Array<{ label: string; record: Record<string, unknown> }>;
+      const out: Array<{ label: string; record: Record<string, unknown> }> = [];
+      for (const action of patchingActions) {
+        if (isActionSwitchedOff(action.source) || !mayInvokeAction(action.requiredPermissions)) continue;
+        const visible = action.visible;
+        if (visible === false) continue;
+        if (
+          visible != null &&
+          visible !== true &&
+          !evalFieldPredicate(visible as FieldRulePredicate, ruleRecord, false, previousRecord, predicateScope, {
+            warn: false,
+          })
+        ) {
+          continue;
+        }
+        out.push({ label: action.label, record: { ...ruleRecord, ...action.patch } });
+      }
+      return out;
+    }, [isCreateForm, patchingActions, mayInvokeAction, ruleRecord, previousRecord, predicateScope]);
 
     // Field name → label, for the "select the parent first" gate hint (#2284).
     const fieldLabelByName = React.useMemo(() => {
@@ -3051,10 +3145,7 @@ ComponentRegistry.register('form',
 
           // Check if submission returned an error
           if (result?.error) {
-            setSubmitError(result.error);
-            // Also surface as a toast so the message is visible even when the
-            // in-form banner has scrolled out of view (long forms in modals/drawers).
-            toast.error(result.error, { id: outcomeToastId });
+            raiseRefusal(result.error);
             return;
           }
         }
@@ -3140,10 +3231,7 @@ ComponentRegistry.register('form',
         if (isPermissionError(error) && typeof console !== 'undefined') {
           console.warn('[form] write denied:', error);
         }
-        setSubmitError(errorMessage);
-        // Also surface as a toast so the message is visible even when the
-        // in-form banner has scrolled out of view (long forms in modals/drawers).
-        toast.error(refusalContent(errorMessage), { id: outcomeToastId });
+        raiseRefusal(errorMessage);
 
         // Log errors for debugging (dev environment only)
         // process may not be defined in all environments
@@ -3209,14 +3297,12 @@ ComponentRegistry.register('form',
     const handleSubmit = (event?: React.BaseSyntheticEvent) => {
       if (faultedVisibleWhenFieldNames.length > 0) {
         event?.preventDefault?.();
-        toast.dismiss(outcomeToastId);
         const message = t('form.visibleWhenFaulted', {
           fields: faultedVisibleWhenFieldNames
             .map((n) => fieldLabelByName[n] || n)
             .join(t('validation.formInvalidJoiner')),
         });
-        setSubmitError(message);
-        toast.error(message, { id: outcomeToastId });
+        raiseRefusal(message);
         // Marks the tabs that hold the fields, as a rejected submit does.
         setRejectedFieldNames(faultedVisibleWhenFieldNames);
         return Promise.resolve();
@@ -3891,6 +3977,18 @@ ComponentRegistry.register('form',
                     invalidInputMessages.set(name, message);
                     void form.trigger(name);
                   },
+                  // A lookup pick's declared `lookupAutofill` targets, written
+                  // as edits of this form's record; the widget decides what the
+                  // overwrite rule lets it fill. A target already showing an
+                  // error is re-validated, so a filled required field clears.
+                  onAutofill: (patch: Record<string, unknown>) => {
+                    for (const [target, filled] of Object.entries(patch)) {
+                      form.setValue(target, filled, {
+                        shouldDirty: true,
+                        shouldValidate: !!form.getFieldState(target).error,
+                      });
+                    }
+                  },
                   // Required is a STATE, so it travels the state channel
                   // (objectui#3290). Until now the resolved `required` (static
                   // `required` + `requiredWhen` CEL) drove exactly one thing —
@@ -3958,6 +4056,26 @@ ComponentRegistry.register('form',
                 // which is a missing hint, never a wrong one.
                 serverOwned && !readonly && !fieldDisabled && isMissingForRequired(formField.value)
                   ? t('form.serverDefaultHint')
+                  : undefined,
+                // objectstack#28382 — the update actions this empty field
+                // would block: its own `requiredWhen` over the record each
+                // action leaves (`actionOutcomes`). Not while it is required
+                // already (the asterisk says so), nor on a control the person
+                // cannot fill. Faults answer `false` and stay quiet: the live
+                // evaluation above already reported a broken rule.
+                requiredWhen != null &&
+                  !required &&
+                  !readonly &&
+                  !fieldDisabled &&
+                  actionOutcomes.length > 0 &&
+                  isMissingForRequired(formField.value)
+                  ? actionOutcomes
+                      .filter((outcome) =>
+                        evalFieldPredicate(requiredWhen, outcome.record, false, previousRecord, predicateScope, {
+                          warn: false,
+                        }),
+                      )
+                      .map((outcome) => t('form.requiredForAction', { action: outcome.label }))
                   : undefined,
               )}
               <FormMessage />
@@ -4076,7 +4194,7 @@ ComponentRegistry.register('form',
         >
           {/* Form Error Alert */}
           {submitError && (
-            <Alert variant="destructive" className="mb-4">
+            <Alert ref={submitBannerRef} variant="destructive" className="mb-4">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>{refusalContent(submitError)}</AlertDescription>
             </Alert>
@@ -4369,7 +4487,7 @@ interface RenderFieldProps {
   /** react-hook-form's ref binding, handed to the built-in control by name. */
   ref?: RefCallBack;
   /** The field's raw metadata object (`field.field`, else the field config). */
-  field?: Record<string, unknown>;
+  field?: Record<string, unknown> | FormFieldConfig;
   /** A dependent select's gate hint while its controlling field is unset (#2284). */
   emptyHint?: string;
   [key: string]: unknown;
@@ -4729,7 +4847,7 @@ const BuiltinSelectControl = React.forwardRef<HTMLButtonElement, BuiltinSelectCo
  * wrote it until objectui#12130; `objectFormNumericStep-9574.test.tsx` pins
  * both of its routes.
  */
-function nativeNumberStep(carrier: Record<string, unknown> | undefined): number | 'any' {
+function nativeNumberStep(carrier: RenderFieldProps['field']): number | 'any' {
   const step = carrier?.step;
   if (typeof step === 'number') return step;
   const scale = carrier?.scale;

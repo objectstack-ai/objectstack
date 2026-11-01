@@ -18,6 +18,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { toast } from 'sonner';
 import {
   recordDelete,
+  readCascadeDeleteObjects,
   type ActionDef,
   type ActionResult,
   type ConfirmationHandler,
@@ -26,6 +27,30 @@ import {
 
 /** The browser's native box — the fallback when the host passes no `onConfirm`. */
 const nativeConfirm: ConfirmationHandler = async (message) => window.confirm(message);
+
+/**
+ * The labels of the objects a delete of `objectName` cascades into, for the
+ * delete confirmation (objectstack#28472). The list is the platform's served
+ * `cascadeDeleteObjects`, read off the by-name object schema the adapter
+ * carries it on: a host's `objects` entry comes from the list read, which
+ * never serves it. `undefined` when no answer was served or the read failed,
+ * so the confirmation then says nothing about children. Each name is resolved
+ * by `labelOf`; a host that passes none shows the names.
+ */
+export async function resolveCascadeDeleteLabels(
+  dataSource: { getObjectSchema?: (objectName: string) => Promise<unknown> } | null | undefined,
+  objectName: string,
+  labelOf: (objectName: string) => string = (name) => name,
+): Promise<string[] | undefined> {
+  if (typeof dataSource?.getObjectSchema !== 'function') return undefined;
+  let schema: unknown;
+  try {
+    schema = await dataSource.getObjectSchema(objectName);
+  } catch {
+    return undefined;
+  }
+  return readCascadeDeleteObjects(schema)?.map((name) => labelOf(name));
+}
 
 interface ObjectActionConfig {
   objectName: string;
@@ -42,6 +67,12 @@ interface ObjectActionConfig {
   onConfirm?: ConfirmationHandler;
   /** Optional toast handler — falls back to sonner */
   onToast?: (message: string, options?: { type?: string }) => void;
+  /**
+   * Resolve another object's name to its label in the session's language, so
+   * the delete confirmation names the objects the delete cascades into
+   * (objectstack#28472). Without it those objects read by name.
+   */
+  objectLabelOf?: (objectName: string) => string;
 }
 
 interface ObjectActions {
@@ -75,6 +106,7 @@ export function useObjectActions({
   onRefresh,
   onConfirm,
   onToast,
+  objectLabelOf,
 }: ObjectActionConfig): ObjectActions {
   const navigate = useNavigate();
   const { appName } = useParams();
@@ -158,8 +190,9 @@ export function useObjectActions({
       // The copy comes from the shared record-delete core (objectui#10383).
       // With only an id in hand the title names the record by the resolver's
       // `Record #id` floor.
+      const cascadeLabels = await resolveCascadeDeleteLabels(dataSource, objectName, objectLabelOf);
       const copy = recordDelete.confirmCopy(
-        { objectName, t, label, objectDef },
+        { objectName, t, label, objectDef, cascadeLabels },
         { record: record ?? { id: recordId } },
       );
       if (!(await confirmDelete(copy))) return { success: false, error: 'Action cancelled by user' };
@@ -168,19 +201,20 @@ export function useObjectActions({
         params: record ? { recordId, record } : { recordId },
       });
     },
-    [execute, t, objectName, label, objectDef, confirmDelete],
+    [execute, t, objectName, label, objectDef, confirmDelete, dataSource, objectLabelOf],
   );
 
   const deleteRecords = useCallback(
     async (records: Record<string, unknown>[]): Promise<ActionResult> => {
+      const cascadeLabels = await resolveCascadeDeleteLabels(dataSource, objectName, objectLabelOf);
       const copy = recordDelete.confirmCopy(
-        { objectName, t, label, objectDef },
+        { objectName, t, label, objectDef, cascadeLabels },
         { count: records.length },
       );
       if (!(await confirmDelete(copy))) return { success: false, error: 'Action cancelled by user' };
       return execute({ type: 'delete', params: { records } });
     },
-    [execute, t, objectName, label, objectDef, confirmDelete],
+    [execute, t, objectName, label, objectDef, confirmDelete, dataSource, objectLabelOf],
   );
 
   const navigateToView = useCallback(

@@ -10,6 +10,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
 
@@ -220,7 +221,7 @@ const actionTranslationSchema = (surface: string) => strictObject({
   // `ActionSchema.submitText` (#27944) — the param dialog's submit button
   // label; overlaid by `translateAction` like `description`, the same
   // dialog's line under its title, for an action that declares `params`.
-  submitText: z.string().optional().describe('Translated label of the submit button in the action\'s param dialog (the action must declare `params`; no renderer shows it yet)'),
+  submitText: z.string().optional().describe('Translated label of the submit button in the action\'s param dialog (the action must declare `params`)'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather
@@ -2472,6 +2473,8 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // dropped on every parse — and `authored-translation-sync` has to strip them
   // by hand on the read side precisely because the schema could not hold them.
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 }).describe('One locale of translations — the `translation` metadata type'));
 
 /** A single `translation` metadata item. */

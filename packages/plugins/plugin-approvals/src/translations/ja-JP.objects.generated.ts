@@ -43,7 +43,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "オブジェクト"
       },
       record_id: {
-        label: "レコード ID"
+        label: "レコード"
       },
       submitter_id: {
         label: "送信者"

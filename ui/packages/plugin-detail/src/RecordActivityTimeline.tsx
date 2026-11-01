@@ -130,18 +130,24 @@ export interface RecordActivityTimelineProps {
   /** The same, for the feed's comment read. */
   commentsDenied?: boolean;
   /**
-   * objectstack#27055, Target 3 — `stream` is the record page v3 timeline:
-   * the filter chips 全部 / 活动 / 讨论 / 变更 on the title row instead of
-   * the dropdown, system entries (field changes, system events) as one
-   * compact muted line each, and 「查看全部 N 条 →」 at the foot. `panel`
-   * (the default) is the block as it has always been.
+   * objectstack#27055, Target 3 — `stream` is the record page's 动态 stream
+   * in full (the 动态 tab): the filter chips 全部 / 活动 / 讨论 / 变更 on the
+   * title row instead of the dropdown, system entries (field changes, system
+   * events) as one compact muted line each, and paging at the foot.
+   * objectstack#27524, Target 5 — `peek` is the body of the 动态 panel, the
+   * first panel of the right column: a one-line composer that opens the full
+   * one when pressed, the entries it is handed as one line each, and
+   * 「查看全部 N 条 →」 (`onViewAll`); no chips, no title — the panel draws
+   * the header. `panel` (the default) is the block as it has always been.
    */
-  variant?: 'panel' | 'stream';
+  variant?: 'panel' | 'stream' | 'peek';
   /** The stream's chip (controlled); `all` when absent. */
   streamFilter?: TimelineStreamFilter;
   onStreamFilterChange?: (filter: TimelineStreamFilter) => void;
-  /** How many entries the whole stream holds, for its 「查看全部 N 条 →」. */
+  /** How many entries the whole stream holds, for the peek's 「查看全部 N 条 →」. */
   totalCount?: number;
+  /** The peek's 「查看全部 N 条 →」: open the 动态 tab. Absent: not drawn. */
+  onViewAll?: () => void;
   className?: string;
 }
 
@@ -316,9 +322,11 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   streamFilter = 'all',
   onStreamFilterChange,
   totalCount,
+  onViewAll,
   className,
 }) => {
-  const isStream = variant === 'stream';
+  const isPeek = variant === 'peek';
+  const isStream = variant === 'stream' || isPeek;
   const { t } = useDetailTranslation();
   // The BCP-47 tag the absolute-date tail formats with (objectui#9786).
   const displayLocale = useDisplayLocale();
@@ -328,6 +336,8 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   const [isLoadingMore, setIsLoadingMore] = React.useState(false);
   const [pendingAttachments, setPendingAttachments] = React.useState<Attachment[]>([]);
   const [isUploading, setIsUploading] = React.useState(false);
+  // The peek's composer is one line until the reader presses it.
+  const [composerOpen, setComposerOpen] = React.useState(false);
   // ONE value for the visible heading's title AND the landmark's name — see the
   // `<section>` below (objectui#9998).
   const title = titleLabel ?? t('detail.activity');
@@ -462,6 +472,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       );
       setCommentText('');
       setPendingAttachments([]);
+      setComposerOpen(false);
     } catch {
       // A rejection means the comment was NOT written (objectui#10899). The
       // host reports why; the composer's part is to keep the draft and its
@@ -505,24 +516,26 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   // same function when expanded (objectstack#25959).
   // objectstack#27055 — a system entry of the stream: ONE muted line, the
   // change itself, then who and when. 「状态 新建 → 已联系 · Dev Admin · 昨天」.
-  const renderSystemLine = (item: FeedItem): React.ReactNode => {
-    const Icon = FEED_TYPE_ICONS[item.type] || Zap;
+  const systemLineText = (item: FeedItem): string => {
     const changes = (item.fieldChanges ?? []).map((change) => {
       const label = change.fieldLabel || labelOfField(change.field);
       const from = change.oldDisplayValue ?? (change.oldValue == null ? '' : String(change.oldValue));
       const to = change.newDisplayValue ?? (change.newValue == null ? '' : String(change.newValue));
       return `${label} ${from || '—'} → ${to || '—'}`;
     });
-    const what =
-      changes.length > 0
-        ? changes.join('; ')
-        : item.body && item.body.trim()
-          ? item.body
-          : item.changedFields && item.changedFields.length > 0
-            ? t('detail.foldedUpdates', {
-                fields: item.changedFields.map(labelOfField).join(t('validation.formInvalidJoiner')),
-              })
-            : t('detail.activityUpdated');
+    return changes.length > 0
+      ? changes.join('; ')
+      : item.body && item.body.trim()
+        ? item.body
+        : item.changedFields && item.changedFields.length > 0
+          ? t('detail.foldedUpdates', {
+              fields: item.changedFields.map(labelOfField).join(t('validation.formInvalidJoiner')),
+            })
+          : t('detail.activityUpdated');
+  };
+  const renderSystemLine = (item: FeedItem): React.ReactNode => {
+    const Icon = FEED_TYPE_ICONS[item.type] || Zap;
+    const what = systemLineText(item);
     return (
       <div key={item.id} className="flex items-start gap-2 py-0.5 text-xs text-muted-foreground" data-stream-system-row="">
         <span className="z-10 flex h-8 w-8 shrink-0 items-center justify-center">
@@ -608,7 +621,10 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               item={item}
               onEditComment={onEditComment}
               onDeleteComment={onDeleteComment}
-              bodyClassName="text-sm whitespace-pre-wrap break-words text-muted-foreground"
+              // The body is what the author wrote, so it reads in the
+              // foreground colour, as a reply's body does; the muted grey
+              // belongs to the meta line above it (objectstack#27520 row 14).
+              bodyClassName="text-sm whitespace-pre-wrap break-words text-foreground"
             />
 
             {/* Drill to source rich entity (ADR-0052 ActivityPointer) */}
@@ -743,6 +759,112 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
     );
   };
 
+  const composer = (
+    <RichTextCommentInput
+      value={commentText}
+      onChange={setCommentText}
+      onSubmit={handleAddComment}
+      mentionSuggestions={mentionSuggestions}
+      placeholder={t('detail.leaveCommentPlaceholder')}
+      disabled={isSubmitting}
+      canSubmitEmpty={pendingAttachments.length > 0}
+      autoFocus={isPeek}
+      extraSlot={
+        onUploadAttachments ? (
+          <CommentAttachment
+            attachments={pendingAttachments}
+            onUpload={handleUpload}
+            onRemove={handleRemoveAttachment}
+            readOnly={isSubmitting || isUploading}
+          />
+        ) : pendingAttachments.length > 0 ? (
+          <CommentAttachment
+            attachments={pendingAttachments}
+            onRemove={handleRemoveAttachment}
+            readOnly={isSubmitting}
+          />
+        ) : undefined
+      }
+    />
+  );
+
+  // objectstack#27524, Target 5 — the 动态 panel's body. The panel around it
+  // draws the header (「动态」 and the count); here: the composer, one line
+  // until pressed, then the entries this block was handed (the newest, roots
+  // only) as one line each — what, then when — and 「查看全部 N 条 →」 to the
+  // 动态 tab when the stream holds more than are drawn.
+  if (isPeek) {
+    const total = totalCount ?? filtered.length;
+    const peekLine = (item: FeedItem): React.ReactNode => {
+      const Icon = item.type === 'comment' ? MessageSquare : isSystemStreamEntry(item) ? Edit : FEED_TYPE_ICONS[item.type] || Zap;
+      const body = (item.body ?? '').replace(/\s+/g, ' ').trim();
+      const what = isSystemStreamEntry(item) ? systemLineText(item) : body || item.actor;
+      const when = formatTimestamp(item.createdAt, t, displayLocale);
+      return (
+        <div
+          key={item.id}
+          className="flex h-8 items-center gap-2 border-t border-border px-3 text-[12.5px]"
+          title={`${what} · ${item.actor} · ${when}`}
+          data-record-timeline-peek-row=""
+        >
+          <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">{what}</span>
+          <span className="shrink-0 text-[11.5px] text-muted-foreground tabular-nums">{when}</span>
+        </div>
+      );
+    };
+    return (
+      <div className={className} data-record-timeline-peek="">
+        {showCommentInput && (
+          <div className="border-t border-border px-3 py-2">
+            {composerOpen || commentText || pendingAttachments.length > 0 ? (
+              composer
+            ) : (
+              <button
+                type="button"
+                className="flex h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => setComposerOpen(true)}
+                data-record-timeline-composer=""
+              >
+                <span className="truncate">{t('detail.timelineComposer', { defaultValue: 'Write a note… @ to mention' })}</span>
+              </button>
+            )}
+          </div>
+        )}
+        {filtered.length > 0 && deniedNotice && <div className="border-t border-border px-3">{deniedNotice}</div>}
+        {loading && filtered.length === 0 ? (
+          <div
+            role="status"
+            aria-live="polite"
+            data-testid="activity-loading"
+            className="flex items-center gap-2 border-t border-border px-3 py-2 text-xs text-muted-foreground"
+          >
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <span>{t('detail.loading')}</span>
+          </div>
+        ) : (activityDenied || commentsDenied) && filtered.length === 0 ? (
+          <div className="border-t border-border px-3">{deniedNotice}</div>
+        ) : filtered.length === 0 ? (
+          <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+            {emptyLabel ?? t('detail.noActivity')}
+          </div>
+        ) : (
+          rootItems.map(peekLine)
+        )}
+        {onViewAll && total > rootItems.length && (
+          <button
+            type="button"
+            className="flex h-8 w-full items-center border-t border-border px-3 text-left text-[12.5px] text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+            onClick={onViewAll}
+            data-record-timeline-view-all=""
+          >
+            {t('detail.viewAllEntries', { count: total, defaultValue: 'View all {{count}} →' })}
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <section
       // De-boxed: render as a naked section with a top divider instead of
@@ -847,33 +969,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
         )}
 
         {/* Comment Input — rich text with @mention + bold/italic/list/code + preview */}
-        {showCommentInput && (
-          <RichTextCommentInput
-            value={commentText}
-            onChange={setCommentText}
-            onSubmit={handleAddComment}
-            mentionSuggestions={mentionSuggestions}
-            placeholder={t('detail.leaveCommentPlaceholder')}
-            disabled={isSubmitting}
-            canSubmitEmpty={pendingAttachments.length > 0}
-            extraSlot={
-              onUploadAttachments ? (
-                <CommentAttachment
-                  attachments={pendingAttachments}
-                  onUpload={handleUpload}
-                  onRemove={handleRemoveAttachment}
-                  readOnly={isSubmitting || isUploading}
-                />
-              ) : pendingAttachments.length > 0 ? (
-                <CommentAttachment
-                  attachments={pendingAttachments}
-                  onRemove={handleRemoveAttachment}
-                  readOnly={isSubmitting}
-                />
-              ) : undefined
-            }
-          />
-        )}
+        {showCommentInput && composer}
 
         {/* A refusal with rows on screen (objectui#11195): the comments
             were readable and the activity was not, or the other way round.
@@ -942,17 +1038,15 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
               size="sm"
               onClick={handleLoadMore}
               disabled={isLoadingMore}
-              aria-label={isStream ? undefined : t('detail.loadMore')}
-              data-stream-view-all={isStream ? '' : undefined}
+              aria-label={t('detail.loadMore')}
+              data-stream-load-more={isStream ? '' : undefined}
             >
               {isLoadingMore ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-1" />
-              ) : isStream ? null : (
+              ) : (
                 <ChevronDown className="h-4 w-4 mr-1" />
               )}
-              {isStream
-                ? t('detail.viewAllEntries', { count: totalCount ?? filtered.length, defaultValue: 'View all {{count}} →' })
-                : t('detail.loadMore')}
+              {t('detail.loadMore')}
             </Button>
           </div>
         )}

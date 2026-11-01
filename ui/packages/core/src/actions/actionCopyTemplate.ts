@@ -51,6 +51,25 @@ export function actionCopySource(copy: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * A copy value with a `template` envelope reduced to its text, for a reader
+ * that takes a string or an `I18nLabel` locale map: the envelope's `source`
+ * (`undefined` when it carries none), anything else — a string, a locale map,
+ * `undefined` — handed back unchanged.
+ *
+ * The slots an action's param dialog and success toast read beside
+ * `confirmText` — `description`, each param's `helpText`, an
+ * `outcomeMessages` entry — are `template` slots too (objectstack#27948,
+ * ruling A, step 2), so a served value can be the envelope where it was a
+ * string. The readers that localize them (a bundle lookup over the literal,
+ * `pickLocalized` over a locale map) take a string, so the envelope is
+ * reduced here first; a locale map stays one, as its own reader resolves it.
+ */
+export function actionCopyText<T>(copy: T): Exclude<T, { dialect?: 'template'; source?: unknown }> | string | undefined {
+  if (isActionCopyEnvelope(copy)) return actionCopySource(copy);
+  return copy as Exclude<T, { dialect?: 'template'; source?: unknown }>;
+}
+
 /** A `{{ … }}` hole, as the template engine delimits one. */
 const TEMPLATE_HOLE = /\{\{[^}]*\}\}/;
 
@@ -64,6 +83,28 @@ const TEMPLATE_HOLE = /\{\{[^}]*\}\}/;
  */
 export function hasTemplateHoles(text: string): boolean {
   return TEMPLATE_HOLE.test(text);
+}
+
+/**
+ * Fill the copy of a slot that is still in transition to the `template`
+ * dialect — the param dialog's `description`, each param's `helpText`, and an
+ * `outcomeMessages` entry (objectstack#27948, ruling A, step 1: the renderer
+ * reads `{{ }}` before the spec closes these slots to it).
+ *
+ * ONE dialect per sentence, the rule `confirmText` / `successMessage` kept
+ * through their own transition: a sentence with a `{{ }}` hole is filled by
+ * `fillTemplate` (the template engine) alone and is never read for `${…}`, so
+ * a `${…}` token in it stays text and a value filled into a hole is never read
+ * a second time; a sentence with none keeps its `${…}` reading through
+ * `fillLegacy`. Step 2 of that ruling (the spec's publish refusal of `${…}`
+ * and the migration of existing copy) retires `fillLegacy`.
+ */
+export function fillTransitionalCopy(
+  text: string,
+  fillTemplate: (source: string) => string,
+  fillLegacy: (source: string) => string,
+): string {
+  return hasTemplateHoles(text) ? fillTemplate(text) : fillLegacy(text);
 }
 
 /**

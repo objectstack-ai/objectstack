@@ -53,15 +53,11 @@
  *    decided, whether that retry succeeds or fails again. Driven, not assumed:
  *    the second `it` below IS path 2, and it is green post-#7354.
  *
- * The parent `<ObjectForm>`'s own renderer also toasts a rejected write, under
- * its OWN `form-outcome:` id, and retires it at the top of the next submit
- * (objectui#7252). Before objectui#7354 that toast was already superseded and
- * was not what this file pinned; it was visible in the pre-fix registry below
- * as the second error entry. Post-#7354 it is the ONLY error entry — the
- * duplication objectui#7354 fixed is gone, so `distinctOnScreen` below now
- * sees the same one-error reality `onScreen` does; see
- * `MasterDetailForm.singleRefusalRaiser.test.tsx` for the pin that asserts
- * that directly on the raw (undeduplicated) registry.
+ * The parent `<ObjectForm>`'s own renderer says a rejected write once, by
+ * its banner, and raises no error toast for it (objectstack-ai/objectstack#27520);
+ * it retires any outcome toast of its own at the top of the next submit
+ * (objectui#7252). `MasterDetailForm.singleRefusalRaiser.test.tsx` pins the
+ * one-message count directly.
  *
  * ## Why the pin models sonner rather than counting calls
  *
@@ -189,27 +185,16 @@ const save = () => fireEvent.click(screen.getByRole('button', { name: /create/i 
 const onScreen = (): ToastEntry[] => [...toastRegistry.values()];
 
 /**
- * What the screen SAYS, with each distinct statement counted once.
- *
- * Before objectui#7354: a refused master-detail save put the SAME refusal on
- * screen twice — `handleError` here raised one, and the parent
- * `<ObjectForm>`'s renderer raised its own for the write it re-threw. That
- * duplication was a separate defect from the one THIS file pins, so the
- * assertions below were written to deliberately not depend on HOW MANY
- * raisers reported an outcome — only on WHICH outcomes remain readable.
- *
- * objectui#7354 fixed that duplication (removed `handleError`'s own toast),
- * so today `distinctOnScreen()` and the raw `onScreen()` agree on a refused
- * save — there is only the one raiser left. The dedup here is kept anyway:
- * this file's OWN subject (a later outcome superseding an earlier one on THIS
- * form) never depended on how many raisers were active, and
- * `MasterDetailForm.singleRefusalRaiser.test.tsx` is where the raw,
- * undeduplicated count is the point of the assertion.
+ * The refusal as the form says it: its banner, the one message a refused save
+ * raises (objectstack-ai/objectstack#27520) — no error toast repeats it.
  */
-const distinctOnScreen = (): ToastEntry[] => {
-  const seen = new Map<string, ToastEntry>();
-  for (const t of onScreen()) seen.set(`${t.type}:${t.message}`, t);
-  return [...seen.values()];
+const refusalBanners = (): HTMLElement[] =>
+  screen.queryAllByRole('alert').filter((el) => (el.textContent ?? '').includes(REFUSAL));
+
+/** The refusal is said once, by its banner, and by no toast. */
+const saidOnceByBanner = () => {
+  expect(refusalBanners()).toHaveLength(1);
+  expect(onScreen().filter((t) => t.type === 'error')).toEqual([]);
 };
 
 beforeEach(() => {
@@ -228,7 +213,7 @@ describe('MasterDetailForm — a later save outcome supersedes this form’s ear
     fireEvent.change(await headerInput(container), { target: { value: 'PO-1' } });
     save();
     await waitFor(() => expect(ds.batchTransaction).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(distinctOnScreen()).toEqual([{ type: 'error', message: REFUSAL }]));
+    await waitFor(saidOnceByBanner);
 
     // The user corrects the input and saves again inside the refusal's lifetime.
     fireEvent.change(await headerInput(container), { target: { value: 'PO-1b' } });
@@ -237,6 +222,7 @@ describe('MasterDetailForm — a later save outcome supersedes this form’s ear
 
     // The card's own sentence: one form, one outcome on screen.
     await waitFor(() => expect(onScreen()).toEqual([{ type: 'success', message: 'Created' }]));
+    expect(refusalBanners()).toEqual([]);
   });
 
   it('retires the refusal even when the host owns confirmation (no built-in success toast)', async () => {
@@ -251,7 +237,7 @@ describe('MasterDetailForm — a later save outcome supersedes this form’s ear
     fireEvent.change(await headerInput(container), { target: { value: 'PO-2' } });
     save();
     await waitFor(() => expect(ds.batchTransaction).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(distinctOnScreen()).toEqual([{ type: 'error', message: REFUSAL }]));
+    await waitFor(saidOnceByBanner);
 
     fireEvent.change(await headerInput(container), { target: { value: 'PO-2b' } });
     save();
@@ -260,6 +246,7 @@ describe('MasterDetailForm — a later save outcome supersedes this form’s ear
 
     // Nothing left asserting the save was refused.
     await waitFor(() => expect(onScreen()).toEqual([]));
+    expect(refusalBanners()).toEqual([]);
   });
 
   it('does not stack a second refusal when the retry is refused too', async () => {
@@ -273,15 +260,14 @@ describe('MasterDetailForm — a later save outcome supersedes this form’s ear
     fireEvent.change(await headerInput(container), { target: { value: 'PO-3' } });
     save();
     await waitFor(() => expect(ds.batchTransaction).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(distinctOnScreen()).toEqual([{ type: 'error', message: REFUSAL }]));
-    // How many raisers reported this refusal is not this file's subject; that
-    // the SECOND attempt adds none of its own is.
+    await waitFor(saidOnceByBanner);
+    // That the SECOND attempt adds no message of its own is this file's subject.
     const afterFirstAttempt = onScreen().length;
 
     fireEvent.change(await headerInput(container), { target: { value: 'PO-3b' } });
     save();
     await waitFor(() => expect(ds.batchTransaction).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(distinctOnScreen()).toEqual([{ type: 'error', message: REFUSAL }]));
+    await waitFor(saidOnceByBanner);
     expect(onScreen()).toHaveLength(afterFirstAttempt);
   });
 });

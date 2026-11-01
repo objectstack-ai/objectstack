@@ -49,12 +49,18 @@
  *   failure directly.
  */
 
+import type { ActionFieldError } from '@object-ui/types';
 import { actionErrorDetail } from './actionErrorDetail.js';
 
 export interface ActionResponseOutcome {
     ok: boolean;
     /** Human-readable failure text. Always a string when `ok` is false. */
     error?: string;
+    /**
+     * The refusal's per-field entries (`error.details.fields`), when it carried
+     * any with a usable `field`. Only on a failure.
+     */
+    fieldErrors?: ActionFieldError[];
     /**
      * The ACTION ENVELOPE (`body.data`) — `{ success, data }`. Kept as-is
      * because `ActionResult.data` has always carried this level and
@@ -119,13 +125,39 @@ export function interpretActionResponse(
         // `{message, code}` object, which `actionErrorDetail` resolves to a
         // string — handing that object to `toast.error()` as a React child
         // crashes the page, React #31).
+        const fieldErrors = refusalFieldErrors(innerFailed ? envelope : json);
         return {
             ok: false,
             error: innerFailed
                 ? actionErrorDetail(envelope, `${label} failed`)
                 : actionErrorDetail(json, `${label} failed (HTTP ${res.status})`),
+            ...(fieldErrors ? { fieldErrors } : {}),
         };
     }
 
     return { ok: true, envelope, payload: readActionPayload(envelope) };
+}
+
+/**
+ * The `fields` list of a refusal body: `error.details.fields` on the current
+ * envelope, `fields` on the legacy inner one. Entries with no string `field`
+ * are dropped rather than guessed at; the rest keep the server's own `code`,
+ * `message` and `label`.
+ */
+function refusalFieldErrors(body: unknown): ActionFieldError[] | undefined {
+    const b = body as { error?: { details?: { fields?: unknown } }; fields?: unknown } | null | undefined;
+    const raw = b?.error?.details?.fields ?? b?.fields;
+    if (!Array.isArray(raw)) return undefined;
+    const out: ActionFieldError[] = [];
+    for (const entry of raw) {
+        const e = entry as Record<string, unknown> | null;
+        if (!e || typeof e !== 'object' || typeof e.field !== 'string' || e.field === '') continue;
+        out.push({
+            field: e.field,
+            ...(typeof e.code === 'string' ? { code: e.code } : {}),
+            ...(typeof e.message === 'string' ? { message: e.message } : {}),
+            ...(typeof e.label === 'string' ? { label: e.label } : {}),
+        });
+    }
+    return out.length > 0 ? out : undefined;
 }

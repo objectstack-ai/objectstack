@@ -4,8 +4,6 @@ import type { SemanticMigration } from '../../types.js';
 
 export const entry: SemanticMigration = {
   id: 'system-metrics-jsdoc-durations-unit-in-key',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface: 'the five remaining metrics durations whose unit lived in a source JSDoc only: '
     + 'MetricDefinition.summary.maxAge, ServiceLevelObjective.errorBudget.burnRateWindows[].window, '
     + 'MetricExportConfig.interval, MetricsConfig.collectionInterval and '

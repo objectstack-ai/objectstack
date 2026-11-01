@@ -30,7 +30,10 @@
  * when the resolved list reads the body.
  *
  * Controls: the data door refuses the same filters; a scalar-column filter on
- * a family table is served projected, as #21519 serves it; and an ordinary
+ * a family table is served projected to a system run, as #21519 serves it, and
+ * no row to a user-identity run below datasource administration (#27884: a
+ * datasource definition's stored row is served only to holders of
+ * `manage_platform_settings`, which this triggering user is not); and an ordinary
  * object whose columns share the family's column names is filtered and served
  * exactly as stored.
  *
@@ -334,7 +337,18 @@ describe("flow get_record refuses a filter that evaluates the stored-metadata fa
     });
   }
 
-  for (const runAs of ['system', 'user'] as const) {
+  it("runAs:'user' below datasource administration: a scalar-column filter on a family read runs and is served no datasource row (#27884)", async () => {
+    const run = await runWatched(readThenCopyFlow(`scalar_${seq++}`, 'sys_metadata', 'user', 'one', { name: DS_NAME, type: 'datasource' }));
+    expect(run.res.success, `run failed: ${JSON.stringify(run.res.error)}`).toBe(true);
+    expect(run.familyReads).toBeGreaterThan(0);
+    expect(run.copy, 'the node downstream of the read ran').toBeTruthy();
+    expect(run.res.output?.rec ?? null, 'the node served a row').toBeNull();
+    const text = JSON.stringify(run.res);
+    expect(text.includes(SENTINEL), 'the stored credential reached the run').toBe(false);
+    expect(text.includes(DS_URL), "the row's configuration reached the run").toBe(false);
+  });
+
+  for (const runAs of ['system'] as const) {
     it(`runAs:'${runAs}': a scalar-column filter on a family read is served projected, with the door's keyed hash`, async () => {
       const control: any = await door.findData({ object: 'sys_metadata', query: { where: { name: DS_NAME } } });
       expect(control.records).toHaveLength(1);

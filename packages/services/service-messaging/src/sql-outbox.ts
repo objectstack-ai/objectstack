@@ -11,6 +11,7 @@ import type {
     INotificationOutbox,
     NotificationDeliveryRecord,
     ReapOptions,
+    DueWorkOptions,
 } from './outbox.js';
 import { hashPartition } from './backoff.js';
 import { toEpochMs } from './audit-timestamp.js';
@@ -73,9 +74,9 @@ interface DeliveryRow {
  * `sys_stamp_audit_update` hook stamps it on every update unconditionally, and
  * `updated_at` is `readonly`, so a caller-supplied value is stripped by
  * `stripReadonlyFields` (#2948) before it reaches the driver — with a WARN per
- * call. The visibility-timeout reap is an unconditional UPDATE that runs whether
- * or not a row is stale — `reap()`, and `claim()` / `claimDigest()` unless told
- * `skipReap` — and while every claim path ran it per partition, an idle dev
+ * call. The visibility-timeout reap was an unconditional UPDATE that ran whether
+ * or not a row was stale (#28383 now reads first) — `reap()`, and `claim()` /
+ * `claimDigest()` unless told `skipReap` — and while every claim path ran it per partition, an idle dev
  * server's three claim paths × 8 partitions × a 500 ms dispatcher tick spammed
  * 48 identical warnings a second and drowned the console. Writing the column was already a no-op
  * (stripped, then re-stamped); passing it as epoch-ms would also have been the
@@ -149,6 +150,26 @@ export class SqlNotificationOutbox implements INotificationOutbox {
 
     async reap(opts: ReapOptions): Promise<void> {
         await this.reapExpired(opts.now ?? Date.now(), opts.claimTtlMs);
+    }
+
+    /**
+     * [#28383] One read across every partition: is any `pending` row due? The
+     * predicate is {@link claim}'s and {@link claimDigest}'s with their two
+     * `digest_key` arms and their partition term dropped, so it answers `true`
+     * exactly when at least one of the `2 × partitionCount` probes an idle tick
+     * used to issue would have found a row.
+     */
+    async hasDueWork(opts: DueWorkOptions): Promise<boolean> {
+        const now = opts.now ?? Date.now();
+        const due = await this.engine.find(this.objectName, {
+            where: {
+                status: 'pending',
+                $or: [{ next_attempt_at: null }, { next_attempt_at: { $lte: now } }],
+            },
+            fields: ['id'],
+            limit: 1,
+        }, { context: DISPATCHER_SYSTEM_CONTEXT });
+        return due.length > 0;
     }
 
     async claim(opts: ClaimOptions): Promise<ClaimedDeliveryRecord[]> {
@@ -389,15 +410,32 @@ export class SqlNotificationOutbox implements INotificationOutbox {
      * The visibility-timeout reap: ONE predicate UPDATE returning every expired
      * `in_flight` claim to `pending`. No partition in the predicate — it spans
      * the whole table by construction.
+     *
+     * [#28383] Asked first, written only when there is something to reap. On a
+     * kernel the predicate UPDATE is two statements — the engine reads the
+     * matched rows for the per-row `afterUpdate` dispatch, then writes — and it
+     * ran on every tick with nothing expired, which is nearly every tick. A
+     * one-row id read now answers "anything expired?"; only a hit pays for the
+     * UPDATE, whose predicate is unchanged, so it still moves every row expired
+     * by then, not just the one the read saw. A row that expires between the
+     * read and the next tick is the next tick's reap, which is the window the
+     * once-per-tick reap already had (#17610).
      */
     private async reapExpired(now: number, claimTtlMs: number): Promise<void> {
+        const expired = { status: 'in_flight', claimed_at: { $lt: now - claimTtlMs } };
+        const any = await this.engine.find(
+            this.objectName,
+            { where: expired, fields: ['id'], limit: 1 },
+            { context: DISPATCHER_SYSTEM_CONTEXT },
+        );
+        if (any.length === 0) return;
         await this.engine.update(
             this.objectName,
             { status: 'pending', claimed_by: null, claimed_at: null },
             // Environment-wide by design: recovers rows a crashed node abandoned,
             // for every organization. Warrant in `outbox-dispatcher-scope.ts`.
             {
-                ...dispatcherSweepOptions({ status: 'in_flight', claimed_at: { $lt: now - claimTtlMs } }),
+                ...dispatcherSweepOptions(expired),
                 context: DISPATCHER_SYSTEM_CONTEXT,
             },
         );

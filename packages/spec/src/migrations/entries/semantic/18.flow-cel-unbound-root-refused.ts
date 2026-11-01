@@ -10,8 +10,6 @@ import type { SemanticMigration } from '../../types.js';
 // D2 conversion has behaviour to carry over.
 export const entry: SemanticMigration = {
   id: 'flow-cel-unbound-root-refused',
-  // No backticks in `surface` — build-upgrade-guide renders it inside a code
-  // span already, and a nested backtick would close it.
   surface:
     'flows[].nodes[].config.condition, flows[].edges[].condition, a decision node\'s conditions[].expression, a '
     + 'screen node\'s fields[].visibleWhen, and the CEL value envelopes of an assignment node\'s assignments and of '

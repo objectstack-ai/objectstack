@@ -11,8 +11,6 @@ import type { SemanticMigration } from '../../types.js';
 // D10 fate 1), which this entry does not perform.
 export const entry: SemanticMigration = {
   id: 'sys-audit-log-organization-column-retired',
-  // No backticks in `surface` — build-upgrade-guide.ts renders it inside a
-  // code span AND a table cell.
   surface:
     'sys_audit_log.organization_id — the injected organization column left the compliance ledger '
     + '(packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts, which now declares '

@@ -53,6 +53,7 @@ import {
   SelectValue,
 } from '@object-ui/components';
 import type { ActionParam } from '@object-ui/types';
+import { actionCopySource, isActionCopyEnvelope } from '@object-ui/core';
 import { paramDegradesWithoutTarget } from '../../../utils/paramToField.js';
 import { resolveParamWidgetType } from '@object-ui/fields';
 import type { MetadataPreviewProps } from '../preview-registry.js';
@@ -87,9 +88,18 @@ interface ResultDialog {
   fields?: ResultDialogField[];
 }
 
+/**
+ * The text a copy value shows: a string, an `I18nLabel` map's English (else
+ * first) value, or — for an action's `template` copy slots (`confirmText`,
+ * `successMessage`, and since objectstack#27948 `description`, a param's
+ * `helpText`, an `outcomeMessages` entry) — the `{ dialect: 'template',
+ * source }` envelope's `source`. Read as a map, the envelope gave the word
+ * `template`.
+ */
 function localize(v: unknown): string {
   if (v == null) return '';
   if (typeof v === 'string') return v;
+  if (isActionCopyEnvelope(v)) return actionCopySource(v) ?? '';
   if (typeof v === 'object') {
     const o = v as Record<string, string>;
     return o.en ?? o['en-US'] ?? Object.values(o)[0] ?? '';
@@ -456,7 +466,7 @@ function DialogMock({
                 {p.type && <span className="font-mono text-[9px] text-muted-foreground">{p.type}</span>}
               </label>
               {renderFieldMock(p, fieldLabel, locale)}
-              {p.helpText && <div className="text-[10px] text-muted-foreground">{p.helpText}</div>}
+              {localize(p.helpText) && <div className="text-[10px] text-muted-foreground">{localize(p.helpText)}</div>}
             </div>
           );
         })}

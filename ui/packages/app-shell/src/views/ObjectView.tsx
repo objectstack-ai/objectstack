@@ -41,6 +41,7 @@ import { ManagedUsersInviteLine } from './managedEnvironmentUsers.js';
 import { importTargetFields } from './importTargetFields.js';
 import { resolveViewId } from '../utils/resolveViewId.js';
 import { useRecordOpenPreference } from '../utils/recordOpenPreference.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { LIST_PINNED_VIEW_PREFERENCE, objectPreferenceScope, useWorkspacePreference } from '../utils/workspacePreference.js';
 import type { ListViewProps } from '@object-ui/plugin-list';
 import { defaultListViewId, viewRowId } from '../utils/viewIdentity.js';
@@ -60,7 +61,7 @@ import {
     loadViewOverrides,
     buildViewTabs,
 } from './objectViewTabs.js';
-import { ObjectNotFoundState } from './objectViewChrome.js';
+import { ObjectNotFoundState, useViewTabsFit } from './objectViewChrome.js';
 import { useObjectViewLiveData } from './objectViewLiveData.js';
 import { useObjectViewIdentity } from './objectViewIdentity.js';
 import { useObjectViewRecordNavigation } from './objectViewRecordNavigation.js';
@@ -655,8 +656,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         setSearchParams,
     });
 
-    // objectstack#25992 slice 11b: the view-config save and create handlers, view switching,
-    // the mobile view switcher and the view-tab CRUD callbacks moved to `./objectViewViewCrud.tsx`.
+    // objectstack#25992 slice 11b: the view-config save and create handlers, view switching
+    // and the view-tab CRUD callbacks moved to `./objectViewViewCrud.tsx` (the mobile view
+    // switcher it also registered retired with objectstack#27058).
     const {
         handleViewConfigSave,
         handleViewCreate,
@@ -678,17 +680,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         objectName,
         viewId,
         t,
-        language,
-        viewLabel,
-        servedViews,
         metadataClient,
         previewDrafts,
         setShowViewConfigPanel,
         setViewConfigPanelMode,
         setShowCreateViewDialog,
         setViewDraft,
-        objectDef,
-        unlabelledViewText,
         setRefreshKey,
         confirmHandler,
         savedViews,
@@ -715,6 +712,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // Action system for toolbar operations — refreshKey moved up (declared earlier).
     // Wired to confirmHandler/toastHandler so deletes use the Shadcn AlertDialog
     // and Sonner toast instead of native window.confirm.
+    // objectstack#28472 — the objects a delete cascades into, named by label.
+    const objectLabelOf = useCallback(
+        (name: string) => objectLabel(objects.find((o: any) => o.name === name) ?? { name, label: name }),
+        [objects, objectLabel],
+    );
     const actions = useObjectActions({
         objectName: objectDef.name,
         // The label this page shows (its header and breadcrumb read the same
@@ -727,6 +729,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         onEdit,
         onRefresh: refreshData,
         onConfirm: confirmHandler,
+        objectLabelOf,
         // ToastHandler's `type` is a string-literal union — a subset of the
         // looser `{ type?: string }` useObjectActions declares; cast is sound.
         onToast: toastHandler as (message: string, options?: { type?: string }) => void,
@@ -745,7 +748,13 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // an object that declares `page` (or `new_window` / `none`) keeps its
     // declaration. objectstack#27545 — the pane beside the list is the default.
     const [recordOpenPreference, setRecordOpenPreference] = useRecordOpenPreference();
-    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep } = useObjectViewRecordNavigation({
+    // objectstack#27058 — on a phone the record is always a page: a row tap
+    // navigates to it, and no pane is mounted beside or over the list.
+    const phone = usePhoneViewport();
+    // Below `sm` the page header, and the switcher in its title, is not drawn:
+    // the switcher leads the list's toolbar row instead (objectstack#27058).
+    const pageHeaderShown = useViewTabsFit();
+    const { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel } = useObjectViewRecordNavigation({
         activeView,
         objectDef,
         objects,
@@ -761,6 +770,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         unlabelledViewText,
         language,
         recordOpenPreference,
+        phone,
     });
     // A record that opens in the pane draws beside the list (`split`) unless
     // the reader prefers the drawer over it: same URL state (`?recordId=`),
@@ -772,14 +782,15 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // objectstack#26681 — the Display menu's Open records section: the mode this
     // object and view resolved to, and the reader's preference with its setter.
     // The console offers the full page as the third choice (objectstack#27545).
-    const recordOpen = useMemo<NonNullable<ListViewProps['recordOpen']>>(
-        () => ({
+    // Not on a phone, where every record is a page (objectstack#27058).
+    const recordOpen = useMemo<ListViewProps['recordOpen']>(
+        () => (phone ? undefined : {
             resolvedMode: navOverlay.mode,
             preference: recordOpenPreference,
             setPreference: setRecordOpenPreference,
             selectPage: () => setRecordOpenPreference('page'),
         }),
-        [navOverlay.mode, recordOpenPreference, setRecordOpenPreference],
+        [phone, navOverlay.mode, recordOpenPreference, setRecordOpenPreference],
     );
     // objectstack#26681 — the name cell's ↗, "open as full page", for a row that
     // opens the drawer (or the pane beside the list). A `page` object's row
@@ -803,7 +814,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
 
     // objectstack#27594: the list title is the view switcher, which replaced the
     // view tab strip; the view items `ManageViewsDialog` lists come with it.
-    const { viewTabItems, titleSwitcher } = useObjectViewTitleSwitcher({
+    const { viewTabItems, titleSwitcher, titleLabel } = useObjectViewTitleSwitcher({
         views,
         savedViews,
         objectDef,
@@ -858,6 +869,9 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         handleListRowsChange,
         recordOpen,
         openAsPage,
+        phoneTitle: !pageHeaderShown && titleSwitcher ? (
+            <span className="flex min-w-0 max-w-full text-base font-semibold" data-testid="list-phone-title">{titleSwitcher}</span>
+        ) : null,
         urlFilters,
         initialUfSelections,
         handleUserFilterSelectionsChange,
@@ -962,11 +976,18 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  the icon-pill + title again wastes ~60px of viewport
                  chrome that real-app conventions (Gmail / Notion / Linear)
                  reclaim for content. The create / import / overflow
-                 actions move to a floating action button (see below). */}
+                 actions move to a floating action button (see below), and
+                 the title's view switcher 「<view> ▾ · N」 leads the list's
+                 toolbar row, beside its filter / sort / display tools
+                 (objectstack#27058). */}
              {/* objectstack#25992 slice 10: the header moved to `./objectViewPageHeader.tsx`. */}
              <ObjectViewPageHeader
                  objectDef={objectDef}
-                 titleSwitcher={titleSwitcher}
+                 // Below `sm` the switcher is drawn in the list's toolbar row,
+                 // so the hidden header does not hold a second one.
+                 titleSwitcher={pageHeaderShown ? titleSwitcher : null}
+                 titleLabel={titleLabel}
+                 objectListHref={appName && objectName ? `/apps/${appName}/${objectName}` : undefined}
                  objectPluralLabel={objectPluralLabel}
                  objectDesc={objectDesc}
                  createButton={createButton}
@@ -1077,8 +1098,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
              {/* Views are switched from the page title (`titleSwitcher`,
                  objectstack#27594), on every face: a list, a chart and a view
                  the server refused alike. Its Manage views opens the dialog
-                 below. Below `sm` the mobile view switcher is rendered by
-                 AppHeader via MobileViewSwitcherContext (registered above). */}
+                 below. On a phone the same switcher leads the list's toolbar
+                 row (objectstack#27058). */}
              {isAdmin && views.length >= 1 && (
                <ManageViewsDialog
                  open={manageViewsOpen}
@@ -1155,7 +1176,10 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     return (
         <ActionProvider {...actionRuntime.actionProviderProps}>
         <RelatedRecordActionsProvider value={listRecordActions}>
-        {/* objectstack#25992 slice 10: the record pane moved to `./objectViewRecordOverlay.tsx`. */}
+        {/* objectstack#25992 slice 10: the record pane moved to `./objectViewRecordOverlay.tsx`.
+            On a phone no pane is mounted: a row opens the record's page
+            (objectstack#27058). */}
+        {phone ? pageColumn : (
         <ObjectViewRecordOverlay
             navOverlay={navOverlay}
             mode={recordPaneMode}
@@ -1166,10 +1190,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             drawerRoot={drawerRoot}
             drawerRestore={drawerRestore}
             handleRootStep={handleRootStep}
+            stepScope={listLabel}
             dataSource={dataSource}
             objects={objects}
             onEdit={onEdit}
         />
+        )}
         {actionRuntime.dialogs}
         </RelatedRecordActionsProvider>
         </ActionProvider>

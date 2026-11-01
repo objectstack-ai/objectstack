@@ -3,6 +3,7 @@
 import { Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import { createInterface } from 'node:readline';
+import { isValueDomainMember } from '@objectstack/spec/shared';
 import {
   printHeader,
   printSuccess,
@@ -23,6 +24,33 @@ import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js
 import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 // Type-only, so the heavy engine package is still loaded lazily below.
 import type { RecordCurrencyBackfillEngine } from '@objectstack/objectql';
+
+/**
+ * The `--code` refusal, judged before the occupancy probe, the `--apply`
+ * prompt and the boot: a code the code field's `valueDomain` would refuse
+ * fails the same way on every database, so nothing about the database needs
+ * opening to say so, and an `--apply` boot may create tables and columns.
+ *
+ * The predicate is the one `backfillRecordCurrencyCodes` applies, and the
+ * error is its envelope (`INVALID_FIELD` / 400, `httpStatus` for the `--json`
+ * face) and its wording, so the answer is the one the engine gave when this
+ * was judged after the boot. The code field's name is in the object's
+ * declaration, which is not loaded yet, so the message names the amount field
+ * the code is owed by. The engine keeps its own check for every other caller.
+ */
+function refuseNonMemberCurrencyCode(object: string, field: string, code: string): void {
+  if (isValueDomainMember('iso_4217_currency', code)) return;
+  const err = new Error(
+    `[record-currency-backfill] '${code}' is not an ISO 4217 currency code, so the currency code field of ` +
+      `'${object}.${field}' would refuse it: give the uppercase alphabetic code of the currency these amounts ` +
+      'are in (for example USD). Refused before the database was opened or any row was read.',
+  ) as Error & { code: string; status: number; httpStatus: number; field: string };
+  err.code = 'INVALID_FIELD';
+  err.status = 400;
+  err.httpStatus = 400;
+  err.field = field;
+  throw err;
+}
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -78,7 +106,7 @@ export default class MigrateRecordCurrencyCodes extends Command {
     code: Flags.string({
       description:
         'The ISO 4217 code to write, uppercase (e.g. USD). Written into every row with an amount and a blank code; ' +
-        'a row that holds a code is never touched. A code that is not ISO 4217 is refused before any row is read',
+        'a row that holds a code is never touched. A code that is not ISO 4217 is refused before the database is opened',
       required: true,
     }),
     apply: Flags.boolean({
@@ -102,6 +130,20 @@ export default class MigrateRecordCurrencyCodes extends Command {
     const apply = flags.apply;
 
     if (!flags.json) printHeader('Migrate · record-currency-codes');
+
+    // `--code` first: before the occupancy probe, the `--apply` prompt and the boot.
+    try {
+      refuseNonMemberCurrencyCode(flags.object, flags.field, flags.code);
+    } catch (error: any) {
+      if (flags.json) {
+        await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true });
+        this.exit(1);
+        return;
+      }
+      printError(error.message);
+      this.exit(1);
+      return;
+    }
 
     // Occupancy gate, as `summary-nulls`: probed before boot and before the prompt.
     const occupancy = await probeMigrationTarget(flags['database-url']);
@@ -244,8 +286,9 @@ export default class MigrateRecordCurrencyCodes extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
-      // `INVALID_FIELD` is the backfill refusing the field or the code before
-      // its walk ("Refused before the walk read or wrote any row."). The boot
+      // `INVALID_FIELD` is the backfill refusing the field before its walk
+      // ("Refused before the walk read or wrote any row."; the code was judged
+      // before the boot, so it is refused there only if that judge drifts). The boot
       // above ran first, so on a SQLite file the note naming a journal-mode
       // switch follows, as on `summary-nulls`.
       const journalNote = error?.code === 'INVALID_FIELD'
