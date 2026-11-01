@@ -17,10 +17,12 @@
  * schema declares the `data` payload, envelope-free — the same convention as
  * `PublishPackageDraftsResponseSchema` and its ledger row.
  *
- * One pair is the exception: `ImportUnmanagedPackageRequestSchema` /
+ * Two pairs are the exception, each with a request half its producer PARSES
+ * rather than a transcription: `ImportUnmanagedPackageRequestSchema` /
  * `ImportUnmanagedPackageResponseSchema` (ADR-0131 D6) declare a protocol verb
- * no route serves yet, and the request half is parsed by its producer rather
- * than transcribed — see their own docblocks.
+ * no route serves yet, and `EnsureCustomizationPackageRequestSchema` /
+ * `EnsureCustomizationPackageResponseSchema` (ADR-0146 D3) declare the ensure
+ * door of a base's paired `.custom` package — see their own docblocks.
  *
  * `packages.publish`'s contract is NOT here: its producer
  * (`MetadataManager.publishPackage`) already has an exact published schema,
@@ -311,6 +313,67 @@ export const ImportUnmanagedPackageResponseSchema = lazySchema(() => z.object({
   ),
 }));
 
+/**
+ * The request of `ensureCustomizationPackage` — the ONE creation path of a
+ * base's paired customization package `<base>.custom` (ADR-0146 D3: "no second
+ * door builds the pair"). Given an installed base, the door answers the pair,
+ * creating it when it is absent.
+ *
+ * ENFORCED, like `ImportUnmanagedPackageRequestSchema`: the producer
+ * (`@objectstack/metadata-protocol`) parses its request through it, so a key it
+ * does not declare is refused rather than ignored. `POST
+ * /api/v1/packages/:id/ensure-customization` builds it from the path — the
+ * route reads no body — and the actor is never stated here: creating the pair
+ * records none, as every package install does.
+ *
+ * Everything the pair is made of is DERIVED, never requested: its id, its
+ * namespace and its dependency range are the base's, through the pairing rules
+ * of `@objectstack/spec/kernel` (`customizationPackageId`,
+ * `customizationNamespace`, `customizationDependencyRange`). A request that
+ * could name them would be a second spelling of the pair.
+ */
+export const EnsureCustomizationPackageRequestSchema = lazySchema(() => z.object({
+  basePackageId: z.string().describe(
+    'Id of the installed base whose paired customization package is ensured (`com.acme.crm` → '
+    + '`com.acme.crm.custom`). The base must be installed and read-only — a writable base is customized '
+    + 'directly — and must not itself be a customization package.',
+  ),
+}).strict());
+
+/**
+ * The answer of `ensureCustomizationPackage`, and the `data` of `POST
+ * /api/v1/packages/:id/ensure-customization` (`201` when it created the pair,
+ * `200` when the pair was already there).
+ *
+ * Transcribed from the producer's declared return. Every refusal is a thrown
+ * ADR-0112 error raised before anything is written, so a returned answer
+ * always names a pair that exists. An existing pair is returned UNCHANGED —
+ * never rewritten, never adopted: one that does not declare the namespace and
+ * the dependency below is refused, naming what it lacks.
+ */
+export const EnsureCustomizationPackageResponseSchema = lazySchema(() => z.object({
+  basePackageId: z.string().describe('The base the pair customizes.'),
+  packageId: z.string().describe('The paired customization package: `<basePackageId>.custom`.'),
+  namespace: z.string().describe(
+    'The pair\'s namespace: the base\'s namespace followed by `_custom` (`crm` → `crm_custom`), set '
+    + 'explicitly and never derived from the pair\'s id. A new object authored into the pair is named '
+    + '`<namespace>_<short>`.',
+  ),
+  dependencyRange: z.string().describe(
+    'The range the pair declares on its base in `manifest.dependencies`. A created pair declares `^<major>` '
+    + 'of the base\'s version at creation; an existing pair answers the range it declares, unchanged.',
+  ),
+  created: z.boolean().describe(
+    'True when this call created the pair; false when the pair was already installed and was returned '
+    + 'unchanged.',
+  ),
+  writable: z.boolean().describe(
+    'Whether the pair is a writable package — the verdict the package read doors serve as `writable`. A '
+    + 'created pair is writable; an existing pair delivered by code or an installed artifact is not, and its '
+    + 'items are authored where it is built.',
+  ),
+}));
+
 export type DiscardPackageDraftsResponse = z.input<typeof DiscardPackageDraftsResponseSchema>;
 /** Post-parse shape of {@link DiscardPackageDraftsResponse} — defaults applied, transforms run (ADR-0122). */
 export type DiscardPackageDraftsResponseParsed = z.infer<typeof DiscardPackageDraftsResponseSchema>;
@@ -338,3 +401,9 @@ export type ImportUnmanagedPackageRequestParsed = z.infer<typeof ImportUnmanaged
 export type ImportUnmanagedPackageResponse = z.input<typeof ImportUnmanagedPackageResponseSchema>;
 /** Post-parse shape of {@link ImportUnmanagedPackageResponse} — defaults applied, transforms run (ADR-0122). */
 export type ImportUnmanagedPackageResponseParsed = z.infer<typeof ImportUnmanagedPackageResponseSchema>;
+export type EnsureCustomizationPackageRequest = z.input<typeof EnsureCustomizationPackageRequestSchema>;
+/** Post-parse shape of {@link EnsureCustomizationPackageRequest} — defaults applied, transforms run (ADR-0122). */
+export type EnsureCustomizationPackageRequestParsed = z.infer<typeof EnsureCustomizationPackageRequestSchema>;
+export type EnsureCustomizationPackageResponse = z.input<typeof EnsureCustomizationPackageResponseSchema>;
+/** Post-parse shape of {@link EnsureCustomizationPackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type EnsureCustomizationPackageResponseParsed = z.infer<typeof EnsureCustomizationPackageResponseSchema>;

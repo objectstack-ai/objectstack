@@ -2307,7 +2307,7 @@
       "title": "Editing the permission matrix and publishing flips an affected persona's live API access; revoke flips it back; assign/unassign moves access",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2372,8 +2372,7 @@
       ],
       "negative": [
         "an edit that repaints the matrix but whose PUT/publish never lands (M's access unchanged) is a FAIL — the network + M's live access are the oracles, not the checkbox paint",
-        "enforcement flipping on the DRAFT alone (before publish) is wrong: access must key on the PUBLISHED set",
-        "cross-ref: enforcement correctness is access-security.crud-permission-matrix and the read-only-package lock is access-security.readonly-package-locks-studio — this item is the WRITE/edit loop only"
+        "enforcement flipping on the DRAFT alone (before publish) is wrong: access must key on the PUBLISHED set"
       ],
       "variants": [
         "object-verb flip (CRUD)",
@@ -2391,7 +2390,8 @@
         "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (PUT /api/v1/meta/:type/:name saveItem; POST .../publish publishItem — re-pointed #18104: saveItem is a CLIENT METHOD name, carried in this file only inside a string value)",
         "packages/metadata-protocol/src/sys-metadata-repository.ts#promoteDraft (the publish-with-nothing-pending refusal: status 404, code NO_DRAFT)",
         "examples/app-showcase/src/security/permission-sets.ts",
-        "cross-ref access-security.crud-permission-matrix + access-security.readonly-package-locks-studio, ADR-0090 D1/D5, ADR-0033"
+        "cross-ref access-security.crud-permission-matrix + access-security.readonly-package-locks-studio, ADR-0090 D1/D5, ADR-0033",
+        "cross-ref: enforcement correctness is access-security.crud-permission-matrix and the read-only-package lock is access-security.readonly-package-locks-studio — this item is the WRITE/edit loop only"
       ],
       "history": [
         {
@@ -2413,6 +2413,12 @@
           "date": "2026-10-31",
           "change": "steps[2], [4] and [5] said 'save (draft) then publish'. The console Save on the Setup door lands active, as QA run #27441 measured. Source agrees: PermissionMatrixEditor.tsx's saveVersioned call adds mode 'draft' only when the editor is mounted with a packageId (Studio's Access pillar), and Setup's metadata-admin door mounts it with none, so its Save is a plain PUT that writes state 'active'. The steps now say Save, and that the publish call then answers 404 NO_DRAFT. acceptance[1] already scored both paths and is unchanged. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6490438726",
           "ref": "#27441"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-01",
+          "change": "negative[2] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3087,7 +3093,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3153,8 +3159,7 @@
       "negative": [
         "no runtime write reaches the anchor: OS_PLATFORM_OWNER_EMAIL is declared a NON-TABLE derivation input (admin-standing-surface.ts) — revocation is a configuration change plus a process roll, by design. Any in-product surface found mutating who is a platform administrator is an authorization finding: record it under RUNNER rule 2's carve-out (no card; one run-record row `area.item · clause · security finding — detail withheld, reported to PM`), never with a reproduction",
         "the derivation reads the caller's OWN STORED sys_user row, never the session-seeded grants.email — the ⭐ P1 pin of the leg. That property is asserted by the unit pin (the '⭐ … reads the STORED row, never the seeded email' describe); do not attempt to re-prove it against a live server",
-        "run every refused probe as the seeded admin too: a 200 proves each refusal keyed on the member's standing, not on a broken route (wrong-persona, both sides)",
-        "out of scope here: the WALLED-posture boot refusal when the variable is unset (#11184) is plugin-auth's separate door — do not score it on this item"
+        "run every refused probe as the seeded admin too: a 200 proves each refusal keyed on the member's standing, not on a broken route (wrong-persona, both sides)"
       ],
       "variants": [
         "unset (zero config-derived admins)",
@@ -3171,7 +3176,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/platform-owner-email-anchor.dogfood.test.ts (#26571) restarts one showcase deployment per variable value on one database file, in the steps' order, with the datasource admin routes mounted as serve mounts them; probes are GET /datasources and GET /auth/me/permissions as member M and as the seeded admin. acceptance[0] — unset: M 403 PERMISSION_DENIED and no manage_platform_settings, the admin 200 on the grant anchor; acceptance[1] — the variable names unverified M: the same refusal; acceptance[2] — it names an address no row holds: the same, the admin still 200; acceptance[4]'s live leg — it names M after a system-context email_verified stamp (the knownGaps doorway): M 200 and every ADMIN_FULL_ACCESS_CAPABILITIES systemPermission; acceptance[3] — 'M, not an address' with M still verified and holding no admin_full_access grant: the [authz] refusal is printed once, naming the entry verbatim and the zero-administrator consequence, M is refused and the admin served; negative[0] — ADMIN_STANDING_NON_TABLE_INPUTS (@objectstack/core) declares {kind:'env', name:'OS_PLATFORM_OWNER_EMAIL'}; negative[2] — every refused probe has the admin's 200 beside it. A fresh database booted with a well-formed variable promotes only the declared owner (bootstrap-platform-admin.ts), so the variants run on one database first booted unset, as the steps restart one deployment. Unit pins beneath: packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. acceptance[5] and negative[1] are test-scored; negative[3] is out of scope"
+        "ref": "packages/qa/dogfood/test/platform-owner-email-anchor.dogfood.test.ts (#26571) restarts one showcase deployment per variable value on one database file, in the steps' order, with the datasource admin routes mounted as serve mounts them; probes are GET /datasources and GET /auth/me/permissions as member M and as the seeded admin. acceptance[0] — unset: M 403 PERMISSION_DENIED and no manage_platform_settings, the admin 200 on the grant anchor; acceptance[1] — the variable names unverified M: the same refusal; acceptance[2] — it names an address no row holds: the same, the admin still 200; acceptance[4]'s live leg — it names M after a system-context email_verified stamp (the knownGaps doorway): M 200 and every ADMIN_FULL_ACCESS_CAPABILITIES systemPermission; acceptance[3] — 'M, not an address' with M still verified and holding no admin_full_access grant: the [authz] refusal is printed once, naming the entry verbatim and the zero-administrator consequence, M is refused and the admin served; negative[0] — ADMIN_STANDING_NON_TABLE_INPUTS (@objectstack/core) declares {kind:'env', name:'OS_PLATFORM_OWNER_EMAIL'}; negative[2] — every refused probe has the admin's 200 beside it. A fresh database booted with a well-formed variable promotes only the declared owner (bootstrap-platform-admin.ts), so the variants run on one database first booted unset, as the steps restart one deployment. Unit pins beneath: packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. acceptance[5] and negative[1] are test-scored; the out-of-scope note that was negative[3] is source[10]"
       },
       "source": [
         "packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
@@ -3183,7 +3188,8 @@
         "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV + packages/types/src/env.ts#resolvePlatformOwnerEmail (the variable's name, and its live per-call read)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts (#11343 — the dev seed stamps its admin's address verified)",
         "packages/services/service-datasource/src/admin-routes.ts#DATASOURCE_ADMIN_CAPABILITY (the manage_platform_settings-floor probe)",
-        "#11663 L2 (the design and ruled bundle), #13146 (landed 2026-08-29), ADR-0068 D2 (the stored-grant anchor beside it)"
+        "#11663 L2 (the design and ruled bundle), #13146 (landed 2026-08-29), ADR-0068 D2 (the stored-grant anchor beside it)",
+        "out of scope here: the WALLED-posture boot refusal when the variable is unset (#11184) is plugin-auth's separate door — do not score it on this item"
       ],
       "history": [
         {
@@ -3257,6 +3263,12 @@
           "date": "2026-10-29",
           "change": "RUNNER rule 2's security-finding carve-out re-worded (#27382; maintainer rulings of 2026-10-29, recorded on #27377): a security finding gets no GitHub card at all, the run record carries the one row `area.item · clause · security finding — detail withheld, reported to PM`, and the reproduction goes privately to the dispatching PM session. negative[0] quoted the retired 'detail withheld pending maintainer' row and now names the new one. The same PR re-words every item string that quoted the retired row. No clause, oracle or status changed",
           "ref": "#27642"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-01",
+          "change": "negative[3] moved to source[10]: it was a scope note (the walled-posture boot refusal is plugin-auth's door, not scored here), which no run can decide, so it could only score skipped. Its text is unchanged; automated.ref's closing note, which called negative[3] out of scope, now points at source[10]. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3402,7 +3414,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -3467,8 +3479,7 @@
       ],
       "negative": [
         "an audit write must never break the read: reads answer 200 even when the ledger write fails — the failure is reported once per CAUSE with the durability text (read-audit.ts; #18247): a second, different cause reports again at error, and a repeat of a cause already reported degrades to debug. Rows are LOST, not retried. Observing that needs a broken ledger and is out of scope for a stock run; do not fabricate it",
-        "a read with no principal (no userId and no actor) lands no row — noise in the WHO ledger is refused by design (read-audit.ts)",
-        "cross-ref access-security.audit-log-browser — WRITE auditing, the browser UI, and the append-only guard belong there; this item owes only the read-writer's contract (one ledger, two items, no double-scoring). The append-only negative there covers action:'read' rows too: user-context POSTs to sys_audit_log are refused regardless of action"
+        "a read with no principal (no userId and no actor) lands no row — noise in the WHO ledger is refused by design (read-audit.ts)"
       ],
       "variants": [
         "stock boot (nothing audited)",
@@ -3485,13 +3496,14 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/record-view-read-audit.dogfood.test.ts (#26571) boots the showcase twice with the AuditPlugin serve would end up running (bootStack constructs none), reads rows through GET /data/sys_audit_log as the admin and keeps the 2 s flush. Stock (new AuditPlugin()): acceptance[0] — the boot log carries INFO lines and AuditPlugin lines (the positive control) and no 'record-view auditing installed' line; a member's GET /data/showcase_account/:id answers 200 and past the flush window the ledger holds no action 'read' row. Configured (readAudit.objects ['showcase_account', 'sys_job'], the docs' opt-in): acceptance[1] and [4] — one install line, 'on 1 object(s) — showcase_account', without sys_job, and the exclusion warning naming sys_job; acceptance[1] and [2] — one detail read lands exactly one row with action 'read', user_id = M, object_name, record_id, old_value and new_value null, and created_at inside the read's wall-clock window (before the flush could have run); acceptance[3] — a filtered LIST read that serves the record leaves the ledger count unchanged; acceptance[1] — an un-opted showcase_project detail read (200) lands no row. Unit pins beneath: packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. acceptance[5] stays test-scored; negative[0] needs a broken ledger and is out of scope for a stock run; negative[1] is the unit pin's no-principal skip; negative[2] is a cross-reference"
+        "ref": "packages/qa/dogfood/test/record-view-read-audit.dogfood.test.ts (#26571) boots the showcase twice with the AuditPlugin serve would end up running (bootStack constructs none), reads rows through GET /data/sys_audit_log as the admin and keeps the 2 s flush. Stock (new AuditPlugin()): acceptance[0] — the boot log carries INFO lines and AuditPlugin lines (the positive control) and no 'record-view auditing installed' line; a member's GET /data/showcase_account/:id answers 200 and past the flush window the ledger holds no action 'read' row. Configured (readAudit.objects ['showcase_account', 'sys_job'], the docs' opt-in): acceptance[1] and [4] — one install line, 'on 1 object(s) — showcase_account', without sys_job, and the exclusion warning naming sys_job; acceptance[1] and [2] — one detail read lands exactly one row with action 'read', user_id = M, object_name, record_id, old_value and new_value null, and created_at inside the read's wall-clock window (before the flush could have run); acceptance[3] — a filtered LIST read that serves the record leaves the ledger count unchanged; acceptance[1] — an un-opted showcase_project detail read (200) lands no row. Unit pins beneath: packages/plugins/plugin-audit/src/read-audit.test.ts (discriminator, batching/flush, isSystem + no-principal skips, exclusion filter) + audit-plugin.test.ts. acceptance[5] stays test-scored; negative[0] needs a broken ledger and is out of scope for a stock run; negative[1] is the unit pin's no-principal skip; the cross-reference that was negative[2] is source[4]"
       },
       "source": [
         "packages/plugins/plugin-audit/src/read-audit.ts#READ_AUDIT_ACTION (READ_AUDIT_ACTION, installReadAuditWriter opt-in + exclusion filter, extractDetailReadId, buildRow nulls + view instant, isSystem/no-principal skips, batcher)",
         "packages/plugins/plugin-audit/src/audit-plugin.ts#writer (wiring readAudit options into the writer; the install log line)",
         "content/docs/permissions/record-view-auditing.mdx ('Under os serve' — the option-less auto-instance audits no views; last-one-wins supersession is the opt-in path; no metadata key / stack key / env flag by design)",
-        "#8992 (the card and the 2026-08-16 maintainer ruling: Option A scoped MVP — detail views only, per-object closed opt-in, async batched writes)"
+        "#8992 (the card and the 2026-08-16 maintainer ruling: Option A scoped MVP — detail views only, per-object closed opt-in, async batched writes)",
+        "cross-ref access-security.audit-log-browser — WRITE auditing, the browser UI, and the append-only guard belong there; this item owes only the read-writer's contract (one ledger, two items, no double-scoring). The append-only negative there covers action:'read' rows too: user-context POSTs to sys_audit_log are refused regardless of action"
       ],
       "history": [
         {
@@ -3529,6 +3541,12 @@
           "date": "2026-10-27",
           "change": "automated.kind unit -> dogfood (#26571 slice 3; the slice-2 ACCEPT noted it): revision 5's ref already leads with a dogfood pin over the in-process HTTP stack, with the unit pins beneath. No ref, clause or status changed",
           "ref": "#26571"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-01",
+          "change": "negative[2] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged, and automated.ref's closing note, which called negative[2] a cross-reference, now points at source[4]. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },

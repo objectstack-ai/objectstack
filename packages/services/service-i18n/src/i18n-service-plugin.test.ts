@@ -108,6 +108,19 @@ describe('I18nServicePlugin', () => {
       const registeredService = ctx.registerService.mock.calls[0][1];
       expect(registeredService.getFallbackLocale()).toBe('zh-CN');
     });
+
+    it('reports a translation fallback through the plugin logger (#28109)', async () => {
+      const plugin = new I18nServicePlugin({ defaultLocale: 'en', fallbackLocale: 'en' });
+      await plugin.init!(ctx as any);
+      const i18n = ctx.registerService.mock.calls[0][1];
+      i18n.loadTranslations('en', { only_en: 'English only' });
+      i18n.loadTranslations('zh-CN', { other: '其他' });
+      ctx.logger.warn.mockClear();
+
+      expect(i18n.t('only_en', 'zh-CN')).toBe('English only');
+      expect(ctx.logger.warn).toHaveBeenCalledTimes(1);
+      expect(String(ctx.logger.warn.mock.calls[0][0])).toContain("'only_en'");
+    });
   });
 
   // -- HTTP surface: none (#23347) -------------------------------------------
