@@ -36,6 +36,7 @@
  */
 
 import { DatasourceSchema, externalBindingDatasourceRefusal, validateDriverConfig } from '@objectstack/spec/data';
+import { MetadataProtectionFields } from '@objectstack/spec/kernel';
 import type { IPubSub } from '@objectstack/spec/contracts';
 import { assertDatasourcePoolSupported } from './datasource-pool-support.js';
 import { datasourceConnectivityChanged } from './datasource-connectivity-change.js';
@@ -84,7 +85,102 @@ const PROBE_DRAFT_NAME = 'connection_test_draft';
  * a gate landed. Every other patched key, and any supplied secret, is a change
  * to what the record binds, and the record is judged whole.
  */
-const RECORD_JUDGED_PATCH_KEYS = ['driver', 'schemaMode', 'config', 'external', 'pool'] as const;
+const RECORD_JUDGE_EXEMPT_PATCH_KEYS: ReadonlySet<string> = new Set(['label', 'active']);
+
+/**
+ * [#28633] The top-level keys `DatasourceSchema` declares that a write door
+ * deliberately does NOT take from the request body, each for its reason:
+ *
+ *  - `origin` — provenance, "server-managed, read-only" and "never accepted
+ *    from client input" (the schema's own words): the door stamps `runtime`.
+ *  - the ADR-0010 protection envelope (`MetadataProtectionFields`: the `_lock*`
+ *    family, `_provenance`, `_packageId`, `_packageVersion`) — set by a code
+ *    package's loader, never by an author's write. The metadata save door
+ *    refuses an authored lock for that reason (ADR-0010 §3.5); storing one here
+ *    would be the way around it.
+ *
+ * Read off those declarations, so a protection field added later is left out
+ * here the day it lands.
+ */
+const SERVER_STAMPED_KEYS: ReadonlySet<string> = new Set(['origin', ...Object.keys(MetadataProtectionFields)]);
+
+let storedKeysCache: readonly string[] | undefined;
+
+/**
+ * [#28633] The top-level keys a create, an edit and a probe take from the
+ * body: every key `DatasourceSchema` declares, minus {@link SERVER_STAMPED_KEYS}.
+ *
+ * Derived from the schema's shape at run time, never listed by hand. The hand
+ * list that stood here (`name`, `label`, `driver`, `schemaMode`, `config`,
+ * `external`, `pool`, `active`) left out `ssl`, `autoConnect` and
+ * `description`: the doors accepted them (the schema declares them, so the
+ * undeclared-key refusal lets them through) and then dropped them, and a
+ * datasource saved with a TLS block connected without one. A key the schema
+ * declares later is stored the day it lands.
+ */
+function storedDatasourceKeys(): readonly string[] {
+  if (!storedKeysCache) {
+    const shape = (DatasourceSchema as unknown as { shape: Record<string, unknown> }).shape;
+    storedKeysCache = Object.freeze(Object.keys(shape).filter((key) => !SERVER_STAMPED_KEYS.has(key)));
+  }
+  return storedKeysCache;
+}
+
+/** `body`'s members under {@link storedDatasourceKeys} whose value is not `undefined`. */
+function storedKeysOf(body: object): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const key of storedDatasourceKeys()) {
+    const value = (body as Record<string, unknown>)[key];
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * [#28633] The one `ssl` member that is key material: the client private key.
+ * `ca` and `cert` are public certificates; `key` is the secret half of the
+ * client certificate (the schema: "Client private key").
+ */
+const SSL_PRIVATE_KEY = 'key';
+
+/**
+ * [#28633] Why `body` cannot be taken as it is: its `ssl` block carries a
+ * client private key. `undefined` when it carries none.
+ *
+ * This door keeps credentials out of the stored record: a cleartext `secret`
+ * transits the request and only the `credentialsRef` the secret store mints is
+ * stored. `ssl.key` has no such channel, so storing it would put key material
+ * in the datasource row in cleartext, where every metadata read of the row
+ * serves it (that read path redacts `config`, not `ssl`). Refused by name,
+ * never by value, before anything is read, written or probed. The rest of the
+ * block (`enabled`, `rejectUnauthorized`, `ca`, `cert`) is stored.
+ */
+function inlineSslKeyRefusal(heading: string, body: object): string | undefined {
+  const ssl = (body as { ssl?: unknown }).ssl;
+  if (!ssl || typeof ssl !== 'object') return undefined;
+  if ((ssl as Record<string, unknown>)[SSL_PRIVATE_KEY] === undefined) return undefined;
+  return (
+    `${heading}\n`
+    + '`ssl.key`: a TLS client private key is not accepted through this door. It would be stored in cleartext '
+    + 'in the datasource record, and this door stores no credential there: only a `secret` it seals into the '
+    + 'secret store, which takes no TLS key. Leave `ssl.key` out (`enabled`, `rejectUnauthorized`, `ca` and '
+    + '`cert` are stored) and send the request again. Nothing was written or probed.'
+  );
+}
+
+/** {@link inlineSslKeyRefusal} for a write door: refuses by throwing (a `400` at the route). */
+function assertNoInlineSslKey(heading: string, body: object): void {
+  const refusal = inlineSslKeyRefusal(heading, body);
+  if (refusal) throw new Error(refusal);
+}
+
+/** `ssl` as a read may serve it: the private key withheld, every other member as stored. */
+function servableSsl(ssl: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!ssl || typeof ssl !== 'object') return ssl;
+  if (!(SSL_PRIVATE_KEY in ssl)) return ssl;
+  const { [SSL_PRIVATE_KEY]: _withheld, ...rest } = ssl;
+  return rest;
+}
 
 /** A copy of `record` carrying the binding a supplied secret is about to create. */
 function withPendingSecretRef(record: StoredDatasource): StoredDatasource {
@@ -148,6 +244,10 @@ export interface StoredDatasource {
   active?: boolean;
   /** Force a live connection at boot even when managed + unrouted (ADR-0062 D2(c)). */
   autoConnect?: boolean;
+  /** Datasource-level TLS block (`DatasourceSchema.ssl`), read by the driver factory. */
+  ssl?: Record<string, unknown>;
+  /** Internal description. */
+  description?: string;
   origin?: 'code' | 'runtime';
   /** Package that defines a code-origin datasource, when known. */
   definedIn?: string;
@@ -160,6 +260,8 @@ export interface ProbeInput {
   /** Cleartext secret used for this probe only (e.g. password / DSN). */
   secret?: string;
   external?: Record<string, unknown>;
+  /** [#28633] The draft's TLS block, exactly as a Save would store it. */
+  ssl?: Record<string, unknown>;
   timeoutMs?: number;
 }
 
@@ -598,7 +700,10 @@ export class DatasourceAdminService implements IDatasourceAdminService {
    * stops it being SERVED, not what removes it.
    */
   async getDatasource(name: string): Promise<
-    | (Pick<StoredDatasource, 'name' | 'label' | 'driver' | 'schemaMode' | 'config' | 'active' | 'definedIn'> & {
+    | (Pick<
+        StoredDatasource,
+        'name' | 'label' | 'driver' | 'schemaMode' | 'config' | 'active' | 'definedIn' | 'ssl' | 'autoConnect' | 'description'
+      > & {
         origin: 'code' | 'runtime';
         hasSecret: boolean;
         redactedConfigKeys: string[];
@@ -616,6 +721,13 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       schemaMode: rec.schemaMode ?? 'managed',
       config,
       active: rec.active ?? true,
+      // [#28633] The other keys the doors now store, so an edit form reads back
+      // what was saved. `ssl` is served without its private key, whatever the
+      // row holds: the key never leaves this service, as a `config` credential
+      // does not (#8081).
+      ...(rec.ssl !== undefined ? { ssl: servableSsl(rec.ssl) } : {}),
+      ...(rec.autoConnect !== undefined ? { autoConnect: rec.autoConnect } : {}),
+      ...(rec.description !== undefined ? { description: rec.description } : {}),
       origin: rec.origin === 'runtime' ? 'runtime' : 'code',
       hasSecret,
       redactedConfigKeys: redactedKeys,
@@ -651,8 +763,15 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // reports green for a pairing `createDatasource` refuses. Judged on the
     // record a Save would persist, as create judges it, minus the identity the
     // probe does not have.
+    //
+    // [#28633] And probed from that same record: the projection a Save stores
+    // is the one the probe reads, so a test opens TLS exactly as the saved
+    // datasource will.
+    const draft = this.toRecord({ ...input, name: PROBE_DRAFT_NAME });
+    const keyRefusal = inlineSslKeyRefusal('This connection draft is not a valid datasource.', draft);
+    if (keyRefusal) return { ok: false, error: keyRefusal };
     const refusal = this.recordRefusal(
-      this.withSecretBinding({ ...this.toRecord({ ...input, name: PROBE_DRAFT_NAME }), origin: 'runtime' }, secret),
+      this.withSecretBinding({ ...draft, origin: 'runtime' }, secret),
       'This connection draft is not a valid datasource.',
     );
     if (refusal) return { ok: false, error: refusal };
@@ -661,10 +780,11 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     const queryTimeoutMs = (input.external as { queryTimeoutMs?: number } | undefined)?.queryTimeoutMs;
     try {
       return await this.config.probe({
-        driver: input.driver,
-        config: input.config ?? {},
+        driver: draft.driver,
+        config: draft.config ?? {},
         secret: secret?.value,
-        external: input.external,
+        external: draft.external,
+        ...(draft.ssl !== undefined ? { ssl: draft.ssl } : {}),
         ...(typeof queryTimeoutMs === 'number' ? { timeoutMs: queryTimeoutMs } : {}),
       });
     } catch (err) {
@@ -676,6 +796,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     this.assertValidName(input?.name);
     this.assertNoDraftCredentialsRef(input);
     this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${input.name}'.`, input);
+    assertNoInlineSslKey(`Invalid datasource '${input.name}'.`, input);
     if (!input.driver) throw new Error('A driver is required to create a datasource.');
     this.assertValidConfig(input.driver, input.config);
     // The wizard is a publish door for `pool` too (#5714). Rejected BEFORE the
@@ -741,16 +862,16 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // edit included: that exemption spares a row stored before a gate, and this
     // judges a key the author is writing now.
     this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${existing.name}'.`, patch);
+    assertNoInlineSslKey(`Invalid datasource '${existing.name}'.`, patch);
 
     // Merge patch over the existing record; `name`/`origin` are never patched.
+    // [#28633] Every key the create door stores is patchable the same way
+    // ({@link storedDatasourceKeys}); `external` keeps its own rule below.
+    const { name: _name, external: _external, ...patched } = storedKeysOf(patch);
+    const patchedKeys = Object.keys(patched).concat(patch.external !== undefined ? ['external'] : []);
     const merged: StoredDatasource = {
       ...existing,
-      ...(patch.label !== undefined ? { label: patch.label } : {}),
-      ...(patch.driver !== undefined ? { driver: patch.driver } : {}),
-      ...(patch.schemaMode !== undefined ? { schemaMode: patch.schemaMode } : {}),
-      ...(patch.config !== undefined ? { config: patch.config } : {}),
-      ...(patch.pool !== undefined ? { pool: patch.pool } : {}),
-      ...(patch.active !== undefined ? { active: patch.active } : {}),
+      ...(patched as Partial<StoredDatasource>),
       name: existing.name,
       origin: 'runtime',
     };
@@ -789,7 +910,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // not move across the restore — it grafts back credential keys and swaps a
     // url for its stored twin, which names the same user (`redactUrlPassword`
     // keeps the userinfo username).
-    if (secret !== undefined || RECORD_JUDGED_PATCH_KEYS.some((key) => patch[key] !== undefined)) {
+    if (secret !== undefined || patchedKeys.some((key) => !RECORD_JUDGE_EXEMPT_PATCH_KEYS.has(key))) {
       this.assertValidRecord(this.withSecretBinding(merged, secret));
       // [ADR-0015 §4.2 · #25277] The merged record against the objects bound
       // to it, under the same condition: a `label`/`active`-only write stays
@@ -834,6 +955,15 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // destructive sweep that decision is reserved for.
     if (patch.config !== undefined && merged.driver === existing.driver) {
       merged.config = restoreRedactedConfig(existing.driver, merged.config, existing.config);
+    }
+    // [#28633] The same carry-forward for the one `ssl` member a read withholds:
+    // a patched `ssl` block without a private key (what `getDatasource()`
+    // served) keeps the stored one. This door never takes a new one
+    // ({@link assertNoInlineSslKey}), so it preserves a key already at rest and
+    // creates none.
+    const storedKey = existing.ssl?.[SSL_PRIVATE_KEY];
+    if (patch.ssl !== undefined && storedKey !== undefined && merged.ssl && !(SSL_PRIVATE_KEY in merged.ssl)) {
+      merged.ssl = { ...merged.ssl, [SSL_PRIVATE_KEY]: storedKey };
     }
 
     await this.config.putDatasourceRecord(merged);
@@ -1292,17 +1422,13 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     throw new Error(`${heading}\n${detail.join('\n')}`);
   }
 
+  /**
+   * The record a create stores and a probe reads: the draft's members under
+   * every key `DatasourceSchema` declares, minus the server-stamped ones
+   * ({@link storedDatasourceKeys}). `name` and `driver` are always present.
+   */
   private toRecord(input: DatasourceDraft): StoredDatasource {
-    return {
-      name: input.name,
-      ...(input.label !== undefined ? { label: input.label } : {}),
-      driver: input.driver,
-      ...(input.schemaMode !== undefined ? { schemaMode: input.schemaMode } : {}),
-      ...(input.config !== undefined ? { config: input.config } : {}),
-      ...(input.external !== undefined ? { external: input.external } : {}),
-      ...(input.pool !== undefined ? { pool: input.pool } : {}),
-      ...(input.active !== undefined ? { active: input.active } : {}),
-    };
+    return { ...storedKeysOf(input), name: input.name, driver: input.driver } as StoredDatasource;
   }
 
   private toSummary(record: StoredDatasource): DatasourceSummary {
