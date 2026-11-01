@@ -3,7 +3,8 @@
 /**
  * The listing this package publishes as, and the document it packages:
  * `objectstack.manifest.json` parses against the spec's own schema for that
- * file and names the same package id as the stack; the README's credentials
+ * file, names the same package id as the stack and points at the icon the
+ * package owns (a public http(s) `iconUrl`); the README's credentials
  * section names every credential the app's connectors reference (the
  * marketplace handbook's "every credential it needs" rule, checked against
  * the metadata rather than trusted); and the packaged OpenAPI document is the
@@ -13,7 +14,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { TemplateManifestSchema } from '@objectstack/spec/marketplace';
 import stack from '../objectstack.config.js';
@@ -21,6 +22,27 @@ import { STRIPE_READ_OPERATIONS, StripeConnector } from '../src/connectors/strip
 
 const manifestPath = fileURLToPath(new URL('../objectstack.manifest.json', import.meta.url));
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+
+/** Where the listing icon is served from once this package's tree is on `main`. */
+const ICON_URL = 'https://raw.githubusercontent.com/objectstack-ai/objectstack/main/packages/apps/connector-stripe/assets/icon.svg';
+
+/**
+ * Why a manifest's `iconUrl` cannot be the listing icon, or `null` when it can:
+ * `os package publish` sends the key as the package's `icon_url`, and the
+ * marketplace handbook asks for a public http(s) URL. `TemplateManifestSchema`
+ * accepts any URL scheme, so the scheme is checked here.
+ */
+function iconUrlProblem(m: Record<string, unknown>): string | null {
+  const value = m.iconUrl;
+  if (typeof value !== 'string') return 'iconUrl is absent';
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return `iconUrl is not a URL: ${value}`;
+  }
+  return url.protocol === 'https:' || url.protocol === 'http:' ? null : `iconUrl is not http(s): ${value}`;
+}
 const readme = readFileSync(fileURLToPath(new URL('../README.md', import.meta.url)), 'utf8');
 const documentBytes = readFileSync(fileURLToPath(new URL('../openapi/stripe.openapi.json', import.meta.url)));
 const document = JSON.parse(documentBytes.toString('utf8')) as {
@@ -63,6 +85,27 @@ describe('connector-stripe listing', () => {
     expect(refs).toEqual(['STRIPE_RESTRICTED_KEY']);
     for (const ref of refs) expect(credentials).toContain(`\`${ref}\``);
     expect(credentials).toContain('https://dashboard.stripe.com/apikeys');
+  });
+
+  it('carries a public http(s) iconUrl', () => {
+    expect(iconUrlProblem(manifest)).toBeNull();
+  });
+
+  it('refuses an iconUrl that is absent or not http(s)', () => {
+    const withoutIcon = { ...manifest };
+    delete withoutIcon.iconUrl;
+    expect(iconUrlProblem(withoutIcon)).toBe('iconUrl is absent');
+    expect(iconUrlProblem({ ...manifest, iconUrl: 'ftp://example.com/icon.svg' })).toMatch(/not http\(s\)/);
+    expect(iconUrlProblem({ ...manifest, iconUrl: 'assets/icon.svg' })).toMatch(/not a URL/);
+  });
+
+  it('points iconUrl at the icon this package owns', () => {
+    expect(manifest.iconUrl).toBe(ICON_URL);
+    const iconPath = fileURLToPath(new URL('../assets/icon.svg', import.meta.url));
+    expect(existsSync(iconPath)).toBe(true);
+    // `--icon-file` takes up to 256 KB; hold the owned asset to the same bound.
+    expect(statSync(iconPath).size).toBeLessThan(256 * 1024);
+    expect(readFileSync(iconPath, 'utf8')).toMatch(/^<svg [^>]*viewBox="0 0 256 256"/);
   });
 
   it('carries no secret in metadata', () => {
