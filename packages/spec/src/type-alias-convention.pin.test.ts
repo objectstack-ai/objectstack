@@ -429,6 +429,9 @@ export type Iso_api_authEndpoints__EmailPasswordConfigPublicSchema = Assert<Eq< 
 // api/auth.zod.ts
 export type Iso_api_auth__AuthProvider = Assert<Eq< z.input< typeof M13.AuthProvider >, z.infer< typeof M13.AuthProvider > >>;
 export type Iso_api_auth__LoginType = Assert<Eq< z.input< typeof M13.LoginType >, z.infer< typeof M13.LoginType > >>;
+export type Iso_api_auth__MePermissionsAnonymousResponseSchema = Assert<Eq< z.input< typeof M13.MePermissionsAnonymousResponseSchema >, z.infer< typeof M13.MePermissionsAnonymousResponseSchema > >>;
+export type Iso_api_auth__MePermissionsAuthenticatedResponseSchema = Assert<Eq< z.input< typeof M13.MePermissionsAuthenticatedResponseSchema >, z.infer< typeof M13.MePermissionsAuthenticatedResponseSchema > >>;
+export type Iso_api_auth__MePermissionsResponseSchema = Assert<Eq< z.input< typeof M13.MePermissionsResponseSchema >, z.infer< typeof M13.MePermissionsResponseSchema > >>;
 export type Iso_api_auth__RefreshTokenRequestSchema = Assert<Eq< z.input< typeof M13.RefreshTokenRequestSchema >, z.infer< typeof M13.RefreshTokenRequestSchema > >>;
 export type Iso_api_auth__RegisterRequestSchema = Assert<Eq< z.input< typeof M13.RegisterRequestSchema >, z.infer< typeof M13.RegisterRequestSchema > >>;
 export type Iso_api_auth__SessionSchema = Assert<Eq< z.input< typeof M13.SessionSchema >, z.infer< typeof M13.SessionSchema > >>;

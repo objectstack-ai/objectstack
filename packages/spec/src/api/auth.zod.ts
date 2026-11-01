@@ -2,6 +2,7 @@
 
 import { z } from 'zod';
 import { BaseResponseSchema } from './contract.zod';
+import { EffectiveObjectPermissionSchema } from '../security/permission.zod';
 
 /**
  * Authentication Service Protocol
@@ -131,6 +132,76 @@ export const UserProfileResponseSchema = lazySchema(() => BaseResponseSchema.ext
   data: SessionUserSchema,
 }));
 
+// ==========================================
+// GET /auth/me/permissions
+// ==========================================
+
+/**
+ * [#28508] The anonymous answer of `GET /auth/me/permissions`: a caller with no
+ * session is told only that, at 200, so the console can tell "signed out" from
+ * a fault. Strict: nothing about any user is disclosed here.
+ */
+export const MePermissionsAnonymousResponseSchema = lazySchema(() => z.object({
+  authenticated: z.literal(false).describe('No session: the caller is anonymous.'),
+}).strict());
+
+/**
+ * [#28508] The authenticated answer of `GET /auth/me/permissions`: the caller's
+ * effective permissions, resolved once by the server so the console never
+ * re-derives them (`@objectstack/plugin-hono-server`, `current-user-endpoints.ts`).
+ *
+ * Three bodies take this one shape:
+ *
+ * - **full** — a stack with SecurityPlugin: every key present;
+ * - **closed** — the server knew the caller but failed to compute the grants:
+ *   every key present and empty, `hasAnyQueue: false`;
+ * - **degraded** — no SecurityPlugin (or no metadata service): `systemPermissions`
+ *   and `tabPermissions` are ABSENT on purpose. Absent means "unknown", which
+ *   the console fails open on, because there the server enforces nothing
+ *   either; present-and-empty means "none". The two must never be conflated.
+ *
+ * Strict: an undeclared key is refused, so a key the server starts sending is
+ * declared here first (`Clause-②`).
+ */
+export const MePermissionsAuthenticatedResponseSchema = lazySchema(() => z.object({
+  authenticated: z.literal(true).describe('A session was resolved for the caller.'),
+  userId: z.string().describe('The caller\'s user id.'),
+  tenantId: z.string().nullable().describe('The caller\'s active organization id, or null when the session has none.'),
+  positions: z.array(z.string()).describe(
+    'The security positions the caller holds (ADR-0068 D3): built-in identity names plus assigned positions, scope-resolved.',
+  ),
+  permissionSets: z.array(z.string()).describe('The names of the permission sets resolved for the caller.'),
+  objects: z.record(z.string(), EffectiveObjectPermissionSchema).describe(
+    'The effective object permissions, keyed by object name — the map `current_user.can()` reads on the server.',
+  ),
+  fields: z.record(z.string(), z.object({
+    readable: z.boolean().describe('The caller may read the field.'),
+    editable: z.boolean().describe('The caller may edit the field on some row (a row-conditioned entry is reported as its lock).'),
+  }).strict()).describe('The effective field permissions, keyed `object.field`.'),
+  systemPermissions: z.array(z.string()).optional().describe(
+    'The effective system capabilities (ADR-0066). Absent only on the degraded body, where it means unknown; '
+    + 'an empty array means none.',
+  ),
+  tabPermissions: z.record(z.string(), z.enum(['visible', 'hidden', 'default_on', 'default_off'])).optional().describe(
+    'The effective app tab visibilities, keyed by app name. Absent only on the degraded body.',
+  ),
+  hasAnyQueue: z.boolean().describe(
+    'Whether the caller\'s organization has at least one ownership queue: a declared queue the activation ledger '
+    + 'has not switched off, or a `sys_queue` row of the organization. Resolved server-side through the '
+    + 'ownership-queue service, so a member who may not read `sys_queue` still gets the answer; no names and no '
+    + 'counts are disclosed. False when no ownership-queue service is registered, and on the closed body.',
+  ),
+}).strict());
+
+/**
+ * [#28508] The response of `GET /auth/me/permissions`, discriminated by
+ * `authenticated`. The console reads it once per session.
+ */
+export const MePermissionsResponseSchema = lazySchema(() => z.discriminatedUnion('authenticated', [
+  MePermissionsAnonymousResponseSchema,
+  MePermissionsAuthenticatedResponseSchema,
+]));
+
 export type AuthProvider = z.input<typeof AuthProvider>;
 export type SessionUser = z.input<typeof SessionUserSchema>;
 /** Post-parse shape of {@link SessionUser} — defaults applied, transforms run (ADR-0122). */
@@ -148,3 +219,6 @@ export type SessionResponseParsed = z.infer<typeof SessionResponseSchema>;
 export type UserProfileResponse = z.input<typeof UserProfileResponseSchema>;
 /** Post-parse shape of {@link UserProfileResponse} — defaults applied, transforms run (ADR-0122). */
 export type UserProfileResponseParsed = z.infer<typeof UserProfileResponseSchema>;
+export type MePermissionsAnonymousResponse = z.input<typeof MePermissionsAnonymousResponseSchema>;
+export type MePermissionsAuthenticatedResponse = z.input<typeof MePermissionsAuthenticatedResponseSchema>;
+export type MePermissionsResponse = z.input<typeof MePermissionsResponseSchema>;

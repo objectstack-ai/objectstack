@@ -32,6 +32,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
+import { MePermissionsResponseSchema } from '@objectstack/spec/api';
 import { registerCurrentUserEndpoints } from './current-user-endpoints';
 
 const ME_PERMISSIONS = '/api/v1/auth/me/permissions';
@@ -116,10 +117,19 @@ function mount(
     return { app, warn, hasAnyQueue };
 }
 
+/**
+ * Read the body, and hold it to the declared contract: every body this file
+ * provokes (full, degraded, closed, anonymous) parses through the STRICT
+ * `MePermissionsResponseSchema`, so a key the handler sends that the spec does
+ * not declare reds here.
+ */
 async function read(app: Hono) {
     const res = await app.request(`http://localhost${ME_PERMISSIONS}`);
     expect(res.status).toBe(200);
-    return res.json();
+    const body = await res.json();
+    const parsed = MePermissionsResponseSchema.safeParse(body);
+    expect(parsed.success ? [] : parsed.error.issues).toEqual([]);
+    return body;
 }
 
 describe('[#28508] /auth/me/permissions carries hasAnyQueue from the ownership-queue service', () => {
