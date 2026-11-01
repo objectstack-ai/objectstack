@@ -1,6 +1,6 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences } from '@objectstack/spec/data';
+import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolveInjectedSystemColumns, resolveInjectedColumnProvenance as injectedColumnProvenance, isInjectedColumnDefinition, isTenancyDisabled, checkManagedApiMethodAffordances, LEGACY_API_METHODS, AUDIT_PROVENANCE_FIELDS, materializeTreeSelfReferences, BASE_FIELD_DISPLAY_WHITELIST, type ObjectExtensionParsed } from '@objectstack/spec/data';
 // [#4513] The audit-family governance table, and [#6562] the injected-column
 // DEFINITION tables it governs — see the re-exports below for why both live in a
 // package `objectql` and `metadata-protocol` both depend on.
@@ -37,6 +37,10 @@ import {
   OBJECT_FIELD_TYPE_REFUSED_ERROR_NAME,
   type ObjectFieldTypeRefusal,
   type ObjectFieldTypeViolation,
+  // [ADR-0146 D10, second rule] The field-patch target check — the install
+  // door's and `os validate`'s judge, asked here so the fold names a patch it
+  // cannot apply by the same verdict those doors refuse it by.
+  fieldPatchTargetMisses,
 } from '@objectstack/metadata-core';
 // [ADR-0029 D9.2a] `scalarOverridesPackagedBase` is the #8284 comparison, imported rather
 // than re-spelled: the object FOLD asks the same question one layer down (has
@@ -496,6 +500,129 @@ const OBJECT_FOLD_SCALAR_KEYS = ['label', 'pluralLabel', 'description'] as const
 type ObjectFoldScalarKey = (typeof OBJECT_FOLD_SCALAR_KEYS)[number];
 
 /**
+ * [ADR-0146 D10, second rule] An object extension's per-field display patches:
+ * the slot `ObjectExtensionSchema.fieldPatches` declares, carried onto the
+ * extension def by the manifest loop (`engine.ts`) and applied by
+ * {@link mergeObjectDefinitions}. ⛔ No second shape: the type IS the spec's,
+ * and the keys applied are read from `BASE_FIELD_DISPLAY_WHITELIST`, so a
+ * widened whitelist widens what the merge applies too.
+ */
+type ObjectFieldPatches = NonNullable<ObjectExtensionParsed['fieldPatches']>;
+
+/** An `extend` contributor's body: a partial object that may carry {@link ObjectFieldPatches}. */
+type ObjectExtensionBody = Partial<ServiceObject> & { fieldPatches?: ObjectFieldPatches };
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+  v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * The address of one patched display key in a fold's D9.2a yield set
+ * ({@link SchemaRegistry.tenantPatchedDisplayKeys}): a field key, or one key of
+ * the option addressed by its stored value.
+ */
+function fieldPatchYieldKey(field: string, key: string, option?: string): string {
+  return option === undefined ? `${field}\u0000${key}` : `${field}\u0000options\u0000${option}\u0000${key}`;
+}
+
+/** A field of an object body's name-keyed `fields`, when it is a record. */
+function recordFieldOf(body: unknown, name: string): Record<string, unknown> | undefined {
+  const fields = isPlainRecord(body) ? body.fields : undefined;
+  if (!isPlainRecord(fields) || !Object.prototype.hasOwnProperty.call(fields, name)) return undefined;
+  const field = fields[name];
+  return isPlainRecord(field) ? field : undefined;
+}
+
+/** The option of a field's own `options` whose stored `value` is `value`. */
+function optionByValue(field: Record<string, unknown>, value: string): Record<string, unknown> | undefined {
+  const options = field.options;
+  if (!Array.isArray(options)) return undefined;
+  const found = options.find((o) => isPlainRecord(o) && o.value === value);
+  return isPlainRecord(found) ? found : undefined;
+}
+
+/**
+ * [ADR-0029 D9.2a] The scalar yield's comparison, asked of one display key of a
+ * field or of one of its options. It IS {@link scalarOverridesPackagedBase} —
+ * the one comparison behind every D9.2a yield, keyed by any attribute (its own
+ * docblock: the exported key union names the keys its callers ask about, and
+ * the implementation underneath reads any) — ⛔ never a second copy of it.
+ */
+function displayKeyOverridesPackagedBase(packaged: unknown, key: string, value: unknown): boolean {
+  return scalarOverridesPackagedBase(packaged, key as Parameters<typeof scalarOverridesPackagedBase>[1], value);
+}
+
+/**
+ * [ADR-0146 D10, second rule] One base field with an extension's patch applied:
+ * the whitelisted field keys, then each option the patch addresses by its
+ * stored `value`. A key the tenant authored on the fold's base yields
+ * (`tenantPatched`, ADR-0029 D9.2a). Returns `field` BY REFERENCE when nothing
+ * applies.
+ *
+ * A field bound to a picklist is left alone under `options`: the served options
+ * are the picklist's, written over the field after the fold
+ * ({@link SchemaRegistry.finishServedObject}), so an option label written here
+ * would never be served. The target check names that patch instead.
+ */
+function patchedField(
+  name: string,
+  field: Record<string, unknown>,
+  patch: ObjectFieldPatches[string],
+  tenantPatched: ReadonlySet<string> | undefined,
+): Record<string, unknown> {
+  let next: Record<string, unknown> | undefined;
+  const patchKeys = patch as Record<string, unknown>;
+  for (const key of BASE_FIELD_DISPLAY_WHITELIST.field) {
+    const value = patchKeys[key];
+    if (value === undefined || tenantPatched?.has(fieldPatchYieldKey(name, key))) continue;
+    (next ??= { ...field })[key] = value;
+  }
+  const optionPatches = patch.options;
+  const options = field.options;
+  const picklistBound = typeof field.picklist === 'string' && field.picklist !== '';
+  if (optionPatches && Array.isArray(options) && !picklistBound) {
+    let patchedOptions: unknown[] | undefined;
+    options.forEach((option, index) => {
+      if (!isPlainRecord(option) || typeof option.value !== 'string') return;
+      if (!Object.prototype.hasOwnProperty.call(optionPatches, option.value)) return;
+      const optionPatch = optionPatches[option.value] as Record<string, unknown> | undefined;
+      if (!optionPatch) return;
+      let patchedOption: Record<string, unknown> | undefined;
+      for (const key of BASE_FIELD_DISPLAY_WHITELIST.option) {
+        const value = optionPatch[key];
+        if (value === undefined || tenantPatched?.has(fieldPatchYieldKey(name, key, option.value))) continue;
+        (patchedOption ??= { ...option })[key] = value;
+      }
+      if (patchedOption) (patchedOptions ??= [...options])[index] = patchedOption;
+    });
+    if (patchedOptions) (next ??= { ...field }).options = patchedOptions;
+  }
+  return next ?? field;
+}
+
+/**
+ * [ADR-0146 D10, second rule] `fields` with every patch of `patches` applied
+ * that names a field `fields` has. A patch naming a field the object lacks is
+ * skipped here, and named by the fold ({@link SchemaRegistry.reportFieldPatchMisses}).
+ * Returns `fields` BY REFERENCE when nothing applies.
+ */
+function applyFieldPatches(
+  fields: ServiceObject['fields'],
+  patches: ObjectFieldPatches,
+  tenantPatched: ReadonlySet<string> | undefined,
+): ServiceObject['fields'] {
+  if (!isPlainRecord(fields)) return fields;
+  let out: Record<string, unknown> | undefined;
+  for (const [name, patch] of Object.entries(patches)) {
+    if (!patch) continue;
+    const field = recordFieldOf({ fields: out ?? fields }, name);
+    if (!field) continue;
+    const next = patchedField(name, field, patch, tenantPatched);
+    if (next !== field) (out ??= { ...fields })[name] = next;
+  }
+  return (out ?? fields) as ServiceObject['fields'];
+}
+
+/**
  * [#28356] Which layer an object fold serves: `'served'`, what every read
  * answers (the bound actions the registry serves, runtime-authored included),
  * or `'code'`, the code-layer resolution {@link SchemaRegistry.getArtifactItem}
@@ -516,6 +643,12 @@ type ServedObjectLayer = 'served' | 'code';
  *   - The three {@link OBJECT_FOLD_SCALAR_KEYS} (`label`, `pluralLabel`,
  *     `description`) are overridden last-writer-wins, subject to the
  *     `tenantAuthored` yield rule below.
+ *   - `fieldPatches` [ADR-0146 D10, second rule] is APPLIED, never carried:
+ *     after the merges above, each patch writes its `BASE_FIELD_DISPLAY_WHITELIST`
+ *     keys onto the named field and its option labels onto the options whose
+ *     stored `value` it names, each key yielding where `tenantPatched` says the
+ *     tenant authored it — the same D9.2a rule as the scalars. A patch naming a
+ *     field the merged object lacks is skipped here; the fold names it.
  *
  * **Every other top-level prop on `extension` is silently discarded.**
  * `merged` starts as `{ ...base }` and nothing outside the list above is ever
@@ -527,8 +660,8 @@ type ServedObjectLayer = 'served' | 'code';
  *
  * Declarative authors never reach that silence, though: `ObjectExtensionSchema`
  * (`packages/spec/src/data/object.zod.ts`) is `.strict()` — its shape is
- * exactly `extend` / `fields` / `label` / `pluralLabel` / `description` /
- * `validations` / `indexes` / `priority`, so an `objectExtensions` entry
+ * exactly `extend` / `fields` / `fieldPatches` / `label` / `pluralLabel` /
+ * `description` / `validations` / `indexes` / `priority`, so an `objectExtensions` entry
  * naming `tenancy`, `permissions`, or any other key outside that list fails
  * LOUDLY at authoring time with a prescription (#4001; the same rule is
  * documented at `content/docs/data-modeling/object-extensions.mdx`). This
@@ -558,9 +691,10 @@ type ServedObjectLayer = 'served' | 'code';
  */
 function mergeObjectDefinitions(
   base: ServiceObject,
-  extension: Partial<ServiceObject>,
+  extension: ObjectExtensionBody,
   tenantAuthored?: ReadonlySet<ObjectFoldScalarKey>,
   tenantRules?: ReadonlyMap<string, TenantRuleSettings>,
+  tenantPatched?: ReadonlySet<string>,
 ): ServiceObject {
   const merged = { ...base };
 
@@ -592,6 +726,16 @@ function mergeObjectDefinitions(
   }
   if (extension.description !== undefined && !yields('description')) {
     merged.description = extension.description;
+  }
+
+  // [ADR-0146 D10, second rule] The extension's display patches of the base's
+  // fields — AFTER the additive merges, so a patch reaches a field a
+  // lower-priority extender added, and with each key yielding where the tenant
+  // authored it (`tenantPatched`, ADR-0029 D9.2a), as the scalars above yield.
+  // Two extenders patching one key resolve as the scalars do: the fold applies
+  // contributors in ascending `priority`, so the higher one is written last.
+  if (extension.fieldPatches) {
+    merged.fields = applyFieldPatches(merged.fields, extension.fieldPatches, tenantPatched);
   }
 
   return merged;
@@ -4160,6 +4304,10 @@ export class SchemaRegistry {
     // tenant's `message` and `active`. Computed once, over the base, as the
     // scalars above are.
     const tenantRules = this.tenantRuleSettings(contributors, baseDefinition);
+    // [ADR-0146 D10, second rule; ADR-0029 D9.2a] The display keys the tenant
+    // authored on the fields the extenders patch — computed once, over the
+    // base, for the scalars' reason above.
+    const tenantPatched = this.tenantPatchedDisplayKeys(contributors, baseDefinition);
     let merged = tenantRules
       ? this.withPackagedOwnerRules(contributors, baseDefinition, tenantRules)
       : { ...baseDefinition };
@@ -4167,7 +4315,8 @@ export class SchemaRegistry {
       if (contrib.ownership === 'extend') {
         let extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
         if (governQueue) extension = this.withoutExtensionQueueField(extension, contrib.packageId);
-        merged = mergeObjectDefinitions(merged, extension, tenantAuthored, tenantRules);
+        merged = mergeObjectDefinitions(merged, extension, tenantAuthored, tenantRules, tenantPatched);
+        this.reportFieldPatchMisses(merged, extension, contrib.packageId);
       }
     }
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
@@ -4175,6 +4324,45 @@ export class SchemaRegistry {
     // it — here, in the fold every object read and the write door share, so
     // the set a client is offered and the set a write is judged by are one.
     return this.finishServedObject(merged, layer);
+  }
+
+  /**
+   * [ADR-0146 D10, second rule] Field-patch targets already named, keyed
+   * `object|package|field|option`. Per registry, for the reason
+   * {@link shadowedExtensionQueueWarned} gives.
+   */
+  private fieldPatchMissesWarned = new Set<string>();
+
+  /**
+   * [ADR-0146 D10, second rule] Name, once, each patch of `extension` the fold
+   * could not apply: a field the object does not have, an option value its
+   * field does not have, or an option of a picklist-bound field. The verdict
+   * is the install door's and `os validate`'s own judge
+   * (`fieldPatchTargetMisses`), so the boot names exactly what those doors
+   * refuse.
+   *
+   * ⛔ Never a refusal, and worded as the state it observes: the fold runs on
+   * every read while a boot is still registering packages, so a field another
+   * extender adds later makes the patch apply on the next read, with nothing
+   * recorded to undo (AGENTS.md *Startup registry reads*). At `warn`: the
+   * object is visibly unpatched, and nothing durable is lost.
+   */
+  private reportFieldPatchMisses(
+    target: ServiceObject,
+    extension: ObjectExtensionBody,
+    packageId: string | undefined,
+  ): void {
+    if (!extension.fieldPatches) return;
+    const object = String(target.name ?? extension.name ?? '');
+    for (const miss of fieldPatchTargetMisses(object, extension.fieldPatches, target)) {
+      const key = `${object}|${packageId ?? ''}|${miss.field}|${miss.option ?? ''}`;
+      if (this.fieldPatchMissesWarned.has(key)) continue;
+      this.fieldPatchMissesWarned.add(key);
+      console.warn(
+        `[Registry] An extension of object "${object}"${packageId ? ` from package "${packageId}"` : ''} ` +
+          `carries a field patch that is not applied while the object has no such target: ${miss.message}`,
+      );
+    }
   }
 
   /**
@@ -4478,6 +4666,55 @@ export class SchemaRegistry {
     for (const key of OBJECT_FOLD_SCALAR_KEYS) {
       if (scalarOverridesPackagedBase(owner, key, baseDefinition[key])) {
         (authored ??= new Set()).add(key);
+      }
+    }
+    return authored;
+  }
+
+  /**
+   * [ADR-0146 D10, second rule; ADR-0029 D9.2a] The display keys a fold's base
+   * has authored away from the packaged owner's value, on the fields and
+   * options the `extend` contributors patch — each a {@link fieldPatchYieldKey}.
+   * A patch yields on those keys, as an extender's scalar yields on
+   * {@link tenantAuthoredScalars}, and by the same comparison
+   * ({@link displayKeyOverridesPackagedBase}).
+   *
+   * The same two "no opinion" edges as {@link tenantAuthoredScalars}, for its
+   * reasons: no `own` contributor, or a base that IS the owner's body (by
+   * reference). Idempotent over a folded base for its reason too: a base that
+   * already carries a patch's text reads as authored, so the patch yields and
+   * the value stays what the first fold produced.
+   */
+  private tenantPatchedDisplayKeys(
+    contributors: ObjectContributor[],
+    baseDefinition: ServiceObject,
+  ): ReadonlySet<string> | undefined {
+    const owner = contributors.find((c) => c.ownership === 'own')?.definition;
+    if (!owner || owner === baseDefinition) return undefined;
+    let authored: Set<string> | undefined;
+    for (const contrib of contributors) {
+      if (contrib.ownership !== 'extend') continue;
+      const patches = (contrib.definition as ObjectExtensionBody).fieldPatches;
+      if (!patches) continue;
+      for (const [name, patch] of Object.entries(patches)) {
+        const packagedField = recordFieldOf(owner, name);
+        const baseField = recordFieldOf(baseDefinition, name);
+        if (!patch || !packagedField || !baseField) continue;
+        for (const key of BASE_FIELD_DISPLAY_WHITELIST.field) {
+          if (displayKeyOverridesPackagedBase(packagedField, key, baseField[key])) {
+            (authored ??= new Set()).add(fieldPatchYieldKey(name, key));
+          }
+        }
+        for (const value of Object.keys(patch.options ?? {})) {
+          const packagedOption = optionByValue(packagedField, value);
+          const baseOption = optionByValue(baseField, value);
+          if (!packagedOption || !baseOption) continue;
+          for (const key of BASE_FIELD_DISPLAY_WHITELIST.option) {
+            if (displayKeyOverridesPackagedBase(packagedOption, key, baseOption[key])) {
+              (authored ??= new Set()).add(fieldPatchYieldKey(name, key, value));
+            }
+          }
+        }
       }
     }
     return authored;
