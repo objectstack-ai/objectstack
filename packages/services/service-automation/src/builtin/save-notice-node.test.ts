@@ -172,4 +172,29 @@ describe('#28251 — save_notice is refused by name where no write waits', () =>
         expect(result.success).toBe(false);
         expect(result.error).toContain("save_notice 'tell': this run holds no record write to answer");
     });
+
+    it('gives a map child no channel either, so the parent\'s write hears nothing from it', async () => {
+        const engine = engineWith();
+        engine.registerFlow('child_notice', noticeFlow('child_notice', 'From the child') as never);
+        engine.registerFlow('parent_map', {
+            name: 'parent_map', label: 'parent_map', type: 'record_change',
+            nodes: [
+                START,
+                {
+                    id: 'each', type: 'map', label: 'Each',
+                    config: { collection: { dialect: 'cel', source: '[1]' }, flowName: 'child_notice', iteratorVariable: 'item' },
+                },
+                { id: 'done', type: 'end', label: 'Done' },
+            ],
+            edges: [
+                { id: 'e0', source: 'start', target: 'each' },
+                { id: 'e1', source: 'each', target: 'done' },
+            ],
+        } as never);
+        const tap = channel();
+
+        await engine.execute('parent_map', triggerContext(tap.saveNotice));
+
+        expect(tap.heard).toEqual([]);
+    });
 });
