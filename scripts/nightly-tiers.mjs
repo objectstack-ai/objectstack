@@ -67,12 +67,13 @@
  * request that introduces it, which is the open question the landing card
  * records.
  *
- * ## The nightly's shards: one slice of the tier on EVERY shard, by the nightly's own count
+ * ## The nightly's shards: every shard runs something, by the nightly's own count
  *
- * `--packages` is the nightly's whole input to `scripts/partition-test-shards.mjs`,
- * and the one tier-owning package (`@objectstack/cli`, 82 tier files at
- * 4f81f31526) has to reach every one of the nightly's shards as a slice of its
- * own: an item the split does not place on a shard leaves that shard running
+ * `--packages` is the nightly's whole input to `scripts/partition-test-shards.mjs`.
+ * Two packages own tier files: `@objectstack/cli` (86 tier files at cd065d3698),
+ * cut into slices, and `@objectstack/example-showcase`, kept whole on a shard of
+ * its own. Every shard the reservation leaves must carry one slice of the CLI:
+ * an item the split does not place on a shard leaves that shard running
  * nothing, reading green, while another carries the whole tier.
  *
  * The nightly used to get its slices by inheriting Test Core's

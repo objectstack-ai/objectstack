@@ -3863,7 +3863,7 @@ function main() {
   // density cap is printed beside the bins it bounds (#22075).
   console.error(
     `shard ${shardSpec}: ${mine.names.length}/${weighted.length} items ` +
-      `(${weighted.length - packages} of them file-level slices of ${packages} package(s)), ` +
+      `(${weighted.filter((w) => w.slice).length} of them file-level slices of ${packages} package(s)), ` +
       `${mine.total.toFixed(1)}s predicted (all bins: ${bins.map((b) => b.total.toFixed(0)).join('/')}s; ` +
       `max/mean ${ratio.toFixed(2)}x of the ${MAX_SHARD_OVER_MEAN}x bound` +
       `${ownShard.length > 0 ? ` over the ${sharedCount} shared shard(s)` : ''}, max ${max.toFixed(0)}s, mean ${mean.toFixed(0)}s; ` +

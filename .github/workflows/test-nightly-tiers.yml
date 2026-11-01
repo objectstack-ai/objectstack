@@ -68,7 +68,7 @@ name: Nightly Tiers
 # ## What lands where — the house idiom of `fleet-patrols.yml`'s `platform-checklist-watchdog` job
 #
 # On green this workflow files nothing, edits nothing and closes nothing. On
-# red the `report` job — ONE writer, after both shards, never the shards
+# red the `report` job — ONE writer, after all shards, never the shards
 # themselves (two matrix legs racing the same lookup would mint two cards) —
 # opens or refreshes ONE card: fixed title `nightly-tiers: red on main`, labels
 # `bug` · `domain:devx` · `priority:p1` on create only (grading is the devx
@@ -172,7 +172,7 @@ jobs:
     # report job says so rather than reading it as "no failing files".
     timeout-minutes: 45
     strategy:
-      # Both shards run to completion: the card should carry every failing
+      # All shards run to completion: the card should carry every failing
       # file, not the first shard's.
       fail-fast: false
       matrix:
