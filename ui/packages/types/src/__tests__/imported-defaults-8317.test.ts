@@ -149,6 +149,7 @@ import {
   checkPageDefaultPlacement,
   checkPageMainRegionWidth,
   checkPageRecordBindingPlacement,
+  checkAppLandingItems,
   VIEW_METADATA_MEMBERS as SpecViewMetadataMembers,
   // objectui#12736 — the form option's spec shape: the form-view option.
   FormSelectOptionSchema as SpecFormSelectOptionSchema,
@@ -745,6 +746,9 @@ describe('the import boundary strips every imported default (objectui#8317)', ()
       // `ListViewSchema`, attached on the authored page `list-view` node's bag
       // (`ListViewPropsBag`), whose `type` is the spec's view kind.
       ['checkListViewChartBinding', checkListViewChartBinding],
+      // objectstack#28450: the spec's `AppSchema.landing` check, re-attached on
+      // `AppComponentSchema` under the objectui#7715 ruling.
+      ['checkAppLandingItems', checkAppLandingItems],
     ]);
 
     /**

@@ -47,6 +47,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { z } from 'zod';
 import { AppSchema as SpecAppSchema } from '@objectstack/spec/ui';
 import type { AppComponentSchema } from '../app';
 // @ts-expect-error — `AppAction` is retired (objectui#7469); re-exporting it turns this directive unused
@@ -144,7 +145,10 @@ describe('objectui#7469 (c) — the platform\'s `AppSchema` refuses the key too'
 describe('objectui#7469 (d) — CONTROL: a deleted arm would KEEP the array under `.passthrough()`', () => {
   it('the mirror with the arm omitted parses the retired array green and keeps it — what a deletion would have left', () => {
     const value = RETIRED_VALUES[0]![1];
-    const r = AppMirror.omit({ actions: true }).safeParse(app({ actions: value }));
+    // Rebuilt from the mirror's own shape: zod refuses `.omit()` on an object that
+    // carries refinements, and the mirror chains the spec's `checkAppLandingItems`.
+    const { actions: _retired, ...withoutArm } = AppMirror.shape;
+    const r = z.object(withoutArm).passthrough().safeParse(app({ actions: value }));
     expect(r.success).toBe(true);
     expect((r.data as Record<string, unknown>).actions).toEqual(value);
   });
