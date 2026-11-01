@@ -307,19 +307,20 @@ export class FileI18nAdapter implements II18nService {
    *
    * - The locale has no bundle at all (static or authored): ONE line per
    *   locale, not one per key. A locale nobody ships (a `fr` reader on the
-   *   platform bundles) would otherwise report every key it renders. It is a
-   *   `warn` only when the app declared the locale in `i18n.supportedLocales`
-   *   (offered, with nothing behind it, #7679). An undeclared one is what the
-   *   client asked for, often straight from `Accept-Language`; the fallback is
-   *   the designed answer there, so it is `debug`, and a client cannot drive
-   *   the warn volume by sending locales.
-   * - The fallback locale served the key: `warn`. The key exists, so a
-   *   translation for this locale is what is missing; whoever owns the bundle
-   *   can add it.
-   * - No bundle holds the key: `debug`. Most `t()` callers probe on purpose
-   *   (a deployment override address, a field label with a declared-label
-   *   fallback) and read the echoed key as "not overridden", so a `warn`
-   *   here would mostly report misses nobody has to fix.
+   *   platform bundles) would otherwise report every key it renders.
+   * - The fallback locale served the key: one line per key and locale. The
+   *   key exists, so a translation for this locale is what is missing.
+   * - No bundle holds the key: `debug`, always. Most `t()` callers probe on
+   *   purpose (a deployment override address, a field label with a
+   *   declared-label fallback) and read the echoed key as "not overridden",
+   *   so a `warn` here would mostly report misses nobody has to fix.
+   *
+   * The first two are a `warn` only for a locale this stack OFFERS
+   * (`getLocales()`: the declared `i18n.supportedLocales`, else every loaded
+   * locale). For any other locale the client asked for something the app
+   * never offered, often straight from `Accept-Language`; the fallback is the
+   * designed answer there, so it is `debug`, and a client cannot drive the
+   * warn volume by sending locales.
    */
   private reportMiss(key: string, locale: string, fallback: string | undefined, servedByFallback: boolean): void {
     const logger = this.logger;
@@ -332,7 +333,8 @@ export class FileI18nAdapter implements II18nService {
     this.reportedMisses.add(said);
 
     const fallsBackTo = fallback ? `'${fallback}' (fallback locale) or to the key` : 'the key';
-    if (!hasBundle && this.supportedLocales?.includes(locale)) {
+    const offered = this.getLocales().includes(locale);
+    if (!hasBundle && offered) {
       logger.warn(
         `[i18n] locale '${locale}' is offered (i18n.supportedLocales) but has no translation bundle; ` +
         `strings requested in it fall back to ${fallsBackTo}. ` +
@@ -344,10 +346,11 @@ export class FileI18nAdapter implements II18nService {
         `strings requested in it fall back to ${fallsBackTo}. Said once for this locale.`,
       );
     } else if (servedByFallback) {
-      logger.warn(
+      const message =
         `[i18n] translation key '${key}' is missing in '${locale}'; served the '${fallback}' (fallback locale) text. ` +
-        `Add it to the '${locale}' bundle. Said once for this key and locale.`,
-      );
+        `Add it to the '${locale}' bundle. Said once for this key and locale.`;
+      if (offered) logger.warn(message);
+      else logger.debug(`${message} '${locale}' is not offered by this stack.`);
     } else {
       logger.debug(
         `[i18n] translation key '${key}' has no entry in '${locale}'${fallback ? ` or '${fallback}' (fallback locale)` : ''}; ` +

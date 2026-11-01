@@ -499,6 +499,18 @@ describe('FileI18nAdapter reports a translation fallback once (#28109)', () => {
     expect(lines[0].message).toContain("'other'");
   });
 
+  it('a fallback in a locale the app does not offer is said at debug', () => {
+    const { lines, logger } = capture();
+    const i18n = build(logger);
+    i18n.loadTranslations('ja-JP', { k: 'こんにちは' });
+    i18n.setSupportedLocales(['en', 'zh-CN']);
+    expect(i18n.t('only_en', 'ja-JP')).toBe('English only');
+    expect(i18n.t('only_en', 'zh-CN')).toBe('English only');
+    expect(lines.map((l) => l.level)).toEqual(['debug', 'warn']);
+    expect(lines[0].message).toContain("'ja-JP'");
+    expect(lines[1].message).toContain("'zh-CN'");
+  });
+
   it('stops after a bounded number of reports, and says so once', () => {
     const { lines, logger } = capture();
     const i18n = build(logger);
