@@ -532,6 +532,42 @@ function recordFieldOf(body: unknown, name: string): Record<string, unknown> | u
   return isPlainRecord(field) ? field : undefined;
 }
 
+/**
+ * [ADR-0146 D10, second rule] The fields a field patch reaches: the names the
+ * `own` contributor's declaration carries in the name-keyed `fields` the merge
+ * reads — "the target object's own fields", as `ObjectExtensionSchema.fieldPatches`
+ * publishes it. A field an extension adds is never one of them, whatever the
+ * priorities, and neither is an array-spelled entry: the merge, the patch and
+ * the miss report all read the record spelling, so they cannot disagree.
+ * The declaration is the one the registry stores, so the platform columns
+ * {@link applySystemFields} injects at registration (`created_at` and the
+ * rest) are among these names: the fold and the install door
+ * (`getObjectOwner`) admit a patch of one, while `os validate`, which judges
+ * the authored declaration, refuses it.
+ * `undefined` when no owner is registered — no opinion, as
+ * {@link SchemaRegistry.tenantPatchedDisplayKeys} has none there either.
+ */
+function ownFieldNamesOf(owner: unknown): ReadonlySet<string> | undefined {
+  if (owner === undefined) return undefined;
+  const fields = isPlainRecord(owner) ? owner.fields : undefined;
+  return new Set(isPlainRecord(fields) ? Object.keys(fields).filter((name) => isPlainRecord(fields[name])) : []);
+}
+
+/**
+ * [ADR-0146 D10, second rule] What a field patch is judged against in the fold:
+ * `object` with only the fields of `ownFields`, in the record spelling, as they
+ * stand at that point of the fold. The fold applies a patch to exactly these
+ * fields ({@link applyFieldPatches}), so what it names is what it skipped.
+ */
+function ownFieldsTarget(object: ServiceObject, ownFields: ReadonlySet<string>): Record<string, unknown> {
+  const fields: Record<string, unknown> = {};
+  for (const name of ownFields) {
+    const field = recordFieldOf(object, name);
+    if (field) fields[name] = field;
+  }
+  return { ...object, fields };
+}
+
 /** The option of a field's own `options` whose stored `value` is `value`. */
 function optionByValue(field: Record<string, unknown>, value: string): Record<string, unknown> | undefined {
   const options = field.options;
@@ -601,19 +637,22 @@ function patchedField(
 
 /**
  * [ADR-0146 D10, second rule] `fields` with every patch of `patches` applied
- * that names a field `fields` has. A patch naming a field the object lacks is
- * skipped here, and named by the fold ({@link SchemaRegistry.reportFieldPatchMisses}).
- * Returns `fields` BY REFERENCE when nothing applies.
+ * that names one of the owner's own fields (`ownFields`, {@link ownFieldNamesOf})
+ * present in `fields`. A patch naming any other field — one the object lacks,
+ * or one only an extension adds — is skipped here, and named by the fold
+ * ({@link SchemaRegistry.reportFieldPatchMisses}). Nothing applies when no
+ * owner is registered. Returns `fields` BY REFERENCE when nothing applies.
  */
 function applyFieldPatches(
   fields: ServiceObject['fields'],
   patches: ObjectFieldPatches,
   tenantPatched: ReadonlySet<string> | undefined,
+  ownFields: ReadonlySet<string> | undefined,
 ): ServiceObject['fields'] {
-  if (!isPlainRecord(fields)) return fields;
+  if (!isPlainRecord(fields) || !ownFields) return fields;
   let out: Record<string, unknown> | undefined;
   for (const [name, patch] of Object.entries(patches)) {
-    if (!patch) continue;
+    if (!patch || !ownFields.has(name)) continue;
     const field = recordFieldOf({ fields: out ?? fields }, name);
     if (!field) continue;
     const next = patchedField(name, field, patch, tenantPatched);
@@ -647,8 +686,9 @@ type ServedObjectLayer = 'served' | 'code';
  *     after the merges above, each patch writes its `BASE_FIELD_DISPLAY_WHITELIST`
  *     keys onto the named field and its option labels onto the options whose
  *     stored `value` it names, each key yielding where `tenantPatched` says the
- *     tenant authored it — the same D9.2a rule as the scalars. A patch naming a
- *     field the merged object lacks is skipped here; the fold names it.
+ *     tenant authored it — the same D9.2a rule as the scalars. A patch reaches
+ *     the owner's own fields only (`ownFields`): one naming any other field,
+ *     a field an extension adds included, is skipped here; the fold names it.
  *
  * **Every other top-level prop on `extension` is silently discarded.**
  * `merged` starts as `{ ...base }` and nothing outside the list above is ever
@@ -695,6 +735,7 @@ function mergeObjectDefinitions(
   tenantAuthored?: ReadonlySet<ObjectFoldScalarKey>,
   tenantRules?: ReadonlyMap<string, TenantRuleSettings>,
   tenantPatched?: ReadonlySet<string>,
+  ownFields?: ReadonlySet<string>,
 ): ServiceObject {
   const merged = { ...base };
 
@@ -728,14 +769,16 @@ function mergeObjectDefinitions(
     merged.description = extension.description;
   }
 
-  // [ADR-0146 D10, second rule] The extension's display patches of the base's
-  // fields — AFTER the additive merges, so a patch reaches a field a
-  // lower-priority extender added, and with each key yielding where the tenant
-  // authored it (`tenantPatched`, ADR-0029 D9.2a), as the scalars above yield.
-  // Two extenders patching one key resolve as the scalars do: the fold applies
-  // contributors in ascending `priority`, so the higher one is written last.
+  // [ADR-0146 D10, second rule] The extension's display patches of the
+  // owner's own fields (`ownFields`) — never of a field an extension adds,
+  // whatever the priorities, or the answer would depend on which extender the
+  // fold reached first — applied AFTER the additive merges, with each key
+  // yielding where the tenant authored it (`tenantPatched`, ADR-0029 D9.2a),
+  // as the scalars above yield. Two extenders patching one key resolve as the
+  // scalars do: the fold applies contributors in ascending `priority`, so the
+  // higher one is written last.
   if (extension.fieldPatches) {
-    merged.fields = applyFieldPatches(merged.fields, extension.fieldPatches, tenantPatched);
+    merged.fields = applyFieldPatches(merged.fields, extension.fieldPatches, tenantPatched, ownFields);
   }
 
   return merged;
@@ -4308,6 +4351,8 @@ export class SchemaRegistry {
     // authored on the fields the extenders patch — computed once, over the
     // base, for the scalars' reason above.
     const tenantPatched = this.tenantPatchedDisplayKeys(contributors, baseDefinition);
+    // [ADR-0146 D10, second rule] The fields a patch reaches: the owner's own.
+    const ownFields = ownFieldNamesOf(contributors.find((c) => c.ownership === 'own')?.definition);
     let merged = tenantRules
       ? this.withPackagedOwnerRules(contributors, baseDefinition, tenantRules)
       : { ...baseDefinition };
@@ -4315,8 +4360,8 @@ export class SchemaRegistry {
       if (contrib.ownership === 'extend') {
         let extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
         if (governQueue) extension = this.withoutExtensionQueueField(extension, contrib.packageId);
-        merged = mergeObjectDefinitions(merged, extension, tenantAuthored, tenantRules, tenantPatched);
-        this.reportFieldPatchMisses(merged, extension, contrib.packageId);
+        merged = mergeObjectDefinitions(merged, extension, tenantAuthored, tenantRules, tenantPatched, ownFields);
+        this.reportFieldPatchMisses(merged, extension, contrib.packageId, ownFields);
       }
     }
     if (tenantRules) this.reportChangedRuleCopies(contributors, baseDefinition);
@@ -4335,26 +4380,31 @@ export class SchemaRegistry {
 
   /**
    * [ADR-0146 D10, second rule] Name, once, each patch of `extension` the fold
-   * could not apply: a field the object does not have, an option value its
-   * field does not have, or an option of a picklist-bound field. The verdict
-   * is the install door's and `os validate`'s own judge
-   * (`fieldPatchTargetMisses`), so the boot names exactly what those doors
-   * refuse.
+   * could not apply: a field that is not one of the owner's own (absent, or
+   * added only by an extension), an option value its field does not have, or
+   * an option of a picklist-bound field. The verdict is the install door's and
+   * `os validate`'s own judge (`fieldPatchTargetMisses`), asked of the owner's
+   * fields ({@link ownFieldsTarget}) as the install door asks it of the
+   * owner's declaration, so the boot names exactly what those doors refuse.
+   * With no owner registered there is nothing to judge against, and nothing
+   * is named.
    *
    * ⛔ Never a refusal, and worded as the state it observes: the fold runs on
-   * every read while a boot is still registering packages, so a field another
-   * extender adds later makes the patch apply on the next read, with nothing
-   * recorded to undo (AGENTS.md *Startup registry reads*). At `warn`: the
-   * object is visibly unpatched, and nothing durable is lost.
+   * every read while a boot is still registering packages, and an owner that
+   * registers again declaring the field (an upgrade) makes the patch apply on
+   * the next read, with nothing recorded to undo (AGENTS.md *Startup registry
+   * reads*). At `warn`: the object is visibly unpatched, and nothing durable
+   * is lost.
    */
   private reportFieldPatchMisses(
     target: ServiceObject,
     extension: ObjectExtensionBody,
     packageId: string | undefined,
+    ownFields: ReadonlySet<string> | undefined,
   ): void {
-    if (!extension.fieldPatches) return;
+    if (!extension.fieldPatches || !ownFields) return;
     const object = String(target.name ?? extension.name ?? '');
-    for (const miss of fieldPatchTargetMisses(object, extension.fieldPatches, target)) {
+    for (const miss of fieldPatchTargetMisses(object, extension.fieldPatches, ownFieldsTarget(target, ownFields))) {
       const key = `${object}|${packageId ?? ''}|${miss.field}|${miss.option ?? ''}`;
       if (this.fieldPatchMissesWarned.has(key)) continue;
       this.fieldPatchMissesWarned.add(key);
