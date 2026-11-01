@@ -153,7 +153,7 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
     body: unknown;
     analytics: () => AnalyticsService;
     message: RegExp;
-    /** Defaults to `DATASET_INVALID`; see the one row that legitimately differs. */
+    /** Defaults to `DATASET_INVALID`; see the two rows that legitimately differ. */
     code?: string;
   }> = [
     {
@@ -225,17 +225,22 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
     },
     {
       // The caller-shaped trigger: the DATASET declares no `include`, and the
-      // SELECTION filters on a dotted member, which the strategy compiles into
-      // a join at alias `account`. [#28258] A dotted `dimensions` entry was the
-      // trigger here until the service learned to refuse it ahead of either
-      // strategy (`INVALID_FIELD` / 400, one answer on all three dataset
-      // faces); a `runtimeFilter` member still reaches the strategy's own
-      // allowlist, and this row's audit trail is about that producer.
+      // SELECTION filters on a dotted member, which the strategy would compile
+      // into a join at alias `account`. [#28258] A dotted `dimensions` entry
+      // was the trigger here until the service learned to refuse it ahead of
+      // either strategy; [#28557] a `runtimeFilter` member (and [#28556] a
+      // `timeDimensions` entry) is now refused by the same service gate,
+      // `INVALID_FIELD` / 400 naming the member, one answer on all three
+      // dataset faces. No request member reaches the strategy's allowlist on
+      // this route any more (it stays for a hand-authored cube's configured
+      // hook). The row keeps its audit trail: the input this list entry used to
+      // classify answers 400 from a declared envelope, never from a message.
       name: 'native-sql-strategy: a selection naming a join outside the allowlist',
       listEntry: 'not backed by a declared relationship',
       analytics: nativeAnalytics,
       body: { dataset, selection: { dimensions: ['stage'], measures: ['revenue'], runtimeFilter: { 'account.region': 'emea' } } },
-      message: /join "account" is not backed by a declared relationship on cube "pipeline"/,
+      message: /Filter member 'account\.region' on cube 'pipeline' traverses relationship path 'account', which the dataset does not declare/,
+      code: 'INVALID_FIELD',
     },
   ];
 
