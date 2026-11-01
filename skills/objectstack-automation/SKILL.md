@@ -413,7 +413,7 @@ card, the app still writing none: the protocol is not HTTP; the work writes
 identity objects (users, units, positions); it processes files locally; one fixed
 action contract spans several vendors; the callback's signature is outside the
 `api` door's HMAC. A document the loader cannot take yet (YAML, Swagger 2.0,
-`$ref`, request signing) is a gap named against its platform card, never a
+`$ref`) is a gap named against its platform card, never a
 reason to write code.
 
 ---

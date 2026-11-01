@@ -31,7 +31,7 @@ deployment and to the sender. Scaffolded apps list the three executors in
   default `X-API-Key`, or `paramName` for a query-string key); `basic` (`username`
   stays in metadata); `signed` on `openapi` / `rest` (`scheme`
   `aliyun-acs3-hmac-sha256`, `tencentcloud-tc3-hmac-sha256` or `alipay-v3`,
-  `keyId`) signs each request. A secret in a url path has no variant — use a
+  `keyId`) signs each request; `oauth2` / `app-credential`: recipe 6. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
 - `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
 
@@ -148,8 +148,7 @@ export const LegacyErp = defineConnector({
 
 Recipe 1's shape with a grant-bearing `auth`, served on `rest`, `openapi` and
 `mcp` (`http` only; a `stdio` server's credentials ride `transport.env`): the
-token is fetched per dispatch, kept in memory, refreshed before expiry and once
-on a `401`; no metadata key holds it.
+token is fetched per dispatch; no metadata key holds it.
 
 ```ts
 // A user grants access once (PKCE always on); the ref is the client secret, omitted for a public client.
@@ -157,7 +156,7 @@ auth: { type: 'oauth2', grant: 'authorization_code', authorizationUrl: 'https://
         tokenUrl: 'https://account.docusign.com/oauth/token', scopes: ['signature'],
         clientId: 'objectstack-prod', credentialRef: 'DOCUSIGN_CLIENT_SECRET' }
 // Server to server: grant: 'client_credentials' with tokenUrl, clientId, credentialRef (`resource` optional).
-// Vendor app (Feishu bearer, DingTalk `x-acs-dingtalk-access-token`, WeCom `access_token` query):
+// Vendor app id + app secret:
 auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialRef: 'FEISHU_APP_SECRET' }
 ```
 
@@ -167,12 +166,11 @@ auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialR
 once per organization, from a signed-in session (an agent or API key is refused):
 `POST /api/v1/automation/connectors/:name/connection` answers `{ authorizationUrl }`
 for the admin to open; the vendor redirects to `GET …/connectors/oauth/callback`.
-`GET …/:name/connection` reads `not_connected` / `connected` / `reconnect_required`
-(the vendor refused the grant: connect again); `DELETE` revokes. Endpoints are
-`https://`; on `mcp` they and `clientId` may be omitted, discovered at connect.
+`GET` reads the status; `DELETE` revokes. Endpoints are `https://`; an
+`authorization_code` instance on `mcp` may omit them and `clientId`, discovered at connect.
 Still never park a short-lived token behind a `bearer` ref.
 
-## Not yet — declare it, mark the integration blocked, write no plugin
+## Not yet — mark the integration blocked, write no plugin
 
 - **WeChat Pay**: no `signed` scheme yet (Alipay's is `alipay-v3`, which also
   verifies responses).
