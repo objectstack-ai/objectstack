@@ -377,6 +377,8 @@
     "kernel/OpsPluginStructure:files",
     "kernel/OpsPluginStructure:metadata",
     "kernel/OpsPluginStructure:root",
+    "kernel/OverrideDeclaration:basedOn",
+    "kernel/OverrideDeclaration:package",
     "kernel/PackageArtifact:builtAt",
     "kernel/PackageArtifact:builtWith",
     "kernel/PackageArtifact:checksums",

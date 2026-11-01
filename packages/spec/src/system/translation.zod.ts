@@ -10,6 +10,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { textSlotTemplateRefusal } from '../automation/flow-text-slot-template';
 
@@ -2472,6 +2473,8 @@ export const TranslationItemSchema = lazySchema(() => strictObject({
   // dropped on every parse — and `authored-translation-sync` has to strip them
   // by hand on the read side precisely because the schema could not hold them.
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 }).describe('One locale of translations — the `translation` metadata type'));
 
 /** A single `translation` metadata item. */

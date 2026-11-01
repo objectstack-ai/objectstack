@@ -2792,6 +2792,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/objectql/src/protocol-validation-rule-copy-save-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-validation-rule-copy-save-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-validation-rule-copy-save-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/objectql/src/protocol-view-identity-overlay.test.ts",
       "verb": "delete",
       "pinned": 1

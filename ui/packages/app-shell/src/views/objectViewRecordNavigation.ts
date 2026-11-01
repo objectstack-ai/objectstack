@@ -14,11 +14,18 @@
  * 「Collapse to drawer」 back to this list with that record open
  * (`drawerRestore`), and from the record header's `⋯` menu
  * (`handleOpenAsPage`), at any level of the stack.
+ *
+ * On a phone (objectstack#27058) none of that applies: the record is always a
+ * page. The spec's own rule says so (`deriveRecordSurface` with
+ * `viewport: 'mobile'` answers `page`), a row tap navigates to the record
+ * route with the list as its origin, and the pane is never mounted, so the
+ * reader's Open records preference and the drawer's `?recordId=` state do not
+ * apply: a `?recordId=` link opened on a phone lands on that record's page.
  */
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import type { NavigateFunction, Location, SetURLSearchParams } from 'react-router-dom';
-import { overlayWidthFor } from '@object-ui/plugin-view';
+import { deriveRecordSurface, overlayWidthFor } from '@object-ui/plugin-view';
 import { useNavigationOverlay } from '@object-ui/react';
 import type { ViewNavigationConfig } from '@object-ui/types';
 import { RECORD_DRAWER_PARAM } from '../urlParams.js';
@@ -110,6 +117,7 @@ export function useObjectViewRecordNavigation({
     unlabelledViewText,
     language,
     recordOpenPreference,
+    phone,
 }: {
     activeView: ReturnType<typeof buildViewTabs>[number];
     objectDef: ConsoleObjectViewProps['objects'][number];
@@ -127,6 +135,8 @@ export function useObjectViewRecordNavigation({
     language: ReturnType<typeof useObjectTranslation>['language'];
     /** The reader's own way of opening a drawer-mode record (objectstack#27545). */
     recordOpenPreference: RecordOpenPreference;
+    /** The console is on a phone (`usePhoneViewport`, objectstack#27058): every record opens as a page. */
+    phone: boolean;
 }) {
     // Navigation overlay for record detail.
     // Priority: activeView.navigation > objectDef.navigation > default drawer.
@@ -141,6 +151,9 @@ export function useObjectViewRecordNavigation({
     // side-by-side pane is the reader's preference, read by `ObjectView`.
     const detailNavigation: ViewNavigationConfig = useMemo(
         () => {
+            // objectstack#27058 — on a phone the spec's rule decides, and it
+            // answers `page` whatever the view or the object declares.
+            if (phone) return { mode: deriveRecordSurface(objectDef, { viewport: 'mobile' }) };
             const authored = activeView?.navigation ?? objectDef.navigation;
             if (authored) {
                 // Authored config wins. For an overlay, resolve the `size`
@@ -165,7 +178,7 @@ export function useObjectViewRecordNavigation({
             // reader drags and `⤢` widens.
             return { mode: 'drawer', width: overlayWidthFor(recordPaneSize(undefined), objectDef) };
         },
-        [activeView?.navigation, objectDef]
+        [activeView?.navigation, objectDef, phone]
     );
     const drawerRecordId = searchParams.get(RECORD_DRAWER_PARAM);
     // The location as of the latest render, read when a handler runs: the
@@ -186,7 +199,7 @@ export function useObjectViewRecordNavigation({
     );
     // Memoize onNavigate to prevent stale closure in useNavigationOverlay's handleClick
     const handleNavOverlayNavigate = useCallback(
-        (recordId: string | number, action?: string, extraState?: Record<string, unknown>) => {
+        (recordId: string | number, action?: string, extraState?: Record<string, unknown>, replace?: boolean) => {
             if (action === 'new_window') {
                 // Open record detail in a new browser tab with Console-correct URL.
                 // Same builder the list's link column publishes as its href
@@ -213,18 +226,23 @@ export function useObjectViewRecordNavigation({
             // them: the page's top bar counts and steps through them
             // (objectstack#27524, Target 7).
             const set = listSiblingSetOf(listRowsRef.current, String(recordId));
+            // The list as the page's origin, without the drawer's
+            // `?recordId=` a phone redirect leaves behind (objectstack#27058).
+            const originParams = new URLSearchParams(search);
+            originParams.delete(RECORD_DRAWER_PARAM);
+            const originSearch = originParams.toString();
             const originState = {
               ...extraState,
               from: {
-                pathname: pathname + (search || ''),
+                pathname: pathname + (originSearch ? `?${originSearch}` : ''),
                 label: listLabel,
                 ...(set ?? {}),
               },
             };
             if (viewId) {
-                navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState });
+                navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState, replace });
             } else {
-                navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState });
+                navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState, replace });
             }
         },
         [navigate, viewId, listLabel]
@@ -393,13 +411,19 @@ export function useObjectViewRecordNavigation({
             : null),
         [drawerRecordId, objectDef.name, listRows],
     );
-    // Sync URL-based recordId to overlay state
+    // Sync URL-based recordId to overlay state. On a phone there is no pane to
+    // open: the drawer link is answered by the record's page, in its place in
+    // the history (objectstack#27058).
     useEffect(() => {
+        if (phone) {
+            if (drawerRecordId) handleNavOverlayNavigate(drawerRecordId, undefined, undefined, true);
+            return;
+        }
         if (drawerRecordId && !navOverlay.isOpen) {
             navOverlay.open({ id: drawerRecordId });
         } else if (!drawerRecordId && navOverlay.isOpen) {
             navOverlay.close();
         }
-    }, [drawerRecordId]);
+    }, [drawerRecordId, phone]);
     return { listRecordActions, navOverlay, handleDrawerClose, handleRowClick, handleOpenAsPage, handleOpenRowAsPage, drawerRoot, drawerRestore, handleListRowsChange, handleRootStep, listLabel };
 }

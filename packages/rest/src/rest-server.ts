@@ -5994,7 +5994,10 @@ export class RestServer {
      *
      *   GET  {basePath}/forms/:slug          → resolved form spec
      *   POST {basePath}/forms/:slug/submit   → INSERT record (no auth required),
-     *                                          answering `{ id }` only (#22437)
+     *                                          answering `{ id }` (#22437), plus
+     *                                          `fields` when the form's
+     *                                          thank-you panel names
+     *                                          engine-generated fields (#28005)
      *
      * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
      * deployment (e.g. ObjectOS multi-tenant). The submit is authorized by the

@@ -2115,6 +2115,7 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 ### Nested Shape: `ViewItem[viewKind='list'].config`
 
@@ -2175,6 +2176,13 @@ This schema accepts one of the following structures:
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
 
+### Nested Shape: `ViewItem[viewKind='list'].overrides`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
+
 ---
 
 #### Option 2
@@ -2201,6 +2209,7 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 ### Nested Shape: `ViewItem[viewKind='form'].config`
 
@@ -2237,6 +2246,13 @@ This schema accepts one of the following structures:
 | **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
+### Nested Shape: `ViewItem[viewKind='form'].overrides`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
 
 ---
 
@@ -2282,6 +2298,7 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 | **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
@@ -2347,6 +2364,13 @@ This schema accepts one of the following structures:
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
 
+### Nested Shape: `ViewItemWire[viewKind='list'].overrides`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
+
 ### Nested Shape: `ViewItemWire[viewKind='list'].columnState`
 
 | Property | Type | Required | Description |
@@ -2380,6 +2404,7 @@ This schema accepts one of the following structures:
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 | **isPinned** | `boolean` | optional | Console round-trip: the view is pinned in the object's view switcher. Written by the console's pin toggle through the `view` metadata API and read back to draw the pinned group. Stored on the view's row, which has no per-user scope. Not authored. |
 | **sortOrder** | `integer` | optional | Console round-trip: the view's position among the object's saved views in the switcher, 0-based and counted over saved views only (a code-defined view carries none). Written by the console's drag-reorder and read back to order the tabs. Not authored: `order` is the authored default position. |
 | **visibility** | `Enum<'private' \| 'team' \| 'organization' \| 'public'>` | optional | Console round-trip: the group the switcher files this view's tab under (private, team, organization or public). Display grouping only, NOT access control: nothing restricts who can list or open the view by this value. No console control sets it; the console carries a stored value forward when it re-saves the row. Not authored. |
@@ -2421,6 +2446,13 @@ This schema accepts one of the following structures:
 | **lock** | `Enum<'none' \| 'no-overlay' \| 'no-delete' \| 'full'>` | ✅ | Lock policy — none \| no-overlay \| no-delete \| full. |
 | **reason** | `string` | ✅ | User-visible reason shown when the lock blocks an action. |
 | **docsUrl** | `string` | optional | Optional URL the Studio banner links to for more context. |
+
+### Nested Shape: `ViewItemWire[viewKind='form'].overrides`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
 
 ### Nested Shape: `ViewItemWire[viewKind='form'].columnState`
 

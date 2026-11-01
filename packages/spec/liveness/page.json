@@ -241,6 +241,23 @@
     "slots": {
       "status": "live",
       "note": "slotted-page override map (header/actions/alerts/highlights/details/discussion; the tabs slot is a tombstone) — objectui plugin-detail; Preview render in objectui#1948. Verified in the Studio Design slot editor during the dogfood."
+    },
+    "overrides": {
+      "status": "planned",
+      "verifiedAt": "2026-10-31",
+      "note": "PLANNED RECORD (ADR-0146 D2, the spec card N-08): the override declaration `overrides: { package, basedOn }`, one field set (`OverrideDeclarationFields`, packages/spec/src/kernel/override-declaration.zod.ts) spread on the thirteen types `OVERRIDE_TYPE_CLASSIFICATION` classifies `overridable`. CARRIED today, measured: it survives the metadata save's schema parse, `defineStack()` and `GET /packages/:id/export` (packages/spec/src/kernel/override-declaration.test.ts; packages/runtime/src/domains/packages-export-override-declaration.test.ts). ACTED ON by nothing yet: the write gate that admits a declared override from the paired `<base>.custom` and refuses an undeclared same-named item, and the effective read that serves the declared document over the base's, are later cards of ADR-0146's Rollout (P1). Flip to `live` on the commit that lands the reader, citing it.",
+      "children": {
+        "package": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row): the base package id the declaring item replaces an item of. The pair predicate the write gate will read is `isCustomizationPairOf` (packages/spec/src/kernel/customization-package.ts). The schema refuses a `.custom` id here at parse."
+        },
+        "basedOn": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row). RECORDED, NEVER JUDGED by contract (ADR-0146 D2, 'Decided here' item 2): no door compares it with the installed base, produces an upgrade diff from it, or refuses on it. Its whole reading is a person's (Studio's override chip, the export); it stays `planned` until that reader lands, and must never gain a gate."
+        }
+      }
     }
   }
 }

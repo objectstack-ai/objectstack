@@ -242,6 +242,7 @@ View filter rule
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+| **overrides** | `{ package: string; basedOn: string }` | optional | Override declaration (ADR-0146 D2): `{ package, basedOn }` — this item of "`<base>`.custom" replaces the base package's same-named item whole. `basedOn` is recorded and never judged. |
 
 ### Nested Shape: `Page.variables[number]`
 
@@ -321,6 +322,13 @@ View filter rule
 | **details** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … } \| { type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | optional |  |
 | **tabs** | `never` | optional | [REMOVED] `page.slots.tabs` was removed in @objectstack/spec 18.3.0 (ADR-0085) — an authored strip replaced the whole synthesized one, so the related lists, approvals, attachments and history the platform composes from the object were dropped unless re-added by hand, and the page stayed tabbed at every width instead of taking the record page's columns. Delete the key. The record page composes its tabs and columns from the object's roles and relationship flags: to change which related lists appear or their order, set `relatedList` / `relatedList: 'primary'` on the child's reference field; to replace the Details body, author `slots.details`; a page that needs its own strip is `kind: 'full'`, drawn as authored. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
 | **discussion** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … } \| { type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | optional |  |
+
+### Nested Shape: `Page.overrides`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **package** | `string` | ✅ | The base package id whose same-named item this item replaces whole (e.g. "com.acme.crm"). Only an item of the base's paired "`<base>`.custom" package declares an override. |
+| **basedOn** | `string` | ✅ | Recorded, never judged: the base package's `manifest.version` this override was taken from (e.g. "3.2.0"), not a history version of the item. No door compares it with the installed base, no upgrade diff is produced from it, and nothing is refused on it; it tells a person re-basing the override where it started (ADR-0146 D2). |
 
 
 ---

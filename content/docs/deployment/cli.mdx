@@ -1302,6 +1302,7 @@ where the data lives.
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
+| `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
@@ -1503,6 +1504,43 @@ changes no behaviour, so there is no posture for a flag to attest.
 A deployment whose database was seeded fresh on this version has nothing to do
 here: its parents were created with the value already in place, and the run
 reports zero.
+
+#### `os migrate record-currency-codes`
+
+Switching an existing currency field to `currencyMode: 'record'` leaves every row
+already stored holding an amount beside a blank code. Nothing refuses such a row for
+resting, but until it holds a code it shows as a plain number, falls into the `null`
+group of a grouped aggregate, and sits outside every filter on the amount and its
+code. The save that makes the switch answers 409 `destructive_change` naming this
+command ([Currency fields](/docs/data-modeling/currency#switching-a-field-that-already-holds-rows)
+covers the switch). This command writes the code into those rows.
+
+```bash
+os migrate record-currency-codes --object opportunity --field amount --code USD          # Dry run: counts the rows, writes none
+os migrate record-currency-codes --object opportunity --field amount --code USD --apply  # Write the code (prompts)
+os migrate record-currency-codes --object opportunity --field amount --code USD --apply --yes --json   # CI / scripts
+```
+
+**The code is yours, never derived.** `--object`, `--field` and `--code` are all
+required. One run writes the one code you give into every row of the field whose
+amount is set and whose code is blank. It never reads a code from the `defaultCurrency`
+the field had under `fixed`, from the organization's `localization.currency`, or from
+anything else. A row that holds a code is never touched, whatever the code, and a row
+with no amount owes none. If the stored amounts are in more than one currency, split
+them with your own writes first: nothing here can tell those rows apart.
+
+**A bad `--code` is refused before anything is opened.** A code that is not an
+uppercase ISO 4217 code (`usd`, `EURO`) is refused with `INVALID_FIELD` / 400 and
+exit 1 before the database is probed, the `--apply` prompt is shown or the app is
+booted. An object your deployment does not declare (`OBJECT_NOT_FOUND`), or a field
+that is not a record-mode currency field (`INVALID_FIELD`), is refused after the boot
+and before any row is read.
+
+Each row is written through the engine like any other update, so the record-mode
+write rule and the code field's `valueDomain` judge it, and it is audited. Idempotent:
+every write turns a blank code into a code, so a second run finds nothing to write.
+Re-running until the report says zero *is* the verification, which is why this
+command records no flag.
 
 #### `os migrate comment-reactions`
 

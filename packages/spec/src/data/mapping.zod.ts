@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 // `QuerySchema` left with `extractQuery` in 17.0.0 (#4509) — a mapping no
 // longer carries a query of its own.
 
@@ -442,6 +443,8 @@ export const MappingSchema = lazySchema(() => strictObject({
   // they were dropped on every parse: protection metadata lost on round-trip,
   // and a hard 422 the day this shape closed — which is today.
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 }));
 
 export type Mapping = z.input<typeof MappingSchema>;

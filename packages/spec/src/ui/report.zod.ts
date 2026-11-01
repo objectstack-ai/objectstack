@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { ProtectionSchema } from '../shared/protection.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { analyticsCarrierFilter } from './analytics-carrier-filter';
 import { ChartConfigSchema } from './chart.zod';
 import { DATE_RANGE_DEFAULT_RANGES, SINGLE_SERIES_CHART_TYPES } from './dashboard.zod';
@@ -759,6 +760,8 @@ export const ReportSchema = lazySchema(() => strictObject({
 
   // ADR-0010 — runtime protection envelope (internal — set by loader).
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 
 }).superRefine((r, ctx) => {
   // ADR-0021 single-form: a report is dataset-bound. A `joined` report carries

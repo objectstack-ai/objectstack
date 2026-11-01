@@ -22,6 +22,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { ruleArrayFilterError } from './filter-rule-array';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
+import { OverrideDeclarationFields } from '../kernel/override-declaration.zod';
 import { PAGE_TYPE_DEFAULT, misplacedDefaultPageRefusal } from './default-record-page';
 
 /**
@@ -2169,6 +2170,8 @@ export const PageSchema = lazySchema(() => strictObject({
   // parse — protection metadata lost on round-trip, and a hard 422 the day this
   // shape closed.
   ...MetadataProtectionFields,
+  // ADR-0146 D2 — the override declaration (authored; travels with the item).
+  ...OverrideDeclarationFields,
 })
   // ADR-0080/0081 + ADR-0078 (completeness): an html/react page with no
   // `source` is silently inert — fail loudly at author time, never render empty.
