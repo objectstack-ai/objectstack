@@ -23604,17 +23604,16 @@ export class ObjectStackProtocolImplementation implements
         // `repo.promoteDraft` writes, so a batch publish aborts on it as on the
         // refusals above. An admitted declaration is promoted as the pair's own
         // row (the runtime-only intent below).
-        // As at the save door, a refused declaration throws here and an
-        // undeclared same name just before the store promotes (below), so no
-        // refusal this door already answered changes its code.
+        // Judged here and thrown just before the store promotes (below), so no
+        // refusal this door already answered changes its code. (The save door
+        // judged this draft when it was stored; a refusal here is a draft
+        // stored before the gate, or one whose closure has since gained the
+        // name.)
         const overrideVerdict: OverrideWriteVerdict = draftForGate
             ? this.overrideWriteVerdict({
                 type: singularType, name: request.name, packageId: promoteInto, item: draftForGate.body,
             })
             : { verdict: 'not_concerned' };
-        if (overrideVerdict.verdict === 'refuse' && overrideVerdict.rule !== 'undeclared_same_name') {
-            throw overrideWriteRefusalError(overrideVerdict);
-        }
         const declaredOverride = overrideVerdict.verdict === 'admit';
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet
@@ -23727,7 +23726,7 @@ export class ObjectStackProtocolImplementation implements
             })
             : [];
 
-        // [ADR-0146 D2] The override write gate's undeclared-same-name refusal.
+        // [ADR-0146 D2] The override write gate's refusal, the last before the store.
         if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
         const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
