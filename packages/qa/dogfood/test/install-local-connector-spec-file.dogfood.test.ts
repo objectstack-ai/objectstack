@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one real `os build` of a one-connector app, then one showcase boot with install-local mounted; measured 8.92 s of tests on a shared agent box, re-measure on CI
 //
 // GOLDEN REGRESSION — an OpenAPI connector app whose `providerConfig.spec` is a
 // PACKAGE-RELATIVE file materializes once its built artifact is installed into
