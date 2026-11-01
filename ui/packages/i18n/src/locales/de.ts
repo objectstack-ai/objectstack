@@ -3614,11 +3614,7 @@ const de = {
     redirecting: "Weiterleitung in {{seconds}} Sekunden…",
     redirectPending: "Weiterleitung…",
     loading: "Formular wird geladen…",
-    requiredHint: "* Pflichtfeld",
     requiredFields: "Pflichtfelder: {{fields}}",
-    consentRequired: "Bitte akzeptieren Sie die Datenschutzrichtlinie, um fortzufahren.",
-    rateLimited: "Bitte nehmen Sie sich einen Moment, um Ihre Antworten zu überprüfen, bevor Sie absenden.",
-    redirectBlocked: "Einreichung akzeptiert, aber die Weiterleitungs-URL wurde aus Sicherheitsgründen blockiert.",
   },
   connectAgent: {
     disabled: {

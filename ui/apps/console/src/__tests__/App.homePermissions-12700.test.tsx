@@ -34,7 +34,8 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import { render, screen, cleanup, waitFor, act } from '@testing-library/react';
 import { useContext, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MetadataCtx, type MetadataContextValue, __resetVisibilityPredicateWarnings } from '@object-ui/react';
+import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
+import { __resetVisibilityPredicateWarnings } from '../../../../packages/react/src/utils/visibilityDiagnostic';
 import { usePermissions, type MePermissionsResponse } from '@object-ui/permissions';
 // Not on the package's entry: the context object itself, read by its module id
 // (`@object-ui/permissions` resolves to `packages/permissions/src`, so this is

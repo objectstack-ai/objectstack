@@ -26,6 +26,7 @@ import { resolveJsxGateManifest, printJsxGateNotices } from '../utils/sdui-manif
 import { preflightDeclaredCapabilities, renderCapabilityMessage } from '../utils/capability-preflight.js';
 import { collectAndLintDocs, type DocIssue } from '../utils/collect-docs.js';
 import { collectSeedFiles } from '../utils/bundle-seed-files.js';
+import { collectConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
 import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import {
   printHeader,
@@ -801,6 +802,29 @@ export default class Validate extends Command {
         console.log('');
         printError(`Seed file validation failed (${seedFiles.issues.length} issue${seedFiles.issues.length > 1 ? 's' : ''})`);
         for (const issue of seedFiles.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
+        this.exit(1);
+      }
+
+      // 3d-ter. Connector spec files — the OpenAPI document a
+      //     `provider: 'openapi'` connector names by package-relative file must
+      //     name a JSON object under the directory holding the config. `os build`
+      //     refuses the same references before it carries the documents into the
+      //     artifact, where an installed copy has no package directory to read.
+      const connectorSpecs = collectConnectorSpecFiles(absolutePath, result.data as Record<string, unknown>);
+      if (connectorSpecs.issues.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: connectorSpecs.issues,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Connector spec file validation failed (${connectorSpecs.issues.length} issue${connectorSpecs.issues.length > 1 ? 's' : ''})`);
+        for (const issue of connectorSpecs.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
         this.exit(1);
       }
 

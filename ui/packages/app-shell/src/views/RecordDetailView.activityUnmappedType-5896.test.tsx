@@ -100,8 +100,8 @@ vi.mock('@object-ui/plugin-detail', async (importOriginal) => {
 
 import {
   UNMAPPED_ACTIVITY_FEED_TYPE,
-  resetUnknownActivityTypeWarnings,
 } from '@object-ui/plugin-detail';
+import { resetUnknownActivityTypeWarnings } from '../../../plugin-detail/src/renderers/recordActivityFeed';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

@@ -481,6 +481,10 @@ const READS: Readonly<Record<string, ReadRow>> = {
     reads: 'top-level',
     why: 'the top level\'s own datasets; the same walk reads `manifest.data` and each `packages[i].manifest` body\'s `data` too, by position, because `placeSeedFiles` writes the bytes into those very dataset objects (#25779). Pinned on a package body in `bundle-seed-files.test.ts`.',
   },
+  'utils/bundle-connector-spec-files.ts :: stack.connectors': {
+    reads: 'top-level',
+    why: 'the top level\'s own connector entries; the same walk reads `manifest.connectors` and each `packages[i].manifest` body\'s `connectors` too, by position, because `placeConnectorSpecFiles` writes the carried OpenAPI document into those very entry objects. Pinned on a package body in `bundle-connector-spec-files.test.ts`.',
+  },
   'utils/collect-docs.ts :: stack.docs': {
     reads: 'top-level',
     why: 'the artifact\'s own top-level `docs`; the same function reads each package\'s docs off its body (`bodyDocsOf(stack.packages, …)`) and lints them against that package.',
