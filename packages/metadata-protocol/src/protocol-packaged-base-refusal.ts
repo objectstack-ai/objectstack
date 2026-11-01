@@ -256,9 +256,9 @@ const NOT_CONCERNED: OverrideWriteVerdict = { verdict: 'not_concerned' };
  * A malformed `overrides` (null, not an object, no `package`, a `.custom`
  * package named as the base, a missing `basedOn`, an unknown key) is NOT a
  * declaration here: the gate is not concerned with it, and the door's schema
- * gate answers it with its own 400 `VALIDATION_ERROR`, which is the fact. The
- * gate runs before that schema gate, so judging the malformed value as a
- * declaration would answer `403 NOT_OVERRIDABLE` in its place.
+ * gate answers it with its own `422 INVALID_METADATA` naming the key, which is
+ * the fact. The gate runs before that schema gate, so judging the malformed
+ * value as a declaration would answer `403 NOT_OVERRIDABLE` in its place.
  */
 function declarationOf(item: unknown): { present: boolean; base: string | undefined } {
     if (item === null || typeof item !== 'object' || !('overrides' in item)) return { present: false, base: undefined };
