@@ -2266,6 +2266,56 @@ describe('validateTranslationReferences — flow refusals (#22450)', () => {
   });
 });
 
+describe('validateTranslationReferences — flow save notices (#28251)', () => {
+  /** HotCRM's measured shape: the notice ahead of the approval that suspends the run. */
+  const dealStack = {
+    flows: [
+      {
+        name: 'deal_submit',
+        type: 'record_change',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start', config: { objectName: 'deal', triggerType: 'record-after-update' } },
+          { id: 'tell', type: 'save_notice', label: 'Tell', config: { message: 'Sent {{ record.name }} for approval' } },
+          { id: 'approve', type: 'approval', label: 'Manager approval', config: { approvers: [{ type: 'manager' }] } },
+        ],
+      },
+    ],
+  };
+  const bundle = (flows: unknown) => ({ ...dealStack, translations: [{ 'zh-CN': { flows } }] });
+  const firstSentence = (message: string) => message.slice(0, message.indexOf('. ') + 1);
+
+  it('reports nothing for the message of a `save_notice` node', () => {
+    expect(
+      validateTranslationReferences(bundle({ deal_submit: { notices: { tell: { message: '已将 {{ record.name }} 提交审批' } } } })),
+    ).toEqual([]);
+  });
+
+  it('refuses a notice key over an UNKNOWN node, with the nearest notice offered', () => {
+    const findings = validateTranslationReferences(bundle({ deal_submit: { notices: { tel: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].severity).toBe('error');
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.deal_submit.notices.tel');
+    expect(firstSentence(findings[0].message)).toBe(
+      'Translations are keyed to save notice "tel", a node id flow "deal_submit" does not declare, so the ' +
+        'notice keeps its source-locale message.',
+    );
+    expect(findings[0].message).toContain('Did you mean "tell"?');
+    expect(findings[0].hint).toBe('Save-notice translations are keyed by the `id` of a `save_notice` node.');
+  });
+
+  it('diagnoses a notice key on a node of another type as such', () => {
+    const findings = validateTranslationReferences(bundle({ deal_submit: { notices: { approve: { message: 'x' } } } }));
+    expect(findings).toHaveLength(1);
+    expect(findings[0].rule).toBe(TRANSLATION_TARGET_UNKNOWN);
+    expect(findings[0].path).toBe('translations[0]["zh-CN"].flows.deal_submit.notices.approve');
+    expect(findings[0].message).toBe(
+      'Translations are keyed to save notice "approve", which flow "deal_submit" declares as an `approval` ' +
+        'node, not a `save_notice`, so nothing resolves this key.',
+    );
+  });
+});
+
 describe('validateTranslationReferences — flow approval steps (`approvals.<node_id>.label`)', () => {
   /**
    * HotCRM's measured shape: an approval flow whose step is an `approval`

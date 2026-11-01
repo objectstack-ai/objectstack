@@ -579,7 +579,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -588,12 +588,12 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the showcase flow-per-node-type map (examples/app-showcase/src/automation/flows/): create_record=showcase_inbound_task_webhook · update_record+screen=showcase_reassign_wizard · get_record+decision+delete_record=showcase_inquiry_purge · script+notify=showcase_task_completed · wait=showcase_task_follow_up · subflow=showcase_task_done_notify_owner→showcase_notify_owner · map=showcase_release_signoff · connector_action=showcase_task_completed_rest_ping · loop=showcase_batch_reminders · parallel+http=showcase_fan_out_notify · try_catch=showcase_resilient_sync · assignment=showcase_closure_signoff and showcase_one_task_signoff (the map child: its mark_ok / mark_no nodes run inside every showcase_release_signoff item once that item's approval is decided) · approval=showcase_expense_signoff · approval_revise=showcase_budget_approval (wait_revision)"
+          "the showcase flow-per-node-type map (examples/app-showcase/src/automation/flows/): create_record=showcase_inbound_task_webhook · update_record+screen=showcase_reassign_wizard · get_record+decision+delete_record=showcase_inquiry_purge · script+save_notice+notify=showcase_task_completed · wait=showcase_task_follow_up · subflow=showcase_task_done_notify_owner→showcase_notify_owner · map=showcase_release_signoff · connector_action=showcase_task_completed_rest_ping · loop=showcase_batch_reminders · parallel+http=showcase_fan_out_notify · try_catch=showcase_resilient_sync · assignment=showcase_closure_signoff and showcase_one_task_signoff (the map child: its mark_ok / mark_no nodes run inside every showcase_release_signoff item once that item's approval is decided) · approval=showcase_expense_signoff · approval_revise=showcase_budget_approval (wait_revision)"
         ],
         "knownGaps": [
           "parallel_gateway / join_gateway / boundary_event are deliberately NOT in the matrix: BPMN-interop lowering targets whose author-facing forms are the ADR-0031 structured containers — waived with reasons in examples/app-showcase/src/coverage.ts FLOW_NODE_WAIVERS, and the coverage test enforces every OTHER enum member is authored",
           "showcase_fan_out_notify (the parallel + http owner in the map above) posts to Slack and needs outbound egress. On an egress-denied runner, prove parallel on another run that carries it (showcase_nested_fan_out_reminders — a loop-body parallel), and record http as blocked(environment) rather than FAIL when its only located steps failed for want of egress (#21784 FE13). http itself is provable without egress on a SELF-PINGING scratch flow: register (POST /api/v1/automation) start → http {method: 'GET', url: 'http://127.0.0.1:<OS_PORT>/api/v1/health'} → end, trigger it (POST /api/v1/automation/<name>/trigger), read the run (http step success), then DELETE /api/v1/automation/<name> — measured on main c91af8ed6: 200, run completed, http success",
-          "no pin scores a full clause of this item (RUNNER rule 6, a pin scores only the layer it drives; the theme-B rule), so the item carries no automated ref. packages/qa/dogfood/test/flow-node.dogfood.test.ts runs ONE update_record node over the HTTP trigger, with its input variable wired into the filter (the target stamped, the bystander untouched). That is one variant of acceptance[1]'s twenty, and no clause scores a single variant. automated may return when a pin drives the whole matrix, the palette feed or the unknown-type contract"
+          "no pin scores a full clause of this item (RUNNER rule 6, a pin scores only the layer it drives; the theme-B rule), so the item carries no automated ref. packages/qa/dogfood/test/flow-node.dogfood.test.ts runs ONE update_record node over the HTTP trigger, with its input variable wired into the filter (the target stamped, the bystander untouched). That is one variant of acceptance[1]'s twenty-one, and no clause scores a single variant. automated may return when a pin drives the whole matrix, the palette feed or the unknown-type contract"
         ]
       },
       "variants": [
@@ -608,6 +608,7 @@
         "get_record",
         "http",
         "notify",
+        "save_notice",
         "script",
         "screen",
         "wait",
@@ -622,7 +623,7 @@
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
         "GET /api/v1/automation/actions (the designer palette feed) and record the descriptor list; open the Studio flow-designer palette on a WRITABLE scope and screenshot it — the stock showcase package is read-only, so its canvas offers no Add node: clone a flow first (POST /api/v1/automation/NAME/clone with both `name` and `label` in the body — a missing label is refused, field label required — or Setup › Packaged Automation, as QA run #24545 did) and open the clone under Studio's ~org scope",
-        "record_change chain: POST a showcase_task WITH `assignee` set to a real user's email, under a project that has an `owner` (the project lookup is required), with status 'in_review' — task_status_flow allows done only from in_review and does not check a create — then PATCH status→done — fires showcase_task_completed (script+notify), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action). ⚠ The notify steps address the task's assignee and its project's owner: a task created without an assignee, or under a project without an owner, makes them fail LOUDLY for want of a recipient — a correct refusal, not a notify FAIL (QA run #23166)",
+        "record_change chain: POST a showcase_task WITH `assignee` set to a real user's email, under a project that has an `owner` (the project lookup is required), with status 'in_review' — task_status_flow allows done only from in_review and does not check a create — then PATCH status→done — fires showcase_task_completed (script+save_notice+notify; the PATCH answer carries its `notice`), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action). ⚠ The notify steps address the task's assignee and its project's owner: a task created without an assignee, or under a project without an owner, makes them fail LOUDLY for want of a recipient — a correct refusal, not a notify FAIL (QA run #23166)",
         "on-demand chain: POST /api/v1/automation/<name>/trigger for showcase_batch_reminders {params:{tasks:[…]}} (loop), showcase_inquiry_purge (get_record+decision+delete_record — seed at least one closed showcase_inquiry first), showcase_release_signoff {params:{items:[…]}} (map — its itemObject is showcase_task, so each item is record-shaped, {id, title})",
         "browser chain: run the Tasks row action showcase_bulk_reassign → showcase_reassign_wizard (screen + update_record)",
         "approval chain: the boot already leaves a PAUSED showcase_expense_signoff run at its approval node — the showcase's approval-demo seed launches it on EXP-2001 (examples/app-showcase/src/security/seed-approval-demo.ts) — so locate the approval variant on that run; a NEW one needs a report ENTERING submitted from another status (the start condition requires previous.status != 'submitted'), e.g. PATCH EXP-2003 (draft) to submitted; PATCH a showcase_project budget above 100000 to open showcase_budget_approval, then POST /api/v1/approvals/requests/:id/revise so the run parks at the approval_revise node",
@@ -633,7 +634,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the designer palette (fed by GET /api/v1/automation/actions) offers every NON-structural variant (19 of 21; start/end are structural per FLOW_STRUCTURAL_NODE_TYPES — no executor, no descriptor)",
+          "clause": "the designer palette (fed by GET /api/v1/automation/actions) offers every NON-structural variant (20 of 22; start/end are structural per FLOW_STRUCTURAL_NODE_TYPES — no executor, no descriptor)",
           "oracle": "api",
           "verify": "the actions descriptor list contains every variant id except start and end; the palette screenshot (taken after render) shows them offered. start/end absent from the feed is by design, not a gap",
           "evidence": "actions API read + palette screenshot"
@@ -641,7 +642,7 @@
         {
           "clause": "each non-structural variant plus `start` appears as an executed step; `end` is proven by the run reaching status completed — a TAKEN end logs no step, while an end on an UNTAKEN branch is logged as a `skipped` step (that row proves the closed gate, not the end).",
           "oracle": "api",
-          "verify": "for each of the 20 step-logging variants cite the run id + step whose nodeType matches (status success, or the documented pause for suspending types), and for end cite a completed run — executeNode returns on a taken end before any step is pushed, while start logs a success step; a skipped end row (skippedBy naming the gate, the #4354 trace — e.g. showcase_inquiry_purge) is no evidence for end. A variant with no located evidence is UNPROVEN for that variant, not a partial pass of the matrix",
+          "verify": "for each of the 21 step-logging variants cite the run id + step whose nodeType matches (status success, or the documented pause for suspending types), and for end cite a completed run — executeNode returns on a taken end before any step is pushed, while start logs a success step; a skipped end row (skippedBy naming the gate, the #4354 trace — e.g. showcase_inquiry_purge) is no evidence for end. A variant with no located evidence is UNPROVEN for that variant, not a partial pass of the matrix",
           "evidence": "per-variant table of run id / step / status"
         },
         {
@@ -750,12 +751,13 @@
           "change": "steps[1], steps[3] and steps[6] name the request shapes the run needed. Checklist-accuracy findings of the 18.2.0 wave 2 (QA run #26456, release-18.2.0-w2-manual-browser, at 756220c4; wave anchor #25807, slice A): the clone door needs a label as well as a name, release_signoff's items are record-shaped, and the inbound hook accepts only the timestamped signature. Re-read at base e4ba846f (api-trigger.ts; examples/app-showcase/src/automation/flows/index.ts showcase_release_signoff's map node; packages/runtime/src/domains/automation-flow-clone.test.ts, the label-required case). No clause changed",
           "ref": "#25807"
         },
-        { "revision": 11, "date": "2026-10-31", "change": "fixtures.requires[0] names the second assignment carrier and steps[5] the seeded approval run. Fixture findings of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): assignment is also exercised by showcase_one_task_signoff, and the boot already leaves a paused showcase_expense_signoff run, while PATCHing an already-submitted report starts nothing. Re-read at base 488b3ed0: examples/app-showcase/src/automation/flows/index.ts (showcase_one_task_signoff mark_ok / mark_no; showcase_expense_signoff's record-after-update start condition), examples/app-showcase/src/security/seed-approval-demo.ts (launches showcase_expense_signoff on EXP-2001). No clause changed", "ref": "#27441" }
+        { "revision": 11, "date": "2026-10-31", "change": "fixtures.requires[0] names the second assignment carrier and steps[5] the seeded approval run. Fixture findings of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): assignment is also exercised by showcase_one_task_signoff, and the boot already leaves a paused showcase_expense_signoff run, while PATCHing an already-submitted report starts nothing. Re-read at base 488b3ed0: examples/app-showcase/src/automation/flows/index.ts (showcase_one_task_signoff mark_ok / mark_no; showcase_expense_signoff's record-after-update start condition), examples/app-showcase/src/security/seed-approval-demo.ts (launches showcase_expense_signoff on EXP-2001). No clause changed", "ref": "#27441" },
+        { "revision": 12, "date": "2026-11-01", "change": "variants gain save_notice, the FlowNodeAction member #28251 added: a record-triggered flow tells the person who made the write what the save set in motion, and the create/update answer carries it as `notice`. The showcase demonstrates it on showcase_task_completed (node tell_saver, between summarize and notify), so fixtures.requires[0] and steps[2] name it; acceptance[0] counts 20 of 22 offered variants and acceptance[1] 21 step-logging variants; enumSource.expect is 21", "ref": "#28251" }
       ],
       "enumSource": {
         "file": "packages/spec/src/automation/flow.zod.ts",
         "export": "FlowNodeAction",
-        "expect": 20
+        "expect": 21
       }
     },
     {
