@@ -114,6 +114,7 @@ import type {
     PackageExportManifest,
     ReassignOrphanedMetadataResponse,
     DuplicatePackageResponse,
+    EnsureCustomizationPackageResponse,
 } from '@objectstack/spec/api';
 import type { ResolvedBook } from '@objectstack/spec/system';
 // [#16325] `Environment` — the camelCase row type that used to be the
@@ -437,6 +438,7 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
     expectTypeOf(await client.packages.export('com.acme.crm')).toEqualTypeOf<PackageExportManifest>();
     expectTypeOf(await client.packages.adoptOrphans('com.acme.crm')).toEqualTypeOf<ReassignOrphanedMetadataResponse>();
     expectTypeOf(await client.packages.duplicate('com.acme.crm', 'com.acme.copy')).toEqualTypeOf<DuplicatePackageResponse>();
+    expectTypeOf(await client.packages.ensureCustomization('com.acme.crm')).toEqualTypeOf<EnsureCustomizationPackageResponse>();
 
     // ── direction 2: a WRONG shape must now be rejected ───────────────────
     // Each suppression is unused — a TS2578 error — while the method still

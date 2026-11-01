@@ -19,6 +19,8 @@ import {
   ReassignOrphanedMetadataResponseSchema,
   DuplicatePackageResponseSchema,
   PackagePublishResultSchema,
+  EnsureCustomizationPackageRequestSchema,
+  EnsureCustomizationPackageResponseSchema,
 } from './package-lifecycle.zod';
 import { PackagePublishResultSchema as SystemPackagePublishResultSchema } from '../system/metadata-persistence.zod';
 
@@ -268,5 +270,47 @@ describe('DuplicatePackageResponseSchema declares the duplicate body', () => {
     const result = DuplicatePackageResponseSchema.safeParse(realResponse);
     expect(result.success).toBe(true);
     if (result.success) expect((result.data as { success: boolean }).success).toBe(false);
+  });
+});
+
+describe('EnsureCustomizationPackageRequestSchema declares the ensure door\'s one input (ADR-0146 D3)', () => {
+  it('admits the base package id', () => {
+    const request = { basePackageId: 'com.acme.crm' };
+    expect(EnsureCustomizationPackageRequestSchema.parse(request)).toEqual(request);
+  });
+
+  it('refuses a key it does not declare — the pair\'s namespace and range are derived, never requested', () => {
+    expect(EnsureCustomizationPackageRequestSchema.safeParse({ basePackageId: 'com.acme.crm', namespace: 'mine' }).success).toBe(false);
+    expect(EnsureCustomizationPackageRequestSchema.safeParse({ basePackageId: 'com.acme.crm', dependencyRange: '*' }).success).toBe(false);
+  });
+
+  it('requires the base package id', () => {
+    expect(EnsureCustomizationPackageRequestSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('EnsureCustomizationPackageResponseSchema declares the ensure door\'s answer', () => {
+  /** A verbatim-shaped capture of a real `ensureCustomizationPackage` return (the call that created the pair). */
+  const realResponse = {
+    basePackageId: 'com.acme.crm',
+    packageId: 'com.acme.crm.custom',
+    namespace: 'crm_custom',
+    dependencyRange: '^3',
+    created: true,
+    writable: true,
+  };
+
+  it('parses the real answer and PRESERVES every member', () => {
+    const result = EnsureCustomizationPackageResponseSchema.safeParse(realResponse);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(realResponse);
+  });
+
+  it('requires every member — an answer without `created` cannot say whether this call made the pair', () => {
+    for (const key of Object.keys(realResponse)) {
+      const partial: Record<string, unknown> = { ...realResponse };
+      delete partial[key];
+      expect(EnsureCustomizationPackageResponseSchema.safeParse(partial).success, key).toBe(false);
+    }
   });
 });

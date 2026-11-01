@@ -221,7 +221,7 @@ export function customizationPairManifestRefusal(
     } else if (expected?.ok && namespace !== expected.value) {
         lacks.push(`\`namespace: '${expected.value}'\` (it declares '${namespace}')`);
     }
-    if (declaredRangeOn(m, baseId) === undefined) {
+    if (declaredRangeOn(m ?? undefined, baseId) === undefined) {
         lacks.push(`a dependency on '${baseId}' in \`manifest.dependencies\``);
     }
     if (lacks.length === 0) return undefined;
