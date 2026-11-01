@@ -58,10 +58,10 @@ export {
   // The ENABLEMENT gate's opening line (objectui#6445). Exported beside its
   // sibling for the reason that one is: an app filtering these out of its
   // console transport filters by the constant, and a second line it cannot
-  // name is a second thing to hard-code. Not a second reporter — the emit,
-  // the dedupe `Set` and the reset above are still the only ones.
+  // name is a second thing to hard-code. Not a second reporter — the emit
+  // and the dedupe `Set` in `visibilityDiagnostic` are still the only ones.
   UNRESOLVABLE_ENABLEMENT_PREFIX,
-  __resetVisibilityPredicateWarnings,
+  // `__resetVisibilityPredicateWarnings` is test-only and stays off the barrel
 } from './utils/visibilityDiagnostic.js';
 // The per-surface scope hint those two take (objectui#6487). Exported because
 // `@object-ui/app-shell` — a caller in another package — has to name its tier,

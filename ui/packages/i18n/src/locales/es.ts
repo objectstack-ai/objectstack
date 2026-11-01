@@ -3689,11 +3689,7 @@ const es = {
     redirecting: "Redirigiendo en {{seconds}} segundos…",
     redirectPending: "Redirigiendo…",
     loading: "Cargando formulario…",
-    requiredHint: "* Campo obligatorio",
     requiredFields: "Campos obligatorios: {{fields}}",
-    consentRequired: "Acepte la política de privacidad para continuar.",
-    rateLimited: "Tómese un momento para revisar sus respuestas antes de enviar.",
-    redirectBlocked: "Envío aceptado, pero la URL de redirección fue bloqueada por seguridad.",
   },
   connectAgent: {
     disabled: {

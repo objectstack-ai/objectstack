@@ -3911,11 +3911,7 @@ const ar = {
     redirecting: "إعادة توجيه خلال {{seconds}} ثانية(ثوانٍ)…",
     redirectPending: "جارٍ إعادة التوجيه…",
     loading: "جارٍ تحميل النموذج…",
-    requiredHint: "* حقل مطلوب",
     requiredFields: "الحقول المطلوبة: {{fields}}",
-    consentRequired: "يرجى قبول سياسة الخصوصية للمتابعة.",
-    rateLimited: "خذ لحظة لمراجعة إجاباتك قبل الإرسال.",
-    redirectBlocked: "تم قبول الإرسال، لكن رابط إعادة التوجيه تم حظره لأسباب أمنية.",
   },
   connectAgent: {
     disabled: {

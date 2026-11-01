@@ -16,6 +16,7 @@ import {
 } from '@objectstack/spec';
 import { loadConfig, namedExportRejectionHints } from '../utils/config.js';
 import { collectSeedFiles, placeSeedFiles } from '../utils/bundle-seed-files.js';
+import { collectConnectorSpecFiles, placeConnectorSpecFiles } from '../utils/bundle-connector-spec-files.js';
 import { judgeSeedRecordValues } from '../utils/seed-record-values.js';
 import { refuseUnbuiltStack } from '../utils/stack-provenance-refusal.js';
 import { isExtractionRefusal, lowerCallables } from '../utils/lower-callables.js';
@@ -1120,6 +1121,30 @@ export default class Compile extends Command {
       placeSeedFiles(seedFiles);
       if (seedFiles.files > 0 && !flags.json) {
         printStep(`Bundling seed files... ${seedFiles.files} file${seedFiles.files === 1 ? '' : 's'} (${(seedFiles.bytes / 1024).toFixed(1)} KB)`);
+      }
+
+      // 4a-bis. The OpenAPI document a `provider: 'openapi'` connector names
+      //     by package-relative file (ADR-0097), read relative to the
+      //     directory holding the config and carried in the artifact as the
+      //     inline document. An installed artifact has no package directory —
+      //     the runtime it is installed into caches the JSON alone — so a
+      //     reference left as a path resolves against that runtime's own root
+      //     and names nothing. A path that names no file fails the build here
+      //     rather than the instance after install.
+      const connectorSpecs = collectConnectorSpecFiles(absolutePath, finalBundle);
+      if (connectorSpecs.issues.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, error: 'connector spec file bundling failed', issues: connectorSpecs.issues, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        console.log('');
+        printError(`Connector spec file bundling failed (${connectorSpecs.issues.length} issue${connectorSpecs.issues.length > 1 ? 's' : ''})`);
+        for (const issue of connectorSpecs.issues) console.log(chalk.red(`  ✗ ${issue.location}: ${issue.message}`));
+        this.exit(1);
+      }
+      placeConnectorSpecFiles(connectorSpecs);
+      if (connectorSpecs.files > 0 && !flags.json) {
+        printStep(`Bundling connector spec files... ${connectorSpecs.files} document${connectorSpecs.files === 1 ? '' : 's'} (${(connectorSpecs.bytes / 1024).toFixed(1)} KB)`);
       }
 
       // 4b. Bundle handler functions into `<artifactDir>/objectstack-runtime.{hash}.mjs`

@@ -3773,11 +3773,7 @@ const ru = {
     redirecting: "Перенаправление через {{seconds}} с…",
     redirectPending: "Перенаправление…",
     loading: "Загрузка формы…",
-    requiredHint: "* Обязательное поле",
     requiredFields: "Обязательные поля: {{fields}}",
-    consentRequired: "Пожалуйста, примите политику конфиденциальности.",
-    rateLimited: "Проверьте ответы перед отправкой.",
-    redirectBlocked: "Ответ принят, но URL перенаправления заблокирован по соображениям безопасности.",
   },
   connectAgent: {
     disabled: {

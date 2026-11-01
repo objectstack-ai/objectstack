@@ -225,12 +225,16 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
     },
     {
       // The caller-shaped trigger: the DATASET declares no `include`, and the
-      // SELECTION names a dotted dimension, which `lookupMember`'s synthetic
-      // relation fallback turns into a join at alias `account`.
+      // SELECTION filters on a dotted member, which the strategy compiles into
+      // a join at alias `account`. [#28258] A dotted `dimensions` entry was the
+      // trigger here until the service learned to refuse it ahead of either
+      // strategy (`INVALID_FIELD` / 400, one answer on all three dataset
+      // faces); a `runtimeFilter` member still reaches the strategy's own
+      // allowlist, and this row's audit trail is about that producer.
       name: 'native-sql-strategy: a selection naming a join outside the allowlist',
       listEntry: 'not backed by a declared relationship',
       analytics: nativeAnalytics,
-      body: { dataset, selection: { dimensions: ['account.region'], measures: ['revenue'] } },
+      body: { dataset, selection: { dimensions: ['stage'], measures: ['revenue'], runtimeFilter: { 'account.region': 'emea' } } },
       message: /join "account" is not backed by a declared relationship on cube "pipeline"/,
     },
   ];
