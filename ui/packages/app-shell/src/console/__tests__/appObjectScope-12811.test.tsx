@@ -22,7 +22,7 @@ import { cleanup, render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { AdapterCtx } from '@object-ui/react';
 import { MetadataProvider } from '../../providers/MetadataProvider';
-import { useAppObjectScopePrefetch } from '../appObjectScope';
+import { enterAppBundle, useAppObjectScopePrefetch } from '../appObjectScope';
 
 const CRM = 'app.crm';
 const OBJECTS = [
@@ -115,6 +115,15 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
     );
     await waitFor(() => expect(entered).toEqual(['crm']));
     expect(calls).toContain(`object?package=${CRM}`);
+    // `AppContent` reuses the root's entry rather than asking the bundle again;
+    // another app, or the app after the root has left it, is entered.
+    enterAppBundle(adapter, 'crm');
+    expect(entered).toEqual(['crm']);
+    enterAppBundle(adapter, 'hr');
+    expect(entered).toEqual(['crm', 'hr']);
+    cleanup();
+    enterAppBundle(adapter, 'crm');
+    expect(entered).toEqual(['crm', 'hr', 'crm']);
   });
 
   it('CONTROL: outside an app, on a record form overlay, or for an app without a package id, it asks nothing', async () => {

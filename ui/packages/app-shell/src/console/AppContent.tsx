@@ -68,7 +68,7 @@ import {
 } from '../hooks/useNavMemberGates.js';
 import { resolveSetupAppPath } from './ConsoleShell.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, type LazyMetadataType } from './appRouteMetadataReads.js';
-import { readAppObjectScope } from './appObjectScope.js';
+import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
@@ -399,10 +399,9 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // Only the app the URL names: a pseudo-route's fallback app is not entered.
   // A host adapter without the bundle keeps every by-name read.
   const bundleAppName: string | undefined = typeof matchedApp?.name === 'string' ? matchedApp.name : undefined;
+  // objectstack#28645 — the console root entered it first (`enterAppBundle`).
   useEffect(() => {
-    const load = dataSource?.loadAppBundle;
-    if (!bundleAppName || typeof load !== 'function') return;
-    void load.call(dataSource, bundleAppName);
+    enterAppBundle(dataSource, bundleAppName);
   }, [dataSource, bundleAppName]);
 
   // objectstack-ai/objectstack#26183 — a URL that reached the app through its

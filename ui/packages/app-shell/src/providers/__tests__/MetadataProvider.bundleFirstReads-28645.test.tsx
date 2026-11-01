@@ -237,6 +237,35 @@ describe('MetadataProvider — bundle-first reads (objectstack#28645)', () => {
     expect(lists(m.calls)).toEqual(['app', 'view', `object?package=${PKG}`]);
   });
 
+  it('a scope settled on the view list stays settled, and keeps its objects, when an app is entered after it', async () => {
+    const m = mount();
+    await act(async () => { await m.ctx().ensureType!('view'); });
+    await waitFor(() => {
+      expect(m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] }).settled).toBe(true);
+    });
+    const before = m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] });
+    act(() => m.bundle.enter());
+    const during = m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] });
+    expect(during.settled).toBe(true);
+    expect(during.objects).toBe(before.objects);
+    await act(async () => { await m.bundle.land(); });
+    expect(m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] }).objects).toBe(before.objects);
+  });
+
+  it('a scope read with `views: false` asks which objects there are and never reads the view list', async () => {
+    const m = mount();
+    const read = (names: string[]) =>
+      (m.ctx().readObjectScope as unknown as (s: { packageId: string; names: string[]; views: false }) => ReturnType<NonNullable<Ctx['readObjectScope']>>)(
+        { packageId: PKG, names, views: false },
+      );
+    // `b28645_outside` is not in the bundle, and no bundle was even entered.
+    await waitFor(() => expect(read(['b28645_outside']).settled).toBe(true));
+    const scope = read(['b28645_outside']);
+    expect((scope.objects as Doc[]).map((o) => o.name)).toContain('b28645_outside');
+    expect(scope.objects).toBe(scope.served);
+    expect(lists(m.calls)).toEqual(['app', `object?package=${PKG}`]);
+  });
+
   it('CONTROL: the whole registry reads the view list with it, and answers once both have', async () => {
     const m = mount();
     await waitFor(() => expect(m.calls).toContain('app'));

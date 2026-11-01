@@ -438,28 +438,53 @@ export function readAppObjectScope(
   };
 }
 
+/** An adapter that loads app metadata bundles (`ObjectStackAdapter.loadAppBundle`). */
+type BundleHost = { loadAppBundle?: (appName: string) => unknown };
+
+/** objectstack#28645 — the app the console root entered, per adapter, while it stays entered. */
+const ROOT_ENTERED_APP = new WeakMap<object, string>();
+
+/**
+ * Enter `appName`'s metadata bundle (objectstack#27627), unless the console
+ * root already entered it ({@link useAppObjectScopePrefetch}): `AppContent`
+ * mounts below the session's permission read, and entering again there would
+ * ask the bundle a second time. A host adapter without bundles is left alone.
+ */
+export function enterAppBundle(dataSource: unknown, appName: string | undefined): void {
+  const host = dataSource as BundleHost | null | undefined;
+  const load = host?.loadAppBundle;
+  if (!host || !appName || typeof load !== 'function') return;
+  if (ROOT_ENTERED_APP.get(host) === appName) return;
+  void load.call(host, appName);
+}
+
 /**
  * The console root's half: on an app route, start the app's object scope as
  * soon as the app list names the app, before `AppContent` mounts (it mounts
  * below the session's permission read). It renders nothing; `AppContent` reads
  * the same scope entry when it renders.
  *
- * objectstack#28645 — it enters the app's metadata bundle at the same moment
- * (`loadAppBundle`, which `AppContent` joins), so the scope it starts composes
- * its views from the bundle instead of reading the `/meta/view` list before
- * the app was entered.
+ * objectstack#28645 — it enters the app's metadata bundle at the same moment,
+ * once, and `AppContent` reuses that entry ({@link enterAppBundle}), so the
+ * scope composes its views from the bundle instead of reading the
+ * `/meta/view` list before the app was entered. Leaving the app ends the
+ * entry, so coming back revalidates the bundle as entering it always has.
  */
 export function useAppObjectScopePrefetch(): void {
   const { apps, readObjectScope } = useMetadata();
-  const dataSource = useAdapter() as { loadAppBundle?: (appName: string) => unknown } | null | undefined;
+  const dataSource = useAdapter() as BundleHost | null;
   const { pathname, search } = useLocation();
   const segments = pathname.split('/').filter(Boolean);
   const app = segments[0] === 'apps' && segments[1] ? matchAppBySegment(apps, segments[1]) : undefined;
   const bundleAppName = typeof app?.name === 'string' && app.name ? app.name : undefined;
   useEffect(() => {
     const load = dataSource?.loadAppBundle;
-    if (!bundleAppName || typeof load !== 'function') return;
+    if (!dataSource || !bundleAppName || typeof load !== 'function') return;
     void load.call(dataSource, bundleAppName);
+    ROOT_ENTERED_APP.set(dataSource, bundleAppName);
+    return () => {
+      if (ROOT_ENTERED_APP.get(dataSource) === bundleAppName) ROOT_ENTERED_APP.delete(dataSource);
+    };
   }, [dataSource, bundleAppName]);
   if (app && readObjectScope) readAppObjectScope(readObjectScope, app, segments.slice(2).join('/'), search);
 }

@@ -764,37 +764,6 @@ function itemNames(items: readonly unknown[]): string[] {
   return names;
 }
 
-/** The object a view document belongs to, as `mergeViewsIntoObjects` reads it. */
-function viewObjectName(view: any): string | undefined {
-  if (isViewItem(view)) return view.object;
-  const name = view?.name || view?.list?.data?.object || view?.form?.data?.object;
-  return typeof name === 'string' && name ? name : undefined;
-}
-
-/**
- * The bundle's views, plus the listed views of the objects the bundle does not
- * hold (objectstack#28645): a `/meta/view` list already in hand still composes
- * them. One array per (bundle views, list) pair, so `composeObjects` keeps its
- * identity across renders.
- */
-const BUNDLED_WITH_LISTED = new WeakMap<unknown[], { listed: unknown[]; views: unknown[] }>();
-function bundledWithListed(
-  bundled: unknown[],
-  bundledObjects: ReadonlyMap<string, unknown> | undefined,
-  listed: unknown[],
-): unknown[] {
-  if (listed.length === 0) return bundled;
-  const cached = BUNDLED_WITH_LISTED.get(bundled);
-  if (cached && cached.listed === listed) return cached.views;
-  const rest = listed.filter((view) => {
-    const object = viewObjectName(view);
-    return !!object && !bundledObjects?.has(object);
-  });
-  const views = rest.length > 0 ? [...bundled, ...rest] : bundled;
-  BUNDLED_WITH_LISTED.set(bundled, { listed, views });
-  return views;
-}
-
 function composeObjects(objs: unknown[], views: unknown[]): unknown[] {
   const cached = COMPOSED_OBJECTS.get(objs);
   if (cached && cached.views === views) return cached.composed;
@@ -1593,29 +1562,28 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   /**
    * The views to compose a scope's objects with (objectstack#28645), and
    * whether they are in hand. `asked` are the names the scope's reader asked
-   * for (a names-only scope: every object in it). When the app bundle holds
-   * each of them, the bundle's views answer, since it carries every view of
-   * every object it holds. A package object the bundle does not hold, and that
-   * no reader asked by name, is composed from a `/meta/view` list already in
-   * hand, and asks for none: a reader of its views names it. Otherwise the
-   * scope reads the `/meta/view` list, as before.
+   * for (a names-only scope: every object in it).
+   *
+   *   - A `/meta/view` list already in hand answers, as it always has: a scope
+   *     never recomposes, or unsettles, because an app was entered after it.
+   *   - Otherwise, when the app bundle holds each asked name, the bundle's views
+   *     answer: it carries every view of every object it holds. A package
+   *     object the bundle does not hold, and that no reader asked by name, is
+   *     composed without views; a reader of its views names it.
+   *   - Otherwise the scope reads the `/meta/view` list, as before.
    */
   const viewsForObjects = useCallback(
     (asked: readonly string[]): { views: unknown[]; settled: boolean } => {
-      const bundled = readBundledViews(asked);
-      if (bundled.state === 'pending') return { views: NO_VIEWS, settled: false };
       const listed = getEntry('view');
-      if (bundled.state === 'hit') {
-        if (listed.status !== 'ready') return { views: bundled.value, settled: true };
-        const peek = peekBundle();
-        const bundledObjects = peek?.status === 'ready' ? peek.items.get('object') : undefined;
-        return { views: bundledWithListed(bundled.value, bundledObjects, listed.items), settled: true };
-      }
+      if (listed.status === 'ready') return { views: listed.items, settled: true };
+      const bundled = readBundledViews(asked);
+      if (bundled.state === 'hit') return { views: bundled.value, settled: true };
+      if (bundled.state === 'pending') return { views: NO_VIEWS, settled: false };
       const views = readType('view');
       const status = getEntry('view').status;
       return { views, settled: status === 'ready' || status === 'error' };
     },
-    [getEntry, peekBundle, readBundledViews, readType],
+    [getEntry, readBundledViews, readType],
   );
 
   // objectui#12811 — see `MetadataContextValue.readObjectScope`. Reading it
@@ -1625,7 +1593,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   // it and nothing is requested. With `names` and no `packageId` it is the
   // names-only scope (objectui#12980): no package list, each name by name.
   const readObjectScope = useCallback(
-    (scope: { packageId?: string; names?: readonly string[] }) => {
+    (scope: { packageId?: string; names?: readonly string[]; views?: false }) => {
       const namesOnly = !scope.packageId && !!scope.names && scope.names.length > 0;
       const packageId = scope.packageId || (namesOnly ? NAMES_ONLY_SCOPE : undefined);
       if (packageId === undefined) {
@@ -1701,12 +1669,24 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       // code. Both ride beside the published shape: this package's own
       // readers read them (`appObjectScope.ts`), other readers never see them.
       const atRest = entry.answered && namesSettled;
-      // objectstack#28645 — the scope's views: the app bundle's when it holds
-      // every name asked (a names-only scope: every object in it), else the
-      // `/meta/view` list (see `viewsForObjects`). The scope is not settled
-      // until they are in hand, so a route never draws its objects without the
-      // views they carry. `views` rides beside the published shape for this
-      // package's own readers (`useServedViewItems`).
+      // objectstack#28645 — the scope's views (see `viewsForObjects`). The
+      // scope is not settled until they are in hand, so a route never draws its
+      // objects without the views they carry. `views` rides beside the
+      // published shape for this package's own readers (`useServedViewItems`).
+      // `views: false`, this package's own hand-off too, is a reader that only
+      // asks which objects there are (`useObjectPresence`): it reads no views,
+      // and its `objects` are the served items, not composed.
+      if (scope.views === false) {
+        return {
+          objects: entry.items,
+          served: entry.items,
+          missing: entry.missing as readonly string[],
+          settled: atRest && failedNames.length === 0,
+          failed: atRest && failedNames.length > 0 ? (failedNames as readonly string[]) : NO_NAMES,
+          refused: entry.refused,
+          views: NO_VIEWS,
+        };
+      }
       const scopeViews = viewsForObjects(namesOnly ? itemNames(entry.items) : (scope.names ?? NO_NAMES));
       return {
         objects: composeObjects(entry.items, scopeViews.views) as any[],
