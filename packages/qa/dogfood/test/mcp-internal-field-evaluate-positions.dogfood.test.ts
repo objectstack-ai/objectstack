@@ -54,6 +54,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { MCPServerPlugin, MCPServerRuntime } from '@objectstack/mcp';
+import type { PluginContext } from '@objectstack/core';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 import { catalogPermissionSet } from './catalog-permission-set.js';
@@ -133,6 +134,12 @@ const POSITIONS: Array<{ label: string; tool: 'query_records' | 'aggregate_recor
   },
 ];
 
+/** The two engine verbs the fixture writes and reads through, in system context. */
+interface FixtureEngine {
+  insert(object: string, data: Record<string, unknown>, options: typeof SYS): Promise<unknown>;
+  findOne(object: string, query: { where: Record<string, unknown> } & typeof SYS): Promise<{ id?: string } | null>;
+}
+
 /** What a tool call answered: `isError`, the JSON it returned (or its bare text). */
 interface ToolAnswer {
   isError: boolean;
@@ -206,15 +213,17 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
    */
   async function stdioSession(apiKey: string): Promise<Call> {
     const local = new Map<string, unknown>();
-    const ctx: any = {
+    const host = {
       registerService: (name: string, service: unknown) => { local.set(name, service); },
-      getService: (name: string) => (local.has(name) ? local.get(name) : stack.kernel.getService(name)),
+      getService: (name: string): unknown => (local.has(name) ? local.get(name) : stack.kernel.getService<unknown>(name)),
       replaceService: (name: string, service: unknown) => { local.set(name, service); },
       hook: () => {},
       trigger: async () => {},
       logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
       getKernel: () => stack.kernel,
     };
+    // The members the plugin reads; the rest of the kernel's context is not asked here.
+    const ctx = host as unknown as PluginContext;
     process.env.OS_MCP_STDIO_API_KEY = apiKey;
     const plugin = new MCPServerPlugin({ autoStart: true });
     try {
@@ -274,7 +283,7 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
 
     const saved = await stack.apiAs(sessionTokens.admin, 'PUT', `/meta/object/${OBJECT}`, DEFINITION);
     expect(saved.status, `runtime object authored: ${await saved.clone().text()}`).toBe(200);
-    const ql: any = await stack.kernel.getServiceAsync('objectql');
+    const ql = await stack.kernel.getServiceAsync<FixtureEngine>('objectql');
     for (const row of ROWS) await ql.insert(OBJECT, row, SYS);
 
     // The member reads the object through one authored set and nothing else.
