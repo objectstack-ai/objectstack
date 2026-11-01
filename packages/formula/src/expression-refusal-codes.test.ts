@@ -159,12 +159,12 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
   'invalid-cel': [
     {
       produce: () => onlyError('predicate', 'record.rating >='),
-      params: { role: 'predicate', detail: celDetail('record.rating >=') },
+      params: { role: 'predicate', detail: celDetail('record.rating >='), celCode: 'unexpected_token', pos: { start: 16, end: 16 } },
       message: `invalid CEL predicate: ${celDetail('record.rating >=')} — predicates are bare CEL (e.g. \`record.rating >= 4\`).`,
     },
     {
       produce: () => onlyError('value', "1 + 'a'"),
-      params: { role: 'value', detail: celDetail("1 + 'a'") },
+      params: { role: 'value', detail: celDetail("1 + 'a'"), celCode: 'no_such_overload', pos: { start: 0, end: 7 } },
       message: `invalid CEL value: ${celDetail("1 + 'a'")} — values are bare CEL (e.g. \`record.rating >= 4\`).`,
     },
   ],
@@ -506,14 +506,40 @@ const VALIDATE_CODES: ReadonlySet<string> = new Set(
 );
 const ROOTS_CODES: ReadonlySet<CelRootsRefusalCode> = new Set<CelRootsRefusalCode>(['empty-expression', 'cel-parse-failed']);
 
+/**
+ * The LOCATOR params (`expression-refusal.ts`): a structured reading of the
+ * fault `detail` renders, not text the message interpolates. Judged by
+ * {@link expectLocatorsRead} instead of by containment.
+ */
+const LOCATOR_PARAMS: ReadonlySet<string> = new Set(['celCode', 'pos']);
+
 /** Every string a param carries, flattened — lists element by element, numbers as text. */
 function paramStrings(params: unknown): string[] {
   const out: string[] = [];
-  for (const value of Object.values(params as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
+    if (LOCATOR_PARAMS.has(key)) continue;
     if (Array.isArray(value)) out.push(...value.map(String));
     else out.push(String(value));
   }
   return out;
+}
+
+/**
+ * A locator param, where present, is a reading of the engine's fault: only
+ * `invalid-cel` carries them, the code is a cel-js snake_case token, and the
+ * range lies inside the source it was read against.
+ */
+function expectLocatorsRead(said: { code: string; params: unknown; source: string }): void {
+  const params = said.params as Record<string, unknown>;
+  const present = Object.keys(params).filter((k) => LOCATOR_PARAMS.has(k));
+  if (present.length === 0) return;
+  expect(said.code).toBe('invalid-cel');
+  if ('celCode' in params) expect(params.celCode).toMatch(/^[a-z]+(?:_[a-z]+)*$/);
+  if ('pos' in params) {
+    const { start, end } = params.pos as { start: number; end: number };
+    expect(Number.isInteger(start) && Number.isInteger(end)).toBe(true);
+    expect(0 <= start && start <= end && end <= said.source.length, `${JSON.stringify(params.pos)} in ${JSON.stringify(said.source)}`).toBe(true);
+  }
 }
 
 describe('expression refusal codes — the closed set', () => {
@@ -541,6 +567,7 @@ describe('expression refusal codes — the closed set', () => {
             expect(typeof said.params).toBe('object');
             expect(said.params).not.toBeNull();
             for (const part of paramStrings(said.params)) expect(said.message).toContain(part);
+            expectLocatorsRead(said);
             provoked.add(said.code);
           }
         }
