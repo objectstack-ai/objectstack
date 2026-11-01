@@ -973,3 +973,55 @@ describe('[#28117] record-change flows on an object of a disabled package', () =
     expect(await stampAfterInsert('qdm_order')).toBe('done');
   }, 15000);
 });
+
+/**
+ * [#28251] A record-triggered flow's `save_notice` node sets the triggering
+ * write's notice — the hook face `ctx.notice` the engine binds from the write's
+ * own `onNotice` listener, handed to the run as `AutomationContext.saveNotice`.
+ * Asserted on that listener, the one `metadata-protocol` answers as `notice`.
+ */
+describe('[#28251] a save_notice node tells the person who made the triggering write', () => {
+  const noticeFlow = (name: string, object: string) => ({
+    name,
+    label: name,
+    type: 'record_change',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { objectName: object, triggerType: 'record-after-write' } },
+      { id: 'tell', type: 'save_notice', label: 'Tell', config: { message: 'Sent {{ record.status }} for approval' } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'tell' },
+      { id: 'e2', source: 'tell', target: 'end' },
+    ],
+  });
+
+  it('answers the create and the update that fired the run, and a run with no write refuses the node by name', async () => {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+    const objectql = kernel.getService('objectql') as any;
+    const automation = kernel.getService<AutomationEngine>('automation');
+    await attachSqlite(objectql);
+    objectql.registry.registerObject(objectDef('snw'), 'test', 'test');
+    await objectql.syncSchemas();
+    await installDefaultOrganization(objectql as never);
+    automation.registerFlow('snw_tell', noticeFlow('snw_tell', 'snw') as any);
+
+    const heard: unknown[] = [];
+    const onNotice = (message: unknown) => { heard.push(message); };
+    const created: any = await objectql.insert('snw', { status: 'quote' }, { context: { userId: 'u_trigger' }, onNotice });
+    expect(heard).toEqual(['Sent quote for approval']);
+
+    heard.length = 0;
+    await objectql.update('snw', { status: 'order' }, { where: { id: created.id }, context: { userId: 'u_trigger' }, onNotice });
+    expect(heard).toEqual(['Sent order for approval']);
+
+    // The same flow run directly: no write waits on it, so the node refuses.
+    const direct: any = await automation.execute('snw_tell', { record: { status: 'x' } } as any);
+    expect(direct.success).toBe(false);
+    expect(String(direct.error)).toContain("save_notice 'tell': this run holds no record write to answer");
+  }, 15000);
+});
