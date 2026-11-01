@@ -45,6 +45,7 @@ import {
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_HAS_ARGUMENT,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
+  VISIBILITY_PAGE_VARIABLE_UNDECLARED,
   VISIBILITY_ROOT_MISLAYERED,
 } from './validate-visibility-predicates.js';
 import {
@@ -62,17 +63,23 @@ const FAMILY_IDS = new Set<string>([
   VISIBILITY_PREDICATE_SYNTAX,
   VISIBILITY_PREDICATE_HAS_ARGUMENT,
   VISIBILITY_PREDICATE_UNKNOWN_FUNCTION,
+  VISIBILITY_PAGE_VARIABLE_UNDECLARED,
   VISIBILITY_ROOT_MISLAYERED,
   PREDICATE_PATH_UNRESOLVED,
   PREDICATE_PATH_UNROOTED,
   PREDICATE_RHS_PATH_SHAPED,
 ]);
 
-/** One `page:header` whose props are declared, so a finding is the predicate's. */
+/**
+ * One `page:header` whose props are declared, so a finding is the predicate's.
+ * The page declares the one variable a control reads (#28725: an undeclared
+ * `page.NAME` read is refused).
+ */
 const page = (visibleWhen: unknown) => ({
   name: 'pipeline_home',
   label: 'Pipeline',
   type: 'app',
+  variables: [{ name: 'selectedProjectId', type: 'record_id' }],
   regions: [
     { name: 'main', components: [{ type: 'page:header', properties: { title: 'Pipeline' }, visibleWhen }] },
   ],

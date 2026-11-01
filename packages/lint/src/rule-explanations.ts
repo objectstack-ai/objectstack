@@ -1014,6 +1014,22 @@ const VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION: RuleExplanation = {
+  rule: 'visibility-page-variable-undeclared',
+  covers: 'which page variables a page predicate can read',
+  paragraphs: [
+    'On a page component `page` holds the page\'s own variables and nothing else: the console seeds it ' +
+      'from the page\'s `variables` declarations, and the only things that write it — an element bound ' +
+      'by a declaration\'s `source`, and a dashboard\'s filter bar — write declared names. So ' +
+      '`page.NAME` for a `NAME` no declaration carries is never there: the predicate cannot evaluate and ' +
+      'the console falls OPEN, rendering the element unconditionally.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Declare the variable ' +
+      'in the page\'s `variables`, or correct the name to one the page declares (names are compared ' +
+      'exactly, case included). A predicate that reads through an index (`page[\'x\']`) is not judged.',
+  ],
+};
+
 const VISIBILITY_BARE_IDENTIFIER_EXPLANATION: RuleExplanation = {
   rule: 'visibility-bare-identifier',
   covers: 'why every value is read through a namespace',
@@ -2769,6 +2785,22 @@ const PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION: RuleExplanation = {
     'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
       'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Fix the default, omit ' +
       'it, or declare the type the default really has.',
+  ],
+};
+
+const PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-source-unknown',
+  covers: 'what a page variable `source` must name',
+  paragraphs: [
+    'A page variable\'s `source` is the `id` of the component that writes it — a record picker or a ' +
+      'text input on the same page. The console binds the writer by comparing that `id` exactly, so a ' +
+      '`source` no component on the page carries binds nothing: no element ever writes the variable, ' +
+      'and it keeps its default for as long as the page is open while the author believes it is fed.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Set `source` to the ' +
+      'writer\'s `id` (components nested inside a container count), give the writer that `id`, or drop ' +
+      '`source` when nothing on the page writes the variable. A page authored as `source` code ' +
+      '(`kind: \'react\'` or `\'html\'`) is not judged, because its components live in the code.',
   ],
 };
 
@@ -5418,6 +5450,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VISIBILITY_PREDICATE_SYNTAX_EXPLANATION.rule]: VISIBILITY_PREDICATE_SYNTAX_EXPLANATION,
   [VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION.rule]: VISIBILITY_PREDICATE_UNKNOWN_FUNCTION_EXPLANATION,
   [VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION.rule]: VISIBILITY_PREDICATE_HAS_ARGUMENT_EXPLANATION,
+  [VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION.rule]: VISIBILITY_PAGE_VARIABLE_UNDECLARED_EXPLANATION,
   [VISIBILITY_BARE_IDENTIFIER_EXPLANATION.rule]: VISIBILITY_BARE_IDENTIFIER_EXPLANATION,
   [HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION.rule]: HOOK_BODY_WRITE_UNKNOWN_FIELD_EXPLANATION,
   [HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION.rule]: HOOK_BODY_WRITE_UNPROVISIONED_ANCHOR_EXPLANATION,
@@ -5480,6 +5513,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION.rule]: PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION,
   [PAGE_VARIABLE_NAME_EMPTY_EXPLANATION.rule]: PAGE_VARIABLE_NAME_EMPTY_EXPLANATION,
   [PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION.rule]: PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION,
+  [PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION.rule]: PAGE_VARIABLE_SOURCE_UNKNOWN_EXPLANATION,
   [FILTER_PRESET_COMPARAND_EXPLANATION.rule]: FILTER_PRESET_COMPARAND_EXPLANATION,
   [FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FILTER_TOKEN_UNKNOWN_EXPLANATION,
   [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION.rule]: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION,
