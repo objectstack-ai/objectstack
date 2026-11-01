@@ -16,6 +16,7 @@ import {
   errorCodeFields,
   isExitSignal,
 } from '../../utils/format.js';
+import type { PackagelessOverlayCensus, PackagelessOverlayMigration } from '@objectstack/metadata-protocol';
 import { PackageServicePlugin } from '@objectstack/service-package';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { describeUnloadableHostConfig } from '../../utils/schema-migration-plugins.js';
@@ -37,41 +38,11 @@ async function confirm(question: string): Promise<boolean> {
   }
 }
 
-/** The census row shape `listPackagelessOverlays` answers (`@objectstack/metadata-protocol`). */
-interface CensusRow {
-  id: string;
-  storedType: string;
-  type: string;
-  name: string;
-  state: 'active' | 'draft';
-  member?: string;
-  disposition: 'movable' | 'multi_shipped' | 'no_pair' | 'foreign_declaration' | 'shadowed';
-  shippers: string[];
-  base?: string;
-  pair?: string;
-  shadowDeclares?: boolean;
-}
-interface IncompleteDeclaration {
-  id: string;
-  type: string;
-  name: string;
-  state: 'active' | 'draft';
-  member?: string;
-  base: string;
-  pair: string;
-}
-interface Census {
-  rows: CensusRow[];
-  environmentRows: number;
-  incompleteDeclarations: IncompleteDeclaration[];
-}
-type Outcome =
-  | { id: string; outcome: 'moved' | 'declaration_completed'; packageId: string; basedOn: string }
-  | { id: string; outcome: 'failed'; error: string };
-interface Migration extends Census {
-  outcomes: Outcome[];
-  bases: Array<{ base: string; pair: string; pairCreated: boolean; moved: number; declarationsCompleted: number; failed: number; shadowed: number }>;
-}
+/** The census and the move's report, as `@objectstack/metadata-protocol` declares them. */
+type Census = PackagelessOverlayCensus;
+type Migration = PackagelessOverlayMigration;
+type CensusRow = Census['rows'][number];
+type Outcome = Migration['outcomes'][number];
 interface MigrationProtocol {
   listPackagelessOverlays?: () => Promise<Census>;
   migratePackagelessOverlays?: (request: { actor: string }) => Promise<Migration>;

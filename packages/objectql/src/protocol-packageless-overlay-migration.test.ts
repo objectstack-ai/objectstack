@@ -145,6 +145,8 @@ function makeMemoryDriver() {
     };
     return { driver, stores };
 }
+const PAGE = 'showcase_home';
+const pageBody = (name: string, label: string) => ({ name, label, type: 'app', regions: [] });
 const listBody = (name: string, object: string, columns: readonly string[]) => ({
     name,
     object,
@@ -285,19 +287,26 @@ describe('[#28413] the census and the move', () => {
         // A Studio customization made first (N-17): the pair's declared row.
         await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, PAIR, 'active', { overrides: { package: BASE, basedOn: '1.0.0' } });
         await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        // …and a Setup DRAFT of the same name: the pair's override is per
+        // name, so a draft beside its ACTIVE override is shadowed too — moved
+        // in as the pair's draft, its publish would replace the Studio
+        // customization (the merge Wanted 2 forbids).
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, null, 'draft');
         await storeRow(engine, SHARED_VIEW, 'shared_task', UNBOUND_COLUMNS);
         await storeRow(engine, ENV_VIEW, 'showcase_task', UNBOUND_COLUMNS);
 
         const listedCensus = await census(protocol);
-        expect(dispositions(listedCensus)).toEqual([`${SHARED_VIEW}@active multi_shipped`, `${VIEW}@active shadowed`]);
+        expect(dispositions(listedCensus)).toEqual([
+            `${SHARED_VIEW}@active multi_shipped`, `${VIEW}@active shadowed`, `${VIEW}@draft shadowed`,
+        ]);
         expect(listedCensus.rows.find((r: any) => r.disposition === 'multi_shipped').shippers).toEqual([OTHER, BASE]);
-        expect(listedCensus.rows.find((r: any) => r.disposition === 'shadowed').shadowDeclares).toBe(true);
+        expect(listedCensus.rows.filter((r: any) => r.disposition === 'shadowed').map((r: any) => r.shadowDeclares)).toEqual([true, true]);
         expect(listedCensus.environmentRows).toBe(1);
 
         const result = await migrate(protocol);
         expect(result.outcomes).toEqual([]);
-        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: false, moved: 0, declarationsCompleted: 0, failed: 0, shadowed: 1 }]);
-        expect(rows(VIEW).slice().sort((a, b) => String(a[0]).localeCompare(String(b[0])))).toEqual([[PAIR, 'active'], [null, 'active']]);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: false, moved: 0, declarationsCompleted: 0, failed: 0, shadowed: 2 }]);
+        expect(rows(VIEW).slice().sort((a, b) => `${a[0]}${a[1]}`.localeCompare(`${b[0]}${b[1]}`))).toEqual([[PAIR, 'active'], [null, 'active'], [null, 'draft']]);
         expect(rows(SHARED_VIEW)).toEqual([[null, 'active']]);
         expect(rows(ENV_VIEW)).toEqual([[null, 'active']]);
         // The pair's declared row is still the one served.
@@ -328,6 +337,25 @@ describe('[#28413] the census and the move', () => {
         expect(JSON.parse(String(rowOf(VIEW, PAIR)!.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
         expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
         expect((await census(protocol)).incompleteDeclarations).toEqual([]);
+    });
+
+    it('…on every overridable type, not only the five overlay types (a page)', async () => {
+        const { engine, protocol, stores } = await boot();
+        engine.registerApp({ id: BASE, name: 'showcase', version: '1.2.0', namespace: 'showcase', pages: [pageBody(PAGE, 'Home')] } as any);
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        await engine.insert('sys_metadata', {
+            type: 'page', name: PAGE, organization_id: null, package_id: PAIR,
+            metadata: JSON.stringify({ ...pageBody(PAGE, 'Edited home'), overrides: { package: BASE } }), state: 'active', version: 1,
+        }, { context: { isSystem: true } });
+        const pageRow = () => Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .find((r) => r.type === 'page' && r.name === PAGE && r.package_id === PAIR && r.state === 'active');
+
+        expect((await census(protocol)).incompleteDeclarations.map((d: any) => [d.type, d.name, d.pair])).toEqual([['page', PAGE, PAIR]]);
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.basedOn, o.error])).toEqual([['declaration_completed', '1.2.0', undefined]]);
+        const body = JSON.parse(String(pageRow()!.metadata));
+        expect(body.overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+        expect(body.label).toBe('Edited home');
     });
 });
 

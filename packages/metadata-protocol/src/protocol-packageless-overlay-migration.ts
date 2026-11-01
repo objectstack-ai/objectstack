@@ -36,9 +36,10 @@
  * is writable.
  *  - `foreign_declaration` — the body already carries an `overrides` key that
  *    does not name the base: listed, never rewritten.
- *  - `shadowed` — the pair already holds a row of that name in that state (a
- *    Studio customization made first, N-17): listed with the two ways out,
- *    never merged or deleted.
+ *  - `shadowed` — the pair already holds a row of that item, in EITHER state
+ *    (a Studio customization made first, N-17): listed with the two ways out,
+ *    never merged or deleted. Per item, not per state — an unbound draft moved
+ *    in beside the pair's active override would replace it on its publish.
  *  - `movable` — everything else. `--apply` moves it.
  *
  * Permission sets, positions and capabilities are not overlay types, so they
@@ -73,13 +74,19 @@
  * does not judge `basedOn`) and refused on its next save by the write gate
  * (`OverrideDeclarationSchema` requires it). The same ceremony completes it:
  * `basedOn` = the installed base's version now, saved through the same door.
+ * Its population is every type a declaration applies to
+ * (`isOverridableMetadataType`), as the read counts one — not only the five
+ * overlay types the move acts on. A type whose declared write the gate does
+ * not yet open (`flow`, `action`: ADR-0146 D9) is refused by that save, and the
+ * row is that refusal's `failed` outcome, its sentence the reason.
  */
 
 import {
+    OVERRIDABLE_METADATA_TYPES,
     customizationBasePackageId,
     customizationPackageId,
 } from '@objectstack/spec/kernel';
-import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
 import { OVERLAY_MEMBER_COLUMN, overlayMemberValue } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
@@ -210,12 +217,30 @@ function messageOf(error: unknown): string {
 const identityKey = (type: string, name: string, member: string | undefined, state: string): string =>
     `${type}\u0000${name}\u0000${member ?? ''}\u0000${state}`;
 
+/**
+ * Every type a declared override applies to (`isOverridableMetadataType`),
+ * both spellings: the population of the `basedOn` completion, which reads a
+ * declaration wherever `isServedOverrideRowOf` counts one — not only on the
+ * five overlay types the move acts on.
+ */
+const OVERRIDABLE_TYPE_SPELLINGS: readonly string[] = Object.freeze(
+    [...new Set(OVERRIDABLE_METADATA_TYPES.flatMap((type) => [type, SINGULAR_TO_PLURAL[type] ?? type]))].sort(),
+);
+
 /** The rows of the five overlay types, either spelling, the environment's only. */
-async function overlayRows(this: Pick<PackagelessOverlayMigrationHost, 'overlayTypes' | 'findEnvironmentRows' | 'rethrowUnlessMetadataStoreUnprovisioned'>): Promise<any[]> {
+function overlayRows(this: Pick<PackagelessOverlayMigrationHost, 'overlayTypes' | 'findEnvironmentRows' | 'rethrowUnlessMetadataStoreUnprovisioned'>): Promise<any[]> {
+    return environmentRowsOfTypes.call(this, [...this.overlayTypes].sort());
+}
+
+/** The environment's `sys_metadata` rows of the given stored type spellings. */
+async function environmentRowsOfTypes(
+    this: Pick<PackagelessOverlayMigrationHost, 'findEnvironmentRows' | 'rethrowUnlessMetadataStoreUnprovisioned'>,
+    types: readonly string[],
+): Promise<any[]> {
     let rows: any[] = [];
     try {
         rows = await this.findEnvironmentRows('sys_metadata', {
-            where: { type: { $in: [...this.overlayTypes].sort() } },
+            where: { type: { $in: [...types] } },
             context: SYSTEM,
         });
     } catch (error) {
@@ -252,6 +277,15 @@ export async function listPackagelessOverlays(
         const type = PLURAL_TO_SINGULAR[row.type] ?? row.type;
         pairRows.set(`${row.package_id}\u0000${identityKey(type, row.name, memberOf(row), row.state)}`, row);
     }
+    // The pair's row of an item that shadows an unbound row in `state`: the
+    // pair's override is per ITEM, not per state, so a row of the pair in
+    // EITHER state shadows it — the one in the same state when there is one.
+    // (An unbound draft beside the pair's active override, moved in as the
+    // pair's draft, would replace that override on its publish: the merge
+    // the census exists to refuse.)
+    const shadowOf = (pair: string, type: string, name: string, member: string | undefined, state: 'active' | 'draft') =>
+        pairRows.get(`${pair}\u0000${identityKey(type, name, member, state)}`)
+        ?? pairRows.get(`${pair}\u0000${identityKey(type, name, member, state === 'active' ? 'draft' : 'active')}`);
 
     const listed: PackagelessOverlayRow[] = [];
     let environmentRows = 0;
@@ -297,7 +331,7 @@ export async function listPackagelessOverlays(
             listed.push({ ...common, base, pair, disposition: 'foreign_declaration' });
             continue;
         }
-        const shadow = pairRows.get(`${pair}\u0000${identityKey(type, name, member, state)}`);
+        const shadow = shadowOf(pair, type, name, member, state);
         if (shadow !== undefined) {
             listed.push({ ...common, base, pair, disposition: 'shadowed', shadowDeclares: isServedOverrideRowOf(shadow, base) });
             continue;
@@ -305,8 +339,10 @@ export async function listPackagelessOverlays(
         listed.push({ ...common, base, pair, disposition: 'movable' });
     }
 
+    // Every type a declaration applies to, not only the five the move acts on.
     const incompleteDeclarations: IncompleteOverrideDeclarationRow[] = [];
-    for (const row of pairRows.values()) {
+    for (const row of await environmentRowsOfTypes.call(this, OVERRIDABLE_TYPE_SPELLINGS)) {
+        if (isUnbound(row)) continue;
         const base = customizationBasePackageId(row.package_id);
         if (base === null || !isServedOverrideRowOf(row, base)) continue;
         const basedOn = (bodyOf(row) as { overrides?: { basedOn?: unknown } } | undefined)?.overrides?.basedOn;
@@ -392,6 +428,9 @@ export async function migratePackagelessOverlays(
     const repository = new SysMetadataRepository({ engine: this.engine as never, orgLabel: 'env' });
     const rowsById = new Map<string, any>();
     for (const row of await overlayRows.call(this)) rowsById.set(String(row.id), row);
+    if (census.incompleteDeclarations.length > 0) {
+        for (const row of await environmentRowsOfTypes.call(this, OVERRIDABLE_TYPE_SPELLINGS)) rowsById.set(String(row.id), row);
+    }
 
     for (const row of census.rows) {
         if (row.disposition !== 'movable' || row.base === undefined || row.pair === undefined) continue;
