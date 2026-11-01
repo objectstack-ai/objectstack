@@ -18,7 +18,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { celEngine } from './cel-engine';
-import { declaresOptions } from './stdlib';
+import { declaresOptions, declaresOptionsOnceServed } from './stdlib';
 import { validateExpression, type ExprSchemaHint } from './validate';
 
 /** The card's object: `first` is text, `kind` a select with options, `stage` a radio with options. */
@@ -123,5 +123,30 @@ describe('declaresOptions — the one reading of "has options" (#28659)', () => 
     expect(declaresOptions({ type: 'select', options: 'a,b' })).toBe(false);
     expect(declaresOptions(null)).toBe(false);
     expect(declaresOptions(undefined)).toBe(false);
+  });
+});
+
+describe('declaresOptionsOnceServed — the authored-form reading (#28659)', () => {
+  it('admits inline options and a named picklist, the two option sources the spec declares', () => {
+    expect(declaresOptionsOnceServed({ type: 'select', options: [{ value: 'a', label: 'A' }] })).toBe(true);
+    expect(declaresOptionsOnceServed({ type: 'select', picklist: 'kinds' })).toBe(true);
+    expect(declaresOptionsOnceServed({ type: 'radio', picklist: 'kinds' })).toBe(true);
+    expect(declaresOptionsOnceServed({ type: 'select', picklist: '' })).toBe(false);
+    expect(declaresOptionsOnceServed({ type: 'text' })).toBe(false);
+    expect(declaresOptionsOnceServed({ type: 'select' })).toBe(false);
+    expect(declaresOptionsOnceServed(null)).toBe(false);
+  });
+
+  it('a picklist-bound field: refused by the served-form reading as authored, admitted once its list is written on', () => {
+    const authored = { type: 'select', picklist: 'kinds' };
+    const served = { ...authored, options: [{ value: 'clean', label: 'Clean' }] };
+    expect(declaresOptions(authored)).toBe(false);
+    expect(declaresOptions(served)).toBe(true);
+    expect(declaresOptionsOnceServed(authored)).toBe(declaresOptions(served));
+  });
+
+  it('CONTROL — a picklist-bound field named in optionFields is admitted by the validator', () => {
+    const schema: ExprSchemaHint = { ...P4, fields: [...P4.fields!, 'tier'], optionFields: [...P4.optionFields!, 'tier'] };
+    expect(validateExpression('value', 'label(record.tier)', schema)).toEqual({ ok: true, errors: [], warnings: [] });
   });
 });

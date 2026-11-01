@@ -72,9 +72,11 @@ export function planCallsOptionLabel(plan: ReadonlyArray<PlannedExpression>): bo
 
 /**
  * The fields of `schema` that declare options, as `translateObject` takes them.
- * "Declares options" is `@objectstack/formula`'s `declaresOptions`, the same
- * predicate `@objectstack/lint`'s formula pass refuses `label()` by (#28659),
- * so the door refuses exactly the fields this map leaves out.
+ * "Declares options" is `@objectstack/formula`'s `declaresOptions`, read on
+ * the SERVED object, where a picklist-bound field carries its resolved list.
+ * `@objectstack/lint`'s formula pass reads the authored body through
+ * `declaresOptionsOnceServed`, whose served-form half is this predicate
+ * (#28659), so the door refuses exactly the fields this map leaves out.
  */
 function optionFields(schema: unknown): Record<string, ObjectFieldLike> {
   const fields = (schema as { fields?: unknown } | undefined)?.fields;

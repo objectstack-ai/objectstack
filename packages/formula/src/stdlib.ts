@@ -394,23 +394,46 @@ export function optionLabelFieldOf(node: CelMacroNode | undefined): string | und
 }
 
 /**
- * Does this field definition declare options — the one reading of "has options"
- * `label()` depends on (#28659)?
+ * Does this SERVED field definition declare options — the reading of "has
+ * options" `label()` depends on at evaluation (#28659)?
  *
- * A field whose definition carries an `options` list is a field the engine
- * builds a label map for (`@objectstack/objectql`'s `formula-option-labels.ts`
- * reads its fields through this), so `label(record.<field>)` answers on it.
- * Any other field is absent from that map, and {@link optionLabelOf} faults on
- * every row. `@objectstack/lint`'s formula pass reads the object's fields
- * through the same predicate, so the authoring gate refuses exactly the fields
- * the evaluator would fault on: one spelling, two readers.
+ * A field whose served definition carries an `options` list is a field the
+ * engine builds a label map for (`@objectstack/objectql`'s
+ * `formula-option-labels.ts` reads the served object's fields through this),
+ * so `label(record.<field>)` answers on it. Any other field is absent from
+ * that map, and {@link optionLabelOf} faults on every row.
  *
  * It reads the declaration, not the type: a `select` that declares no options
  * has no labels either (and is refused for that by its own completeness rule),
  * and any field type that does declare a list is answered.
+ *
+ * An AUTHORED definition is read through {@link declaresOptionsOnceServed}
+ * instead: a field bound to a shared picklist is authored without `options`
+ * and served with them.
  */
 export function declaresOptions(def: unknown): boolean {
   return !!def && typeof def === 'object' && Array.isArray((def as { options?: unknown }).options);
+}
+
+/**
+ * Will this AUTHORED field definition declare options once it is served — the
+ * reading an authoring gate judges `label()` by (#28659)?
+ *
+ * The spec gives a `select` / `radio` two option sources, mutually exclusive
+ * (`FieldSchema`): inline `options`, or a `picklist` naming a shared list.
+ * The registry writes a picklist-bound field's resolved options onto the
+ * served object (`@objectstack/objectql`'s `picklist-resolution.ts`), so the
+ * served definition {@link declaresOptions} and `label()` reads the list's
+ * labels; a name no list declares is refused at load. So an authored field
+ * answers when it declares `options` or names a picklist — the R8 reading in
+ * `@objectstack/lint`'s `data-model-rules.ts` — and `@objectstack/lint`'s
+ * formula pass reads the authored body through this, so the authoring gate
+ * refuses exactly the fields the evaluator would fault on.
+ */
+export function declaresOptionsOnceServed(def: unknown): boolean {
+  if (declaresOptions(def)) return true;
+  const picklist = !!def && typeof def === 'object' ? (def as { picklist?: unknown }).picklist : undefined;
+  return typeof picklist === 'string' && picklist !== '';
 }
 
 /**

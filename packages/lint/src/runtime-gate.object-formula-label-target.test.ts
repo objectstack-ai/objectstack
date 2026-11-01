@@ -22,7 +22,8 @@
  *
  * The card's body and its compound variant are refused at every command and
  * at the door, located at the formula field's `expression`. Controls: `label()`
- * on a select and on a radio that declare options publishes clean, and the
+ * on a select and on a radio that declare options, and on a select bound to a
+ * shared `picklist` (authored with no `options`), publishes clean, and the
  * unknown-field and unregistered-function refusals are unchanged. Each
  * refusal asserts the rule, the location and the named field, not the prose.
  */
@@ -40,6 +41,9 @@ const p4 = (expression: string) => ({
     first: { type: 'text', label: 'First' },
     kind: { type: 'select', label: 'Kind', options: [{ value: 'clean', label: 'Clean' }] },
     stage: { type: 'radio', label: 'Stage', options: [{ value: 'draft', label: 'Draft' }] },
+    // Bound to a shared picklist: authored with no `options`, served with the
+    // list's options written on (objectql's picklist resolution).
+    tier: { type: 'select', label: 'Tier', picklist: 'qa_tiers' },
     pf: { type: 'formula', label: 'PF', expression },
   },
 });
@@ -49,8 +53,11 @@ const WHERE = "object 'qaformula_p4' · field 'pf' expression";
 const expressionFindings = <T extends { rule: string }>(fs: readonly T[]): T[] =>
   fs.filter((f) => f.rule === EXPRESSION_INVALID);
 
+/** The shared list `tier` names, so the stack is the one an author would build. */
+const QA_TIERS = { name: 'qa_tiers', label: 'Tiers', options: [{ value: 'gold', label: 'Gold' }] };
+
 const atCommand = (command: (typeof AUTHORING_COMMANDS)[number], item: unknown) => {
-  const stack = { objects: [item] };
+  const stack = { objects: [item], picklists: [QA_TIERS] };
   return expressionFindings(runAuthoringRules(command, { normalized: stack, parsed: stack }));
 };
 
@@ -79,7 +86,14 @@ describe('label() on a field that declares no options is refused at every face o
     });
   }
 
-  for (const expression of ['label(record.kind)', "label(record.kind) + ' · ' + label(record.stage)", "record.first + label(record.kind)"]) {
+  for (const expression of [
+    'label(record.kind)',
+    "label(record.kind) + ' · ' + label(record.stage)",
+    "record.first + label(record.kind)",
+    // A picklist-bound select names its list instead of declaring `options`.
+    'label(record.tier)',
+    "label(record.tier) + ' / ' + label(record.kind)",
+  ]) {
     it(`CONTROL — \`${expression}\` (option-bearing fields) publishes clean at every command and at the door`, () => {
       for (const command of AUTHORING_COMMANDS) expect(atCommand(command, p4(expression))).toEqual([]);
       const door = atDoor(p4(expression));

@@ -202,10 +202,12 @@ export interface ExprSchemaHint {
    */
   traversalHydration?: boolean;
   /**
-   * [#28659] The fields of {@link fields} that declare options — the fields
-   * `label(record.<field>)` can answer on. Read each field through
-   * `declaresOptions` (`stdlib.ts`), the predicate the engine builds its
-   * label map with, so this list and the evaluator agree by construction.
+   * [#28659] The fields of {@link fields} that declare options once served —
+   * the fields `label(record.<field>)` can answer on: inline `options`, or a
+   * `picklist` the registry resolves onto the served field. Read an authored
+   * field through `declaresOptionsOnceServed` (`stdlib.ts`), whose served-form
+   * half is `declaresOptions`, the predicate the engine builds its label map
+   * with, so this list and the evaluator agree.
    *
    * When supplied, every `label(record.<field>)` call naming a field that IS
    * declared ({@link fields}) but is not in this list is refused under
