@@ -203,7 +203,7 @@ describe('the Customize button and the override badge (objectstack#28562)', () =
     const button = screen.getByTestId('studio-customize');
     expect(button).toBeEnabled();
     expect(button).toHaveTextContent(t('engine.studio.customize.action', 'en'));
-    expect(button).toHaveAttribute('title', tFormat('engine.studio.customize.actionTitle', 'en', { base: 'HotCRM' }));
+    expect(button).toHaveAttribute('title', tFormat('engine.studio.customize.actionTitle', 'en', { package: 'HotCRM' }));
     button.click();
     expect(onCustomize).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('studio-customize-blocked')).toBeNull();
@@ -211,7 +211,7 @@ describe('the Customize button and the override badge (objectstack#28562)', () =
 
   it.each([
     ['walled', t('engine.studio.customize.walled', 'en')],
-    ['noVersion', tFormat('engine.studio.customize.noVersion', 'en', { base: 'HotCRM' })],
+    ['noVersion', tFormat('engine.studio.customize.noVersion', 'en', { package: 'HotCRM' })],
   ] as const)('blocked (%s): disabled, and its wrapper says why', (block, reason) => {
     const onCustomize = vi.fn();
     render(<StudioCustomizeButton block={block} baseLabel="HotCRM" locale="en" onCustomize={onCustomize} />);
@@ -226,10 +226,10 @@ describe('the Customize button and the override badge (objectstack#28562)', () =
   it('the badge names the base, and its title the version the override is based on', () => {
     render(<StudioOverrideChip baseLabel="HotCRM" basedOn="4.0.0" locale="en" />);
     const chip = screen.getByTestId('studio-override-chip');
-    expect(chip).toHaveTextContent(tFormat('engine.studio.customize.overrides', 'en', { base: 'HotCRM' }));
+    expect(chip).toHaveTextContent(tFormat('engine.studio.customize.overrides', 'en', { package: 'HotCRM' }));
     expect(chip).toHaveAttribute(
       'title',
-      tFormat('engine.studio.customize.overridesTitle', 'en', { base: 'HotCRM', basedOn: '4.0.0' }),
+      tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }),
     );
   });
 });

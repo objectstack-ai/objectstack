@@ -346,8 +346,8 @@ describe('Customize a read-only base’s dashboard into its pair (objectstack#28
 
     // The badge reads the declaration the pair's draft now serves.
     const chip = await within(header()).findByTestId('studio-override-chip', undefined, { timeout: 8000 });
-    expect(chip).toHaveTextContent(tFormat('engine.studio.customize.overrides', 'en', { base: 'HotCRM' }));
-    expect(chip).toHaveAttribute('title', tFormat('engine.studio.customize.overridesTitle', 'en', { base: 'HotCRM', basedOn: '4.0.0' }));
+    expect(chip).toHaveTextContent(tFormat('engine.studio.customize.overrides', 'en', { package: 'HotCRM' }));
+    expect(chip).toHaveAttribute('title', tFormat('engine.studio.customize.overridesTitle', 'en', { package: 'HotCRM', basedOn: '4.0.0' }));
 
     // A later edit of the same item asks the door no more.
     patchBoard();

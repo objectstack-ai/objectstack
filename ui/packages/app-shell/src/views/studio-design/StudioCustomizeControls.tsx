@@ -207,7 +207,7 @@ export function StudioCustomizeButton({
     block === 'walled'
       ? t('engine.studio.customize.walled', locale)
       : block === 'noVersion'
-        ? tFormat('engine.studio.customize.noVersion', locale, { base: baseLabel })
+        ? tFormat('engine.studio.customize.noVersion', locale, { package: baseLabel })
         : null;
   const button = (
     <button
@@ -215,7 +215,7 @@ export function StudioCustomizeButton({
       data-testid="studio-customize"
       disabled={reason !== null}
       aria-describedby={reason !== null ? reasonId : undefined}
-      title={reason === null ? tFormat('engine.studio.customize.actionTitle', locale, { base: baseLabel }) : undefined}
+      title={reason === null ? tFormat('engine.studio.customize.actionTitle', locale, { package: baseLabel }) : undefined}
       onClick={onCustomize}
       className={cn(
         'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md border bg-background px-2.5 text-xs font-medium text-foreground hover:bg-muted',
@@ -260,11 +260,11 @@ export function StudioOverrideChip({
   return (
     <span
       data-testid="studio-override-chip"
-      title={tFormat('engine.studio.customize.overridesTitle', locale, { base: baseLabel, basedOn })}
+      title={tFormat('engine.studio.customize.overridesTitle', locale, { package: baseLabel, basedOn })}
       className="inline-flex h-[22px] shrink-0 items-center gap-1 rounded-[5px] bg-sky-500/10 px-2 text-[11px] font-medium text-sky-700 dark:text-sky-300"
     >
       <Layers className="h-3 w-3 shrink-0" aria-hidden="true" />
-      {tFormat('engine.studio.customize.overrides', locale, { base: baseLabel })}
+      {tFormat('engine.studio.customize.overrides', locale, { package: baseLabel })}
     </span>
   );
 }
@@ -318,7 +318,7 @@ export function StudioRestoreOriginalDialog({
   locale: string;
   onConfirm: () => void;
 }): React.ReactElement {
-  const vars = { item: label, base: baseLabel };
+  const vars = { item: label, package: baseLabel };
   const body = tFormat('engine.studio.customize.restoreBody', locale, vars);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>

@@ -5148,7 +5148,7 @@ export function InterfacesPillar({
         }
         const declared = overrideDraftBody(body, custom.base, custom.basedOn);
         if (declared === null) {
-          setError({ message: tFormat('engine.studio.customize.noVersion', locale, { base: custom.baseLabel }) });
+          setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
           return;
         }
         // The buffer was read at another package (the base, before its pair
@@ -5247,7 +5247,7 @@ export function InterfacesPillar({
               const pair = await pairFor(custom, 'view', viewId);
               const body = overrideDraftBody(row, custom.base, custom.basedOn);
               if (body === null) {
-                throw new Error(tFormat('engine.studio.customize.noVersion', locale, { base: custom.baseLabel }));
+                throw new Error(tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }));
               }
               return { packageId: pair, body };
             },
@@ -5923,7 +5923,7 @@ export function InterfacesPillar({
         }
         setServedNonce((n) => n + 1);
         emitMetadataRefresh();
-        toast.success(tFormat('engine.studio.customize.restoreDone', locale, { item: item.label, base: custom.baseLabel }));
+        toast.success(tFormat('engine.studio.customize.restoreDone', locale, { item: item.label, package: custom.baseLabel }));
       } catch (e) {
         setError(plainRefusal(e));
       } finally {
