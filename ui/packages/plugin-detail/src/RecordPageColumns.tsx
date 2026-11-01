@@ -362,7 +362,14 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   if (hasTimeline) {
     tabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: t('detail.timeline', { defaultValue: 'Activity' }), count: streamCount });
   }
-  const panelTabs = partitionRecordTabsByRecords(resolved.order.map(panelTab));
+  // While the panels' first count set is still out (the right column draws its
+  // count skeletons meanwhile) their tabs wait off the row, so a tab that turns
+  // out empty never draws on the row and then leaves it: the tabs appear once,
+  // already in place. The active tab is always drawn; a list that is never
+  // counted (no source, a refused read) keeps its place in the arrangement.
+  const panelTabs = partitionRecordTabsByRecords(
+    resolved.order.filter((id) => id === activeTab || counts.stateOf(id).kind !== 'pending').map(panelTab),
+  );
   tabs.push(...panelTabs.withRecords);
   if (openBodyTable) tabs.push(openBodyTable);
   const hiddenTabs = resolved.hidden.map(panelTab);

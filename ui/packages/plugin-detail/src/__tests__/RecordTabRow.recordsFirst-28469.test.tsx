@@ -12,7 +12,9 @@
  * behind a separator and in a muted face, the hidden panels' tabs last; an
  * active empty tab on the row; and, through `RecordPageColumns`, a page whose
  * counts arrive with its payload draws that order on its first render, with
- * no tab moving after. The rule itself is pinned in
+ * no tab moving after — and, when the counts are read after the page draws,
+ * the panel tabs wait off the row until they land, then appear in place. The
+ * rule itself is pinned in
  * `synth/__tests__/recordTabRow-28469.test.ts`.
  */
 
@@ -193,14 +195,73 @@ describe('the record page draws the final tab order at first paint (objectstack#
     expect(find).not.toHaveBeenCalled();
   });
 
-  it('control: counts read after the page draws move the empty tabs once they land — what the observer above would have seen', async () => {
-    const find = vi.fn(async (objectName: string) => ({ data: [], total: TOTALS[objectName] }));
+  it('counts read after the page draws: the panel tabs wait off the row while the set is out, then appear once, already partitioned — no tab drawn earlier moves or leaves', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const find = vi.fn(async (objectName: string) => {
+      await gate;
+      return { data: [], total: TOTALS[objectName] };
+    });
     renderPage(find);
-    // Not known yet: every tab where the arrangement puts it.
-    expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'task.lead_id', 'note.parent_id', 'call.lead_id', 'event.lead_id']);
-    const watch = watchTabList();
-    await waitFor(() => expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'note.parent_id', 'event.lead_id']));
-    expect(watch.moves()).toBeGreaterThan(0);
-    watch.stop();
+    // The set is out: the row is Overview and Activity alone, and nothing on it will have to move.
+    expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL]);
+    const states: string[][] = [shownIds() as string[]];
+    const observer = new MutationObserver(() => states.push(shownIds() as string[]));
+    observer.observe(document.querySelector('[data-record-tab-row]')!, { childList: true, subtree: true });
+    release();
+    const final = ['overview', RECORD_PAGE_TIMELINE_PANEL, 'note.parent_id', 'event.lead_id'];
+    await waitFor(() => expect(shownIds()).toEqual(final));
+    await settle();
+    observer.disconnect();
+    // Every row drawn on the way is a prefix of the final one: tabs were only added after it.
+    for (const state of states) expect(final.slice(0, state.length)).toEqual(state);
+    expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('+2');
+  });
+
+  it('a list whose count is refused keeps its place in the arrangement, among the lists with records', async () => {
+    const find = vi.fn(async (objectName: string) => {
+      if (objectName === 'task') throw new Error('refused');
+      return { data: [], total: TOTALS[objectName] };
+    });
+    renderPage(find);
+    // Tasks (first in the arrangement) is never counted: it stays first; Calls (0) folds.
+    await waitFor(() =>
+      expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'task.lead_id', 'note.parent_id', 'event.lead_id']),
+    );
+    expect(document.querySelector('[data-record-tab="task.lead_id"] [data-record-tab-count]')).toBeNull();
+    expect(document.querySelector('[data-record-tab-more]')?.textContent).toBe('+1');
+  });
+
+  it('an active tab (restored from ?related=) is drawn while the set is out', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const find = vi.fn(async (objectName: string) => {
+      await gate;
+      return { data: [], total: TOTALS[objectName] };
+    });
+    const dataSource = { find, getObjectSchema: vi.fn(async () => ({ fields: {} })) };
+    render(
+      <RecordContextProvider objectName="lead" recordId="lead-1" dataSource={dataSource as any}>
+        <RecordPageColumns
+          tier="wide"
+          columns={columnsOf()}
+          enlargedRelated="call.lead_id"
+          onEnlargeRelated={vi.fn()}
+          onCloseEnlargedRelated={vi.fn()}
+          relatedFieldsOf={() => ({})}
+        />
+      </RecordContextProvider>,
+    );
+    expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'call.lead_id']);
+    expect(document.querySelector('[aria-selected="true"]')?.getAttribute('data-record-tab')).toBe('call.lead_id');
+    release();
+    // Calls turns out empty: as the active tab it stays on the row, in the last slot.
+    await waitFor(() =>
+      expect(shownIds()).toEqual(['overview', RECORD_PAGE_TIMELINE_PANEL, 'note.parent_id', 'event.lead_id', 'call.lead_id']),
+    );
   });
 });

@@ -12,7 +12,7 @@ The tab row under the record header used to place one tab per related list in th
 - **Lists with records first.** After Overview and Activity, the related lists whose count is not `0` keep the reader's arrangement among themselves, then the empty ones follow in the same order. A count that is not known yet (still loading, or a refused read) counts as non-empty, so that tab stays where the arrangement puts it.
 - **Empty lists never take a slot.** Their tabs always sit in the dropdown, even on a row with room for them: after the tabs that did not fit, behind a separator, with their `0` in a muted face, and before the hidden lists' tabs.
 - **The active tab stays on the row.** A link that opens an empty list (`?related=`) still shows its tab, in the row's last slot.
-- **First paint is final.** The counts come with the record page's payload, so on a normal open the tabs do not move after the row first draws.
+- **No tab moves once drawn.** While the lists' counts are still loading (the right column shows its count placeholders meanwhile), their tabs wait off the row, and they appear once the counts land, already in order; the tab that is open is always drawn. A list whose count cannot be read keeps its place in the reader's arrangement.
 - **Nothing stored changes.** The order is computed when the row is drawn; the stored arrangement (`record.related.arrangement`) and its shape are untouched.
 
 What to do: nothing. No metadata key and no setting.
