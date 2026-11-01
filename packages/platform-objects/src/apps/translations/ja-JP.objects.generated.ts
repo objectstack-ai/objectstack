@@ -3061,7 +3061,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "履歴データとして扱う"
       },
       error: {
-        label: "致命的なエラー"
+        label: "失敗理由"
       },
       results: {
         label: "行ごとの結果（サンプル）",

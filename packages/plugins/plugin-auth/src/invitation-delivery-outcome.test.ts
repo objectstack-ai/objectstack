@@ -17,6 +17,9 @@
 //      non-pending row.
 //  (d) the action is refused while the environment is cloud-managed (the
 //      declaration hides it there too, pinned in platform-objects).
+//  (e) #28384: a row that still reads `pending` after its `expires_at` has
+//      passed is refused 409 (the declaration hides it there too, pinned in
+//      platform-objects), while Resend still answers for it.
 //
 // Every invitation is issued, resent, canceled and accepted through the
 // vendor's own routes on a real `AuthManager` over the installed better-auth,
@@ -353,6 +356,61 @@ describe('#27843 (c) — copy_invitation_link is answered only inside the invite
     const { owner, copyLink } = await stage();
     const v = await refusalOf(copyLink('inv_never_issued', owner.userId));
     expect([v.status, v.code]).toEqual([404, 'RECORD_NOT_FOUND']);
+  });
+});
+
+describe('#28384 (e) — copy_invitation_link refuses a pending invitation past its expires_at', () => {
+  /** Move a pending row's `expires_at` into the past, leaving its status as it is. */
+  const expire = (row: Record<string, any>) => {
+    row.expires_at = new Date(Date.now() - 60_000);
+  };
+
+  it('a row still pending after expires_at is refused 409, and is not handed a link', async () => {
+    const { invite, owner, copyLink, invitationRow } = await stage();
+    const id = String((await invite('bob.builder@acme.test')).body.id);
+    expire(invitationRow(id));
+    expect(invitationRow(id).status).toBe('pending');
+
+    const v = await refusalOf(copyLink(id, owner.userId));
+    expect([v.status, v.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+    expect(v.message.split('. ')[0]).toBe('This invitation has expired, so its link no longer lets anyone join');
+  });
+
+  it('a pending row with no readable expires_at is refused the same way', async () => {
+    const { invite, owner, copyLink, invitationRow } = await stage();
+    const id = String((await invite('bob.builder@acme.test')).body.id);
+    invitationRow(id).expires_at = 'not a date';
+    const v = await refusalOf(copyLink(id, owner.userId));
+    expect([v.status, v.code]).toEqual([409, 'RESOURCE_CONFLICT']);
+  });
+
+  it('a pending row before expires_at still answers its link, whatever shape the driver returns', async () => {
+    const { invite, owner, copyLink, invitationRow } = await stage();
+    const id = String((await invite('bob.builder@acme.test')).body.id);
+    const later = Date.now() + 60 * 60 * 1000;
+    for (const shape of [new Date(later), new Date(later).toISOString(), later]) {
+      invitationRow(id).expires_at = shape;
+      expect((await copyLink(id, owner.userId)).acceptUrl).toContain(`/accept-invitation/${id}`);
+    }
+  });
+
+  it('reach is judged before expiry: a plain member learns nothing about an expired row', async () => {
+    const { invite, member, copyLink, invitationRow } = await stage();
+    const id = String((await invite('bob.builder@acme.test')).body.id);
+    expire(invitationRow(id));
+    const v = await refusalOf(copyLink(id, member.userId));
+    expect([v.status, v.code]).toEqual([403, 'PERMISSION_DENIED']);
+  });
+
+  it('Resend still answers for the invitee, and its answer has a link to copy', async () => {
+    const { invite, owner, copyLink, invitationRow } = await stage();
+    const id = String((await invite('bob.builder@acme.test')).body.id);
+    expire(invitationRow(id));
+
+    const resent = await invite('bob.builder@acme.test', { resend: true });
+    expect(resent.status, resent.text).toBe(200);
+    const answered = String(resent.body.id);
+    expect((await copyLink(answered, owner.userId)).acceptUrl).toContain(`/accept-invitation/${answered}`);
   });
 });
 

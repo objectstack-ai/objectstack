@@ -76,6 +76,7 @@ import { useConsoleSidebarRail, useConsoleSidebarRailPanel } from './consoleSide
 import { SidebarItemMenu, sidebarItemDesignPath, favoriteDesignPath } from './SidebarItemMenu.js';
 import { SortableFavoriteRows, type FavoriteRowDragProps } from './SortableFavoriteRows.js';
 import { favoriteAppSegment } from './listViewFavorites.js';
+import { electSidebarArea, type SidebarAreaRoute } from './sidebarAreaElection.js';
 import type { FavoriteItem } from '../hooks/useFavorites.js';
 
 /**
@@ -256,6 +257,24 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
     can,
   } = useNavMemberGates();
 
+  // App-level context selectors (e.g. Studio's package scope). Their
+  // values are injected into nav items as `{<id>}` template vars so a
+  // single dropdown transparently scopes every secondary menu.
+  const { contextValues, element: contextSelectorsUI } = useAppContextSelectors(
+    activeApp?.name || 'home',
+    activeApp?.contextSelectors,
+    t,
+  );
+
+  // The template context every navigation href here resolves with; the area
+  // election below matches routes with it too, so it agrees with the drawn
+  // highlight.
+  const navTemplateContext = {
+    currentUserId: user?.id ?? null,
+    currentOrgId: activeOrganization?.id ?? null,
+    contextValues,
+  };
+
   // Area management.
   //
   // Area visibility is DERIVED from the items inside (objectui#3311 /
@@ -303,37 +322,36 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       hasActionHandler: !!dispatchNavAction,
     }),
   );
+  // The route the area election reads: in an app, the area whose navigation
+  // holds the entry the current page addresses is shown (`electSidebarArea`).
+  const areaRoute: SidebarAreaRoute | null =
+    context === 'app' && activeApp
+      ? {
+          pathname: location.pathname,
+          search: location.search,
+          basePath: `/apps/${appRouteSegment(activeApp)}`,
+          templateContext: navTemplateContext,
+        }
+      : null;
   const [activeAreaId, setActiveAreaId] = React.useState<string | null>(
-    () => visibleAreas.length > 0 ? visibleAreas[0].id : null,
+    () => electSidebarArea(visibleAreas, null, areaRoute),
   );
 
   const visibleAreaIds = visibleAreas.map((a) => a.id).join(',');
 
-  // Re-elect when the app changes or the visible-area set changes. Keeping
-  // `prev` whenever it is still visible means merely REVEALING a new area
-  // never steals the user's current selection.
+  // Re-elect when the app, the visible-area set or the route changes. The
+  // current area stays while it is still visible and the page is one of its
+  // entries' (or no area's), so merely REVEALING a new area never steals the
+  // user's selection, and a user's own pick holds on a page it addresses.
   React.useEffect(() => {
-    if (visibleAreas.length > 0) {
-      setActiveAreaId(prev => visibleAreas.some((a) => a.id === prev) ? prev : visibleAreas[0].id);
-    } else {
-      setActiveAreaId(null);
-    }
-  }, [activeApp?.name, visibleAreaIds]);
+    setActiveAreaId((prev) => electSidebarArea(visibleAreas, prev, areaRoute));
+  }, [activeApp?.name, visibleAreaIds, location.pathname, location.search, context]);
 
   // Resolve navigation items. The render-time `?? visibleAreas[0]` fallback
   // covers the frame between a gating change hiding the active area and the
   // effect above re-electing.
   const activeArea = visibleAreas.find((a) => a.id === activeAreaId) ?? visibleAreas[0];
   const appNavigation: NavigationItem[] = activeArea?.navigation || readableAppNavigation || [];
-
-  // App-level context selectors (e.g. Studio's package scope). Their
-  // values are injected into nav items as `{<id>}` template vars so a
-  // single dropdown transparently scopes every secondary menu.
-  const { contextValues, element: contextSelectorsUI } = useAppContextSelectors(
-    activeApp?.name || 'home',
-    activeApp?.contextSelectors,
-    t,
-  );
 
   // Home navigation items. For workspace admins we surface the full system
   // ("Administration") nav right here on /home — previously the home context
@@ -637,7 +655,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              locale={language}
              onAction={dispatchNavAction}
              t={t}
-             templateContext={{ currentUserId: user?.id ?? null, currentOrgId: activeOrganization?.id ?? null, contextValues }}
+             templateContext={navTemplateContext}
            />
 
            {/* The app's report index is an entry its navigation declares,
@@ -731,7 +749,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
              locale={language}
              onAction={dispatchNavAction}
              t={t}
-             templateContext={{ currentUserId: user?.id ?? null, currentOrgId: activeOrganization?.id ?? null, contextValues }}
+             templateContext={navTemplateContext}
            />
 
            {/* Starred Apps */}

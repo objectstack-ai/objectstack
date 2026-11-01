@@ -7,8 +7,10 @@
  */
 
 /**
- * objectui#10423: the mobile card's one-line amount summary reads the FIELD's
- * currency, exactly as the desktop cell of the same row does.
+ * objectui#10423: the mobile card's amount reads the FIELD's currency, exactly
+ * as the desktop cell of the same row does. Since objectstack#28484 the card
+ * draws the amount on its subtitle line through that same desktop cell, so the
+ * two faces are one face.
  *
  * objectui#10354 made the desktop cell and the summary footer carry the
  * field's `currencyConfig`. The mobile card's amount line did not follow: it
@@ -62,15 +64,15 @@ const OBJECT = 'os_10423_deal';
 const FIELDS: Record<string, Record<string, unknown>> = {
   id: { type: 'text' },
   name: { type: 'text', label: 'Deal Name' },
-  // `classify` reads `amount` in the key, so this is the card's amount line.
+  // The first subtitle value after the title.
   amount: {
     type: 'currency',
     label: 'Yen Amount',
     currencyConfig: { currencyMode: 'fixed', defaultCurrency: 'JPY' },
   },
-  // The control: also classified `amount`, but no `currencyConfig`.
+  // The control: the same face, but no `currencyConfig`.
   plain_amount: { type: 'currency', label: 'Plain Amount' },
-  // The enrichment signal: the card's stage badge reads its label off the
+  // The enrichment signal: the card's status chip reads its label off the
   // object schema's options, so `Won Label` on the card proves the field
   // defs have arrived (the schema is fetched async; a `$` read before it
   // lands would pass for the wrong reason).
@@ -112,13 +114,13 @@ async function renderGrid(schemaExtra: Record<string, unknown>) {
   return utils;
 }
 
-/** The card's amount line: the left-hand span of the Amount + Stage row. */
+/** The card's amount: the first value of its subtitle line. */
 async function cardAmountLine(schemaExtra: Record<string, unknown>): Promise<string> {
   setWidth(390);
   const { container } = await renderGrid(schemaExtra);
   expect(container.querySelector('table'), 'expected the mobile card layout, not the table').toBeNull();
-  const line = container.querySelector('span.tabular-nums.font-medium');
-  expect(line, 'the card rendered no amount line').not.toBeNull();
+  const line = container.querySelector('[data-testid="grid-card-subtitle-part"]');
+  expect(line, 'the card rendered no subtitle value').not.toBeNull();
   return (line!.textContent ?? '').trim();
 }
 
@@ -131,13 +133,13 @@ function paths(amountField: string): Array<[string, Record<string, unknown>]> {
   ];
 }
 
-describe('the mobile card amount line reads the field currency (objectui#10423)', () => {
+describe('the mobile card amount reads the field currency (objectui#10423)', () => {
   it.each(paths('amount'))('%s: a JPY-fixed amount reads ¥ on the card under a USD tenant', async (_p, extra) => {
-    expect(await cardAmountLine(extra)).toBe('¥1.2M');
+    expect(await cardAmountLine(extra)).toBe('¥1,234,567');
   });
 
   it.each(paths('plain_amount'))('%s: control, a field with no currencyConfig reads the tenant $', async (_p, extra) => {
-    expect(await cardAmountLine(extra)).toBe('$1.2M');
+    expect(await cardAmountLine(extra)).toBe('$1,234,567.00');
   });
 
   it.each(paths('amount'))('%s: control, the desktop cell of the same fixture reads ¥', async (_p, extra) => {

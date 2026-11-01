@@ -3061,7 +3061,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "视为历史数据"
       },
       error: {
-        label: "致命错误"
+        label: "失败原因"
       },
       results: {
         label: "行结果（样本）",

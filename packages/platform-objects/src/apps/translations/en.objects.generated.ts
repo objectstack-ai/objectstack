@@ -3061,7 +3061,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Treat As Historical"
       },
       error: {
-        label: "Fatal Error"
+        label: "Failure Reason"
       },
       results: {
         label: "Row Results (sample)",
