@@ -159,6 +159,67 @@ describe('FAIL-CLOSED: the datasource redactor is a BUILT-IN, not a plugin regis
   });
 });
 
+describe('the datasource built-in also withholds the credential members its schema marks (the declared ssl block)', () => {
+  const redact = (item: Record<string, unknown>) => getMetadataTypeRedactor('datasource')!(item);
+
+  it('ssl.key is dropped and named; the public ssl members stay', () => {
+    const stored = {
+      name: 'tls_pg',
+      driver: 'postgres',
+      config: { host: 'db.internal', database: 'app' },
+      ssl: { enabled: true, rejectUnauthorized: true, ca: 'CA_PEM', cert: 'CERT_PEM', key: 'TEST_PLACEHOLDER_KEY' },
+    };
+    const result = redact(stored);
+    expect(result.item.ssl).toEqual({ enabled: true, rejectUnauthorized: true, ca: 'CA_PEM', cert: 'CERT_PEM' });
+    expect(JSON.stringify(result.item)).not.toContain('TEST_PLACEHOLDER_KEY');
+    expect(result.redactedKeys).toEqual(['ssl.key']);
+    // Pure: the stored body keeps its key for the connect path.
+    expect(stored.ssl.key).toBe('TEST_PLACEHOLDER_KEY');
+  });
+
+  it('with no config object at all, ssl.key is still withheld', () => {
+    const result = redact({ name: 'x', driver: 'postgres', ssl: { enabled: true, key: 'TEST_PLACEHOLDER_KEY', cert: 'CERT_PEM' } });
+    expect(result.item.ssl).toEqual({ enabled: true, cert: 'CERT_PEM' });
+    expect(result.redactedKeys).toEqual(['ssl.key']);
+  });
+
+  it('config and ssl credentials together are both withheld, in one sorted list', () => {
+    const result = redact({
+      name: 'x',
+      driver: 'postgres',
+      config: { host: 'h', password: 'TEST_SECRET' },
+      ssl: { enabled: true, key: 'TEST_PLACEHOLDER_KEY' },
+    });
+    expect(result.item).toEqual({ name: 'x', driver: 'postgres', config: { host: 'h' }, ssl: { enabled: true } });
+    expect(result.redactedKeys).toEqual(['config.password', 'ssl.key']);
+  });
+
+  it('controls: no ssl block, and an ssl block with no secret member, are served unchanged by reference', () => {
+    const noSsl = { name: 'x', driver: 'postgres', config: { host: 'h' } };
+    expect(redact(noSsl)).toEqual({ item: noSsl, redactedKeys: [] });
+    expect(redact(noSsl).item).toBe(noSsl);
+    const publicSsl = { name: 'x', driver: 'postgres', config: { host: 'h' }, ssl: { enabled: true, ca: 'CA_PEM', cert: 'CERT_PEM' } };
+    expect(redact(publicSsl).item).toBe(publicSsl);
+    expect(redact(publicSsl).redactedKeys).toEqual([]);
+  });
+
+  it('the cleared form (an empty key) holds nothing, so it is served as written and not reported', () => {
+    const cleared = { name: 'x', driver: 'postgres', ssl: { enabled: true, key: '' } };
+    expect(redact(cleared)).toEqual({ item: cleared, redactedKeys: [] });
+  });
+
+  it('the stored-row seam withholds ssl.key from a serialized datasource body', () => {
+    const row = {
+      type: 'datasource',
+      name: 'tls_pg',
+      metadata: JSON.stringify({ name: 'tls_pg', driver: 'postgres', ssl: { enabled: true, key: 'TEST_PLACEHOLDER_KEY' } }),
+    };
+    const served = redactStoredMetadataRow('sys_metadata', row) as Record<string, unknown>;
+    expect(String(served.metadata)).not.toContain('TEST_PLACEHOLDER_KEY');
+    expect(JSON.parse(String(served.metadata)).ssl).toEqual({ enabled: true });
+  });
+});
+
 describe('FAIL-CLOSED: the connector redactor is a BUILT-IN as well', () => {
   // A connector row reaches the metadata save door with or without any
   // connector plugin mounted — the same fail-open shape as `datasource` — and
