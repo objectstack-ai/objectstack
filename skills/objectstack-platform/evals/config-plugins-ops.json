@@ -90,6 +90,16 @@
         "must_contain": ["queues:", "assignmentRules:", "defineQueue", "'sharing'"],
         "must_not_contain": ["assigned_to", "beforeInsert"]
       }
+    },
+    {
+      "id": 10,
+      "prompt": "We installed HotCRM (`hotcrm`, version 3.2.0). Replace its `crm_account_grid` list view with our own columns so every read of that view serves ours, and keep the change exportable to staging.",
+      "expected_output": "The whole view, under the same name `crm_account_grid`, authored in HotCRM's paired writable package `hotcrm.custom` (which depends on `hotcrm`) with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` in its body — the base's `manifest.id` and `manifest.version`, `basedOn` recorded and never judged. Every read of the name (no `?package`, `?package=hotcrm`, the layered read, both lists) then serves it under `_packageId: 'hotcrm'`, and `GET /packages/hotcrm.custom/export` carries it with the declaration. Not an in-place edit of HotCRM's own read-only item, not a package-unbound Setup row (that path wins only until the D11 migration), not an object extension (that adds fields and replaces no view), and no declaration from any other package (ignored).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["hotcrm.custom", "overrides:", "package: 'hotcrm'", "basedOn"],
+        "must_not_contain": ["objectExtensions", "allowEnvironmentOverlay"]
+      }
     }
   ]
 }

@@ -111,6 +111,37 @@ later ships. See [ADR-0070](https://github.com/objectstack-ai/objectstack/blob/m
 > container of metadata), distinct from the npm `@objectstack/*` packages listed in
 > the repo README.
 
+### Customizing an installed package: the paired `.custom` override (ADR-0146)
+
+A customer's change to an installed base package — HotCRM, id `hotcrm` — is an item of
+the base's paired writable package **`hotcrm.custom`**, which depends on the base; the
+base's own items stay read-only. An item of the pair that bears a base item's name and
+declares in its body `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (the base's
+`manifest.id` and `manifest.version`; `basedOn` is recorded and never judged; schema:
+[Override Declaration](/docs/references/kernel/override-declaration)) replaces the base's
+document **whole** for every read that serves the base's name
+([ADR-0146 D8](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)):
+
+- **The reads agree.** `GET /meta/:type/:name` with no `?package`, the same read with
+  `?package=hotcrm`, the layered read (`code` = the base's document, `overlay` = the
+  override, `effective` = the override), the list scoped to the base and the
+  environment-wide list all serve the override, stamped `_packageId: 'hotcrm'`. The
+  declaration counts only from the pair — the stored row's own `package_id` must be
+  `hotcrm.custom` — and only for an overridable type (`OVERRIDABLE_METADATA_TYPES` in
+  `@objectstack/spec/kernel`; a `flow` or `action` override is not served until ADR-0146 D9's
+  conditions land). A declaration from any other package is ignored.
+- **The environment-wide list** serves one item per name that exactly one code package
+  ships. A dependent package's same-named item is not listed beside it and stays under
+  its own `?package=` address. A package-unbound row — the overlay row of the table
+  below — still wins over the base's document until ADR-0146 D11 migrates it into the
+  pair.
+- **Orphans are reported, not dropped.** A row of the base's name stored in the pair
+  without the declaration, or in a package that depends on the base, is reported by the
+  layered read in `overlay` with `effective` = the base's document.
+- **Export carries the declaration.** `GET /packages/hotcrm.custom/export` carries the
+  overriding item with its `overrides` block; `GET /packages/hotcrm/export` carries the
+  base unchanged.
+
 ## Overlay whitelist (shared-DB tenancy invariant)
 
 **Most metadata types must not be overlaid by an environment** — overlaying a packaged item would break the physical schema or the behaviour its package ships. The whitelist lives in **one** place: `MetadataTypeRegistryEntry.allowEnvironmentOverlay` in `packages/spec/src/kernel/metadata-plugin.zod.ts` (spelled `allowOrgOverride` before protocol 18; `GET /api/v1/meta/types` serves it per entry as `allowEnvironmentOverlay`).

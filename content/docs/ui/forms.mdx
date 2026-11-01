@@ -20,7 +20,7 @@ Both modes:
 - Honor `?prefill_<field>=<value>` URL params
 - Honor `submitBehavior` (thank-you / redirect / continue / next-record) — with **mode-aware defaults** when it is omitted (see [§8](#8-submitbehavior--what-happens-after-submit))
 
-A **public form** is the Salesforce *Web-to-Lead* style embeddable form — declare a `FormView` with `sharing.enabled: true` and `sharing.allowAnonymous: true`, give it a `publicLink`, and the framework wires the anonymous REST endpoints automatically. Clearing either switch withdraws the form from every anonymous endpoint.
+A **public form** is the Salesforce *Web-to-Lead* style embeddable form — declare a `FormView` with `sharing.enabled: true` and `sharing.allowAnonymous: true`, give it a `publicLink`, and the framework wires the anonymous REST endpoints automatically. Clearing either switch withdraws the form from every anonymous endpoint. An override of the form view in the base package's paired `.custom` package ([ADR-0146](https://github.com/objectstack-ai/objectstack/blob/main/docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md)) is the form these endpoints serve, so it can narrow or withdraw anonymous intake — but it never re-opens a form that the base's own document or any other body the endpoints honoured withdrew: the anonymous doors only narrow.
 
 ## Architecture at a glance
 
