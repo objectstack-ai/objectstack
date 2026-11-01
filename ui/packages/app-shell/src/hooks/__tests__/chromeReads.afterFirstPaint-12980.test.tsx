@@ -5,9 +5,10 @@
  * objectui#12980, part 3 — two shell readers that mount UNDER the boot splash
  * wait for the page's first paint, not the splash's:
  *
- *   - `NavigationSyncEffect` reads the `pages` / `dashboards` lists (lazy
+ *   - `NavigationSyncEffect` read the `pages` / `dashboards` lists (lazy
  *     getters: reading one starts its `/meta/:type` read) only once the splash
- *     is gone and a frame has painted;
+ *     was gone. objectstack#28680 retired it: it now reads neither list, before
+ *     or after the first paint;
  *   - the bell's Activity feed, until the bell asks for it, does not even ask
  *     whether `sys_activity` exists: inside an app that answer is its own
  *     by-name read through the app's object scope, which used to go out in
@@ -73,7 +74,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('NavigationSyncEffect reads the page and dashboard lists after the first paint (objectui#12980)', () => {
+describe('NavigationSyncEffect reads neither list, before or after the first paint (objectui#12980, objectstack#28680)', () => {
   function metadataRecording(read: Set<string>): MetadataContextValue {
     return {
       apps: [{ name: 'crm', label: 'CRM', navigation: [] }],
@@ -98,7 +99,7 @@ describe('NavigationSyncEffect reads the page and dashboard lists after the firs
     } as unknown as MetadataContextValue;
   }
 
-  it('reads neither list while the boot splash is up, and both once it is gone', async () => {
+  it('reads neither list while the boot splash is up, nor once it is gone', async () => {
     const read = new Set<string>();
     const adapter = { getClient: () => ({ meta: { saveItem: vi.fn() } }) } as unknown as React.ComponentProps<
       typeof AdapterCtx.Provider
@@ -114,7 +115,8 @@ describe('NavigationSyncEffect reads the page and dashboard lists after the firs
     expect([...read]).toEqual([]);
 
     dropSplash();
-    await waitFor(() => expect([...read].sort()).toEqual(['dashboard', 'page']));
+    await someFrames();
+    expect([...read]).toEqual([]);
   });
 });
 

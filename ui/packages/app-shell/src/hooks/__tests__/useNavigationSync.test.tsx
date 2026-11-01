@@ -7,26 +7,35 @@
  */
 
 /**
- * NavigationSyncEffect baseline race — the regression that motivated this
- * suite: `page` / `dashboard` metadata is lazily loaded, so the effect's
- * first baseline could be seeded from a partial (or, after `invalidate()`,
- * emptied) list. When the full list landed, platform pages
- * (sys_organization_detail, sys_user_detail, …) diffed as "user added" and
- * the effect PUT them into every app's navigation — including write-protected
- * system apps (ADR-0010 `_lock`), which 403'd into red failure toasts while
- * writable apps got polluted with sys_ nav entries (and a green toast).
+ * Navigation sync's rules, and the site door that applies them
+ * (objectstack#28680).
+ *
+ * `NavigationSyncEffect` used to read the whole `page` and `dashboard` lists on
+ * every app page and diff their name sets. Maintainer ruling A retired it: the
+ * console's create and delete sites call `useNavigationWrites()` instead. This
+ * suite pins that the effect now reads and writes nothing, and that the site
+ * door keeps the diff's rules: platform artifacts (sys_ names, package
+ * provenance) never write navigation, write-protected apps are skipped, draft
+ * preview writes nothing, and a second create of the same page adds no second
+ * entry.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { MetadataCtx, AdapterCtx, type MetadataContextValue, type MetadataTypeStatus } from '@object-ui/react';
+import { useEffect } from 'react';
 import {
   NavigationSyncEffect,
+  useNavigationWrites,
   isSystemArtifactName,
   isPlatformArtifact,
   isNavigationSyncableApp,
+  isNavigationTargetType,
+  navigationReferences,
 } from '../useNavigationSync';
 import { __markFirstPainted } from '../sharedUserFeeds';
+import { MemoryRouter } from 'react-router-dom';
+import { PreviewModeProvider } from '../../preview/PreviewModeContext';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -84,24 +93,59 @@ describe('isNavigationSyncableApp', () => {
   });
 });
 
+describe('isNavigationTargetType', () => {
+  it('names page and dashboard, and nothing else', () => {
+    expect(isNavigationTargetType('page')).toBe(true);
+    expect(isNavigationTargetType('dashboard')).toBe(true);
+    expect(isNavigationTargetType('view')).toBe(false);
+    expect(isNavigationTargetType('report')).toBe(false);
+    expect(isNavigationTargetType(undefined)).toBe(false);
+  });
+});
+
+describe('navigationReferences', () => {
+  const tree = [
+    { id: 'a', type: 'object', objectName: 'task' },
+    { id: 'g', type: 'group', children: [{ id: 'p', type: 'page', pageName: 'home' }] },
+    { id: 'd', type: 'dashboard', dashboardName: 'sales' },
+  ] as any[];
+
+  it('finds an entry at any depth, by type and name', () => {
+    expect(navigationReferences(tree, 'page', 'home')).toBe(true);
+    expect(navigationReferences(tree, 'dashboard', 'sales')).toBe(true);
+  });
+
+  it('does not match another name or the other type', () => {
+    expect(navigationReferences(tree, 'page', 'sales')).toBe(false);
+    expect(navigationReferences(tree, 'dashboard', 'home')).toBe(false);
+    expect(navigationReferences([], 'page', 'home')).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
-// NavigationSyncEffect
+// The fixtures both halves below share
 // ---------------------------------------------------------------------------
 
 interface World {
   apps: any[];
-  pages: any[];
-  dashboards: any[];
-  status: Partial<Record<string, MetadataTypeStatus>>;
+  pages?: any[];
+  dashboards?: any[];
 }
 
-function metaValue(world: World): MetadataContextValue {
+/** A metadata value that records every list read and serves `apps` as it is told. */
+function metaValue(world: World, read: Set<string> = new Set()): MetadataContextValue {
   return {
     apps: world.apps,
     objects: [],
-    dashboards: world.dashboards,
+    get dashboards() {
+      read.add('dashboard');
+      return world.dashboards ?? [];
+    },
     reports: [],
-    pages: world.pages,
+    get pages() {
+      read.add('page');
+      return world.pages ?? [];
+    },
     loading: false,
     error: null,
     refresh: async () => {},
@@ -109,209 +153,188 @@ function metaValue(world: World): MetadataContextValue {
     ensureType: async () => [],
     getItem: async () => null,
     getItemsByType: () => [],
-    getTypeStatus: (type: string) => world.status[type] ?? 'ready',
-  };
+    getTypeStatus: (): MetadataTypeStatus => 'ready',
+  } as unknown as MetadataContextValue;
 }
 
 function makeAdapter(saveItem: ReturnType<typeof vi.fn>) {
   return { getClient: () => ({ meta: { saveItem } }) } as any;
 }
 
-function renderEffect(saveItem: ReturnType<typeof vi.fn>, world: World) {
-  const utils = render(
-    <AdapterCtx.Provider value={makeAdapter(saveItem)}>
-      <MetadataCtx.Provider value={metaValue(world)}>
-        <NavigationSyncEffect />
-      </MetadataCtx.Provider>
-    </AdapterCtx.Provider>,
-  );
-  const setWorld = (next: World) =>
-    utils.rerender(
-      <AdapterCtx.Provider value={makeAdapter(saveItem)}>
-        <MetadataCtx.Provider value={metaValue(next)}>
-          <NavigationSyncEffect />
-        </MetadataCtx.Provider>
-      </AdapterCtx.Provider>,
-    );
-  return { ...utils, setWorld };
-}
-
-/** Flush the effect's fire-and-forget async sync loop. */
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 const crm = { name: 'crm', label: 'CRM', navigation: [] };
 
-describe('NavigationSyncEffect', () => {
+// ---------------------------------------------------------------------------
+// NavigationSyncEffect — retired
+// ---------------------------------------------------------------------------
+
+describe('NavigationSyncEffect is retired (objectstack#28680)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // objectui#12980 — the effect reads nothing before the console's first
-    // paint; these cases are about the diff, so they start past it.
     __markFirstPainted();
   });
 
-  it('does not seed the baseline until page AND dashboard types are ready', async () => {
+  it('reads neither list and writes nothing, even when a page and a dashboard appear', async () => {
     const saveItem = vi.fn().mockResolvedValue({});
-    // Lazy types still loading — pages reads as [] even though the server
-    // has sys_ pages plus a user page.
-    const { setWorld } = renderEffect(saveItem, {
-      apps: [crm],
-      pages: [],
-      dashboards: [],
-      status: { page: 'loading', dashboard: 'loading' },
-    });
-
-    // Full load lands. If the empty not-ready snapshot had been used as the
-    // baseline, every page here would now diff as "user added".
-    setWorld({
-      apps: [crm],
-      pages: [{ name: 'sys_organization_detail' }, { name: 'sys_user_detail' }, { name: 'home' }],
-      dashboards: [{ name: 'sales' }],
-      status: {},
-    });
+    const read = new Set<string>();
+    const tree = (world: World) => (
+      <AdapterCtx.Provider value={makeAdapter(saveItem)}>
+        <MetadataCtx.Provider value={metaValue(world, read)}>
+          <NavigationSyncEffect />
+        </MetadataCtx.Provider>
+      </AdapterCtx.Provider>
+    );
+    const { rerender } = render(tree({ apps: [crm], pages: [], dashboards: [] }));
     await flush();
-    expect(saveItem).not.toHaveBeenCalled();
+    rerender(tree({ apps: [crm], pages: [{ name: 'my_page' }], dashboards: [{ name: 'my_dash' }] }));
+    await flush();
 
-    // A page created AFTER the ready baseline does sync.
-    setWorld({
-      apps: [crm],
-      pages: [{ name: 'sys_organization_detail' }, { name: 'sys_user_detail' }, { name: 'home' }, { name: 'my_page' }],
-      dashboards: [{ name: 'sales' }],
-      status: {},
-    });
-    await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
-    const [type, name, schema] = saveItem.mock.calls[0];
-    expect(type).toBe('app');
-    expect(name).toBe('crm');
-    expect(schema.navigation.map((i: any) => i.pageName)).toEqual(['my_page']);
+    expect([...read]).toEqual([]);
+    expect(saveItem).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useNavigationWrites — the create / delete sites' door
+// ---------------------------------------------------------------------------
+
+type Writes = ReturnType<typeof useNavigationWrites>;
+
+/**
+ * Mount the door over `world`, run `act` with it once, and hand back the save
+ * spy. `preview` puts the tree in draft preview (ADR-0037).
+ */
+async function withWrites(
+  world: World,
+  act: (writes: Writes) => Promise<void>,
+  { preview = false }: { preview?: boolean } = {},
+) {
+  const saveItem = vi.fn().mockResolvedValue({});
+  const read = new Set<string>();
+  let done = false;
+  function Caller() {
+    const writes = useNavigationWrites();
+    useEffect(() => {
+      void act(writes).then(() => {
+        done = true;
+      });
+      // Once, on mount: the act is the case.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return null;
+  }
+  render(
+    <MemoryRouter>
+      <PreviewModeProvider force={preview}>
+        <AdapterCtx.Provider value={makeAdapter(saveItem)}>
+          <MetadataCtx.Provider value={metaValue(world, read)}>
+            <Caller />
+          </MetadataCtx.Provider>
+        </AdapterCtx.Provider>
+      </PreviewModeProvider>
+    </MemoryRouter>,
+  );
+  await waitFor(() => expect(done).toBe(true));
+  await flush();
+  return { saveItem, read };
+}
+
+describe('useNavigationWrites keeps the diff\'s rules at the site (objectstack#28680)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('ignores the invalidate dip (status leaves ready, items empty out)', async () => {
-    const saveItem = vi.fn().mockResolvedValue({});
-    const ready: World = {
-      apps: [crm],
-      pages: [{ name: 'home' }],
-      dashboards: [],
-      status: {},
+  it('a created page and dashboard land label-less in every writable app, and no list is read', async () => {
+    const sales = { name: 'sales', label: 'Sales', navigation: [] };
+    const { saveItem, read } = await withWrites({ apps: [crm, sales] }, async (w) => {
+      await w.created('page', 'my_page', { name: 'my_page', label: 'My Page' });
+      await w.created('dashboard', 'my_dash');
+    });
+
+    expect(saveItem.mock.calls.map((c) => c[1])).toEqual(['crm', 'sales', 'crm', 'sales']);
+    const entries = saveItem.mock.calls.map((c) => c[2].navigation.at(-1));
+    expect(entries[0]).toMatchObject({ type: 'page', pageName: 'my_page' });
+    expect(entries[2]).toMatchObject({ type: 'dashboard', dashboardName: 'my_dash' });
+    for (const e of entries) expect(e).not.toHaveProperty('label');
+    expect([...read]).toEqual([]);
+  });
+
+  it('a deleted page leaves every app that referenced it', async () => {
+    const withPage = {
+      name: 'crm',
+      navigation: [
+        { id: 'n1', type: 'page', pageName: 'my_page' },
+        { id: 'n2', type: 'object', objectName: 'task' },
+      ],
     };
-    const { setWorld } = renderEffect(saveItem, ready);
-    await flush();
+    const { saveItem } = await withWrites({ apps: [withPage] }, (w) => w.deleted('page', 'my_page'));
 
-    // invalidate('page') → status 'idle'/'loading', items []. Without the
-    // ready gate this read as "home deleted" …
-    setWorld({ apps: [crm], pages: [], dashboards: [], status: { page: 'loading' } });
-    await flush();
-    // … and the refetch landing (now including a late sys_ page) as
-    // "home + sys_* created".
-    setWorld({
-      apps: [crm],
-      pages: [{ name: 'home' }, { name: 'sys_organization_detail' }],
-      dashboards: [],
-      status: {},
+    expect(saveItem).toHaveBeenCalledTimes(1);
+    expect(saveItem.mock.calls[0][2].navigation.map((i: any) => i.id)).toEqual(['n2']);
+  });
+
+  it('never writes for sys_ names or package-provenance items, in either direction', async () => {
+    const withPkgPage = { name: 'crm', navigation: [{ id: 'n1', type: 'page', pageName: 'crm_home' }] };
+    const { saveItem } = await withWrites({ apps: [withPkgPage] }, async (w) => {
+      await w.created('page', 'sys_user_detail');
+      await w.created('page', 'crm_home', { _packageId: 'com.acme.crm' });
+      await w.created('dashboard', 'billing', { _provenance: 'package' });
+      await w.deleted('page', 'crm_home', { _packageId: 'com.acme.crm' });
     });
-    await flush();
-
     expect(saveItem).not.toHaveBeenCalled();
   });
 
-  it('never treats sys_ pages/dashboards as user creations or deletions', async () => {
-    const saveItem = vi.fn().mockResolvedValue({});
-    const { setWorld } = renderEffect(saveItem, {
-      apps: [crm],
-      pages: [{ name: 'home' }],
-      dashboards: [{ name: 'sys_metrics' }],
-      status: {},
+  it('writes nothing for a type that is not a page or a dashboard', async () => {
+    const { saveItem } = await withWrites({ apps: [crm] }, async (w) => {
+      await w.created('view', 'task_grid');
+      await w.created('report', 'pipeline');
     });
-    await flush();
-
-    // sys_ artifacts appear and disappear (package install/uninstall) —
-    // neither direction may touch app navigation.
-    setWorld({
-      apps: [crm],
-      pages: [{ name: 'home' }, { name: 'sys_user_detail' }],
-      dashboards: [],
-      status: {},
-    });
-    await flush();
     expect(saveItem).not.toHaveBeenCalled();
   });
 
-  it('ignores package-provenance pages from a mid-session install (not sys_-prefixed)', async () => {
-    const saveItem = vi.fn().mockResolvedValue({});
-    const { setWorld } = renderEffect(saveItem, {
-      apps: [crm],
-      pages: [{ name: 'home' }],
-      dashboards: [],
-      status: {},
-    });
-    await flush();
-
-    // Installing a package adds its pages to the metadata list between two
-    // ready snapshots — a name-set diff reads that exactly like user CRUD.
-    // The package ships its own navigation; auto-sync must stay out.
-    setWorld({
-      apps: [crm],
-      pages: [{ name: 'home' }, { name: 'crm_dashboard', _packageId: 'com.acme.crm' }],
-      dashboards: [],
-      status: {},
-    });
-    await flush();
+  it('writes nothing in draft preview (ADR-0037)', async () => {
+    const { saveItem } = await withWrites(
+      { apps: [crm] },
+      async (w) => {
+        await w.created('page', 'my_page');
+        await w.deleted('dashboard', 'my_dash');
+      },
+      { preview: true },
+    );
     expect(saveItem).not.toHaveBeenCalled();
   });
 
-  it('skips write-protected apps (ADR-0010 _lock) when syncing', async () => {
-    const saveItem = vi.fn().mockResolvedValue({});
+  it('skips write-protected apps (ADR-0010 _lock)', async () => {
     const apps = [
       crm,
       { name: 'setup', label: 'Setup', navigation: [], _lock: 'full' },
       { name: 'studio', label: 'Studio', navigation: [], protection: { lock: 'no-overlay' } },
     ];
-    const { setWorld } = renderEffect(saveItem, {
-      apps,
-      pages: [],
-      dashboards: [],
-      status: {},
-    });
-    await flush();
+    const { saveItem } = await withWrites({ apps }, (w) => w.created('page', 'my_page'));
 
-    setWorld({ apps, pages: [{ name: 'my_page' }], dashboards: [], status: {} });
-    await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
-    await flush();
-
-    // Exactly one write — to the writable app; no 403-bound PUTs attempted.
     expect(saveItem).toHaveBeenCalledTimes(1);
     expect(saveItem.mock.calls[0][1]).toBe('crm');
     const { toast } = await import('sonner');
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it('treats a context without getTypeStatus as always ready (back-compat)', async () => {
-    const saveItem = vi.fn().mockResolvedValue({});
-    const base = metaValue({ apps: [crm], pages: [{ name: 'home' }], dashboards: [], status: {} });
-    delete (base as any).getTypeStatus;
-    const next = metaValue({
-      apps: [crm],
-      pages: [{ name: 'home' }, { name: 'p2' }],
-      dashboards: [],
-      status: {},
+  it('a second create of a page an app already references adds no second entry', async () => {
+    const withPage = {
+      name: 'crm',
+      navigation: [{ id: 'g', type: 'group', children: [{ id: 'n1', type: 'page', pageName: 'my_page' }] }],
+    };
+    const withDash = { name: 'ops', navigation: [{ id: 'n2', type: 'dashboard', dashboardName: 'my_dash' }] };
+    const { saveItem } = await withWrites({ apps: [withPage, withDash] }, async (w) => {
+      await w.created('page', 'my_page');
+      await w.created('dashboard', 'my_dash');
     });
-    delete (next as any).getTypeStatus;
 
-    const adapter = makeAdapter(saveItem);
-    const utils = render(
-      <AdapterCtx.Provider value={adapter}>
-        <MetadataCtx.Provider value={base}>
-          <NavigationSyncEffect />
-        </MetadataCtx.Provider>
-      </AdapterCtx.Provider>,
-    );
-    utils.rerender(
-      <AdapterCtx.Provider value={adapter}>
-        <MetadataCtx.Provider value={next}>
-          <NavigationSyncEffect />
-        </MetadataCtx.Provider>
-      </AdapterCtx.Provider>,
-    );
-    await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
-    expect(saveItem.mock.calls[0][1]).toBe('crm');
+    // `crm` already holds the page (nested), `ops` the dashboard: each app is
+    // written only for the target it lacks.
+    expect(saveItem.mock.calls.map((c) => [c[1], c[2].navigation.at(-1).type])).toEqual([
+      ['ops', 'page'],
+      ['crm', 'dashboard'],
+    ]);
   });
 });

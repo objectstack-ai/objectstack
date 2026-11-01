@@ -17,8 +17,9 @@
  * would be relying on the renderer's translate-if-equal-to-name convention,
  * which B retires. This pins the other half, end to end on the real code:
  *
- *   1. the writer — `NavigationSyncEffect`, the console's one caller of the
- *      sync — stores the new dashboard's entry with NO `label` key;
+ *   1. the writer — `useNavigationWrites().created`, the door the console's
+ *      create sites call (objectstack#28680) — stores the new dashboard's entry
+ *      with NO `label` key;
  *   2. that STORED entry, handed to the sidebar's `NavigationRenderer` wired as
  *      `UnifiedSidebar` wires it (`useNavTargetLabel` plus the active
  *      `language` as `locale`, objectui#11299), under a real `I18nProvider`
@@ -31,7 +32,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { render, screen, waitFor, within, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { TranslationData } from '@objectstack/spec/system';
@@ -49,8 +50,7 @@ import {
   transformSpecTranslations,
   useObjectTranslation,
 } from '@object-ui/i18n';
-import { NavigationSyncEffect } from '../useNavigationSync';
-import { __markFirstPainted } from '../sharedUserFeeds';
+import { useNavigationWrites } from '../useNavigationSync';
 import { useNavTargetLabel } from '../useNavTargetLabel';
 
 vi.mock('sonner', () => ({
@@ -89,27 +89,28 @@ function metaValue(dashboards: unknown[]): MetadataContextValue {
   };
 }
 
-const flush = () => new Promise((r) => setTimeout(r, 0));
-
 /** Drive the real writer through a dashboard creation; return the entry it stored. */
 async function syncedDashboardEntry(): Promise<Record<string, unknown>> {
   const saveItem = vi.fn().mockResolvedValue({});
   const adapter = { getClient: () => ({ meta: { saveItem } }) } as unknown as React.ComponentProps<
     typeof AdapterCtx.Provider
   >['value'];
-  const tree = (dashboards: unknown[]) => (
+  function Site() {
+    const { created } = useNavigationWrites();
+    useEffect(() => {
+      void created('dashboard', DASHBOARD.name, DASHBOARD);
+      // Once, on mount: the create is the case.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    return null;
+  }
+  const { unmount } = render(
     <AdapterCtx.Provider value={adapter}>
-      <MetadataCtx.Provider value={metaValue(dashboards)}>
-        <NavigationSyncEffect />
+      <MetadataCtx.Provider value={metaValue([DASHBOARD])}>
+        <Site />
       </MetadataCtx.Provider>
-    </AdapterCtx.Provider>
+    </AdapterCtx.Provider>,
   );
-  // objectui#12980 — the effect reads nothing before the console's first
-  // paint; this case is about the stored entry, so it starts past it.
-  __markFirstPainted();
-  const { rerender, unmount } = render(tree([]));
-  await flush();
-  rerender(tree([DASHBOARD]));
   await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(1));
   unmount();
   const [type, name, schema] = saveItem.mock.calls[0];

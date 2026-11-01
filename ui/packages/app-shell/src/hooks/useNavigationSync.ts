@@ -9,7 +9,7 @@
  * @module
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import type { NavigationItem, AppComponentSchema } from '@object-ui/types';
 import { useObjectTranslation } from '@object-ui/i18n';
@@ -17,7 +17,6 @@ import { useAdapter } from '../providers/AdapterProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
-import { useAfterFirstPaint } from './sharedUserFeeds.js';
 
 // ============================================================================
 // Pure utility helpers (exported for testing)
@@ -102,6 +101,23 @@ export function removeNavigationItems(
       }
       return item;
     });
+}
+
+/**
+ * Whether a navigation tree holds an entry, at any depth, that opens the named
+ * page or dashboard.
+ */
+export function navigationReferences(
+  navigation: NavigationItem[],
+  type: 'page' | 'dashboard',
+  name: string,
+): boolean {
+  return navigation.some(
+    (item) =>
+      (item.type === type &&
+        (type === 'page' ? item.pageName === name : item.dashboardName === name)) ||
+      (!!item.children && navigationReferences(item.children, type, name)),
+  );
 }
 
 /**
@@ -275,6 +291,9 @@ export function useNavigationSync(): UseNavigationSyncReturn {
       if (!app) return;
 
       const prev = app.navigation ?? [];
+      // objectstack#28680 — an app that already references the page keeps
+      // its one entry: a second create call adds no duplicate.
+      if (navigationReferences(prev, 'page', pageName)) return;
       const newItem = newPageNavigationItem(pageName, label);
       const updated = addNavigationItem(prev, newItem);
       const updatedApp: AppComponentSchema = { ...app, navigation: updated };
@@ -307,6 +326,7 @@ export function useNavigationSync(): UseNavigationSyncReturn {
       if (!app) return;
 
       const prev = app.navigation ?? [];
+      if (navigationReferences(prev, 'dashboard', dashboardName)) return;
       const newItem = newDashboardNavigationItem(dashboardName, label);
       const updated = addNavigationItem(prev, newItem);
       const updatedApp: AppComponentSchema = { ...app, navigation: updated };
@@ -570,182 +590,108 @@ export function useNavigationSync(): UseNavigationSyncReturn {
 }
 
 // ============================================================================
-// NavigationSyncEffect — auto-detect page/dashboard metadata changes
+// useNavigationWrites — the create / delete sites' one door (objectstack#28680)
+// ============================================================================
+
+/** The metadata types whose create and delete write app navigation. */
+export type NavigationTargetType = 'page' | 'dashboard';
+
+/** Whether `type` is one whose create and delete write app navigation. */
+export function isNavigationTargetType(type: unknown): type is NavigationTargetType {
+  return type === 'page' || type === 'dashboard';
+}
+
+export interface UseNavigationWritesReturn {
+  /**
+   * A page or dashboard was just published for the FIRST time (it held no
+   * published layer before). Adds a label-less entry for it to every app that
+   * may be written and does not reference it yet.
+   *
+   * `item` is the published body when the caller holds one: its provenance
+   * (`_packageId`, `_provenance`) decides, with the name, whether it is a
+   * platform artifact, which never writes navigation.
+   */
+  created: (type: string, name: string, item?: unknown) => Promise<void>;
+  /** A page or dashboard was just deleted, leaving no baseline behind. Removes its entries from every app that may be written. */
+  deleted: (type: string, name: string, item?: unknown) => Promise<void>;
+}
+
+/**
+ * The navigation writes a page or dashboard create or delete makes, called by
+ * the console site that made it (objectstack#28680, maintainer ruling A).
+ *
+ * This replaces `NavigationSyncEffect`, which read the whole `/meta/page` and
+ * `/meta/dashboard` lists on every app page to diff their name sets. It keeps
+ * that diff's rules, so the same items reach navigation from the console:
+ *
+ *  - only a `page` or a `dashboard`;
+ *  - never a platform artifact ({@link isPlatformArtifact}): an item a package
+ *    install or a CLI deploy brings carries `_packageId`, and its package ships
+ *    the navigation that exposes it;
+ *  - never in draft preview (ADR-0037): preview swaps the whole metadata
+ *    source, so `apps` there may be draft bodies that a navigation write would
+ *    save live;
+ *  - only into apps that may be written ({@link isNavigationSyncableApp}).
+ *
+ * What it no longer covers: a package-less page or dashboard created or
+ * deleted OUTSIDE this tab (a server-side agent, another tab, a raw REST
+ * call). The diff noticed one only when it showed up in this tab's list
+ * mid-session; now it reaches navigation only through its own writer.
+ */
+export function useNavigationWrites(): UseNavigationWritesReturn {
+  const previewDrafts = usePreviewDrafts();
+  const {
+    syncPageCreatedAllApps,
+    syncDashboardCreatedAllApps,
+    syncPageDeletedAllApps,
+    syncDashboardDeletedAllApps,
+  } = useNavigationSync();
+
+  const writes = useCallback(
+    (type: string, name: string, item: unknown): type is NavigationTargetType => {
+      if (previewDrafts || !isNavigationTargetType(type) || !name) return false;
+      const body = item && typeof item === 'object' ? (item as Record<string, unknown>) : {};
+      return !isPlatformArtifact({ ...body, name });
+    },
+    [previewDrafts],
+  );
+
+  const created = useCallback(
+    async (type: string, name: string, item?: unknown) => {
+      if (!writes(type, name, item)) return;
+      // No author label: the entry inherits its target's label at render time
+      // (objectui#9868), as the diff's entries did.
+      if (type === 'page') await syncPageCreatedAllApps(name);
+      else await syncDashboardCreatedAllApps(name);
+    },
+    [writes, syncPageCreatedAllApps, syncDashboardCreatedAllApps],
+  );
+
+  const deleted = useCallback(
+    async (type: string, name: string, item?: unknown) => {
+      if (!writes(type, name, item)) return;
+      if (type === 'page') await syncPageDeletedAllApps(name);
+      else await syncDashboardDeletedAllApps(name);
+    },
+    [writes, syncPageDeletedAllApps, syncDashboardDeletedAllApps],
+  );
+
+  return { created, deleted };
+}
+
+// ============================================================================
+// NavigationSyncEffect — retired (objectstack#28680)
 // ============================================================================
 
 /**
- * Headless component that watches the `pages` and `dashboards` metadata
- * arrays.  When items are added or removed it automatically calls the
- * matching navigation-sync methods for every app.
+ * @deprecated Retired by objectstack#28680; renders nothing and reads nothing.
  *
- * Mount once inside the component tree (e.g. inside `AppContent`) where
- * both `useMetadata` and `useAdapter` are available.
- *
- * > **Rename detection** is not possible with a simple diff — callers
- * > should invoke `syncPageRenamed` / `syncDashboardRenamed` explicitly.
+ * It read the whole `/meta/page` and `/meta/dashboard` lists on every app page
+ * and diffed their name sets to write app navigation. The console's create and
+ * delete sites now write navigation themselves through
+ * {@link useNavigationWrites}. Kept as an inert export so a host that still
+ * mounts it keeps compiling.
  */
-/** What `NavigationSyncEffect` holds for a list it has not read yet. */
-const NOT_READ_YET: never[] = [];
-
 export function NavigationSyncEffect(): null {
-  // objectui#12980 — `pages` and `dashboards` are LAZY getters: reading one
-  // starts its `/meta/:type` read. Nothing on the first paint needs this diff,
-  // so they are not read until the console has painted; the load-state guard
-  // below then waits for both, as it always has.
-  const painted = useAfterFirstPaint();
-  const metadata = useMetadata();
-  const { apps, getTypeStatus } = metadata;
-  const pages = painted ? metadata.pages : NOT_READ_YET;
-  const dashboards = painted ? metadata.dashboards : NOT_READ_YET;
-  const adapter = useAdapter();
-  const adapterRef = useRef(adapter);
-  adapterRef.current = adapter;
-  // ADR-0037 — preview is read-only by design. Entering/leaving
-  // `?preview=draft` swaps the entire metadata source, so the page/dashboard
-  // sets legitimately DIFFER from the previous render; diffing across that
-  // swap would misread draft-only (or published-only) items as user
-  // creations/deletions and WRITE navigation changes back to the real app
-  // metadata from inside a preview. Disabled for the whole preview session.
-  const previewDrafts = usePreviewDrafts();
-
-  const {
-    syncPageCreated,
-    syncDashboardCreated,
-    syncPageDeleted,
-    syncDashboardDeleted,
-  } = useNavigationSync();
-
-  // Track previous page/dashboard name sets
-  const prevPageNamesRef = useRef<Set<string> | null>(null);
-  const prevDashNamesRef = useRef<Set<string> | null>(null);
-
-  // Guard against circular refreshes and concurrent sync operations.
-  // Incremented on each effect invocation; the async closure captures
-  // its own version and bails out if a newer run has started.
-  const syncVersionRef = useRef(0);
-  const syncingRef = useRef(false);
-
-  /** Safely extract the app name from a metadata entry. */
-  const getAppName = (app: unknown): string | undefined =>
-    app && typeof app === 'object' && 'name' in app ? (app as { name: string }).name : undefined;
-
-  useEffect(() => {
-    // Before the first paint nothing is read, so there is nothing to seed a
-    // baseline from: seeding an empty one would diff the real lists, once
-    // they land, as every page and dashboard "added".
-    if (!painted) return;
-    if (syncingRef.current) return;
-    if (previewDrafts) {
-      // Drop the baseline so leaving preview re-seeds instead of diffing the
-      // published world against the draft world it just stopped rendering.
-      prevPageNamesRef.current = null;
-      prevDashNamesRef.current = null;
-      return;
-    }
-
-    // `page` and `dashboard` are lazily-loaded metadata types: their arrays
-    // are empty (or stale) until the fetch lands, and `invalidate()` empties
-    // them again mid-session (e.g. the New-record flow reloads meta). Diffing
-    // a not-ready snapshot misreads that dip as mass deletion / re-creation —
-    // notably flagging system pages as "user added" once the full list
-    // arrives. Only seed the baseline and diff while both types are 'ready'.
-    // (Contexts without getTypeStatus — hand-rolled test values — are
-    // treated as always ready.)
-    if (
-      getTypeStatus &&
-      (getTypeStatus('page') !== 'ready' || getTypeStatus('dashboard') !== 'ready')
-    ) {
-      return;
-    }
-
-    // Platform/package artifacts never participate in the diff: they ship
-    // with the platform or arrive via package install, not from user CRUD,
-    // so their appearance must not write them into app navigation (nor
-    // their disappearance delete nav entries). See isPlatformArtifact.
-    const userArtifactNames = (items: any[]): Set<string> =>
-      new Set(
-        items
-          .filter((it: any) => !isPlatformArtifact(it))
-          .map((it: any) => it?.name)
-          .filter((n: any): n is string => typeof n === 'string' && n.length > 0),
-      );
-    const currentPageNames = userArtifactNames(pages ?? []);
-    const currentDashNames = userArtifactNames(dashboards ?? []);
-
-    const prevPages = prevPageNamesRef.current;
-    const prevDash = prevDashNamesRef.current;
-
-    // First render — seed refs and exit without syncing
-    if (prevPages === null || prevDash === null) {
-      prevPageNamesRef.current = currentPageNames;
-      prevDashNamesRef.current = currentDashNames;
-      return;
-    }
-
-    // Compute diff
-    const addedPages = [...currentPageNames].filter((n) => !prevPages.has(n));
-    const removedPages = [...prevPages].filter((n) => !currentPageNames.has(n));
-    const addedDash = [...currentDashNames].filter((n) => !prevDash.has(n));
-    const removedDash = [...prevDash].filter((n) => !currentDashNames.has(n));
-
-    if (
-      addedPages.length === 0 &&
-      removedPages.length === 0 &&
-      addedDash.length === 0 &&
-      removedDash.length === 0
-    ) {
-      // Nothing changed — update refs and exit
-      prevPageNamesRef.current = currentPageNames;
-      prevDashNamesRef.current = currentDashNames;
-      return;
-    }
-
-    // Sync navigation across all apps
-    const version = ++syncVersionRef.current;
-    syncingRef.current = true;
-
-    let cancelled = false;
-
-    (async () => {
-      try {
-        for (const app of apps) {
-          if (cancelled || syncVersionRef.current !== version) break;
-          const appName = getAppName(app);
-          // Write-protected apps (ADR-0010 `_lock`) would 403 every PUT —
-          // skip them instead of spraying failure toasts.
-          if (!appName || !isNavigationSyncableApp(app)) continue;
-
-          for (const pageName of addedPages) {
-            if (cancelled) break;
-            await syncPageCreated(appName, pageName);
-          }
-          for (const pageName of removedPages) {
-            if (cancelled) break;
-            await syncPageDeleted(appName, pageName);
-          }
-          for (const dashName of addedDash) {
-            if (cancelled) break;
-            await syncDashboardCreated(appName, dashName);
-          }
-          for (const dashName of removedDash) {
-            if (cancelled) break;
-            await syncDashboardDeleted(appName, dashName);
-          }
-        }
-      } finally {
-        // Only update refs if this is still the latest sync version
-        if (syncVersionRef.current === version) {
-          prevPageNamesRef.current = currentPageNames;
-          prevDashNamesRef.current = currentDashNames;
-          syncingRef.current = false;
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [painted, pages, dashboards, apps, previewDrafts, getTypeStatus, syncPageCreated, syncDashboardCreated, syncPageDeleted, syncDashboardDeleted]);
-
   return null;
 }
