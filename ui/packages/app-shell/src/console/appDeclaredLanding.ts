@@ -37,9 +37,13 @@
  * as this member is SHOWN them (the app's `navigation` first, then each of its
  * `areas[].navigation`): an entry the member's own navigation gates hide is
  * passed over, as the spec's `AppSchema.landing` docblock states. An entry
- * whose route the console cannot open inside the app (`routeOf` answers `''`:
- * a `url` entry, or an entry with no target) is passed over too. When no entry
- * lands, the caller keeps today's rule: the first navigation entry by `order`.
+ * whose route the console cannot open inside the app (`routeOf` answers `''`)
+ * is passed over too: the spec refuses such a target at parse (a `group`,
+ * `separator`, `action` or `url` entry), so for a parsed app this pass-over is
+ * defence only. A `doc` entry lands: it opens the in-app docs portal, and which
+ * docs a reader may open is the server's audience gate (objectstack#19790).
+ * When no entry lands, the caller keeps today's rule: the first navigation
+ * entry by `order`.
  *
  * Internal module: not re-exported by the package entry.
  */
