@@ -103,7 +103,7 @@
     "@vitest/ui": "^4.1.10",
     "happy-dom": "^20.11.2",
     "lucide-react": "^1.43.0",
-    "postcss": "^8.5.26",
+    "postcss": "^8.5.32",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-map-gl": "^8.1.2",
