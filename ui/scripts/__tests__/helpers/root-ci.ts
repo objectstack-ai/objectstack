@@ -125,43 +125,21 @@ export function triggerBlock(ci: string): string {
  * list, the reading that would make every "is not hidden" pin vacuous.
  */
 export function uiFilterGlobs(ci: string): string[] {
-  return filterGlobs(ci, 'ui');
-}
-
-/**
- * The globs of one named list of the `filter` job's paths filter (`ui`,
- * `ui_consumers`, `core`, ...), read the way `uiFilterGlobs` reads `ui:`.
- * Throws when the filter declares no such list or it lists no globs.
- */
-export function filterGlobs(ci: string, name: string): string[] {
   const filter = jobBlock(ci, 'filter');
   const lines = filter.split('\n');
-  const at = lines.findIndex((line) => new RegExp(`^ +${name}:[ \\t]*$`).test(line));
-  if (at === -1) throw new Error(`${rootCiPath}: the \`filter\` job declares no \`${name}:\` paths filter`);
+  const at = lines.findIndex((line) => /^ +ui:[ \t]*$/.test(line));
+  if (at === -1) throw new Error(`${rootCiPath}: the \`filter\` job declares no \`ui:\` paths filter`);
   const indent = lines[at].search(/\S/);
   const globs: string[] = [];
   for (const line of lines.slice(at + 1)) {
     if (/^\s*(#.*)?$/.test(line)) continue;
     if (line.search(/\S/) <= indent) break;
     const m = line.match(/^\s+-\s+'([^']+)'\s*$/);
-    if (!m) throw new Error(`${rootCiPath}: cannot read the \`${name}:\` filter entry ${JSON.stringify(line)}`);
+    if (!m) throw new Error(`${rootCiPath}: cannot read the \`ui:\` filter entry ${JSON.stringify(line)}`);
     globs.push(m[1]);
   }
-  if (globs.length === 0) throw new Error(`${rootCiPath}: the \`${name}:\` paths filter lists no globs`);
+  if (globs.length === 0) throw new Error(`${rootCiPath}: the \`ui:\` paths filter lists no globs`);
   return globs;
-}
-
-/**
- * The `filter` outputs a job's `if:` starts it on: every
- * `needs.filter.outputs.<o> != 'false'` it spells, in order. Throws when the
- * job carries no `if:` line or the line reads no filter output.
- */
-export function jobFilterOutputs(ci: string, key: string): string[] {
-  const line = jobBlock(ci, key).match(/^ {4}if: (.+)$/m);
-  if (!line) throw new Error(`${rootCiPath}: the \`${key}\` job carries no one-line \`if:\``);
-  const outputs = [...line[1].matchAll(/needs\.filter\.outputs\.([A-Za-z_][\w-]*) != 'false'/g)].map((m) => m[1]);
-  if (outputs.length === 0) throw new Error(`${rootCiPath}: the \`${key}\` job's \`if:\` reads no filter output`);
-  return outputs;
 }
 
 /** A path relative to this tree, as the root workflow's filters see it (`ui/<path>`). */

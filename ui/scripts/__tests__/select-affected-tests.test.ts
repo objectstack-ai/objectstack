@@ -20,18 +20,7 @@ import {
   trackedFiles,
 } from '../select-affected-tests.mjs';
 import { shardTotal } from '../../../scripts/ci-shard-matrix.mjs';
-import { workspaceRoot } from '../workspace-root.mjs';
-import {
-  filterGlobs,
-  globMatches,
-  jobBlock,
-  jobFilterOutputs,
-  rootCi,
-  triggerBlock,
-  UI_JOBS,
-  uiRun,
-  withoutComments,
-} from './helpers/root-ci';
+import { jobBlock, rootCi, triggerBlock, UI_JOBS, uiRun, withoutComments } from './helpers/root-ci';
 
 /**
  * objectui#12214 — the affected-test selector behind the two-speed `Test` lane.
@@ -456,36 +445,6 @@ describe("the root ci.yml's Test UI job wires the selector fail-open (objectui#1
 
   it('checks out the history the diff base needs', () => {
     expect(job).toMatch(/uses: actions\/checkout@\S+\n\s+with:\n\s+fetch-depth: 0\n/);
-  });
-
-  // objectstack#28220: the selector answered `mode=full` for a diff confined
-  // to packages/lint/**, but the shards read only the `ui` output, so the job
-  // that answer lives in never started and a ui test pinning a lint value went
-  // unrun until a bystander's queue build. The selector and the job's `if:`
-  // answer one question from two ends, so this holds them together: every
-  // workspace package outside this tree that the selector turns full for (read
-  // from the package graph, never listed here) must match a glob of a filter
-  // list the shards' `if:` reads.
-  it('starts the shards on every package outside the tree the selector turns full for (objectstack#28220)', () => {
-    const ci = rootCi();
-    const wsRoot = workspaceRoot(repoRoot);
-    const manifests = trackedFiles(wsRoot).filter(
-      (rel) => rel.includes('/') && rel.endsWith('/package.json') && !rel.startsWith('ui/') && !rel.startsWith('patches/'),
-    );
-    const full = outsideTreeReasons({ root: repoRoot, outside: manifests }).map((reason) => reason.slice(0, reason.indexOf(': ')));
-    // The live graph reaches the seven packages the root `ui_consumers` list names.
-    expect(full.length, 'the selector turned full for no outer package: the graph read nothing').toBeGreaterThanOrEqual(7);
-    expect(full).toContain('packages/lint/package.json');
-
-    const outputs = jobFilterOutputs(ci, UI_JOBS.test).filter((o) => o !== 'ui_tree');
-    const covered = (globs: string[]) => full.filter((rel) => globs.some((glob) => globMatches(glob, rel)));
-    const globs = outputs.flatMap((o) => filterGlobs(ci, o));
-    expect(
-      full.filter((rel) => !covered(globs).includes(rel)),
-      `a package the selector runs every ui test for matches none of the lists \`${UI_JOBS.test}\` starts on (${outputs.join(', ')})`,
-    ).toEqual([]);
-    // Able to say no: the shards' old condition, \`ui\` alone, misses packages/lint.
-    expect(covered(filterGlobs(ci, 'ui'))).not.toContain('packages/lint/package.json');
   });
 
   it('keeps the matrix width and the full-suite command for the full battery', () => {

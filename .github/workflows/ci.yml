@@ -182,9 +182,10 @@ jobs:
       # `merge_group.base_sha` touches no ui path and none of the seven
       # packages skips the five ui jobs, exactly as the same diff does on its
       # PR head; an entry that touches one runs them (Lint UI reads `ui`
-      # alone, so one of the seven by itself does not start it). If the step fails (the
-      # base cannot be fetched, the diff errors), it is `continue-on-error`
-      # there, its outputs are empty and `|| 'true'` runs every ui job.
+      # alone, so one of the seven by itself does not start it). If the step
+      # fails (the base cannot be fetched, the diff errors), it is
+      # `continue-on-error` there, its outputs are empty and `|| 'true'` runs
+      # every ui job.
       #
       # `ui_tree` is what keeps the ui jobs SKIPPED, not failed, on a tree that
       # does not carry ui/ yet: `ui` and `ui_consumers` fall back to 'true' on
@@ -562,9 +563,8 @@ jobs:
             # `.objectstack-pin` used to pack). A change here compiles, builds
             # and tests the Console in the same PR — the check the retired Spec
             # Shape Gate ran hourly against a clone of objectui main. Test UI
-            # reads this list since objectstack#28220; its selector turns full
-            # for any of these packages, and its test pins this list against
-            # the package graph the selector reads.
+            # reads this list since objectstack#28220: its selector already
+            # turns full for any of these packages.
             ui_consumers:
               - 'packages/spec/**'
               - 'packages/client/**'
@@ -3744,9 +3744,9 @@ jobs:
   # skipped all sixteen shards; the next queue build that started them
   # (objectstack#28197) failed a ui test that imports @objectstack/lint, and a
   # bystander was ejected for it. Which files run stays the selector's answer.
-  # `ui/scripts/__tests__/select-affected-tests.test.ts` holds the join: every
-  # package outside ui/ the selector turns full for is covered by a list this
-  # `if:` reads. Lint UI keeps `ui` alone (its eslint reads none of the seven).
+  # The Test UI aggregate below explains a skip only when both outputs said
+  # false, so an `if:` that drops `ui_consumers` again reds there on the first
+  # such diff. Lint UI keeps `ui` alone: its eslint reads none of the seven.
   test-ui:
     name: Test UI (${{ matrix.shard }}/16)
     needs: [filter, ui-deps]
