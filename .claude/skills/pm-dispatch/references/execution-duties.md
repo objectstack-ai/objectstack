@@ -39,11 +39,11 @@
 - 阻塞解除后延后单重定价:前一单派发词必答 #X 变简单、变难、不必要或无影响。
 - 派发后一单前用该回答重读它的选项与成本,⛔ 不沿用立单时那份。
 - 在飞卡衍生三分:不修它验收过不过;in-scope ⇒ 父卡 sub-issue,认领席自有、优先级继承。
-- 该 sub-issue 与 main-red 锚卡各带域与级直接派发,绕过分诊;sweep 事后扫,重复关 `duplicate`。
 - 排队卡含他车道项 ⇒ 发现席自拆:新卡无 `domain:*`,首行 `carries item k of #N; #N keeps items …`。
 - 分诊首触定域可改判;拆出卡 ⛔ 不承父卡域(承域只及本车道 sub-issue),父卡余项照 `Fixes`。
 - 余项落 `ui/**` 的排队卡照常派:`ui/` 在本仓,同 worktree、门禁、合并队列;⛔ 不作 UI 跳过。
 - `ui/**` 余项不是他车道项:本席自派不拆;自拆只对整落 `ui/**` 外他车道树的卡自列独立项。
+- 派 `ui/**` 余项前,在飞求交加读 `domain:ui` 的 `pm:dispatched` 认领文件面;相交 ⇒ 串行或让行。
 - 自在飞派发升级出的卡首行一句:本卡承哪一半、父卡留哪一半;缺此行不入队不入箱。
 - 分诊预见的后续工作是一张卡,触发条件落地时立卡;⛔ 分诊一句话永不授权无卡编辑。
 - 阻塞项无主 ⇒ 被挡席认领做掉,不限大小;在该卡走完整认领、尊重其热文件串行队。
@@ -62,7 +62,7 @@
 - 归属 = session ID,⛔ 不认作者字段;`Account:` 派生自 assignee,不等即半态、持卡席下笔补正。
 - 卡 assignee 归 PM,dev 恒不写;PR ⛔ 不派席位账号;在飞 PR 读 `head:claude/` 开 PR 正文点名的卡。
 - 部分落地(PR 带 `Refs #N (item k)`,⛔ 不 `Fixes`)即释放:合入同笔回 `pm:queue` + 清 assignee。
-- 同笔 `Release:` 行点名已落项与余项;余项整树归他席 ⇒ 点名该席改标,拆分加 `pm:retriage`。
+- `Release:` 行点名已落与余项;余项整落 `ui/**` 外他席树 ⇒ 点名其改标,拆分加 `pm:retriage`。
 - 派发前按序执行原子对:① Assign @me,并把 `pm:dispatched` 与摘 `pm:queue` 放进同一次标签写入。
 - step ① 之后获得 assignee 的直接弃出本批。
 - ② 认领评论照抄 SKILL.md 模板:`Branch:`、`Clause-②:`、`Metadata-protocol:` 各占一行且行首。
