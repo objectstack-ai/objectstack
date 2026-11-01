@@ -441,8 +441,13 @@ export function readAppObjectScope(
 /** An adapter that loads app metadata bundles (`ObjectStackAdapter.loadAppBundle`). */
 type BundleHost = { loadAppBundle?: (appName: string) => unknown };
 
-/** objectstack#28645 — the app the console root entered, per adapter, while it stays entered. */
-const ROOT_ENTERED_APP = new WeakMap<object, string>();
+/**
+ * objectstack#28645 — the app the console root entered, while it stays
+ * entered. Kept by name, not by adapter: below the root, `AppContent` reads a
+ * wrapper of the same adapter (the console's approval record reads), so the
+ * adapter's identity does not say whether the root entered it.
+ */
+let rootEnteredApp: string | undefined;
 
 /**
  * Enter `appName`'s metadata bundle (objectstack#27627), unless the console
@@ -454,7 +459,7 @@ export function enterAppBundle(dataSource: unknown, appName: string | undefined)
   const host = dataSource as BundleHost | null | undefined;
   const load = host?.loadAppBundle;
   if (!host || !appName || typeof load !== 'function') return;
-  if (ROOT_ENTERED_APP.get(host) === appName) return;
+  if (rootEnteredApp === appName) return;
   void load.call(host, appName);
 }
 
@@ -481,9 +486,9 @@ export function useAppObjectScopePrefetch(): void {
     const load = dataSource?.loadAppBundle;
     if (!dataSource || !bundleAppName || typeof load !== 'function') return;
     void load.call(dataSource, bundleAppName);
-    ROOT_ENTERED_APP.set(dataSource, bundleAppName);
+    rootEnteredApp = bundleAppName;
     return () => {
-      if (ROOT_ENTERED_APP.get(dataSource) === bundleAppName) ROOT_ENTERED_APP.delete(dataSource);
+      if (rootEnteredApp === bundleAppName) rootEnteredApp = undefined;
     };
   }, [dataSource, bundleAppName]);
   if (app && readObjectScope) readAppObjectScope(readObjectScope, app, segments.slice(2).join('/'), search);

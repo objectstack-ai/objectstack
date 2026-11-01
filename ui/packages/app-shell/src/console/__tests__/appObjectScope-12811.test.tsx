@@ -118,6 +118,9 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
     // `AppContent` reuses the root's entry rather than asking the bundle again;
     // another app, or the app after the root has left it, is entered.
     enterAppBundle(adapter, 'crm');
+    // The console hands `AppContent` a wrapper of the same adapter.
+    const wrapper = { loadAppBundle: (app: string) => (adapter as any).loadAppBundle(app) };
+    enterAppBundle(wrapper, 'crm');
     expect(entered).toEqual(['crm']);
     enterAppBundle(adapter, 'hr');
     expect(entered).toEqual(['crm', 'hr']);
