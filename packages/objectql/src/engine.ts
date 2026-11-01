@@ -4996,12 +4996,9 @@ export function packageBodyObjectAndAppOwnerStampRefusal(
  * walking the collections and items in the order the seam registers them, or
  * `undefined`.
  *
- * The seam used to raise each of these on the item it was about to register,
- * after `installPackage`, the objects and the apps had registered: the
- * refusal propagated (install-local answered `422 PLUGIN_REGISTER_FAILED`)
- * while the package record, objects and apps stayed in the live registry until
- * restart, and a refused re-register of an installed id left that install
- * half-replaced. Every judge here reads the item, its derived name, the
+ * Asked first so a body refused by one of them leaves nothing of the package
+ * registered, and a refused re-register of an installed id leaves that
+ * install as it was. Every judge here reads the item, its derived name, the
  * source label and the owning id, and nothing the registry holds, so asking
  * it first gives the same answer in the same words. ⛔ No second copy of any
  * judge: each is the one function its own record names.

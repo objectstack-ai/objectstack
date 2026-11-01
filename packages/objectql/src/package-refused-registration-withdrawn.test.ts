@@ -22,8 +22,8 @@
  *    boot seed of disabled packages;
  *  - CONTROLS: a clean body registers everything as before; a body that took
  *    over a tenant's object is not withdrawn (the withdrawal would drop the
- *    tenant's layer); an installed id refused part-way by the registry keeps
- *    today's state, pinned here until it has its own card.
+ *    tenant's layer); nor is an installed id refused part-way by the registry
+ *    (the withdrawal would take the installed version with it).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -225,7 +225,7 @@ describe('[#28697] controls', () => {
         expect(engine.registry.getPackage(PKG), 'not withdrawn').toBeDefined();
     });
 
-    it('an installed id refused part-way by the registry: today\'s state, pinned until its own card', () => {
+    it('an installed id refused part-way by the registry is not withdrawn', () => {
         const engine = new ObjectQL();
         engine.registerApp({ id: HOST, name: HOST, objects: [object('probe_held')] } as any);
         engine.registerApp({ id: PKG, name: PKG, version: '1.0.0', objects: [object('probe_a'), object('probe_old')], apps: [app('probe_app')] } as any);
@@ -235,7 +235,7 @@ describe('[#28697] controls', () => {
         }) as any));
         expect(err).toMatchObject({ code: 'OBJECT_OWNERSHIP_CONFLICT', status: 422 });
         const t = trace(engine);
-        // Not withdrawn (that would take v1 with it) and not restored.
+        // Not withdrawn: the withdrawal would take v1 with it.
         expect(t.pkg?.manifest.version).toBe('2.0.0');
         expect((engine.registry.getObject('probe_a') as any)?.label).toBe('v2 label');
         expect(t.objects).toEqual(['probe_a', 'probe_held', 'probe_old']);

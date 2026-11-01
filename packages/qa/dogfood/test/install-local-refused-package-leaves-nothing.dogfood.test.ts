@@ -3,18 +3,12 @@
 // GOLDEN REGRESSION — a package the install refuses part-way through
 // registering leaves nothing of itself in the running system (#28697).
 //
-// ## What was measured before the fix
-//
-// Installed into the showcase through `POST /api/v1/marketplace/install-local`,
-// an inline manifest whose object and app were clean and whose connector wore
-// the showcase's own `_packageId` answered 422 `PLUGIN_REGISTER_FAILED`, with
-// no ledger entry; but the package, its object and its app had already
-// registered, and stayed readable until restart.
-//
 // ## What this file pins, on one boot
 //
-//   1. that install is refused as before, and afterwards neither the package,
-//      its object nor its app reads; the same id then installs clean, 200;
+//   1. an install whose connector wears the showcase's id is refused as
+//      before (422 `PLUGIN_REGISTER_FAILED`), and afterwards neither the
+//      package, its object nor its app reads; the same id then installs
+//      clean, 200;
 //   2. an install the registry refuses part-way (its second object is one the
 //      showcase owns) is refused 422 `PLUGIN_REGISTER_FAILED`, and afterwards
 //      neither the package nor its first object reads; the showcase's object
