@@ -358,7 +358,7 @@ database layer.
 ## Object Extension Model
 
 To add fields/validations/indexes to an object you do not own, author
-`defineObjectExtension({ extend, fields, priority })` and register it on
+`defineObjectExtension({ extend, fields, fieldPatches, priority })` and register it on
 `defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
 `200`, range `0–999`); an extension can add but never remove. ⛔ Not the same key
 as object-level `ownership` (the record-ownership enum
@@ -374,7 +374,7 @@ values and rules stay the owner's. A key the tenant edited keeps the tenant's
 text; between two extensions the higher `priority` wins. A patch naming a field
 or option value the target lacks is refused at install and by `os validate`, and
 a `picklist`-bound field's options are never patchable. Example:
-`defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector', options: { tech: { label: 'Technology' } } } } })`.
+`defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } } })`.
 
 ---
 
