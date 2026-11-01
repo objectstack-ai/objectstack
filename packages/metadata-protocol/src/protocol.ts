@@ -9834,6 +9834,19 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#28413] Whether a save is a package-less AUTHORING save — the one
+     * {@link packagelessPairLanding} may find a pair row for: it names no
+     * package, is no runtime-source write or package duplicate, and carries a
+     * body object.
+     */
+    private isPackagelessAuthoringSave(request: SaveMetaItemRequest): boolean {
+        return request.packageId == null
+            && request.source === undefined
+            && request.writeFace !== 'package-duplicate'
+            && request.item !== null && typeof request.item === 'object' && !Array.isArray(request.item);
+    }
+
+    /**
      * [#28413] The declared override a package-less save of an overlay type
      * lands on, or `undefined` — see `packagelessPairLanding` in
      * `protocol-packageless-overlay-migration.ts`. Asked by
@@ -21050,35 +21063,30 @@ export class ObjectStackProtocolImplementation implements
         //
         // [#28413] Until #28576 closes the package-less write: a package-less
         // authoring save whose address is a pair row declaring the override of
-        // its base (a row `os migrate packageless-overlays` moved there) keeps
-        // that row's `overrides` block when the body carries none, and is
-        // judged as the write into the pair it is — so Setup's save of a
-        // migrated item, which sends the item as it read it, with or without
-        // the declaration, is not refused as undeclared (or as a package-less
-        // declaration). See `packagelessPairLanding`.
-        let overrideSubject: OverrideWriteSubject = request;
+        // its base (a row `os migrate packageless-overlays` moved there) is the
+        // write into the pair it is — so Setup's save of a migrated item, which
+        // sends the item as it read it, is not refused. Carrying the
+        // declaration, it is judged here as the write into that pair; carrying
+        // none, the late re-judgement below keeps the row's `overrides` block
+        // (see `packagelessPairLanding`). The landing is read ONLY where the
+        // save would otherwise be refused, so no admitted save, and no refusal
+        // ranked before these, reads one row more (#5706's lock gate stays the
+        // first reader).
+        let overrideVerdict = this.overrideWriteVerdict(request);
         if (
-            request.packageId == null
-            && request.source === undefined
-            && request.writeFace !== 'package-duplicate'
-            && request.item !== null && typeof request.item === 'object' && !Array.isArray(request.item)
+            overrideVerdict.verdict === 'refuse'
+            && overrideVerdict.rule === 'declared_outside_pair'
+            && this.isPackagelessAuthoringSave(request)
         ) {
-            const landingType = PLURAL_TO_SINGULAR[request.type] ?? request.type;
             const landing = await this.packagelessPairLanding(
-                request, itemDiscriminator(landingType, request.item),
+                request, itemDiscriminator(PLURAL_TO_SINGULAR[request.type] ?? request.type, request.item),
             );
-            if (landing !== undefined) {
-                if (!('overrides' in (request.item as Record<string, unknown>))) {
-                    request = { ...request, item: { ...(request.item as Record<string, unknown>), overrides: landing.declaration } };
-                }
-                overrideSubject = { ...request, packageId: landing.pair };
-            }
+            if (landing !== undefined) overrideVerdict = this.overrideWriteVerdict({ ...request, packageId: landing.pair });
         }
-        const overrideVerdict = this.overrideWriteVerdict(overrideSubject);
         if (overrideVerdict.verdict === 'refuse' && overrideVerdict.rule !== 'undeclared_same_name') {
             throw overrideWriteRefusalError(overrideVerdict);
         }
-        const declaredOverride = overrideVerdict.verdict === 'admit';
+        let declaredOverride = overrideVerdict.verdict === 'admit';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
@@ -22265,6 +22273,31 @@ export class ObjectStackProtocolImplementation implements
                 : request.packageId ?? null;
             if (typeof inheritedPackage === 'string' && inheritedPackage.length > 0) {
                 lateOverrideVerdict = this.overrideWriteVerdict({ ...request, packageId: inheritedPackage });
+            }
+        }
+        // [#28413] …and a package-less save carrying no declaration whose
+        // address is a pair row declaring the override (the early gate's
+        // comment above) keeps that row's `overrides` block: the body as
+        // persisted is the declared override it replaces, judged again.
+        if (
+            lateOverrideVerdict.verdict === 'refuse'
+            && lateOverrideVerdict.rule === 'undeclared_same_name'
+            && namedNoPackage
+            // (its address may have named the pair on the request since: `namedNoPackage` is what it named)
+            && this.isPackagelessAuthoringSave({ ...request, packageId: null })
+            && !('overrides' in (request.item as Record<string, unknown>))
+        ) {
+            const landing = await this.packagelessPairLanding(
+                request, itemDiscriminator(PLURAL_TO_SINGULAR[request.type] ?? request.type, request.item),
+            );
+            if (landing !== undefined) {
+                const declared = { ...request, item: { ...(request.item as Record<string, unknown>), overrides: landing.declaration } };
+                const verdict = this.overrideWriteVerdict({ ...declared, packageId: landing.pair });
+                if (verdict.verdict === 'admit') {
+                    request = declared;
+                    lateOverrideVerdict = verdict;
+                    declaredOverride = true;
+                }
             }
         }
         if (lateOverrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(lateOverrideVerdict);
