@@ -138,10 +138,19 @@ const serviceArea: NavigationArea = {
   ],
 };
 
-let navigate: NavigateFunction;
+/** The router's navigate, handed out of the tree once it has rendered. */
+const router: { navigate: NavigateFunction | null } = { navigate: null };
 function NavigateProbe() {
-  navigate = useNavigate();
+  const navigate = useNavigate();
+  React.useEffect(() => {
+    router.navigate = navigate;
+  }, [navigate]);
   return null;
+}
+
+function navigate(path: string) {
+  if (!router.navigate) throw new Error('the router has not rendered');
+  void router.navigate(path);
 }
 
 function renderAt(path: string) {
