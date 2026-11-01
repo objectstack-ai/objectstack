@@ -250,18 +250,17 @@ export function packagelessOverlayWriteRefusal(
     const item = `'${type}/${request.name}'`;
     const owner = this.packagedArtifactOwner(request);
     const pairId = typeof owner === 'string' ? customizationPackageId(owner) : undefined;
-    const pair = pairId?.ok ? `'${pairId.value}'` : 'the paired .custom package of the package that ships it';
+    const pair = pairId?.ok ? `'${pairId.value}'` : "the base's paired .custom package";
     const query = pairId?.ok ? ` (?package=${pairId.value})` : '';
     const shipped = typeof owner === 'string' ? `ships in '${owner}'` : 'ships in an installed package';
     const declared = typeof owner === 'string' ? `overrides: { package: '${owner}', basedOn }` : 'overrides: { package, basedOn }';
-    const ceremony = `A package-less customization stored before this release is still served: run \`os migrate packageless-overlays\` to move it into ${pair}`;
+    const ceremony = 'A package-less customization stored before this release is still served; run '
+        + `\`os migrate packageless-overlays\` first to move it into ${pair}.`;
     const fix = operation === 'delete'
-        ? `Remove it from ${pair}${query}. ${ceremony} first.`
+        ? `Remove it from ${pair}${query}. ${ceremony}`
         : operation === 'rollback'
-            ? `${ceremony}, then roll it back there.`
-            : operation === 'publish'
-                ? `Publish it into ${pair}${query}, declaring ${declared}. ${ceremony} first.`
-                : `Save it into ${pair}${query}, declaring ${declared}. ${ceremony} first.`;
+            ? `Its customization belongs in ${pair}: run \`os migrate packageless-overlays\` to move the row there, then roll it back.`
+            : `${operation === 'publish' ? 'Publish' : 'Save'} it into ${pair}${query}, declaring ${declared}. ${ceremony}`;
     const what = operation === 'rollback' ? 'a rollback of its package-less row' : 'a write naming no package';
     const err = new Error(
         `${item} ${shipped}, and ${what} onto a packaged item is closed: a customization of an installed package `

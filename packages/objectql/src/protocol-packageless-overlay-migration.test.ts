@@ -4,9 +4,8 @@
  * [#28413, ADR-0146 D11, N-16a] A package-less overlay row of a name a code
  * package X ships moves into X's paired `<X>.custom` as a declared override —
  * `listPackagelessOverlays` / `migratePackagelessOverlays`, the protocol half
- * of `os migrate packageless-overlays` — and, until #28576 closes the
- * package-less write, a package-less save landing on the moved row keeps its
- * declaration.
+ * of `os migrate packageless-overlays` — and, after it, the package-less
+ * write onto a packaged item closed (#28576, ADR-0146 D11).
  *
  * Pinned through the real protocol over the real `ObjectQL` engine and an
  * in-memory driver (the harness of `protocol-custom-override-effective-read.test.ts`):
@@ -18,10 +17,13 @@
  *  - LEFT ALONE: a name no package ships, a name two packages ship, and a row
  *    the pair already overrides (`shadowed`), each untouched;
  *  - a stored pair declaration with no `basedOn` gains it (#28644's reading);
- *  - THE SAVE (Wanted 4): after the move, a package-less draft save and publish
- *    land on the pair's row with or without `overrides` in the body, and the
- *    item stays the declared override; a package-less DELETE removes the pair's
- *    row and X's document is served again;
+ *  - THE CLOSE (#28576): after the move, a package-less save (draft or
+ *    publish, with or without `overrides`), publish, DELETE and rollback are
+ *    refused `403 NOT_OVERRIDABLE` naming the pair and the ceremony, and the
+ *    pair's row is untouched; the same save and DELETE naming the pair
+ *    succeed; a name no package ships keeps its package-less write; an
+ *    unmigrated row is served, and its package-less write is refused; a
+ *    rollback of the pair's declared row is the declared override (a page);
  *  - ADOPT-ORPHANS (Wanted 5): adopting into a writable package skips the
  *    shipped-name row and rebinds an environment one.
  *
@@ -361,7 +363,7 @@ describe('[#28413] the census and the move', () => {
 
 /**
  * The state the move leaves, laid down without the ceremony (so these cases
- * read the save door alone): the pair ensured through its door, and the
+ * read the write doors alone): the pair ensured through its door, and the
  * item's row bound to it, declaring the override.
  */
 async function movedState(engine: ObjectQL, protocol: ObjectStackProtocolImplementation): Promise<void> {
@@ -369,46 +371,131 @@ async function movedState(engine: ObjectQL, protocol: ObjectStackProtocolImpleme
     await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, PAIR, 'active', { overrides: { package: BASE, basedOn: '1.2.0' } });
 }
 
-describe('[#28413] until #28576: a package-less save of a moved item keeps its declaration', () => {
+/** A write's refusal as an HTTP boundary relays it, or `undefined` when it was not refused. */
+const refusalOf = (write: Promise<unknown>) => write.then(
+    () => undefined,
+    (e: any) => ({ code: e?.code, status: e?.status, message: String(e?.message ?? '') }),
+);
+
+/** The close's refusal: the sealed write's code and status, naming the pair and the ceremony (ADR-0146 D11). */
+const expectClosed = (refusal: { code?: unknown; status?: unknown; message: string } | undefined) => {
+    expect(refusal).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    expect(refusal!.message).toContain(`'${PAIR}'`);
+    expect(refusal!.message).toContain('os migrate packageless-overlays');
+};
+
+/**
+ * A package-less row of `VIEW` as an older release's door stored it: through
+ * the repository itself (the row and its history), versions 1 and 2, with no
+ * protocol door in front — the close refuses that write through every door.
+ */
+async function legacyRowWithHistory(protocol: ObjectStackProtocolImplementation): Promise<void> {
+    const repo = (protocol as any).getOverlayRepo();
+    const ref = { type: 'view', name: VIEW, org: 'env' };
+    const opts = { actor: null, source: 'older-release', intent: 'override-artifact', packageId: null } as const;
+    const first = await repo.put(ref, listBody(VIEW, 'showcase_task', UNBOUND_COLUMNS), { ...opts, parentVersion: null });
+    await repo.put(ref, listBody(VIEW, 'showcase_task', EDITED_COLUMNS), { ...opts, parentVersion: first.version });
+}
+
+describe('[#28576] after the close: a package-less write onto a packaged item is refused, naming the pair', () => {
     for (const withOverrides of [false, true]) {
-        it(`a package-less draft save and publish ${withOverrides ? 'carrying' : 'without'} \`overrides\` land on the pair's row, still the declared override`, async () => {
+        it(`a migrated item: a package-less draft save and publish-mode save ${withOverrides ? 'carrying' : 'without'} \`overrides\` are refused, and the pair's row is untouched`, async () => {
             const { engine, protocol, rows, rowOf } = await boot();
             await movedState(engine, protocol);
             // Setup's form save: the item as the editor read it, naming no package.
             const served = await read(protocol);
             const body: Record<string, unknown> = { ...listBody(VIEW, 'showcase_task', EDITED_COLUMNS) };
             if (withOverrides) body.overrides = served.overrides;
-            await protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft' } as any);
-            await protocol.publishMetaItem({ type: 'view', name: VIEW } as any);
+
+            expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft' } as any)));
+            expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: body } as any)));
+            // `packageId: null` names no package too, as the request contract states.
+            expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, packageId: null } as any)));
 
             expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
             expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
-            expect(JSON.parse(String(rowOf(VIEW, PAIR)!.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
-            expect(await fiveReads(protocol)).toEqual([EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS]);
-
-            // …and a publish-mode save naming no package, the other spelling of the same write.
-            await protocol.saveMetaItem({ type: 'view', name: VIEW, item: { ...listBody(VIEW, 'showcase_task', UNBOUND_COLUMNS) } } as any);
-            expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
-            expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
-            expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+            expect(await fiveReads(protocol)).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
         });
     }
 
-    it('a package-less DELETE removes the pair\'s row and X\'s document is served again', async () => {
+    it('a migrated item: a package-less DELETE (Setup\'s reset) and a package-less publish are refused, and nothing moves', async () => {
         const { engine, protocol, rows } = await boot();
         await movedState(engine, protocol);
-        await protocol.deleteMetaItem({ type: 'view', name: VIEW } as any);
+        expectClosed(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any)));
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+
+        // A draft in the pair, published naming no package: refused, the draft stays a draft.
+        await protocol.saveMetaItem({
+            type: 'view', name: VIEW, packageId: PAIR, mode: 'draft',
+            item: { ...listBody(VIEW, 'showcase_task', EDITED_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
+        } as any);
+        expectClosed(await refusalOf(protocol.publishMetaItem({ type: 'view', name: VIEW } as any)));
+        expect(rows(VIEW).sort()).toEqual([[PAIR, 'active'], [PAIR, 'draft']]);
+        expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+        // …and naming the pair publishes it.
+        await protocol.publishMetaItem({ type: 'view', name: VIEW, packageId: PAIR } as any);
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
+    });
+
+    it('a migrated item: a save and a DELETE naming ?package=<base>.custom succeed', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await movedState(engine, protocol);
+        await protocol.saveMetaItem({
+            type: 'view', name: VIEW, packageId: PAIR,
+            item: { ...listBody(VIEW, 'showcase_task', EDITED_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
+        } as any);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+        expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
+        expect(await fiveReads(protocol)).toEqual([EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS, EDITED_COLUMNS]);
+
+        await protocol.deleteMetaItem({ type: 'view', name: VIEW, packageId: PAIR } as any);
         expect(rows(VIEW)).toEqual([]);
         expect(await fiveReads(protocol)).toEqual([BASE_COLUMNS, BASE_COLUMNS, BASE_COLUMNS, BASE_COLUMNS, BASE_COLUMNS]);
     });
 
-    it('CONTROL: a package-less save carrying `overrides` over an unmoved package-less row is still refused (the pair is not its address)', async () => {
-        const { engine, protocol } = await boot();
-        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
-        await expect(protocol.saveMetaItem({
-            type: 'view', name: VIEW, mode: 'draft',
-            item: { ...listBody(VIEW, 'showcase_task', EDITED_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
-        } as any)).rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    it('CONTROL: a package-less save and DELETE of a name no package ships (environment metadata) still succeed', async () => {
+        const { protocol, rows } = await boot();
+        await protocol.saveMetaItem({ type: 'view', name: ENV_VIEW, item: listBody(ENV_VIEW, 'showcase_task', UNBOUND_COLUMNS) } as any);
+        expect(rows(ENV_VIEW)).toEqual([[null, 'active']]);
+        await protocol.deleteMetaItem({ type: 'view', name: ENV_VIEW } as any);
+        expect(rows(ENV_VIEW)).toEqual([]);
+    });
+
+    it('an unmigrated row is served, and its package-less save, DELETE and rollback are refused naming the ceremony', async () => {
+        const { protocol, rows, rowOf } = await boot();
+        await legacyRowWithHistory(protocol);
+        const before = rowOf(VIEW, null);
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
+        expect(columnsOf((await layered(protocol)).effective)).toEqual(EDITED_COLUMNS);
+
+        expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(VIEW, 'showcase_task', BASE_COLUMNS) } as any)));
+        expectClosed(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any)));
+        expectClosed(await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 })));
+
+        expect(rows(VIEW)).toEqual([[null, 'active']]);
+        expect(rowOf(VIEW, null)).toEqual(before);
+        expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
+        // The ceremony still moves it, and the item is the pair's then.
+        expect((await migrate(protocol)).outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+    });
+
+    it('a rollback of the pair\'s own declared row is the pair\'s declared override, never an artifact override (a page)', async () => {
+        const { engine, protocol, stores } = await boot();
+        engine.registerApp({ id: BASE, name: 'showcase', version: '1.2.0', namespace: 'showcase', pages: [pageBody(PAGE, 'Home')] } as any);
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        const declared = (label: string) => ({ ...pageBody(PAGE, label), overrides: { package: BASE, basedOn: '1.2.0' } });
+        await protocol.saveMetaItem({ type: 'page', name: PAGE, packageId: PAIR, item: declared('Edited home') } as any);
+        await protocol.saveMetaItem({ type: 'page', name: PAGE, packageId: PAIR, item: declared('Second edit') } as any);
+        const pageRow = () => Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.type === 'page' && r.name === PAGE);
+
+        const rolled = await refusalOf((protocol as any).rollbackMetaItem({ type: 'page', name: PAGE, toVersion: 1 }));
+        expect(rolled).toBeUndefined();
+        expect(pageRow().map((r) => [r.package_id, r.state])).toEqual([[PAIR, 'active']]);
+        const body = JSON.parse(String(pageRow()[0]!.metadata));
+        expect(body.label).toBe('Edited home');
+        expect(body.overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
     });
 });
 
