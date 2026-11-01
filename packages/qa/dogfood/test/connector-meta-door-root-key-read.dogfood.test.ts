@@ -23,10 +23,13 @@ const SYSTEM = { isSystem: true, positions: [], permissions: [] };
 const PLACEHOLDERS = {
   credentialShaped: 'TEST_PLACEHOLDER_ROOT_CREDENTIAL_SHAPED',
   plain: 'TEST_PLACEHOLDER_ROOT_PLAIN',
+  dottedRoot: 'TEST_PLACEHOLDER_DOTTED_ROOT',
+  dottedUrl: 'TEST_PLACEHOLDER_DOTTED_PROVIDER_URL',
 } as const;
 const ALL_PLACEHOLDERS = Object.values(PLACEHOLDERS);
 
 const ROW = 'crk_root_keys_stored';
+const DOTTED = 'crk_dotted_keys_stored';
 
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : Array.isArray(r?.value) ? r.value : []);
 const bodyOf = (row: any): Record<string, any> =>
@@ -156,5 +159,58 @@ describe('connector metadata read doors: root keys the entry does not declare ar
     const body = bodyOf((await stored(ROW))[0]);
     expect(body.apiKey).toBe(PLACEHOLDERS.credentialShaped);
     expect(body.region).toBe(PLACEHOLDERS.plain);
+  });
+
+  it('a cleared undeclared root key is withheld so a plain read then save answers 200, not 422', async () => {
+    const put = await stack.apiAs(admin, 'PUT', `/meta/connector/crk_cleared`, instance('crk_cleared'));
+    expect(put.status, await put.clone().text()).toBe(200);
+    const [row] = await stored('crk_cleared');
+    await ql.update('sys_metadata', {
+      id: row.id,
+      metadata: JSON.stringify({ ...instance('crk_cleared', { label: 'CRK cleared (seeded)' }), apiKey: '', extra: {} }),
+    }, { context: SYSTEM });
+
+    const text = await expectWithheld(admin, `/meta/connector/crk_cleared`, ['crk_cleared']);
+    const served = itemOf(JSON.parse(text));
+    expect(served).not.toHaveProperty('apiKey');
+    expect(served).not.toHaveProperty('extra');
+
+    const body = Object.fromEntries(Object.entries(served).filter(([k]) => !k.startsWith('_')));
+    const resave = await stack.apiAs(admin, 'PUT', `/meta/connector/crk_cleared`, { ...body, label: 'CRK cleared (edited)' });
+    expect(resave.status, await resave.clone().text()).toBe(200);
+  });
+
+  it('a withheld dot-spelled root key and a dot-spelled providerConfig URL survive a save of the served form', async () => {
+    const put = await stack.apiAs(admin, 'PUT', `/meta/connector/${DOTTED}`, instance(DOTTED));
+    expect(put.status, await put.clone().text()).toBe(200);
+    const [row] = await stored(DOTTED);
+    const dottedUrl = `https://svc:${PLACEHOLDERS.dottedUrl}@api.vendor.example/v1`;
+    await ql.update('sys_metadata', {
+      id: row.id,
+      metadata: JSON.stringify({
+        ...instance(DOTTED, { label: 'CRK dotted (seeded)' }),
+        providerConfig: { baseUrl: 'https://api.vendor.example/v1', 'v1.url': dottedUrl },
+        'x.y': PLACEHOLDERS.dottedRoot,
+      }),
+    }, { context: SYSTEM });
+
+    const text = await expectWithheld(admin, `/meta/connector/${DOTTED}`, ['CRK dotted (seeded)']);
+    const served = itemOf(JSON.parse(text));
+    expect(served).not.toHaveProperty('x.y');
+    expect(served.providerConfig).not.toHaveProperty('v1.url');
+
+    const body = Object.fromEntries(Object.entries(served).filter(([k]) => !k.startsWith('_')));
+    const resave = await stack.apiAs(admin, 'PUT', `/meta/connector/${DOTTED}`, { ...body, label: 'CRK dotted (edited)' });
+    expect(resave.status, await resave.clone().text()).toBe(200);
+
+    const atRest = bodyOf((await stored(DOTTED))[0]);
+    expect(atRest.label).toBe('CRK dotted (edited)');
+    expect(atRest['x.y']).toBe(PLACEHOLDERS.dottedRoot);
+    expect(atRest.providerConfig['v1.url']).toBe(dottedUrl);
+
+    // And the next read still withholds both.
+    const reread = itemOf(JSON.parse(await expectWithheld(admin, `/meta/connector/${DOTTED}`, ['CRK dotted (edited)'])));
+    expect(reread).not.toHaveProperty('x.y');
+    expect(reread.providerConfig).not.toHaveProperty('v1.url');
   });
 });

@@ -242,9 +242,15 @@ describe('the connector redactor — credentials inside a URL under `providerCon
     expect(holds(served, P(39), P(42), P(43))).toBe(false);
   });
 
-  it('a dot-spelled key is off the walk (the carry-forward cannot address it)', () => {
-    const item = { ...base, providerConfig: { 'v1.url': `https://u:${P(40)}@b.example` } };
-    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  it('withholds whole a dot-spelled key under providerConfig that holds a credential URL (fail closed)', () => {
+    const { item: served, redactedKeys } = at({
+      'v1.url': `https://u:${P(40)}@b.example`,
+      'legacy.list': ['https://c.example', `https://d.example/v1?token=${P(44)}`],
+      'plain.note': 'https://e.example/v1?region=eu',
+    });
+    expect(redactedKeys).toEqual(['providerConfig.legacy.list', 'providerConfig.v1.url']);
+    expect(served.providerConfig).toEqual({ 'plain.note': 'https://e.example/v1?region=eu' });
+    expect(holds(served, P(40), P(44))).toBe(false);
   });
 
   it('a map withheld whole is not walked for URLs: it is reported once, as the map', () => {
@@ -291,9 +297,19 @@ describe('the connector redactor — top-level keys the entry does not declare',
     expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
   });
 
-  it('a cleared undeclared key is served as written and not reported', () => {
-    const item = { ...base, apiKey: '', token: null };
-    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  it('withholds a cleared undeclared key too, and names it (the save door refuses it whatever its value)', () => {
+    const item = { ...base, apiKey: '', token: null, extra: {} };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(['apiKey', 'extra', 'token']);
+    for (const key of ['apiKey', 'token', 'extra']) expect(served).not.toHaveProperty(key);
+  });
+
+  it('withholds an undeclared root key whose own name carries a dot, and names it whole', () => {
+    const item = { ...base, 'x.y': P(59) };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(['x.y']);
+    expect(served).not.toHaveProperty('x.y');
+    expect(holds(served, P(59))).toBe(false);
   });
 
   it('withholds an undeclared root key beside the other positions, each named once', () => {
