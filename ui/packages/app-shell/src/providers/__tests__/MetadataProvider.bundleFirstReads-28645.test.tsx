@@ -189,6 +189,54 @@ describe('MetadataProvider — bundle-first reads (objectstack#28645)', () => {
     expect(lists(m.calls)).toEqual(['app', 'view']);
   });
 
+  it('composes a package scope from the bundle when every name asked is bundled, though the package holds more', async () => {
+    const m = mount();
+    act(() => m.bundle.enter());
+    await act(async () => { await m.bundle.land(); });
+    let scope = m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] });
+    await waitFor(() => {
+      scope = m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] });
+      expect(scope.settled).toBe(true);
+    });
+    // The package list holds `b28645_outside` too; no reader asked for it.
+    expect(scope.served).toHaveLength(3);
+    const plan = (scope.objects as Doc[]).find((o) => o.name === 'b28645_plan') as { listViews?: Record<string, unknown> };
+    expect(plan.listViews?.['b28645_plan.all']).toBeDefined();
+    expect(lists(m.calls)).toEqual(['app', `object?package=${PKG}`]);
+    // The same composition, read after read.
+    expect(m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] }).objects).toBe(scope.objects);
+  });
+
+  it('CONTROL: a package scope asking an object the bundle lacks reads the `view` list', async () => {
+    const m = mount();
+    act(() => m.bundle.enter());
+    await act(async () => { await m.bundle.land(); });
+    const asked = ['b28645_plan', 'b28645_outside'];
+    await waitFor(() => {
+      const scope = m.ctx().readObjectScope!({ packageId: PKG, names: asked });
+      expect(scope.settled).toBe(true);
+    });
+    const scope = m.ctx().readObjectScope!({ packageId: PKG, names: asked });
+    const outside = (scope.objects as Doc[]).find((o) => o.name === 'b28645_outside') as { listViews?: Record<string, unknown> };
+    expect(outside.listViews?.['b28645_outside.all']).toBeDefined();
+    expect(lists(m.calls)).toEqual(['app', `object?package=${PKG}`, 'view']);
+  });
+
+  it('composes an unasked package object from a `view` list already in hand', async () => {
+    const m = mount();
+    act(() => m.bundle.enter());
+    await act(async () => { await m.bundle.land(); });
+    await act(async () => { await m.ctx().ensureType!('view'); });
+    await waitFor(() => {
+      expect(m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] }).settled).toBe(true);
+    });
+    const scope = m.ctx().readObjectScope!({ packageId: PKG, names: ['b28645_plan'] });
+    const byName = (name: string) => (scope.objects as Doc[]).find((o) => o.name === name) as { listViews?: Record<string, unknown> };
+    expect(byName('b28645_plan').listViews?.['b28645_plan.all']).toBeDefined();
+    expect(byName('b28645_outside').listViews?.['b28645_outside.all']).toBeDefined();
+    expect(lists(m.calls)).toEqual(['app', 'view', `object?package=${PKG}`]);
+  });
+
   it('CONTROL: the whole registry reads the view list with it, and answers once both have', async () => {
     const m = mount();
     await waitFor(() => expect(m.calls).toContain('app'));
