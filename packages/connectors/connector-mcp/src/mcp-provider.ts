@@ -7,7 +7,11 @@ import type {
   ConnectorProviderFactory,
   ResolvedConnectorAuth,
 } from '@objectstack/spec/integration';
-import { ConnectorCredentialRejectedError, ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
+import {
+  ConnectorCredentialRejectedError,
+  ConnectorUpstreamChangedError,
+  ConnectorUpstreamUnavailableError,
+} from '@objectstack/spec/integration';
 import { callWithBorrowedCredential } from '@objectstack/types';
 import {
   createMcpConnector,
@@ -317,7 +321,9 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * listing, every pinned tool is hashed and compared on its own: a pinned tool
  * the server serves with a different description or input schema, or no
  * longer serves, closes the connection and degrades the instance with a
- * message naming each such tool (see {@link toolsSnapshotDriftError}). A
+ * message naming each such tool — thrown as {@link ConnectorUpstreamChangedError}
+ * (ruling 6545635244), which the materializer re-checks on its backoff (see
+ * {@link toolsSnapshotDriftError}). A
  * pinned name's absence is the pin's to report even when `include` lists it
  * too: the pin says the tool existed with that definition, so its absence is
  * the server's change rather than a typo.
@@ -544,23 +550,22 @@ const DRIFT_NAMED_MAX = 20;
  * pinned tool the server changed (with the digest it now serves, which is what
  * a reviewed re-pin writes) and each pinned tool it no longer serves.
  *
- * Thrown as {@link ConnectorUpstreamUnavailableError}, the one marker on which
- * the ADR-0097 materializer degrades an instance without failing boot: the
- * husk's reason (`GET /connectors`, a `connector_action` refusal) is this
- * message, and the instance is re-materialized on the #3017 backoff — so a
- * server that serves the pinned definitions again recovers it, as an edited
- * pin does at once. The materializer's own log line for that marker reads
- * "upstream unavailable … retrying with backoff"; a wording of its own for a
- * mismatch needs a marker the materializer can tell apart.
+ * Thrown as {@link ConnectorUpstreamChangedError} (ruling 6545635244): the
+ * ADR-0097 materializer degrades the instance without failing boot, the husk's
+ * reason (`GET /connectors`, a `connector_action` refusal) is this message, and
+ * its log records say the pin did not match rather than that the upstream is
+ * unavailable. The instance is re-checked on the #3017 backoff — so a server
+ * that serves the pinned definitions again recovers it, as an edited pin does
+ * at once.
  */
-function toolsSnapshotDriftError(connectorName: string, drift: ToolsSnapshotDrift): Error {
+function toolsSnapshotDriftError(connectorName: string, drift: ToolsSnapshotDrift): ConnectorUpstreamChangedError {
   const findings = [
     ...drift.changed.map(({ name, served }) => `tool '${name}' changed (it now hashes to ${served})`),
     ...drift.missing.map((name) => `pinned tool '${name}' is no longer served`),
   ];
   const named = findings.slice(0, DRIFT_NAMED_MAX);
   const more = findings.length > named.length ? `; … ${findings.length - named.length} more` : '';
-  return new ConnectorUpstreamUnavailableError(
+  return new ConnectorUpstreamChangedError(
     `connector-mcp provider: connector '${connectorName}' providerConfig.toolsSnapshot does not match the tools ` +
       `its MCP server serves: ${named.join('; ')}${more}. None of the instance's tools are exposed while a pinned ` +
       `tool differs. If the change is expected, review it and set each pin to the digest the server now serves; ` +

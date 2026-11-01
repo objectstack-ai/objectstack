@@ -10,7 +10,11 @@ import { describe, it, expect } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import type { ConnectorMaterialization, ConnectorProviderContext } from '@objectstack/spec/integration';
-import { isConnectorCredentialRejected, isConnectorUpstreamUnavailable } from '@objectstack/spec/integration';
+import {
+    isConnectorCredentialRejected,
+    isConnectorUpstreamChanged,
+    isConnectorUpstreamUnavailable,
+} from '@objectstack/spec/integration';
 import type { McpClientLike, McpToolDescriptor } from './mcp-connector.js';
 import { ConnectorMcpPlugin } from './connector-mcp-plugin.js';
 import { createMcpProviderFactory } from './mcp-provider.js';
@@ -59,6 +63,17 @@ async function materialize(tools: McpToolDescriptor[], providerConfig: Record<st
 /** A configuration fault: plain, neither retryable nor a credential refusal. */
 function expectConfigurationFault(err: unknown) {
     expect(err).toBeInstanceOf(Error);
+    expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+    expect(isConnectorUpstreamChanged(err)).toBe(false);
+    expect(isConnectorCredentialRejected(err)).toBe(false);
+}
+
+/**
+ * A pin mismatch (ruling 6545635244): the CONNECTOR_UPSTREAM_CHANGED marker,
+ * and not the outage marker, whose log wording would misdescribe it.
+ */
+function expectUpstreamChanged(err: unknown) {
+    expect(isConnectorUpstreamChanged(err)).toBe(true);
     expect(isConnectorUpstreamUnavailable(err)).toBe(false);
     expect(isConnectorCredentialRejected(err)).toBe(false);
 }
@@ -123,7 +138,7 @@ describe('mcp provider: providerConfig.toolsSnapshot pins each tool', () => {
             toolsSnapshot: PIN,
         });
         expect(mat).toBeUndefined();
-        expect(isConnectorUpstreamUnavailable(err)).toBe(true);
+        expectUpstreamChanged(err);
         const message = (err as Error).message;
         expect(message).toMatch(
             /^connector-mcp provider: connector 'vendor' providerConfig\.toolsSnapshot does not match the tools its MCP server serves: /,
@@ -137,14 +152,14 @@ describe('mcp provider: providerConfig.toolsSnapshot pins each tool', () => {
     it('a changed inputSchema is a change of that tool too', async () => {
         const widened = { ...LIST_ISSUES, inputSchema: { type: 'object', properties: { org: { type: 'string' } } } };
         const { err } = await materialize([CREATE_ISSUE, widened], { toolsSnapshot: PIN });
-        expect(isConnectorUpstreamUnavailable(err)).toBe(true);
+        expectUpstreamChanged(err);
         expect((err as Error).message).toContain("tool 'list_issues' changed");
         expect((err as Error).message).not.toContain("'create_issue'");
     });
 
     it('a pinned tool the server no longer lists degrades naming it', async () => {
         const { err, state } = await materialize([LIST_ISSUES, DELETE_REPO], { toolsSnapshot: PIN });
-        expect(isConnectorUpstreamUnavailable(err)).toBe(true);
+        expectUpstreamChanged(err);
         expect((err as Error).message).toContain("pinned tool 'create_issue' is no longer served");
         expect((err as Error).message).not.toContain("'list_issues'");
         expect(state.closed).toBe(true);
@@ -155,7 +170,7 @@ describe('mcp provider: providerConfig.toolsSnapshot pins each tool', () => {
             include: ['create_issue', 'list_issues'],
             toolsSnapshot: PIN,
         });
-        expect(isConnectorUpstreamUnavailable(err)).toBe(true);
+        expectUpstreamChanged(err);
         expect((err as Error).message).toContain("pinned tool 'create_issue' is no longer served");
         expect((err as Error).message).not.toContain('providerConfig.include names');
     });

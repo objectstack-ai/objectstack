@@ -31,7 +31,7 @@
 import type { ActionDescriptor, FlowParsed } from '@objectstack/spec/automation';
 import { FLOW_RESERVED_NODE_TYPES, defineActionDescriptor, resolveFlowTriggerKind, resolveScheduleOrganization } from '@objectstack/spec/automation';
 import type { Connector, ConnectorOrigin } from '@objectstack/spec/integration';
-import { ConnectorSchema } from '@objectstack/spec/integration';
+import { ConnectorSchema, isConnectorUpstreamChanged } from '@objectstack/spec/integration';
 import { describeThrownForLog } from './thrown-cause-diagnostics.js';
 import type { AutomationEngine, ConnectorActionHandler, ConnectorHold, FlowTrigger, FlowTriggerBinding, NodeExecutor } from './engine.js';
 
