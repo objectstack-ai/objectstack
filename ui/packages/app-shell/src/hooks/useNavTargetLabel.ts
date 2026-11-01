@@ -69,7 +69,8 @@ import { resolveI18nLabel as resolveInlineI18nLabel } from '@objectstack/spec/ui
 import { resolveViewId } from '@object-ui/core';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { NavLabelTarget, NavTargetLabelResolver } from '@object-ui/layout';
-import { bundledFirst, useBundledReads, useMetadata } from '../providers/MetadataProvider.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
 
 /**
  * A metadata label (plain string or inline locale map) as display text, or

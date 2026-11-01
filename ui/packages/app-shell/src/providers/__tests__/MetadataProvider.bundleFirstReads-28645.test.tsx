@@ -29,14 +29,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
-import {
-  MetadataProvider,
-  useBundledItem,
-  useBundledReads,
-  useMetadata,
-  type BundledRead,
-  type BundledReads,
-} from '../MetadataProvider';
+import { MetadataProvider, useMetadata } from '../MetadataProvider';
+import { bundledFirst, useBundledItem, useBundledReads, type BundledRead, type BundledReads } from '../bundledReads';
+import { useServedViewItems } from '../../hooks/useServedViewItems';
 
 type Ctx = ReturnType<typeof useMetadata>;
 type Doc = { name: string; [key: string]: unknown };
@@ -245,5 +240,41 @@ describe('MetadataProvider — bundle-first reads (objectstack#28645)', () => {
     const m = mount({ bundle: null });
     expect(m.page().state).toBe('miss');
     expect(m.reads().viewsFor(scopeNames).state).toBe('miss');
+  });
+
+  it('bundledFirst reads the list only for a name the bundle does not hold', async () => {
+    const m = mount();
+    act(() => m.bundle.enter());
+    let listReads = 0;
+    const list = () => {
+      listReads += 1;
+      return [{ name: 'b28645_elsewhere', label: 'Elsewhere' }];
+    };
+    expect(bundledFirst(m.reads(), 'dashboard', 'b28645_home', list)).toBeUndefined();
+    await act(async () => { await m.bundle.land(); });
+    await waitFor(() => expect(bundledFirst(m.reads(), 'dashboard', 'b28645_home', list)?.label).toBe('Home'));
+    expect(listReads).toBe(0);
+    expect(bundledFirst(m.reads(), 'dashboard', 'b28645_elsewhere', list)?.label).toBe('Elsewhere');
+    expect(listReads).toBe(1);
+    expect(bundledFirst(null, 'dashboard', 'b28645_elsewhere', list)?.label).toBe('Elsewhere');
+  });
+
+  it('useServedViewItems(false) reads neither list', async () => {
+    const calls: string[] = [];
+    let served: ReturnType<typeof useServedViewItems> | null = null;
+    function Probe() {
+      served = useServedViewItems(false);
+      return null;
+    }
+    render(
+      <MetadataProvider adapter={makeAdapter(calls, null)}>
+        <Probe />
+      </MetadataProvider>,
+    );
+    await waitFor(() => expect(calls).toContain('app'));
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(lists(calls)).toEqual(['app']);
+    expect(served!.views).toHaveLength(0);
+    expect(served!.objects).toHaveLength(0);
   });
 });

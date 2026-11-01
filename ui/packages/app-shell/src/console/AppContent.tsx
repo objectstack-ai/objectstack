@@ -19,7 +19,8 @@ import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.
 import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordSaveMessage } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useBundledReads, useMetadata } from '../providers/MetadataProvider.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { useBundledReads } from '../providers/bundledReads.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';

@@ -33,7 +33,8 @@ import { Button, DataErrorState, Empty, EmptyTitle, EmptyDescription, Spinner } 
 import { FileText, Pencil, RotateCw } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
-import { useBundledItem, useMetadata } from '../providers/MetadataProvider.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { useBundledItem } from '../providers/bundledReads.js';
 import { PageRecordScope, useExpressionContext } from '../providers/ExpressionProvider.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { appStudioRoutePath } from '../utils/appRoute.js';

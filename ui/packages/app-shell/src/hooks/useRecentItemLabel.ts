@@ -60,7 +60,8 @@
 import { useMemo } from 'react';
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { RecentItem } from '../context/RecentItemsProvider.js';
-import { bundledFirst, useBundledReads, useMetadata } from '../providers/MetadataProvider.js';
+import { useMetadata } from '../providers/MetadataProvider.js';
+import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
 import { findByName, metadataText, useNavTargetLabel, type LabelledRecord } from './useNavTargetLabel.js';
 
 /** Answers the display text of a recent entry, in the current language. */
