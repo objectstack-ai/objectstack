@@ -16,7 +16,7 @@ objectExtensions: [{
     industry: {
       label: 'Sector',
       inlineHelpText: 'The market the account sells into',
-      options: { tech: { label: 'Technology' } },
+      options: { technology: { label: 'Tech' } },
     },
   },
 }]

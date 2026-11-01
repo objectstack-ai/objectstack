@@ -17,7 +17,7 @@ ADR-0146 D10's second rule, live. The per-field display patch an object extensio
 objectExtensions: [{
   extend: 'crm_account',
   fieldPatches: {
-    industry: { label: 'Sector', inlineHelpText: 'The market the account sells into', options: { tech: { label: 'Technology' } } },
+    industry: { label: 'Sector', inlineHelpText: 'The market the account sells into', options: { technology: { label: 'Tech' } } },
   },
 }]
 ```
