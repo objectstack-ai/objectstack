@@ -522,6 +522,9 @@ const PARAM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record
     { label: '(none)', query: {} },
     { label: '?id=crm', param: 'id', query: { id: 'crm' } },
     { label: '?id=nope', param: 'id', query: { id: 'nope' } },
+    // [#28548] An EMPTY app name is refused (400 VALIDATION_ERROR) on both
+    // transports, never read as absent.
+    { label: '?id= (empty)', param: 'id', query: { id: '' } },
     { label: '?object=lead', param: 'object', query: { object: 'lead' } },
     { label: '?object=nope', param: 'object', query: { object: 'nope' } },
     { label: '?include=content', param: 'include', query: { include: 'content' } },
@@ -680,6 +683,8 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         const { read } = bootRest('holder');
         expect(names((await read('/meta/app', { id: 'crm' })).items)).toEqual(['crm']);
         expect((await read('/meta/app', { id: 'nope' })).items).toEqual([]);
+        const blank = await read('/meta/app', { id: '' });
+        expect({ status: blank.status, code: blank.code, items: blank.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         expect(names((await read('/meta/view', { object: 'lead' })).items)).toEqual(['lead_mine', 'lead_all']);
         expect((await read('/meta/views', { object: 'nope' })).items).toEqual([]);
         const docs = await read('/meta/docs');
