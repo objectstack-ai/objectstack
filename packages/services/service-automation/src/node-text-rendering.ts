@@ -3,7 +3,8 @@
 /**
  * The node-level helpers of {@link AutomationEngine}'s DAG traversal: the
  * node-type vocabulary checks a run makes, a failed node's error variable, and
- * the rendering of refusal messages and flow text slots.
+ * the rendering of refusal messages, a flow's terminal text (#28054) and flow
+ * text slots.
  *
  * [#25222] Slice 7 of the `engine.ts` split, move-only. Each function here is
  * the body of the `AutomationEngine` method of the same name, moved unedited.
@@ -22,7 +23,7 @@ import { collectFlowGraphs } from '@objectstack/spec/automation';
 // `../guard-refusal.js` and package-external contracts, so nothing it pulls in
 // reaches back here.
 import { renderTextSlot, FlowTextTemplateError } from './builtin/template.js';
-import { flowRefusalMessageKey } from '@objectstack/spec/system';
+import { flowRefusalMessageKey, flowTerminalMessageKey, type FlowTerminalMessageKey } from '@objectstack/spec/system';
 // The value below (`negotiatedServiceLocale`) is read only inside the function
 // bodies, at call time, never while a module is evaluating, so the import cycle
 // with ./engine.js is safe under ESM live bindings; the tsup bundle is one file
@@ -111,6 +112,40 @@ export function renderRefusalMessage(
         variables,
         context,
     );
+}
+
+/** The body of {@link AutomationEngine.renderFlowTerminalMessage}; that method's docblock is its contract. */
+export function renderFlowTerminalMessage(
+    this: Pick<NodeTextRenderingHost, 'renderFlowTextSlot' | 'logger'>,
+    flowName: string,
+    key: FlowTerminalMessageKey,
+    authored: string | undefined,
+    variables: Map<string, unknown>,
+    context: AutomationContext,
+): string | undefined {
+    if (authored === undefined) return undefined;
+    try {
+        return this.renderFlowTextSlot(
+            {
+                key: flowTerminalMessageKey(flowName, key),
+                authored,
+                subject: `flow '${flowName}' ${key}`,
+                shownAs: `the ${key}`,
+            },
+            variables,
+            context,
+        );
+    } catch (err: unknown) {
+        if (!(err instanceof FlowTextTemplateError)) throw err;
+        // The run has already ended, and its verdict and history row stand: a
+        // terminal text that cannot render is left off the result, so the
+        // caller shows its own sentence, never the template's raw holes.
+        this.logger.warn(
+            `[automation] flow '${flowName}': its ${key} did not render (${err.message}), so the run's result ` +
+            `carries no ${key} and the caller shows its own sentence. The run's own outcome is unaffected.`,
+        );
+        return undefined;
+    }
 }
 
 /** The body of {@link AutomationEngine.renderFlowTextSlot}; that method's docblock is its contract. */

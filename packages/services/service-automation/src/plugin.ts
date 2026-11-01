@@ -575,6 +575,28 @@ export function nonHostDeclaringPackageOf(
     return declaresSameProviderBinding(entry, declaration, stamp) ? undefined : { packageId: stamp, why: 'stored' };
 }
 
+/**
+ * [#28713] Whether the kernel this plugin runs on dispatches its boot-phase
+ * hooks (`kernel:bootstrapped` among them) once every plugin has started —
+ * the kernel's own `dispatchesBootPhaseHooks()`. Only then may the `start()`
+ * reconcile leave stored entries to the `kernel:bootstrapped` pass.
+ *
+ * A host that does not say (no `getKernel`, or a kernel without the reader)
+ * answers `false`, as does a kernel that withholds the hooks: there the
+ * `start()` reconcile keeps every stored entry, so none waits for a pass that
+ * never comes.
+ */
+function kernelDispatchesBootPhaseHooks(ctx: PluginContext): boolean {
+    let kernel: unknown;
+    try {
+        kernel = typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined;
+    } catch {
+        return false;
+    }
+    const reader = (kernel as { dispatchesBootPhaseHooks?: unknown } | undefined)?.dispatchesBootPhaseHooks;
+    return typeof reader === 'function' && (reader as () => unknown).call(kernel) === true;
+}
+
 // The credential resolver lives in ./credential-resolver.ts so the engine reads
 // the same one for an `api` flow's `config.secretRef`; re-exported unchanged.
 export { defaultEnvCredentialResolver, type CredentialResolver };
@@ -1305,6 +1327,24 @@ export class AutomationServicePlugin implements Plugin {
      * `start()` runs no second reconcile.
      */
     private reconciledDeclaration?: string;
+    /**
+     * [#28713] Whether a reconcile leaves STORED entries (rows of the
+     * environment, {@link nonHostDeclaringPackageOf}) for later. True from
+     * `start()` until the `kernel:bootstrapped` pass, on a kernel that
+     * dispatches that pass ({@link kernelDispatchesBootPhaseHooks}).
+     *
+     * A connector plugin registers its connector in its own `start()`, after
+     * this plugin's. A stored entry the `start()` reconcile materialized
+     * would take the name before the plugin's registration arrives, and the
+     * plugin's registration is then refused (ADR-0097 §4, no silent
+     * precedence) — a refusal inside that plugin's `start()`, which fails the
+     * boot. Held until every plugin has started, the stored entry meets the
+     * plugin's connector instead, as on a running platform: the §4 conflict
+     * is logged and the stored entry skipped, the plugin's connector served.
+     */
+    private holdStoredEntries = false;
+    /** [#28713] A reconcile held at least one stored entry, so the `kernel:bootstrapped` pass must run. */
+    private storedEntriesHeld = false;
     /** Serializes reconcile runs — see {@link materializeDeclaredConnectors}. */
     private reconcileQueue: Promise<void> = Promise.resolve();
     private destroyed = false;
@@ -2211,6 +2251,12 @@ export class AutomationServicePlugin implements Plugin {
         // #27237, a `credentialRef` no source answers for (it materializes once the
         // credential is set) or one its upstream refuses (CONNECTOR_CREDENTIAL_REJECTED).
         // An operational blip in one integration must not take the whole app down.
+        // [#28713] Stored entries (rows of the environment) wait for the
+        // `kernel:bootstrapped` pass below, when the kernel dispatches it: a
+        // connector plugin that starts after this one registers its connector
+        // first, so a stored entry under its name is skipped, not served in
+        // its place. See {@link holdStoredEntries}.
+        this.holdStoredEntries = kernelDispatchesBootPhaseHooks(ctx);
         await this.materializeDeclaredConnectors(ctx, { fatal: true });
 
         // ── [#28591] Connectors registered after start(), during the boot ─────
@@ -2694,8 +2740,10 @@ export class AutomationServicePlugin implements Plugin {
      * [#28591] Reconcile once more at `kernel:bootstrapped`, only when the
      * registry's connector declaration differs from the one the last reconcile
      * read — i.e. a plugin registered (or changed) a provider-bound entry after
-     * the boot reconcile in `start()`. A boot that registered nothing more runs
-     * no second reconcile.
+     * the boot reconcile in `start()`, or [#28713] that reconcile held stored
+     * entries ({@link holdStoredEntries}), which are reconciled here, once
+     * every plugin's connectors are registered. A boot that registered
+     * nothing more and held nothing runs no second reconcile.
      *
      * Reload semantics (`fatal: false`): an entry registered here arrives the
      * way a hot install's does, so a configuration fault in it is logged and
@@ -2705,9 +2753,15 @@ export class AutomationServicePlugin implements Plugin {
      */
     private reconcileConnectorsRegisteredDuringBoot(ctx: PluginContext): Promise<void> {
         return this.onReconcileQueue(async () => {
+            // [#28713] Every plugin has started: stored entries are reconciled
+            // from here on, and this pass reconciles the ones held so far.
+            this.holdStoredEntries = false;
+            const held = this.storedEntriesHeld;
+            this.storedEntriesHeld = false;
             if (!this.engine || this.destroyed) return;
             const declared = await this.readDeclaredConnectorItems(ctx, { post: false });
-            if (!declared || declaredInstanceFingerprint(declared) === this.reconciledDeclaration) return;
+            if (!declared) return;
+            if (!held && declaredInstanceFingerprint(declared) === this.reconciledDeclaration) return;
             try {
                 await this.reconcileDeclaredConnectors(ctx, { fatal: false });
             } catch (err) {
@@ -2814,6 +2868,11 @@ export class AutomationServicePlugin implements Plugin {
             if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
             const bound = entry as DeclaredConnectorItem & { name: string; provider: string };
             if (bound.enabled === false) continue;
+            // [#28713] Held until every plugin has started ({@link holdStoredEntries}).
+            if (this.holdStoredEntries && storedEntry(bound)) {
+                this.storedEntriesHeld = true;
+                continue;
+            }
             if (desired.has(bound.name)) {
                 fail(
                     `[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be unique (ADR-0097).`,
