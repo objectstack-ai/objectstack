@@ -32,7 +32,7 @@
  *    object page itself uses — so an entry names the same view it opens;
  *  - a dashboard's `label` from `dashboards`, read ONLY when a dashboard target
  *    is asked about. One list request for the whole type (the cache's), never
- *    one per nav entry; the console's `NavigationSyncEffect` loads it anyway.
+ *    one per nav entry.
  *
  * Nothing is written back and nothing is memoised across metadata versions, so
  * a renamed target shows its new name on the next render (the ruling accepts a

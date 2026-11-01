@@ -42,12 +42,29 @@
  * record picked), not a value of another type. An absent `type` is the parse's
  * default, `string`, and is judged as one — the console reads it so too.
  *
- * Out of scope here, and NOT judged: a `source` naming a component the page
- * does not hold, and a predicate reading a `page.NAME` the page does not
- * declare.
+ * ## A `source` the page does not hold (#28725)
+ *
+ * `source` names the component that WRITES the variable: the console binds a
+ * writer element by `definitions.find((d) => d.source === schema.id)`
+ * (`usePageVariableBinding`), the element's own `id` compared exactly. A
+ * `source` no component on the page carries therefore binds nothing — no
+ * element ever writes the variable, and it holds its default for the page's
+ * whole life while the author believes a picker feeds it.
+ *
+ * The page's component ids are read through `walkPageComponents`, the one
+ * traversal every page rule shares (regions, slots, and the sub-trees inside
+ * `properties`), so a writer nested in a container is found where the console
+ * renders it. A source-authored (`html` / `react`) page is not judged: its
+ * components live in the `source`, which that walk deliberately does not read,
+ * so "absent" there carries no information.
+ *
+ * A predicate reading a `page.NAME` the page does not declare is the
+ * visibility family's verdict (`visibility-page-variable-undeclared`, in
+ * `validate-visibility-predicates.ts`), where the predicate is already parsed.
  */
 
 import { collectionEntries } from './collection-entries.js';
+import { isSourceAuthoredPage, walkPageComponents } from './page-walk.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -57,6 +74,8 @@ export const PAGE_VARIABLE_NAME_DUPLICATE = 'page-variable-name-duplicate';
 export const PAGE_VARIABLE_NAME_EMPTY = 'page-variable-name-empty';
 /** An entry's `defaultValue` is not a value of its declared `type`. */
 export const PAGE_VARIABLE_DEFAULT_TYPE = 'page-variable-default-type';
+/** An entry's `source` names no component the page holds (#28725). */
+export const PAGE_VARIABLE_SOURCE_UNKNOWN = 'page-variable-source-unknown';
 
 export interface PageVariableFinding {
   severity: 'error';
@@ -145,6 +164,18 @@ export function validatePageVariables(stack: AnyRec): PageVariableFinding[] {
     if (!Array.isArray(page.variables)) continue;
     const where = `page "${typeof page.name === 'string' ? page.name : pagePath}"`;
     const firstIndex = new Map<string, number>();
+    // The ids of the components the page holds, read once and only when some
+    // entry names a `source` (see the module note §A `source` the page does
+    // not hold).
+    let componentIds: Set<string> | undefined;
+    const holdsComponent = (id: string): boolean => {
+      componentIds ??= new Set(
+        walkPageComponents(page, pagePath)
+          .map(({ component }) => component.id)
+          .filter((cid): cid is string => typeof cid === 'string'),
+      );
+      return componentIds.has(id);
+    };
 
     for (let i = 0; i < page.variables.length; i++) {
       const v = page.variables[i];
@@ -173,6 +204,22 @@ export function validatePageVariables(stack: AnyRec): PageVariableFinding[] {
           hint:
             `Give it ${TYPE_NOUN[type] ?? `a ${type}`} as \`defaultValue\` (or omit it for ` +
             `\`${EMPTY_VALUE[type] ?? 'the empty value'}\`), or declare the \`type\` the default has`,
+        });
+      }
+
+      if (typeof variable.source === 'string' && !isSourceAuthoredPage(page) && !holdsComponent(variable.source)) {
+        const label = name && name.trim() ? `\`${name}\`` : `#${i}`;
+        findings.push({
+          severity: 'error',
+          rule: PAGE_VARIABLE_SOURCE_UNKNOWN,
+          where,
+          path: `${at}.source`,
+          message:
+            `page variable ${label} names \`${variable.source}\` as its \`source\`, but no component on this ` +
+            'page has that `id`, so nothing ever writes the variable and it keeps its default value',
+          hint:
+            'Set `source` to the `id` of the component that writes the variable (e.g. the record picker), ' +
+            'give that component the `id`, or drop `source` if nothing on the page writes it',
         });
       }
 

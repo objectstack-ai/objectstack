@@ -346,6 +346,14 @@ export const GetPackageCustomizationsRequestSchema = lazySchema(() => z.object({
  *
  * X with no `.custom` package answers empty lists and zero counts (the read
  * never creates the pair); the switched-off list does not depend on the pair.
+ *
+ * [#28722, ADR-0029 D7 as amended by ADR-0146 D3] Beside the pair's changes,
+ * the same read names what OTHER installed packages bring to X's surface, so
+ * Studio can draw those items greyed with their source: `contributions`, one
+ * entry per item, each stamped with the package that contributes it. The
+ * stamp is on the item, so two packages adding a field of the same name are
+ * two entries and nothing is joined by name on the client. X's own items and
+ * the pair's (listed above) are never contributions.
  */
 export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object({
   packageId: z.string().describe('The base package the customizations are of (the request\'s id).'),
@@ -390,12 +398,34 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
     'Every activation-ledger row (`sys_metadata_activation`) that records the base as its package and '
     + '`active: false`: the base\'s items this deployment switched off. Ordered by type and name.',
   ),
+  contributions: z.array(z.object({
+    kind: z.enum(['field', 'flow']).describe(
+      'What is contributed: `field`, a field another package\'s object extension (`objectExtensions`) adds to '
+      + 'one of the base\'s objects; `flow`, a flow another package ships whose trigger object (its `start` '
+      + 'node\'s `config.objectName`) is one of the base\'s objects.',
+    ),
+    object: z.string().describe('The base-owned object the item is on: the extended object, or the flow\'s trigger object.'),
+    name: z.string().describe('The item\'s name: the field name as the extension declares it, or the flow\'s name.'),
+    packageId: z.string().describe(
+      'The package that contributes the item: the extension\'s package, or the package the flow is registered '
+      + 'under. Never the base and never its `<base>.custom` pair.',
+    ),
+  }).strict()).describe(
+    'Every field and flow another installed package contributes to the base\'s objects, one entry per item and '
+    + 'contributing package: the fields of every object extension of an object the base owns, from any package '
+    + 'but the base and its pair, and every flow registered under such a package whose trigger object the base '
+    + 'owns (a flow of a disabled package is not served, so not listed). Ordered by object, kind, name and package.',
+  ),
   counts: z.object({
     overrides: z.number().int().nonnegative().describe('`overrides.length`.'),
     extensions: z.number().int().nonnegative().describe('`extensions.length`: members, not objects.'),
     switchedOff: z.number().int().nonnegative().describe('`switchedOff.length`.'),
+    contributions: z.number().int().nonnegative().describe('`contributions.length`: items, not packages.'),
   }).strict().describe('Each list\'s length, derived from the lists in this same answer.'),
-}).strict().describe('Per-package customization read: overrides, extensions and switched-off items of one installed base.'));
+}).strict().describe(
+  'Per-package customization read: overrides, extensions and switched-off items of one installed base, and the '
+  + 'fields and flows other packages contribute to it.',
+));
 
 /**
  * The request of `ensureCustomizationPackage` — the ONE creation path of a

@@ -57,7 +57,6 @@ import { ObjectNotFoundState } from '../views/ObjectView.js';
 import { KeyboardShortcutsDialog } from '../chrome/KeyboardShortcutsDialog.js';
 import { OnboardingWalkthrough } from '../chrome/OnboardingWalkthrough.js';
 import { RouteFader } from '../chrome/RouteFader.js';
-import { NavigationSyncEffect } from '../hooks/useNavigationSync.js';
 import { AppNoAccessEmptyState } from './AppNoAccessEmptyState.js';
 import { appNamesOnlyUnreadableObjects, appServesNoNavigation } from './appServesNoNavigation.js';
 import { resolveDeclaredLandingRoute, type LandingVisibilityEvaluator } from './appDeclaredLanding.js';
@@ -1452,7 +1451,6 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         currentUserId={user?.id ?? null}
         currentOrgId={activeOrganization?.id ?? null}
       >
-      <NavigationSyncEffect />
       <ConsoleLayout
         activeAppName={activeApp.name}
         activeApp={activeApp}

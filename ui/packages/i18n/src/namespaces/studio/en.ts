@@ -3250,9 +3250,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.name': 'Organization flows',
   'engine.studio.org.hint': 'Flows that belong to no package',
   'engine.studio.org.description': 'The organization’s own flows that belong to no package, such as a clone of a packaged flow. They open editable.',
-  'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
-  // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
-  'engine.studio.org.openSetup': 'Open in Setup',
+  // ADR-0146 D11 — no link out: no Setup page copies a flow into this scope any more.
+  'engine.studio.org.none': 'No flows outside a package. To change a packaged flow, open its package and use New similar.',
   // objectstack#28561 — the "All metadata" area's cross-package leg: the
   // environment catalog, entered from the landing.
   'engine.studio.landing.envCatalog.name': 'Environment catalog',
