@@ -12,9 +12,9 @@
  *
  * `NavigationSyncEffect` used to read the whole `page` and `dashboard` lists on
  * every app page and diff their name sets. Maintainer ruling A retired it: the
- * console's create and delete sites call `useNavigationWrites()` instead. This
- * suite pins that the effect now reads and writes nothing, and that the site
- * door keeps the diff's rules: platform artifacts (sys_ names, package
+ * console's create and delete sites call `useNavigationWrites()` instead, and
+ * the effect is gone. This suite pins that the site door keeps the diff's
+ * rules, and reads neither list: platform artifacts (sys_ names, package
  * provenance) never write navigation, write-protected apps are skipped, draft
  * preview writes nothing, and a second create of the same page adds no second
  * entry.
@@ -25,7 +25,6 @@ import { render, waitFor } from '@testing-library/react';
 import { MetadataCtx, AdapterCtx, type MetadataContextValue, type MetadataTypeStatus } from '@object-ui/react';
 import { useEffect } from 'react';
 import {
-  NavigationSyncEffect,
   useNavigationWrites,
   isSystemArtifactName,
   isPlatformArtifact,
@@ -33,7 +32,6 @@ import {
   isNavigationTargetType,
   navigationReferences,
 } from '../useNavigationSync';
-import { __markFirstPainted } from '../sharedUserFeeds';
 import { MemoryRouter } from 'react-router-dom';
 import { PreviewModeProvider } from '../../preview/PreviewModeContext';
 
@@ -164,36 +162,6 @@ function makeAdapter(saveItem: ReturnType<typeof vi.fn>) {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 const crm = { name: 'crm', label: 'CRM', navigation: [] };
-
-// ---------------------------------------------------------------------------
-// NavigationSyncEffect — retired
-// ---------------------------------------------------------------------------
-
-describe('NavigationSyncEffect is retired (objectstack#28680)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    __markFirstPainted();
-  });
-
-  it('reads neither list and writes nothing, even when a page and a dashboard appear', async () => {
-    const saveItem = vi.fn().mockResolvedValue({});
-    const read = new Set<string>();
-    const tree = (world: World) => (
-      <AdapterCtx.Provider value={makeAdapter(saveItem)}>
-        <MetadataCtx.Provider value={metaValue(world, read)}>
-          <NavigationSyncEffect />
-        </MetadataCtx.Provider>
-      </AdapterCtx.Provider>
-    );
-    const { rerender } = render(tree({ apps: [crm], pages: [], dashboards: [] }));
-    await flush();
-    rerender(tree({ apps: [crm], pages: [{ name: 'my_page' }], dashboards: [{ name: 'my_dash' }] }));
-    await flush();
-
-    expect([...read]).toEqual([]);
-    expect(saveItem).not.toHaveBeenCalled();
-  });
-});
 
 // ---------------------------------------------------------------------------
 // useNavigationWrites — the create / delete sites' door

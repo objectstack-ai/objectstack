@@ -17,4 +17,4 @@ The diff's rules are kept: platform artifacts (a `sys_` name, or `_packageId` / 
 
 What no longer reaches navigation: a package-less page or dashboard created or deleted outside this tab (a server-side agent, another tab, a raw REST call). The diff noticed one only when it appeared in this tab's list mid-session; it now reaches navigation only through its own writer. Items from a package install or a CLI deploy carry `_packageId` and never reached navigation through the diff.
 
-`NavigationSyncEffect` stays exported, deprecated, and renders nothing.
+`NavigationSyncEffect` is removed. `@object-ui/app-shell` is private and nothing outside it imported the effect.

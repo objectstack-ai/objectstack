@@ -620,8 +620,9 @@ export interface UseNavigationWritesReturn {
  * The navigation writes a page or dashboard create or delete makes, called by
  * the console site that made it (objectstack#28680, maintainer ruling A).
  *
- * This replaces `NavigationSyncEffect`, which read the whole `/meta/page` and
- * `/meta/dashboard` lists on every app page to diff their name sets. It keeps
+ * It replaces the retired `NavigationSyncEffect`, which read the whole
+ * `/meta/page` and `/meta/dashboard` lists on every app page to diff their
+ * name sets. It keeps
  * that diff's rules, so the same items reach navigation from the console:
  *
  *  - only a `page` or a `dashboard`;
@@ -677,21 +678,4 @@ export function useNavigationWrites(): UseNavigationWritesReturn {
   );
 
   return { created, deleted };
-}
-
-// ============================================================================
-// NavigationSyncEffect — retired (objectstack#28680)
-// ============================================================================
-
-/**
- * @deprecated Retired by objectstack#28680; renders nothing and reads nothing.
- *
- * It read the whole `/meta/page` and `/meta/dashboard` lists on every app page
- * and diffed their name sets to write app navigation. The console's create and
- * delete sites now write navigation themselves through
- * {@link useNavigationWrites}. Kept as an inert export so a host that still
- * mounts it keeps compiling.
- */
-export function NavigationSyncEffect(): null {
-  return null;
 }

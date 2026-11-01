@@ -2,13 +2,10 @@
  * ObjectUI
  * Copyright (c) 2024-present ObjectStack Inc.
  *
- * objectui#12980, part 3 — two shell readers that mount UNDER the boot splash
- * wait for the page's first paint, not the splash's:
+ * objectui#12980, part 3 — shell readers that mount UNDER the boot splash
+ * wait for the page's first paint, not the splash's (objectstack#28680 retired a
+ * third, `NavigationSyncEffect`):
  *
- *   - `NavigationSyncEffect` read the `pages` / `dashboards` lists (lazy
- *     getters: reading one starts its `/meta/:type` read) only once the splash
- *     was gone. objectstack#28680 retired it: it now reads neither list, before
- *     or after the first paint;
  *   - the bell's Activity feed, until the bell asks for it, does not even ask
  *     whether `sys_activity` exists: inside an app that answer is its own
  *     by-name read through the app's object scope, which used to go out in
@@ -40,7 +37,6 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 }));
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-import { NavigationSyncEffect } from '../useNavigationSync';
 import { useSignedInUserLocale } from '../useUserLocale';
 import { __resetFirstPaint, useSharedActivityFeed } from '../sharedUserFeeds';
 import { ExpressionProvider } from '../../providers/ExpressionProvider';
@@ -72,52 +68,6 @@ afterEach(() => {
   splash?.remove();
   splash = null;
   vi.restoreAllMocks();
-});
-
-describe('NavigationSyncEffect reads neither list, before or after the first paint (objectui#12980, objectstack#28680)', () => {
-  function metadataRecording(read: Set<string>): MetadataContextValue {
-    return {
-      apps: [{ name: 'crm', label: 'CRM', navigation: [] }],
-      get pages() {
-        read.add('page');
-        return [];
-      },
-      get dashboards() {
-        read.add('dashboard');
-        return [];
-      },
-      objects: [],
-      reports: [],
-      loading: false,
-      error: null,
-      refresh: async () => {},
-      invalidate: () => {},
-      ensureType: async () => [],
-      getItem: async () => null,
-      getItemsByType: () => [],
-      getTypeStatus: () => 'ready',
-    } as unknown as MetadataContextValue;
-  }
-
-  it('reads neither list while the boot splash is up, nor once it is gone', async () => {
-    const read = new Set<string>();
-    const adapter = { getClient: () => ({ meta: { saveItem: vi.fn() } }) } as unknown as React.ComponentProps<
-      typeof AdapterCtx.Provider
-    >['value'];
-    render(
-      <AdapterCtx.Provider value={adapter}>
-        <MetadataCtx.Provider value={metadataRecording(read)}>
-          <NavigationSyncEffect />
-        </MetadataCtx.Provider>
-      </AdapterCtx.Provider>,
-    );
-    await someFrames();
-    expect([...read]).toEqual([]);
-
-    dropSplash();
-    await someFrames();
-    expect([...read]).toEqual([]);
-  });
 });
 
 describe('useSignedInUserLocale reads the user row after the first paint (objectui#12980)', () => {
