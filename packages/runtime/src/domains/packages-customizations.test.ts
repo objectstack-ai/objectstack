@@ -37,6 +37,7 @@ import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObje
 import { ObjectStoreMetadataActivationStore } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { ROUTE_LEDGER } from '../route-ledger.js';
 
 const BASE = 'com.example.showcase';
 const PAIR = 'com.example.showcase.custom';
@@ -299,6 +300,12 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
         });
         const parsed = GetPackageCustomizationsResponseSchema.safeParse(data);
         expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    });
+
+    it('the route ledger names the response schema this suite parses the answer with', () => {
+        const row = ROUTE_LEDGER.find((r) => r.route === 'GET /packages/:id/customizations');
+        expect(row?.responseSchema).toBe('GetPackageCustomizationsResponseSchema');
+        expect(row?.client).toBe('packages.customizations');
     });
 
     it('AGREEMENT: every listed override is the item the layered read of the base\'s name reports as `overlay`', async () => {
