@@ -1,8 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * PackagedActionsSection — the packaged-ACTIONS half of Setup › Packaged
- * automation (ADR-0126 §7.4 page, §8 item 2 charter, amendment ruling 3).
+ * PackagedActionsSection — Setup › Packaged actions (ADR-0126 §7.4 page, §8
+ * item 2 charter, amendment ruling 3), the half of Setup › Packaged automation
+ * that stayed in Setup when objectstack ADR-0146 D11 retired that page: D4 keeps
+ * the action switch here, and the flows half moved into Studio.
  *
  * The maintainer's pull, verbatim and untranslated:
  *
@@ -14,7 +16,8 @@
  * That is all the `sys_metadata_activation` ledger knows about an action, and
  * the section claims nothing more.
  *
- *   ⛔ **No clone.** The flows section beside it clones (ADR-0126 §7.1);
+ *   ⛔ **No clone.** A packaged flow is copied (ADR-0126 §7.1; Studio's New
+ *      similar since objectstack ADR-0146 D4);
  *      ruling 3 charters the SWITCH for actions and nothing else, and §8 item 2
  *      keeps the clone half pre-chartered until real pull appears. A clone
  *      button here would advertise machinery that does not exist — which is
@@ -191,6 +194,12 @@ export interface PackagedActionsSectionProps {
    * the two halves show states read at different moments with nothing saying so.
    */
   nonce?: number;
+  /**
+   * Whether the section names itself (its heading and subtitle). The Packaged
+   * actions page says both in its page header, so it mounts the section
+   * without them.
+   */
+  headed?: boolean;
 }
 
 /** Row identity for busy/refusal bookkeeping: the pair the flip addresses. */
@@ -198,7 +207,7 @@ function rowKey(row: Pick<PackagedActionRow, 'name' | 'objectName'>): string {
   return `${row.objectName}:${row.name}`;
 }
 
-export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProps) {
+export function PackagedActionsSection({ nonce = 0, headed = true }: PackagedActionsSectionProps) {
   const { t } = useObjectTranslation();
   const { objectLabel } = useObjectLabel();
 
@@ -322,17 +331,19 @@ export function PackagedActionsSection({ nonce = 0 }: PackagedActionsSectionProp
 
   return (
     <section className="space-y-3" data-testid="packaged-actions-section">
-      <div className="space-y-1">
-        <h2 className="text-base font-semibold">
-          {t('packagedAutomation.actionsHeading', { defaultValue: 'Packaged actions' })}
-        </h2>
-        <p className="text-sm text-muted-foreground max-w-2xl">
-          {t('packagedAutomation.actionsSubtitle', {
-            defaultValue:
-              'Actions shipped by installed packages. Turn one off for this deployment and it stops running everywhere it is offered. Authoring your own action alongside it stays open in Studio.',
-          })}
-        </p>
-      </div>
+      {headed && (
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold">
+            {t('packagedAutomation.actionsHeading', { defaultValue: 'Packaged actions' })}
+          </h2>
+          <p className="text-sm text-muted-foreground max-w-2xl">
+            {t('packagedAutomation.actionsSubtitle', {
+              defaultValue:
+                'Actions shipped by installed packages. Turn one off for this deployment and it stops running everywhere it is offered. Authoring your own action alongside it stays open in Studio.',
+            })}
+          </p>
+        </div>
+      )}
 
       {loadError && (
         <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm">

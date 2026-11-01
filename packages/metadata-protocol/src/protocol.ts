@@ -11,6 +11,7 @@ import { judgePermissionSetOwnerBinding, type TenancyPosture } from '@objectstac
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
 import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [#17502] The served JSON Schema publishes what an author MAY write, so a
 // property no instance can satisfy — a `retiredKey()` tombstone, rendered
 // `{ not: {} }` — is dropped from it. See the module header for the channels
@@ -185,6 +186,7 @@ import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { customizationPackageId, isCustomizationPairOf } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { bindStoredRow } from './stored-row-binding.js';
+import { incomingTakesStoredFlowSlot } from './stored-flow-slot.js';
 import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
 // [#28413, ADR-0146 D11] The package-less overlay migration (`os migrate
 // packageless-overlays`).
@@ -14428,7 +14430,13 @@ export class ObjectStackProtocolImplementation implements
             onNotice: (message: unknown) => { if (typeof message === 'string' && message.trim() !== '') notice = message; },
         };
         if (request.context !== undefined) opts.context = request.context;
-        const result = await this.engine.insert(request.object, request.data, opts);
+        // [#28661] A roll-up that cannot recompute after the row landed throws
+        // `ERR_SUMMARY_RECOMPUTE` carrying the written row: the answer below is
+        // built from it and rides the refusal, rethrown at the end (see
+        // `summary-recompute-answer.ts`).
+        let stale: SummaryRecomputeRefusal | undefined;
+        const result = await this.engine.insert(request.object, request.data, opts)
+            .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
         // [#7823] The 201 body is a GENERIC-DATA-PATH surface: strip
         // `internal: true` fields here, at the ingress, per the A-prime ruling
         // (2026-08-13). The engine deliberately no longer strips its own write
@@ -14437,7 +14445,7 @@ export class ObjectStackProtocolImplementation implements
         // external create response. Tripwire-enforced; see
         // `write-response-internal-fields.ts`.
         omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(request.object), result);
-        return {
+        const answer = {
             object: request.object,
             id: result.id,
             record: result,
@@ -14446,6 +14454,8 @@ export class ObjectStackProtocolImplementation implements
             ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
             ...(notice !== undefined ? { notice } : {}),
         };
+        if (stale) throw withEarnedAnswer(stale, answer);
+        return answer;
     }
 
     /**
@@ -14653,7 +14663,12 @@ export class ObjectStackProtocolImplementation implements
         )
             ? { ...(request.data as Record<string, unknown>), id: request.id }
             : request.data;
-        const result = byIdUpdateRecord(await this.engine.update(request.object, writeData, opts));
+        // [#28661] The row landed even when a roll-up could not recompute after
+        // it: the answer is built from the written row and rides the refusal
+        // (see `createData`).
+        let stale: SummaryRecomputeRefusal | undefined;
+        const result = byIdUpdateRecord(await this.engine.update(request.object, writeData, opts)
+            .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any));
         // The engine resolved, so the write was authorized. A `null` readback
         // is two answers by contract (`IDataEngine.update`): the row is not
         // there, or the write moved it out of the caller's row scope
@@ -14676,7 +14691,7 @@ export class ObjectStackProtocolImplementation implements
         // `api-key-hash-not-serialized.dogfood.test.ts` and the ingress
         // tripwire.
         omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(request.object), result);
-        return {
+        const answer = {
             object: request.object,
             id: request.id,
             record: result,
@@ -14685,6 +14700,8 @@ export class ObjectStackProtocolImplementation implements
             ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
             ...(notice !== undefined ? { notice } : {}),
         };
+        if (stale) throw withEarnedAnswer(stale, answer);
+        return answer;
     }
 
     async deleteData(request: { object: string, id: string, expectedVersion?: string, context?: any }) {
@@ -14692,7 +14709,11 @@ export class ObjectStackProtocolImplementation implements
         await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
-        const deleted = await this.engine.delete(request.object, opts);
+        // [#28661] The row is gone even when a roll-up could not recompute
+        // after it: the answer rides the refusal (see `createData`).
+        let stale: SummaryRecomputeRefusal | undefined;
+        const deleted = await this.engine.delete(request.object, opts)
+            .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
         // [#4435] `success: true` used to be a LITERAL — the response said the
         // same thing for a real deletion, an already-deleted row and a typo'd
         // id, so nothing on the wire could tell them apart. The driver contract
@@ -14731,11 +14752,13 @@ export class ObjectStackProtocolImplementation implements
         // Everything else keeps its #4435 reading, including an off-contract
         // `undefined` from a third-party driver: only a POSITIVE zero is read
         // as "not removed".
-        return {
+        const answer = {
             object: request.object,
             id: request.id,
             success: deleted !== 0
         };
+        if (stale) throw withEarnedAnswer(stale, answer);
+        return answer;
     }
 
     /**
@@ -17314,14 +17337,19 @@ export class ObjectStackProtocolImplementation implements
      * second code package's claim on the name, ADR-0029 D3), and its artifact
      * lookup reads the owner's layer whatever package is asked for, so the
      * owner is the whole set.
+     *
+     * [#28746] `member` — one bundle member's artifacts, for a type whose
+     * identity is a pair (the override write gate's question, which asks
+     * about the member a write addresses). Omitted, the bundle's artifact
+     * canonical-first, as before: a lock binds the NAME.
      */
-    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
+    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages, member?: string): unknown[] {
         // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
         const host: ThisParameterType<typeof shippedArtifactsOf> = {
             lookupArtifactItem: (...a) => this.lookupArtifactItem(...a),
             shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
-        return shippedArtifactsOf.call(host, type, name, shipping);
+        return shippedArtifactsOf.call(host, type, name, shipping, member);
     }
 
     /**
@@ -18679,10 +18707,12 @@ export class ObjectStackProtocolImplementation implements
      * suggestion of an `isDefault` set) saw the item as unowned: on a host
      * kernel until the next list read, and on an environment kernel that
      * hydrates its own store until never. ⛔ No owner is derived: the binding is
-     * only read, a body that already names a `_packageId` keeps it, a row with
-     * no binding stays unowned, and an artifact's envelope still wins over the
-     * stamp ({@link mergeArtifactProtection}). The expansions of a view
-     * container are registered from the unstamped row, as before.
+     * only read, and since #28673 the column wins over the body — a body that
+     * names a different `_packageId` has it replaced by the row's binding, and
+     * a row with no binding has a body stamp dropped, so it stays unowned. An
+     * artifact's envelope still wins over the stamp
+     * ({@link mergeArtifactProtection}). The expansions of a view container are
+     * registered from the stamped row too ({@link hydrateExpandedViewItems}).
      *
      * ## [#9111] `type` is an ASSERTED input, not a silently-trusted one
      *
@@ -18837,7 +18867,20 @@ export class ObjectStackProtocolImplementation implements
         // ({@link bindStoredRow}): the pull arms the shipping package's
         // declared override over the loader's body only when the column, not
         // a stamp in the body, binds the row to that package's `.custom` pair.
-        if (canonicalType === 'flow') bindStoredRow(registered, options.packageId ?? null);
+        if (canonicalType === 'flow') {
+            bindStoredRow(registered, options.packageId ?? null);
+            // [#28717] …and the shipping package's declared override keeps the
+            // name's one bare slot over any other stored row of the name, in
+            // whatever order the store reads them, so the boot pull arms it
+            // from the first pull. The row that loses stays stored and is
+            // carried on the override's body for the boot pull to name
+            // ({@link incomingTakesStoredFlowSlot}).
+            const held = typeof registry.getItem === 'function'
+                ? registry.getItem(type, String((data as any).name))
+                : undefined;
+            const owner = this.packagedArtifactOwner({ type, name: String((data as any).name) });
+            if (!incomingTakesStoredFlowSlot(held, registered, owner)) return true;
+        }
         registry.registerItem(type, registered, 'name' as any);
         await this.hydrateExpandedViewItems(type, data, options);
         return true;
@@ -28965,8 +29008,10 @@ export class ObjectStackProtocolImplementation implements
                     // #5927 — was an inline `this.isArtifactBacked(...)` call
                     // with these exact arguments; now reads the method-scoped
                     // binding the receipts share. Same fact, one call fewer.
-                    // [#28412] The pair's row of an open-override type is
-                    // removed as the declared save wrote it: runtime-only.
+                    // [#28412] The pair's row of a type whose D9 conditions
+                    // are delivered (`flow` only, {@link isPairRowRemoval})
+                    // is removed as the declared save wrote it: runtime-only.
+                    // Every other type keeps the intent main gave it.
                     intent: artifactBacked && !pairRowRemoval
                         ? 'override-artifact'
                         : 'runtime-only',

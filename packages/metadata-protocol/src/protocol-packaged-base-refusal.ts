@@ -47,6 +47,7 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
+import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -341,6 +342,40 @@ export function isPairRowRemoval(type: string, basePackageId: unknown, packageId
     return pair.ok && pair.value === packageId;
 }
 
+/**
+ * [#28746, ADR-0146 D2] The bundle member an item IS, for a type whose
+ * identity is a pair (`ITEM_KEY_DISCRIMINATORS`: an `email_template` is one
+ * item per `(name, locale)`), the canonical member when the body declares
+ * none; `undefined` for every other type, whose identity is its name alone.
+ *
+ * Read off the identity table the registry keys its bundles on and the read
+ * side serves a member by (`findServedOverlayRow`, the layered read), never a
+ * type literal. The save is BODY-addressed, so the member is the body's own.
+ */
+export function overrideWriteMemberOf(type: string, item: unknown): string | undefined {
+    return itemDiscriminator(PLURAL_TO_SINGULAR[type] ?? type, item);
+}
+
+/**
+ * [#28746, ADR-0146 D2] The identity two packages' items collide on under the
+ * override write gate: `identity` (an item's name; an `action`'s
+ * `<objectName>:<name>`) joined with its bundle member
+ * ({@link overrideWriteMemberOf}) for a pair-identified type, and `identity`
+ * unchanged for every other type.
+ *
+ * The ONE spelling every door that hands the gate its `shippers` compares on:
+ * {@link overrideWriteItemsOf} (so `os validate` and the install door's
+ * incoming items), the install door's listing of an installed package, and
+ * {@link overrideWriteVerdict}'s registry lookup at the same member. A base
+ * that ships a template in `en-US` alone therefore ships no `fr-FR` member: a
+ * declared `fr-FR` override is refused (`declared_package_ships_no_such_item`),
+ * and an undeclared `fr-FR` beside it collides with nothing.
+ */
+export function overrideWriteIdentityOf(type: string, identity: string, item: unknown): string {
+    const member = overrideWriteMemberOf(type, item);
+    return member === undefined ? identity : `${identity}\u0000${member}`;
+}
+
 /** One item written into one package — what the override write gate judges. */
 export interface OverrideWriteSubject {
     /** The metadata type, either spelling (folded here). */
@@ -362,7 +397,11 @@ export interface OverrideWriteClosure {
      * admitting needs the base to be proven inside the closure.
      */
     readonly dependencies: readonly string[] | undefined;
-    /** The packages of {@link dependencies} that ship an item of this type and name. */
+    /**
+     * The packages of {@link dependencies} that ship an item of this type and
+     * name — for a pair-identified type, of this bundle member
+     * ({@link overrideWriteIdentityOf}).
+     */
     readonly shippers: readonly string[];
 }
 
@@ -425,7 +464,8 @@ function declarationOf(item: unknown): { present: boolean; base: string | undefi
  * Order: a declaration is judged on its type first (D10 `object`, D6 and the
  * other excluded types, then D9's `flow` and `action`), then on who declares
  * (the pair alone), then on what it names (inside the closure, and shipping
- * that item). An undeclared item is judged only when a package of its closure
+ * that item — for a pair-identified type, that bundle member: the caller's
+ * `shippers` are counted at {@link overrideWriteIdentityOf}). An undeclared item is judged only when a package of its closure
  * ships the same name, on a type a declared override applies to; outside the
  * closure two packages keep ADR-0048 §3.3/§3.4's coexistence on a bare name.
  */
@@ -481,8 +521,11 @@ export function judgeOverrideWrite(
                 + `Declare a dependency on '${base}' in the \`dependencies\` of '${packageId}''s manifest, or remove \`overrides\` (ADR-0146 D2).`);
         }
         if (!closure.shippers.includes(base)) {
+            // [#28746] A pair-identified type names the member it addressed.
+            const member = overrideWriteMemberOf(type, subject.item);
+            const ofMember = member === undefined ? '' : ` with ${ITEM_KEY_DISCRIMINATORS[type]?.field} '${member}'`;
             return refuse('declared_package_ships_no_such_item',
-                `${item} declares an override of '${base}', which ships no ${type} named '${name}'. `
+                `${item} declares an override of '${base}', which ships no ${type} named '${name}'${ofMember}. `
                 + `Remove \`overrides\` to keep it as '${packageId}''s own item, or correct the name (ADR-0146 D2).`);
         }
         return { verdict: 'admit', base };
@@ -513,7 +556,9 @@ export interface OverrideWriteItem {
     readonly name: string;
     /**
      * The registry identity two packages collide on: an `action` is
-     * `<objectName>:<name>` (the registry's key), every other item its name.
+     * `<objectName>:<name>` (the registry's key), every other item its name,
+     * and [#28746] a pair-identified type's item that joined with its bundle
+     * member ({@link overrideWriteIdentityOf}).
      */
     readonly identity: string;
     /** The item body the declaration is read from. */
@@ -555,7 +600,7 @@ export function overrideWriteItemsOf(body: Record<string, unknown>, at = ''): Ov
             const identity = type === 'action' && typeof item.objectName === 'string' && item.objectName !== ''
                 ? `${item.objectName}:${declaredName}`
                 : declaredName;
-            out.push({ type, name: declaredName, identity, item, path });
+            out.push({ type, name: declaredName, identity: overrideWriteIdentityOf(type, identity, item), item, path });
         }
     }
     return out;
@@ -580,6 +625,11 @@ export function overrideWriteRefusalError(
  * registry (`resolveWritePackageScope`, the save door's own) and the shipping
  * packages from the artifact lookup (`shippedArtifactsOf`, the read's own),
  * then asks {@link judgeOverrideWrite}.
+ *
+ * [#28746] For a pair-identified type the lookup is at the body's bundle
+ * member ({@link overrideWriteMemberOf}), and an artifact of another member is
+ * no shipper: a registry that ignores `member` can answer one, as
+ * `mergeArtifactProtection` guards on the read side.
  */
 export function overrideWriteVerdict(
     this: Pick<PackagedBaseRefusalHost, 'isWritablePackage' | 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
@@ -597,10 +647,12 @@ export function overrideWriteVerdict(
     // fact about the package, not about the item.
     if (packageId !== undefined && scope === undefined) return NOT_CONCERNED;
     const dependencies = scope?.dependencies.filter((id) => id !== packageId);
+    const member = overrideWriteMemberOf(request.type, request.item);
     const shippers = dependencies === undefined || dependencies.length === 0
         ? []
         : Array.from(new Set(
-            this.shippedArtifactsOf(request.type, request.name)
+            this.shippedArtifactsOf(request.type, request.name, undefined, member)
+                .filter((a) => overrideWriteMemberOf(request.type, a) === member)
                 .map((a) => (a as { _packageId?: unknown } | null | undefined)?._packageId)
                 // An override replaces an item of an INSTALLED, read-only base
                 // (ADR-0146 D1): a writable package's item is edited in place

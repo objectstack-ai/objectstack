@@ -79,7 +79,6 @@ import {
   useStudioItemDraftStatus,
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
-import { packagedAutomationPath } from './BuilderLanding.js';
 import { FlowItemMoreMenu, type FlowCopied } from './FlowItemMoreMenu.js';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
@@ -175,7 +174,6 @@ import {
   Clock,
   MousePointerClick,
   CornerDownRight,
-  ArrowUpRight,
   FileQuestion,
   PackageX,
   Library,
@@ -10760,14 +10758,10 @@ export function AutomationsPillar({
                       action={
                         packageId === null ? (
                           // objectui#12513 — the package-less scope creates
-                          // nothing; its way in is the Setup list the sentence
-                          // names, so the action is a link that says it leaves.
-                          <Button asChild size="sm" variant="outline">
-                            <Link to={packagedAutomationPath()} data-testid="auto-empty-open-setup">
-                              {t('engine.studio.org.openSetup', locale)}
-                              <ArrowUpRight aria-hidden="true" className="h-4 w-4" />
-                            </Link>
-                          </Button>
+                          // nothing, and since ADR-0146 D11 no Setup page
+                          // copies into it: the sentence says so, with no
+                          // link out of Studio.
+                          undefined
                         ) : (
                           openCreateFlow && (
                             <StudioEmptyStateAction

@@ -21,7 +21,7 @@
 // deliberately NOT built (#6659's triage): it is a separate maintainer-facing
 // call, not a prerequisite for labelling the ids it cannot see.
 //
-// This file makes no general claim. It pins exactly eight ids that were checked
+// This file makes no general claim. It pins exactly the ids below, each checked
 // ONE BY ONE against a repo-wide grep — `id: '<key>'` returned zero hits for
 // each of the first five on `61282f906` (`nav_jwks` on `68a1edb`), against a
 // control probe (`nav_webhooks`) that returned five — and each of which has a
@@ -57,6 +57,9 @@
 //                           entry id (example apps, docs, test fixtures) — so
 //                           for that one the grep is no evidence, and the
 //                           assertions below are the whole claim.
+//   nav_packaged_automation Setup › Packaged automation (ADR-0146 D11): its
+//                           flows half moved into Studio (D4), and its actions
+//                           half is its own entry, `nav_packaged_actions`.
 //   nav_audit_log_browser   the console's audit browser (`audit:log`), which
 //                           `@objectstack/plugin-audit` now contributes under
 //                           `nav_audit_logs` ("Audit Log"), the id its
@@ -73,7 +76,7 @@
 // ---------------------------------------------------------------------------
 // What to do when this test goes red
 // ---------------------------------------------------------------------------
-// It goes red on exactly one event: one of the eight ids comes back. That is not
+// It goes red on exactly one event: one of the listed ids comes back. That is not
 // automatically wrong — re-adding `nav_verifications`, `nav_device_codes` or
 // `nav_jwks` is a deliberate security decision (each requires enabling the read
 // on the object first — for `sys_jwks`, opening a data-API read path onto
@@ -100,6 +103,7 @@ const DEAD_SETUP_NAV_IDS = [
   'nav_device_codes',
   'nav_jwks',
   'nav_metadata',
+  'nav_packaged_automation',
   'nav_user_preferences',
   'nav_verifications',
 ] as const;

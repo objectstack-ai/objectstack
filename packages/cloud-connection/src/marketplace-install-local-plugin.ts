@@ -245,7 +245,7 @@ import type {
 import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
 // [ADR-0146 D2, #28410] The override write gate's one rule and its item walk,
 // asked at the managed install exactly as the publish doors ask them.
-import { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
+import { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
 import { judgeExtensionFieldSuffix } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
@@ -581,14 +581,20 @@ function listedItems(answer: unknown): Record<string, unknown>[] {
         : [];
 }
 
-/** An item's registry identity — `overrideWriteItemsOf`'s: an action is `<objectName>:<name>`. */
+/**
+ * An item's registry identity — `overrideWriteItemsOf`'s: an action is
+ * `<objectName>:<name>`, and [#28746] a pair-identified type's item carries its
+ * bundle member, through the gate's own `overrideWriteIdentityOf`, so an
+ * installed base's listed `en-US` template and an incoming `fr-FR` one are two
+ * items here as at the publish doors.
+ */
 function listedIdentity(type: string, item: Record<string, unknown>): string | undefined {
     const name = typeof item.name === 'string' && item.name !== '' ? item.name : undefined;
     if (name === undefined) return undefined;
     if (type === 'action' && typeof item.objectName === 'string' && item.objectName !== '' && !name.includes(':')) {
         return `${item.objectName}:${name}`;
     }
-    return name;
+    return overrideWriteIdentityOf(type, name, item);
 }
 
 /** A `{ … }` object — not an array, not null. */
