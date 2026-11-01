@@ -1,6 +1,6 @@
 ---
 '@objectstack/spec': minor
-'@objectstack/rest': patch
+'@objectstack/rest': minor
 ---
 
 feat(rest): the record page payload carries the record's discussion, activity and attachments, and the related rows' names (#28470)
