@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 50 — compiles the package type graph once: the lib and @objectstack/spec declaration files are parsed and bound once in this worker and shared by one TypeScript Program per emitted scaffold (each `os init` template, each `os g` generator, and the canary), each with its own tsconfig and diagnostics, instead of one `tsc` child per case; the file also imports the init and generate command modules to derive both rosters; slowest CI reading 33.0 s (run 41199450735, over the five scheduled ci.yml runs 41199450735 to 41271604267, one tsc child per case) x 1.25, rounded up
 
 /**
  * PIN (#15976) — every scaffold this package emits must survive the
