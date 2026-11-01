@@ -874,6 +874,7 @@ retry):
 | A `connector_action` input value whose shape the parameter's style has no encoding for (an array of objects for `form`, an object for a `content`-typed parameter) | **The step fails before dispatch** naming the parameter, and nothing is sent |
 | A `connector_action` input that, once evaluated, breaks the action's `inputSchema` (a missing `required` parameter, a wrong `type`) | **The step fails before dispatch** with `VALIDATION_ERROR`, naming each parameter path, and nothing is sent; a `fault` edge or `try_catch` can route it. Supply the parameter or send the declared type: text is never converted, so cast it in a CEL envelope (`int()`, `double()`, `bool()`). `GET /api/v1/automation/connectors` lists the schema; `os validate` does not judge the input against the `inputSchema` yet |
 | A bad entry arrives via **runtime reload** (a Studio publish, a direct active save through `PUT /api/v1/meta/connector/:name`, or a delete, made on any replica — peers reconcile on [cluster lane 2](/docs/kernel/cluster#62-the-cluster-invalidation-family); or a dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
+| A bad entry belongs to a package **installed into the runtime** (`POST /api/v1/marketplace/install-local`), at the install or at a restart that registers the package again | Logged and **skipped**, as on a runtime reload: the boot completes and the package's other instances materialize |
 
 ## Catalog descriptors: entries without a `provider`
 

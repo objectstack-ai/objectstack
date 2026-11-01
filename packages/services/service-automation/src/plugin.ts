@@ -833,6 +833,26 @@ function connectorInstanceSignature(entry: {
 }
 
 /**
+ * [#28591] The provider-bound instances a declaration asks the reconcile for,
+ * as one comparable string: the name and {@link connectorInstanceSignature} of
+ * every named, provider-bound entry not `enabled: false`, sorted. Two reads
+ * with the same fingerprint ask for the same set of instances with the same
+ * inputs. Credential and connection state are not in it: they are read by the
+ * reconcile itself, not declared.
+ */
+function declaredInstanceFingerprint(declared: readonly unknown[]): string {
+    const parts: string[] = [];
+    for (const raw of declared) {
+        const entry = raw as DeclaredConnectorItem | undefined;
+        if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
+        if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
+        if (entry.enabled === false) continue;
+        parts.push(`${entry.name}=${connectorInstanceSignature(entry)}`);
+    }
+    return stableStringify(parts.sort());
+}
+
+/**
  * The shape of a declarative `connectors:` stack entry as it sits in the
  * ObjectQL metadata registry (registered by `registerApp` under kind
  * 'connector'). Raw authored values — Zod defaults (e.g. `enabled: true`)
@@ -1192,6 +1212,13 @@ export class AutomationServicePlugin implements Plugin {
      * pre-edit one.
      */
     private reloadedConnectors?: { items: unknown[]; owners: ReadonlySet<string> };
+    /**
+     * [#28591] The {@link declaredInstanceFingerprint} of the declaration the
+     * most recent reconcile read. The `kernel:bootstrapped` check compares the
+     * registry against it, so a boot whose registry did not change after
+     * `start()` runs no second reconcile.
+     */
+    private reconciledDeclaration?: string;
     /** Serializes reconcile runs — see {@link materializeDeclaredConnectors}. */
     private reconcileQueue: Promise<void> = Promise.resolve();
     private destroyed = false;
@@ -2100,6 +2127,20 @@ export class AutomationServicePlugin implements Plugin {
         // An operational blip in one integration must not take the whole app down.
         await this.materializeDeclaredConnectors(ctx, { fatal: true });
 
+        // ── [#28591] Connectors registered after start(), during the boot ─────
+        // The reconcile above reads the registry as `start()` leaves it. A
+        // package a plugin registers in its own `kernel:ready` handler arrives
+        // after it — the install-local rehydrate re-registers every installed
+        // package there — and announces no reload, so its connectors were never
+        // materialized until some unrelated reload. Its flows already bind: the
+        // `kernel:ready` flow sync below reads the protocol's view after the
+        // rehydrate. Connectors are read again at `kernel:bootstrapped`, which
+        // fires once every `kernel:ready` handler has settled, whatever the
+        // plugin order. See {@link reconcileConnectorsRegisteredDuringBoot}.
+        ctx.hook('kernel:bootstrapped', async () => {
+            await this.reconcileConnectorsRegisteredDuringBoot(ctx);
+        });
+
         // ── Runtime re-bind: re-sync flow triggers on 'metadata:reloaded' ──────
         // Fires on two RUNTIME events (never on a cold boot — the kernel:ready
         // bind below covers that): a dev `os dev` artifact recompile (MetadataPlugin
@@ -2549,6 +2590,36 @@ export class AutomationServicePlugin implements Plugin {
      * re-materialize. Degraded instances are retried with exponential backoff
      * ({@link DECLARATIVE_RETRY_BASE_MS}) and on every reconcile.
      */
+    /**
+     * [#28591] Reconcile once more at `kernel:bootstrapped`, only when the
+     * registry's connector declaration differs from the one the last reconcile
+     * read — i.e. a plugin registered (or changed) a provider-bound entry after
+     * the boot reconcile in `start()`. A boot that registered nothing more runs
+     * no second reconcile.
+     *
+     * Reload semantics (`fatal: false`): an entry registered here arrives the
+     * way a hot install's does, so a configuration fault in it is logged and
+     * the entry skipped, as on install — it never fails the boot. A run that
+     * throws anyway is reported at `warn`: a connector that is not live is a
+     * functional degradation, visible on `GET /automation/connectors`.
+     */
+    private reconcileConnectorsRegisteredDuringBoot(ctx: PluginContext): Promise<void> {
+        return this.onReconcileQueue(async () => {
+            if (!this.engine || this.destroyed) return;
+            const declared = await this.readDeclaredConnectorItems(ctx, { post: false });
+            if (!declared || declaredInstanceFingerprint(declared) === this.reconciledDeclaration) return;
+            try {
+                await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+            } catch (err) {
+                ctx.logger.warn(
+                    '[Automation] the connector reconcile for packages registered during the boot failed — their '
+                        + 'connector instances are not live until the next metadata reload or restart.',
+                    describeThrownForLog(err),
+                );
+            }
+        });
+    }
+
     private materializeDeclaredConnectors(ctx: PluginContext, opts: { fatal: boolean }): Promise<void> {
         // Serialize runs: boot, `metadata:reloaded`, and the degraded-retry
         // timer can all request a reconcile; concurrent runs would race the
@@ -2584,6 +2655,7 @@ export class AutomationServicePlugin implements Plugin {
         // wrote after boot.
         const declared = await this.readDeclaredConnectorItems(ctx, { post: !opts.fatal });
         if (!declared) return; // no registry, no reloaded artifact — nothing declared
+        this.reconciledDeclaration = declaredInstanceFingerprint(declared);
 
         // Report a reconcile problem: fatal (boot) throws; soft (reload) logs.
         //
