@@ -81,8 +81,8 @@ export function isConnectorUpstreamUnavailable(err: unknown): boolean {
  *
  * An upstream that accepts the credential but answers it with less than the
  * instance declares is the same outcome: an MCP server that lists only the
- * tools a credential may use, and so leaves out a tool the instance's
- * `include` names, is answered with this marker by the `mcp` provider.
+ * tools the instance's `auth` credential may use, and so leaves out a tool
+ * the instance's `include` names, is answered with this marker by the `mcp` provider.
  */
 export const CONNECTOR_CREDENTIAL_REJECTED = 'CONNECTOR_CREDENTIAL_REJECTED' as const;
 
