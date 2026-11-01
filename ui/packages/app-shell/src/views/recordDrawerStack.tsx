@@ -102,6 +102,12 @@ export interface RecordDrawerLevel {
   recordId: string;
   /** The ids of the level's sibling set, in the order its list showed them. */
   siblings?: readonly string[];
+  /**
+   * The sibling set's own name — the group or board lane the record sits in
+   * on a grouped list (objectstack#28461) — which the counter's tooltip says
+   * in place of the list's.
+   */
+  scope?: string;
   /** The record's title, learned when a level above it was opened from it. */
   title?: string;
   /** The `?tab=` the level showed when a level above it was opened. */
@@ -334,7 +340,7 @@ export function useRecordDrawerStack({
       setState((prev) => {
         const next = [...prev.path];
         const top = next[next.length - 1];
-        next[next.length - 1] = { objectName: top.objectName, recordId, siblings: top.siblings };
+        next[next.length - 1] = { objectName: top.objectName, recordId, siblings: top.siblings, scope: top.scope };
         return { ...prev, path: next };
       });
     };
@@ -402,7 +408,10 @@ export function RecordStackDrawer({
   objects: ReadonlyArray<unknown>;
   /** The list the pane opens from (`NavigationOverlay.mainContent`). */
   mainContent?: ReactNode;
-  /** The root level's set by name — the list view it came from — for the counter's tooltip. */
+  /**
+   * The root level's set by name — the list view it came from — for the
+   * counter's tooltip, unless the level names its own set (its group).
+   */
   stepScope?: string;
   onClose: () => void;
   /** The record header's 「Open as full page」 — the path from the root to the record shown, inclusive. */
@@ -476,7 +485,8 @@ export function RecordStackDrawer({
       </span>
     </nav>
   );
-  const scopedStepper = stepper && depth === 0 && stepScope ? { ...stepper, scope: stepScope } : stepper;
+  const rootScope = current?.scope ?? stepScope;
+  const scopedStepper = stepper && depth === 0 && rootScope ? { ...stepper, scope: rootScope } : stepper;
   return (
     <NavigationOverlay
       isOpen={open && !!current}
@@ -642,6 +652,12 @@ function readFromSiblings(state: unknown): readonly string[] | undefined {
     : undefined;
 }
 
+/** The name of those rows' own set — their group on a grouped list (objectstack#28461). */
+function readFromScope(state: unknown): string | undefined {
+  const scope = (state as { from?: { scope?: unknown } } | null | undefined)?.from?.scope;
+  return typeof scope === 'string' && scope !== '' ? scope : undefined;
+}
+
 /**
  * The record page's list context (objectstack#27524, Target 7). A page the
  * list row's ↗ opened carries the way back to that list in its history state
@@ -661,6 +677,7 @@ export function useRecordPageReturn(recordId: string | undefined): RecordPageRet
     const back = readReturn(location.state);
     if (!back) {
       const siblings = readFromSiblings(location.state);
+      const scope = readFromScope(location.state);
       const index = recordId && siblings ? siblings.indexOf(recordId) : -1;
       if (!recordId || !siblings || index < 0) return {};
       // The `from` state goes along unchanged: the next page has the same list.
@@ -680,6 +697,7 @@ export function useRecordPageReturn(recordId: string | undefined): RecordPageRet
           onPrevious: index > 0 ? go(siblings[index - 1]) : undefined,
           onNext: index < siblings.length - 1 ? go(siblings[index + 1]) : undefined,
           position: { index, total: siblings.length },
+          ...(scope ? { scope } : {}),
         },
       };
     }
@@ -727,6 +745,7 @@ export function useRecordPageReturn(recordId: string | undefined): RecordPageRet
         onPrevious: index > 0 ? go(siblings[index - 1]) : undefined,
         onNext: index < siblings.length - 1 ? go(siblings[index + 1]) : undefined,
         position: { index, total: siblings.length },
+        ...(top.scope ? { scope: top.scope } : {}),
       },
     };
   }, [location.state, location.pathname, location.search, recordId, navigate]);
