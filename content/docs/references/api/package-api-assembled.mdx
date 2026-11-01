@@ -112,7 +112,7 @@ Installed package row whose manifest is the assembled package body
 | **functions** | `Record<string, string \| { handler?: string; effect?: Enum<'pure' \| 'writes'> }> \| { name: string; handler?: string; packageId?: string; effect?: Enum<'pure' \| 'writes'> }[]` | optional | Named handler functions, lowered to the refs a JSON document carries |
 | **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
 | **translations** | `Record<string, { objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }>[]` | optional | I18n Translation Bundles |
-| **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
+| **objectExtensions** | `{ extend: string; fields?: Record<string, object>; fieldPatches?: Record<string, object>; label?: string; … }[]` | optional | Extensions to objects owned by other packages |
 | **picklists** | `{ name: string; label: string; description?: string; options: object[]; … }[]` | optional | Shared option lists that select fields reference by name |
 | **picklistExtensions** | `{ extend: string; options: object[] }[]` | optional | Options added to picklists owned by other packages (additive only) |
 | **apps** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Applications |
@@ -362,7 +362,7 @@ This schema accepts one of the following structures:
 | **functions** | `Record<string, string \| { handler?: string; effect?: Enum<'pure' \| 'writes'> }> \| { name: string; handler?: string; packageId?: string; effect?: Enum<'pure' \| 'writes'> }[]` | optional | Named handler functions, lowered to the refs a JSON document carries |
 | **datasourceMapping** | `{ namespace?: string; package?: string; objectPattern?: string; default?: boolean; … }[]` | optional | Centralized datasource routing rules for packages/namespaces/objects |
 | **translations** | `Record<string, { objects?: Record<string, object>; picklists?: Record<string, object>; apps?: Record<string, object>; messages?: Record<string, string>; … }>[]` | optional | I18n Translation Bundles |
-| **objectExtensions** | `{ extend: string; fields?: Record<string, object>; label?: string; pluralLabel?: string; … }[]` | optional | Extensions to objects owned by other packages |
+| **objectExtensions** | `{ extend: string; fields?: Record<string, object>; fieldPatches?: Record<string, object>; label?: string; … }[]` | optional | Extensions to objects owned by other packages |
 | **picklists** | `{ name: string; label: string; description?: string; options: object[]; … }[]` | optional | Shared option lists that select fields reference by name |
 | **picklistExtensions** | `{ extend: string; options: object[] }[]` | optional | Options added to picklists owned by other packages (additive only) |
 | **apps** | `{ name: string; label: string \| Record<string, string>; description?: string \| Record<string, string>; icon?: string; … }[]` | optional | Applications |
