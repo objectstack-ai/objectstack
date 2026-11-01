@@ -57,7 +57,7 @@ preference store, never in the object; on `navigation` only the `size` bucket
 import { Field, ObjectSchema } from '@objectstack/spec/data';
 
 export const Task = ObjectSchema.create({
-  name: 'task',
+  name: 'task', sharingModel: 'controlled_by_parent',
   fields: {
     lead: Field.masterDetail('lead', { relatedList: 'primary', relatedListFilter: { status: { $ne: 'done' } } }),
   },

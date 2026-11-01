@@ -885,10 +885,10 @@ export const CEILINGS = new Map([
   // metadata. PAID DOWN FIRST by the 403 tokens the three rows above gave up (the tab
   // strip the record page no longer has, SKILL.md 307 + navigation.md 76 + pages.md 23);
   // the card's binding budget is the package's hand-authored LINE count, +40 at most,
-  // landed at +39 (1876 -> 1915), so the package nets +583 tokens, every one of them
+  // landed at +39 (1876 -> 1915), so the package nets +593 tokens, every one of them
   // teaching the surface `main` ships today and none of it restating a sibling file.
-  //   ceil($(wc -c < skills/objectstack-ui/rules/record-page.md) / 4) == ceil(3943 / 4)
-  ['skills/objectstack-ui/rules/record-page.md', 986],
+  //   ceil($(wc -c < skills/objectstack-ui/rules/record-page.md) / 4) == ceil(3981 / 4)
+  ['skills/objectstack-ui/rules/record-page.md', 996],
 
   // ── 2026-09-22 the #19715 split — decision batch #213 item 1 ─────────────
   // The maintainer ruled the four over-500-line published SKILL.md files split
