@@ -962,6 +962,11 @@ const VISIBILITY_PREDICATE_SYNTAX_EXPLANATION: RuleExplanation = {
       'evaluate, and the console falls OPEN: the element renders unconditionally and looks exactly like ' +
       'one with no predicate at all (failing open is the console\'s settled behaviour). Every other ' +
       'predicate surface already gates a syntax fault (ADR-0032), so this one does too.',
+    'An app navigation entry\'s `visible` is judged the same way, and there the cost is the opposite ' +
+      'one: the console\'s navigation gate falls CLOSED, so an entry whose predicate does not parse is ' +
+      'hidden from every viewer, its author included. Only the syntax is judged on a navigation entry: ' +
+      'it binds `current_user`, `user`, `features` and the rest of the shell\'s roots rather than ' +
+      '`record`, so the reference checks a page predicate gets do not apply to it.',
     'Spellings from other languages do not parse: write `==` (not `===`), `!=` (not `!==` or `<>`), ' +
       '`&&` (not `and`), `||` (not `or`), `!` (not `not`). A predicate that is flawless CEL but too ' +
       'large is `visibility-predicate-over-budget` instead.',
@@ -2710,6 +2715,53 @@ const PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION: RuleExplanation = {
       'save door (Studio, REST, MCP) — so the page does not validate or save until the block is ' +
       'replaced with a printable one or removed. A page that is not a document should not declare ' +
       '`print`: delete the declaration and the subset no longer applies.',
+  ],
+};
+
+// ── Page variables (`validate-page-variables.ts`) ───────────────────────────
+
+const PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-name-duplicate',
+  covers: 'why a page variable name may be declared only once',
+  paragraphs: [
+    'A page variable is page-local state that predicates read as `page.NAME` and an element writes ' +
+      'through its `source` binding. The console seeds the page\'s variable store from the declarations ' +
+      'in order, so a second declaration of the same name silently replaces the first: the first one\'s ' +
+      '`type` and `defaultValue` are gone, and nothing says so.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Rename one of the two ' +
+      'or remove the duplicate. A stored page keeps loading and serving; only its next save is judged.',
+  ],
+};
+
+const PAGE_VARIABLE_NAME_EMPTY_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-name-empty',
+  covers: 'why a page variable needs a name',
+  paragraphs: [
+    'A page variable is reached only by its name: predicates read it as `page.NAME`, and an element ' +
+      'writes it through its `source` binding. A declaration whose name is empty or blank can be neither ' +
+      'read nor written, so it is a declaration that does nothing while looking like one that works.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Name the variable or ' +
+      'remove the entry.',
+  ],
+};
+
+const PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION: RuleExplanation = {
+  rule: 'page-variable-default-type',
+  covers: 'which `defaultValue` each page variable type admits',
+  paragraphs: [
+    'A page variable starts with its `defaultValue`, or with its type\'s empty value when the default ' +
+      'is omitted: `\'\'` for `string` and `record_id`, `0` for `number`, `false` for `boolean`, `{}` ' +
+      'for `object`, `[]` for `array`. A default of another kind — `defaultValue: "abc"` on a `number` ' +
+      'variable — is seeded as written, so every predicate that reads it compares the wrong kind of ' +
+      'value while the declaration claims otherwise.',
+    'Admitted: a string for `string` and `record_id`, a finite number for `number`, `true` or `false` ' +
+      'for `boolean`, a plain object for `object`, an array for `array`, and `null` for any type ' +
+      '("no value yet"). A variable with no `type` is a `string` variable, as the schema defaults it.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the page save ' +
+      'door (Studio, REST, MCP), including a draft\'s diagnostics and its publish. Fix the default, omit ' +
+      'it, or declare the type the default really has.',
   ],
 };
 
@@ -5399,6 +5451,9 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [COMPONENT_TYPE_UNKNOWN_EXPLANATION.rule]: COMPONENT_TYPE_UNKNOWN_EXPLANATION,
   [COMPONENT_PROPS_INVALID_EXPLANATION.rule]: COMPONENT_PROPS_INVALID_EXPLANATION,
   [PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION.rule]: PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION,
+  [PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION.rule]: PAGE_VARIABLE_NAME_DUPLICATE_EXPLANATION,
+  [PAGE_VARIABLE_NAME_EMPTY_EXPLANATION.rule]: PAGE_VARIABLE_NAME_EMPTY_EXPLANATION,
+  [PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION.rule]: PAGE_VARIABLE_DEFAULT_TYPE_EXPLANATION,
   [FILTER_PRESET_COMPARAND_EXPLANATION.rule]: FILTER_PRESET_COMPARAND_EXPLANATION,
   [FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FILTER_TOKEN_UNKNOWN_EXPLANATION,
   [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION.rule]: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION,

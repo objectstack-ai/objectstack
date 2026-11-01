@@ -235,13 +235,23 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * SHARED_NON_REGISTRY_GATES instead.
  *
  * EMPTY is this ledger's steady state: every row is a gap the build carries.
- * Both rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
+ * Two rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
  * gained the call: `findViewContainerNameRefusals` (#20331 → #20393) and
- * `findOverrideDeclarationRefusals` (#28410 → #28643). The ledger stays,
- * empty, because it is the only honest place the closed roster has for the
- * next validate-only gate.
+ * `findOverrideDeclarationRefusals` (#28410 → #28643). It holds one today,
+ * `findExtensionFieldSuffixRefusals` (#28564), whose card did not name the
+ * build.
  */
-const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {};
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
+  // [#28564] A real gap in the build's direction, reported and not closed —
+  // the shape `findOverrideDeclarationRefusals` held until #28643 closed it.
+  // Card #28564 (ADR-0146 D10, decided item 7) named the `__c` reservation's
+  // doors — the save, restore and publish doors, `os validate`, the install
+  // doors and the duplicate — and `os build` is not one of them. The artifact
+  // a build emits is still judged where it lands: the marketplace install and
+  // the save and publish doors refuse the same fields with the same judge.
+  findExtensionFieldSuffixRefusals:
+    'card #28564 placed the __c reservation at the save/restore/publish doors, os validate, the install doors and duplicate; os build is a further point it did not name (as #28410 left the override gate until #28643). The install and publish doors refuse the same fields with the same judge.',
+};
 
 /**
  * Everything else the two commands call, and the reason each one is NOT an

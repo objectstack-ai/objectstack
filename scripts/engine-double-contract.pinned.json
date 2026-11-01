@@ -837,6 +837,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.external-binding-named-datasource-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1695,6 +1710,11 @@
       "file": "packages/metadata-protocol/src/protocol.rollback-carries-item-failures.test.ts",
       "verb": "update",
       "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.row-binding-column.test.ts",
+      "verb": "findOne",
+      "pinned": 2
     },
     {
       "file": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts",

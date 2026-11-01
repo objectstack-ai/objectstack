@@ -367,8 +367,10 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
 /**
  * [#28534] The package-anchored members a connector entry is handed when it is
  * not the host's own ({@link nonHostDeclaringPackageOf}) — the package that
- * declared it was INSTALLED into this runtime, or its stamp names a package no
- * registration records as the host's: both
+ * declared it was INSTALLED into this runtime, its stamp names a package no
+ * registration records as the host's, or [#28594] it is a definition STORED in
+ * this environment (a metadata-door row, environment-wide or in an `authored`
+ * package) rather than one the host's stack declares: both
  * {@link ConnectorProviderContext.loadPackageFile} and
  * {@link ConnectorProviderContext.resolvePackagePath} refuse every ref.
  *
@@ -387,8 +389,10 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
  * directory), the same cross-package reach by another road. A refusal thrown
  * from the member is the factory's own failure, handled by the materializer
  * like every other configuration fault (fatal at boot, a skipped entry on
- * reload); a factory that never dereferences a ref (an inline document, an
- * http(s) URL) never meets it.
+ * reload), except a STORED entry's (#28594): that one is logged and skipped
+ * at boot too, so a row at rest never stops the platform starting. A factory
+ * that never dereferences a ref (an inline document, an http(s) URL) never
+ * meets it.
  */
 export function createInstalledPackageRefRefusal(
     connectorName: string,
@@ -399,17 +403,25 @@ export function createInstalledPackageRefRefusal(
         const whose = declaring.why === 'installed'
             ? `is declared by package '${declaring.packageId}', which was installed into this runtime and has no ` +
                 'package root on its disk'
-            : `names package '${declaring.packageId}' as its owner, which no package registration in this runtime ` +
-                'records as the host\'s';
+            : declaring.why === 'unrecorded'
+                ? `names package '${declaring.packageId}' as its owner, which no package registration in this runtime ` +
+                    'records as the host\'s'
+                // [#28594] A definition stored in this environment, not one the
+                // host's stack declares: it has no package root on disk at all.
+                : `is stored in this environment${declaring.packageId === undefined ? '' : ` (package '${declaring.packageId}')`}` +
+                    ', not declared by the host\'s own stack, and a stored definition has no package root on disk';
         const head =
             `connector instance '${connectorName}' ${whose}, so its package ${member === 'reads' ? 'file' : 'path'} ref ` +
             `'${String(relativePath)}' is refused: a relative ref resolves only against the root of the package that ` +
             `declared it, never against the host's.`;
         const remedy = member === 'reads'
-            ? ' Rebuild the package with a current `os build`, which carries an `openapi` spec file into the artifact, ' +
-                'or inline the document in the package.'
+            ? declaring.why === 'stored'
+                ? ' Carry the document inline in the definition, or name it by an http(s) URL.'
+                : ' Rebuild the package with a current `os build`, which carries an `openapi` spec file into the artifact, ' +
+                    'or inline the document in the package.'
             : ' A provider that needs a location inside the package (a stdio MCP server\'s working directory) cannot ' +
-                'serve an installed package\'s entry; declare a transport that needs none, such as an http MCP server.';
+                `serve ${declaring.why === 'stored' ? 'a stored' : 'an installed package\'s'} entry; declare a transport ` +
+                'that needs none, such as an http MCP server.';
         throw new Error(head + remedy);
     };
 }
@@ -417,22 +429,58 @@ export function createInstalledPackageRefRefusal(
 /**
  * [#28534] What {@link nonHostDeclaringPackageOf} reads: the objectql engine's
  * package registry rows, and its record of each artifact residual's origin.
+ * [#28594] …and the declaration a registering door FILED under a package, and
+ * which entries the host's own artifact carried.
  */
 export interface DeclaringPackageReaders {
     /** `SchemaRegistry.getPackage` — the row the registering door wrote, with its `source`. */
     getPackage?: (id: string) => { source?: unknown } | undefined;
     /** `ObjectQL.residualOwnerSource` — the registering door's statement for a residual owner id, which has no row. */
     residualOwnerSource?: (id: string) => 'code' | 'marketplace' | undefined;
+    /**
+     * [#28594] `SchemaRegistry.getArtifactItem('connector', name, packageId)` —
+     * the connector a package REGISTRATION filed under that package (its
+     * composite slot, the ADR-0010 §3.3 artifact lookup), never a stored row
+     * hydrated into the bare slot. Absent on a registry double that keeps no
+     * such layer: the stored-or-declared judgment then keeps today's reading.
+     */
+    registeredDeclaration?: (name: string, packageId: string) => unknown;
+    /**
+     * [#28594] Whether this exact entry object came from the host's own
+     * artifact — the dev reload's payload (`metadata:reloaded` carrying
+     * `metadata.connectors`, `MetadataPlugin`), the one source of an edited
+     * definition the registry was never re-told.
+     */
+    isHostArtifactEntry?: (entry: unknown) => boolean;
 }
 
 /**
  * [#28534] A declaring package whose entries are NOT the host's own: one the
  * runtime installed (`installed`), or a stamp no registration records as the
- * host's (`unrecorded`).
+ * host's (`unrecorded`). [#28594] Or a definition stored in this environment,
+ * not one the host's stack declares (`stored`): `packageId` is the package
+ * it is stored in, absent for an environment-wide row.
  */
 export interface NonHostDeclaringPackage {
-    packageId: string;
-    why: 'installed' | 'unrecorded';
+    packageId?: string;
+    why: 'installed' | 'unrecorded' | 'stored';
+}
+
+/**
+ * [#28594] Whether `declaration` — what a registering door filed for this name
+ * under `packageId` — states the same provider binding as `entry`: the same
+ * `provider` and the same `providerConfig`, which is everything a factory
+ * dereferences a ref out of. An entry agreeing with it names only refs the
+ * host's stack itself declared; one that differs (a stored row served over the
+ * name, an edit nobody registered) or has no declaration is not the host's.
+ */
+function declaresSameProviderBinding(entry: unknown, declaration: unknown, packageId: string): boolean {
+    if (!declaration || typeof declaration !== 'object') return false;
+    const filed = declaration as { _packageId?: unknown; provider?: unknown; providerConfig?: unknown };
+    if (filed._packageId !== packageId) return false;
+    const own = entry as { provider?: unknown; providerConfig?: unknown };
+    return stableStringify({ provider: own.provider ?? null, providerConfig: own.providerConfig ?? null })
+        === stableStringify({ provider: filed.provider ?? null, providerConfig: filed.providerConfig ?? null });
 }
 
 /**
@@ -462,17 +510,33 @@ export interface NonHostDeclaringPackage {
  * a registered item is the registering door's. Nor an artifact entry's stated
  * `source` — it reaches here only as the row the door wrote.
  *
+ * [#28594] Nor the entry's PRESENCE in the declared list: the post-boot read
+ * is the protocol's execution view, which serves the environment's stored rows
+ * (`sys_metadata`, written through the metadata door) over and beside the
+ * registry's items, and stamps a stored row's `_packageId` from its column. A
+ * stored row is no package's declaration and has no root on disk; so only an
+ * entry that a registering door filed, or that the host's own artifact
+ * carried, is read as declared at all.
+ *
  * ## The answers
  *
  *  - no registry at all: the host's (no door could have registered a package);
- *  - no stamp: the host's (an item registered into no package);
- *  - a row: `'marketplace'` is `installed`; any other source is the host's
- *    (`'authored'` packages keep today's reading, a separate question);
+ *  - no stamp: the host's only when the host's own artifact carried the entry
+ *    (or the registry keeps no registered layer to ask); otherwise `stored`,
+ *    a row bound to no package;
+ *  - a row: `'marketplace'` is `installed`; `'code'` is the host's package;
+ *    any other source (`'authored'`, a package created in this environment,
+ *    whose items are stored rows) is `stored`;
  *  - no row, but the stamp is a residual owner a `'code'` door recorded: the
- *    host's; one an install recorded: `installed`;
+ *    host's package; one an install recorded: `installed`;
  *  - any other stamp — no row and no residual record, or not a non-empty
  *    string: `unrecorded`, refused. Fail closed: a stamp nobody's registration
- *    answers for is never read as the host's.
+ *    answers for is never read as the host's;
+ *  - the host's package: the host's only when the entry is what a registering
+ *    door filed under that package with the same provider binding
+ *    ({@link declaresSameProviderBinding}), or the host's own artifact carried
+ *    it; otherwise `stored` (a stored row served under the host's name or
+ *    claiming the host's package).
  */
 export function nonHostDeclaringPackageOf(
     entry: unknown,
@@ -480,13 +544,35 @@ export function nonHostDeclaringPackageOf(
 ): NonHostDeclaringPackage | undefined {
     if (readers === undefined) return undefined;
     const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
-    if (stamp === undefined) return undefined;
+    const carried = readers.isHostArtifactEntry?.(entry) === true;
+    const judgesStored = readers.registeredDeclaration !== undefined;
+    if (stamp === undefined) return carried || !judgesStored ? undefined : { why: 'stored' };
     if (typeof stamp !== 'string' || stamp.length === 0) return { packageId: String(stamp), why: 'unrecorded' };
     const row = readers.getPackage?.(stamp);
-    if (row !== undefined) return row.source === 'marketplace' ? { packageId: stamp, why: 'installed' } : undefined;
-    const residual = readers.residualOwnerSource?.(stamp);
-    if (residual === 'code') return undefined;
-    return { packageId: stamp, why: residual === 'marketplace' ? 'installed' : 'unrecorded' };
+    if (row !== undefined) {
+        if (row.source === 'marketplace') return { packageId: stamp, why: 'installed' };
+        if (row.source !== 'code') return judgesStored ? { packageId: stamp, why: 'stored' } : undefined;
+    } else {
+        const residual = readers.residualOwnerSource?.(stamp);
+        if (residual === 'marketplace') return { packageId: stamp, why: 'installed' };
+        if (residual !== 'code') {
+            // [#28594] No row and no residual record, and no registration filed
+            // this entry under the package it names: a stored row. An `authored`
+            // package's rows reach the boot reconcile before its package row
+            // does, so this is where they meet it (measured on a restart).
+            const name = (entry as { name?: unknown }).name;
+            const filed = judgesStored && !carried && typeof name === 'string'
+                ? readers.registeredDeclaration!(name, stamp) !== undefined
+                : true;
+            return { packageId: stamp, why: filed ? 'unrecorded' : 'stored' };
+        }
+    }
+    // The host's package: only what a registration filed (or the host's own
+    // artifact carried) reads its root.
+    if (carried || !judgesStored) return undefined;
+    const name = (entry as { name?: unknown }).name;
+    const declaration = typeof name === 'string' ? readers.registeredDeclaration!(name, stamp) : undefined;
+    return declaresSameProviderBinding(entry, declaration, stamp) ? undefined : { packageId: stamp, why: 'stored' };
 }
 
 // The credential resolver lives in ./credential-resolver.ts so the engine reads
@@ -2429,7 +2515,10 @@ export class AutomationServicePlugin implements Plugin {
      */
     private declaringPackageReadersOrNone(ctx: PluginContext): DeclaringPackageReaders | undefined {
         let ql: {
-            registry?: { getPackage?: (id: string) => { source?: unknown } | undefined };
+            registry?: {
+                getPackage?: (id: string) => { source?: unknown } | undefined;
+                getArtifactItem?: (type: string, name: string, packageId?: string) => unknown;
+            };
             residualOwnerSource?: (id: string) => 'code' | 'marketplace' | undefined;
         } | undefined;
         try {
@@ -2439,9 +2528,18 @@ export class AutomationServicePlugin implements Plugin {
         }
         if (!ql) return undefined;
         const registry = ql.registry;
+        // [#28594] The entries the host's own artifact carried (the dev
+        // reload's payload), by identity: the merge hands them on as they are.
+        const carried = new WeakSet<object>(
+            (this.reloadedConnectors?.items ?? []).filter((item): item is object => !!item && typeof item === 'object'),
+        );
         return {
             getPackage: registry && typeof registry.getPackage === 'function' ? (id) => registry.getPackage!(id) : undefined,
             residualOwnerSource: typeof ql.residualOwnerSource === 'function' ? (id) => ql!.residualOwnerSource!(id) : undefined,
+            registeredDeclaration: registry && typeof registry.getArtifactItem === 'function'
+                ? (name, packageId) => registry.getArtifactItem!('connector', name, packageId)
+                : undefined,
+            isHostArtifactEntry: (entry) => !!entry && typeof entry === 'object' && carried.has(entry),
         };
     }
 
@@ -2558,7 +2656,9 @@ export class AutomationServicePlugin implements Plugin {
      *    provider, invalid `providerConfig`, a host credential resolver that
      *    throws, name conflict, duplicate — **throws**, which is fatal to
      *    bootstrap under both LiteKernel and ObjectKernel (the ADR's "fail
-     *    loudly" contract).
+     *    loudly" contract). [#28698] Except a STORED entry's (a row of the
+     *    environment, not the host's declaration): that one is logged and
+     *    skipped exactly as on a reload, so a row at rest never stops a boot.
      *  - **Reload** (`fatal: false`, called from `metadata:reloaded`): the same
      *    problems are **logged and the offending entry is skipped**, so a bad
      *    Studio publish / dev reload never crashes a live server. A changed
@@ -2657,6 +2757,12 @@ export class AutomationServicePlugin implements Plugin {
         if (!declared) return; // no registry, no reloaded artifact — nothing declared
         this.reconciledDeclaration = declaredInstanceFingerprint(declared);
 
+        // [#28534] The engine's package rows and residual-owner record, read
+        // once per run (each lookup is live), answer which declaring packages
+        // are not the host's own ({@link nonHostDeclaringPackageOf}).
+        const declaringReaders = this.declaringPackageReadersOrNone(ctx);
+        const storedEntry = (entry: unknown): boolean => nonHostDeclaringPackageOf(entry, declaringReaders)?.why === 'stored';
+
         // Report a reconcile problem: fatal (boot) throws; soft (reload) logs.
         //
         // #5575 — `msg` MUST be a single-line, self-contained sentence, and an
@@ -2677,8 +2783,19 @@ export class AutomationServicePlugin implements Plugin {
         // A `fail(msg)` with no cause logs exactly what it always did: `cause`
         // is only described when it is present, so the causeless reports (dup
         // name, §4 conflict, unknown provider) gain no `"error":"undefined"`.
-        const fail = (msg: string, cause?: unknown): void => {
-            if (opts.fatal) {
+        //
+        // [#28594, #28698] `stored`: the fault is a STORED entry's (a row of
+        // the environment, {@link nonHostDeclaringPackageOf}), not one the
+        // host's stack declares. A row at rest is hydrated into the registry
+        // before this boot reconcile reads it, so failing the boot on it would
+        // let one stored definition (accepted when it was saved, and since
+        // made invalid: its provider no longer offered, a policy a newer
+        // runtime refuses) stop the platform starting, with no door left to
+        // fix it through. So a stored entry's fault takes the soft path in
+        // BOTH modes: the same record, the entry skipped, the boot carrying
+        // on. A host-declared entry's keeps the fail-loud contract at boot.
+        const fail = (msg: string, cause?: unknown, stored = false): void => {
+            if (opts.fatal && !stored) {
                 throw new Error(cause === undefined ? msg : `${msg} cause: ${thrownMessageText(cause)}`);
             }
             // Third argument, per the `Logger` contract's `error(message, error?,
@@ -2698,7 +2815,11 @@ export class AutomationServicePlugin implements Plugin {
             const bound = entry as DeclaredConnectorItem & { name: string; provider: string };
             if (bound.enabled === false) continue;
             if (desired.has(bound.name)) {
-                fail(`[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be unique (ADR-0097).`);
+                fail(
+                    `[Automation] duplicate declarative connector instance name '${bound.name}' — connector names must be unique (ADR-0097).`,
+                    undefined,
+                    storedEntry(bound),
+                );
                 continue;
             }
             desired.set(bound.name, { entry: bound, signature: connectorInstanceSignature(bound) });
@@ -2807,11 +2928,6 @@ export class AutomationServicePlugin implements Plugin {
             if (!desired.has(name)) this.credentialRefusalAttempts.delete(name);
         }
 
-        // [#28534] The engine's package rows and residual-owner record, read
-        // once per run (each lookup is live), answer which declaring packages
-        // are not the host's own ({@link nonHostDeclaringPackageOf}).
-        const declaringReaders = this.declaringPackageReadersOrNone(ctx);
-
         // 2. Add new instances and re-materialize changed ones (signature diff).
         let changed = 0;
         for (const [name, { entry, signature }] of desired) {
@@ -2835,6 +2951,8 @@ export class AutomationServicePlugin implements Plugin {
             if (held?.held && held.signature === signature) continue;
 
             const provider = entry.provider;
+            const notHost = nonHostDeclaringPackageOf(entry, declaringReaders);
+            const stored = notHost?.why === 'stored';
 
             // §4 conflict: the name is held by a plugin-registered connector (not
             // one of ours). Never silently replace across origins.
@@ -2842,6 +2960,8 @@ export class AutomationServicePlugin implements Plugin {
                 fail(
                     `[Automation] connector name conflict: declarative provider-bound instance '${name}' collides with a ` +
                         `plugin-registered connector of the same name — there is no silent precedence (ADR-0097 §4). Rename one.`,
+                    undefined,
+                    stored,
                 );
                 continue;
             }
@@ -2854,6 +2974,8 @@ export class AutomationServicePlugin implements Plugin {
                         `Install the connector plugin that supplies it (openapi → @objectstack/connector-openapi, mcp → @objectstack/connector-mcp, ` +
                         `rest → @objectstack/connector-rest) in the stack's plugins: array. Installed providers: ` +
                         `[${installed.join(', ') || 'none'}] (ADR-0097).`,
+                    undefined,
+                    stored,
                 );
                 continue;
             }
@@ -2901,11 +3023,12 @@ export class AutomationServicePlugin implements Plugin {
                     // (`AutomationServicePluginOptions.credentialResolver` — a
                     // secrets service, or anything that validates with Zod), so
                     // what lands here is not ours to assume anything about, and its
-                    // contract is unchanged: fatal at boot, logged and skipped on
-                    // a reload.
+                    // contract is unchanged: fatal at boot for the host's own
+                    // entry, logged and skipped on a reload or for a stored one.
                     fail(
                         `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -2931,6 +3054,7 @@ export class AutomationServicePlugin implements Plugin {
                     fail(
                         `[Automation] connector instance '${name}' (provider '${provider}'): auth resolution failed (ADR-0097 §3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -2966,6 +3090,7 @@ export class AutomationServicePlugin implements Plugin {
                         `[Automation] connector instance '${name}' (provider '${provider}'): a key it names cannot sign or ` +
                             `verify (ADR-0143 D2.3).`,
                         err,
+                        stored,
                     );
                     continue;
                 }
@@ -3042,13 +3167,13 @@ export class AutomationServicePlugin implements Plugin {
                         `[Automation] connector instance '${name}' (provider '${provider}'): retryConfig is not a valid ` +
                             `connector retry policy (integration/connector.zod.ts RetryConfigSchema).`,
                         parsed.error,
+                        stored,
                     );
                     continue;
                 }
                 retryConfig = parsed.data;
             }
 
-            const notHost = nonHostDeclaringPackageOf(entry, declaringReaders);
             const providerCtx: ConnectorProviderContext = {
                 name,
                 label: entry.label ?? name,
@@ -3073,6 +3198,7 @@ export class AutomationServicePlugin implements Plugin {
                 // not the host's own (an INSTALLED package's, or one whose stamp
                 // no registration answers for) is handed refusals instead: such
                 // a package has no root here, and the host's is not its own.
+                // [#28594] So is a definition stored in this environment.
                 loadPackageFile: notHost === undefined
                     ? createPackageFileLoader(this.options.packageRoot)
                     : createInstalledPackageRefRefusal(name, notHost, 'reads'),
@@ -3204,10 +3330,12 @@ export class AutomationServicePlugin implements Plugin {
                 // people to write, and the first one that validates its
                 // `providerConfig` with Zod throws a message whose first line is
                 // `[`. The cause goes to `meta` on the soft path, and is appended
-                // to the thrown message on the fatal one.
+                // to the thrown message on the fatal one. [#28594] A stored
+                // entry's (its refused package ref among them) is soft at boot.
                 fail(
                     `[Automation] failed to materialize connector instance '${name}' via provider '${provider}' (ADR-0097).`,
                     thrown,
+                    stored,
                 );
                 continue;
             }
