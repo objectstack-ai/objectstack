@@ -184,6 +184,7 @@ import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 // base's name.
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf } from './served-override.js';
+import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
@@ -9739,6 +9740,31 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#28411, ADR-0146 D8 item 4] The served overrides of a base package's
+     * items: each ACTIVE row of its paired `<base>.custom` package that
+     * {@link isServedOverrideRowOf} admits and no read declines, as
+     * `{ type, name, member?, basedOn?, version? }`, ordered by type, name and
+     * member. The overrides half of `GET /packages/:id/customizations`; the
+     * body and its narrowings are `protocol-served-overrides.ts`'s.
+     *
+     * A base with no pair, or an id with no pair, answers `[]`, and the read
+     * never creates the pair. No diff and no `basedOn` verdict: `basedOn` is
+     * copied as recorded (ADR-0146 D2, D6).
+     *
+     * @throws the `sys_metadata` read failure, classified by
+     *         {@link rethrowUnlessMetadataStoreUnprovisioned}; an unprovisioned
+     *         table answers `[]`.
+     */
+    async listServedOverrides(request: { packageId: string }): Promise<ServedOverrideEntry[]> {
+        const host: ThisParameterType<typeof listServedOverrides> = {
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            declinesStoredRow: (...a) => this.declinesStoredRow(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return listServedOverrides.call(host, request);
+    }
+
+    /**
      * The one body behind {@link getMetaItems},
      * {@link getMetaItemsForExecution} and {@link getMetaItemsPerPackage}.
      * `audience` decides ONLY whether the serving decorations are applied at
@@ -11701,6 +11727,45 @@ export class ObjectStackProtocolImplementation implements
             ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
             ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
         };
+    }
+
+    /**
+     * [#28337, ADR-0048] The layered view's door refusal: what
+     * `GET /meta/:type/:name/layers` (and the deprecated `?layers=true`)
+     * answers when it names no package and the item's ACTIVE rows are bound
+     * to two or more packages. The refusal the package-less save and delete
+     * answer for the same rows ({@link packagelessAddressAmbiguityRefusal},
+     * `409 RESOURCE_CONFLICT`, the holders sorted and the `?package=`
+     * prescription), asked of the same resolution
+     * ({@link packagelessAddress} at `active`, at the addressed bundle member,
+     * read in full): one answer to one ambiguity. `undefined` for a name one
+     * package holds, none does, or only the package-unbound row does, and for
+     * every request that names a package (the caller asks only without one).
+     *
+     * Before, {@link getMetaItemLayered} naming no package took its overlay
+     * from {@link packagelessReadAddress}, which answers no package for such
+     * a name, so the layer was the first row a package-agnostic lookup met:
+     * one holder's stack, picked silently, while the Studio editor that loads
+     * this view and the save it then sends were refused for the same name.
+     *
+     * Asked by the DOOR (the shared layered chain in `@objectstack/rest`,
+     * `createMetaLayeredAnswer`), ⛔ never inside {@link getMetaItemLayered}:
+     * its in-process resolution readers (the security catalog echo, the
+     * packaged-permission-set lock gate, `/published`) read the layers of a
+     * name with no package and keep the answer they had.
+     */
+    async packagelessLayeredReadRefusal(request: {
+        type: string;
+        name: string;
+        /** The bundle member the layered read addresses ({@link resolveBundleMemberSelector}); omitted, the canonical one. */
+        member?: string;
+    }): Promise<(Error & { code: 'RESOURCE_CONFLICT'; status: 409 }) | undefined> {
+        const { type, name } = canonicalizeMetaRequestType(request);
+        const member = resolveBundleMemberSelector(type, request.member);
+        const address = await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member);
+        return address.candidates.length > 1
+            ? packagelessAddressAmbiguityRefusal('layered read', type, name, address.candidates)
+            : undefined;
     }
 
     /**

@@ -279,6 +279,14 @@ import { sendError as sendEnvelopeError } from '@objectstack/types';
 export type RestProtocol = DataProtocol & MetadataProtocol & {
     getMetaItemForExecution?: MetadataProtocol['getMetaItem'];
     getMetaItemsForExecution?: MetadataProtocol['getMetaItems'];
+    /**
+     * [#28337] The layered view's door refusal for a name several packages
+     * hold, read naming none (metadata-protocol's
+     * `packagelessLayeredReadRefusal`), equally optional: the layered chain
+     * asks it ({@link RestServer.metaItemReadGateSources}); a protocol without
+     * it refuses nothing, as before.
+     */
+    packagelessLayeredReadRefusal?(request: { type: string; name: string; member?: string }): Promise<Error | undefined>;
 };
 
 // [#23050 slice 10] `TransportScopedMetaRequest`, the meta doors' request envelope, moved to
@@ -3634,6 +3642,9 @@ export class RestServer {
      * reached through {@link wiredEngineOrLoud}: none wired withholds nothing,
      * as before; one that cannot be resolved is the loud outage, never "not
      * withheld".
+     *
+     * [#28337] `packagelessLayeredReadRefusal`, the layered chain's step 1c:
+     * the protocol's own judge, handed through when it has one.
      */
     private metaItemReadGateSources(
         environmentId: string | undefined,
@@ -3663,6 +3674,9 @@ export class RestServer {
                 const envelope = await p.getMetaItem(itemRequest) as { item?: unknown; packageId?: unknown } | undefined;
                 return envelope?.item == null && registry.isPackageDisabled(envelope?.packageId) === true;
             },
+            ...(typeof p.packagelessLayeredReadRefusal === 'function'
+                ? { packagelessLayeredReadRefusal: (item: { type: string; name: string; member?: string }) => p.packagelessLayeredReadRefusal!(item) }
+                : {}),
         };
     }
 
@@ -4337,6 +4351,8 @@ export class RestServer {
                 metaType: RestServer.metaTypeSingular(req.params.type),
                 name: req.params.name,
                 ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
+                // [#28337] The member the layers were read at, for step 1c.
+                ...metaReadGate.metaMemberSelector(req.query),
                 maskPosture,
             },
         )(layered);

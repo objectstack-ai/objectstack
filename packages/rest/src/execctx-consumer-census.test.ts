@@ -216,6 +216,11 @@ function metaProtocol(doc: any) {
                     type: doc.type, name: doc.name, code: doc, overlay: null, overlayScope: null, effective: doc,
                 }));
             }
+            // [#28337] The layered chain's ambiguity judge in its own shape:
+            // `undefined`, one holder. The generic answer below is a truthy
+            // non-refusal the chain would throw as a fault (500), so the
+            // `/layers` row would stop reaching the answer it measures.
+            if (k === 'packagelessLayeredReadRefusal') return vi.fn(async () => undefined);
             return vi.fn(async () => ({ ok: true, rows: [], data: [], items: [doc], total: 1 }));
         },
     });
