@@ -43,7 +43,8 @@ const ALL_PLACEHOLDERS = Object.values(PLACEHOLDERS);
 const CONTROL_REF = 'CCH_CONTROL_CREDENTIAL_REF';
 const CONTROL = 'cch_control';
 const STORED = 'cch_stored';
-const REFUSED = 'cch_refused';
+/** One name per refused kind, so each case's "nothing is stored" reads only its own write. */
+const refusedName = (kind: string) => `cch_refused_${kind.replace(/-/g, '_')}`;
 
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : Array.isArray(r?.value) ? r.value : []);
 const bodyOf = (row: any): Record<string, any> =>
@@ -146,8 +147,9 @@ describe('connector metadata doors: inline credentials are refused on write and 
       ['api-key', { type: 'api-key', credentialRef: CONTROL_REF, key: PLACEHOLDERS.inlineKey }, 'key'],
       ['basic', { type: 'basic', username: 'svc', credentialRef: CONTROL_REF, password: PLACEHOLDERS.inlinePassword }, 'password'],
       ['none', { type: 'none', token: PLACEHOLDERS.inlineToken }, 'token'],
-    ] as const)('%s: 422 INVALID_METADATA located at `auth`, naming the key, and nothing is stored', async (_kind, auth, key) => {
-      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${REFUSED}`, instance(REFUSED, { auth }));
+    ] as const)('%s: 422 INVALID_METADATA located at `auth`, naming the key, and nothing is stored', async (kind, auth, key) => {
+      const name = refusedName(kind);
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${name}`, instance(name, { auth }));
       const json = (await res.json()) as any;
       expect(res.status, JSON.stringify(json).slice(0, 400)).toBe(422);
       expect(json.code, JSON.stringify(json).slice(0, 400)).toBe('INVALID_METADATA');
@@ -156,7 +158,7 @@ describe('connector metadata doors: inline credentials are refused on write and 
       expect(located, JSON.stringify(issues).slice(0, 400)).toBeDefined();
       expect(located!.message).toContain(`\`${key}\``);
       expect(holdsAPlaceholder(json), 'the refusal never echoes the value').toBe(false);
-      expect(await stored(REFUSED)).toHaveLength(0);
+      expect(await stored(name)).toHaveLength(0);
     });
   });
 
