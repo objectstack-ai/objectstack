@@ -31,6 +31,7 @@ import {
   PublishPackageDraftsResponse,
   LoginRequest,
   SessionResponse,
+  MePermissionsResponse,
   GetPresignedUrlRequest,
   PresignedUrlResponse,
   CompleteUploadRequest,
@@ -4989,6 +4990,26 @@ export class ObjectStackClient {
             headers: { Origin: this.baseUrl },
         });
         return normalizeSessionResponse(await res.json());
+    },
+
+    /**
+     * [#28508] The caller's effective permissions: `GET /auth/me/permissions`,
+     * the one payload the console reads once per session for its whole
+     * permission layer, declared STRICTLY by `MePermissionsResponseSchema`
+     * (`@objectstack/spec/api`).
+     *
+     * Discriminate on `authenticated`: an anonymous caller resolves
+     * `{ authenticated: false }` at 200 (the route answers it so a client can
+     * tell "signed out" from a fault). An authenticated answer carries, among
+     * the rest, `hasAnyQueue` (does the caller's organization have at least one
+     * ownership queue), and `systemPermissions` / `tabPermissions` are absent
+     * only when the server runs without SecurityPlugin, where absent means
+     * unknown and an empty array means none.
+     */
+    mePermissions: async (): Promise<MePermissionsResponse> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/me/permissions`);
+        return (await res.json()) as MePermissionsResponse;
     },
 
     /**
