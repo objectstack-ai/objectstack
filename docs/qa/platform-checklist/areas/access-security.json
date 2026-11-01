@@ -3093,7 +3093,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3159,8 +3159,7 @@
       "negative": [
         "no runtime write reaches the anchor: OS_PLATFORM_OWNER_EMAIL is declared a NON-TABLE derivation input (admin-standing-surface.ts) — revocation is a configuration change plus a process roll, by design. Any in-product surface found mutating who is a platform administrator is an authorization finding: record it under RUNNER rule 2's carve-out (no card; one run-record row `area.item · clause · security finding — detail withheld, reported to PM`), never with a reproduction",
         "the derivation reads the caller's OWN STORED sys_user row, never the session-seeded grants.email — the ⭐ P1 pin of the leg. That property is asserted by the unit pin (the '⭐ … reads the STORED row, never the seeded email' describe); do not attempt to re-prove it against a live server",
-        "run every refused probe as the seeded admin too: a 200 proves each refusal keyed on the member's standing, not on a broken route (wrong-persona, both sides)",
-        "out of scope here: the WALLED-posture boot refusal when the variable is unset (#11184) is plugin-auth's separate door — do not score it on this item"
+        "run every refused probe as the seeded admin too: a 200 proves each refusal keyed on the member's standing, not on a broken route (wrong-persona, both sides)"
       ],
       "variants": [
         "unset (zero config-derived admins)",
@@ -3177,7 +3176,7 @@
       ],
       "automated": {
         "kind": "dogfood",
-        "ref": "packages/qa/dogfood/test/platform-owner-email-anchor.dogfood.test.ts (#26571) restarts one showcase deployment per variable value on one database file, in the steps' order, with the datasource admin routes mounted as serve mounts them; probes are GET /datasources and GET /auth/me/permissions as member M and as the seeded admin. acceptance[0] — unset: M 403 PERMISSION_DENIED and no manage_platform_settings, the admin 200 on the grant anchor; acceptance[1] — the variable names unverified M: the same refusal; acceptance[2] — it names an address no row holds: the same, the admin still 200; acceptance[4]'s live leg — it names M after a system-context email_verified stamp (the knownGaps doorway): M 200 and every ADMIN_FULL_ACCESS_CAPABILITIES systemPermission; acceptance[3] — 'M, not an address' with M still verified and holding no admin_full_access grant: the [authz] refusal is printed once, naming the entry verbatim and the zero-administrator consequence, M is refused and the admin served; negative[0] — ADMIN_STANDING_NON_TABLE_INPUTS (@objectstack/core) declares {kind:'env', name:'OS_PLATFORM_OWNER_EMAIL'}; negative[2] — every refused probe has the admin's 200 beside it. A fresh database booted with a well-formed variable promotes only the declared owner (bootstrap-platform-admin.ts), so the variants run on one database first booted unset, as the steps restart one deployment. Unit pins beneath: packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. acceptance[5] and negative[1] are test-scored; negative[3] is out of scope"
+        "ref": "packages/qa/dogfood/test/platform-owner-email-anchor.dogfood.test.ts (#26571) restarts one showcase deployment per variable value on one database file, in the steps' order, with the datasource admin routes mounted as serve mounts them; probes are GET /datasources and GET /auth/me/permissions as member M and as the seeded admin. acceptance[0] — unset: M 403 PERMISSION_DENIED and no manage_platform_settings, the admin 200 on the grant anchor; acceptance[1] — the variable names unverified M: the same refusal; acceptance[2] — it names an address no row holds: the same, the admin still 200; acceptance[4]'s live leg — it names M after a system-context email_verified stamp (the knownGaps doorway): M 200 and every ADMIN_FULL_ACCESS_CAPABILITIES systemPermission; acceptance[3] — 'M, not an address' with M still verified and holding no admin_full_access grant: the [authz] refusal is printed once, naming the entry verbatim and the zero-administrator consequence, M is refused and the admin served; negative[0] — ADMIN_STANDING_NON_TABLE_INPUTS (@objectstack/core) declares {kind:'env', name:'OS_PLATFORM_OWNER_EMAIL'}; negative[2] — every refused probe has the admin's 200 beside it. A fresh database booted with a well-formed variable promotes only the declared owner (bootstrap-platform-admin.ts), so the variants run on one database first booted unset, as the steps restart one deployment. Unit pins beneath: packages/core/src/security/resolve-authz-context.platform-admin-config.test.ts (the acceptance criterion, all four fail-closed arms, the ⭐ stored-row-not-seed pin, the #11663 L5 posture split of the legacy grant anchor, the '[ADR-0131 D5] under `single` the Default Organization's admin_full_access grant is the anchor' describe) + packages/core/src/security/platform-admin.test.ts (parse/refusal/memo) + packages/core/src/security/admin-standing-surface.test.ts. acceptance[5] and negative[1] are test-scored; the out-of-scope note that was negative[3] is source[10]"
       },
       "source": [
         "packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
@@ -3189,7 +3188,8 @@
         "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV + packages/types/src/env.ts#resolvePlatformOwnerEmail (the variable's name, and its live per-call read)",
         "packages/plugins/plugin-auth/src/auth-plugin.ts (#11343 — the dev seed stamps its admin's address verified)",
         "packages/services/service-datasource/src/admin-routes.ts#DATASOURCE_ADMIN_CAPABILITY (the manage_platform_settings-floor probe)",
-        "#11663 L2 (the design and ruled bundle), #13146 (landed 2026-08-29), ADR-0068 D2 (the stored-grant anchor beside it)"
+        "#11663 L2 (the design and ruled bundle), #13146 (landed 2026-08-29), ADR-0068 D2 (the stored-grant anchor beside it)",
+        "out of scope here: the WALLED-posture boot refusal when the variable is unset (#11184) is plugin-auth's separate door — do not score it on this item"
       ],
       "history": [
         {
@@ -3263,6 +3263,12 @@
           "date": "2026-10-29",
           "change": "RUNNER rule 2's security-finding carve-out re-worded (#27382; maintainer rulings of 2026-10-29, recorded on #27377): a security finding gets no GitHub card at all, the run record carries the one row `area.item · clause · security finding — detail withheld, reported to PM`, and the reproduction goes privately to the dispatching PM session. negative[0] quoted the retired 'detail withheld pending maintainer' row and now names the new one. The same PR re-words every item string that quoted the retired row. No clause, oracle or status changed",
           "ref": "#27642"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-01",
+          "change": "negative[3] moved to source[10]: it was a scope note (the walled-posture boot refusal is plugin-auth's door, not scored here), which no run can decide, so it could only score skipped. Its text is unchanged; automated.ref's closing note, which called negative[3] out of scope, now points at source[10]. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },

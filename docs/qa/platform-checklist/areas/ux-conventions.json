@@ -56,7 +56,7 @@
         {
           "clause": "every write that landed server-side produced visible feedback on the surface that started it — a toast, an inline status, or (direct manipulation only) the item visibly in its new place",
           "oracle": "dom",
-          "verify": "per variant, the captured feedback text is non-empty, or (kanban only) the card's column in the DOM matches the status the server read returns; pair every row with its step-3 server read",
+          "verify": "per variant, the captured feedback text is non-empty, or (kanban only) the card's column in the DOM matches the status the server read returns; pair every row with its step-3 server read. The Studio top bar's save status ('Saved' / 「已保存」, with or without a time) is not write feedback under this convention and does not count here: a Studio row whose only feedback is that status scores FAIL",
           "evidence": "per-variant table: variant · landed (y/n, request status) · feedback text verbatim or 'none' · screenshot"
         },
         {
@@ -157,7 +157,7 @@
         {
           "revision": 9,
           "date": "2026-11-01",
-          "change": "acceptance[1].verify says the Studio top bar's save status ('Saved' / 「已保存」) is not write feedback: it names no item, so a Studio row passes only on a toast or inline text naming the item or package, and a row with only that status scores FAIL. This is ruling 6545938831 item ② on #28345, which keeps the convention's wording (success names its subject) and settles how a runner scores that indicator; the clause is unchanged. Held from slice S5 (revision 8). Wave anchor #27377",
+          "change": "acceptance[0].verify and acceptance[1].verify say the Studio top bar's save status ('Saved' / 「已保存」) is not write feedback: it names no item, so a Studio row passes only on a toast or inline text naming the item or package, and a row with only that status scores FAIL. This is ruling 6545938831 item ② on #28345, which keeps the convention's wording (success names its subject) and settles how a runner scores that indicator, in both clauses; neither clause's wording changed. Held from slice S5 (revision 8). Wave anchor #27377",
           "ref": "#28345"
         }
       ]

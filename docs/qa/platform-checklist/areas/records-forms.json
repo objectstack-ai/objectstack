@@ -3586,7 +3586,7 @@
         ],
         "knownGaps": [
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
-          "OPEN defect, acceptance[5] expected FAIL until it is fixed — card owed (seat files): the banner draws the uncapped server total (ui/packages/plugin-grid/src/components/BulkActionBar.tsx, the grid.bulkSelectAllMatching, grid.bulkAllMatchingSelected and grid.bulkSelectedAllMatches strings, each counting totalMatching) while resolveBulkRows stops at its local HARD_CAP of 5000 (ui/packages/plugin-grid/src/ObjectGrid.tsx), so past 5000 the user is told every match is selected and the action processes the first 5000. Read at base 37184244"
+          "OPEN defect, acceptance[5] expected FAIL until it is fixed — #28552: the banner draws the uncapped server total (ui/packages/plugin-grid/src/components/BulkActionBar.tsx, the grid.bulkSelectAllMatching, grid.bulkAllMatchingSelected and grid.bulkSelectedAllMatches strings, each counting totalMatching) while resolveBulkRows stops at its local HARD_CAP of 5000 (ui/packages/plugin-grid/src/ObjectGrid.tsx), so past 5000 the user is told every match is selected and the action processes the first 5000. Read at base 37184244"
         ]
       },
       "steps": [
@@ -3689,7 +3689,7 @@
         {
           "revision": 6,
           "date": "2026-11-01",
-          "change": "acceptance[5] added with steps[7] and fixtures.knownGaps[1]: past HARD_CAP 5000 the cross-page banner must name the cap (e.g. 「将处理前 5000 条」), never present the uncapped server total as the set the action processes. Today the banner counts totalMatching uncapped (BulkActionBar.tsx) while resolveBulkRows stops at 5000 (ObjectGrid.tsx), so the clause is an expected FAIL until the product defect card the seat files is fixed. Read at base 37184244. No existing clause changed. Ruling 6545938831 item ④ on #28345. Wave anchor #27377",
+          "change": "acceptance[5] added with steps[7] and fixtures.knownGaps[1]: past HARD_CAP 5000 the cross-page banner must name the cap (e.g. 「将处理前 5000 条」), never present the uncapped server total as the set the action processes. Today the banner counts totalMatching uncapped (BulkActionBar.tsx) while resolveBulkRows stops at 5000 (ObjectGrid.tsx), so the clause is an expected FAIL until the product defect #28552 is fixed. Read at base 37184244. No existing clause changed. Ruling 6545938831 item ④ on #28345. Wave anchor #27377",
           "ref": "#28345"
         }
       ]
