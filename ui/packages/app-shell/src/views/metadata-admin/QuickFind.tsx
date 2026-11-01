@@ -168,7 +168,7 @@ export function MetadataQuickFind({ appSlug }: MetadataQuickFindProps = {}) {
       )
       .slice(0, 40);
     return [...typeHits, ...itemHits];
-  }, [query, typeEntries, items, host?.packageId]);
+  }, [query, typeEntries, items, host?.packageId, locale]);
 
   React.useEffect(() => {
     setActiveIdx(0);

@@ -111,24 +111,24 @@ function AreaLoading({ locale }: { locale: string }): React.ReactElement {
  * `<root>/:type/:name`: a pillar type opens its pillar, every other type the
  * generic item page (`areaItemPillarPath` lists when).
  *
- * Decided once per item, when it opens: the item page itself rewrites the
- * query it opened with (it drops `?review=1` once the review sheet is open),
- * and that must not send an open review on to the pillar.
+ * Decided once per item, when it opens (the item is the key below): the item
+ * page itself rewrites the query it opened with (it drops `?review=1` once the
+ * review sheet is open), and that must not send an open review on to the
+ * pillar.
  */
 function AreaItem(): React.ReactElement {
   const { type = '', name = '' } = useParams<{ type: string; name: string }>();
+  // A type never holds a `/`, so this names one item.
+  return <AreaItemOpen key={`${type}/${name}`} type={type} name={name} />;
+}
+
+function AreaItemOpen({ type, name }: { type: string; name: string }): React.ReactElement {
   const [search] = useSearchParams();
   const host = useMetadataAreaHost();
-  const decided = React.useRef<{ key: string; pillarPath: string | null } | null>(null);
-  // A type never holds a `/`, so this names one item.
-  const key = `${type}/${name}`;
-  if (decided.current?.key !== key) {
-    decided.current = {
-      key,
-      pillarPath: areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search }),
-    };
-  }
-  if (decided.current.pillarPath) return <Navigate to={decided.current.pillarPath} replace />;
+  const [pillarPath] = React.useState(() =>
+    areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search }),
+  );
+  if (pillarPath) return <Navigate to={pillarPath} replace />;
   return <MetadataResourceEditPage />;
 }
 
