@@ -436,3 +436,47 @@ describe('[#7867] the engine answers with the SAME error the protocol and callDa
       .toEqual({ code: b.code, status: b.status, object: b.object, message: b.message });
   });
 });
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * 5. The write is judged BEFORE the gate asks whether the row exists
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+describe('a by-id write the middleware chain refuses gets that refusal whether or not the id exists', () => {
+  // The gate sits inside the middleware chain's `next()`, so a refusal the
+  // chain answers — the security middleware's object-level verdict is the one
+  // that matters — is answered for an id that names no row exactly as for one
+  // that does. The data doors rely on this order: they ask nothing about
+  // existence ahead of the engine, so an update by id answers the same refusal
+  // whether or not the id exists, as delete does.
+  for (const verb of ['update', 'delete'] as const) {
+    it(`${verb}: one refusal for a real id and for a missing one, and nothing reaches the driver`, async () => {
+      const { engine, calls } = await bootEngine([]);
+      const row: any = await engine.insert('nf_task', { title: 'Ship it', done: false });
+      engine.registerMiddleware(async (opCtx: any, next: () => Promise<void>) => {
+        if ((opCtx.operation === 'update' || opCtx.operation === 'delete') && opCtx.context?.userId === 'u_refused') {
+          throw Object.assign(new Error('You do not have permission to perform this action.'), {
+            code: 'PERMISSION_DENIED',
+            status: 403,
+          });
+        }
+        await next();
+      });
+      const context = { userId: 'u_refused' };
+      const run = (id: string) =>
+        (verb === 'update'
+          ? engine.update('nf_task', { id, done: true }, { context } as any)
+          : engine.delete('nf_task', { where: { id }, context } as any)
+        ).then(
+          () => null,
+          (e: any) => ({ code: e?.code, status: e?.status, message: e?.message }),
+        );
+
+      const real = await run(row.id);
+      const ghost = await run('ghost');
+
+      expect(real).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+      expect(ghost).toEqual(real);
+      expect(calls.update + calls.delete).toBe(0);
+    });
+  }
+});
