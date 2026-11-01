@@ -83,6 +83,7 @@ import {
 } from '../utils/workspacePreference.js';
 import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type ShortcutChord, type ShortcutLabelTranslate } from '../chrome/advertisedShortcuts.js';
 import { useActionModal } from '../hooks/useActionModal.js';
+import { resolveCascadeDeleteLabels } from '../hooks/useObjectActions.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useObjectPresence } from '../hooks/useObjectPresence.js';
 
@@ -4119,7 +4120,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           };
           const deleteTarget =
             (readablePageRecord as Record<string, unknown> | null | undefined) ?? { id: pureRecordId };
-          const copy = recordDelete.confirmCopy(deleteDeps, { record: deleteTarget });
+          // objectstack#28472 — and names the objects the delete cascades into.
+          const cascadeLabels = await resolveCascadeDeleteLabels(dataSource, objectName!, (name) =>
+            objectLabel(objects.find((o: any) => o.name === name) ?? { name, label: name }));
+          const copy = recordDelete.confirmCopy({ ...deleteDeps, cascadeLabels }, { record: deleteTarget });
           // objectui#11001 — asked through this page's own confirm runtime,
           // the in-app `ActionConfirmDialog` the list view's delete asks
           // through too, never the browser's native `window.confirm` (which

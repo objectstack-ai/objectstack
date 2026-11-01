@@ -3572,6 +3572,7 @@ const ar = {
     bulkDeleteConfirmTitle_many: "حذف {{count}} من سجلات {{label}}؟",
     bulkDeleteConfirmTitle_other: "حذف {{count}} من سجلات {{label}}؟",
     deleteConfirmButton: "حذف",
+    deleteCascade: "سيؤدي هذا أيضًا إلى حذف السجلات المرتبطة في: {{objects}}.",
     bulkDeleteSuccess: "تم حذف {{count}} سجل(ات) {{label}}",
     bulkDeleteSuccess_zero: "تم حذف {{count}} من سجلات {{label}}",
     bulkDeleteSuccess_one: "تم حذف {{count}} من سجلات {{label}}",
