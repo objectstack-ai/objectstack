@@ -73,11 +73,48 @@ function startOfDayUtc(d: Date): Date {
   return out;
 }
 
-/** Coerce a CEL value (Date | ISO string | epoch number) to a Date. */
+/**
+ * The invalid Dates {@link toDate} minted from TEXT it could not parse — not
+ * from an empty source. Read through {@link isUnparseableDate}.
+ *
+ * `date()` / `datetime()` answer an invalid Date for both, and that answer is
+ * deliberate: a predicate compares it and stays `false` (`date(record.d) ==
+ * today()` on a non-date string is simply not today), which is what the
+ * temporal-equality rewrite in `cel-engine.ts` relies on. So the VALUE never
+ * changes here. A formula FIELD, though, serializes an invalid Date to `null`,
+ * the same bytes an empty source gives, and its reader must be able to tell
+ * "the text was not a date" (a fault worth one warn line) from "there was no
+ * text" (no fault). This side table is that distinction, held off the value.
+ *
+ * Weakly held, so it keeps nothing alive; it records a fact about an argument
+ * and never changes what any function returns.
+ */
+const unparseableDates = new WeakSet<Date>();
+
+/**
+ * Coerce a CEL value (Date | ISO string | epoch number) to a Date.
+ *
+ * Non-empty text that does not parse yields an invalid Date marked in
+ * {@link unparseableDates}; an empty source (`null`, `undefined`, blank text)
+ * yields an unmarked invalid Date.
+ */
 function toDate(v: unknown): Date {
   if (v instanceof Date) return v;
   if (typeof v === 'number' || typeof v === 'bigint') return new Date(Number(v));
-  return new Date(String(v));
+  const out = new Date(String(v));
+  if (typeof v === 'string' && v.trim() !== '' && Number.isNaN(out.getTime())) unparseableDates.add(out);
+  return out;
+}
+
+/**
+ * True when `value` is the invalid Date `date()` / `datetime()` (or a stdlib
+ * date function over one) answered for non-empty text it could not parse.
+ * False for an invalid Date from an empty source, for every valid Date and for
+ * anything that is not a Date. A formula-field reader reports a `true` as an
+ * evaluation fault; a predicate never asks.
+ */
+export function isUnparseableDate(value: unknown): boolean {
+  return value instanceof Date && unparseableDates.has(value);
 }
 
 /** One UTC day in milliseconds. */
@@ -113,6 +150,8 @@ function isoTimestampText(fn: string, d: Date): string {
 
 /** Add `n` days to a Date in UTC; returns a new Date. */
 function addDaysUtc(d: Date, n: number): Date {
+  // Unparseable text stays the same invalid Date, so its mark survives.
+  if (unparseableDates.has(d)) return d;
   const out = new Date(d.getTime());
   out.setUTCDate(out.getUTCDate() + n);
   return out;
@@ -125,6 +164,7 @@ function addDaysUtc(d: Date, n: number): Date {
  * "next service date = last + N months" rule to behave.
  */
 function addMonthsUtc(d: Date, n: number): Date {
+  if (unparseableDates.has(d)) return d;
   const out = new Date(d.getTime());
   const day = out.getUTCDate();
   out.setUTCDate(1); // avoid roll-over while shifting the month

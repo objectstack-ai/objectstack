@@ -117,6 +117,10 @@ const CASES: GateCase[] = [
       // fallback and an ordinary sum on every SQL datasource — one query, two
       // numbers, both plausible.
       { aggregations: [{ function: 'sum', field: 'amount', alias: 'total', distinct: true }] },
+      // #28609 — an undeclared aggregation-entry key. The node was a plain
+      // object, so `bogusKey` was stripped and the query answered; it is
+      // closed at the producer now, as the MCP tool's entry already was.
+      { aggregations: [{ function: 'count', alias: 'n', bogusKey: true }] },
       // #23574 — `null` was read as no query (`req.body ?? {}`) and answered
       // the full record set; `query` declares a QueryAST or nothing.
       null,

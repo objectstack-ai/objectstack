@@ -14,8 +14,10 @@
 //     (day/week/month/quarter/year)
 //   • group-by dimensions; count / count_distinct / sum / avg / min / max
 //   • order + limit/offset
-// Anything beyond (joins via `include`, raw SQL) falls back to the caller's
-// normal execution path — the preview simply doesn't claim it.
+// Anything beyond (joins via `include`, raw SQL) is not evaluated here. A
+// member read through a relationship path is refused before this evaluator
+// runs, `INVALID_FIELD` / 400 (#28555, `AnalyticsService`'s
+// `assertPreviewJoinsNothing`): the rows are the base object's alone.
 //
 // [#19810] "Doesn't claim it" is a FALL-BACK only where a fall-back exists. A
 // `where` operator outside the subset above has none: the rows being charted
