@@ -121,7 +121,7 @@ const mockClient = vi.hoisted(() => ({
     }
     throw Object.assign(new Error(`No pending draft exists for ${type}/${name}.`), { code: 'NO_DRAFT', status: 404 });
   }),
-  save: vi.fn(async (type: string, name: string, item: unknown, opts: Record<string, unknown> = {}) => {
+  save: vi.fn(async (_type: string, name: string, item: unknown, opts: Record<string, unknown> = {}) => {
     srv.saves.push({ name, body: clone(item) as Record<string, unknown>, opts: clone(opts) });
     if (srv.saveRefusal) {
       throw Object.assign(new Error(srv.saveRefusal.message), { status: srv.saveRefusal.status });
@@ -133,7 +133,7 @@ const mockClient = vi.hoisted(() => ({
     srv.version += 1;
     return { success: true, version: `v${srv.version}`, state: 'draft' };
   }),
-  reset: vi.fn(async (type: string, name: string, opts: Record<string, unknown> = {}) => {
+  reset: vi.fn(async (_type: string, name: string, opts: Record<string, unknown> = {}) => {
     srv.resets.push({ name, opts: clone(opts) });
     if (opts.packageId === PAIR) {
       if (opts.state === 'draft') srv.pairDraft = null;
