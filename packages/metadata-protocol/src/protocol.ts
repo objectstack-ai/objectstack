@@ -378,7 +378,13 @@ import { applyPublishBackfill, planPublishBackfill } from './protocol-publish-ba
 // [#25467 cut 12] The `_drafts` list read and the one-draft discard.
 import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 // [#25467 cut 13] The package door's save refusal and the origin-gated removal verdict.
-import { originGatedRemovalRefusal, refusePackagedBaseOverride } from './protocol-packaged-base-refusal.js';
+import {
+    originGatedRemovalRefusal,
+    overrideWriteRefusalError,
+    overrideWriteVerdict,
+    refusePackagedBaseOverride,
+} from './protocol-packaged-base-refusal.js';
+import type { OverrideWriteSubject, OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
 import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
@@ -16503,8 +16509,32 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof refusePackagedBaseOverride> = {
             isSealedManagedItem: (...a) => this.isSealedManagedItem(...a),
             isWritablePackage: (...a) => this.isWritablePackage(...a),
+            lookupArtifactItem: (...a) => this.lookupArtifactItem(...a),
         };
         return refusePackagedBaseOverride.call(host, request);
+    }
+
+    /**
+     * [ADR-0146 D2, ruling A on #28390] The override write gate's verdict on
+     * one item written into one package: `admit` for the base's paired
+     * `<base>.custom` declaring an override of an item the base ships, one
+     * named `refuse`, or `not_concerned`. The rule is
+     * `judgeOverrideWrite` (`protocol-packaged-base-refusal.ts`), the one
+     * judgement `os validate` and the marketplace install door ask too; this
+     * method supplies its two registry facts — the written package's
+     * dependency closure ({@link resolveWritePackageScope}) and which closure
+     * packages ship the name ({@link shippedArtifactsOf}).
+     *
+     * Asked by the save door ahead of {@link refusePackagedBaseOverride}, and
+     * by the promotion ({@link promoteDraftForPublish}, so both
+     * `publishMetaItem` and `publishPackageDrafts`) on the draft's body.
+     */
+    private overrideWriteVerdict(request: OverrideWriteSubject): OverrideWriteVerdict {
+        const host: ThisParameterType<typeof overrideWriteVerdict> = {
+            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+        };
+        return overrideWriteVerdict.call(host, request);
     }
 
     /**
@@ -20513,6 +20543,19 @@ export class ObjectStackProtocolImplementation implements
         // are no caller's claim about anything: a row stored before the
         // #16702 strip may still carry stale stamps, and rewriting it keeps
         // the silent strip it always had rather than failing the rewrite.
+        // [ADR-0146 D2, ruling A on #28390] The override write gate — on every
+        // save, whatever its source, and ahead of the flow-only sealed check
+        // below, so a declared or same-named item meets its own named
+        // refusal rather than a regime sentence: only the base's paired
+        // `<base>.custom` declares an override; a dependent's same-named item
+        // is refused (rename, or for the pair declare-or-rename); `overrides`
+        // on a dependent, on a package outside the closure or on a type with
+        // no override channel is refused. An admitted declaration is the
+        // pair's own row: the sealed refusal does not apply to it, and the
+        // store is told a runtime-only write (both below).
+        const overrideVerdict = this.overrideWriteVerdict(request);
+        if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
+        const declaredOverride = overrideVerdict.verdict === 'admit';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
@@ -20689,7 +20732,10 @@ export class ObjectStackProtocolImplementation implements
         // [#23577] Every write over a sealed name reads one sentence: the
         // first-write pin (`If-None-Match: *`) declares no create, so the door
         // advises neither a create nor an edit.
-        this.refusePackagedBaseOverride(request);
+        // [ADR-0146 D2] An admitted declared override (see the gate above) is
+        // the pair's own row: the sealed refusal judges the base's managed
+        // item, so it does not apply to it.
+        if (!declaredOverride) this.refusePackagedBaseOverride(request);
 
         // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
         // overlay `_lock`) blocks save independent of the L1 type-level
@@ -21675,7 +21721,9 @@ export class ObjectStackProtocolImplementation implements
         // surfaced as a 409.
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
-        const intent: 'override-artifact' | 'runtime-only' = artifactBacked
+        // [ADR-0146 D2] An admitted declared override writes the pair's own
+        // row; it edits no managed item, so the store judges a runtime write.
+        const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact'
             : 'runtime-only';
         // D1 (ADR-0070) — a brand-new, DB-only ("runtime-only") metadata
@@ -23239,6 +23287,21 @@ export class ObjectStackProtocolImplementation implements
             );
             if (nameCollision) throw nameCollision;
         }
+        // [ADR-0146 D2] …and the override write gate, on the draft's body and
+        // the package it is promoted into, with the save door's judge and
+        // envelope: a draft stored before the gate (or under a package whose
+        // closure has since gained the name) is refused here, before
+        // `repo.promoteDraft` writes, so a batch publish aborts on it as on the
+        // refusals above. An admitted declaration is promoted as the pair's own
+        // row (the runtime-only intent below).
+        let declaredOverride = false;
+        if (draftForGate) {
+            const overrideVerdict = this.overrideWriteVerdict({
+                type: singularType, name: request.name, packageId: promoteInto, item: draftForGate.body,
+            });
+            if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
+            declaredOverride = overrideVerdict.verdict === 'admit';
+        }
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet
         // one by the time it is published, since the save door judged only the
@@ -23351,7 +23414,7 @@ export class ObjectStackProtocolImplementation implements
             : [];
 
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
-        const intent: 'override-artifact' | 'runtime-only' = artifactBacked
+        const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';
         const ref = {
             type: singularType,

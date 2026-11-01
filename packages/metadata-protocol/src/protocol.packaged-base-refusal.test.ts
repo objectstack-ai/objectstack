@@ -276,7 +276,12 @@ describe('packagedBaseRefusal — the sentence is chosen per ADR-0126 regime', (
         const p = protocolOn('env_1');
         const refusal: any = p.packagedBaseRefusal({ type: 'page', name: 'pkg_page', operation: 'save' });
         expect(shape(refusal)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
-        expect(refusal.message).toBe(SEALED_SAVE('page', 'pkg_page'));
+        // [ADR-0146 D2] …and, on a type a declared override can replace, names
+        // the two fixes: declare from the base's paired `.custom`, or rename.
+        expect(refusal.message).toBe(
+            `${SEALED_SAVE('page', 'pkg_page')} To change it, declare an override from '${PACKAGE_ID}.custom' `
+            + `(overrides: { package: '${PACKAGE_ID}', basedOn }), or rename the item.`,
+        );
         // It never names the hatch as a remedy.
         expect(refusal.message).not.toMatch(/set OS_METADATA_WRITABLE|may set OS_METADATA_WRITABLE/);
     });
@@ -481,6 +486,8 @@ describe('the override write gate — only the base\'s paired .custom declares a
         [OTHER_PAIR]: { dependencies: { [BASE]: '^3', 'com.zeta': '^1' }, version: '0.1.0' },
         'com.zeta': { dependencies: {}, version: '1.0.0' },
         [UNRELATED]: { dependencies: {}, version: '1.0.0' },
+        // The pair of the unrelated package, installed without declaring its base.
+        [`${UNRELATED}.custom`]: { dependencies: {}, version: '0.1.0' },
     };
     /** What the base ships: an overlay type, a sealed type, a flow, an action, a permission set, an object. */
     const BASE_ITEMS: Array<{ type: string; name: string }> = [
@@ -691,7 +698,7 @@ describe('the override write gate — only the base\'s paired .custom declares a
     it('a declaration naming a package outside the closure is refused — declare a dependency', async () => {
         const { protocol, stored } = gateProtocol();
         const e = await thrown(protocol.saveMetaItem({
-            type: 'view', name: 'task.crm_list', packageId: 'com.other.custom',
+            type: 'view', name: 'task.crm_list', packageId: `${UNRELATED}.custom`,
             item: body('view', 'task.crm_list', true, { package: UNRELATED, basedOn: '1.0.0' }),
         }));
         expect(shape(e)).toEqual(REFUSED);
@@ -784,11 +791,29 @@ describe('the override write gate — only the base\'s paired .custom declares a
     });
 
     it('publishPackageDrafts refuses a partner\'s undeclared same-named draft, and promotes nothing', async () => {
+        // The batch answers per item and rolls the whole batch back (ADR-0067
+        // D2); this stub's transaction does not roll back, so what is pinned
+        // is the refused item: never promoted, named with its code.
         const { protocol, stored, seedDraft } = gateProtocol();
-        seedDraft('dashboard', 'crm_board', PARTNER, body('dashboard', 'crm_board'));
         seedDraft('dashboard', 'partner_board', PARTNER, body('dashboard', 'partner_board'));
-        const e = await thrown(protocol.publishPackageDrafts({ packageId: PARTNER }));
-        expect(shape(e)).toEqual(REFUSED);
-        expect(stored().every((r) => r.state === 'draft')).toBe(true);
+        seedDraft('dashboard', 'crm_board', PARTNER, body('dashboard', 'crm_board'));
+        const res = await protocol.publishPackageDrafts({ packageId: PARTNER });
+        expect(res.success).toBe(false);
+        expect(res.failed).toEqual(expect.arrayContaining([
+            expect.objectContaining({ type: 'dashboard', name: 'crm_board', code: 'NOT_OVERRIDABLE' }),
+        ]));
+        expect(stored().filter((r) => r.name === 'crm_board')).toEqual([
+            { type: 'dashboard', name: 'crm_board', package_id: PARTNER, state: 'draft' },
+        ]);
+    });
+
+    it('publishPackageDrafts promotes the pair\'s declared override beside its own new item', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('page', 'crm_home', PAIR, body('page', 'crm_home', true));
+        seedDraft('dashboard', 'custom_board', PAIR, body('dashboard', 'custom_board'));
+        const res = await protocol.publishPackageDrafts({ packageId: PAIR });
+        expect(res.success).toBe(true);
+        expect(stored().map((r) => `${r.type}/${r.name}:${r.state}`).sort())
+            .toEqual(['dashboard/custom_board:active', 'page/crm_home:active']);
     });
 });
