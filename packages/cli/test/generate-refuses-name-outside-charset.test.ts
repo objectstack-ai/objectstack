@@ -47,7 +47,7 @@
  * class here is an EXIT CODE plus bytes on disk, `process.exitCode` inside a
  * vitest worker is not an exit status, and these commands print through
  * `utils/format.ts`, whose `printError` writes to stdout. Spawned through
- * `bin/run-dev.js` + tsx so the suite does not depend on `packages/cli/dist`.
+ * `bin/run-dev.js` + `node` so the suite does not depend on `packages/cli/dist`.
  *
  * ## ⛔ Why this file is NOT named `.e2e`
  *
@@ -73,9 +73,8 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold start, with every command module loaded; ~2-10 s when healthy. */
+/** oclif cold start, with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 240_000;
 
 interface Run {
@@ -84,10 +83,10 @@ interface Run {
   stderr: string;
 }
 
-function runTsx(args: string[], cwd: string): Promise<Run> {
+function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       args,
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -160,12 +159,12 @@ beforeAll(async () => {
   backstopDir = mkdtempSync(join(tmpdir(), 'os-g-charset-backstop-'));
   controlDir = mkdtempSync(join(tmpdir(), 'os-g-charset-control-'));
 
-  // Sequential on purpose: cold tsx starts, each loading every command module,
+  // Sequential on purpose: cold CLI starts, each loading every command module,
   // in a container several agents share.
-  gated = await runTsx([CLI, 'generate', 'object', 'order-line'], gatedDir);
-  dryRun = await runTsx([CLI, 'generate', 'flow', 'lead-qual', '--dry-run'], dryRunDir);
-  backstop = await runTsx([CLI, 'generate', 'object', 'class'], backstopDir);
-  control = await runTsx([CLI, 'generate', 'object', 'order_line'], controlDir);
+  gated = await runCli([CLI, 'generate', 'object', 'order-line'], gatedDir);
+  dryRun = await runCli([CLI, 'generate', 'flow', 'lead-qual', '--dry-run'], dryRunDir);
+  backstop = await runCli([CLI, 'generate', 'object', 'class'], backstopDir);
+  control = await runCli([CLI, 'generate', 'object', 'order_line'], controlDir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {

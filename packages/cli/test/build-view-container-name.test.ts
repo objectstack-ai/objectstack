@@ -26,7 +26,7 @@
  * actually throws for the same payload, driven through `ObjectQL.registerApp`,
  * rather than a literal copy of the words.
  *
- * The CLI runs through `bin/run-dev.js` (source, via tsx); its dependencies —
+ * The CLI runs through `bin/run-dev.js` (source, under `node`); its dependencies —
  * `@objectstack/objectql` among them — resolve through `exports` to `dist/`.
  */
 
@@ -42,8 +42,7 @@ import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
-/** A cold `tsx` spawn of the CLI source entry runs well past vitest's 5 s default. */
+/** A cold spawn of the CLI source entry runs well past vitest's 5 s default. */
 const SPAWN_TIMEOUT_MS = 120_000;
 /** `os build`'s default `--output`, relative to the working directory. */
 const ARTIFACT = join('dist', 'objectstack.json');
@@ -57,7 +56,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
