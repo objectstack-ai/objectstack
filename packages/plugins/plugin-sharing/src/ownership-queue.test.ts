@@ -268,6 +268,61 @@ describe('[ADR-0142 D2] OwnershipQueueService — the one expander', () => {
     expect(await svc.expandMembers('x', 'org_a')).toEqual([]);
     expect(await svc.isMember('u', 'x', 'org_a')).toBe(false);
     expect(await svc.queuesOf('u', 'org_a')).toEqual([]);
+    expect(await svc.hasAnyQueue('org_a')).toBe(false);
+  });
+});
+
+// ─── "Does this organization have any queue at all?" ───────────────────────
+
+describe('[ADR-0131 D4] OwnershipQueueService.hasAnyQueue — the session payload\'s one boolean', () => {
+  const ROW_ONLY = (): Record<string, Row[]> => ({
+    sys_queue: [{ id: 'q1', name: 'billing', label: 'Billing', organization_id: 'org_a' }],
+    [METADATA_ACTIVATION_TABLE]: [],
+  });
+
+  it('an organization with only a sys_queue row has a queue; another organization does not', async () => {
+    const svc = service(makeEngine({ tables: ROW_ONLY() }));
+    expect(await svc.hasAnyQueue('org_a')).toBe(true);
+    expect(await svc.hasAnyQueue('org_b')).toBe(false);
+  });
+
+  it('a declared queue the ledger leaves on counts for every organization', async () => {
+    const svc = service(makeEngine({ declared: SUPPORT_DECLARED, tables: { [METADATA_ACTIVATION_TABLE]: [] } }));
+    expect(await svc.hasAnyQueue('org_a')).toBe(true);
+    expect(await svc.hasAnyQueue('org_b')).toBe(true);
+  });
+
+  it('a declared queue switched off in the activation ledger, and no row, is no queue', async () => {
+    const svc = service(makeEngine({
+      declared: SUPPORT_DECLARED,
+      tables: { [METADATA_ACTIVATION_TABLE]: [{ metadata_type: 'queue', name: 'support_tier1', active: false }] },
+    }));
+    expect(await svc.hasAnyQueue('org_a')).toBe(false);
+    // The same switched-off name resolves nowhere, so the two answers agree.
+    expect(await svc.resolveQueue('support_tier1', 'org_a')).toBeNull();
+  });
+
+  it('a row under a switched-off declared name is not a queue either — it resolves nowhere', async () => {
+    const svc = service(makeEngine({
+      declared: SUPPORT_DECLARED,
+      tables: {
+        sys_queue: [{ id: 'q9', name: 'support_tier1', label: 'Shadowed', organization_id: 'org_a' }],
+        [METADATA_ACTIVATION_TABLE]: [{ metadata_type: 'queue', name: 'support_tier1', active: false }],
+      },
+    }));
+    expect(await svc.resolveQueue('support_tier1', 'org_a')).toBeNull();
+    expect(await svc.hasAnyQueue('org_a')).toBe(false);
+  });
+
+  it('neither a declared queue nor a row is no queue', async () => {
+    const svc = service(makeEngine({ tables: { [METADATA_ACTIVATION_TABLE]: [] } }));
+    expect(await svc.hasAnyQueue('org_a')).toBe(false);
+  });
+
+  it('a failed sys_queue read counts no authored queue — the same posture as resolveQueue', async () => {
+    const svc = service(makeEngine({ tables: ROW_ONLY(), failOn: ['sys_queue'] }));
+    expect(await svc.hasAnyQueue('org_a')).toBe(false);
+    expect(await svc.resolveQueue('billing', 'org_a')).toBeNull();
   });
 });
 

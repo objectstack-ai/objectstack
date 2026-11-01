@@ -8,6 +8,7 @@
   "category": "finance",
   "tags": ["stripe", "openapi", "connector", "payments"],
   "license": "Apache-2.0",
+  "iconUrl": "https://raw.githubusercontent.com/objectstack-ai/objectstack/main/packages/apps/connector-stripe/assets/icon.svg",
   "homepageUrl": "https://github.com/objectstack-ai/objectstack/tree/main/packages/apps/connector-stripe",
   "readmePath": "README.md"
 }
