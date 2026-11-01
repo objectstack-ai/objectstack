@@ -249,6 +249,7 @@ export type { PackagelessOverlayCensus, PackagelessOverlayMigration } from './pr
 // read by the automation boot pull, which judges a flow override on the
 // column (`isServedOverrideRowOf`), ⛔ never on the body's `_packageId`.
 export { bindStoredRow, storedRowBindingOf } from './stored-row-binding.js';
+export { shadowedStoredRowsOf } from './stored-flow-slot.js';
 
 // [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
 // function `importUnmanagedPackage` raises, exported so the install door
