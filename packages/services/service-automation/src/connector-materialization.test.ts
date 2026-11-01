@@ -1037,16 +1037,15 @@ describe('#28594 — a definition stored in this environment is refused its pack
         await kernel.shutdown();
     });
 
-    it('control: a configuration fault other than a refused ref (an unknown provider) still fails the boot', async () => {
-        // The soft path is the stored entry's refused ref alone; a provider the
-        // runtime does not offer keeps the fail-loud contract.
+    it('control: the host\'s own entry with a configuration fault (an unknown provider) still fails the boot', async () => {
+        // The soft path is a stored entry's alone (#28698): the host's
+        // registered declaration, faulty as filed, keeps the fail-loud contract.
         const { factory } = makeRefProvider();
+        const faulty = { ...hostEntry, provider: 'no_such_provider' };
         const err = await rejectionOf(
-            boot([{ ...hostEntry, provider: 'no_such_provider' }], {
-                providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
-            }),
+            boot([{ ...faulty }], { providerFactory: factory, packageRoot: fixtureRoot, packages, registered: [faulty] }),
         );
-        expect(err.message).toContain('host_pkg');
+        expect(err.message).toContain(`connector instance 'host_pkg' declares provider 'no_such_provider'`);
     });
 
     it('control: a stored entry carrying its document inline materializes — neither member is reached', async () => {
@@ -1082,6 +1081,139 @@ describe('#28594 — a definition stored in this environment is refused its pack
         expect(engine.getRegisteredConnectors()).toEqual(expect.arrayContaining(['host_pkg', 'host_unstamped']));
         expect(reads).toHaveLength(2);
         await kernel.shutdown();
+    });
+});
+
+// ── #28698 — every configuration fault of a STORED entry is soft at boot ────
+//
+// #28594 made a stored entry's refused ref soft at boot. Every other
+// configuration fault the boot reconcile meets on a stored entry takes the same
+// path (#28698): logged with the record a reload writes, the entry skipped,
+// the host's entries beside it served. The host's own entry with the same fault
+// keeps failing the boot.
+
+describe('#28698 — a stored entry\'s configuration fault never fails the boot; the host\'s still does', () => {
+    const HOST = 'com.acme.host';
+    const packages = { [HOST]: { source: 'code' } };
+    const ownedBy = <T extends object>(item: T, packageId: string) => ({ ...item, _packageId: packageId });
+    const bearer = { type: 'bearer', credentialRef: 'OS_TEST_28698_VAULT_REF' } as ConnectorInstanceAuth;
+
+    /** A factory that materializes every entry, except one whose providerConfig asks it to refuse. */
+    function makeProvider() {
+        const calls: string[] = [];
+        const factory: ConnectorProviderFactory = (ctx) => {
+            calls.push(ctx.name);
+            if (ctx.providerConfig.refuse === true) throw new Error(`providerConfig of '${ctx.name}' is not valid: refuse is set`);
+            return {
+                def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] } as unknown as Connector,
+                handlers: { ping: async () => ({ ok: true }) },
+            };
+        };
+        return { factory, calls };
+    }
+    const throwingResolver: CredentialResolver = () => { throw new Error('the vault could not be reached'); };
+
+    /** The host's entry served beside every stored fault: registered, so it is the host's. */
+    const hostServed = ownedBy(providerConnector('host_served'), HOST);
+
+    /**
+     * One fault, spelled for an entry `name`: what the entry carries, the boot
+     * options it needs, and the record text that names it.
+     */
+    const FAULTS: Array<{
+        fault: string;
+        entry: (name: string) => Record<string, unknown>;
+        opts?: Partial<BootOptions>;
+        livePlugin?: boolean;
+        record: (name: string) => string;
+    }> = [
+        {
+            fault: 'a provider no plugin offers',
+            entry: (name) => providerConnector(name, { provider: 'no_such_provider' }),
+            record: (name) => `connector instance '${name}' declares provider 'no_such_provider', but no provider factory is registered`,
+        },
+        {
+            fault: 'an invalid retryConfig',
+            entry: (name) => ({ ...providerConnector(name), retryConfig: { maxAttempts: -3 } }),
+            record: (name) => `connector instance '${name}' (provider 'fake'): retryConfig is not a valid connector retry policy`,
+        },
+        {
+            fault: 'a credential resolver that throws',
+            entry: (name) => providerConnector(name, { auth: bearer }),
+            opts: { credentialResolver: throwingResolver },
+            record: (name) => `connector instance '${name}' (provider 'fake'): auth resolution failed`,
+        },
+        {
+            fault: 'a name a plugin connector holds',
+            entry: (name) => providerConnector(name),
+            livePlugin: true,
+            record: (name) => `declarative provider-bound instance '${name}' collides with a plugin-registered connector`,
+        },
+        {
+            fault: 'a providerConfig its provider refuses',
+            entry: (name) => providerConnector(name, { providerConfig: { refuse: true } }),
+            record: (name) => `failed to materialize connector instance '${name}' via provider 'fake'`,
+        },
+    ];
+
+    it.each(FAULTS.map((f) => [f.fault, f] as const))('a stored entry with %s: the boot starts, the entry is skipped with its record, the host\'s entry serves', async (_fault, f) => {
+        const { factory } = makeProvider();
+        const logged: Array<{ msg: string; meta?: unknown }> = [];
+        const name = 'stored_faulty';
+        const kernel = await boot([{ ...hostServed }, f.entry(name)], {
+            providerFactory: factory, packages, registered: [hostServed], logged,
+            ...(f.livePlugin ? { registerLivePlugin: [name] } : {}),
+            ...f.opts,
+        });
+        const engine = automationOf(kernel);
+        expect(engine.getRegisteredConnectors()).toContain('host_served');
+        // Skipped: nothing declarative serves the name (a plugin connector may).
+        expect(engine.getConnectorOrigin(name)).not.toBe('declarative');
+        const record = logged.find((l) => l.msg.includes(f.record(name)));
+        expect(record, `no record names '${name}': ${JSON.stringify(logged.map((l) => l.msg))}`).toBeDefined();
+        await kernel.shutdown();
+    });
+
+    it.each(FAULTS.map((f) => [f.fault, f] as const))('control: the host\'s own entry with %s still fails the boot', async (_fault, f) => {
+        const { factory } = makeProvider();
+        const name = 'host_faulty';
+        const faulty = ownedBy(f.entry(name), HOST);
+        const err = await rejectionOf(boot([{ ...faulty }], {
+            providerFactory: factory, packages, registered: [faulty],
+            ...(f.livePlugin ? { registerLivePlugin: [name] } : {}),
+            ...f.opts,
+        }));
+        expect(err.message).toContain(f.record(name));
+    });
+
+    it('a stored entry duplicating the host\'s name is skipped with its record; the host\'s entry serves', async () => {
+        const { factory, calls } = makeProvider();
+        const logged: Array<{ msg: string; meta?: unknown }> = [];
+        const kernel = await boot(
+            [{ ...hostServed }, providerConnector('host_served', { providerConfig: { other: true } })],
+            { providerFactory: factory, packages, registered: [hostServed], logged },
+        );
+        expect(automationOf(kernel).getRegisteredConnectors()).toContain('host_served');
+        expect(calls).toEqual(['host_served']);
+        expect(logged.some((l) => l.msg.includes(`duplicate declarative connector instance name 'host_served'`))).toBe(true);
+        await kernel.shutdown();
+    });
+
+    it('control: two host entries of one name still fail the boot', async () => {
+        const { factory } = makeProvider();
+        const err = await rejectionOf(boot([{ ...hostServed }, { ...hostServed }], {
+            providerFactory: factory, packages, registered: [hostServed],
+        }));
+        expect(err.message).toContain(`duplicate declarative connector instance name 'host_served'`);
+    });
+
+    it('control: an INSTALLED package\'s entry with a configuration fault still fails the boot (#28534 unchanged)', async () => {
+        const { factory } = makeProvider();
+        const installed = ownedBy(providerConnector('installed_faulty', { provider: 'no_such_provider' }), 'com.acme.installed');
+        const err = await rejectionOf(boot([installed], {
+            providerFactory: factory, packages: { ...packages, 'com.acme.installed': { source: 'marketplace' } }, registered: [installed],
+        }));
+        expect(err.message).toContain(`connector instance 'installed_faulty' declares provider 'no_such_provider'`);
     });
 });
 
