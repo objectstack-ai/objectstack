@@ -161,11 +161,13 @@ export function newSimilarTargetRefusal(
         }
     }
     if (request.objects !== undefined && request.objects.length > 0) {
-        const entries: Array<{ name: string; isSystem?: unknown; _packageId?: string }> = [];
+        // Each entry is the registered object as the save gate's predicate
+        // reads it, with its owner stamped the way `getAllObjects` tags one.
+        const entries: Array<{ name: string; _packageId?: string }> = [];
         for (const name of request.objects) {
-            const object = registry?.getObject?.(name) as { isSystem?: unknown } | undefined;
-            if (!object) continue;
-            entries.push({ name, isSystem: object.isSystem, _packageId: registry?.getObjectOwner?.(name)?.packageId });
+            const object = registry?.getObject?.(name);
+            if (!object || typeof object !== 'object') continue;
+            entries.push({ ...object, name, _packageId: registry?.getObjectOwner?.(name)?.packageId });
         }
         const kept = new Set(narrowObjectsToPackageClosure(entries, resolvePackageClosure(target, (id) => getPackage(id))));
         const outside = entries.filter((entry) => !kept.has(entry));
