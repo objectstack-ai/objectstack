@@ -17,7 +17,7 @@ import {
   cn,
 } from '@object-ui/components';
 import { ChevronDown } from 'lucide-react';
-import { layoutRecordTabRow } from './synth/recordTabRow';
+import { arrangeRecordTabRow, layoutRecordTabRow } from './synth/recordTabRow';
 import { useDetailTranslation } from './useDetailTranslation';
 
 /** The id of the row's first tab, 「概览」: the page itself, no `?related=`. */
@@ -35,6 +35,12 @@ export interface RecordTab {
 export interface RecordTabRowProps {
   /** The row's tabs in their order; the first is 「概览」. */
   tabs: readonly RecordTab[];
+  /**
+   * The empty related lists' tabs (objectstack#28469): never on the row —
+   * unless one is active, which then takes the row's last slot — and listed in
+   * the dropdown after the folded tabs, behind a separator, in a muted face.
+   */
+  emptyTabs?: readonly RecordTab[];
   /** The hidden panels' tabs: never on the row, at the end of the dropdown. */
   hiddenTabs?: readonly RecordTab[];
   /** The active tab's id; always on the row. */
@@ -49,9 +55,12 @@ const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? React.useLayou
 
 const widthOf = (element: Element | null | undefined): number => (element ? element.getBoundingClientRect().width : 0);
 
-const CountChip: React.FC<{ count: number }> = ({ count }) => (
+const CountChip: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
   <span
-    className="inline-flex h-4 shrink-0 items-center rounded bg-muted px-1 text-[10.5px] font-normal tabular-nums text-foreground"
+    className={cn(
+      'inline-flex h-4 shrink-0 items-center rounded bg-muted px-1 text-[10.5px] font-normal tabular-nums',
+      muted ? 'text-muted-foreground' : 'text-foreground',
+    )}
     data-record-tab-count=""
   >
     {count}
@@ -61,10 +70,10 @@ const CountChip: React.FC<{ count: number }> = ({ count }) => (
 const hasCount = (tab: RecordTab): tab is RecordTab & { count: number } => typeof tab.count === 'number';
 
 /** A tab's face, shared by the row's button and the measuring copy. */
-const TabFace: React.FC<{ tab: RecordTab }> = ({ tab }) => (
+const TabFace: React.FC<{ tab: RecordTab; muted?: boolean }> = ({ tab, muted }) => (
   <>
     <span>{tab.label}</span>
-    {hasCount(tab) && <CountChip count={tab.count} />}
+    {hasCount(tab) && <CountChip count={tab.count} muted={muted} />}
   </>
 );
 
@@ -81,21 +90,33 @@ const TAB_CLASS =
  * How many tabs the row shows is computed from its own width, measured on
  * every resize (a window resize, the sidebar collapsing, a pane dragged
  * wider): as many as fit, the rest in a 「+N ▾」 dropdown that lists them with
- * their counts, the hidden panels' tabs at its end. The active tab is always
- * on the row, and so are 「概览」 and at least one more
- * ({@link layoutRecordTabRow}).
+ * their counts, then the empty lists' tabs (objectstack#28469), then the
+ * hidden panels' tabs at its end. The active tab is always on the row, and so
+ * are 「概览」 and at least one more ({@link layoutRecordTabRow},
+ * {@link arrangeRecordTabRow}).
  *
  * Keyboard: the row is one tab stop; ← → Home End move between its tabs, and
  * Enter or Space opens the focused one.
  */
-export const RecordTabRow: React.FC<RecordTabRowProps> = ({ tabs, hiddenTabs = [], activeId, onSelect }) => {
+export const RecordTabRow: React.FC<RecordTabRowProps> = ({
+  tabs: candidates,
+  emptyTabs: allEmpty = [],
+  hiddenTabs = [],
+  activeId,
+  onSelect,
+}) => {
   const { t } = useDetailTranslation();
+  // The row's candidates: the given tabs, plus an empty list's tab while it is active.
+  const { row: tabs, empty: emptyTabs } = arrangeRecordTabRow(candidates, allEmpty, activeId);
   const rowRef = React.useRef<HTMLDivElement | null>(null);
   const measureRef = React.useRef<HTMLDivElement | null>(null);
   const [measure, setMeasure] = React.useState<{ widths: number[]; more: number; available: number } | null>(null);
 
   // What the tabs draw, as a value: re-measure when a label or a count moves.
-  const facesKey = JSON.stringify([tabs.map((tab) => [tab.id, tab.label, tab.count ?? null]), hiddenTabs.length]);
+  const facesKey = JSON.stringify([
+    tabs.map((tab) => [tab.id, tab.label, tab.count ?? null]),
+    emptyTabs.length + hiddenTabs.length,
+  ]);
   useIsomorphicLayoutEffect(() => {
     const row = rowRef.current;
     const measurer = measureRef.current;
@@ -135,14 +156,14 @@ export const RecordTabRow: React.FC<RecordTabRowProps> = ({ tabs, hiddenTabs = [
           gap: TAB_GAP,
           moreWidth: measure.more,
           activeIndex,
-          alwaysInDropdown: hiddenTabs.length,
+          alwaysInDropdown: emptyTabs.length + hiddenTabs.length,
         })
       : { shown: tabs.map((_, index) => index), overflow: [] as number[] };
   // An id naming no tab leaves 「概览」 active.
   const activeTabId = tabs[activeIndex]?.id;
   const shown = layout.shown.map((index) => tabs[index]);
   const overflow = layout.overflow.map((index) => tabs[index]);
-  const moreCount = overflow.length + hiddenTabs.length;
+  const moreCount = overflow.length + emptyTabs.length + hiddenTabs.length;
 
   const tabRefs = React.useRef(new Map<string, HTMLButtonElement>());
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -225,9 +246,25 @@ export const RecordTabRow: React.FC<RecordTabRowProps> = ({ tabs, hiddenTabs = [
                 <TabFace tab={tab} />
               </DropdownMenuItem>
             ))}
-            {hiddenTabs.length > 0 && (
+            {emptyTabs.length > 0 && (
               <>
                 {overflow.length > 0 && <DropdownMenuSeparator />}
+                {emptyTabs.map((tab) => (
+                  <DropdownMenuItem
+                    key={tab.id}
+                    className="justify-between gap-3 text-muted-foreground"
+                    data-record-tab-menu-item={tab.id}
+                    data-record-tab-empty=""
+                    onSelect={() => onSelect(tab.id)}
+                  >
+                    <TabFace tab={tab} muted />
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
+            {hiddenTabs.length > 0 && (
+              <>
+                {overflow.length + emptyTabs.length > 0 && <DropdownMenuSeparator />}
                 <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
                   {t('detail.recordTabsHidden', { defaultValue: 'Hidden' })}
                 </DropdownMenuLabel>
@@ -257,7 +294,7 @@ export const RecordTabRow: React.FC<RecordTabRowProps> = ({ tabs, hiddenTabs = [
             </span>
           ))}
           <span className={cn(TAB_CLASS, 'gap-0.5 border-transparent')} data-record-tab-measure-more="">
-            <span>+{tabs.length + hiddenTabs.length}</span>
+            <span>+{tabs.length + emptyTabs.length + hiddenTabs.length}</span>
             <ChevronDown className="h-3.5 w-3.5" />
           </span>
         </div>
