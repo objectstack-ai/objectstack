@@ -73,6 +73,10 @@ import {
     FLOW_CLONE_NAME_TAKEN_STATUS,
     FLOW_CLONE_NOTICE,
 } from '../flow-clone.js';
+// [#28149, ADR-0146 D4] The clone body's declaration (its closed member set)
+// and the target rule every "new similar" door shares.
+import { CloneFlowRequestSchema } from '@objectstack/spec/api';
+import { newSimilarTargetRefusal, newSimilarTargetRefusalAnswer } from './new-similar-target.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 import { readDispatchedBody } from '../deferred-request-body.js';
@@ -2314,6 +2318,12 @@ async function registerAndSaveFlow(
     name: string,
     definition: unknown,
     door: 'definition' | 'clone',
+    /**
+     * [#28149] The package the clone door resolved for its copy
+     * ({@link resolveCloneTarget}) — the one caller here that holds a package
+     * of its own choosing rather than a stamp. The definition doors pass none.
+     */
+    packageId?: string,
 ): Promise<{ registered: unknown } | { refused: HttpDispatcherResult }> {
     const store: (Partial<Pick<ObjectStackProtocolImplementation, 'saveMetaItem'>>
         & Partial<Pick<MetadataProtocol, 'getMetaItems'>>) | undefined =
@@ -2337,7 +2347,13 @@ async function registerAndSaveFlow(
         // with no user passes no actor, an unattributed write as before.
         const { userId: actor } = activationCaller(context);
         try {
-            await store.saveMetaItem({ type: FLOW_METADATA_TYPE, name, item: definition, ...(actor ? { actor } : {}) });
+            await store.saveMetaItem({
+                type: FLOW_METADATA_TYPE,
+                name,
+                item: definition,
+                ...(packageId !== undefined ? { packageId } : {}),
+                ...(actor ? { actor } : {}),
+            });
         } catch (e) {
             restoreFlowRegistration(automationService, name, held);
             return {
@@ -2346,6 +2362,95 @@ async function registerAndSaveFlow(
         }
     }
     return { registered };
+}
+
+/**
+ * [#28149, ADR-0146 D3/D4] WHERE the clone door's copy lands — "new similar":
+ * a package, always (ADR-0070 D5/D6 retired the package-less scope, and ⛔ no
+ * clone is written without one), resolved before anything is registered.
+ *
+ *  - **`package` sent** — that package, judged by the target rule every "new
+ *    similar" door shares ({@link newSimilarTargetRefusal}): installed,
+ *    writable, and holding the source's package in its dependency closure.
+ *  - **`package` omitted** — the source's paired customization package
+ *    `<base>.custom`, where `<base>` is the package the loader's set says
+ *    ships the source (`packagedArtifactOwner` — the loader's fact, ⛔ never
+ *    the `_packageId` stamp on the definition the engine holds, which for a
+ *    name two packages hold is the boot bind's pick). The pair is ensured
+ *    through the protocol's `ensureCustomizationPackage` — the body of
+ *    `POST /packages/:id/ensure-customization`, the ONE creation path of the
+ *    pair (ADR-0146 D3), called in process and ⛔ never re-implemented. This
+ *    door already holds the authority that door asks (`manage_metadata`, then
+ *    the walled refusal, both judged before the domain is entered), so the
+ *    call creates nothing a caller could not create there. Its refusals (a
+ *    writable base, a base with no pair namespace, a namespace another package
+ *    owns) are relayed as the protocol built them. The pair it answers is then
+ *    judged by the same target rule, so a pair that is not writable here is
+ *    refused before the copy is written into it.
+ *  - **`package` omitted, and no package ships the source** — refused
+ *    `400 VALIDATION_ERROR` on `package`: a flow authored in the deployment,
+ *    or one stored in a writable package, has no base and so no pair, and
+ *    this door does not guess one (its stored binding is not the engine's to
+ *    tell, see {@link registerAndSaveFlow}). The caller names the package.
+ *
+ * A composition whose protocol cannot ensure a pair or save into a package
+ * has nowhere to land a copy: `501`, never the package-less write it used to
+ * make.
+ *
+ * Ordering: the pair is ensured before the copy is registered and saved, so a
+ * save the store then refuses leaves the pair in place. That is the pair's
+ * ordinary state — ensure is idempotent and an empty pair is a valid one —
+ * and the next clone reuses it.
+ */
+async function resolveCloneTarget(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    sourceName: string,
+    requested: string | undefined,
+): Promise<{ packageId: string } | { refused: HttpDispatcherResult }> {
+    const protocol: Partial<Pick<ObjectStackProtocolImplementation,
+        'ensureCustomizationPackage' | 'packagedArtifactOwner' | 'saveMetaItem'>> | undefined =
+        await deps.resolveServiceOrLoud(context, 'protocol');
+    if (typeof protocol?.ensureCustomizationPackage !== 'function'
+        || typeof protocol.packagedArtifactOwner !== 'function'
+        || typeof protocol.saveMetaItem !== 'function') {
+        return {
+            refused: {
+                handled: true,
+                response: deps.error(
+                    'Flow clone not supported: a copy lands in a package, and this deployment has no metadata '
+                    + 'protocol that can ensure a customization package and save a flow into it.',
+                    501,
+                ),
+            },
+        };
+    }
+    const subject = `flow '${sourceName}'`;
+    const owner = protocol.packagedArtifactOwner({ type: FLOW_METADATA_TYPE, name: sourceName });
+    let target: string;
+    if (requested !== undefined) {
+        target = requested;
+    } else {
+        if (owner === undefined) {
+            throw validationFailure(
+                `Flow '${sourceName}' is not shipped by a package, so it has no paired customization package to `
+                + 'land a copy in (ADR-0146 D3): name the package the copy lands in with `package`.',
+                [{ field: 'package', code: 'required', message: 'the source has no paired customization package' }],
+            );
+        }
+        try {
+            target = (await protocol.ensureCustomizationPackage({ basePackageId: owner })).packageId;
+        } catch (e) {
+            return { refused: { handled: true, response: deps.errorFromThrown(e) } };
+        }
+    }
+    const refusal = newSimilarTargetRefusal(await deps.getObjectQL(context), {
+        target,
+        subject,
+        ...(owner !== undefined ? { sourcePackageId: owner } : {}),
+    });
+    if (refusal) return { refused: newSimilarTargetRefusalAnswer(deps, refusal) };
+    return { packageId: target };
 }
 
 /** The engine methods {@link unregisterAndDeleteFlow} drives. */
@@ -3537,13 +3642,18 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         { field: '(body)', code: 'invalid_type', message: 'expected an object' },
                     ]);
                 }
-                const unknownKeys = Object.keys(cloneBody).filter((k) => k !== 'name' && k !== 'label');
+                // [#28149] The closed member set is the declaration's
+                // (`CloneFlowRequestSchema`, `@objectstack/spec/api`), read off
+                // it rather than re-listed, so the door and the contract cannot
+                // disagree about which keys a clone reads.
+                const declaredKeys = new Set(Object.keys(CloneFlowRequestSchema.shape));
+                const unknownKeys = Object.keys(cloneBody).filter((k) => !declaredKeys.has(k));
                 if (unknownKeys.length > 0) {
                     throw validationFailure(
-                        `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the clone body is { name: string, label: string }`,
+                        `Unknown key${unknownKeys.length > 1 ? 's' : ''} ${unknownKeys.map((k) => `\`${k}\``).join(', ')} — the clone body is { name: string, label: string, package?: string }`,
                         // `unknown_field` — the ADR-0114 catalog member for "a
                         // key the target does not declare" (#8124).
-                        unknownKeys.map((k) => ({ field: k, code: 'unknown_field', message: 'not a clone field — the clone body is { name, label }' })),
+                        unknownKeys.map((k) => ({ field: k, code: 'unknown_field', message: 'not a clone field — the clone body is { name, label, package? }' })),
                     );
                 }
                 // The NEW MACHINE NAME IS MANDATORY (ADR-0126 §7.1, commit e170b0ae5's
@@ -3573,6 +3683,19 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         'A clone requires a new display name — `label` is mandatory. '
                         + 'Two flows sharing one label are indistinguishable on the automation surface.',
                         [{ field: 'label', code: targetLabel === undefined ? 'required' : 'invalid_type', message: 'expected a non-empty string' }],
+                    );
+                }
+                // [#28149, ADR-0146 D4] `package` is optional — the package the
+                // copy lands in — and, when sent, a non-empty string: a blank or
+                // a non-string is refused here rather than read as "omitted",
+                // so a caller who meant to name a target never has the copy
+                // land somewhere it did not name.
+                const requestedPackage = (cloneBody as { package?: unknown }).package;
+                if (requestedPackage !== undefined && (typeof requestedPackage !== 'string' || requestedPackage.trim() === '')) {
+                    throw validationFailure(
+                        'The clone\'s `package` names the package the copy lands in, and must be a non-empty package id '
+                        + 'when sent. Omit it to land the copy in the source\'s paired customization package.',
+                        [{ field: 'package', code: 'invalid_type', message: 'expected a non-empty string' }],
                     );
                 }
 
@@ -3611,6 +3734,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                     };
                 }
 
+                // [#28149, ADR-0146 D3/D4] WHERE the copy lands — never without
+                // a package (ADR-0070 D5/D6). Resolved after every refusal above
+                // and before anything is registered, so a refused target leaves
+                // no copy behind (see `resolveCloneTarget`).
+                const target = await resolveCloneTarget(deps, context, name, requestedPackage);
+                if ('refused' in target) return target.refused;
+
                 const clone = cloneFlowDefinition(source, { name: targetName, label: targetLabel });
                 // [#20761, ADR-0126 §7.1] The copy is TENANT-AUTHORED, stated by
                 // the server: `cloneFlowDefinition` drops the base's whole
@@ -3637,7 +3767,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // deployment can no longer register. The target name is new (the
                 // collision probe above), so a save that fails withdraws it.
                 const written = await registerAndSaveFlow(
-                    deps, context, automationService as FlowRegistrationService, targetName, clone, 'clone',
+                    deps, context, automationService as FlowRegistrationService, targetName, clone, 'clone', target.packageId,
                 );
                 if ('refused' in written) return written.refused;
                 // ⛔ NO ANCESTRY on the way out either (ADR-0126 amendment
@@ -3650,7 +3780,14 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // [#20552] The ANSWER is a served definition like any other. A
                 // source holding a credential never reaches this line (#20790
                 // C1, above), so the clone carries none.
-                return { handled: true, response: deps.success({ flow: servedFlowDefinition(clone), notice: FLOW_CLONE_NOTICE }) };
+                // [#28149] …and NAMES the package it landed in, so a console
+                // opens the copy where it lives (Setup's "Open the clone in
+                // Studio"): the package is where the copy is, not where it
+                // came from, so it records no lineage.
+                return {
+                    handled: true,
+                    response: deps.success({ flow: servedFlowDefinition(clone), packageId: target.packageId, notice: FLOW_CLONE_NOTICE }),
+                };
             }
         }
 

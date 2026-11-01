@@ -142,6 +142,13 @@
         "manifest.views.element.list.timeline.groupByField"
       ]
     },
+    "api/CloneFlowResponse": {
+      "sites": [
+        "data.flow",
+        "data.flow.errorHandling",
+        "data.flow.nodes.element.in.waitEventConfig"
+      ]
+    },
     "api/CreateFlowRequest": {
       "sites": [
         "",
