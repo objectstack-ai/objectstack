@@ -183,6 +183,7 @@
     "CloneDataResponse (type)",
     "CloneDataResponseSchema (const)",
     "CloneFlowRequest (type)",
+    "CloneFlowRequestParsed (type)",
     "CloneFlowRequestSchema (const)",
     "CloneFlowResponse (type)",
     "CloneFlowResponseParsed (type)",

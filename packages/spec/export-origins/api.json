@@ -173,6 +173,7 @@
     "CloneDataResponse": "src/api/protocol.zod.ts#CloneDataResponse (type)",
     "CloneDataResponseSchema": "src/api/protocol.zod.ts#CloneDataResponseSchema (const)",
     "CloneFlowRequest": "src/api/automation-api.zod.ts#CloneFlowRequest (type)",
+    "CloneFlowRequestParsed": "src/api/automation-api.zod.ts#CloneFlowRequestParsed (type)",
     "CloneFlowRequestSchema": "src/api/automation-api.zod.ts#CloneFlowRequestSchema (const)",
     "CloneFlowResponse": "src/api/automation-api.zod.ts#CloneFlowResponse (type)",
     "CloneFlowResponseParsed": "src/api/automation-api.zod.ts#CloneFlowResponseParsed (type)",

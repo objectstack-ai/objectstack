@@ -698,6 +698,7 @@ export const CloneFlowRequestSchema = lazySchema(() => z.object({
   ),
 }).strict());
 export type CloneFlowRequest = z.input<typeof CloneFlowRequestSchema>;
+export type CloneFlowRequestParsed = z.infer<typeof CloneFlowRequestSchema>;
 
 /**
  * Response of the flow clone door.
