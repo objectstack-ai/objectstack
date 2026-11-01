@@ -31,6 +31,9 @@ import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 import {
     invokeBusinessAction,
+    apiActionRequestReadsSubjectRow,
+    apiForwardSubjectRecord,
+    forwardsOnDeniedSubjectLoad,
     apiActionResultOf,
     buildApiActionRequest,
     isHeadlessInvokableAction,
@@ -81,6 +84,21 @@ const APPROVE_LEAD = {
     ai: { exposed: true, description: 'Approve the lead.' },
 };
 
+/**
+ * [#28657] An api action whose request needs a field OF the subject row: a
+ * `{field}` path token other than `{id}`.
+ */
+const NOTE_OWNER = {
+    name: 'note_owner', label: 'Note Owner', objectName: OBJECT, type: 'api', method: 'POST',
+    target: '/api/v1/data/crm_note/{email}', ai: { exposed: true, description: 'Note the owner.' },
+};
+/** [#28657] The other one: a `recordIdParam` seeded from a `recordIdField` other than `id`. */
+const FLAG_BY_EMAIL = {
+    name: 'flag_by_email', label: 'Flag', objectName: OBJECT, type: 'api', method: 'POST',
+    target: '/api/v1/data/crm_flag', recordIdParam: 'email', recordIdField: 'email',
+    ai: { exposed: true, description: 'Flag the lead by email.' },
+};
+
 type Injected = { url: string; init: RequestInit };
 
 function boot(opts: {
@@ -104,7 +122,7 @@ function boot(opts: {
     });
     const server = { getRawApp: () => ({ request }) };
     const executeAction = vi.fn(async () => ({ ran: 'script' }));
-    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD] };
+    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD, NOTE_OWNER, FLAG_BY_EMAIL] };
     const ql: any = {
         executeAction,
         getSchema: (name: string) => (name === OBJECT ? objectDef : undefined),
@@ -1160,5 +1178,167 @@ describe('[ADR-0090 D10 rule 5, #28367] the two flipped cells: an OAuth agent is
         const sent = headersOf(h.injected[0]!.init);
         expect(sent.authorization).toBe('Bearer tok_member');
         expect(sent[FORWARD_CREDENTIAL_HEADER]).toBeUndefined();
+    });
+});
+
+// [#28657] A same-origin api action's target authorizes the caller itself
+// (ADR-0066 D4), so a subject row the caller's own scope did not deliver no
+// longer answers the door's own 404 ahead of the forward: the door forwards
+// and answers what the target answers. The real-stack half — a non-admin
+// pending approver's decision from the request page, on the real approvals
+// routes — is `packages/verify/src/action-door-api-forward-denied-subject.test.ts`.
+// The branches that keep the 404 on a denied load (flow, script/body, and the
+// declarative update) stay pinned in `../action-door-record-load-denied.test.ts`
+// and `../http-dispatcher.actions-type-dispatch.test.ts`.
+describe('[#28657] a denied subject load forwards an api action whose request needs nothing from the row', () => {
+    /** An id the fake data layer delivers no row for: the caller-scope load is denied. */
+    const HIDDEN = 'areq_hidden';
+    const runViaMcp = async (h: ReturnType<typeof boot>, name: string, input: any = {}) => {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+        return invokeBusinessAction(deps, CTX() as any, name, input, {
+            driver: h.ql,
+            ec: { userId: 'u_agent', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            // The caller's scope delivers nothing for HIDDEN: the data layer's 404.
+            callData: async (_a: string, p: any) => {
+                if (p?.id === HIDDEN) throw Object.assign(new Error('not found'), { status: 404, code: 'RECORD_NOT_FOUND' });
+                return { object: p?.object, id: p?.id, record: { id: p?.id, email: 'target@example.test' } };
+            },
+        });
+    };
+
+    it('REST: the approve shape on a row the caller cannot read is forwarded, and the target\'s 200 is the answer', async () => {
+        const { dispatcher, injected } = boot({ answer: { body: { success: true, data: { request: { id: HIDDEN } } } } });
+
+        const res = await dispatcher.handleActions(
+            `/${OBJECT}/${APPROVE_LEAD.name}`, 'POST', { recordId: HIDDEN, params: { comment: 'ok' } }, CTX(),
+        );
+
+        expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+        expect(injected).toHaveLength(1);
+        expect(injected[0].url).toBe(`http://app.example.test/api/v1/approvals/requests/${HIDDEN}/approve`);
+        expect(JSON.parse(String(injected[0].init.body))).toEqual({ comment: 'ok' });
+        expect(headersOf(injected[0].init).authorization).toBe('Bearer tok_member');
+        expect(res?.response?.body?.data).toEqual({ request: { id: HIDDEN } });
+    });
+
+    it('REST: the target\'s refusal is the answer — its status, its code, and its `{ code, error }` sentence', async () => {
+        // The approvals decision routes answer `{ code, error: '<sentence>' }`.
+        const sentence = "actor 'u_member' is not a pending approver";
+        const { dispatcher, injected } = boot({ answer: { status: 403, body: { code: 'FORBIDDEN', error: sentence } } });
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${APPROVE_LEAD.name}`, 'POST', { recordId: HIDDEN }, CTX());
+
+        expect(injected).toHaveLength(1);
+        expect(statusOf(res)).toBe(403);
+        expect(codeOf(res)).toBe('FORBIDDEN');
+        expect(messageOf(res)).toBe(sentence);
+    });
+
+    it('REST: a `recordIdParam` read from `id` is seeded from the routed id alone', async () => {
+        const { dispatcher, injected } = boot();
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${RECALC_LEAD.name}`, 'POST', { recordId: HIDDEN }, CTX());
+
+        expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+        expect(JSON.parse(String(injected[0].init.body))).toEqual({ recordId: HIDDEN });
+    });
+
+    it('REST: an api action whose request needs a field OF the row keeps the 404 RECORD_NOT_FOUND, and nothing is forwarded', async () => {
+        for (const action of [NOTE_OWNER, FLAG_BY_EMAIL]) {
+            const { dispatcher, request } = boot();
+
+            const res = await dispatcher.handleActions(`/${OBJECT}/${action.name}`, 'POST', { recordId: HIDDEN }, CTX());
+
+            expect(statusOf(res), action.name).toBe(404);
+            expect(codeOf(res), action.name).toBe('RECORD_NOT_FOUND');
+            expect(request, action.name).not.toHaveBeenCalled();
+        }
+    });
+
+    it('REST, the firing control: the same two actions on a row the caller CAN read are forwarded with the row\'s field', async () => {
+        const note = boot();
+        expect(statusOf(await note.dispatcher.handleActions(`/${OBJECT}/${NOTE_OWNER.name}`, 'POST', { recordId: 'u_target' }, CTX()))).toBe(200);
+        expect(note.injected[0].url).toBe('http://app.example.test/api/v1/data/crm_note/target%40example.test');
+
+        const flag = boot();
+        expect(statusOf(await flag.dispatcher.handleActions(`/${OBJECT}/${FLAG_BY_EMAIL.name}`, 'POST', { recordId: 'u_target' }, CTX()))).toBe(200);
+        expect(JSON.parse(String(flag.injected[0].init.body))).toEqual({ email: 'target@example.test' });
+    });
+
+    it('REST: a target\'s 400 prescription in `{ code, error }` is relayed, not replaced by "its target answered HTTP 400"', async () => {
+        const sentence = 'decision output(s) `amount` are required to approve this step';
+        const { dispatcher } = boot({ answer: { status: 400, body: { code: 'VALIDATION_FAILED', error: sentence } } });
+
+        const res = await dispatcher.handleActions(`/${OBJECT}/${APPROVE_LEAD.name}`, 'POST', { recordId: 'u_target' }, CTX());
+
+        expect(statusOf(res)).toBe(400);
+        expect(codeOf(res)).toBe('VALIDATION_FAILED');
+        expect(messageOf(res)).toBe(sentence);
+    });
+
+    it('MCP `run_action`: the same approve shape on a row the caller cannot read is forwarded and succeeds', async () => {
+        const h = boot({ answer: { body: { success: true, data: { request: { id: HIDDEN } } } } });
+
+        const result: any = await runViaMcp(h, APPROVE_LEAD.name, { recordId: HIDDEN, params: { comment: 'ok' } });
+
+        expect(result.ok).toBe(true);
+        expect(result.result).toEqual({ request: { id: HIDDEN } });
+        expect(h.injected[0].url).toBe(`http://app.example.test/api/v1/approvals/requests/${HIDDEN}/approve`);
+        expect(JSON.parse(String(h.injected[0].init.body))).toEqual({ comment: 'ok' });
+    });
+
+    it('MCP `run_action`: a request that needs a field OF the row is thrown the 404 RECORD_NOT_FOUND, and nothing is forwarded', async () => {
+        for (const action of [NOTE_OWNER, FLAG_BY_EMAIL]) {
+            const h = boot();
+
+            const thrown = await runViaMcp(h, action.name, { recordId: HIDDEN }).catch((e) => e);
+
+            expect((thrown as any).status ?? (thrown as any).statusCode, action.name).toBe(404);
+            expect((thrown as any).code, action.name).toBe('RECORD_NOT_FOUND');
+            expect(h.request, action.name).not.toHaveBeenCalled();
+        }
+    });
+
+    it('MCP `run_action`: the target\'s `{ code, error }` sentence rides the throw', async () => {
+        const sentence = 'decision output(s) `amount` are required to approve this step';
+        const h = boot({ answer: { status: 400, body: { code: 'VALIDATION_FAILED', error: sentence } } });
+
+        const thrown = await runViaMcp(h, APPROVE_LEAD.name, { recordId: HIDDEN }).catch((e) => e);
+
+        expect((thrown as any).status).toBe(400);
+        expect((thrown as any).code).toBe('VALIDATION_FAILED');
+        expect(String(thrown.message)).toBe(sentence);
+    });
+
+    it('the shared helpers: which declarations read the row, and the row a denied load builds from', () => {
+        expect(apiActionRequestReadsSubjectRow(APPROVE_LEAD)).toBe(false);
+        expect(apiActionRequestReadsSubjectRow(RECALC_LEAD)).toBe(false);
+        expect(apiActionRequestReadsSubjectRow(BAN_LEAD)).toBe(false);
+        expect(apiActionRequestReadsSubjectRow(DELETE_LEAD)).toBe(false);
+        expect(apiActionRequestReadsSubjectRow(NOTE_OWNER)).toBe(true);
+        expect(apiActionRequestReadsSubjectRow(FLAG_BY_EMAIL)).toBe(true);
+        expect(apiActionRequestReadsSubjectRow({ ...APPROVE_LEAD, target: '/api/v1/x/{id}/{status}' })).toBe(true);
+
+        expect(forwardsOnDeniedSubjectLoad(APPROVE_LEAD)).toBe(true);
+        expect(forwardsOnDeniedSubjectLoad(NOTE_OWNER)).toBe(false);
+        expect(forwardsOnDeniedSubjectLoad(REMOTE_PING)).toBe(false);
+        expect(forwardsOnDeniedSubjectLoad({ name: 'run_it', type: 'flow', target: 'some_flow' })).toBe(false);
+        expect(forwardsOnDeniedSubjectLoad({ name: 'go', type: 'script' })).toBe(false);
+        // `operation` before `type`: a declarative update is never forwarded.
+        expect(forwardsOnDeniedSubjectLoad({ ...APPROVE_LEAD, operation: 'update', patch: { done: true } })).toBe(false);
+
+        // ⛔ Whatever a denied load left behind, the request sees the routed id only.
+        const leftover = { record: { id: HIDDEN, email: 'secret@example.test' }, recordLoadDenied: true };
+        expect(apiForwardSubjectRecord(HIDDEN, leftover)).toEqual({ id: HIDDEN });
+        const delivered = { record: { id: 'u_target', email: 'target@example.test' }, recordLoadDenied: false };
+        expect(apiForwardSubjectRecord('u_target', delivered)).toBe(delivered.record);
     });
 });

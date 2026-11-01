@@ -16,11 +16,13 @@
  *   `null` group.
  * - A multi-hop spelling is judged hop by hop: with only `account` included,
  *   `account.owner.name` is refused naming `account.owner`.
- * - CONTROL: a backed dotted dimension still serves on every face (the live
- *   strategies the same groups); a dotted spelling that resolves to a declared
- *   dimension (`<object>.region`) still serves; an undeclared plain dimension
- *   (`bogus`, #28201) keeps its own refusal; a `runtimeFilter` member through an
- *   unbacked path keeps the native strategy's `DATASET_INVALID`.
+ * - CONTROL: a backed dotted dimension still serves on both live strategies
+ *   (the same groups), and the draft preview refuses it with its own refusal
+ *   (#28555, `dotted-path-preview-parity.test.ts`); a dotted spelling that
+ *   resolves to a declared dimension (`<object>.region`) still serves; an
+ *   undeclared plain dimension (`bogus`, #28201) keeps its own refusal. A
+ *   `runtimeFilter` member through an unbacked path is refused by the same
+ *   gate since #28557 (pinned in that file too).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -182,15 +184,18 @@ describe('[#28258] a dotted dimension through a relationship path the dataset do
     expect(refusals[2].message).toBe(refusals[0].message);
   });
 
-  it("CONTROL: a backed 'account.name' serves on every face, the same groups on both live strategies", async () => {
+  it("CONTROL: a backed 'account.name' serves on both live strategies, the same groups", async () => {
     const expected = [{ key: 'Acme', total: 130 }, { key: 'Globex', total: 50 }];
     for (const face of ['native', 'objectql'] as const) {
       const result = await ask(face, BACKED, { dimensions: ['account.name'], measures: ['total'] });
       expect(groupsOf(result.rows, 'account.name'), face).toEqual(expected);
     }
-    // The preview serves it (it is not refused); its seed rows carry no join.
-    const preview = await ask('preview', BACKED, { dimensions: ['account.name'], measures: ['total'] });
-    expect(Array.isArray(preview.rows)).toBe(true);
+    // [#28555] The preview joins nothing, so it refuses the backed path with
+    // its own refusal rather than this gate's (which judges only unbacked ones).
+    const err = await refusalOf(ask('preview', BACKED, { dimensions: ['account.name'], measures: ['total'] }));
+    expect(err.code, err.message).toBe('INVALID_FIELD');
+    expect(err.status).toBe(400);
+    expect(err.message).not.toContain('which the dataset does not declare');
   });
 
   it("CONTROL: '<object>.region', which resolves to the declared 'region', still serves on every face", async () => {
@@ -226,11 +231,13 @@ describe('[#28258] a dotted dimension through a relationship path the dataset do
     expect(refusals[2].message).toBe(refusals[0].message);
   });
 
-  it("CONTROL: a runtimeFilter member through an unbacked path keeps the native strategy's DATASET_INVALID", async () => {
+  it("[#28557] a runtimeFilter member through an unbacked path is refused by the same gate, param 'where'", async () => {
     const err = await refusalOf(
       ask('native', UNBACKED, { dimensions: ['region'], measures: ['total'], runtimeFilter: { 'account.name': 'Acme' } }),
     );
-    expect(err.code, err.message).toBe('DATASET_INVALID');
+    expect(err.code, err.message).toBe('INVALID_FIELD');
     expect(err.status).toBe(400);
+    expect(err.param).toBe('where');
+    expect(err.member).toBe('account.name');
   });
 });

@@ -466,6 +466,8 @@ import { rollBackUnmanagedImport, unmanagedImportCollisions } from './protocol-u
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 // [#28355] The `denied` row the four single-item doors leave for a refusal that writes none of its own.
 import { withRefusalAudit } from './protocol-refusal-audit.js';
+// [#28665] The null-master rows a `controlled_by_parent` detail stops serving, counted into the finding that makes its master required.
+import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
 
 /**
  * Canonical Zod schema per metadata type lives in
@@ -21481,7 +21483,14 @@ export class ObjectStackProtocolImplementation implements
                 } as any);
                 const prev = (existing as any)?.item;
                 if (prev) {
-                    const issues = detectDestructiveObjectChanges(prev, request.item);
+                    // [#28665, ADR-0055 §1] The master of a `controlled_by_parent`
+                    // detail made required: its finding names how many stored rows
+                    // hold no master, since those stop serving everyone. One count
+                    // per such finding, none on any other save; see the module.
+                    const issues = await withNullMasterRowCounts(
+                        detectDestructiveObjectChanges(prev, request.item), request.item, request.name,
+                        (field) => this.engine.count(request.name, { where: { [field]: { $null: true } }, context: { isSystem: true } }),
+                    );
                     if (issues.length > 0) {
                         // [commit 809e61221] Deliberately NOT trimmed to a headline, and
                         // this is a MEASURED verdict rather than an oversight —

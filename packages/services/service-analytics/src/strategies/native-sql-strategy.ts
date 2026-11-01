@@ -1506,7 +1506,11 @@ export class NativeSQLStrategy implements AnalyticsStrategy {
           // `lookupMember`'s synthetic relation fallback mints a dotted
           // dimension nobody declared, so `selection.dimensions`,
           // `selection.timeDimensions` and a `runtimeFilter` member spelled
-          // `account.name` each land here. The dataset's OWN dimensions and
+          // `account.name` would each land here. [#28258, #28556, #28557]
+          // `AnalyticsService.assertDimensionJoinsBacked` now refuses all three
+          // in the call context, `INVALID_FIELD` / 400, before any strategy
+          // runs, so on the dataset route nothing a request names reaches this
+          // check; it stays for the hook below. The dataset's OWN dimensions and
           // measures cannot: `compileDataset`'s `assertDeclared` refuses an
           // undeclared relationship path at compile time (also 400
           // `DATASET_INVALID`, so the two agree rather than diverge), and

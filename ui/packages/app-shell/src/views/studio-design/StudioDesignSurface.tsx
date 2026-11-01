@@ -211,6 +211,7 @@ import {
   ObjectListViewInspector,
   useObjectListViewDraft,
   type DraftOnlyObjects,
+  type ListViewCustomization,
 } from './ObjectListViewInspector.js';
 import {
   DEFAULT_PAGE_SOURCE_KIND,
@@ -384,7 +385,28 @@ import { ObjectApiPanel } from './ObjectApiPanel.js';
 import { ObjectHooksPanel } from './ObjectHooksPanel.js';
 import { ObjectActionsPanel } from './ObjectActionsPanel.js';
 import { getIcon } from '../../utils/getIcon.js';
-import { fetchListedPackageIds, fetchPackages, prefixObjectName, type PkgEntry } from './packages-io.js';
+import {
+  ensureCustomizationPackage,
+  fetchListedPackageIds,
+  fetchListedPackageManifests,
+  fetchPackages,
+  listedCustomizationPairOf,
+  listedPackageVersion,
+  prefixObjectName,
+  type PkgEntry,
+} from './packages-io.js';
+import {
+  StudioCustomizeButton,
+  StudioOverrideChip,
+  StudioRestoreOriginalDialog,
+  StudioRestoreOriginalItem,
+  isStudioCustomizeType,
+  overrideDraftBody,
+  useCustomizeDoorWalled,
+  useServedOverride,
+  type CustomizeBlock,
+  type ServedOverride,
+} from './StudioCustomizeControls.js';
 import {
   DraftChangesPanel,
   type DraftChangeEntry,
@@ -842,6 +864,10 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
  * overlay is edited. Any other item, no open item, or a registry not yet
  * read draws a plain "Read-only" mark that links nowhere.
  *
+ * objectstack#28562 (ADR-0146 D2) — nor does a view, dashboard or report
+ * (`isStudioCustomizeType`): Studio customizes those itself, into the base's
+ * paired customization package, so Setup's overlay page is not their editor.
+ *
  * objectui#12707 — at a tab row's end, the mark folds to its glyph when the
  * row cannot hold it whole (`useStudioTabRowFold`), rather than being cut
  * mid-word at the row's edge. Folded, its text stays as its accessible name
@@ -859,7 +885,10 @@ export function StudioReadOnlyLink({
 }): React.ReactElement {
   const client = useMetadataClient();
   const { entries } = useMetadataTypes(client);
-  const overlayable = item !== null && entries.some((e) => e.type === item.type && e.allowEnvironmentOverlay === true);
+  const overlayable =
+    item !== null &&
+    !isStudioCustomizeType(item.type) &&
+    entries.some((e) => e.type === item.type && e.allowEnvironmentOverlay === true);
   const ref = React.useRef<HTMLElement | null>(null);
   const label = t(overlayable ? 'engine.studio.pkg.readonlyLink' : 'engine.studio.pkg.readonly', locale);
   const folded = useStudioTabRowFold(ref, label);
@@ -1578,6 +1607,15 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
   // (`fetchListedPackageIds`, the same request), because the switcher's
   // entries hide the kernel packages that ARE installed.
   const [pkgMissing, setPkgMissing] = React.useState(false);
+  // objectstack#28562 (ADR-0146 D2, D3) — what customizing a read-only base
+  // reads off the same list: the version its manifest declares (an override's
+  // `basedOn`) and its paired customization package when one is listed. Held
+  // with the id it answered for; `null` until read, and on a writable package.
+  const [baseFacts, setBaseFacts] = React.useState<{
+    for: string;
+    basedOn: string | null;
+    listedPair: string | null;
+  } | null>(null);
   React.useEffect(() => {
     // objectui#11553 — the package-less scope has no package to look up; its
     // writability is decided below, not fetched.
@@ -1585,16 +1623,32 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
     let cancelled = false;
     setPkgWritable(undefined);
     setPkgMissing(false);
+    setBaseFacts(null);
     // Asked beside the entries read, so both share its one request. A failure
     // is reported once, by the entries read below.
     const listedIds = fetchListedPackageIds();
     listedIds.catch(() => {});
+    const listedManifests = fetchListedPackageManifests();
+    listedManifests.catch(() => {});
     fetchPackages()
       .then((list) => {
         if (cancelled) return;
         const entry = list.find((p) => p.id === packageId) ?? null;
         setPkgWritable(entry?.writable ?? null);
         setPkgEntry(entry);
+        if (entry && !entry.writable) {
+          listedManifests.then(
+            (manifests) => {
+              if (cancelled) return;
+              setBaseFacts({
+                for: packageId,
+                basedOn: listedPackageVersion(manifests, packageId),
+                listedPair: listedCustomizationPairOf(manifests, packageId),
+              });
+            },
+            () => {},
+          );
+        }
         if (entry) return;
         listedIds.then(
           (ids) => {
@@ -1621,6 +1675,43 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
   // own, so they open editable whatever the last package answered. The
   // server's write gate stays the authority, exactly as for a writable package.
   const readOnly = packageId !== null && pkgWritable === false;
+  // objectstack#28562 — the base's pair: the ensure door's answer once this
+  // surface has asked it, else the listed one. Pending, the changes panel and
+  // Publish act on its drafts (`draftScope`); with no pair, on the base's own,
+  // as before. ⛔ A write names the door's answer only (`ensurePair`).
+  const [ensuredPair, setEnsuredPair] = React.useState<{ base: string; packageId: string } | null>(null);
+  const baseRead = readOnly && baseFacts !== null && baseFacts.for === packageId ? baseFacts : null;
+  const pairId =
+    !readOnly || packageId === null
+      ? null
+      : ensuredPair?.base === packageId
+        ? ensuredPair.packageId
+        : (baseRead?.listedPair ?? null);
+  const draftScope = pairId ?? packageId;
+  // A read-only base with no pair has nothing of its own to publish.
+  const publishReadOnly = readOnly && pairId === null;
+  const customizeWalled = useCustomizeDoorWalled();
+  const ensurePair = React.useCallback(async (): Promise<string> => {
+    if (packageId === null) throw new Error('No package is open.');
+    const answer = await ensureCustomizationPackage(packageId);
+    setEnsuredPair({ base: packageId, packageId: answer.packageId });
+    return answer.packageId;
+  }, [packageId]);
+  const baseLabel = pkgEntry?.id === packageId ? pkgEntry.name : (packageId ?? '');
+  const customization = React.useMemo<StudioBaseCustomization | null>(
+    () =>
+      baseRead && packageId !== null
+        ? {
+            base: packageId,
+            baseLabel,
+            basedOn: baseRead.basedOn,
+            walled: customizeWalled,
+            pairId,
+            ensure: ensurePair,
+          }
+        : null,
+    [baseRead, packageId, baseLabel, customizeWalled, pairId, ensurePair],
+  );
 
   // objectui#2600 — the header's pillar links, Home button and PackageSwitcher
   // are pure SPA client navigation, so the editors' `beforeunload` guard never
@@ -1727,7 +1818,7 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
     entries: pendingEntries,
     refresh: refreshPending,
     behindSave,
-  } = usePendingDrafts({ packageId });
+  } = usePendingDrafts({ packageId: draftScope });
   const pendingCount =
     packageId !== null ? feedCount : feedCount === null ? null : pendingEntries.filter(isOrgScopeDraft).length;
 
@@ -1773,7 +1864,7 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
           const body =
             Array.isArray(f.issues) && f.issues.length > 0
               ? await shellClient
-                  .getDraft<Record<string, unknown>>(f.type, f.name, packageId !== null ? { packageId } : {})
+                  .getDraft<Record<string, unknown>>(f.type, f.name, draftScope !== null ? { packageId: draftScope } : {})
                   .then((resp) => extractDraftBody(resp) as Record<string, unknown> | null, () => null)
               : null;
           return [publishRefusalKey(type, f.name), f.name, publishRefusal(f, type, body, locale)] as const;
@@ -1853,9 +1944,11 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
       // PR objectui#10038 made for the two sibling call sites.
       // objectui#12929 — the sheet's options ride only when it gave some, so an
       // unchecked publish is the very call it was before.
+      // objectstack#28562 — on a read-only base, its pair's drafts.
+      const publishTarget = pairId ?? packageId;
       const payload = (await (options
-        ? shellClient.publishPackageDrafts(packageId, options)
-        : shellClient.publishPackageDrafts(packageId))) as {
+        ? shellClient.publishPackageDrafts(publishTarget, options)
+        : shellClient.publishPackageDrafts(publishTarget))) as {
         success?: boolean;
         outcome?: string;
         error?: { message?: string; details?: { issues?: unknown } };
@@ -1964,7 +2057,7 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
       setPublishing(false);
     }
     await refreshPending();
-  }, [shellClient, packageId, refreshPending, locale, heldEdit]);
+  }, [shellClient, packageId, pairId, draftScope, refreshPending, locale, heldEdit]);
 
   // objectui#11787 — a Studio draft save reports here when it lands, and the
   // count follows it: the read it asks for is sent after the save, never
@@ -2311,9 +2404,9 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
         setChangesPosture('confirm');
         setChangesOpen(true);
       }}
-      disabled={publishing || !hasPending || readOnly}
+      disabled={publishing || !hasPending || publishReadOnly}
       aria-describedby={
-        readOnly
+        publishReadOnly
           ? publishReadOnlyReasonId
           : !hasPending && !publishing
             ? publishNoneReasonId
@@ -2322,7 +2415,7 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
       // A read-only package's reason is the wrapper's (objectui#12303), not a
       // `title` the disabled button can never show.
       title={
-        readOnly
+        publishReadOnly
           ? undefined
           : hasPending
             ? t('engine.studio.publishTitle', locale)
@@ -2335,11 +2428,11 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
       className={cn(
         // The border is on both states so the swap never shifts the bar.
         'inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-[13px] font-medium',
-        publishing || (hasPending && !readOnly)
+        publishing || (hasPending && !publishReadOnly)
           ? 'border-transparent bg-primary text-primary-foreground disabled:opacity-50'
           : 'text-muted-foreground',
         // The wrapper takes the hover: the disabled button lets it through.
-        readOnly && 'disabled:pointer-events-none',
+        publishReadOnly && 'disabled:pointer-events-none',
       )}
     >
       {publishing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rocket className="h-3.5 w-3.5" />}
@@ -2475,7 +2568,7 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
                   objectui#12459 moves the sentence off the strip into the
                   Publish button's description, where readers and the tooltip
                   still find it. */}
-              {!hasPending && !readOnly && !publishing && (
+              {!hasPending && !publishReadOnly && !publishing && (
                 <span
                   id={publishNoneReasonId}
                   className="sr-only"
@@ -2491,8 +2584,10 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
                   `title` reached no keyboard or assistive-tech user and Tab
                   skipped Publish entirely. The wrapping span is the tooltip
                   trigger and a tab stop, and the button and the span both
-                  point `aria-describedby` at an `sr-only` copy of the reason. */}
-              {readOnly ? (
+                  point `aria-describedby` at an `sr-only` copy of the reason.
+                  objectstack#28562 — a read-only base with a customization
+                  package publishes that package's drafts, so it is not this. */}
+              {publishReadOnly ? (
                 <TooltipProvider delayDuration={200}>
                   <Tooltip>
                     <TooltipTrigger asChild>
@@ -2654,6 +2749,7 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
                   onCreateApp={readOnly ? undefined : () => setAppCreating(true)}
                   readOnly={readOnly}
                   readOnlySettled={pkgWritable !== undefined}
+                  customization={customization}
                   onDirtyChange={setPillarDirty}
                   onSurfaceLabelChange={setSurfaceLabel}
                   onHeldEditChange={setHeldEdit}
@@ -2698,9 +2794,10 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
         <DraftChangesPanel
           open={changesOpen}
           onOpenChange={setChangesOpen}
-          packageId={packageId}
+          // objectstack#28562 — a read-only base reviews its pair's drafts.
+          packageId={draftScope}
           include={packageId === null ? isOrgScopeDraft : undefined}
-          onPublish={readOnly ? undefined : doPublish}
+          onPublish={publishReadOnly ? undefined : doPublish}
           publishing={publishing}
           posture={changesPosture}
           renderEntryNote={renderPublishRefusal}
@@ -4109,6 +4206,29 @@ function NavUrlFields({
 /** The Interfaces pillar's leaf identity, `type:name` (`:` when none is open). */
 const leafKeyOf = (s: Surface | null): string => `${s?.type ?? ''}:${s?.name ?? ''}`;
 
+/**
+ * objectstack#28562 (ADR-0146 D2, D3) — what the Interfaces pillar customizes
+ * a read-only base with, from the Studio surface: passed only on a read-only
+ * base, once the package list has answered for it.
+ */
+export interface StudioBaseCustomization {
+  /** The read-only base package. */
+  base: string;
+  /** Its display name, as the top bar shows it. */
+  baseLabel: string;
+  /** The version its listed manifest declares: an override's `basedOn`. `null` when the list states none. */
+  basedOn: string | null;
+  /** The ensure door refuses this caller (`customizeDoorWalled`). */
+  walled: boolean;
+  /** The base's pair, for READS (its drafts); `null` while it has none. */
+  pairId: string | null;
+  /** The ensure door: resolves the pair's id from its answer, which every write names; rejects with its refusal. */
+  ensure: () => Promise<string>;
+}
+
+/** The key an item of `base` is customized under: the base, `type` and `name`. */
+const customizeItemKey = (base: string, type: string, name: string): string => JSON.stringify([base, type, name]);
+
 export function InterfacesPillar({
   packageId,
   packageLabel,
@@ -4121,12 +4241,17 @@ export function InterfacesPillar({
   onDirtyChange,
   onSurfaceLabelChange,
   onHeldEditChange,
+  customization = null,
 }: {
   packageId: string;
   /** objectui#12718 — the package's display name, as the Studio top bar
    * reads it; `undefined` until the package list answers. The pillar names a
    * package with no app by it, so the id shows only when neither exists. */
   packageLabel?: string;
+  /** objectstack#28562 — on a read-only base, what its views, dashboards and
+   * reports are customized with ({@link StudioBaseCustomization}); `null`
+   * otherwise, and then nothing here changes. */
+  customization?: StudioBaseCustomization | null;
   publishNonce?: number;
   /** Bumped when a draft is saved elsewhere (e.g. the header's create-app flow) — a
    * re-resolve signal so a just-created app appears without a reload. */
@@ -4775,6 +4900,74 @@ export function InterfacesPillar({
   // running app, not an editable draft — schema editing is the Data pillar's
   // job — so those leaves are not draft-editable in this canvas.
   const isEditable = !!Preview && !StudioCanvas;
+  // objectstack#28562 (ADR-0146 D2, D3) — Customize. On a read-only base a
+  // view, dashboard or report (and an `object` leaf's list view) is edited in
+  // the base's paired customization package, as a declared override of the
+  // base's item. Its editors stay read-only until Customize is pressed, or
+  // while the server serves no override of it; nothing is written until an
+  // edit is saved, and that save asks the ensure door for the pair (once per
+  // item) and writes there. ⛔ The pair a write names is the door's answer,
+  // never a `<base>.custom` spelled here; the pair a READ names is the
+  // surface's (`StudioBaseCustomization.pairId`), read through this ref, so a
+  // pair the first save creates never reloads the buffer it saved.
+  const customizationRef = React.useRef(customization);
+  React.useLayoutEffect(() => {
+    customizationRef.current = customization;
+  });
+  const customizing = readOnly && customization !== null;
+  const customizeBase = customizing && customization ? customization.base : null;
+  const customizePair = customizing && customization ? customization.pairId : null;
+  const customizeBaseLabel = customization?.baseLabel ?? packageId;
+  const customizeWalled = customizing && customization?.walled === true;
+  const customizeBlock: CustomizeBlock = customizeWalled
+    ? 'walled'
+    : customizing && !customization?.basedOn
+      ? 'noVersion'
+      : null;
+  // The items Customize was pressed on (`customizeItemKey`): unlocked, nothing saved yet.
+  const [customizeAsked, setCustomizeAsked] = React.useState<ReadonlySet<string>>(() => new Set());
+  const askCustomize = React.useCallback((key: string) => {
+    setCustomizeAsked((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
+  }, []);
+  // The ensure door's answer for each item's first saved edit: asked once
+  // per item, and again only after a refusal.
+  const pairsByItemRef = React.useRef(new Map<string, Promise<string>>());
+  const pairFor = React.useCallback(
+    (custom: StudioBaseCustomization, type: string, name: string): Promise<string> => {
+      const key = customizeItemKey(custom.base, type, name);
+      const held = pairsByItemRef.current.get(key);
+      if (held) return held;
+      const asked = custom.ensure();
+      pairsByItemRef.current.set(key, asked);
+      asked.catch(() => {
+        if (pairsByItemRef.current.get(key) === asked) pairsByItemRef.current.delete(key);
+      });
+      return asked;
+    },
+    [],
+  );
+  // Re-reads the served declarations: an item's first save into the pair, a restore.
+  const [servedNonce, setServedNonce] = React.useState(0);
+  const servedKey = `${publishNonce}:${servedNonce}`;
+  // A restore in flight: no save is sent beside it.
+  const [restoring, setRestoring] = React.useState(false);
+  // objectstack#28562 — the package the leaf buffer's draft read was asked
+  // at: the address its pin describes (see `doSave`).
+  const leafReadAtRef = React.useRef<{ key: string; at: string } | null>(null);
+  const leafCustomizable = customizing && !!current && isEditable && isStudioCustomizeType(current.type);
+  const leafServed = useServedOverride(client, leafCustomizable ? current : null, customizeBase, customizePair, servedKey);
+  const leafCustomizeKey =
+    current && customizeBase ? customizeItemKey(customizeBase, current.type, current.name) : '';
+  const leafInPair = leafCustomizable && leafServed.declaration !== null;
+  const leafUnlocked =
+    leafCustomizable &&
+    !customizeWalled &&
+    (leafInPair || (customizeBlock === null && customizeAsked.has(leafCustomizeKey)));
+  const leafReadOnly = readOnly && !leafUnlocked;
+  const leafInPairRef = React.useRef(leafInPair);
+  React.useLayoutEffect(() => {
+    leafInPairRef.current = leafInPair;
+  });
   // objectui#5800 — Design ⇄ Run: one canvas, two modes (ADR-0080's pivot made
   // visible). Run mode is pure subtraction: `editing=false` drops the design
   // overlays (dashboard widget overlays, page block canvas) and the SAME
@@ -4812,6 +5005,7 @@ export function InterfacesPillar({
       setDraft({});
       setDraftFor(leafKeyOf(current));
       forgetLeafVersion();
+      leafReadAtRef.current = null;
       setHasDraft(false);
       setIfDirty(false);
       return;
@@ -4831,8 +5025,11 @@ export function InterfacesPillar({
     (async () => {
       try {
         // objectui#11773 — read at the address the leaf save writes, so the
-        // version it serves pins that save.
-        const draftRead = await readDraftForSave<Record<string, unknown>>(client, current.type, current.name, packageId);
+        // version it serves pins that save. objectstack#28562 — a read-only
+        // base's view, dashboard or report: its pair, when one is listed.
+        const pair = customizing ? customizationRef.current?.pairId : null;
+        const readAt = pair && isStudioCustomizeType(current.type) ? pair : packageId;
+        const draftRead = await readDraftForSave<Record<string, unknown>>(client, current.type, current.name, readAt);
         if (cancelled) return;
         const body = extractDraftBody(draftRead.answer);
         // objectui#11799 — the baseline is read only when it is used, for a
@@ -4854,7 +5051,8 @@ export function InterfacesPillar({
         setDraft(body ?? baseline);
         setDraftFor(leafKeyOf(current));
         // objectui#11773 — the next save is pinned to what the draft read served.
-        recordLeafRead(current.type, current.name, packageId, draftRead.pin);
+        recordLeafRead(current.type, current.name, readAt, draftRead.pin);
+        leafReadAtRef.current = { key: leafKeyOf(current), at: readAt };
         setHasDraft(!!body);
         setIfDirty(false);
       } catch (e) {
@@ -4876,7 +5074,7 @@ export function InterfacesPillar({
       // same rule.
       if (!settled) setLoading(false);
     };
-  }, [client, current, isEditable, packageId, publishNonce, leafReloadNonce, recordLeafRead, forgetLeafVersion]);
+  }, [client, current, isEditable, packageId, publishNonce, leafReloadNonce, recordLeafRead, forgetLeafVersion, customizing]);
 
   // objectui#12688 — the open dashboard as the server serves it for this
   // session's language: the `/meta` dashboard list the console's metadata
@@ -4944,9 +5142,46 @@ export function InterfacesPillar({
     setError(null);
     const body = interfacesSaveBody(current.type, draft);
     try {
-      const outcome = await saveLeafDraft(current.type, current.name, body, { mode: 'draft', packageId, surface: 'studio' });
+      // objectstack#28562 — a read-only base's view, dashboard or report is
+      // saved into the pair the ensure door answers, declaring the override.
+      // A refused door is shown as it was sent, and nothing is saved.
+      const custom = readOnly ? customizationRef.current : null;
+      let target: { packageId: string; body: Record<string, unknown> } = { packageId, body };
+      let entering = false;
+      if (custom && isStudioCustomizeType(current.type)) {
+        let pair: string;
+        try {
+          pair = await pairFor(custom, current.type, current.name);
+        } catch (e) {
+          setError(plainRefusal(e));
+          return;
+        }
+        const declared = overrideDraftBody(body, custom.base, custom.basedOn);
+        if (declared === null) {
+          setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          return;
+        }
+        // The buffer was read at another package (the base, before its pair
+        // was listed): the pair is taken to hold no draft of the item, so a
+        // draft there is a conflict the author is asked about, never one
+        // this save overwrites. Its receipt pins the saves after it.
+        const key = leafKeyOf(current);
+        if (!(leafReadAtRef.current?.key === key && leafReadAtRef.current.at === pair)) {
+          recordLeafRead(current.type, current.name, pair, { ifNoneMatch: '*' });
+          leafReadAtRef.current = { key, at: pair };
+        }
+        entering = !leafInPairRef.current;
+        target = { packageId: pair, body: declared };
+      }
+      const outcome = await saveLeafDraft(current.type, current.name, target.body, {
+        mode: 'draft',
+        packageId: target.packageId,
+        surface: 'studio',
+      });
       // objectui#11773 — the author chose the saved version; the load replaces the buffer.
       if (outcome === 'reloaded') return;
+      // The badge reads the declaration the server now serves.
+      if (entering) setServedNonce((n) => n + 1);
       setHasDraft(true);
       setLeafSavedAt({ key: leafKeyOf(current), at: new Date() });
       // objectui#11204 — clean only if nothing was edited while it was in flight.
@@ -4961,7 +5196,7 @@ export function InterfacesPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveLeafDraft, current, draft, onDraftSaved, packageId, locale]);
+  }, [saveLeafDraft, current, draft, onDraftSaved, packageId, locale, readOnly, pairFor, recordLeafRead]);
   // objectui#11910 — a dashboard edit that leaves a widget's binding out (a
   // widget just added, before its dataset and measures are picked) is held, not
   // sent: the draft door would refuse it with a 422 naming that input. The
@@ -4986,7 +5221,8 @@ export function InterfacesPillar({
     target: leafKey,
     loadedFor: draftFor,
     dirty: ifDirty,
-    blocked: !current || !isEditable || !!saving || readOnly || inspectorBlocking > 0 || leafIncomplete !== null,
+    blocked:
+      !current || !isEditable || !!saving || leafReadOnly || restoring || inspectorBlocking > 0 || leafIncomplete !== null,
     snapshot: draft,
     save: doSave,
   });
@@ -5008,7 +5244,59 @@ export function InterfacesPillar({
   // objectui#11823 — an `object` leaf's list view: the third buffer, edited in
   // the Properties panel and shown on the canvas, autosaved to the package
   // draft like the other two. Blocked on `readOnly` like them.
-  const listView = useObjectListViewDraft({ client, packageId, leaf: current, publishNonce, draftOnlyObjects, onDraftSaved });
+  // objectstack#28562 — on a read-only base the view is read in its pair and
+  // customized there (`ListViewCustomization`); a restore reloads it.
+  const listViewCustomization = React.useMemo<ListViewCustomization | null>(
+    () =>
+      customizing
+        ? {
+            readAt: () => customizationRef.current?.pairId ?? null,
+            writeTarget: async (viewId, row) => {
+              const custom = customizationRef.current;
+              if (!custom) return { packageId, body: row };
+              const pair = await pairFor(custom, 'view', viewId);
+              const body = overrideDraftBody(row, custom.base, custom.basedOn);
+              if (body === null) {
+                throw new Error(tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }));
+              }
+              return { packageId: pair, body };
+            },
+          }
+        : null,
+    [customizing, pairFor, packageId, locale],
+  );
+  const [listViewRestoreNonce, setListViewRestoreNonce] = React.useState(0);
+  const listView = useObjectListViewDraft({
+    client,
+    packageId,
+    leaf: current,
+    publishNonce: publishNonce + listViewRestoreNonce,
+    draftOnlyObjects,
+    onDraftSaved,
+    customization: listViewCustomization,
+  });
+  const listViewTargetId = listView.target?.viewId ?? null;
+  const listViewCustomizable = customizing && listViewTargetId !== null;
+  const listViewServed = useServedOverride(
+    client,
+    listViewCustomizable && listViewTargetId ? { type: 'view', name: listViewTargetId } : null,
+    customizeBase,
+    customizePair,
+    `${servedKey}:${listViewRestoreNonce}`,
+  );
+  const listViewCustomizeKey =
+    listViewTargetId && customizeBase ? customizeItemKey(customizeBase, 'view', listViewTargetId) : '';
+  const listViewInPair = listViewCustomizable && listViewServed.declaration !== null;
+  const listViewUnlocked =
+    listViewCustomizable &&
+    !customizeWalled &&
+    (listViewInPair || (customizeBlock === null && customizeAsked.has(listViewCustomizeKey)));
+  const listViewReadOnly = readOnly && !listViewUnlocked;
+  // The view's first save into the pair: the badge reads what is now served.
+  const listViewSavedInPair = listViewUnlocked && !listViewInPair && listView.hasDraft;
+  React.useEffect(() => {
+    if (listViewSavedInPair) setServedNonce((n) => n + 1);
+  }, [listViewSavedInPair]);
   // objectstack#27895 — an edit that clears a required setting of the view
   // type's own block (a calendar's start date) is held, not sent, as a
   // leaf's is: asked of the spec's list-view schema (`listViewHeldEdit`).
@@ -5017,7 +5305,7 @@ export function InterfacesPillar({
     target: listView.targetKey,
     loadedFor: listView.loadedFor,
     dirty: listView.dirty,
-    blocked: !listView.target || listView.saving || readOnly || listViewHeld !== null,
+    blocked: !listView.target || listView.saving || listViewReadOnly || restoring || listViewHeld !== null,
     snapshot: listView.row,
     save: listView.save,
   });
@@ -5563,9 +5851,116 @@ export function InterfacesPillar({
       () => toast.error(t('engine.studio.if.copyFailed', locale)),
     );
   }, [draft, locale]);
+  // objectstack#28562 — the item this header customizes on a read-only base:
+  // an `object` leaf's list view, else the open view, dashboard or report.
+  const headerCustomize: {
+    type: string;
+    name: string;
+    key: string;
+    label: string;
+    listView: boolean;
+    declaration: ServedOverride['declaration'];
+    inPair: boolean;
+    unlocked: boolean;
+    /** The item is there to customize: loaded, and (a list view) one the server holds. */
+    ready: boolean;
+    hasDraft: boolean;
+    busy: boolean;
+  } | null = isObjectLeaf
+    ? listViewCustomizable && listViewTargetId
+      ? {
+          type: 'view',
+          name: listViewTargetId,
+          key: listViewCustomizeKey,
+          label:
+            navItemLabelText(listView.row?.label as I18nLabel | undefined, locale) || listViewTargetId,
+          listView: true,
+          declaration: listViewServed.declaration,
+          inPair: listViewInPair,
+          unlocked: listViewUnlocked,
+          ready: listView.loadedFor === listView.targetKey && listView.row !== null && !listView.notList,
+          hasDraft: listView.hasDraft,
+          busy: listView.saving,
+        }
+      : null
+    : leafCustomizable && current
+      ? {
+          type: current.type,
+          name: current.name,
+          key: leafCustomizeKey,
+          label: ifTitleText || current.name,
+          listView: false,
+          declaration: leafServed.declaration,
+          inPair: leafInPair,
+          unlocked: leafUnlocked,
+          ready: draftLoaded,
+          hasDraft: hasDraft && draftLoaded,
+          busy: !!saving,
+        }
+      : null;
+  const headerUnlocked = headerCustomize?.unlocked === true;
+  // objectstack#28562 — "Restore package original": the pair's draft of the
+  // item, then its row, deleted at the pair. The pair is the door's answer
+  // this item's saves named, else the surface's; never asked of the door
+  // again. The base's item reads back, and the server's refusal is shown as
+  // it is sent.
+  const [restoreFor, setRestoreFor] = React.useState<NonNullable<typeof headerCustomize> | null>(null);
+  const restoreOriginal = React.useCallback(
+    async (item: { type: string; name: string; key: string; label: string; listView: boolean }) => {
+      const custom = customizationRef.current;
+      if (!custom) return;
+      const held = pairsByItemRef.current.get(item.key);
+      const pair = (held ? await held.catch(() => null) : null) ?? custom.pairId;
+      if (!pair) return;
+      setRestoring(true);
+      setError(null);
+      try {
+        await client.reset(item.type, item.name, { state: 'draft', packageId: pair });
+        await client.reset(item.type, item.name, { packageId: pair });
+        pairsByItemRef.current.delete(item.key);
+        setCustomizeAsked((prev) => {
+          if (!prev.has(item.key)) return prev;
+          const next = new Set(prev);
+          next.delete(item.key);
+          return next;
+        });
+        if (item.listView) {
+          setListViewRestoreNonce((n) => n + 1);
+        } else {
+          setIfDirty(false);
+          forgetLeafVersion();
+          reloadLeafDraft();
+        }
+        setServedNonce((n) => n + 1);
+        emitMetadataRefresh();
+        toast.success(tFormat('engine.studio.customize.restoreDone', locale, { item: item.label, package: custom.baseLabel }));
+      } catch (e) {
+        setError(plainRefusal(e));
+      } finally {
+        setRestoring(false);
+      }
+    },
+    [client, forgetLeafVersion, reloadLeafDraft, locale],
+  );
+  const restoreDialogEl = (
+    <StudioRestoreOriginalDialog
+      open={restoreFor !== null}
+      onOpenChange={(open) => {
+        if (!open) setRestoreFor(null);
+      }}
+      label={restoreFor?.label ?? ''}
+      baseLabel={customizeBaseLabel}
+      hasDraft={restoreFor?.hasDraft ?? false}
+      locale={locale}
+      onConfirm={() => {
+        if (restoreFor) void restoreOriginal(restoreFor);
+      }}
+    />
+  );
   // objectui#12725 — the item's ⋯ menu: its definition, and its document as
   // JSON. Rename and delete are not offered here: this header has neither
   // today (a nav entry is renamed and removed in nav editing).
+  // objectstack#28562 — and, for an item customized into the pair, Restore.
   const itemMoreEl =
     current && draftLoaded ? (
       <DropdownMenu>
@@ -5589,6 +5984,13 @@ export function InterfacesPillar({
             <Copy className="mr-2 h-3.5 w-3.5" aria-hidden="true" />
             {t('engine.studio.if.copyJson', locale)}
           </DropdownMenuItem>
+          {headerCustomize?.inPair && (
+            <StudioRestoreOriginalItem
+              disabled={restoring || headerCustomize.busy || (customizePair === null && !pairsByItemRef.current.has(headerCustomize.key))}
+              locale={locale}
+              onSelect={() => setRestoreFor(headerCustomize)}
+            />
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
     ) : null;
@@ -5663,10 +6065,20 @@ export function InterfacesPillar({
       }
       chips={
         current ? (
-          <span className={STUDIO_KIND_CHIP} data-testid="if-canvas-caption" title={ifInternalId}>
-            <span className="sr-only">{ifTitleText} · </span>
-            {ifKindName}
-          </span>
+          <>
+            <span className={STUDIO_KIND_CHIP} data-testid="if-canvas-caption" title={ifInternalId}>
+              <span className="sr-only">{ifTitleText} · </span>
+              {ifKindName}
+            </span>
+            {/* objectstack#28562 — the override the server serves, never a computation. */}
+            {headerCustomize?.declaration && (
+              <StudioOverrideChip
+                baseLabel={customizeBaseLabel}
+                basedOn={headerCustomize.declaration.basedOn}
+                locale={locale}
+              />
+            )}
+          </>
         ) : undefined
       }
       // objectui#12524 — the draft status sits after the kind chip, as in
@@ -5681,7 +6093,16 @@ export function InterfacesPillar({
               {t('engine.studio.autoSaving', locale)}
             </span>
           )}
-          {readOnly && (
+          {/* objectstack#28562 — Customize unlocks the item's editors; nothing is saved until an edit. */}
+          {headerCustomize && !headerCustomize.unlocked && !headerCustomize.inPair && headerCustomize.ready && (
+            <StudioCustomizeButton
+              block={customizeBlock}
+              baseLabel={customizeBaseLabel}
+              locale={locale}
+              onCustomize={() => askCustomize(headerCustomize.key)}
+            />
+          )}
+          {readOnly && !headerUnlocked && (
             <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
           )}
           {isObjectLeaf && openSurface && current && (
@@ -5896,8 +6317,9 @@ export function InterfacesPillar({
             // preview contract the canvas is then read-only (no add, drag,
             // rename or delete — each a write the blocked autosave would
             // discard), while selecting a block or widget still opens the
-            // inspector, read-only.
-            onPatch={readOnly ? undefined : onPatch}
+            // inspector, read-only. objectstack#28562 — unless the item is
+            // being customized into the base's pair.
+            onPatch={leafReadOnly ? undefined : onPatch}
             locale={locale}
           />
         ) : (
@@ -5970,7 +6392,10 @@ export function InterfacesPillar({
         <div className="min-h-0 flex-1 overflow-hidden">
           <ObjectListViewInspector
             listView={listView}
-            readOnly={readOnly}
+            // objectstack#28562 — a customized view is edited; a new one is
+            // an item of the base, which takes none.
+            readOnly={listViewReadOnly}
+            canCreate={!readOnly}
             locale={locale}
             // objectui#12725 — the pillar's selection, which a canvas header click also makes.
             selection={selection}
@@ -6007,8 +6432,9 @@ export function InterfacesPillar({
             setBlockingReport({ key: inspectorKey, count })
           }
           // objectui#11136 — the pillar's real flag, threaded exactly as the
-          // Data pillar threads it (objectui#2259).
-          readOnly={readOnly}
+          // Data pillar threads it (objectui#2259). objectstack#28562 — the
+          // leaf's: a customized item is edited.
+          readOnly={leafReadOnly}
           locale={locale}
         />
       </div>
@@ -6045,7 +6471,7 @@ export function InterfacesPillar({
               setBlockingReport({ key: inspectorKey, count })
             }
             // objectui#11136 — same flag, same threading as the block inspector.
-            readOnly={readOnly}
+            readOnly={leafReadOnly}
             locale={locale}
           />
         </ServedWidgetTextContext.Provider>
@@ -6086,7 +6512,14 @@ export function InterfacesPillar({
       onClose={navInspectorHead ? () => setNavSel(null) : selection && !StudioCanvas ? () => setSelection(null) : undefined}
       closeLabel={t('engine.studio.deselect', locale)}
       // objectui#12453 — a read-only package saves no draft: no footer.
-      footer={readOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
+      // objectstack#28562 — a customized item's drafts go to the base's pair.
+      footer={
+        !readOnly
+          ? t('engine.studio.inspector.draftFooter', locale)
+          : headerUnlocked
+            ? t('engine.studio.customize.draftFooter', locale)
+            : null
+      }
       bodyClassName="flex min-h-0 flex-1 flex-col"
     >
       <div ref={inspectorBodyRef} className="contents">
@@ -6163,6 +6596,8 @@ export function InterfacesPillar({
       {leafConflictDialog}
       {navConflictDialog}
       {listView.conflictDialog}
+      {/* objectstack#28562 — Restore's confirmation, outside the menu that opens it. */}
+      {restoreDialogEl}
       {/* objectui#11823 (steps 2 and 3) — the shared create dialog; a report
           also asks for its dataset and one measure (`ReportCreateFields`), a
           page for its source kind (`PageCreateFields`). */}
