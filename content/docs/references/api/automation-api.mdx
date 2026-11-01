@@ -169,8 +169,8 @@ const result = AutomationApiErrorCode.parse(data);
 | **name** | `string` | ✅ | Machine name |
 | **label** | `string` | ✅ | Flow label |
 | **description** | `string` | optional |  |
-| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
-| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
+| **successMessage** | `string` | optional | Text for a terminal success, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". A `{{ }}` template over the run's variables (`{{ enrolledCount }} contacts enrolled`), rendered when the run completes. |
+| **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
@@ -297,8 +297,8 @@ const result = AutomationApiErrorCode.parse(data);
 | **name** | `string` | ✅ | Machine name |
 | **label** | `string` | ✅ | Flow label |
 | **description** | `string` | optional |  |
-| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
-| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
+| **successMessage** | `string` | optional | Text for a terminal success, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". A `{{ }}` template over the run's variables (`{{ enrolledCount }} contacts enrolled`), rendered when the run completes. |
+| **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
@@ -382,7 +382,7 @@ const result = AutomationApiErrorCode.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **errorMessage** | `string` | optional | The flow author's own failure text (`flow.errorMessage`), copied verbatim from `AutomationResult.errorMessage`; absent when the author wrote none |
+| **errorMessage** | `string` | optional | The flow author's own failure text (`flow.errorMessage`, rendered by the engine), copied verbatim from `AutomationResult.errorMessage`; absent when the author wrote none |
 | **summary** | `{ selected: integer; acted: integer; skipped: integer; unmeasured?: integer; … }` | optional | The run's per-node accounting (`AutomationResult.summary`) - which node failed; absent when the engine measured none |
 | **innerRefusal** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string }` | optional | The refusal a node's write met inside the run (`AutomationResult.innerRefusal`): `{ code, message }`, `code` in its wire spelling (e.g. `UNIQUE_VIOLATION`). Absent when the failure met no refusal |
 
@@ -839,8 +839,8 @@ const result = AutomationApiErrorCode.parse(data);
 | **name** | `string` | ✅ | Machine name |
 | **label** | `string` | ✅ | Flow label |
 | **description** | `string` | optional |  |
-| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
-| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
+| **successMessage** | `string` | optional | Text for a terminal success, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". A `{{ }}` template over the run's variables (`{{ enrolledCount }} contacts enrolled`), rendered when the run completes. |
+| **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
@@ -1122,8 +1122,8 @@ const result = AutomationApiErrorCode.parse(data);
 | **status** | `Enum<'completed' \| 'paused' \| 'failed' \| 'stranded' \| 'refused'>` | optional | Lifecycle status. `paused` means the run suspended at a node and can be continued with the resume route. Absent or `completed`/`failed`/`stranded`/`refused` means the run reached a terminal state. `refused` is a first-class refusal: the flow reached an `end` node declaring `outcome: 'refused'` — a successful evaluation that said no, so `success` is true, `successMessage` is absent and the per-record reason is on `refusalMessage`; a runner shows it with Close only. `stranded` is the terminally-failed-but-repairable run: a resume consumed the suspension and a downstream node threw, so the run is recorded as failed and can be re-armed only by an explicit operator verb - never by the resume route, which answers RUN_NOT_FOUND for it. |
 | **runId** | `string` | optional | Run id - set when `status` is `paused`, so callers can resume it |
 | **screen** | `{ nodeId: string; title?: string; description?: string; fields: object[]; … }` | optional | The screen to render - set when the run paused at a `screen` node awaiting user input. The client collects values for `screen.fields` and resumes the run with them. |
-| **successMessage** | `string` | optional | Friendly terminal message copied from the flow definition on terminal success, so a screen-flow runner can show a meaningful toast |
-| **errorMessage** | `string` | optional | Friendly terminal message copied from the flow definition on failure |
+| **successMessage** | `string` | optional | Friendly terminal message rendered from the flow definition on terminal success (its `{{ }}` holes filled over the run's variables, in the run's locale), so a screen-flow runner can show a meaningful toast |
+| **errorMessage** | `string` | optional | Friendly terminal message rendered from the flow definition on failure (its `{{ }}` holes filled over the variables at the failure point, in the run's locale) |
 | **userMessage** | `string` | optional | Producer-marked user-facing refusal text, verbatim, of the refusal a node met inside the run - present exactly when that refusal's producer opted in at throw time (`ApiErrorSchema.userMessage` semantics). Never replaces `error` |
 | **innerRefusal** | `{ code: Enum<'VALIDATION_ERROR' \| 'INVALID_FIELD' \| 'MISSING_REQUIRED_FIELD' \| …>; message: string }` | optional | The refusal a node's write met inside the run, structured: `{ code, message }`, `code` in its wire spelling. Set on a failed run only when a refusal was met; `code` above and `error` are unchanged by it |
 | **flowLabel** | `string` | optional | The flow definition's authored `label`, copied verbatim so a runner can name the flow (header, completion toast) and translate it against `flows.<flow>.label`. Set on every result of an evaluation of a registered flow (paused and terminal alike); absent on a refusal carrying `code`. For a subflow chain it is the addressed (parent) run's flow. Never defaulted to the API name |
@@ -1149,8 +1149,8 @@ const result = AutomationApiErrorCode.parse(data);
 | **name** | `string` | ✅ | Machine name |
 | **label** | `string` | ✅ | Flow label |
 | **description** | `string` | optional |  |
-| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
-| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
+| **successMessage** | `string` | optional | Text for a terminal success, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". A `{{ }}` template over the run's variables (`{{ enrolledCount }} contacts enrolled`), rendered when the run completes. |
+| **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
@@ -1214,8 +1214,8 @@ const result = AutomationApiErrorCode.parse(data);
 | **name** | `string` | ✅ | Machine name |
 | **label** | `string` | ✅ | Flow label |
 | **description** | `string` | optional |  |
-| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
-| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
+| **successMessage** | `string` | optional | Text for a terminal success, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". A `{{ }}` template over the run's variables (`{{ enrolledCount }} contacts enrolled`), rendered when the run completes. |
+| **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |

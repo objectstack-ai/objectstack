@@ -832,6 +832,7 @@
     "emailTemplateForm (const)",
     "flowRefusalMessageKey (function)",
     "flowScreenCopyKey (function)",
+    "flowTerminalMessageKey (function)",
     "gcsStorageExample (const)",
     "globalFilterKey (function)",
     "hasMovedFileColumns (function)",

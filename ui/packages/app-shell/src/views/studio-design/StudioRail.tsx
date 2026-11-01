@@ -69,6 +69,8 @@ export interface StudioRailProps {
   /** Anything else the heading row carries at its right (an edit toggle). */
   headerExtra?: React.ReactNode;
   search?: StudioRailSearch;
+  /** objectstack#28572 — a row of filters under the search (the "only customizations" toggle). */
+  filters?: React.ReactNode;
   /** A block above the heading row (a pinned sibling surface). */
   pinned?: React.ReactNode;
   /** A block pinned at the bottom (a legend). */
@@ -90,6 +92,7 @@ export function StudioRail({
   addTestId,
   headerExtra,
   search,
+  filters,
   pinned,
   footer,
   isMobile = false,
@@ -158,6 +161,7 @@ export function StudioRail({
           </div>
         </div>
       )}
+      {filters}
       <div className="min-h-0 flex-1 overflow-auto px-2 pb-3 pt-1">
         {children}
         {noMatches && (
