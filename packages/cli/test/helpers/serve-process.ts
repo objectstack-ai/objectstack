@@ -18,7 +18,10 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 
-/** `bin/run-dev.js` — the CLI entrypoint that runs from TS source via tsx. */
+/**
+ * `bin/run-dev.js` — the CLI entrypoint that runs from TS source. `runServe()`
+ * spawns it with `process.execPath`; a caller may still put {@link TSX} in front.
+ */
 export const CLI = resolve(HERE, '../../bin/run-dev.js');
 export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 
@@ -26,7 +29,7 @@ export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 // THE OTHER ENTRYPOINT: `bin/run.js`, and the build state it silently needs
 //
 // `CLI` above is `bin/run-dev.js`, which pins `NODE_ENV=development` and runs
-// the command from `src/` through tsx — so a file using `runServe()` needs no
+// the command from `src/` — so a file using `runServe()` needs no
 // `packages/cli/dist` at all. A handful of e2e files deliberately spawn the
 // OTHER entrypoint instead, because the thing they measure only exists when
 // oclif resolves the command from the BUILT artifact. Those files, and only
@@ -41,7 +44,7 @@ export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 // the same defect the refusal exists to prevent, one level up.
 //
 // ⛔ It is NOT a general "is the CLI ready" preflight. `runServe()` must never
-// call it: a tsx child reads `src/`, so `packages/cli/dist` is not that child's
+// call it: a `bin/run-dev.js` child reads `src/`, so `packages/cli/dist` is not that child's
 // prerequisite and a guard that refused there would be a false red on a tree
 // that can run the test perfectly well.
 // ─────────────────────────────────────────────────────────────────────────
@@ -966,6 +969,13 @@ function portOf(args: string[]): string | undefined {
  * matching stdout alone would wait for a stream that stays empty for the whole
  * boot. Both streams are still returned separately, which is what lets
  * `serve-stdio-stdout-purity.e2e.test.ts` assert stdout carries NOTHING else.
+ *
+ * The child is `process.execPath` running `bin/run-dev.js`, not the `tsx` binary
+ * in front of it. That binary is a launcher process of its own that spawns a
+ * second node to run the entry, so it doubled the process start and put a relay
+ * between `child.kill()` and the CLI. One spawn of the entry measured
+ * 9.5–11.8 s through it and 5.3–5.4 s through node, byte-identical stdout
+ * (#23181). The entry, its `src/` reads, argv, cwd and env are the same.
  */
 export function runServe(
   cwd: string,
@@ -979,7 +989,7 @@ export function runServe(
   const requested = portOf(args);
   const argv = requested === undefined ? [...args, '--port', KERNEL_ASSIGNED_PORT] : args;
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...argv], {
+    const child = spawn(process.execPath, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...argv], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header for the
       // measured reason (commit 1ddda1d00).
