@@ -34,7 +34,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { LocalizationProvider } from '@object-ui/i18n';
 import { isMachineLocale, recordLocaleArgumentsAsync } from '@object-ui/test-support';
 
@@ -123,12 +123,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function permissions(): MePermissionsResponse {
+function permissions(): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_1',
     tenantId: 't_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: {},
     fields: {},

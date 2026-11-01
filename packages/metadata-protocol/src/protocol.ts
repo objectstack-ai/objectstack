@@ -2668,17 +2668,32 @@ function stateTenantAuthorship(data: unknown): unknown {
 }
 
 /**
- * [#23233] A stored row's body with its package binding stated as `_packageId`,
- * the way `getMetaItems` stamps a row from its `package_id` column. The binding
- * is read, never derived: a row bound to no package ({@link boundPackageOf}),
- * or a body that already names a `_packageId`, is returned as it is. A copy,
- * so the caller's body is never written.
+ * [#23233, #28594, #28673] A stored row's body with its package binding stated
+ * as `_packageId` from the row's `package_id` COLUMN, and only from it: the one
+ * rule every read of a stored row states its package by. A `_packageId` the
+ * body carries is not served: replaced by the column's package, or dropped when
+ * the row is bound to no package ({@link boundPackageOf}). The save door
+ * already strips a body's stamp ({@link stripDerivedProvenance}: the server
+ * states provenance, a caller never does), but a row at rest can still carry
+ * one, and a read that stamped the column only while the body named none
+ * echoed it back. The binding is read, never derived. A body that already
+ * states the column's binding is returned as it is; any other is a copy, so
+ * the caller's body (a cached row's among them) is never written.
+ *
+ * The readers: the list read ({@link storedOverlayEntries}), the list merge
+ * ({@link mergePackageAwareOverlay}), the draft list, the by-name active and
+ * draft reads, the by-name draft preview, and the registry hydration
+ * ({@link ObjectStackProtocolImplementation.hydrateOverlayIntoRegistry}) with
+ * the items a view container row expands to.
  */
-function withRowBinding(data: unknown, packageId: unknown): unknown {
+export function withRowBinding(data: unknown, packageId: unknown): unknown {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
     const binding = boundPackageOf(packageId);
-    if (binding === undefined || !data || typeof data !== 'object' || Array.isArray(data)) return data;
-    if ((data as { _packageId?: unknown })._packageId !== undefined) return data;
-    return { ...(data as Record<string, unknown>), _packageId: binding };
+    if ((data as { _packageId?: unknown })._packageId === binding) return data;
+    const bound: Record<string, unknown> = { ...(data as Record<string, unknown>) };
+    if (binding === undefined) delete bound._packageId;
+    else bound._packageId = binding;
+    return bound;
 }
 
 /**
@@ -3143,7 +3158,13 @@ export function mergePackageAwareOverlay(
                 ?? list.find((c) => c.pkg === undefined)?.item
                 ?? list[0]?.item)
             : undefined;
-        push(slot, packageId, transform ? transform(body, prev) : body, stored, standIn);
+        // [#28673] A stored row enters under its own binding, the `package_id`
+        // column it is slotted by ({@link withRowBinding}), so a stamp its body
+        // carries is never served, here or where the row stands in for a
+        // package's slot below. A record that is not a stored row (a caller's
+        // item, slotted by its own `_packageId`) enters as it is.
+        const bound = stored ? withRowBinding(body, packageId) : body;
+        push(slot, packageId, transform ? transform(bound, prev) : bound, stored, standIn);
     }
 
     const out: unknown[] = [];
@@ -10325,14 +10346,12 @@ export class ObjectStackProtocolImplementation implements
                     // previews only its own package's entry, so two packages'
                     // same-name drafts stay distinct. Draft rows win over active.
                     const placeDraft = (record: any) => {
-                        const data = this.convertStoredItem(
+                        const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
+                        // [#28673] The draft's package is its column's ({@link withRowBinding}).
+                        const data = withRowBinding(this.convertStoredItem(
                             String(record.type ?? request.type),
                             typeof record.metadata === 'string' ? JSON.parse(record.metadata) : record.metadata,
-                        ) as any;
-                        const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-                        if (recPkg && data && typeof data === 'object' && (data as any)._packageId === undefined) {
-                            (data as any)._packageId = recPkg;
-                        }
+                        ), recPkg) as any;
                         // [#21804] The draft's place, as for the active rows:
                         // a package's previewed slot is the draft the
                         // by-name read's preview arm serves, in any row order.
@@ -11398,7 +11417,7 @@ export class ObjectStackProtocolImplementation implements
                         // overridden package's item, as its active row serves.
                         if (servedDraft?.overrideOf !== undefined && servedDraft.row === draftRec) {
                             previewed = { ...previewed, _packageId: servedDraft.overrideOf };
-                        } else if (recPkg && (previewed as any)._packageId === undefined) (previewed as any)._packageId = recPkg;
+                        } else previewed = withRowBinding(previewed, recPkg); // [#28673] the column's package
                         (previewed as any)._draft = true;
                     }
                     return {
@@ -11477,8 +11496,9 @@ export class ObjectStackProtocolImplementation implements
                     // that package's provenance, so the envelope below is the
                     // overridden package's artifact's ({@link envelopePackageId}).
                     item = { ...(item as Record<string, unknown>), _packageId: served.overrideOf };
-                } else if (recPkg && item && typeof item === 'object' && (item as any)._packageId === undefined) {
-                    (item as any)._packageId = recPkg;
+                } else {
+                    // [#28673] The column's package, and only the column's ({@link withRowBinding}).
+                    item = withRowBinding(item, recPkg);
                 }
                 if (readState === 'draft') {
                     draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
@@ -19145,7 +19165,10 @@ export class ObjectStackProtocolImplementation implements
         await this.reconcileViewExpansions(type, {
             container: String((data as { name?: unknown }).name),
             binding: boundPackageOf(options.packageId),
-            expansion: this.expandRuntimeViewContainer(type, data, { ...options, tenantAuthored: true }),
+            // [#28673] The container under its column's binding
+            // ({@link withRowBinding}), so no item it expands to is placed
+            // in a package a stamp in its body names.
+            expansion: this.expandRuntimeViewContainer(type, withRowBinding(data, options.packageId), { ...options, tenantAuthored: true }),
             ...(options.reboundFrom === undefined
                 ? {}
                 : { reboundFrom: { binding: boundPackageOf(options.reboundFrom.packageId) } }),
