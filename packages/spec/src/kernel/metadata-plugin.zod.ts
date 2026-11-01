@@ -814,16 +814,18 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // rollback and delete are the doors every item uses, and the package's
   // export carries the item as an `objectExtensions` entry.
   //
-  // `filePatterns: []`: no loader file holds one on its own. A code package
-  // declares its extensions in `objectExtensions`, which the artifact loader
-  // already stores under this type name. `supportsOverlay` /
+  // `filePatterns`: the `*.extension.ts` convention a code package's
+  // `defineObjectExtension` files follow (`examples/app-showcase/src/data/
+  // extensions/`). A code package declares its extensions in
+  // `objectExtensions`, which the artifact loader already stores under this
+  // type name. `supportsOverlay` /
   // `allowEnvironmentOverlay: false`: an extension is never overlaid; a
   // package changes its own item, and a second package writes a second item.
   // The body is judged by the metadata-protocol doors with
   // `ObjectExtensionSchema` itself; this type has no entry in
   // `BUILTIN_METADATA_TYPE_SCHEMAS` (the ADR-0010 envelope there would change
   // the schema a manifest's `objectExtensions` parses with).
-  { type: 'object_extension', label: 'Object Extension', description: 'Fields and rules a package adds to an object another package defines', filePatterns: [], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 11, domain: 'data' },
+  { type: 'object_extension', label: 'Object Extension', description: 'Fields and rules a package adds to an object another package defines', filePatterns: ['**/*.extension.ts'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: true, executionPinned: false, loadOrder: 11, domain: 'data' },
   // [#7893] `field` — the STANDALONE runtime-create door is RETIRED
   // (`allowRuntimeCreate: false`), maintainer ruling 2026-08-12.
   //
