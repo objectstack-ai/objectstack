@@ -17,6 +17,15 @@
  * declares the door's own capability, `manage_metadata`, which every one of its
  * three routes asks before anything else: the rule the page's routes enforce
  * is stated by the plugin that enforces it, not borrowed from the group.
+ *
+ * ADR-0143 D5 — the same contribution carries Setup → Integrations →
+ * "Connector Connections": the console's `automation:connector-connections`
+ * page, which reads and drives the connector connection door
+ * (`/api/v1/automation/connectors/:name/connection`). That door asks the
+ * organization-scoped `manage_connector_connections` and nothing else, so the
+ * entry asks it too: an organization administrator holds it and not
+ * `manage_metadata`, and must see the page that connects their organization's
+ * vendors.
  */
 
 /** The console component the entry opens. */
@@ -24,6 +33,12 @@ export const CONNECTOR_CREDENTIALS_COMPONENT_REF = 'automation:connector-credent
 
 /** The capability the credential door asks on all three routes. */
 export const CONNECTOR_CREDENTIALS_NAV_CAPABILITY = 'manage_metadata';
+
+/** The console component the connections entry opens (ADR-0143 D5). */
+export const CONNECTOR_CONNECTIONS_COMPONENT_REF = 'automation:connector-connections';
+
+/** The organization-scoped capability the connector connection door asks on every route. */
+export const CONNECTOR_CONNECTIONS_NAV_CAPABILITY = 'manage_connector_connections';
 
 /**
  * `priority` orders contributions within a group, lowest first. The group's
@@ -40,7 +55,7 @@ export const CONNECTOR_CREDENTIALS_UI_BUNDLE = {
     type: 'plugin',
     scope: 'system',
     name: 'Connector Credentials UI',
-    description: 'Setup navigation for the connector credentials the installed apps declare: set, replace or clear each one.',
+    description: 'Setup navigation for the connector credentials the installed apps declare (set, replace or clear each one) and for the OAuth connections an organization administrator connects.',
     navigationContributions: [
         {
             app: 'setup',
@@ -54,6 +69,14 @@ export const CONNECTOR_CREDENTIALS_UI_BUNDLE = {
                     componentRef: CONNECTOR_CREDENTIALS_COMPONENT_REF,
                     icon: 'key-round',
                     requiredPermissions: [CONNECTOR_CREDENTIALS_NAV_CAPABILITY],
+                },
+                {
+                    id: 'nav_connector_connections',
+                    type: 'component',
+                    label: 'Connector Connections',
+                    componentRef: CONNECTOR_CONNECTIONS_COMPONENT_REF,
+                    icon: 'plug',
+                    requiredPermissions: [CONNECTOR_CONNECTIONS_NAV_CAPABILITY],
                 },
             ],
         },

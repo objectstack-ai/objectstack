@@ -24,6 +24,8 @@ import { PositionGrantedSetsCell, PositionHolderCountCell } from '../views/metad
 import { PackagedAutomationPage } from '../views/setup/PackagedAutomationPage.js';
 import { ConnectorCredentialsPage } from '../views/setup/ConnectorCredentialsPage.js';
 import { CONNECTOR_CREDENTIALS_REF } from '../views/setup/connectorCredentials.js';
+import { ConnectorConnectionsPage } from '../views/setup/ConnectorConnectionsPage.js';
+import { CONNECTOR_CONNECTIONS_REF } from '../views/setup/connectorConnections.js';
 import { PositionHoldersPage } from '../views/setup/PositionHoldersPage.js';
 import { PermissionSetAssignmentPage } from '../views/setup/PermissionSetAssignmentPage.js';
 import { PERMISSION_SET_ASSIGNMENT_REF, POSITION_HOLDERS_REF } from '../views/setup/peopleAssignments.js';
@@ -165,6 +167,20 @@ registerAppComponent({
   label: 'Connector Credentials',
   source: '@object-ui/app-shell',
   component: ConnectorCredentialsPage,
+});
+
+/**
+ * Setup → Integrations → Connector Connections (ADR-0143 D5): an organization
+ * administrator connects, reconnects or disconnects each `oauth2`
+ * `authorization_code` connector instance for their organization. The entry
+ * naming this ref is the automation service's to contribute, gated on
+ * `manage_connector_connections`; the shell declares no entry for it.
+ */
+registerAppComponent({
+  ref: CONNECTOR_CONNECTIONS_REF,
+  label: 'Connector Connections',
+  source: '@object-ui/app-shell',
+  component: ConnectorConnectionsPage,
 });
 
 /**

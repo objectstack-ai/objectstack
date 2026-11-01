@@ -2430,6 +2430,26 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.heading': 'Automations',
   'engine.studio.auto.deleteFlow': 'Delete flow',
   'engine.studio.auto.flowDeleted': 'Deleted flow "{item}"',
+  // objectstack#28567 (ADR-0146 D4) — "New similar" on a flow: the clone door
+  // copies it under a new machine name and label, switched off, into the
+  // package that holds the changes; its answer and refusals are shown as sent.
+  'engine.studio.auto.newSimilar.action': 'New similar',
+  'engine.studio.auto.newSimilar.hint': 'Copy this flow under a new name. The copy is switched off until you switch it on.',
+  'engine.studio.auto.newSimilar.title': 'New similar flow',
+  'engine.studio.auto.newSimilar.bodyPair':
+    'Copies "{item}" under a new machine name and label. This package is read-only, so the server saves the copy in the package that holds your changes to it, switched off, and says where it landed.',
+  'engine.studio.auto.newSimilar.bodyHere':
+    'Copies "{item}" under a new machine name and label into this package, switched off. The copy takes the flow as it runs now: unpublished changes are not copied.',
+  'engine.studio.auto.newSimilar.copyLabel': '{label} (copy)',
+  'engine.studio.auto.newSimilar.name': 'New machine name',
+  'engine.studio.auto.newSimilar.label': 'New label',
+  'engine.studio.auto.newSimilar.submit': 'Create copy',
+  'engine.studio.auto.newSimilar.failedHttp': 'Could not create the copy (HTTP {status}).',
+  'engine.studio.auto.newSimilar.failed': 'Could not create the copy.',
+  'engine.studio.auto.newSimilar.done': 'Saved the copy {name} in package {package}.',
+  'engine.studio.auto.newSimilar.noPackage':
+    'The server saved the copy {name}, but its answer does not name the package it landed in, so nothing was opened.',
+  'engine.studio.auto.newSimilar.dismiss': 'Dismiss',
   // ADR-0146 D4 — a read-only package's flow: the activation-ledger switch
   // (this deployment only, never the definition), offered on the item.
   'engine.studio.auto.ledger.on': 'On for this deployment',
