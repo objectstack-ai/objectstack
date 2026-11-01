@@ -211,7 +211,7 @@ describe('PATCH /api/v1/datasources/:name — edit keeps every declared key (#28
     expect(res.status).toBe(200);
     expect(records.get('wh')?.ssl).toEqual(SSL);
     expect(ops).toContain('reregisterPool');
-    expect(pooled.at(-1)?.ssl).toEqual(SSL);
+    expect(pooled[pooled.length - 1]?.ssl).toEqual(SSL);
   });
 
   it('stores autoConnect and description', async () => {
