@@ -26,6 +26,13 @@
  *  - a row stored before the member column existed (a second locale's body,
  *    no member) is backfilled at boot, so it is answered as its own member.
  *
+ * [#28576, ADR-0146 D11] A write naming no package onto the package's
+ * template is closed, so the administrator writes here go into the base's
+ * pair (`inPair`, below), where the member semantics are the same row for
+ * row; a package-less row is laid down as a release before the close stored
+ * it (`seedPackagelessRow`), served until the ceremony moves it, and its
+ * package-less write is refused.
+ *
  * ## The harness
  *
  * `environment-overlay-five-types.test.ts`'s: the real `ObjectQL` engine and
@@ -70,6 +77,8 @@ function mailManifest(): Record<string, unknown> {
         // package's protection envelope (`_packageId`, `_provenance`), which a
         // hydrated overlay of them is grafted with.
         version: '1.0.0',
+        // [#28576] A pair is formed from the base's namespace (ADR-0146 D3).
+        namespace: 'acmemail',
         emailTemplates: [
             template('en-US', 'PKG en'), template('zh-CN', 'PKG zh'),
             // [#22877 stage 2] A second template the package ships in `en-US`
@@ -182,7 +191,51 @@ async function boot(
         engine, () => new Map(), kernel === 'environment' ? 'env_prod' : undefined,
     );
     const load = await protocol.loadMetaFromDb();
-    return { engine, protocol, load };
+    await protocol.ensureCustomizationPackage({ basePackageId: PKG } as any);
+    return { engine, protocol: inPair(protocol), raw: protocol, load };
+}
+
+/**
+ * [#28576, ADR-0146 D11] A write naming no package onto the package's
+ * template is closed, so every administrator write in this file is the one
+ * that stays open: into the base's pair, `com.acme.mail.custom`, declaring
+ * what it overrides. This wrapper names the pair on each save, publish and
+ * delete that names no package, and adds the declaration to a saved body —
+ * the member semantics pinned below are the pair's, row for row, as they were
+ * the package-less row's. A write that names a package (the drafts into
+ * `PKG` below) is passed through untouched.
+ */
+const PAIR = 'com.acme.mail.custom';
+const DECLARATION = { package: PKG, basedOn: '1.0.0' };
+function inPair(protocol: ObjectStackProtocolImplementation): ObjectStackProtocolImplementation {
+    const named = (request: any) => request?.packageId !== undefined;
+    return new Proxy(protocol, {
+        get(target, key, receiver) {
+            const value = Reflect.get(target, key, receiver);
+            if (key === 'saveMetaItem') {
+                return (request: any) => (named(request) ? value.call(target, request) : value.call(target, {
+                    ...request, packageId: PAIR, item: { ...request.item, overrides: DECLARATION },
+                }));
+            }
+            if (key === 'deleteMetaItem' || key === 'publishMetaItem') {
+                return (request: any) => value.call(target, named(request) ? request : { ...request, packageId: PAIR });
+            }
+            return typeof value === 'function' ? value.bind(target) : value;
+        },
+    });
+}
+
+/**
+ * [#28576] A package-less row of the package's template as a release before
+ * the close stored it, written straight to the overlay store (the write door
+ * refuses that write now): such a row is still served by every read until
+ * `os migrate packageless-overlays` moves it (ADR-0146 D11).
+ */
+async function seedPackagelessRow(raw: ObjectStackProtocolImplementation, name: string, body: Record<string, unknown>) {
+    const repo = (raw as any).getOverlayRepo();
+    await repo.put({ type: 'email_template', name, org: 'env' }, body, {
+        parentVersion: null, actor: null, source: 'older-release', intent: 'override-artifact', packageId: null,
+    });
 }
 
 const overlayRows = (stores: Map<string, Map<string, Record<string, unknown>>>) =>
@@ -308,10 +361,15 @@ describe('two locales of one email template survive a restart (#22877)', () => {
         expect(await bareNameSubject(second.protocol)).toBe('PKG en');
         expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'LEGACY zh' });
 
-        // That locale's next save updates the backfilled row — no second row.
-        await second.protocol.saveMetaItem({ type: 'email_template', name: NAME, item: template('zh-CN', 'ADMIN zh') });
+        // [#28576, ADR-0146 D11] That locale's next save naming no package is
+        // refused, naming the ceremony that moves the row; the backfilled row
+        // stays the one served — no second row.
+        const refused: any = await second.raw.saveMetaItem({ type: 'email_template', name: NAME, item: template('zh-CN', 'ADMIN zh') })
+            .then(() => undefined, (e: unknown) => e);
+        expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(String(refused?.message)).toContain('os migrate packageless-overlays');
         expect(overlayRows(stores).map((r) => r.id)).toEqual(['legacy_zh']);
-        expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'ADMIN zh' });
+        expect(await servedSubjects(second.protocol)).toEqual({ 'en-US': 'PKG en', 'zh-CN': 'LEGACY zh' });
     });
 });
 
@@ -704,9 +762,10 @@ async function bootWithOverlays(
     beforeHydration?: (engine: ObjectQL) => void,
 ) {
     const first = await boot(stores);
+    // [#28576] Package-less rows a release before the close stored: the
+    // hydration of an unmigrated row is what this section pins.
     for (const locale of ['en-US', 'zh-CN']) {
-        expect(await first.protocol.saveMetaItem({ type: T, name, item: { ...template(locale, `ADMIN ${name} ${locale}`), name } }))
-            .toMatchObject({ success: true });
+        await seedPackagelessRow(first.raw, name, { ...template(locale, `ADMIN ${name} ${locale}`), name });
     }
     return boot(stores, 'environment', beforeHydration);
 }
@@ -794,32 +853,39 @@ describe('[#23074] the artifact envelope is stamped only on the member the packa
      * (`restoreArtifactRegistryView`) calls is asked about the hydrated entry,
      * on a boot of its own.
      */
-    async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }, after: string | undefined) {
+    async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }) {
         const shadowBoot = (await bootWithOverlays(new Map(), name)).engine;
         expect(shadowBoot.registry.removeRuntimeShadow(T, name, 'zh-CN'), 'removeRuntimeShadow').toBe(verbs.shadow);
         const overlayEntryBoot = (await bootWithOverlays(new Map(), name)).engine;
         expect(overlayEntryBoot.registry.removeOverlayEntry(T, name, 'zh-CN'), 'removeOverlayEntry').toBe(verbs.overlayEntry);
 
+        // [#28576, ADR-0146 D11] The reset of that unmigrated row naming no
+        // package is refused, naming the ceremony that moves it, and the row
+        // keeps serving its member — before and after a restart. The registry
+        // verbs above are what the ceremony's move leaves to the next boot.
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
-        const { engine, protocol } = await bootWithOverlays(stores, name);
-        expect(await protocol.deleteMetaItem({ type: T, name, member: 'zh-CN' })).toMatchObject({ success: true });
-        expect(engine.registry.getItem<any>(T, name, undefined, 'zh-CN')?.subject).toBe(after);
+        const { engine, protocol, raw } = await bootWithOverlays(stores, name);
+        const refused: any = await raw.deleteMetaItem({ type: T, name, member: 'zh-CN' }).then(() => undefined, (e: unknown) => e);
+        expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(String(refused?.message)).toContain('os migrate packageless-overlays');
+        const kept = `ADMIN ${name} zh-CN`;
+        expect(engine.registry.getItem<any>(T, name, undefined, 'zh-CN')?.subject).toBe(kept);
         expect(engine.registry.getItem<any>(T, name, undefined, 'en-US')?.subject).toBe(`ADMIN ${name} en-US`);
-        expect(((await protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(after);
+        expect(((await protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(kept);
         const restarted = await boot(stores);
-        expect(((await restarted.protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(after);
+        expect(((await restarted.protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(kept);
     }
 
-    it('the reset (?member=): an unshipped member is retired by the overlay-entry tier, and nothing is left serving it', async () => {
+    it('the reset (?member=): an unshipped member is retired by the overlay-entry tier; its package-less reset door is closed', async () => {
         // No `zh-CN` artifact takes its place, so the shadow heal declines and
         // the overlay-entry retirement takes the tenant row.
-        await resetZh(DIGEST, { shadow: false, overlayEntry: true }, undefined);
+        await resetZh(DIGEST, { shadow: false, overlayEntry: true });
     });
 
-    it('CONTROL the reset (?member=): a shipped member is un-shadowed onto its artifact', async () => {
+    it('CONTROL the reset (?member=): a shipped member is un-shadowed onto its artifact; its package-less reset door is closed', async () => {
         // The shadow heal lifts the entry onto the `zh-CN` artifact, and the
         // retirement refuses it as packaged code.
-        await resetZh(NAME, { shadow: true, overlayEntry: false }, 'PKG zh');
+        await resetZh(NAME, { shadow: true, overlayEntry: false });
     });
 
     it('a registry that answers another member\'s artifact: the graft keeps it off the body', async () => {
