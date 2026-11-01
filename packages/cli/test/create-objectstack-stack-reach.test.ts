@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one on-ramp scaffold child and three spawns of the source CLI (os g object, os g flow, os validate), chained over the one scaffolded project, every one a distinct triple; slowest CI reading 12.4 s (run 41255489006), taken through the tsx launcher this file no longer uses, of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * PIN (#20333) — `npm create objectstack` → `os g flow` → `os validate`

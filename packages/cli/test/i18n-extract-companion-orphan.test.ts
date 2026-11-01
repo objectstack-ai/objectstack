@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: four spawns of the source CLI (os i18n extract on the apps-only stack, its --check over a seeded legacy companion, and the full stack under --objects-only and --no-objects-only), every one a distinct triple; slowest CI reading 11.3 s (run 41271604267), taken through the tsx launcher this file no longer uses, of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * The provenance companion accompanies the bundle modules beside it, and its
