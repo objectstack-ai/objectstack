@@ -3305,6 +3305,7 @@ const ja = {
     bulkDeleteConfirmTitle_one: "{{count}} 件の {{label}} レコードを削除しますか？",
     bulkDeleteConfirmTitle_other: "{{count}} 件の {{label}} レコードを削除しますか？",
     deleteConfirmButton: "削除",
+    deleteCascade: "関連する次のレコードも削除されます: {{objects}}。",
     bulkDeleteSuccess: "{{count}} 件の {{label}} レコードを削除しました",
     bulkDeleteSuccess_one: "{{count}} 件の {{label}} レコードを削除しました",
     bulkDeleteSuccess_other: "{{count}} 件の {{label}} レコードを削除しました",

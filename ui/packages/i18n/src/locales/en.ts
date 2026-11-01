@@ -4068,6 +4068,7 @@ const en = {
     bulkDeleteConfirmTitle_one: 'Delete {{count}} {{label}} record?',
     bulkDeleteConfirmTitle_other: 'Delete {{count}} {{label}} records?',
     deleteConfirmButton: 'Delete',
+    deleteCascade: 'This also deletes their related records in: {{objects}}.',
     bulkDeleteSuccess: 'Deleted {{count}} {{label}} records',
     bulkDeleteSuccess_one: 'Deleted {{count}} {{label}} record',
     bulkDeleteSuccess_other: 'Deleted {{count}} {{label}} records',

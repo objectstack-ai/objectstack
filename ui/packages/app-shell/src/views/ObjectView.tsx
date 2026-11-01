@@ -712,6 +712,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // Action system for toolbar operations — refreshKey moved up (declared earlier).
     // Wired to confirmHandler/toastHandler so deletes use the Shadcn AlertDialog
     // and Sonner toast instead of native window.confirm.
+    // objectstack#28472 — the objects a delete cascades into, named by label.
+    const objectLabelOf = useCallback(
+        (name: string) => objectLabel(objects.find((o: any) => o.name === name) ?? { name, label: name }),
+        [objects, objectLabel],
+    );
     const actions = useObjectActions({
         objectName: objectDef.name,
         // The label this page shows (its header and breadcrumb read the same
@@ -724,6 +729,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         onEdit,
         onRefresh: refreshData,
         onConfirm: confirmHandler,
+        objectLabelOf,
         // ToastHandler's `type` is a string-literal union — a subset of the
         // looser `{ type?: string }` useObjectActions declares; cast is sound.
         onToast: toastHandler as (message: string, options?: { type?: string }) => void,
