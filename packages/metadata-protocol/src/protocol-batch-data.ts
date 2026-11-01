@@ -48,7 +48,7 @@
 import type { ObjectStackProtocolImplementation, BatchDataLoopOutcome, BatchDataRowResult } from './protocol.js';
 import { byIdUpdateRecord, rowRequiredIdError, toRowApiError } from './protocol.js';
 import type { BatchUpdateRequest, BatchUpdateResponse, DeleteManyDataRequest, UpdateManyDataRequest } from '@objectstack/spec/api';
-import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import type { DroppedFieldsEvent, EngineQueryOptionsParsed } from '@objectstack/spec/data';
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import { engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
@@ -433,8 +433,10 @@ export async function runBatchDataLoop(
                         // under an insert's error — the masking ADR-0119 D4
                         // forbade inside the atomic arm.
                         objectReadable ??= callerMayReadObject.call(this, object, context);
+                        const callerRead: EngineQueryOptionsParsed = { where: { id: record.id } };
+                        if (context !== undefined) callerRead.context = context;
                         const existing = (await objectReadable)
-                            ? await this.engine.findOne(object, { where: { id: record.id }, ...ctxOpt } as any)
+                            ? await this.engine.findOne(object, callerRead)
                             : null;
                         if (existing) {
                             const dropped: DroppedFieldsEvent[] = [];
