@@ -574,6 +574,33 @@ describe('[#28722] GET /packages/:id/customizations — the fields and flows oth
         expect(contributions.map((c: any) => `${c.kind}:${c.name}`)).toEqual(['field:acme_sync_id', 'flow:acme_task_sync']);
     });
 
+    it('reads a field\'s stamp and a flow\'s stamp the same way: each stamp lists both kinds or neither', async () => {
+        const { dispatcher, engine } = await boot();
+        // One field extension and one flow per stamp, on the base's object.
+        // A code package's stamp is a contribution; the package-less
+        // `sys_metadata` sentinel and a tenant-authored body wearing a real
+        // package's id are the environment's, whichever kind carries them.
+        const stamps = [
+            { tag: 'code', packageId: THIRD, body: {} },
+            { tag: 'sentinel', packageId: 'sys_metadata', body: {} },
+            { tag: 'tenant', packageId: FOURTH, body: { _provenance: 'org' } },
+        ] as const;
+        for (const { tag, packageId, body } of stamps) {
+            extend(engine, packageId, 'showcase_task', { ...body, fields: { [`${tag}_field`]: { name: `${tag}_field`, label: tag, type: 'text' } } });
+            engine.registry.registerItem('flow', { ...flowOn(`${tag}_flow`, 'showcase_task'), _packageId: packageId, ...body } as any);
+        }
+        const { contributions } = (await customizations(dispatcher, BASE)).response?.body?.data;
+        const listedTags = (kind: string) => contributions
+            .filter((c: any) => c.kind === kind)
+            .map((c: any) => c.name.replace(/_(field|flow)$/, ''))
+            .sort();
+        expect(listedTags('field')).toEqual(listedTags('flow'));
+        expect(contributions).toEqual([
+            { kind: 'field', object: 'showcase_task', name: 'code_field', packageId: THIRD },
+            { kind: 'flow', object: 'showcase_task', name: 'code_flow', packageId: THIRD },
+        ]);
+    });
+
     it('another base\'s read lists what is contributed to its own objects only', async () => {
         const { dispatcher } = await contributedFixture();
         const data = (await customizations(dispatcher, OTHER)).response?.body?.data;
