@@ -26,25 +26,44 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = { name: 'task', fields: { title: { name: 'title', type: 'text' } } };
 
+/** The refusal a write the engine judges unauthorized answers — before the row is looked up. */
+function writeRefusal(): Error {
+  return Object.assign(new Error('You do not have permission to perform this action.'), {
+    code: 'PERMISSION_DENIED',
+    status: 403,
+  });
+}
+
 /**
  * An engine whose `delete` honours the driver contract
  * (`IDataDriver.delete` — "True if deleted, false if not found") and whose
  * `findOne` answers from the same row set, so existence means one thing here.
+ *
+ * `refuse` names a caller whose writes the engine refuses, in ObjectQL's order:
+ * the write is judged before the row is looked up. `leavesScope` names rows a
+ * landed update moves out of the caller's row scope, so their readback is
+ * `null` while the row is still there.
  */
-function makeProtocol(rows: Record<string, any> = {}) {
+function makeProtocol(
+  rows: Record<string, any> = {},
+  opts: { refuse?: string; leavesScope?: ReadonlySet<string> } = {},
+) {
   const store = new Map<string, any>(Object.entries(rows));
-  const findOne = vi.fn(async (_object: string, opts: any) => { assertEngineFindOnePredicate(_object, opts); return store.get(String(opts?.where?.id)) ?? null; });
-  const update = vi.fn(async (_object: string, data: any, opts: any) => {
-    assertEngineUpdateDispatch(data, opts);
-    const id = String(opts?.where?.id);
+  const refused = (o: any) => opts.refuse !== undefined && o?.context?.userId === opts.refuse;
+  const findOne = vi.fn(async (_object: string, o: any) => { assertEngineFindOnePredicate(_object, o); return store.get(String(o?.where?.id)) ?? null; });
+  const update = vi.fn(async (_object: string, data: any, o: any) => {
+    assertEngineUpdateDispatch(data, o);
+    if (refused(o)) throw writeRefusal();
+    const id = String(o?.where?.id);
     if (!store.has(id)) return null;
     const next = { ...store.get(id), ...data };
     store.set(id, next);
-    return next;
+    return opts.leavesScope?.has(id) ? null : next;
   });
-  const del = vi.fn(async (_object: string, opts: any) => {
-    assertEngineDeleteDispatch(opts);
-    return store.delete(String(opts?.where?.id));
+  const del = vi.fn(async (_object: string, o: any) => {
+    assertEngineDeleteDispatch(o);
+    if (refused(o)) throw writeRefusal();
+    return store.delete(String(o?.where?.id));
   });
   const engine = {
     registry: { getObject: (n: string) => (n === 'task' ? SCHEMA : undefined) },
@@ -118,17 +137,7 @@ describe('[#4435] updateData refuses an id that names no row', () => {
     // `null` readback. Here that readback is a write that LANDED and moved
     // the row out of the caller's row scope, so the row exists and the PATCH
     // keeps its success.
-    const store = new Map<string, any>([['real', { id: 'real', owner: 'u1' }]]);
-    const findOne = vi.fn(async (_object: string, opts: any) => { assertEngineFindOnePredicate(_object, opts); return store.get(String(opts?.where?.id)) ?? null; });
-    const update = vi.fn(async (_object: string, data: any, opts: any) => {
-      assertEngineUpdateDispatch(data, opts);
-      store.set('real', { ...store.get('real'), ...data });
-      return null; // the caller's readback no longer sees the row
-    });
-    const p = new ObjectStackProtocolImplementation({
-      registry: { getObject: (n: string) => (n === 'task' ? SCHEMA : undefined) },
-      findOne, update, delete: vi.fn(),
-    } as any);
+    const { p, findOne, store } = makeProtocol({ real: { id: 'real', owner: 'u1' } }, { leavesScope: new Set(['real']) });
     const res: any = await p.updateData({ object: 'task', id: 'real', data: { owner: 'u2' }, context: { userId: 'u1' } } as any);
     expect(res).toMatchObject({ object: 'task', id: 'real', record: null });
     expect(store.get('real')).toMatchObject({ owner: 'u2' });
@@ -143,14 +152,7 @@ describe('[#4435] updateData refuses an id that names no row', () => {
     // The engine judges the write before it asks whether the row exists, so a
     // caller it refuses is refused alike for both ids — and this door asks
     // nothing ahead of it.
-    const refusal = () => Object.assign(new Error('You do not have permission to perform this action.'), { code: 'PERMISSION_DENIED', status: 403 });
-    const findOne = vi.fn(async () => ({ id: 'real' }));
-    const update = vi.fn(async (_object: string, data: any, opts: any) => { assertEngineUpdateDispatch(data, opts); throw refusal(); });
-    const del = vi.fn(async (_object: string, opts: any) => { assertEngineDeleteDispatch(opts); throw refusal(); });
-    const p = new ObjectStackProtocolImplementation({
-      registry: { getObject: (n: string) => (n === 'task' ? SCHEMA : undefined) },
-      findOne, update, delete: del,
-    } as any);
+    const { p, findOne, store } = makeProtocol({ real: { id: 'real', title: 'x' } }, { refuse: 'u1' });
     const answer = (run: () => Promise<unknown>) => run().then(
       () => { throw new Error('expected a refusal, but the call resolved'); },
       (e: any) => ({ code: e.code, status: e.status, message: e.message }),
@@ -162,6 +164,7 @@ describe('[#4435] updateData refuses an id that names no row', () => {
     expect(patchMissing).toEqual(patchReal);
     expect(deleteMissing).toEqual(patchReal);
     expect(findOne).not.toHaveBeenCalled();
+    expect(store.get('real')).toEqual({ id: 'real', title: 'x' });
   });
 
   it('a PATCH the caller may not see is still decided by RLS, not by an existence read', async () => {

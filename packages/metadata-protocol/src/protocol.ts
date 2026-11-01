@@ -14351,8 +14351,8 @@ export class ObjectStackProtocolImplementation implements
         // as delete does, and a caller the write is open to still gets the 404.
         //
         // ⛔ No existence probe in front of the engine: existence is asked only
-        // once the write has been authorized, on this door and on the by-id
-        // bulk faces ({@link assertRecordExists}).
+        // once the write has been authorized, on this door (below the write)
+        // and on the by-id bulk faces ({@link assertRecordExists}).
         //
         // OCC is asked the way `deleteData` asks it — a probe only when the
         // caller sent a token ({@link assertVersionMatch}) — and a row that
@@ -14446,9 +14446,12 @@ export class ObjectStackProtocolImplementation implements
         // (reassigning `owner_id` away from yourself under an owner-scoped
         // policy) and LANDED — answering 404 to that would report a write that
         // succeeded as one that never happened. Existence tells them apart,
-        // asked now, after authorization. ObjectQL refuses a row that is not
-        // there itself, so this reads only on a `null` readback.
-        if (result == null) await this.assertRecordExists(request.object, request.id);
+        // asked now, after authorization, through the system-context
+        // {@link probeRecord}. ObjectQL refuses a row that is not there
+        // itself, so this reads only on a `null` readback.
+        if (result == null && !(await this.probeRecord(request.object, request.id))) {
+            throw recordNotFoundError(request.object, request.id);
+        }
         // [#7823] The PATCH 200 body is the surface #7728's fourth measurement
         // caught: a client revoking a `sys_api_key` (apiMethods keeps `update`
         // open, #7727) got the stored hash back in this response. That closure
@@ -14572,21 +14575,22 @@ export class ObjectStackProtocolImplementation implements
      * where it was. The one behaviour this adds is the 404 the issue asked for:
      * an id that names no row at all.
      *
-     * ⛔ And it is never asked IN FRONT of the write's authorization. Its two
+     * ⛔ And it is never asked IN FRONT of the write's authorization. Its
      * readers are OCC's `updated_at` comparison, asked only when the caller sent
      * a token ({@link assertVersionMatch}), and the by-id update's existence
      * check, asked only after `engine.update` has judged and resolved the write
-     * ({@link assertRecordExists}) — so an update by id answers the same
-     * refusal whether or not the id exists, as delete does.
+     * (`updateData`, and the bulk faces through {@link assertRecordExists}) —
+     * so an update by id answers the same refusal whether or not the id
+     * exists, as delete does.
      */
     private async probeRecord(object: string, id: string): Promise<any> {
         return this.engine.findOne(object, { where: { id }, context: { isSystem: true } } as any);
     }
 
     /**
-     * [#5088] The by-id update's existence answer — {@link updateData}'s, and
-     * the BY-ID BULK write faces' (`updateManyData` and `batchData`'s `update`
-     * branch), one per row.
+     * [#5088] The by-id update's existence answer for the BY-ID BULK write
+     * faces (`updateManyData` and `batchData`'s `update` branch), one per row —
+     * the same check {@link updateData} makes inline below its write.
      *
      * ⭐ Asked AFTER `engine.update` has judged the write, and only when it
      * resolved a `null` readback — never in front of the engine. The engine

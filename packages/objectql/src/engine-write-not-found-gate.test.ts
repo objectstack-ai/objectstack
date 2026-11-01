@@ -52,8 +52,10 @@
  *
  * ## Two sibling paths already had this gate; this is the third, not a fourth
  *
- *   - `protocol.updateData`/`deleteData` probe existence and throw
- *     `recordNotFoundError` (#4435)
+ *   - `protocol.updateData`/`deleteData` throw `recordNotFoundError` (#4435)
+ *     — no longer by probing ahead of the engine: both leave the answer to
+ *     this gate, which runs after the write is judged (section 5 below), and
+ *     read existence themselves only off the engine's own reply
  *   - `callData`'s ObjectQL fallback does the same (#5138)
  *
  * All three now call the SAME `recordNotFoundError` — moved to
