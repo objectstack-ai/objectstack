@@ -74,6 +74,7 @@ import { zodIssuesToFields } from '@objectstack/spec/api';
 import { validationFailure } from '@objectstack/types';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { applyDroppedFieldsHeader, logUnexpectedRouteError, mapDataError } from './error-response.js';
+import { answerEarnedWriteDespiteStaleSummary } from './stale-summary-answer.js';
 // [#7390] The filter slot is the one arity judgement the shared normalizer
 // structurally cannot make (a filter AST IS an array), so the querystring
 // ingress — the only layer that knows it is one — makes it instead.
@@ -303,6 +304,9 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     applyDroppedFieldsHeader(res, result);
                     res.status(201).json(result);
                 } catch (error: any) {
+                    // [#28661] The row landed; only a roll-up recompute after it
+                    // failed. Answer the write's own 201, never a 500.
+                    if (answerEarnedWriteDespiteStaleSummary(error, res, 201, req.params?.object)) return;
                     // [#24768] A NOT NULL refusal on a declared field arrives as
                     // the engine's `ValidationError`, already named by its label
                     // in the caller's locale; this door relabels nothing.
@@ -487,6 +491,8 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     applyDroppedFieldsHeader(res, result);
                     res.json(result);
                 } catch (error: any) {
+                    // [#28661] As on the create: the write's own 200.
+                    if (answerEarnedWriteDespiteStaleSummary(error, res, 200, req.params?.object)) return;
                     // [#24768] As on the create: the engine named the field.
                     const mapped = mapDataError(error, req.params?.object);
                     logUnexpectedRouteError(error, mapped);
@@ -544,6 +550,8 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     const result = await p.deleteData(deleteRequest);
                     res.json(result);
                 } catch (error: any) {
+                    // [#28661] As on the create: the delete's own 200.
+                    if (answerEarnedWriteDespiteStaleSummary(error, res, 200, req.params?.object)) return;
                     const mapped = mapDataError(error, req.params?.object);
                     logUnexpectedRouteError(error, mapped);
                     res.status(mapped.status).json(mapped.body);

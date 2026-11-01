@@ -11,6 +11,7 @@ import { judgePermissionSetOwnerBinding, type TenancyPosture } from '@objectstac
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
 import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+import { withEarnedAnswer, writeAnsweringStaleSummary } from './summary-recompute-answer.js';
 // [#17502] The served JSON Schema publishes what an author MAY write, so a
 // property no instance can satisfy — a `retiredKey()` tombstone, rendered
 // `{ not: {} }` — is dropped from it. See the module header for the channels
@@ -14302,7 +14303,11 @@ export class ObjectStackProtocolImplementation implements
             onNotice: (message: unknown) => { if (typeof message === 'string' && message.trim() !== '') notice = message; },
         };
         if (request.context !== undefined) opts.context = request.context;
-        const result = await this.engine.insert(request.object, request.data, opts);
+        // [#28661] A roll-up that cannot recompute after the row landed throws
+        // `ERR_SUMMARY_RECOMPUTE` carrying the written row: the answer below is
+        // built from it and rides the refusal, rethrown at the end (see
+        // `summary-recompute-answer.ts`).
+        const { result, stale } = await writeAnsweringStaleSummary(() => this.engine.insert(request.object, request.data, opts));
         // [#7823] The 201 body is a GENERIC-DATA-PATH surface: strip
         // `internal: true` fields here, at the ingress, per the A-prime ruling
         // (2026-08-13). The engine deliberately no longer strips its own write
@@ -14311,7 +14316,7 @@ export class ObjectStackProtocolImplementation implements
         // external create response. Tripwire-enforced; see
         // `write-response-internal-fields.ts`.
         omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(request.object), result);
-        return {
+        const answer = {
             object: request.object,
             id: result.id,
             record: result,
@@ -14320,6 +14325,8 @@ export class ObjectStackProtocolImplementation implements
             ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
             ...(notice !== undefined ? { notice } : {}),
         };
+        if (stale) throw withEarnedAnswer(stale, answer);
+        return answer;
     }
 
     /**
@@ -14527,7 +14534,11 @@ export class ObjectStackProtocolImplementation implements
         )
             ? { ...(request.data as Record<string, unknown>), id: request.id }
             : request.data;
-        const result = byIdUpdateRecord(await this.engine.update(request.object, writeData, opts));
+        // [#28661] The row landed even when a roll-up could not recompute after
+        // it: the answer is built from the written row and rides the refusal
+        // (see `createData`).
+        const { result: written, stale } = await writeAnsweringStaleSummary(() => this.engine.update(request.object, writeData, opts));
+        const result = byIdUpdateRecord(written);
         // The engine resolved, so the write was authorized. A `null` readback
         // is two answers by contract (`IDataEngine.update`): the row is not
         // there, or the write moved it out of the caller's row scope
@@ -14550,7 +14561,7 @@ export class ObjectStackProtocolImplementation implements
         // `api-key-hash-not-serialized.dogfood.test.ts` and the ingress
         // tripwire.
         omitInternalFieldsFromWriteResponse(this.engine.registry?.getObject(request.object), result);
-        return {
+        const answer = {
             object: request.object,
             id: request.id,
             record: result,
@@ -14559,6 +14570,8 @@ export class ObjectStackProtocolImplementation implements
             ...(withheldMentions.size > 0 ? { withheldMentions: [...withheldMentions] } : {}),
             ...(notice !== undefined ? { notice } : {}),
         };
+        if (stale) throw withEarnedAnswer(stale, answer);
+        return answer;
     }
 
     async deleteData(request: { object: string, id: string, expectedVersion?: string, context?: any }) {
@@ -14566,7 +14579,9 @@ export class ObjectStackProtocolImplementation implements
         await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
-        const deleted = await this.engine.delete(request.object, opts);
+        // [#28661] The row is gone even when a roll-up could not recompute
+        // after it: the answer rides the refusal (see `createData`).
+        const { result: deleted, stale } = await writeAnsweringStaleSummary(() => this.engine.delete(request.object, opts));
         // [#4435] `success: true` used to be a LITERAL — the response said the
         // same thing for a real deletion, an already-deleted row and a typo'd
         // id, so nothing on the wire could tell them apart. The driver contract
@@ -14605,11 +14620,13 @@ export class ObjectStackProtocolImplementation implements
         // Everything else keeps its #4435 reading, including an off-contract
         // `undefined` from a third-party driver: only a POSITIVE zero is read
         // as "not removed".
-        return {
+        const answer = {
             object: request.object,
             id: request.id,
             success: deleted !== 0
         };
+        if (stale) throw withEarnedAnswer(stale, answer);
+        return answer;
     }
 
     /**
