@@ -359,9 +359,10 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
                         findOne.mockClear();
                         const matched = await door().send(verb, PLAIN, PLAIN_ID, ifMatch(version));
                         expect(matched.status, JSON.stringify(matched.body)).toBe(200);
-                        // DELETE probes once more when a token is present (it skips the probe without one);
-                        // PATCH probes in both. Nothing else is read on the match path.
-                        expect(findOne.mock.calls.length).toBe(withoutToken + (verb === 'DELETE' ? 1 : 0));
+                        // Both verbs probe once more when a token is present and skip the probe without
+                        // one: neither looks the record up ahead of the engine, which judges the write
+                        // first. Nothing else is read on the match path.
+                        expect(findOne.mock.calls.length).toBe(withoutToken + 1);
                     } finally {
                         findOne.mockRestore();
                     }
