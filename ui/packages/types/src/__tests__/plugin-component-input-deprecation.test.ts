@@ -21,7 +21,7 @@
  * 404, so the deletion had no carrier and the card sat on hold with no
  * `Restart-when:`. Execution ruling, 2026-09-27 (triage comment 5857459542,
  * carrying the maintainer's 「同意」): delete now rather than wait on a dead
- * carrier — `docs/NORTH-STAR.md` 〈阶段姿态〉 makes immediate retirement (no
+ * carrier — `docs/NORTH-STAR.md` 〈Stage posture〉 makes immediate retirement (no
  * alias, no window) the default once a name has zero consumers, and the
  * window this deprecation bought has already been spent.
  *
