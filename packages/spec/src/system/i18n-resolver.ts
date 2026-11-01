@@ -3848,6 +3848,23 @@ export function flowRefusalMessageKey(flowName: string, nodeId: string): string 
 }
 
 /**
+ * Dot-notation i18n key for a `save_notice` node's message —
+ * `flows.<flow>.notices.<node_id>.message` (#28251).
+ *
+ * The sibling of {@link flowRefusalMessageKey}, for the same reason and with
+ * the same reader: the automation engine picks the translated TEMPLATE before
+ * it renders the `{{ }}` holes, here in the triggering writer's locale (the
+ * record-change trigger hands it with the notice channel), because the
+ * create/update answer carries the notice already rendered.
+ *
+ * `flowName` is `Flow.name` and `nodeId` the `save_notice` node's
+ * `FlowNode.id`.
+ */
+export function flowNoticeMessageKey(flowName: string, nodeId: string): string {
+  return `flows.${flowName}.notices.${nodeId}.message`;
+}
+
+/**
  * Dot-notation i18n key for a hook's declared refusal message —
  * `hooks.<hook>.refusals.<CODE>.message` (#26170, maintainer ruling 6431311681
  * letter A).

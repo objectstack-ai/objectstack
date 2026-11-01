@@ -125,6 +125,7 @@
         "manifest.reports.element.runtimeFilter.lazy",
         "manifest.sharingRules.element.sharedWith",
         "manifest.skills.element.triggerConditions.element",
+        "manifest.translations.element.valueType.flows.valueType.notices.valueType.message",
         "manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
@@ -294,6 +295,7 @@
     },
     "api/GetTranslationsResponse": {
       "sites": [
+        "translations.flows.valueType.notices.valueType.message",
         "translations.flows.valueType.refusals.valueType.message",
         "translations.flows.valueType.screens.valueType.description",
         "translations.flows.valueType.screens.valueType.title"
@@ -398,6 +400,7 @@
         "options[1].manifest.reports.element.runtimeFilter.lazy",
         "options[1].manifest.sharingRules.element.sharedWith",
         "options[1].manifest.skills.element.triggerConditions.element",
+        "options[1].manifest.translations.element.valueType.flows.valueType.notices.valueType.message",
         "options[1].manifest.translations.element.valueType.flows.valueType.refusals.valueType.message",
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
@@ -711,6 +714,11 @@
     "automation/ParallelConfig": {
       "sites": [
         "branches.element.nodes.element.lazy.in.waitEventConfig"
+      ]
+    },
+    "automation/SaveNoticeConfig": {
+      "sites": [
+        ""
       ]
     },
     "automation/ScreenConfig": {
@@ -1411,6 +1419,7 @@
     },
     "system/PlatformTranslationBundle": {
       "sites": [
+        "valueType.flows.valueType.notices.valueType.message",
         "valueType.flows.valueType.refusals.valueType.message",
         "valueType.flows.valueType.screens.valueType.description",
         "valueType.flows.valueType.screens.valueType.title"
@@ -1418,6 +1427,7 @@
     },
     "system/PlatformTranslationData": {
       "sites": [
+        "flows.valueType.notices.valueType.message",
         "flows.valueType.refusals.valueType.message",
         "flows.valueType.screens.valueType.description",
         "flows.valueType.screens.valueType.title"
@@ -1430,6 +1440,7 @@
     },
     "system/ServedTranslationData": {
       "sites": [
+        "flows.valueType.notices.valueType.message",
         "flows.valueType.refusals.valueType.message",
         "flows.valueType.screens.valueType.description",
         "flows.valueType.screens.valueType.title"
@@ -1472,6 +1483,7 @@
     },
     "system/TranslationBundle": {
       "sites": [
+        "valueType.flows.valueType.notices.valueType.message",
         "valueType.flows.valueType.refusals.valueType.message",
         "valueType.flows.valueType.screens.valueType.description",
         "valueType.flows.valueType.screens.valueType.title"
@@ -1479,6 +1491,7 @@
     },
     "system/TranslationData": {
       "sites": [
+        "flows.valueType.notices.valueType.message",
         "flows.valueType.refusals.valueType.message",
         "flows.valueType.screens.valueType.description",
         "flows.valueType.screens.valueType.title"
@@ -1486,6 +1499,7 @@
     },
     "system/TranslationItem": {
       "sites": [
+        "flows.valueType.notices.valueType.message",
         "flows.valueType.refusals.valueType.message",
         "flows.valueType.screens.valueType.description",
         "flows.valueType.screens.valueType.title"

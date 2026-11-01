@@ -1642,6 +1642,23 @@ const appTranslationDataShape = () => ({
    * spec half of a contract-first split: the reader that renders the step
    * label in the reader's locale is `plugin-approvals`'s, a downstream change.
    *
+   * ## `notices` — a `save_notice` node's message (#28251)
+   *
+   *   flows.<flow_name>.notices.<node_id>.message
+   *
+   * A `save_notice` node (`SaveNoticeConfigSchema`) tells the person who made
+   * the write that fired a record-triggered run what the save set in motion,
+   * and the create/update answer carries the rendered sentence as `notice`.
+   * It is a `{{ }}` template the server renders per run, so under the #22507
+   * rule it is translated where it is rendered: the engine reads
+   * `flowNoticeMessageKey(flow, node)` (`system/i18n-resolver.ts`) through the
+   * `i18n` service in the triggering WRITER's locale (the hook session's
+   * `locale`, which the record-change trigger hands the run with the notice
+   * channel), and renders the authored template when none is held. Judged as
+   * the text slot it translates, like `refusals.<node_id>.message`.
+   * `objectstack validate` refuses a key over an unknown flow, an unknown
+   * node, or a node that is not a `save_notice`.
+   *
    * ## `successMessage` / `errorMessage` — the terminal toasts (#22507)
    *
    *   flows.<flow_name>.successMessage
@@ -1718,6 +1735,7 @@ const appTranslationDataShape = () => ({
       name: 'label', title: 'label', nodes: 'screens', steps: 'screens', screen: 'screens', pages: 'screens',
       refusal: 'refusals', ends: 'refusals',
       approval: 'approvals',
+      notice: 'notices', saveNotices: 'notices',
       // The spellings the toast pair arrives in from an action translation,
       // which spells its own success toast `successMessage` with these aliases.
       success: 'successMessage', successText: 'successMessage',
@@ -1822,6 +1840,31 @@ const appTranslationDataShape = () => ({
         + 'request shows its submitter and approvers',
       ),
     })).optional().describe("Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node"),
+    // [#28251] A `save_notice` node's message, picked by the ENGINE in the
+    // triggering writer's locale before its holes are filled — the `refusals`
+    // posture, one group over, addressed the same way (by `FlowNode.id`).
+    notices: z.record(z.string(), strictObject({
+      surface: 'this flow save-notice translation',
+      history: TRANSLATION_HISTORY,
+      // The words a notice arrives spelled in — the same aliases
+      // `SaveNoticeConfigSchema` renames onto its own `message`.
+      aliases: { notice: 'message', text: 'message', body: 'message', description: 'message' },
+      guidance: {
+        title:
+          'A save notice has no heading — the client shows the `message` alone with its success message. '
+          + 'Translate `message`.',
+      },
+    }, {
+      // The one text-slot judge, applied to the translation exactly as
+      // `SaveNoticeConfigSchema` applies it to the message it translates; an
+      // empty string is the untranslated skeleton slot (the authored message renders).
+      message: flowTextSlotTranslation()
+        .optional()
+        .describe(
+          'Translated message of a `save_notice` node — a `{{ }}` template like the message it translates, rendered '
+          + "by the engine in the triggering writer's locale in place of the authored one",
+        ),
+    })).optional().describe('Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node'),
   })).optional().describe('Screen-flow translations keyed by flow name'),
 
   /**

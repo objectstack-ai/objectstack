@@ -27,6 +27,7 @@ import { collectFlowGraphs, parseFlowNodeRegions } from './control-flow.zod';
 import { predicateSlotRefusal, resolveFlowNodeExpressions, type FlowNodeSiblingBlocks } from './flow-node-expression-paths';
 import { flowNodeConfigRefusals } from './flow-node-config-refusals';
 import { apiTriggerSecretRefRefusals } from './api-trigger-secret-ref.zod';
+import { saveNoticePlacementRefusals } from './save-notice-placement';
 // [#23543 F3] The loose `config` keys of the two sibling-block node types — one
 // table, shared with the two D2 lifts that still run at rehydration.
 import { siblingBlockLooseConfigRefusals } from './flow-sibling-block-loose-keys';
@@ -52,6 +53,8 @@ export const FlowNodeAction = z.enum([
   'get_record',         // CRUD: Get/Query
   'http',               // Outbound HTTP callout (ADR-0018 M3) — canonical; outbox-backed when durable
   'notify',             // Outbound notification (ADR-0012) — dispatched via the messaging service
+  'save_notice',        // Tell the person who made the triggering write what the save set in motion (#28251) —
+                        //   record-triggered flows only; answered as the create/update `notice`
   'script',             // Custom action: call the registered function named by `config.function`
                         //   (+ `config.inputs`), resolved from `defineStack({ functions })`. The key
                         //   is REQUIRED — a node naming no callable is flagged at build and refused
@@ -1618,6 +1621,14 @@ export const FlowSchema = lazySchema(() => strictObject(
   // flow's own `nodes` is the whole walk; the three refusals and why each
   // exists are `api-trigger-secret-ref.zod.ts`'s header.
   for (const refusal of apiTriggerSecretRefRefusals(flow)) {
+    ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
+  }
+
+  // [#28251] A `save_notice` node answers the write that fired the run, so it
+  // stands only in a flow a create or update record trigger starts — anywhere
+  // else no write waits on the run. Refused at each such node, at any region
+  // depth; the reasons are `save-notice-placement.ts`'s header.
+  for (const refusal of saveNoticePlacementRefusals(flow)) {
     ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
   }
 

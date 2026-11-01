@@ -206,8 +206,8 @@ export interface FlowNodeTextSlot {
  * `message` and, since #19939, `actionUrl` — the 17.x executor stringified
  * it, `String(…)`, so a whole token never handed a typed value on;
  * `screen-nodes.ts` and the engine's `end` handling render through one text
- * renderer; and since #19939 `http-nodes.ts` renders `url` and each `headers`
- * value — the 17.x contract, parsed after the interpolation, refused
+ * renderer, as does the `save_notice` executor (#28251); and since #19939
+ * `http-nodes.ts` renders `url` and each `headers` value — the 17.x contract, parsed after the interpolation, refused
  * anything but a string there, so a whole token never handed a typed value
  * on either). Every OTHER position the 17.x flow interpolator read is no
  * text template: the value slots (`fields.*`, `assignments.*`, the callee
@@ -229,6 +229,7 @@ export const FLOW_NODE_TEXT_SLOTS: readonly FlowNodeTextSlot[] = [
   { nodeType: 'screen', key: 'title', label: 'screen title' },
   { nodeType: 'screen', key: 'description', label: 'screen description' },
   { nodeType: 'end', key: 'message', label: 'end message' },
+  { nodeType: 'save_notice', key: 'message', label: 'save_notice message' },
 ];
 
 /**
