@@ -2,7 +2,7 @@
 "@objectstack/objectql": patch
 ---
 
-Clause-②: no
+Clause-②: yes (widening) — `SchemaRegistry.uninstallPackage` gains an optional `options` parameter
 Metadata-protocol: none
 
 fix(objectql): a package refused while it registers leaves nothing of itself registered
