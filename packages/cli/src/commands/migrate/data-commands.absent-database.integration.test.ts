@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 450 — spawns the real producer once per single-cause fixture: two seed children and 46 spawns of the source CLI (three #21529 commands and eleven #21552 doors, each in its JSON and human faces on the absent database and in JSON on a booted control, plus the four doors that already exited 0), every one a distinct triple; slowest CI reading 355.51 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * [#21529] `os migrate resume`, `os migrate recorded-by` and `os migrate
