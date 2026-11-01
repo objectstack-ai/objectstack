@@ -14,7 +14,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost';
 
@@ -67,6 +67,34 @@ vi.mock('../metadata-admin/index.js', () => ({
   MetadataResourceHistoryPage: () => <PageStub page="history" />,
 }));
 
+/**
+ * objectstack#28569 — the area's form editor, a stub printing what the surface
+ * hands it (the customization, without its door) and saving a draft on click.
+ */
+vi.mock('./StudioBundleItemEditor.js', () => ({
+  StudioBundleItemEditor: ({
+    customization,
+    onDraftSaved,
+    type,
+    name,
+  }: {
+    customization: { ensure?: unknown } | null;
+    onDraftSaved?: (saved?: { type: string; name: string }) => void;
+    type: string;
+    name: string;
+  }) => {
+    const { ensure, ...facts } = customization ?? {};
+    return (
+      <div data-testid="form-editor" data-customization={customization ? JSON.stringify(facts) : 'null'}>
+        <span data-testid="form-editor-door">{typeof ensure}</span>
+        <button type="button" onClick={() => onDraftSaved?.({ type, name })}>
+          save a draft
+        </button>
+      </div>
+    );
+  },
+}));
+
 import { StudioDesignSurface } from './StudioDesignSurface';
 import { t } from '../metadata-admin/i18n';
 
@@ -82,6 +110,25 @@ function servePackages() {
         packages: [
           { manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable: true },
           { manifest: { id: KERNEL_ID, name: 'Platform', scope: 'system' }, writable: false },
+        ],
+      },
+    });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+/** objectstack#28569 — the list with an installed, read-only base that declares its version. */
+const BASE_ID = 'com.vendor.hotcrm';
+function serveWithBase() {
+  const fetchMock = vi.fn(async (input: unknown) => {
+    if (String(input) !== '/api/v1/packages') return answer([]);
+    return answer({
+      success: true,
+      data: {
+        packages: [
+          { manifest: { id: PACKAGE_ID, name: 'Field Ops' }, writable: true },
+          { manifest: { id: BASE_ID, name: 'HotCRM', version: '4.0.0', scope: 'installed' }, writable: false },
         ],
       },
     });
@@ -170,7 +217,7 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
 
   it('a kernel package the switcher hides opens its area read-only', async () => {
     servePackages();
-    renderAt(`/studio/${KERNEL_ID}/metadata/translation/t1?package=${KERNEL_ID}`);
+    renderAt(`/studio/${KERNEL_ID}/metadata/agent/a1?package=${KERNEL_ID}`);
     expect(await areaPage()).toEqual({
       page: 'item',
       host: { packageId: KERNEL_ID, readOnly: true, basePath: `/studio/${KERNEL_ID}/metadata` },
@@ -183,5 +230,33 @@ describe('Studio: the "All metadata" area in the builder (objectstack#28561)', (
     expect(await screen.findByTestId('studio-package-not-found')).toBeInTheDocument();
     expect(nav().queryAllByRole('link')).toHaveLength(0);
     expect(screen.queryByTestId('studio-metadata-area')).toBeNull();
+  });
+});
+
+describe('the area\'s form editor in the builder (objectstack#28569)', () => {
+  it('on a read-only base, the editor is handed the surface\'s customization: the base, its version and the door', async () => {
+    serveWithBase();
+    renderAt(`/studio/${BASE_ID}/metadata/email_template/welcome?package=${BASE_ID}&member=zh-CN`);
+    const editor = await screen.findByTestId('form-editor', undefined, { timeout: 8000 });
+    await waitFor(() => expect(editor.getAttribute('data-customization')).not.toBe('null'));
+    expect(JSON.parse(editor.getAttribute('data-customization') ?? 'null')).toEqual({
+      base: BASE_ID,
+      baseLabel: 'HotCRM',
+      basedOn: '4.0.0',
+      walled: false,
+      pairId: null,
+    });
+    expect(screen.getByTestId('form-editor-door')).toHaveTextContent('function');
+  });
+
+  it('on a writable package, the editor has no customization, and its saved draft counts in the header', async () => {
+    serveWithBase();
+    renderAt(`/studio/${PACKAGE_ID}/metadata/translation/ui_en?package=${PACKAGE_ID}`);
+    const editor = await screen.findByTestId('form-editor', undefined, { timeout: 8000 });
+    expect(editor).toHaveAttribute('data-customization', 'null');
+    expect(screen.queryByTestId('studio-changes-count')).toBeNull();
+    fireEvent.click(within(editor).getByRole('button', { name: 'save a draft' }));
+    // The header counts the draft the save wrote, before its own re-read answers.
+    expect(await screen.findByTestId('studio-changes-count')).toHaveTextContent('1');
   });
 });

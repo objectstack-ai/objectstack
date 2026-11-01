@@ -107,8 +107,14 @@ export function useObjectPresence(name: string): ObjectPresenceReading {
   const { app } = useExpressionContext();
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
   const inApp = typeof app?.name === 'string' && app.name !== '';
+  //
+  // objectstack#28645 — it asks with `views: false` (the provider's hand-off,
+  // `MetadataProvider`): whether an object is there reads no views, so this
+  // question never reads the `/meta/view` list.
   if ((packageId || inApp) && readObjectScope && getTypeStatus?.('object') === 'idle') {
-    const scope = readObjectScope(packageId ? { packageId, names: [name] } : { names: [name] });
+    type ReadScope = NonNullable<typeof readObjectScope>;
+    const readNames = readObjectScope as (scope: Parameters<ReadScope>[0] & { views: false }) => ReturnType<ReadScope>;
+    const scope = readNames(packageId ? { packageId, names: [name], views: false } : { names: [name], views: false });
     const presence: ObjectPresence = !scope.settled
       ? 'unknown'
       : scope.objects.some((o) => (o as { name?: unknown } | null | undefined)?.name === name)

@@ -88,6 +88,7 @@ import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
 import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { useBundledReads } from '../providers/bundledReads.js';
 import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appRouteSegment, appStudioRoutePath } from '../utils/index.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
@@ -476,8 +477,13 @@ export function AppHeader({
   const metadata = useMetadata();
   const metadataApps = metadata.apps;
   // The views a server read served, already translated — `/meta/view`, and the
-  // object document's own `listViews` (objectui#11295, objectui#11336).
-  const servedViews = useServedViewItems();
+  // object document's own `listViews` (objectui#11295, objectui#11336). Read
+  // only on an object's view route, the one title that labels a view
+  // (objectstack#28645): any other route starts no view read for it.
+  const servedViews = useServedViewItems(isApp && location.pathname.split('/').filter(Boolean)[3] === 'view');
+  // objectstack#28645 — the dashboard or page the phone title names, read from
+  // the app bundle first; the list below only for one the bundle does not hold.
+  const bundledReads = useBundledReads();
   const { currentAppName, recordTitle } = useNavigationContext();
 
   /**
@@ -679,7 +685,13 @@ export function AppHeader({
       if (pathParts[3]) {
         const dashboardName = pathParts[3];
         // ADR-0048 Phase 2 — prefer the current app's package (container-scoped).
-        const dashboardDef = preferLocal(metadata.dashboards as any[], dashboardName, (currentApp as any)?._packageId);
+        const bundledDashboard = bundledReads?.item('dashboard', dashboardName, (currentApp as any)?._packageId);
+        const dashboardDef =
+          bundledDashboard?.state === 'hit'
+            ? bundledDashboard.value
+            : bundledDashboard?.state === 'pending'
+              ? undefined
+              : preferLocal(metadata.dashboards as any[], dashboardName, (currentApp as any)?._packageId);
         // A dashboard the `/meta` read served carries its label already
         // translated (a published edit kept over the packaged catalog), so it
         // is drawn as given — the page header draws it the same way. Only the
@@ -698,7 +710,13 @@ export function AppHeader({
       // above its list. The label below names it in the phone bar only.
       if (pathParts[3]) {
         const pageName = pathParts[3];
-        const pageDef = preferLocal(metadata.pages as any[], pageName, (currentApp as any)?._packageId);
+        const bundledPage = bundledReads?.item('page', pageName, (currentApp as any)?._packageId);
+        const pageDef =
+          bundledPage?.state === 'hit'
+            ? bundledPage.value
+            : bundledPage?.state === 'pending'
+              ? undefined
+              : preferLocal(metadata.pages as any[], pageName, (currentApp as any)?._packageId);
         // A page's `label` may be an inline locale map; drawn raw, the phone
         // bar's title blanked the page (objectui#13488).
         const fallback = metadataText(pageDef?.label, language) ?? humanizeSlug(pageName);

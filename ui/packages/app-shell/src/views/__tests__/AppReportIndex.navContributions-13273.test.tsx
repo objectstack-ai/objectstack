@@ -29,7 +29,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 import { MetadataProvider } from '../../providers/MetadataProvider';
 import { ExpressionProvider } from '../../providers/ExpressionProvider';
@@ -90,11 +90,12 @@ const DATASETS = [
   { name: 'ds_cases', object: 'crm_case' },
 ];
 
-const ANSWER: MePermissionsResponse = {
+const ANSWER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u_agent',
   tenantId: null,
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: ['service_agent'],
   systemPermissions: [],
   objects: {

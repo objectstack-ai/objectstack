@@ -4970,6 +4970,14 @@ export class AutomationServicePlugin implements Plugin {
      * the same winners by this same decision, so its receipt describes what is
      * armed after them too. The collision warning is logged by every step that
      * meets a contested name.
+     *
+     * [#28412, ADR-0146 D9 item 1] One stored row of a shipped name IS armed:
+     * the shipping package's declared `.custom` override. The protocol's view
+     * serves it in the package's slot (once, in place of the loader's body),
+     * and the boot pull ranks it above the loader's body by its stored
+     * binding (`flow-precedence.ts`), so every step arms it, with no receipt.
+     * Its removal puts the loader's body back in the view, and each step
+     * re-arms that body by one `registerFlow` — never a withdraw first.
      */
     private resolveFlowContenders(ctx: PluginContext, items: readonly unknown[]) {
         const engine = this.engine;

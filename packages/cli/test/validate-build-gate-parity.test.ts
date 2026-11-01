@@ -254,9 +254,16 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * Three rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
  * gained the call: `findViewContainerNameRefusals` (#20331 → #20393),
  * `findOverrideDeclarationRefusals` (#28410 → #28643) and
- * `findExtensionFieldSuffixRefusals` (#28564 → #28727). It holds none today.
+ * `findExtensionFieldSuffixRefusals` (#28564 → #28727). It holds one today,
+ * `findFieldPatchTargetRefusals` (#28565), whose card did not name the build.
  */
-const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {};
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
+  findFieldPatchTargetRefusals:
+    '[ADR-0146 D10, second rule] An object extension\'s `fieldPatches` naming a field or option value its ' +
+    'in-stack target lacks, judged by the marketplace install door\'s own `fieldPatchTargetRefusals`. Wired ' +
+    'where the rollout card asked for it (`os validate` and the install door); `os build` still emits such an ' +
+    'artifact, which the install door then refuses — the build-side gap, reported rather than closed here.',
+};
 
 /**
  * Everything else the two commands call, and the reason each one is NOT an
