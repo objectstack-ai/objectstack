@@ -122,7 +122,14 @@ export async function deletePackage(this: Pick<PackageUninstallHost, 'deleteMeta
     // the same predicate (the one copy `unregisterObjectsByPackage` itself
     // calls) without performing the uninstall, so the refusal is thrown
     // here, as is, with nothing removed. The HTTP door answers it through
-    // its `catch` around this verb: `500`, nothing changed.
+    // its `catch` around this verb, with the refusal's own `409
+    // RESOURCE_CONFLICT`: nothing changed.
+    //
+    // [#28408, ADR-0146 D3] The same question also refuses a base whose
+    // paired customization package (`<base>.custom`) the registry holds,
+    // naming the pair, in the same refusal; both causes ride on one throw.
+    // It is asked here, before the store delete, for the same reason: a base
+    // removed under its pair strands every customization the pair holds.
     //
     // The registry is reached the way the withdrawal below reaches it. A
     // registry that does not carry the method (an engine double, a host on
