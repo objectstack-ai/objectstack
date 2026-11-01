@@ -21,7 +21,7 @@
  * door's status answers carries a token, and the URL goes only to the window.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { AlertCircle, Info, Plug } from 'lucide-react';
 import {
   Badge,
@@ -70,8 +70,16 @@ interface Waiting {
   window: Window;
   /** The connect being waited for has landed once `connectedAt` moves off this. */
   before?: string;
-  until: number;
+  /** When the begun connect stops being completable, as the server answered it. */
+  until?: number;
 }
+
+/** What the notice line says: a message this page words, or the server's own sentence. */
+type Notice =
+  | { tone: 'ok'; kind: 'connected' | 'disconnected'; name: string }
+  | { tone: 'error'; kind: 'expired'; name: string }
+  | { tone: 'error'; kind: 'popupBlocked' }
+  | { tone: 'error'; kind: 'refusal'; text: string };
 
 interface RevokeDraft {
   name: string;
@@ -89,11 +97,9 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
   const displayLocale = useDisplayLocale();
   const [nonce, setNonce] = useState(0);
   const [listing, setListing] = useState<ConnectionListing | null>(null);
-  const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [revokeDraft, setRevokeDraft] = useState<RevokeDraft | null>(null);
-  const waitingRef = useRef<Waiting | null>(null);
-  waitingRef.current = waiting;
 
   const reload = () => {
     setListing(null);
@@ -118,35 +124,31 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
   // A begun connect: re-read until it lands, its window closes, or it expires.
   useEffect(() => {
     if (!waiting) return;
+    const current = waiting;
+    const deadline = current.until ?? Date.now() + 10 * 60_000;
     let busy = false;
+    let cancelled = false;
     const timer = setInterval(() => {
-      const current = waitingRef.current;
-      if (busy || !current) return;
+      if (busy) return;
       busy = true;
       const closed = current.window.closed;
       void fetchConnection(current.name).then((read) => {
         busy = false;
-        if (waitingRef.current !== current) return;
+        if (cancelled) return;
         const landed = read.ok && read.state.status === 'connected' && read.state.connectedAt !== current.before;
-        const expired = Date.now() > current.until;
+        const expired = Date.now() > deadline;
         if (!landed && !closed && !expired) return;
         applyConnection(current.name, read);
         if (!current.window.closed) current.window.close();
         setWaiting(null);
-        if (landed) {
-          setNotice({ tone: 'ok', text: t('connectorConnections.connected', { defaultValue: 'Connected {{name}}.', name: current.name }) });
-        } else if (expired) {
-          setNotice({
-            tone: 'error',
-            text: t('connectorConnections.expired', {
-              defaultValue: 'The sign-in for {{name}} was not completed in time. Connect again.',
-              name: current.name,
-            }),
-          });
-        }
+        if (landed) setNotice({ tone: 'ok', kind: 'connected', name: current.name });
+        else if (expired && !closed) setNotice({ tone: 'error', kind: 'expired', name: current.name });
       }, () => { busy = false; });
     }, pollMs);
-    return () => clearInterval(timer);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [waiting, pollMs]);
 
   const connect = async (name: string, before?: string) => {
@@ -154,12 +156,7 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
     setNotice(null);
     const signIn = window.open('about:blank', SIGN_IN_WINDOW, SIGN_IN_FEATURES);
     if (!signIn) {
-      setNotice({
-        tone: 'error',
-        text: t('connectorConnections.popupBlocked', {
-          defaultValue: 'The browser blocked the sign-in window. Allow pop-ups for this site and try again.',
-        }),
-      });
+      setNotice({ tone: 'error', kind: 'popupBlocked' });
       return;
     }
     // Detach the window before it reaches the vendor: the vendor's page gets no handle on this one.
@@ -167,12 +164,12 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
     const begun = await beginConnection(name);
     if (!begun.ok) {
       signIn.close();
-      setNotice({ tone: 'error', text: begun.message });
+      setNotice({ tone: 'error', kind: 'refusal', text: begun.message });
       return;
     }
     signIn.location.href = begun.authorizationUrl;
-    const expiresAt = Date.parse(begun.expiresAt);
-    setWaiting({ name, window: signIn, before, until: Number.isNaN(expiresAt) ? Date.now() + 10 * 60_000 : expiresAt });
+    const until = Date.parse(begun.expiresAt);
+    setWaiting({ name, window: signIn, before, ...(Number.isNaN(until) ? {} : { until }) });
   };
 
   const confirmRevoke = async () => {
@@ -186,13 +183,33 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
     }
     applyConnection(name, out);
     setRevokeDraft(null);
-    setNotice({ tone: 'ok', text: t('connectorConnections.disconnected', { defaultValue: 'Disconnected {{name}}.', name }) });
+    setNotice({ tone: 'ok', kind: 'disconnected', name });
   };
 
   const formatAt = (at: string | undefined): string | null => {
     if (!at) return null;
     const d = new Date(at);
     return Number.isNaN(d.getTime()) ? at : d.toLocaleString(displayLocale);
+  };
+
+  const noticeText = (n: Notice): string => {
+    switch (n.kind) {
+      case 'connected':
+        return t('connectorConnections.connected', { defaultValue: 'Connected {{name}}.', name: n.name });
+      case 'disconnected':
+        return t('connectorConnections.disconnected', { defaultValue: 'Disconnected {{name}}.', name: n.name });
+      case 'expired':
+        return t('connectorConnections.expired', {
+          defaultValue: 'The sign-in for {{name}} was not completed in time. Connect again.',
+          name: n.name,
+        });
+      case 'popupBlocked':
+        return t('connectorConnections.popupBlocked', {
+          defaultValue: 'The browser blocked the sign-in window. Allow pop-ups for this site and try again.',
+        });
+      default:
+        return n.text;
+    }
   };
 
   const statusLabel = (status: ConnectorConnectionState['status']) => (status === 'connected'
@@ -362,7 +379,7 @@ export function ConnectorConnectionsPage({ pollMs = 2000 }: ConnectorConnections
               : 'flex items-start gap-2 rounded-md border border-green-500/30 bg-green-500/5 p-3 text-sm text-green-700 dark:text-green-400'}
           >
             {notice.tone === 'error' ? <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /> : <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />}
-            <div className="flex-1">{notice.text}</div>
+            <div className="flex-1">{noticeText(notice)}</div>
             <button type="button" className="text-xs underline opacity-60 hover:opacity-100" onClick={() => setNotice(null)}>
               {t('connectorConnections.dismiss', { defaultValue: 'Dismiss' })}
             </button>
