@@ -26,7 +26,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { act, render, screen, cleanup } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('react-router-dom', async () => {
   const { createElement } = await import('react');
@@ -123,17 +123,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const payload = (systemPermissions?: string[]): MePermissionsResponse =>
+const payload = (systemPermissions?: string[]): MePermissionsAuthenticatedResponse =>
   ({
     authenticated: true,
     userId: 'u1',
     tenantId: 'acme',
-    roles: ['everyone'],
+    positions: ['everyone'],
+    hasAnyQueue: false,
     permissionSets: ['member_default'],
     ...(systemPermissions ? { systemPermissions } : {}),
     objects: {},
     fields: {},
-  }) as MePermissionsResponse;
+  }) as MePermissionsAuthenticatedResponse;
 
 async function renderHome(permissions: MePermissionsResponse) {
   render(

@@ -149,7 +149,7 @@ registerMetadataDefaultInspector('page', PageDefaultInspector);
 vi.stubGlobal('fetch', vi.fn(async () => new Response('null', { status: 404, headers: { 'content-type': 'application/json' } })));
 
 function mePermissions(systemPermissions: string[]): MePermissionsResponse {
-  return { authenticated: true, userId: 'u1', tenantId: 'org_1', roles: [], permissionSets: [], systemPermissions, objects: {}, fields: {} };
+  return { authenticated: true, userId: 'u1', tenantId: 'org_1', hasAnyQueue: false, positions: [], permissionSets: [], systemPermissions, objects: {}, fields: {} };
 }
 const SETUP_ONLY = mePermissions(['manage_org_users', 'setup.access', 'setup.write']);
 

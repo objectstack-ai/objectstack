@@ -3262,6 +3262,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.area.assignments.position': 'The people who hold this position are assigned in Setup.',
   'engine.studio.area.assignments.permission': 'The people this permission set is assigned to are managed in Setup.',
   'engine.studio.area.assignments.open': 'Open in Setup',
+  // objectstack#28569 — the area's form editor of an email template or a translation.
+  'engine.studio.area.formEditor.locale': 'Locale {locale}',
+  'engine.studio.area.formEditor.oneLocale': 'Only the {locale} version of this template is customized. {package}’s other languages of it stay as they are.',
+  'engine.studio.area.formEditor.translationWhole': 'Customizing a translation replaces {package}’s whole {locale} bundle: every string in it is then served from your copy, the ones you leave unchanged included.',
   'engine.studio.publishedAllFlows': 'Published {count} flows',
   'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',

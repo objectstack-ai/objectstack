@@ -42,6 +42,7 @@ import {
   receiverCallNameFromNoOverload,
 } from './unknown-function';
 import { DEFAULT_TRAVERSAL_ROOT, type TraversalConflictKind } from './relationship-traversal';
+import { optionLabelFieldOf, optionlessLabelSentence } from './stdlib';
 import type {
   CelFieldRole,
   ExprValidationCode,
@@ -200,6 +201,26 @@ export interface ExprSchemaHint {
    * not run, which is every caller's behaviour until it opts in.
    */
   traversalHydration?: boolean;
+  /**
+   * [#28659] The fields of {@link fields} that declare options once served —
+   * the fields `label(record.<field>)` can answer on: inline `options`, or a
+   * `picklist` the registry resolves onto the served field. Read an authored
+   * field through `declaresOptionsOnceServed` (`stdlib.ts`), whose served-form
+   * half is `declaresOptions`, the predicate the engine builds its label map
+   * with, so this list and the evaluator agree.
+   *
+   * When supplied, every `label(record.<field>)` call naming a field that IS
+   * declared ({@link fields}) but is not in this list is refused under
+   * `label-field-no-options`: the evaluator faults on that call on every row,
+   * so the formula reads null forever. A field {@link fields} does not declare
+   * keeps its `unknown-field` refusal and gets no second one.
+   *
+   * Opt-in, like {@link traversalHydration}: absent ⇒ the check does not run,
+   * because a caller that does not have the object's options in hand cannot
+   * tell an optionless field from one it was not told about. Needs
+   * {@link fields}; without it nothing is judged.
+   */
+  optionFields?: readonly string[];
 }
 
 /**
@@ -653,6 +674,56 @@ function receiverCallHint(celMessage: string, source: string): { text: string; n
 }
 
 /**
+ * [#28659] Every `label(record.<field>)` call in `source` whose field is
+ * declared but declares no options — one `label-field-no-options` refusal per
+ * such field, worded as the evaluator's fault on the same call
+ * (`optionlessLabelSentence`), so the door says at author time what the log
+ * line would say on every row.
+ *
+ * The field a call names is read through `optionLabelFieldOf`, the reader the
+ * `label` macro itself uses, so a call shape the macro refuses at the type
+ * check (a computed argument, `record.?kind`) names no field here and is left
+ * to that refusal. Runs only when the caller supplied
+ * {@link ExprSchemaHint.optionFields} and {@link ExprSchemaHint.fields}; a
+ * field outside `fields` is `checkFieldExistence`'s to refuse.
+ */
+function checkOptionLabelTargets(
+  ast: () => CelAstNode | null,
+  source: string,
+  schema: ExprSchemaHint | undefined,
+  errors: ExprValidationError[],
+): void {
+  if (!schema?.optionFields || !schema.fields || schema.fields.length === 0) return;
+  // A source that never spells the call cannot hold one (CEL has no comments),
+  // so the common formula pays one scan and no tree walk.
+  if (!/\blabel\s*\(/.test(source)) return;
+  const tree = ast();
+  if (tree == null) return;
+  const declared = new Set(schema.fields);
+  const withOptions = new Set(schema.optionFields);
+  const seen = new Set<string>();
+  const visited = new Set<object>();
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== 'object' || visited.has(node)) return;
+    visited.add(node);
+    if (Array.isArray(node)) {
+      for (const child of node) walk(child);
+      return;
+    }
+    const { op, args } = node as { op?: unknown; args?: unknown };
+    if (op === 'call' && Array.isArray(args) && args[0] === 'label' && Array.isArray(args[1]) && args[1].length === 1) {
+      const field = optionLabelFieldOf(args[1][0] as { op: string; args: unknown } | undefined);
+      if (field !== undefined && declared.has(field) && !withOptions.has(field) && !seen.has(field)) {
+        seen.add(field);
+        errors.push(refusal('label-field-no-options', { field }, source, optionlessLabelSentence(field)));
+      }
+    }
+    for (const value of Object.values(node as Record<string, unknown>)) walk(value);
+  };
+  walk(tree);
+}
+
+/**
  * Every member `source` reads on `record` / `previous`, judged against
  * `schema.fields` — one `unknown-field` refusal per undeclared name.
  *
@@ -1046,6 +1117,7 @@ export function validateExpression(
     }
   } else {
     checkFieldExistence(ast, source, schema, errors);
+    checkOptionLabelTargets(ast, source, schema, errors);
     checkRoleCatalog(source, schema, errors);
     if (schema?.scope === 'record') {
       // In a `record`-scoped site a bare top-level identifier is a silent bug —

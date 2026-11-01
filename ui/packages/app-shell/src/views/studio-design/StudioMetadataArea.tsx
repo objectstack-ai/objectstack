@@ -13,7 +13,9 @@
  *   <root>/_diagnostics        diagnostics
  *   <root>/:type               a type's list
  *   <root>/:type/new           create (a writable package only)
- *   <root>/:type/:name         the generic item page, or the item's pillar
+ *   <root>/:type/:name         the generic item page, the item's pillar, or
+ *                              the form editor of an email template or a
+ *                              translation (`StudioBundleItemEditor`, #28569)
  *   <root>/:type/:name/history the item's history
  *
  * Mirroring Setup's shapes keeps every relative link the pages emit pointing
@@ -39,10 +41,14 @@ import { t, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { fetchListedPackageManifests } from './packages-io.js';
 import {
   STUDIO_ALL_PACKAGES_SEGMENT,
+  areaItemOpensFormEditor,
   areaItemPillarPath,
   areaLocationRedirect,
   studioMetadataAreaPath,
 } from './metadataArea.js';
+import { StudioBundleItemEditor } from './StudioBundleItemEditor.js';
+import { BUNDLE_MEMBER_PARAM } from '../metadata-admin/registry.js';
+import type { StudioBaseCustomization } from './StudioDesignSurface.js';
 
 /*
  * The pages load with the area, through the specifier `AppContent` loads them
@@ -107,28 +113,64 @@ function AreaLoading({ locale }: { locale: string }): React.ReactElement {
   );
 }
 
+/** What the Studio surface hands the area's form editor (`StudioBundleItemEditor`). */
+interface AreaEditorProps {
+  customization: StudioBaseCustomization | null;
+  publishNonce: number;
+  onDraftSaved?: (saved?: { type: string; name: string }) => void;
+}
+
 /**
- * `<root>/:type/:name`: a pillar type opens its pillar, every other type the
- * generic item page (`areaItemPillarPath` lists when).
+ * `<root>/:type/:name`: a pillar type opens its pillar, an email template or a
+ * translation the form editor (`areaItemOpensFormEditor`), every other type
+ * the generic item page (`areaItemPillarPath` lists when).
  *
  * Decided once per item, when it opens (the item is the key below): the item
  * page itself rewrites the query it opened with (it drops `?review=1` once the
  * review sheet is open), and that must not send an open review on to the
  * pillar.
  */
-function AreaItem(): React.ReactElement {
+function AreaItem({ editor }: { editor: AreaEditorProps }): React.ReactElement {
   const { type = '', name = '' } = useParams<{ type: string; name: string }>();
+  const [search] = useSearchParams();
+  // One editor buffer per member: two locales of one template are two items.
+  const member = search.get(BUNDLE_MEMBER_PARAM) ?? '';
   // A type never holds a `/`, so this names one item.
-  return <AreaItemOpen key={`${type}/${name}`} type={type} name={name} />;
+  return <AreaItemOpen key={`${type}/${name}/${member}`} type={type} name={name} editor={editor} />;
 }
 
-function AreaItemOpen({ type, name }: { type: string; name: string }): React.ReactElement {
+function AreaItemOpen({
+  type,
+  name,
+  editor,
+}: {
+  type: string;
+  name: string;
+  editor: AreaEditorProps;
+}): React.ReactElement {
   const [search] = useSearchParams();
   const host = useMetadataAreaHost();
-  const [pillarPath] = React.useState(() =>
-    areaItemPillarPath({ packageId: host?.packageId ?? null, type, name, search }),
-  );
-  if (pillarPath) return <Navigate to={pillarPath} replace />;
+  const [opens] = React.useState(() => {
+    const at = { packageId: host?.packageId ?? null, type, search };
+    if (areaItemOpensFormEditor(at)) return { formEditor: true, pillarPath: null };
+    return { formEditor: false, pillarPath: areaItemPillarPath({ ...at, name }) };
+  });
+  if (opens.pillarPath) return <Navigate to={opens.pillarPath} replace />;
+  if (opens.formEditor && host?.packageId) {
+    return (
+      <StudioBundleItemEditor
+        packageId={host.packageId}
+        type={type}
+        name={name}
+        member={search.get(BUNDLE_MEMBER_PARAM) || undefined}
+        readOnly={host.readOnly}
+        customization={editor.customization}
+        publishNonce={editor.publishNonce}
+        onDraftSaved={editor.onDraftSaved}
+        basePath={host.basePath}
+      />
+    );
+  }
   return <MetadataResourceEditPage />;
 }
 
@@ -146,9 +188,24 @@ function AreaCreate(): React.ReactElement {
 export interface StudioMetadataAreaProps {
   /** The package the area is open on, or `null` for the cross-package leg. */
   packageId: string | null;
+  /**
+   * objectstack#28569 — on a read-only base, what the surface customizes it
+   * with (the Interfaces pillar's `StudioBaseCustomization`): the form editor
+   * offers Customize from it. `null` otherwise.
+   */
+  customization?: StudioBaseCustomization | null;
+  /** Bumped by the header's Publish: the form editor re-reads what is served. */
+  publishNonce?: number;
+  /** Told when the form editor saves a draft, so the header's pending count follows it. */
+  onDraftSaved?: (saved?: { type: string; name: string }) => void;
 }
 
-export function StudioMetadataArea({ packageId }: StudioMetadataAreaProps): React.ReactElement {
+export function StudioMetadataArea({
+  packageId,
+  customization = null,
+  publishNonce = 0,
+  onDraftSaved,
+}: StudioMetadataAreaProps): React.ReactElement {
   const { pathname, search } = useLocation();
   const locale = useMetadataLocale();
   const segment = packageId ?? STUDIO_ALL_PACKAGES_SEGMENT;
@@ -162,6 +219,7 @@ export function StudioMetadataArea({ packageId }: StudioMetadataAreaProps): Reac
     () => ({ packageId, readOnly: packageId !== null && writable === false, basePath }),
     [packageId, writable, basePath],
   );
+  const editor: AreaEditorProps = { customization, publishNonce, onDraftSaved };
 
   // The query names the leg (`areaLocationRedirect`). Settled before any page
   // mounts, so no page reads a scope the URL is about to change.
@@ -181,7 +239,7 @@ export function StudioMetadataArea({ packageId }: StudioMetadataAreaProps): Reac
             <Route path="datasource/*" element={<Navigate to={SETUP_DATASOURCES_PATH} replace />} />
             <Route path=":type" element={<MetadataResourceListPage />} />
             <Route path=":type/new" element={<AreaCreate />} />
-            <Route path=":type/:name" element={<AreaItem />} />
+            <Route path=":type/:name" element={<AreaItem editor={editor} />} />
             <Route path=":type/:name/history" element={<MetadataResourceHistoryPage />} />
           </Routes>
         </React.Suspense>

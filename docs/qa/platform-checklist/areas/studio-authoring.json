@@ -714,7 +714,7 @@
       "title": "The Studio CEL editors reach the SAME verdict as the engine: formula result-type inference, previous. completion in conditional rules, and RLS lint + test-run — the editor UI, not a second grammar",
       "since": "v16",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -727,17 +727,16 @@
         ],
         "knownGaps": [
           "the CEL editors lazy-load @objectstack/formula and FEATURE-DETECT every entry point (celAuthoring.ts) — a missing/older engine degrades to no lint / no suggestions / test-run 'unavailable', never an exception. If the vendored bundle lacks the engine, record the affected clauses blocked(dependency) and verify the graceful-degradation clause instead",
-          "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs here (`pnpm --filter @object-ui/PKG exec vitest run --maxWorkers=2 FILE`); a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
-          "acceptance[7] (graceful degradation) is PIN-ONLY BY DESIGN: its verify forbids hand-breaking the bundle. The environment it needs is this checkout with its install done, to run ui/packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts (describe 'celAuthoring · graceful degradation') with `pnpm --filter @object-ui/app-shell exec vitest run --maxWorkers=2 FILE`. QA run #21784 had no runnable checkout and recorded blocked(environment) (parked on #22017 row 16), which is the right verdict without one: never a hand-driven verdict, never inferred from the source. CI in this repository now runs the ui/ suites (the Test UI job), which is evidence about the commit CI built, not about the run subject: cite a run of the file at the subject sha",
-          "acceptance[2] and acceptance[4] score the editor against the ENGINE's tier for a non-lowerable RLS read predicate, which is ERROR (rls-predicate-unenforceable, fail-closed). At the console pin 4016370a the editor still gives it severity 'warning' with fail-open wording (objectui packages/app-shell/src/views/metadata-admin/celAuthoring.ts lintCelPredicate) and autosaves it — the product defect objectstack-ai/objectui#13061 (QA run #24604 negative[0], rule-7 verified). Until that lands, those two clauses FAIL as written: score them fail with that card cited, never 'pass as written'",
-          "THE FORMULA-FIELD PROBE FAILS TODAY (QA run #26715, Data card, at 3fcafcd3; re-read at 3230bdbf): the Studio RLS editor reads 'Valid CEL' for a USING predicate on a formula field (record.f_formula > 5) and autosaves it, and only the publish refuses it, rls-predicate-unenforceable at INVALID_FIELD — the editor's lint judges a one-clause stack that names no object (celAuthoring.ts rlsPredicateVerdict), so the rule's virtual-field branch cannot fire there. #26707 is closed by 57820085, which fixed the draft half: a draft read's _diagnostics now carries the publish verdict. The editor half has no open card. Until it is fixed, acceptance[2] and acceptance[4] FAIL on this probe: score them fail citing the run"
+          "AUTOMATION LIVES UNDER ui/ — `automated.ref` names objectui specs, and since objectui was imported into this repository they resolve at ui/PATH in this checkout. A jsdom unit pin runs from ui/, the objectui root, with its path written relative to ui/: `cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE`. ⛔ Not `pnpm --filter @object-ui/PKG exec vitest run FILE`: that runs in the package directory, and the ui vitest guard (ui/scripts/vitest-invocation-guard.mjs, which ui/vitest.config.mts calls) refuses any run whose Vitest root is not ui/ (its package-cwd verdict). a ui/e2e/live spec runs from ui/ with `pnpm test:e2e:live SPEC` against a live backend and the console dev server (the prerequisites are in ui/playwright.live.config.ts). Cite the output naming the commit, or drive the item by hand in the browser and score it as a manual run. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact.",
+          "acceptance[7] (graceful degradation) is PIN-ONLY BY DESIGN: its verify forbids hand-breaking the bundle. The environment it needs is this checkout with its install done, to run ui/packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts (describe 'celAuthoring · graceful degradation') with `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts` (the `pnpm --filter @object-ui/app-shell exec vitest run` form is refused by the ui vitest guard, knownGaps[1]). QA run #21784 had no runnable checkout and recorded blocked(environment) (parked on #22017 row 16), which is the right verdict without one: never a hand-driven verdict, never inferred from the source. CI in this repository now runs the ui/ suites (the Test UI job), which is evidence about the commit CI built, not about the run subject: cite a run of the file at the subject sha",
+          "THE FORMULA-FIELD PROBE FAILS TODAY (QA run #26715, Data card, at 3fcafcd3; re-read at 3230bdbf; read live again by QA run #28656, W3-RT, at 6e11a929): the Studio RLS editor reads 'Valid CEL' for a USING predicate on a formula field (record.f_formula > 5), and only the publish refuses it, rls-predicate-unenforceable at INVALID_FIELD — the editor's lint judges a one-clause stack that names no object (celAuthoring.ts rlsPredicateVerdict), so the rule's virtual-field branch cannot fire there. #26707 is closed by 57820085, which fixed the draft half: a draft read's _diagnostics carries the publish verdict. The editor half is #27482, which is open. Its layers #27612, #27643 and #27644 have landed, so a server error at the clause's path now holds the autosave from the server re-read on: the FIRST autosave of each newly refused text still goes out and answers 200, and the edit after it is held (ui/packages/app-shell/src/views/metadata-admin/PermissionMatrixEditor.serverVerdictHold-27482.test.tsx, case (b): the refused clause saves once, its re-read holds the next edit). That first PUT is the residual #27482 carries. Until #27482 is ruled, acceptance[2] and acceptance[4] FAIL on this probe as written, acceptance[4]'s 'no PUT issued' included: score them fail citing the run"
         ]
       },
       "steps": [
         "ground the engine truth FIRST (rule 6 parity): for each probe expression, capture the canonical verdict from the engine — via MCP validate_expression (site: formula / flow_condition) or `objectstack build` — so the editor is judged against server truth. validate_expression has NO RLS site (formula | validation | flow_condition | template), so the RLS probes' engine verdict is the author-time gate `os build` and publish run: packages/lint/src/validate-rls-predicate-enforceability.ts (rls-predicate-unenforceable / rls-predicate-unparseable, both error tier). The ENGINE itself is pinned by ai.mcp-validate-expression / api-backend.formula-gates; this item only checks the EDITOR agrees",
         "F1 formula result-type: open the object field designer (ObjectFieldInspector) on a formula field (type=formula, role=value, scope=record), TYPE a proven-number expression (record.est_hours * 1.1, or record.quantity * record.unit_price) and, separately, one cel-js cannot prove (record.a + record.b); after the 250ms debounce, screenshot the inferred-result-type (Σ) affordance for each",
         "type an unknown field (record.est_hourz) and a bare field ref in record scope (est_hours, no record. prefix); capture the inline error under the field (aria-invalid, destructive border) and its record.<field> fix text",
-        "F2 conditional-rule editor: open the same field's visibleWhen editor (scope=record, roots record/previous/parent); type `previous.` and then `record.` and capture the autocomplete listbox — it must offer the object's field catalog; type `current_user.` and confirm it does NOT list this object's fields; accept a suggestion and confirm the insertion",
+        "F2 conditional-rule editor: open the same field's visibleWhen editor (scope=record, roots record/previous/parent); type `previous.` and then `record.` and capture the autocomplete listbox — it must offer the object's field catalog; type `current_user.` and confirm it does NOT list this object's fields; accept a suggestion and confirm the insertion. The listbox shows at most 8 suggestions (MAX_CEL_SUGGESTIONS, ui/packages/app-shell/src/views/metadata-admin/celAuthoring.ts) in catalog order, and a bare `record.` led with the system fields when QA run #28656 drove it, so the field under test may not be on it: type a member prefix (`record.est`, `previous.s`) and read the listbox for that",
         "F4 RLS editor: in Studio open /_console/studio/PKG/access, select the permission set, open its 'Row-level security' tab (PermissionAdvancedFacets) and add a policy on the object; enter a USING predicate that is NOT a simple field comparison (blast-radius), one with a parse fault, and — the virtual-field probe — one comparing the object's FORMULA field (e.g. record.FORMULA_FIELD > 5: a formula field has no storage column, so the engine cannot push the filter down and refuses it, rls-predicate-unenforceable, packages/lint/src/validate-rls-predicate-enforceability.ts#RLS_PREDICATE_UNENFORCEABLE); confirm ALL THREE raise a blocking ERROR: the non-pushdownable filter at the engine's tier — rls-predicate-unenforceable refuses it at build and publish (ADR-0056 D4) because the runtime drops the policy and fails CLOSED, so it grants no access — and the parse fault as a parse error; with an error present the save is held (celErrorCount>0): the environment door's Save is disabled with title perm.cel.saveBlocked, and the Studio package door, which autosaves and has no Save button, shows the perm-autosave-held status and issues no PUT",
         "RLS test-run: open the CelTestRunDialog ('Test this policy against a sample record'), supply a sample record + current_user, Run; capture allow (shield-check) / deny (shield-x) / a non-boolean value (non-bool smell) across three sample+predicate pairs",
         "parity cross-check: for the SAME expressions, confirm the editor's verdict tier (error/warning/ok, inferred type, allow/deny) equals the engine verdict captured in step 1",
@@ -789,7 +788,7 @@
         {
           "clause": "when @objectstack/formula cannot load the editors degrade to no-lint / no-suggestions / test-run 'unavailable', never an exception that breaks the form (feature-detect + swallow)",
           "oracle": "test",
-          "verify": "run ui/packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts (unavailable-engine cases) and cite its output — do not hand-break the bundle in the browser",
+          "verify": "run ui/packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts (unavailable-engine cases) from ui/, `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts`, and cite its output — do not hand-break the bundle in the browser",
           "evidence": "the test output"
         }
       ],
@@ -854,6 +853,12 @@
           "date": "2026-10-28",
           "change": "fixtures.knownGaps[4] re-read against main 3230bdbf: #26707 is closed by 57820085 (the draft read's _diagnostics reports the publish verdict), but the RLS editor still lints a one-clause stack with no object and reads 'Valid CEL' on the formula-field probe, so acceptance[2] and [4] still fail on it, now cited to the run. No clause changed",
           "ref": "#26848"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-01",
+          "change": "Four QA run #28656 (W3-RT) findings. (1) fixtures.knownGaps[3] is dropped. It said the editor gives a non-lowerable RLS read predicate the warning tier and autosaves it (objectui#13061). The editor now asks the published rule for both RLS clauses and keeps its error severity (celAuthoring.ts lintCelPredicate and rlsPredicateVerdict; celAuthoring.test.ts pins the error for USING and CHECK), and #28656 read it live at 6e11a929: error tier, perm-autosave-held, 0 PUTs. The former knownGaps[4] is now knownGaps[3]. (2) In that knownGap only the factual half changes: the editor half is #27482 (open), not 'no open card'; #27612, #27643 and #27644 landed; the residual is the first autosave of each newly refused text (PermissionMatrixEditor.serverVerdictHold-27482.test.tsx case (b)). acceptance[4]'s 'no PUT issued' is left as it was until #27482 is ruled. (3) knownGaps[1], knownGaps[2] and acceptance[7].verify name the invocation the ui vitest guard accepts, cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/metadata-admin/celAuthoring.test.ts. The pnpm --filter @object-ui/app-shell exec form runs in the package directory, which the guard refuses (ui/scripts/vitest-invocation-guard.mjs, verdict package-cwd). (4) steps[3] says the completion listbox caps at 8 (MAX_CEL_SUGGESTIONS) and to type a member prefix. That a bare record. leads with the system fields is #28656's live reading. No clause is weakened. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); findings parked in anchor comment 6557904764",
+          "ref": "#28656"
         }
       ]
     },
@@ -2025,7 +2030,7 @@
       "title": "Studio asks before an unsent edit is left behind: a held (incomplete) or dirty edit in any pillar survives a pillar switch, a rail switch, the package switcher, Home and a reload — or is discarded only after the author confirms",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2046,7 +2051,7 @@
         "Automations, held step: open the flow, add a step whose required input is empty — the strip names '{input} on the step “{step}” needs a value'; repeat departures (a), (b) with another flow in the rail, and (e)",
         "Interfaces, held widget: open the app's dashboard, add a widget and leave its Dataset empty — the strip names 'Dataset on the widget “…” needs a value'; repeat departures (a) and (e)",
         "controls: Access — tick one matrix checkbox (dirty, not held); Interfaces — rename a navigation entry with nav editing open; repeat departures (a), (d) and (e) for each. A control is dirty only until its autosave lands: Studio's shared draft autosave fires 1.5 s after the LAST edit (ui/packages/app-shell/src/views/studio-design/useDraftAutoSave.ts), so start each departure inside that window, timed from the edit, and record the gap. A departure after the save landed leaves a clean pillar, where no prompt is correct and not a fail of acceptance[0] or [1]",
-        "server truth after each answer: GET /api/v1/meta/_drafts?packageId=PKG (the package's pending drafts) and the item's draft read (GET /api/v1/meta/TYPE/NAME?state=draft&package=PKG) — after Leave they carry nothing of the discarded edit; after Stay, finishing the edit (an option with a value, a target, the input, a dataset) lets the autosave PUT carry it"
+        "server truth after each answer: GET /api/v1/meta/_drafts?packageId=PKG (the package's pending drafts) and the item's draft read (GET /api/v1/meta/TYPE/NAME?state=draft&package=PKG) — after Leave they carry nothing of the discarded edit; after Stay, finishing the edit (an option with a value, a target, the input, a dataset) lets the autosave PUT carry it. The item draft read answers 404 NO_DRAFT when the item has no pending draft (packages/metadata-protocol/src/protocol.ts noPendingDraftError), so for a held edit that never saved, a 404 before AND after Leave is the 'unchanged' reading, not a failed read"
       ],
       "acceptance": [
         {
@@ -2114,6 +2119,12 @@
           "date": "2026-11-01",
           "change": "negative[2] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-01",
+          "change": "QA run #28656 (W3-RT) finding: steps[7] says the item draft read GET /api/v1/meta/TYPE/NAME?state=draft&package=PKG answers 404 NO_DRAFT when no draft exists (metadata-protocol protocol.ts noPendingDraftError; its wire answer is pinned in packages/rest/src/meta-item-absent-404.test.ts), so a 404 before and after Leave is the 'unchanged' reading acceptance[3] asks for, as #28656 read it live at 6e11a929. No clause changed. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); finding parked in anchor comment 6557904764",
+          "ref": "#28656"
         }
       ]
     },
@@ -2926,7 +2937,7 @@
       "title": "A summary (roll-up) field authored in Studio is held until it names its child object and function, offers only numeric child fields for sum and avg, and once published computes and recomputes from the children",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -2937,9 +2948,6 @@
         "requires": [
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
           "a writable package with a published parent object and a published child object holding a master_detail field to the parent and a number field (and a text field, for the numeric-only check)"
-        ],
-        "knownGaps": [
-          "acceptance[0] AND [1] FAIL TODAY (QA run #26715, Data card defect 6, at 3fcafcd3; re-read at 3230bdbf). (1) An unconfigured summary field is not held: the Data pillar saves it, and the publish refuses it. Since 57820085 (#26707, closed) the draft read's _diagnostics carries that publish verdict beforehand, but the field is still saved, not held. (2) For sum and avg the field picker still offers every visible child field, numeric or not (ObjectFieldInspector SummaryConfigFields). No card is open for either; score the two clauses fail citing the run. The computing clauses pass"
         ]
       },
       "steps": [
@@ -2975,7 +2983,7 @@
         }
       ],
       "negative": [
-        "a summary saved unconfigured instead of held — refused only at publish, rolling back the rest of the package release with it — is the shape this item fails today (its draft verdict now reports it, #26707; the hold is still missing)"
+        "a summary saved unconfigured instead of held — refused only at publish, rolling back the rest of the package release with it — is a FAIL (acceptance[0])"
       ],
       "traps": [
         "automation-input",
@@ -3012,6 +3020,12 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-01",
+          "change": "QA run #28656 (W3-RT) finding: fixtures.knownGaps (its one entry, 'acceptance[0] AND [1] FAIL TODAY') is dropped. #27461 is fixed by PR #27720: an unconfigured summary is held (ui/packages/app-shell/src/views/studio-design/DataPillar.summaryHeld-27461.test.tsx), and the sum/avg picker offers only the child fields the spec accepts for the function (ObjectFieldInspector.summaryAggregand-27461.test.tsx). #28656 read both clauses pass live at 6e11a929. negative[0], which called the saved-unconfigured summary 'the shape this item fails today', is reworded as a plain FAIL condition of acceptance[0]. No clause is weakened. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); finding parked in anchor comment 6557904764",
+          "ref": "#28656"
         }
       ]
     },
@@ -3201,7 +3215,7 @@
       "title": "A package dashboard renders every widget type the spec declares — those Studio offers and those written through the API — and every global-filter type renders its control and re-scopes the widgets bound to it; Studio's two widget-type entries offer the same set",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3213,17 +3227,14 @@
           "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin, and a console built from this tree with `pnpm console:build` — the root `pnpm build` does not refresh packages/console/dist (QA run #26715 needed the console build on every card)",
           "a writable package with an app whose menu names one dashboard",
           "a dataset over a package object, with at least one dimension and one measure, written with PUT /api/v1/meta/dataset/NAME?mode=draft&package=PKG and published — Studio has no dataset editor (expected: the Interfaces card read it no-entry), so reports and widgets bind to an API-written dataset. Give it several dimensions (a status-like category and a date) and a few measures over seeded multi-bucket rows — examples/app-showcase/src/ui/dashboards/chart-gallery.dashboard.ts is the model for each type's bindings. Sankey takes no source/target pair: it flows from one root node (the total) to each category of its first dimension, and a second dimension (two or more pivoted series) adds a second column of nodes (ui/packages/plugin-charts/src/AdvancedChartImpl.tsx, the sankey arm and buildSankeyCellFlows; the gallery's sankey_flow binds dimensions ['status'])"
-        ],
-        "knownGaps": [
-          "acceptance[4] FAILS TODAY (QA run #26715, Interfaces card D11, at 3fcafcd3; source re-read at 3230bdbf): the global-filter editor's Add item autosaves a filter with no field, the whole dashboard draft is then refused, and the other edits in it are lost on reload. Family card #26707 closed with #26856, which makes the draft read's _diagnostics and Problems report the refusal; the Studio form still autosaves the incomplete item, and no open card carries that half"
         ]
       },
       "steps": [
         "open the dashboard in /_console/studio/PKG/interfaces; read the Add-widget menu's type list and, on one widget, the Type picker's list",
         "add one widget of every type the Add menu offers, bound to the dataset (a dimension and a measure each); the menu offers every ChartTypeSchema member since #26967, so for any type it does not list, record the missing type and write that widget into the same dashboard draft with PUT /api/v1/meta/dashboard/NAME?mode=draft&package=PKG (keep the Studio-authored widgets in the body)",
-        "global filters: add one filter of each type — text, select (with options or optionsFrom), date, number, lookup (with optionsFrom {object, valueField, labelField}: a lookup filter draws the same select control and, with no options or optionsFrom, offers no choices — ui/packages/plugin-dashboard/src/DashboardFilterBar.tsx) — and bind each to at least one widget through that widget's filter mapping; leave one widget unbound",
+        "global filters: add one filter of each type — text, select (with options or optionsFrom), date, number, lookup (with optionsFrom {object, valueField, labelField}: a lookup filter draws the same select control and, with no options or optionsFrom, offers no choices — ui/packages/plugin-dashboard/src/DashboardFilterBar.tsx) — and bind each to at least one widget through that widget's filter mapping; leave one widget unbound, which means filterBindings { NAME: false } for EVERY filter on it. A widget with no filterBindings entry is not unbound: it inherits each filter on that filter's own field (ui/packages/core/src/utils/dashboard-filters.ts resolveBoundField: an explicit binding, then targetWidgets, then the filter's field; read from source, not driven live)",
         "publish; open the board in the app; screenshot it settled",
-        "change each filter on the rendered board in turn; record which widgets re-query (network) and how their values change; reset",
+        "change each filter on the rendered board in turn (a text or number filter commits only on Enter or when the input loses focus, ui/packages/plugin-dashboard/src/DashboardFilterBar.tsx TextFilter, so press Enter before reading the network); record which widgets re-query (network) and how their values change; reset",
         "in Studio add a global filter with Add item and leave it incomplete; watch the autosave and reload"
       ],
       "acceptance": [
@@ -3254,7 +3265,7 @@
         {
           "clause": "Studio's global-filter editor never autosaves an incomplete filter: the item is held until complete, and no other edit is lost",
           "oracle": "network",
-          "verify": "no dashboard PUT carries the incomplete filter; after a reload, the other edits are present",
+          "verify": "no dashboard PUT carries the incomplete filter. Three cases, each judged: (a) the edits made BEFORE Add item survive a reload; (b) an edit made while the item is held is carried by the PUT that completes the item, answered 200 (ui/packages/app-shell/src/views/studio-design/InterfacesPillar.heldListItem-27459.test.tsx); (c) a reload while the item is held raises the browser's leave-site prompt, and Leave then discards the held item and the edits kept with it, by design (studio-authoring.held-edit-leave-guard) — a reload with no prompt that loses an edit is a FAIL",
           "evidence": "the trace + the post-reload read"
         }
       ],
@@ -3306,6 +3317,12 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-01",
+          "change": "Three QA run #28656 (W3-RT) findings. fixtures.knownGaps (its one entry, 'acceptance[4] FAILS TODAY') is dropped. #27459 is fixed by PR #27784 (InterfacesPillar.heldListItem-27459.test.tsx: Add item then a Label edit sends nothing, and filling the Field in sends one save carrying the item and the Label edit), and #28656 read acceptance[4] pass live at 6e11a929. The report-panel half is #27785. acceptance[4].verify said only 'after a reload, the other edits are present'. It now judges three cases: edits before Add item survive a reload; an edit made while held lands in the PUT that completes the item; a reload while held must raise the leave-site prompt, and Leave then discards by design. steps[4] says a text or number global filter commits only on Enter or blur (DashboardFilterBar.tsx TextFilter). steps[2] says 'unbound' means filterBindings false for every filter, since a widget with no filterBindings inherits each filter on the filter's own field (dashboard-filters.ts resolveBoundField; read from source, not driven live). No clause is weakened. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); findings parked in anchor comment 6557904764",
+          "ref": "#28656"
         }
       ]
     },
@@ -3405,7 +3422,7 @@
       "title": "App and menu-entry keys reach the running app: branding, areas and context selectors render; an entry's viewName, recordId / recordMode, filters, badge, requiresObject and visible each change what the entry does or who sees it; hidden takes an app off the switcher and nothing else — and Studio's menu-entry inspector edits them",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3424,7 +3441,7 @@
         ]
       },
       "steps": [
-        "write the app through PUT /api/v1/meta/app/APP?mode=draft&package=PKG: branding { primaryColor, accentColor, logo }, two areas each holding some entries, a contextSelector, and menu entries: an object entry with viewName (the second list view), one with recordId + recordMode 'edit', one with filters, one with badge + badgeVariant, one with requiresObject naming an object that does not exist, and one with a visible predicate false for the member (e.g. 'org_owner' in current_user.positions: the seeded admin holds org_owner, not org_admin, because an organization's owner membership maps to org_owner alone, packages/spec/src/identity/eval-user.zod.ts, so an 'org_admin' predicate is false for both personas and proves nothing). Make this app the package's FIRST app (steps[4]); publish",
+        "write the app through PUT /api/v1/meta/app/APP?mode=draft&package=PKG: branding { primaryColor, accentColor, logo } (a runner-environment note: give logo a same-origin URL such as /_console/vite.svg, which the console build ships from ui/apps/console/public; an external logo URL is blocked by the runner container's egress proxy and never renders), two areas each holding some entries, a contextSelector, and menu entries: an object entry with viewName (the second list view), one with recordId + recordMode 'edit', one with filters, one with badge + badgeVariant, one with requiresObject naming an object that does not exist, and one with a visible predicate false for the member (e.g. 'org_owner' in current_user.positions: the seeded admin holds org_owner, not org_admin, because an organization's owner membership maps to org_owner alone, packages/spec/src/identity/eval-user.zod.ts, so an 'org_admin' predicate is false for both personas and proves nothing). Make this app the package's FIRST app (steps[4]); publish",
         "as admin and as the member (each in its own context, identity proved with GET /api/v1/auth/get-session), open the app: read the chrome colours and logo, the areas switcher, the context selector, and click each entry",
         "GET /api/v1/meta/app?id=APP as each persona and list the entries each receives",
         "set hidden: true on a second app of the package (through the API) and publish; as the member read the App Switcher, the Home launcher, the avatar menu and GET /api/v1/meta/app?id=SECOND; open its URL directly",
@@ -3507,6 +3524,12 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[3]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-01",
+          "change": "QA run #28656 (W3-RT) finding: steps[0] says to give branding.logo a same-origin URL such as /_console/vite.svg (ui/apps/console/public/vite.svg ships in the console build). This is a runner-environment note: an external logo URL is blocked by the runner container's egress proxy and never renders, which is #28656's live reading at 6e11a929. No clause changed. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); finding parked in anchor comment 6557904764",
+          "ref": "#28656"
         }
       ]
     },
@@ -3806,7 +3829,7 @@
       "title": "The Access pillar's org-wide defaults panel and sharing suggestions do what they say: the OWD panel lists every package object, saves only the changed one and offers controlled-by-parent only with a master; a package's suggested set is granted to Everyone, revoked or dismissed from the pillar, with immediate effect",
       "since": "v18",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3823,7 +3846,7 @@
         ],
         "knownGaps": [
           "THE GUEST PROMPT CANNOT BE REACHED ON STOCK (QA run #26715, Access card G5): only Everyone suggestions exist, and accepting one for Guest answers 405; the pillar's Guest wording ('Cannot be granted here: the Guest position takes no sets from accepted suggestions.') is scored only where a guest suggestion exists — record that leg blocked(fixture) otherwise",
-          "TWO POLISH DEFECTS RECORDED BY THE RUN (Access card D10 and D13): an OWD refusal banner stays after the change is undone, and a dismissed or revoked suggestion offers no way to grant it again from Studio. Neither blocks a clause"
+          "A POLISH DEFECT RECORDED BY THE RUN (Access card D13): a dismissed or revoked suggestion offers no way to grant it again from Studio, and the door refuses it too: accepting a dismissed suggestion answers 409 SUGGESTION_STATE, 'only pending suggestions can be accepted' (packages/plugins/plugin-security/src/suggested-audience-bindings.ts; read live by QA run #28656 at 6e11a929). It blocks no clause"
         ]
       },
       "steps": [
@@ -3899,6 +3922,12 @@
           "date": "2026-11-01",
           "change": "negative[1] moved to source[4]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged except the SCOPE: label, which now reads cross-ref:, the spelling the sibling source rows use. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
           "ref": "#28345"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-01",
+          "change": "QA run #28656 (W3-RT) finding on fixtures.knownGaps[1]: D10 is dropped. After the OWD 422 and an undo the panel reads 'No changes' with no banner, as #28656 read it live at 6e11a929, and ui/packages/app-shell/src/views/studio-design/PackageOwdOverviewPanel.refusalClearsOnRevert-26846.test.tsx pins it (reverting the refused edit clears the banner; CONTROL: an edit still dirty keeps it). D13 still holds, and the knownGap now names its API half: accepting a dismissed suggestion answers 409 SUGGESTION_STATE (suggested-audience-bindings.ts SuggestionStateError). The knownGap names no clause; no clause changed. Re-verified against source at base 1c5b1773ec. Wave anchor #27377, wave-3 accuracy slice S10 (#28701); finding parked in anchor comment 6557904764",
+          "ref": "#28656"
         }
       ]
     },

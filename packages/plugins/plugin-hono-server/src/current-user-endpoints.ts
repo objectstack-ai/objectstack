@@ -50,11 +50,13 @@ import {
     type RequestAuthService,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { MePermissionsAuthenticatedResponse } from '@objectstack/spec/api';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import {
     OWNERSHIP_QUEUE_SERVICE,
     type IMetadataService,
     type IObjectQLEngine,
+    type IOwnershipQueueService,
     type ISecurityService,
     type Logger,
 } from '@objectstack/spec/contracts';
@@ -308,15 +310,10 @@ function closedMePermissionsGrants(): MePermissionsGrants {
 }
 
 /**
- * [#28508] The ownership-queue service's one "any queue at all?" answer, as
- * this handler reads it. Not yet on the spec contract
- * (`IOwnershipQueueService`), which gains it with this payload's response
- * schema; until then the method is optional here, like the contract's own
- * `declaredQueueNamed`.
+ * [#28508] The slice of the ownership-queue contract this handler reads: its
+ * one "any queue at all?" answer.
  */
-interface AnyQueueReader {
-    hasAnyQueue?: (organizationId: string | null) => Promise<boolean>;
-}
+type AnyQueueReader = Pick<IOwnershipQueueService, 'hasAnyQueue'>;
 
 /**
  * [#28508] Does the caller's organization have at least one ownership queue,
@@ -344,9 +341,12 @@ async function organizationHasAnyQueue(
 ): Promise<boolean> {
     try {
         const service = (() => {
-            try { return ctx.getService<AnyQueueReader>(OWNERSHIP_QUEUE_SERVICE) ?? null; }
+            try { return ctx.getService<Partial<AnyQueueReader>>(OWNERSHIP_QUEUE_SERVICE) ?? null; }
             catch { return null; }
         })();
+        // The contract requires the method, but the locator hands back
+        // whatever a host registered under the name, which may be an
+        // implementation older than the contract: that one answers `false`.
         const hasAnyQueue = service?.hasAnyQueue;
         if (typeof hasAnyQueue !== 'function') return false;
         return (await hasAnyQueue.call(service, organizationId)) === true;
@@ -373,7 +373,7 @@ async function organizationHasAnyQueue(
 function mePermissionsBody(
     identity: { userId: string; tenantId: string | null },
     grants: MePermissionsGrants,
-) {
+): MePermissionsAuthenticatedResponse {
     return {
         authenticated: true as const,
         userId: identity.userId,

@@ -27,7 +27,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import type { DataSource, ListViewSchema } from '@object-ui/types';
 import { SchemaRendererProvider } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 type Candidate = { value: string; label: string; type: string };
 
@@ -62,12 +62,13 @@ const COLUMNS = ['title', 'status', 'secret_note'];
 /** Today's list for a user who may read every field: the columns, then the other business field. */
 const FULL_READ_LIST = ['title', 'status', 'secret_note', 'priority'];
 
-function answer(fields: MePermissionsResponse['fields']): MePermissionsResponse {
+function answer(fields: MePermissionsAuthenticatedResponse['fields']): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: [],
+    hasAnyQueue: false,
+    positions: [],
     permissionSets: ['fls_member'],
     objects: { [OBJECT]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false } },
     fields,
