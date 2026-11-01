@@ -1,5 +1,5 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/metadata-protocol': patch
 '@objectstack/runtime': patch
 '@objectstack/client': patch
@@ -8,7 +8,7 @@
 feat(metadata-protocol): an ensure door for a base's paired customization package (ADR-0146 D3)
 
 Clause-②: yes (narrowing)
-Metadata-protocol: none
+Metadata-protocol: added
 
 The new route `POST /api/v1/packages/:id/ensure-customization`, with its request and response schemas (`EnsureCustomizationPackageRequestSchema`, `EnsureCustomizationPackageResponseSchema`), widens the surface, and `POST /api/v1/packages` and the duplicate door's target narrow theirs: a package id shaped like a pair (`<base>.custom`) is refused unless its manifest carries what the ensure door writes.
 
