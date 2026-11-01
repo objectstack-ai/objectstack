@@ -21,6 +21,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine, FlowContender } from './engine.js';
 import { resolveFlowPrecedence, describeFlowContender, renderFlowContender } from './flow-precedence.js';
+import { bindStoredRow } from '@objectstack/metadata-protocol';
 
 const FLOW = 'order_sync';
 
@@ -144,6 +145,81 @@ describe('[#20864] boot-time precedence classifies by the loader\'s set, not by 
         const reader = vi.fn(HOLDS_FLOW);
         resolveFlowPrecedence([flowBody('lonely_flow', 'L', CLAIMED), loaderEntry(), tenantRow()], silent(), reader);
         expect(reader.mock.calls).toEqual([[FLOW]]);
+    });
+});
+
+// ── [#28412] The declared .custom override ranks above the package ─────────
+
+/**
+ * [#28412, ADR-0146 D9 item 1] The shipping package's declared override is
+ * the packaged flow: a stored row whose STORED binding (`bindStoredRow`, what
+ * the protocol's hydration records from the `package_id` column) is the
+ * owner's paired `.custom`, and whose body declares `overrides.package` = the
+ * owner, ranks `override`, above the loader's body. Nothing else does — not a
+ * dependent's declaration, not a body stamped with the pair, not the pair's
+ * undeclared row.
+ */
+describe('[#28412] the declared .custom override is armed over the loader\'s body', () => {
+    const OWNER = 'com.example.crm';
+    const PAIR = `${OWNER}.custom`;
+    const DECLARED = { overrides: { package: OWNER, basedOn: '1.0.0' } };
+    const HOLDS = setOf({ [FLOW]: OWNER });
+    const base = () => flowBody(FLOW, 'LOADER', { _packageId: OWNER, _provenance: 'package' });
+    /** A stored row as the hydration registers it: tenant-marked, its column recorded. */
+    const stored = (binding: string | null, body: Record<string, unknown> = DECLARED, label = 'OVERRIDE') =>
+        bindStoredRow(flowBody(FLOW, label, { ...body, _provenance: 'org' }), binding);
+
+    it('classifies the pair\'s declared row as the override, by its stored binding', () => {
+        expect(describeFlowContender(stored(PAIR), HOLDS)).toEqual({ source: 'override', packageId: PAIR });
+        expect(renderFlowContender({ source: 'override', packageId: PAIR })).toBe(`the declared override in '${PAIR}' (sys_metadata)`);
+    });
+
+    it('arms the override in either arrival order, with no warning and no receipt', () => {
+        for (const listed of [[base(), stored(PAIR)], [stored(PAIR), base()]]) {
+            const logger = silent();
+            const winners = resolveFlowPrecedence(listed, logger, HOLDS);
+            expect(winners).toHaveLength(1);
+            expect((winners[0].definition as { label: string }).label).toBe('OVERRIDE');
+            expect(winners[0].shadowing).toBeUndefined();
+            expect(logger.warn).not.toHaveBeenCalled();
+        }
+    });
+
+    for (const [label, row] of [
+        ['a dependent package\'s declaration', () => stored('com.example.partner')],
+        ['a package-less row whose body stamps the pair', () => stored(null, { ...DECLARED, _packageId: PAIR })],
+        ['a body that only CLAIMS the pair (no stored binding)', () => flowBody(FLOW, 'OVERRIDE', { ...DECLARED, _packageId: PAIR, _provenance: 'org' })],
+        ['the pair\'s undeclared row', () => stored(PAIR, {})],
+        ['another base\'s pair declaring this owner', () => stored('com.other.custom')],
+    ] as const) {
+        it(`${label} is not armed: the loader's body is, and the remedy names the declaration, not a clone`, () => {
+            const logger = silent();
+            const [winner] = resolveFlowPrecedence([row(), base()], logger, HOLDS);
+            expect((winner.definition as { label: string }).label).toBe('LOADER');
+            expect(winner.shadowing?.armed).toEqual({ source: 'package', packageId: OWNER });
+            expect(winner.shadowing?.shadowed.map((c) => c.source)).toEqual(['runtime']);
+            const [message] = logger.warn.mock.calls[0] as [string];
+            expect(message).toContain(`declare it as an override in '${PAIR}' (overrides: { package: '${OWNER}', basedOn })`);
+            expect(message).toContain('or save it under a new name');
+            expect(message).not.toMatch(/clone/i);
+        });
+    }
+
+    it('an unheld name: a declared row is tenant-authored, the set vouches for no override', () => {
+        expect(describeFlowContender(stored(PAIR), HOLDS_NOTHING).source).toBe('runtime');
+    });
+
+    it('the override beside an undeclared stored row: the override is armed, the stored row shadowed and warned', () => {
+        const logger = silent();
+        const [winner] = resolveFlowPrecedence([stored(null, {}, 'TENANT'), base(), stored(PAIR)], logger, HOLDS);
+        expect((winner.definition as { label: string }).label).toBe('OVERRIDE');
+        expect(winner.shadowing).toEqual({
+            name: FLOW,
+            armed: { source: 'override', packageId: PAIR },
+            shadowed: [{ source: 'package', packageId: OWNER }, { source: 'runtime' }],
+        });
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect((logger.warn.mock.calls[0] as [string])[0]).toContain(`because it is the declared override of '${OWNER}' (ADR-0146 D9)`);
     });
 });
 
