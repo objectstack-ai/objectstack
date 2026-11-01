@@ -22,6 +22,13 @@
  * variables (`{{ record.name }}`, `{{ $error.message }}`,
  * `{{ amount | currency }}`), never logic.
  *
+ * Since #28054 the flow itself carries two text slots besides its nodes'
+ * ({@link FLOW_TEXT_SLOTS}): `successMessage` and `errorMessage`, the terminal
+ * text the run hands its caller. The engine renders each at the run's terminal
+ * exit, over the variables as the run left them, through the renderer the
+ * refusing `end` node's `message` uses — so the doors judge them exactly as
+ * they judge a node's text slot ({@link flowTextSlotSources}).
+ *
  * This module is the ONE judge of what the slots still carry from the old
  * dialect: a single-brace `{…}` token is refused, and the refusal names the
  * `{{ }}` spelling of each token or, for a token no hole can spell, where to
@@ -30,7 +37,7 @@
  * `AutomationEngine.registerFlow` and the `validateStackExpressions` rule
  * (`objectstack validate`, `objectstack compile`, the runtime publish gate of
  * an `active` metadata save) call it on every slot
- * {@link flowNodeTextSlotSources} finds — ⛔ never a second reading of the
+ * {@link flowNodeTextSlotSources} and {@link flowTextSlotSources} find — ⛔ never a second reading of the
  * dialect anywhere. Those doors then compile each slot's `{{ }}` holes
  * (`validateExpression('template', …)`), which the spec cannot do itself: the
  * template engine is a runtime.
@@ -50,7 +57,10 @@
  * validate`'s `expression-invalid` finding with the parse's issue list, and
  * would fail the row in the stored pass (`os migrate meta --stored`), which
  * lists a text-slot refusal made after the parse as a TODO under
- * `registerFlow` and leaves its verdict unmoved.
+ * `registerFlow` and leaves its verdict unmoved. The flow's own two slots
+ * ({@link FLOW_TEXT_SLOTS}) are left to the doors for the same reasons:
+ * `registerFlow` reads them straight off the parsed flow, so unlike an `end`
+ * node they never lack a door after the parse.
  *
  * ## Refused, not converted (ADR-0087 D2)
  *
@@ -483,9 +493,38 @@ export function textSlotTemplateRefusal(text: string): string | undefined {
   return refusals.length === 0 ? undefined : refusals.join(' ');
 }
 
-/** One text slot present in a node's config, with the text it carries. */
+/**
+ * One text slot of the FLOW itself (#28054) — a top-level `FlowSchema` key
+ * whose value the engine renders to text.
+ */
+export interface FlowTextSlot {
+  /** The flow key (`flow.<key>`). */
+  readonly key: 'successMessage' | 'errorMessage';
+  /** Author-facing label for diagnostics, e.g. `flow successMessage`. */
+  readonly label: string;
+}
+
+/**
+ * Every text slot of the flow itself — the terminal text the run hands its
+ * caller (#28054). Measured from the engine, as {@link FLOW_NODE_TEXT_SLOTS}
+ * is from the executors: `successMessage` is rendered at every terminal
+ * success exit (`execute()`, a retried attempt's, the resume's) over the
+ * variables the run finished with, and `errorMessage` at every terminal
+ * failure exit over the variables at the failure point, both through the
+ * renderer the refusing `end` node's `message` goes through. The keys are the
+ * flow-level keys of the `flows` translation face (`FLOW_TERMINAL_MESSAGE_KEYS`
+ * in `system/i18n-resolver.ts`), which the engine picks in the run's locale
+ * before it fills the holes. Until #28054 both were copied onto the result
+ * verbatim, so a `{{ }}` hole reached the user as written.
+ */
+export const FLOW_TEXT_SLOTS: readonly FlowTextSlot[] = [
+  { key: 'successMessage', label: 'flow successMessage' },
+  { key: 'errorMessage', label: 'flow errorMessage' },
+];
+
+/** One text slot present in a node's config — or, from {@link flowTextSlotSources}, on the flow — with the text it carries. */
 export interface FlowNodeTextSlotSource {
-  /** Path into `node.config` — the slot's key. */
+  /** Path into `node.config` — the slot's key; from {@link flowTextSlotSources}, the flow key. */
   readonly path: string;
   /** The slot, as a door names it — `notify title`. */
   readonly label: string;
@@ -517,6 +556,23 @@ export function flowNodeTextSlotSources(nodeType: string, config: unknown): Flow
     }
     const source = templateSlotSource(value);
     if (source !== undefined) out.push({ path: slot.key, label: slot.label, source });
+  }
+  return out;
+}
+
+/**
+ * The text slots the FLOW itself carries ({@link FLOW_TEXT_SLOTS}), with their
+ * template text — the flow-level sibling of {@link flowNodeTextSlotSources},
+ * judged by the same doors in the same two steps: {@link textSlotTemplateRefusal},
+ * then the `template` compile. A slot that is absent or not a string is
+ * skipped (`FlowSchema` refuses any other shape).
+ */
+export function flowTextSlotSources(flow: unknown): FlowNodeTextSlotSource[] {
+  if (flow === null || typeof flow !== 'object' || Array.isArray(flow)) return [];
+  const out: FlowNodeTextSlotSource[] = [];
+  for (const slot of FLOW_TEXT_SLOTS) {
+    const value = (flow as Record<string, unknown>)[slot.key];
+    if (typeof value === 'string') out.push({ path: slot.key, label: slot.label, source: value });
   }
   return out;
 }

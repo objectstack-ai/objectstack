@@ -58,8 +58,9 @@
  * permission read rather than after it, as the whole list used to.
  */
 
+import { useEffect } from 'react';
 import { matchRoutes, useLocation } from 'react-router-dom';
-import { isRecordPageOf, useMetadata, type MetadataContextValue } from '@object-ui/react';
+import { isRecordPageOf, useAdapter, useMetadata, type MetadataContextValue } from '@object-ui/react';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
@@ -437,17 +438,58 @@ export function readAppObjectScope(
   };
 }
 
+/** An adapter that loads app metadata bundles (`ObjectStackAdapter.loadAppBundle`). */
+type BundleHost = { loadAppBundle?: (appName: string) => unknown };
+
+/**
+ * objectstack#28645 — the app the console root entered, while it stays
+ * entered (one at a time: the root enters the app its route names). Kept by name, not by adapter: below the root, `AppContent` reads a
+ * wrapper of the same adapter (the console's approval record reads), so the
+ * adapter's identity does not say whether the root entered it.
+ */
+const rootEnteredApps = new Set<string>();
+
+/**
+ * Enter `appName`'s metadata bundle (objectstack#27627), unless the console
+ * root already entered it ({@link useAppObjectScopePrefetch}): `AppContent`
+ * mounts below the session's permission read, and entering again there would
+ * ask the bundle a second time. A host adapter without bundles is left alone.
+ */
+export function enterAppBundle(dataSource: unknown, appName: string | undefined): void {
+  const host = dataSource as BundleHost | null | undefined;
+  const load = host?.loadAppBundle;
+  if (!host || !appName || typeof load !== 'function') return;
+  if (rootEnteredApps.has(appName)) return;
+  void load.call(host, appName);
+}
+
 /**
  * The console root's half: on an app route, start the app's object scope as
  * soon as the app list names the app, before `AppContent` mounts (it mounts
- * below the session's permission read). It reads nothing else and renders
- * nothing; `AppContent` reads the same scope entry when it renders.
+ * below the session's permission read). It renders nothing; `AppContent` reads
+ * the same scope entry when it renders.
+ *
+ * objectstack#28645 — it enters the app's metadata bundle at the same moment,
+ * once, and `AppContent` reuses that entry ({@link enterAppBundle}), so the
+ * scope composes its views from the bundle instead of reading the
+ * `/meta/view` list before the app was entered. Leaving the app ends the
+ * entry, so coming back revalidates the bundle as entering it always has.
  */
 export function useAppObjectScopePrefetch(): void {
   const { apps, readObjectScope } = useMetadata();
+  const dataSource = useAdapter() as BundleHost | null;
   const { pathname, search } = useLocation();
   const segments = pathname.split('/').filter(Boolean);
-  if (segments[0] !== 'apps' || !segments[1] || !readObjectScope) return;
-  const app = matchAppBySegment(apps, segments[1]);
-  if (app) readAppObjectScope(readObjectScope, app, segments.slice(2).join('/'), search);
+  const app = segments[0] === 'apps' && segments[1] ? matchAppBySegment(apps, segments[1]) : undefined;
+  const bundleAppName = typeof app?.name === 'string' && app.name ? app.name : undefined;
+  useEffect(() => {
+    const load = dataSource?.loadAppBundle;
+    if (!dataSource || !bundleAppName || typeof load !== 'function') return;
+    void load.call(dataSource, bundleAppName);
+    rootEnteredApps.add(bundleAppName);
+    return () => {
+      rootEnteredApps.delete(bundleAppName);
+    };
+  }, [dataSource, bundleAppName]);
+  if (app && readObjectScope) readAppObjectScope(readObjectScope, app, segments.slice(2).join('/'), search);
 }

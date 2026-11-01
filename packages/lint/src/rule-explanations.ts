@@ -951,6 +951,12 @@ const VISIBILITY_PREDICATE_OVER_BUDGET_EXPLANATION: RuleExplanation = {
       'does not echo the predicate; its `path` locates it.',
     'Logic genuinely this large is not element visibility: compute it once on the record rather than ' +
       're-deriving it in every predicate that needs it.',
+    'An app navigation entry\'s `visible` is judged the same way, and there the cost is the opposite ' +
+      'one: the console\'s navigation gate falls CLOSED, so an entry whose predicate is over budget is ' +
+      'hidden from every viewer, its author included. A navigation entry binds no `record`, so the ' +
+      'rewrite is a smaller predicate over the viewer: collapse a chain of `\'a\' in current_user.positions` ' +
+      'tests into one `current_user.positions.exists(p, p in [\'a\', \'b\'])`, or gate the entry on one ' +
+      'permission check such as `current_user.can(\'OBJECT\', \'read\')`.',
   ],
 };
 
@@ -964,9 +970,10 @@ const VISIBILITY_PREDICATE_SYNTAX_EXPLANATION: RuleExplanation = {
       'predicate surface already gates a syntax fault (ADR-0032), so this one does too.',
     'An app navigation entry\'s `visible` is judged the same way, and there the cost is the opposite ' +
       'one: the console\'s navigation gate falls CLOSED, so an entry whose predicate does not parse is ' +
-      'hidden from every viewer, its author included. Only the syntax is judged on a navigation entry: ' +
-      'it binds `current_user`, `user`, `features` and the rest of the shell\'s roots rather than ' +
-      '`record`, so the reference checks a page predicate gets do not apply to it.',
+      'hidden from every viewer, its author included. Only whether it parses is judged on a navigation ' +
+      'entry (a size overrun is `visibility-predicate-over-budget`): it binds `current_user`, `user`, ' +
+      '`features` and the rest of the shell\'s roots rather than `record`, so the reference checks a page ' +
+      'predicate gets do not apply to it.',
     'Spellings from other languages do not parse: write `==` (not `===`), `!=` (not `!==` or `<>`), ' +
       '`&&` (not `and`), `||` (not `or`), `!` (not `not`). A predicate that is flawless CEL but too ' +
       'large is `visibility-predicate-over-budget` instead.',

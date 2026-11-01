@@ -3578,6 +3578,33 @@ describe('runtime authoring gate on APP and PAGE writes — nav `visible` syntax
         expect(activeRows(rows, 'app')).toEqual([]);
     });
 
+    it('[#28726] REFUSES an active app save whose nav `visible` overruns the CEL parse budget, with the build\'s finding; nothing stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item = app(Array.from({ length: 90 }, () => 'features.cloudManaged != true').join(' || '));
+
+        const err = await protocol.saveMetaItem({ type: 'app', name: 'qa_app', item }).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the over-budget nav predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues.filter((i: any) => i.rule === 'visibility-predicate-over-budget');
+        expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ path: 'apps[0].navigation[0].visible', where: 'app "qa_app" · nav "nav_admin_only"' });
+        const atBuild = buildErrors({ apps: [item] }).filter((f) => f.rule === 'visibility-predicate-over-budget');
+        for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(issues[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+        expect(activeRows(rows, 'app')).toEqual([]);
+    });
+
+    it('[#28726] an app whose nav `visible` is a chain inside the budget saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item = app(Array.from({ length: 51 }, () => 'features.cloudManaged != true').join(' || '));
+
+        await expect(protocol.saveMetaItem({ type: 'app', name: 'qa_app', item })).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'app')).toHaveLength(1);
+    });
+
     it('an app whose nav `visible` parses saves, and the row lands', async () => {
         const { protocol, rows } = makeProtocol();
 

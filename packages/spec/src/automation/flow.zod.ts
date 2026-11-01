@@ -1073,11 +1073,23 @@ export const FlowSchema = lazySchema(() => strictObject(
    * screen-flow-only was the alternative considered and rejected at #9414's
    * triage — narrowing the text would delete a declared, documented,
    * console-consumed capability to make a bug disappear — so treat the
-   * screen-flow toast as one consumer, not the whole contract. Plain
-   * strings; `{var}` is NOT interpolated here.
+   * screen-flow toast as one consumer, not the whole contract.
+   *
+   * Both are flow TEXT slots (#28054, `FLOW_TEXT_SLOTS` in
+   * `flow-text-slot-template.ts`): `{{ }}` holes over the run's variables
+   * (`'{{ enrolledCount }} contacts enrolled'`), rendered by the engine at the
+   * terminal exit exactly like a refusing `end` node's `message` —
+   * `successMessage` over the variables the run finished with, `errorMessage`
+   * over the variables at the failure point — after it picks the translated
+   * template (`flows.<flow>.successMessage` / `.errorMessage`) in the run's
+   * locale. A hole over a variable the run never bound renders nothing, as in
+   * every text slot. The doors judge them as they judge a node's text slot:
+   * `registerFlow` and `objectstack validate` refuse a single-brace `{var}`
+   * token (no placeholder, it would be sent as literal text) with its `{{ }}`
+   * spelling, and a hole that does not compile.
    */
-  successMessage: z.string().optional().describe('Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done".'),
-  errorMessage: z.string().optional().describe('Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error.'),
+  successMessage: z.string().optional().describe('Text for a terminal success, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". A `{{ }}` template over the run\'s variables (`{{ enrolledCount }} contacts enrolled`), rendered when the run completes.'),
+  errorMessage: z.string().optional().describe('Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run\'s variables, rendered over the variables at the failure point.'),
 
   /** Metadata & Versioning */
   version: z.number().int().default(1).describe('Version number'),

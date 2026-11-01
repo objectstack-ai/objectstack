@@ -4929,6 +4929,85 @@ export function collectionItemOwnerStampRefusal(
 }
 
 /**
+ * [#28697] {@link collectionItemOwnerStampRefusal} for the two collections a
+ * package body files through verbs of their own rather than the collection
+ * loop: its OBJECTS (`registerObject`, the array and the name-keyed map form)
+ * and its APPS (`registerApp`: each `apps[]` entry the loop would register,
+ * and the body itself when it registers as its own app). The first refusal
+ * found, in that order, or `undefined`.
+ *
+ * Asked BEFORE the body registers anything, so a refused body leaves no
+ * package record, object or app behind. An app wearing another package's
+ * `_packageId` kept it (`applyProtection` stamps an unset key only), and every
+ * reader that asks an app's owner — the per-package list filter, the
+ * disabled-package filter, the packaged-base gate — then filed it under the
+ * package it named. An object's stamp is read by the action-parse predicate
+ * of `registerObject` (`schema._packageId ?? packageId`). Refused, not
+ * overwritten, for the reason the collection loop refuses: one judge, so the
+ * build door (the stack schema, which judges `objects` and `apps` too) and
+ * this door cannot disagree.
+ *
+ * Called by {@link ObjectQL.registerApp} and by a nested plugin's
+ * registration (`registerPlugin`, which registers objects and the plugin
+ * itself as an app, and no `apps[]`).
+ *
+ * @param body    The package body or nested plugin, as it arrived.
+ * @param ownerId The package the door registers it under.
+ * @param scope   Which of the app shapes this door registers.
+ */
+export function packageBodyObjectAndAppOwnerStampRefusal(
+  body: any,
+  ownerId: string | undefined,
+  scope: { apps: boolean; selfAsApp: boolean },
+): ReturnType<typeof collectionItemOwnerStampRefusal> {
+  const objects = body?.objects;
+  if (objects && typeof objects === 'object') {
+    const entries: Array<[unknown, unknown]> = Array.isArray(objects)
+      ? objects.map((def: any) => [def?.name, def])
+      : Object.entries(objects);
+    for (const [name, def] of entries) {
+      const refusal = collectionItemOwnerStampRefusal(def, 'object', typeof name === 'string' && name !== '' ? name : '(unnamed)', ownerId);
+      if (refusal) return refusal;
+    }
+  }
+  if (scope.apps && Array.isArray(body?.apps)) {
+    for (const app of body.apps) {
+      // The loop registers an app with a name only; a nameless one is skipped.
+      const appName = app?.name || app?.id;
+      if (!appName) continue;
+      const refusal = collectionItemOwnerStampRefusal(app, 'app', String(appName), ownerId);
+      if (refusal) return refusal;
+    }
+  }
+  if (scope.selfAsApp) {
+    const refusal = collectionItemOwnerStampRefusal(body, 'app', String(body?.name), ownerId);
+    if (refusal) return refusal;
+  }
+  return undefined;
+}
+
+/**
+ * [#28697] Stamp an app object ({@link stampPackage}) and register it through
+ * the registry's app verb, recording the stamp the registration writes onto
+ * the caller's own object ({@link noteRegistrationStamp}): `stampPackage` (with
+ * a version) and `registerItem` (without one) stamp the object in place, so a
+ * module constant handed to a second registration arrives wearing the first
+ * one's stamp, which no body wrote. The stamp before is read BEFORE
+ * `stampPackage`, the order the collection and seed loops keep, so a versioned
+ * registration is recorded too.
+ */
+export function registerAppNotingStamp(
+  registry: SchemaRegistry,
+  app: any,
+  ownerId: string,
+  ownerVersion: string | undefined,
+): void {
+  const stampBefore = (app as { _packageId?: unknown } | null | undefined)?._packageId;
+  registry.registerApp(stampPackage(app, ownerId, ownerVersion), ownerId);
+  noteRegistrationStamp(app, stampBefore);
+}
+
+/**
  * [#5320] The registration door's refusal of a `views:` entry that is not a
  * view CONTAINER (`isViewContainerShaped` is false: a ViewItem's
  * `viewKind`/`config`, a flattened overlay's inline view config): the stack
@@ -8948,6 +9027,30 @@ export class ObjectQL implements IObjectQLEngine {
       // Stamped beside `id` on every item below ({@link stampPackage}), so an
       // item served from this path tells an upgrade's new item from its old one.
       const version = manifest.version as string | undefined;
+      // [#28697] The owner-stamp refusal for the objects and apps below, which
+      // file through verbs of their own (steps 2-4), asked before anything of
+      // this body registers. See {@link packageBodyObjectAndAppOwnerStampRefusal}.
+      {
+          const refusal = packageBodyObjectAndAppOwnerStampRefusal(manifest, id, {
+              apps: true,
+              selfAsApp: Boolean(manifest.name && manifest.navigation && !manifest.apps?.length),
+          });
+          if (refusal) throw refusal;
+          // …and each nested plugin's objects and plugin-as-app (step 7, which
+          // registers them under this package after everything above), so a
+          // nested plugin's stamp is refused before this body registers too.
+          // `registerPlugin` asks the same of the plugin it is handed.
+          if (Array.isArray(manifest.plugins)) {
+              for (const plugin of manifest.plugins) {
+                  if (!plugin || typeof plugin !== 'object') continue;
+                  const nested = packageBodyObjectAndAppOwnerStampRefusal(plugin, id, {
+                      apps: false,
+                      selfAsApp: Boolean(plugin.name && plugin.navigation),
+                  });
+                  if (nested) throw nested;
+              }
+          }
+      }
       this.invalidateSummaryIndex(); // new objects may add/change summary fields
       this.logger.debug('Registering package manifest', { id, namespace });
 
@@ -9011,6 +9114,11 @@ export class ObjectQL implements IObjectQLEngine {
               const extDef = {
                   name: targetFqn, // Use the target FQN as name
                   fields: ext.fields,
+                  // [ADR-0146 D10, second rule] The per-field display patches,
+                  // the slot as `ObjectExtensionSchema.fieldPatches` declares
+                  // it — applied by the registry's `mergeObjectDefinitions`,
+                  // whose fold every object read shares.
+                  fieldPatches: ext.fieldPatches,
                   label: ext.label,
                   pluralLabel: ext.pluralLabel,
                   description: ext.description,
@@ -9032,7 +9140,7 @@ export class ObjectQL implements IObjectQLEngine {
               const appName = app.name || app.id;
               if (appName) {
                   const resolved = namespace ? this.resolveNavObjectNames(app, namespace) : app;
-                  this._registry.registerApp(stampPackage(resolved, id, version), id);
+                  registerAppNotingStamp(this._registry, resolved, id, version);
                   this.logger.debug('Registered App', { app: appName, from: id });
               }
           }
@@ -9042,7 +9150,7 @@ export class ObjectQL implements IObjectQLEngine {
       //    This handles the case where the manifest IS the app definition (legacy/simple packages)
       if (manifest.name && manifest.navigation && !manifest.apps?.length) {
           const resolved = namespace ? this.resolveNavObjectNames(manifest, namespace) : manifest;
-          this._registry.registerApp(stampPackage(resolved, id, version), id);
+          registerAppNotingStamp(this._registry, resolved, id, version);
           this.logger.debug('Registered manifest-as-app', { app: manifest.name, from: id });
       }
 
