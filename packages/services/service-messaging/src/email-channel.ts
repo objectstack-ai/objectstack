@@ -59,6 +59,14 @@ export interface EmailSenderSurface {
         locale?: string;
         /** Same tenant stamp as on `send` (commit b706af987) — forwarded by the email service into the send it performs. */
         organizationId?: string;
+        /**
+         * Structural mirror of `RenderTemplateInput.currency` — the ISO 4217
+         * code a `{{ amount | currency }}` hole with no argument formats in
+         * (the organization's `localization.currency`, #26939). Absent when
+         * the delivery has no tenant default; the renderer then refuses such
+         * a hole with `TEMPLATE_INVALID` rather than guessing a currency.
+         */
+        currency?: string;
     }): Promise<{ id?: string; status?: string; error?: string } | unknown>;
     /**
      * Structural mirror of `IEmailService.renderTemplate` (#9225) — resolves a
@@ -74,8 +82,13 @@ export interface EmailSenderSurface {
         template: string;
         data?: Record<string, unknown>;
         locale?: string;
+        /** Same default currency as on `sendTemplate` (#26939). */
+        currency?: string;
     }): Promise<{ subject: string; html: string; text: string }>;
 }
+
+/** The input `EmailSenderSurface.sendTemplate` declares — the email channel builds it by name. */
+type TemplateSendInput = Parameters<NonNullable<EmailSenderSurface['sendTemplate']>>[0];
 
 export interface EmailChannelOptions {
     /**
@@ -408,19 +421,25 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                     // currency, and grade a refusal below (#27257).
                     currencyReadFault = (err as Error)?.message ?? String(err);
                 }
+                const sendInput: TemplateSendInput = {
+                    template: templateName,
+                    to: address,
+                    ...(data !== undefined ? { data } : {}),
+                    ...(templateLocale ? { locale: templateLocale } : {}),
+                    // Commit b706af987 — this channel HOLDS the organization (the
+                    // tenant stamp the outbox snapshots per delivery), so
+                    // it threads it for the sys_email.organization_id
+                    // stamp. Absent stays absent — never fabricated.
+                    ...(n.organizationId ? { organizationId: n.organizationId } : {}),
+                };
+                // A plain assignment, not a spread: TypeScript checks the key
+                // against the declared input, so a rename on either side fails
+                // to compile. No default currency sends no key (#27754).
+                if (currency) sendInput.currency = currency;
                 try {
-                    const result = (await email.sendTemplate({
-                        template: templateName,
-                        to: address,
-                        ...(data !== undefined ? { data } : {}),
-                        ...(templateLocale ? { locale: templateLocale } : {}),
-                        ...(currency ? { currency } : {}),
-                        // Commit b706af987 — this channel HOLDS the organization (the
-                        // tenant stamp the outbox snapshots per delivery), so
-                        // it threads it for the sys_email.organization_id
-                        // stamp. Absent stays absent — never fabricated.
-                        ...(n.organizationId ? { organizationId: n.organizationId } : {}),
-                    })) as { id?: unknown; status?: unknown; error?: unknown } | undefined;
+                    const result = (await email.sendTemplate(sendInput)) as
+                        | { id?: unknown; status?: unknown; error?: unknown }
+                        | undefined;
                     // `IEmailService.send` reports transport failure as
                     // `status: 'failed'` rather than throwing — surface it.
                     if (result && result.status === 'failed') {
@@ -444,7 +463,7 @@ export function createEmailChannel(opts: EmailChannelOptions): MessagingChannel 
                                 template: templateName,
                                 ...(data !== undefined ? { data } : {}),
                                 ...(templateLocale ? { locale: templateLocale } : {}),
-                                ...{ currency: probe },
+                                currency: probe,
                             })),
                         ),
                     };

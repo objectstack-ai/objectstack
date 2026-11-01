@@ -31,9 +31,8 @@ export const CaseViews = defineView({
 ```
 
 > **Never export a bare flat view object** (`{ name, label, type, columns }`
-> at top level). It is not a valid view container — nothing registers and no
-> view appears in the switcher. Every view lives under `list` / `form` /
-> `listViews` / `formViews`, exactly as in the `defineView` example above.
+> at top level): nothing registers and no view appears in the switcher. Every
+> view lives under `list` / `form` / `listViews` / `formViews`, as above.
 
 ### Data Source (`data`)
 
@@ -47,14 +46,11 @@ data: { provider: 'object', object: 'support_case' }
 data: { provider: 'value', items: [...] }
 ```
 
-> **Best practice:** Always use `provider: 'object'` when the data source is
-> an ObjectStack-managed object. It enables automatic CRUD, real-time updates,
-> filtering, and pagination. A view never calls an API: an API read is a
+> Use `provider: 'object'` for an ObjectStack-managed object (CRUD, live
+> updates, filtering, pagination). A view never calls an API: an API read is a
 > page element's `dataSource` binding.
 
 ### Columns
-
-Columns can be defined as a simple string array or detailed config:
 
 ```typescript
 // Simple — field names only
@@ -96,18 +92,30 @@ by nature — a log, an audit trail, a history, a report roll-up — declares
 
 ### Filtering
 
+`filter` is a list whose elements must **all** match. An element is a rule
+`{ field, operator, value }` or an any-of group `{ or: [rule, ...] }` that
+matches when **any** of its rules does — still ANDed with the elements beside it:
+
 ```typescript
 filter: [
-  { field: 'status', operator: 'not_equals', value: 'closed' },
-  { field: 'assigned_to', operator: 'equals', value: '{current_user_id}' },
+  { or: [                                   // open, OR urgent …
+    { field: 'status', operator: 'equals', value: 'open' },
+    { field: 'priority', operator: 'equals', value: 'urgent' },
+  ] },
+  { field: 'assigned_to', operator: 'equals', value: '{current_user_id}' },   // … AND mine ({current_user_id} = the signed-in user)
 ]
 ```
 
-Common operators: `equals`, `not_equals`, `contains`, `starts_with`,
-`greater_than`, `less_than`, `is_empty`, `is_not_empty`, `in`, `not_in`,
-`this_week`, `this_month`, `this_quarter`, `last_n_days`.
+Operators (no others): `equals`, `not_equals`, `contains`,
+`not_contains`, `icontains`, `starts_with`, `ends_with`, `greater_than`, `less_than`,
+`greater_than_or_equal`, `less_than_or_equal`, `in`, `not_in` (list values),
+`is_empty`, `is_not_empty`, `is_null`, `is_not_null`, `before`, `after`, `between` (`[min, max]`).
 
-> **`{current_user_id}`** resolves to the signed-in user's id.
+A group holds flat rules only (no group in a group) and never `or: []`; `$or`,
+`any` / `anyOf`, `logic` / `conditions` on a rule are refused naming this shape.
+The Console builder saves its OR toggle as one group and edits a filter that is
+exactly one group; a group beside other elements applies, but the builder shows
+it read-only.
 
 ### End-User Quick Filters (`userFilters`, ADR-0047)
 
@@ -136,27 +144,22 @@ Rules:
   entry, rendered as a tab in the object's saved-view switcher.
 - **On an object list view (`*.view.ts` `list` / `listViews`), only
   `element: 'dropdown'` (value chips) is allowed — `tabs` is page-only**
-  (ADR-0047 amendment). An object view's saved-view `ViewTabBar` already owns
-  the tab-bar role, so a `tabs` user-filter would render a second, colliding
-  tab bar. The spec narrows it (`ObjectUserFiltersSchema` — a `tabs` element is
-  untypable at author time and **rejected** at parse, not dropped) and the
+  (ADR-0047 amendment): the saved-view switcher already owns the tab bar, so
+  `ObjectUserFiltersSchema` **rejects** `tabs` at parse (not dropped) and the
   `validate` list-view-mode lint reports it.
   Need named presets on an object? Add a `listViews` entry instead. The full
   `dropdown | tabs | toggle` range applies only to **page lists** /
   `interfaceConfig.userFilters` (the block above).
-- **Omit `userFilters` when unsure — omission means a clean toolbar.** Filter
-  elements render only when explicitly configured; nothing is auto-derived.
-  In data mode the saved-views switcher already covers the preset use case,
-  so most views need no filter elements at all.
+- **Omit `userFilters` when unsure — omission means a clean toolbar.** Nothing
+  is auto-derived, and the saved-views switcher already covers presets.
 - `userFilters: { element: 'dropdown' }` (no `fields`) is valid shorthand:
   the renderer fills the field list from the object's select/boolean fields.
 
 ### Toolbar Search (`searchableFields`, ADR-0061)
 
 The toolbar's search box scans a set the **object** owns. A list view's
-`searchableFields` **narrows** that set for this one list — it can never widen
-it, and the runtime enforces that by **refusing the request**, not by quietly
-dropping the extra name.
+`searchableFields` **narrows** that set for this one list — never widens it;
+the runtime **refuses the request** rather than dropping the extra name.
 
 <!-- os:check -->
 ```typescript
@@ -190,11 +193,9 @@ Modelling side: **objectstack-data → Search Fields**. Query side
 
 #### ⛔ One bad entry 400s EVERY search on that list
 
-The client echoes this declaration verbatim as the `$searchFields` override —
-the active view's list wins over the object's — and the ingress gate refuses any
-entry outside the allowed set before the engine ever runs. The blast radius is
-the list's whole search box, for every user and every term: not a narrower
-result, no result at all.
+The client sends this list verbatim as the `$searchFields` override and the
+ingress gate refuses any entry outside the allowed set before the engine runs —
+the whole search box, for every user and every term: no result at all.
 
 | What you write on the view | `os validate` | Toolbar search at runtime |
 |:---------------------------|:--------------|:--------------------------|
@@ -208,7 +209,7 @@ result, no result at all.
 
 Both diagnostics are **errors**, not warnings — `os validate` fails the build.
 
-To remove the search box, toggle the affordance — a different key, same view:
+To remove the search box, toggle the affordance instead:
 
 <!-- os:check -->
 ```typescript
@@ -226,7 +227,7 @@ export const AuditViews = defineView({
 ```
 
 **Searching by a related record's title:** mirror it into a **stored** field
-and narrow to that — **objectstack-data → Search Fields (`searchableFields`)**.
+and narrow to that (objectstack-data → Search Fields).
 
 ### Sorting
 
@@ -258,8 +259,7 @@ grouping: { fields: [
 ## Configuring Kanban Views
 
 Board settings nest under `kanban:` (`KanbanConfigSchema`) — there is **no
-top-level `groupBy`**. The top-level `columns` is required on every list view
-(including kanban), while `kanban.columns` picks the fields shown on each card.
+top-level `groupBy`**; the top-level `columns` stays required.
 
 ```typescript
 {
@@ -304,6 +304,5 @@ Timeline settings nest under `gantt:` (`GanttConfigSchema`);
 }
 ```
 
-Rows with children (or `type: 'summary'`) render as **summary bars** — they
-move the whole group on drag and have **no resize handles**. Leaf tasks resize
-freely unless `locked: true`.
+Rows with children (or `type: 'summary'`) are **summary bars**: dragged as a
+group, **no resize handles**. Leaf tasks resize unless `locked: true`.

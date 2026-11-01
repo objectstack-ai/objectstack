@@ -1497,7 +1497,9 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
  * is the `:id` path segment, never a body member. The door reads exactly two
  * body members and hands them to `publishPackageDrafts`:
  *
- * - `message` — forwarded only when it is a string;
+ * - `message` — parsed with this declaration's member; a note it refuses (a
+ *   number, an object, an array, `null`) is refused `400 VALIDATION_ERROR`
+ *   naming `message` before anything is published;
  * - `backfill` — forwarded as sent whenever the key is present; the protocol
  *   judges its shape before anything is published and refuses the whole
  *   request `400 VALIDATION_ERROR` with every bad entry in `issues[]`.

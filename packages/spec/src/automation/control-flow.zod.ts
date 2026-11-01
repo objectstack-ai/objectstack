@@ -409,6 +409,28 @@ export interface RegionAnalysis {
 }
 
 /**
+ * The refusal of a region with more than one exit, with its cure (#28055).
+ *
+ * Regions stay single-exit (ADR-0031): the runtime starts a region at its one
+ * entry and the container resumes after its one exit. So the sentence does not
+ * offer to accept the shape; it says how to reach the accepted one — join the
+ * exits on one node. The node it names is a bare `assignment`: its descriptor
+ * declares no `required` key and its executor, given no `config`, sets nothing
+ * and succeeds (the same minimal node the lint rule's `catch` hint names), so
+ * the join adds no behaviour of its own. The sentence serves every container
+ * that owns a region (`loop` body, `parallel` branch, `try_catch` try/catch);
+ * `validateControlFlow` prefixes the slot.
+ */
+function multiExitRefusal(exits: readonly string[]): string {
+  const named = exits.join(', ');
+  return (
+    `region must be single-exit but has ${exits.length}: ${named} — ` +
+    `add one node with an edge from each of ${named} to it, so it is the region's only exit; ` +
+    'an `assignment` node with no `config` sets nothing and can be that node'
+  );
+}
+
+/**
  * Analyze a region's structural well-formedness (ADR-0031 §Sequencing 1):
  *
  *  - every edge references nodes that exist in the region,
@@ -472,7 +494,7 @@ export function analyzeRegion(region: { nodes: FlowNodeParsed[]; edges?: FlowEdg
   else if (entries.length > 1) errors.push(`region must be single-entry but has ${entries.length}: ${entries.join(', ')}`);
 
   if (exits.length === 0) errors.push('region has no exit node (every node has an outgoing edge — cyclic?)');
-  else if (exits.length > 1) errors.push(`region must be single-exit but has ${exits.length}: ${exits.join(', ')}`);
+  else if (exits.length > 1) errors.push(multiExitRefusal(exits));
 
   // Acyclicity (DFS coloring) — a region body must be a DAG.
   const WHITE = 0, GRAY = 1, BLACK = 2;
