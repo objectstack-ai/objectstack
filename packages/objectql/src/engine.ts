@@ -4789,8 +4789,13 @@ export function stampPackage<T>(item: T, packageId: string, packageVersion: stri
  * `name` (`viewContainerNameRefusal`), which the same loop throws one statement
  * earlier. `issues[]` locates the key, as the metadata write doors' refusal of
  * the same rule does. No code is minted.
+ *
+ * Exported for the stack's RESIDUAL registration (`registerUnclaimedTopLevelItems`
+ * in `plugin.ts`), which files a top-level permission set under the stack's id
+ * and refuses the same set in this same envelope. ⛔ Never rebuild the envelope
+ * at a second door.
  */
-function permissionSetOwnerRegistrationRefusal(
+export function permissionSetOwnerRegistrationRefusal(
   item: unknown,
   name: string,
   ownerId: string | undefined,
@@ -4804,6 +4809,41 @@ function permissionSetOwnerRegistrationRefusal(
   err.status = 400;
   err.httpStatus = 400;
   err.issues = [{ path: 'packageId', message: refusal.issueMessage, code: 'custom' }];
+  return err;
+}
+
+/**
+ * [#5320] The registration door's refusal of a `views:` entry that is not a
+ * view CONTAINER (`isViewContainerShaped` is false: a ViewItem's
+ * `viewKind`/`config`, a flattened overlay's inline view config): the stack
+ * `views:` collection carries containers only, the contract the stack schema
+ * declares (`z.array(ViewSchema)`). The caller judges the shape; this is the
+ * envelope and the words — `INVALID_METADATA` / 422, naming the entry by the
+ * name it would be filed under and the source it came from.
+ *
+ * Called by {@link ObjectQL.registerApp}'s metadata loop and by the stack's
+ * RESIDUAL registration (`registerUnclaimedTopLevelItems` in `plugin.ts`, with
+ * the `manifest` source label), so a residual entry and a body's are refused
+ * in one spelling. ⛔ Never a second copy of the text.
+ */
+export function viewsEntryNotContainerRefusal(
+  itemName: string | undefined,
+  sourceLabel: string,
+  ownerId: string | undefined,
+): Error & { code: 'INVALID_METADATA'; status: 422; httpStatus: 422 } {
+  const err = new Error(
+    `Invalid \`views:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': the stack `
+    + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
+    + 'config belong to a single VIEW, not to the container — wrap it: '
+    + '`defineView({ list: { type, data, columns, … } })`, or name it — '
+    + '`defineView({ listViews: { my_view: { … } } })`. A machine-assembled manifest '
+    + `(package export, environment artifact) carries non-container view artifacts under `
+    + `\`${ASSEMBLED_VIEW_ITEMS_KEY}:\` instead — re-export the package with a runtime that `
+    + 'writes that channel.',
+  ) as Error & { code: 'INVALID_METADATA'; status: 422; httpStatus: 422 };
+  err.code = 'INVALID_METADATA';
+  err.status = 422;
+  err.httpStatus = 422;
   return err;
 }
 
@@ -9087,21 +9127,10 @@ export class ObjectQL implements IObjectQLEngine {
               // belongs to is this seam's contract; whether a container's
               // internals are well-formed stays the authoring/publish doors'
               // job (defineStack, `os validate`, the metadata door).
+              // The envelope and the words: {@link viewsEntryNotContainerRefusal},
+              // which the residual registration throws too.
               if (key === 'views' && !isViewContainerShaped(toRegister)) {
-                  const err: Error & { code?: string; status?: number; httpStatus?: number } = new Error(
-                      `Invalid \`views:\` entry '${itemName}' from ${sourceLabel} '${ownerId}': the stack `
-                      + '`views:` collection carries view CONTAINERS only. `viewKind`/`config`/inline view '
-                      + 'config belong to a single VIEW, not to the container — wrap it: '
-                      + '`defineView({ list: { type, data, columns, … } })`, or name it — '
-                      + '`defineView({ listViews: { my_view: { … } } })`. A machine-assembled manifest '
-                      + `(package export, environment artifact) carries non-container view artifacts under `
-                      + `\`${ASSEMBLED_VIEW_ITEMS_KEY}:\` instead — re-export the package with a runtime that `
-                      + 'writes that channel.',
-                  );
-                  err.code = 'INVALID_METADATA';
-                  err.status = 422;
-                  err.httpStatus = 422;
-                  throw err;
+                  throw viewsEntryNotContainerRefusal(itemName, sourceLabel, ownerId);
               }
               this._registry.registerItem(pluralToSingular(key), stampPackage(toRegister, ownerId, ownerVersion), 'name' as any, ownerId);
               // "Object has-many View" (ADR-0017): a `defineView` document
