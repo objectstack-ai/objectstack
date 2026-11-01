@@ -82,7 +82,7 @@ import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
 interface Run {
@@ -94,7 +94,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

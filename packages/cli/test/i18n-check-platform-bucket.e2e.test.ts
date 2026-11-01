@@ -38,7 +38,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const CLI_PACKAGE_ROOT = resolve(HERE, '..');
 
 /** An app that translates everything it owns and ships no platform bundle. */
@@ -106,7 +105,7 @@ interface Run {
 }
 
 function runCheck(args: readonly string[]): Run {
-  const child = spawnSync(TSX, [CLI, 'i18n', 'check', ...args], {
+  const child = spawnSync(process.execPath, [CLI, 'i18n', 'check', ...args], {
     cwd: CLI_PACKAGE_ROOT,
     encoding: 'utf8',
     env: childEnv(),

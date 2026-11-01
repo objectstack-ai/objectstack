@@ -43,7 +43,6 @@ import { join } from 'node:path';
 import {
   CLI,
   E2E_SECRET_KEY,
-  TSX,
   childEnv,
   KERNEL_ASSIGNED_PORT,
   probeThroughChild,
@@ -126,7 +125,7 @@ const dirs: string[] = [];
  */
 function bootServe(dir: string, db: string): Promise<LiveServe> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
+    const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).

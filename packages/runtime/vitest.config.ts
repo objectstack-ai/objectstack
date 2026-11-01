@@ -148,6 +148,10 @@ export default defineConfig({
         replacement: path.resolve(__dirname, '../platform-objects/src/index.ts'),
       },
       { find: '@objectstack/rest', replacement: path.resolve(__dirname, '../rest/src/index.ts') },
+      // The clone door's target rule (`domains/new-similar-target.ts`) walks the
+      // dependency closure with `resolvePackageClosure`, the one walk the save
+      // door's publish gate uses; its tests judge the source, never `dist/`.
+      { find: /^@objectstack\/lint\/runtime$/, replacement: path.resolve(__dirname, '../lint/src/runtime.ts') },
       // #9457: ONE anchored rule for every `@objectstack/spec` namespace, in
       // place of the hand-maintained list of the twelve subpaths tests happened
       // to reach on the day it was written. That list had gone stale in three
