@@ -287,6 +287,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.adopt-orphans-owner-judges.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.adopt-orphans-owner-judges.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.adr0005-org-override-rollback.test.ts",
       "verb": "delete",
       "pinned": 1
