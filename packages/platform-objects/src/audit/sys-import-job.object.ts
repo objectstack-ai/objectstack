@@ -67,7 +67,7 @@ export const SysImportJob = ObjectSchema.create({
     treat_as_historical: Field.boolean({ label: 'Treat As Historical', required: false, defaultValue: false, group: 'Request' }),
 
     // ── outcome ──
-    error: Field.textarea({ label: 'Fatal Error', required: false, group: 'Outcome' }),
+    error: Field.textarea({ label: 'Failure Reason', required: false, group: 'Outcome' }),
     results: Field.json({
       label: 'Row Results (sample)',
       required: false,

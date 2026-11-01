@@ -3061,7 +3061,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Tratar como histórico"
       },
       error: {
-        label: "Error fatal"
+        label: "Motivo del fallo"
       },
       results: {
         label: "Resultados por fila (muestra)",
