@@ -364,6 +364,74 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
     return (relativePath: string) => resolveInsidePackageRoot(packageRoot, relativePath, 'paths');
 }
 
+/**
+ * [#28534] The package-anchored members a connector entry is handed when the
+ * package that declared it was INSTALLED into this runtime rather than shipped
+ * in the host's own stack: both {@link ConnectorProviderContext.loadPackageFile}
+ * and {@link ConnectorProviderContext.resolvePackagePath} refuse every ref.
+ *
+ * The contract resolves a relative ref against the root of the package that
+ * declared the entry. An installed package has no root on this runtime's disk
+ * — the install keeps its artifact JSON and nothing else — and the only root
+ * the host holds is its own, so answering would read, or point a launched
+ * process at, ANOTHER package's files: an install-local app naming
+ * `./src/system/connectors/status-openapi.json` materialized against the host
+ * showcase's own document. So the ref is refused, naming the entry, the
+ * package, the ref and the remedy.
+ *
+ * Members, not `undefined`: a factory handed `undefined` takes the
+ * no-filesystem path, which for `resolvePackagePath` means "keep the
+ * behaviour without it" (a stdio child inherits the host's working
+ * directory), the same cross-package reach by another road. A refusal thrown
+ * from the member is the factory's own failure, handled by the materializer
+ * like every other configuration fault (fatal at boot, a skipped entry on
+ * reload); a factory that never dereferences a ref (an inline document, an
+ * http(s) URL) never meets it.
+ */
+export function createInstalledPackageRefRefusal(
+    connectorName: string,
+    packageId: string,
+    member: 'reads' | 'paths',
+): (relativePath: string) => Promise<never> {
+    return async (relativePath: string) => {
+        const head =
+            `connector instance '${connectorName}' is declared by package '${packageId}', which was installed into this ` +
+            `runtime and has no package root on its disk, so its package ${member === 'reads' ? 'file' : 'path'} ref ` +
+            `'${String(relativePath)}' is refused: a relative ref resolves only against the root of the package that ` +
+            `declared it, never against the host's.`;
+        const remedy = member === 'reads'
+            ? ' Rebuild the package with a current `os build`, which carries an `openapi` spec file into the artifact, ' +
+                'or inline the document in the package.'
+            : ' A provider that needs a location inside the package (a stdio MCP server\'s working directory) cannot ' +
+                'serve an installed package\'s entry; declare a transport that needs none, such as an http MCP server.';
+        throw new Error(head + remedy);
+    };
+}
+
+/**
+ * [#28534] The id of the INSTALLED package that declared a connector entry,
+ * or `undefined` when the entry is the host's own.
+ *
+ * The answer is the package registry's row for the entry's `_packageId`
+ * stamp — its `source`, which the door that registered the package states and
+ * the registry records without inferring it (`InstalledPackageSchema.source`,
+ * #23972): the install-local door registers with `'marketplace'`, at install
+ * and at every restart's rehydrate, while the host's own stack, each member of
+ * a multi-package artifact that states no other origin, and every plugin
+ * package register as `'code'`. Only `'marketplace'` is read as installed. An
+ * entry with no stamp, a stamp no row answers (a composed stack's residual
+ * owner), or no registry at all is the host's: a package reaches this runtime
+ * as installed only through a door that writes that row.
+ */
+export function installedDeclaringPackageOf(
+    entry: unknown,
+    registry: { getPackage?: (id: string) => { source?: unknown } | undefined } | undefined,
+): string | undefined {
+    const packageId = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (typeof packageId !== 'string' || packageId.length === 0) return undefined;
+    return registry?.getPackage?.(packageId)?.source === 'marketplace' ? packageId : undefined;
+}
+
 // The credential resolver lives in ./credential-resolver.ts so the engine reads
 // the same one for an `api` flow's `config.secretRef`; re-exported unchanged.
 export { defaultEnvCredentialResolver, type CredentialResolver };
@@ -2266,6 +2334,25 @@ export class AutomationServicePlugin implements Plugin {
      * down every live connector on a reload. Same rule as the flow re-sync's
      * `null` read: never tear down on an absent answer.
      */
+    /**
+     * [#28534] The package registry the declared connector items are read
+     * from — the ObjectQL registry {@link readDeclaredConnectorItems} lists
+     * them out of — for {@link installedDeclaringPackageOf}. `undefined` when
+     * no `objectql` service is registered: then no door has registered an
+     * installed package in this kernel either.
+     */
+    private packageRegistryOrNone(
+        ctx: PluginContext,
+    ): { getPackage?: (id: string) => { source?: unknown } | undefined } | undefined {
+        try {
+            return ctx.getService<{
+                registry?: { getPackage?: (id: string) => { source?: unknown } | undefined };
+            }>('objectql')?.registry;
+        } catch {
+            return undefined; // no registry service
+        }
+    }
+
     private async readDeclaredConnectorItems(
         ctx: PluginContext,
         opts: { post: boolean },
@@ -2558,6 +2645,11 @@ export class AutomationServicePlugin implements Plugin {
             if (!desired.has(name)) this.credentialRefusalAttempts.delete(name);
         }
 
+        // [#28534] The package registry, read once per run, answers which
+        // declaring packages were installed rather than shipped in the host's
+        // stack ({@link installedDeclaringPackageOf}).
+        const packageRegistry = this.packageRegistryOrNone(ctx);
+
         // 2. Add new instances and re-materialize changed ones (signature diff).
         let changed = 0;
         for (const [name, { entry, signature }] of desired) {
@@ -2788,6 +2880,7 @@ export class AutomationServicePlugin implements Plugin {
                 retryConfig = parsed.data;
             }
 
+            const installedBy = installedDeclaringPackageOf(entry, packageRegistry);
             const providerCtx: ConnectorProviderContext = {
                 name,
                 label: entry.label ?? name,
@@ -2808,11 +2901,17 @@ export class AutomationServicePlugin implements Plugin {
                 requestTimeoutMs: entry.requestTimeoutMs,
                 // #3016 — lets a factory dereference relative file refs (e.g.
                 // openapi's `providerConfig.spec: './billing-openapi.json'`),
-                // confined to the stack/package root.
-                loadPackageFile: createPackageFileLoader(this.options.packageRoot),
+                // confined to the stack/package root. [#28534] An entry an
+                // INSTALLED package declared is handed refusals instead: that
+                // package has no root here, and the host's is not its own.
+                loadPackageFile: installedBy === undefined
+                    ? createPackageFileLoader(this.options.packageRoot)
+                    : createInstalledPackageRefRefusal(name, installedBy, 'reads'),
                 // #22434 — the same root as a location (e.g. a launched
                 // process's working directory), under the same confinement.
-                resolvePackagePath: createPackagePathResolver(this.options.packageRoot),
+                resolvePackagePath: installedBy === undefined
+                    ? createPackagePathResolver(this.options.packageRoot)
+                    : createInstalledPackageRefRefusal(name, installedBy, 'paths'),
             };
 
             let materialization;
