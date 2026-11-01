@@ -35,6 +35,22 @@ describe('findFieldPatchTargetRefusals', () => {
     })).toEqual([]);
   });
 
+  it('[#28809] judges an option against the declared object, never against an extension that redeclares the field through `fields`', () => {
+    const takeover = { industry: { ...account.fields.industry, options: [...account.fields.industry.options, { value: 'finance', label: 'Finance' }] } };
+    const refusals = findFieldPatchTargetRefusals({
+      objects: [account],
+      objectExtensions: [
+        { extend: 'fpt_account', fields: takeover },
+        { extend: 'fpt_account', fields: takeover, fieldPatches: { industry: { options: { finance: { label: 'Banking' } } } } },
+        { extend: 'fpt_account', fieldPatches: { industry: { options: { finance: { label: 'Banking' } } } } },
+      ],
+    });
+    expect(refusals.map((r) => r.path)).toEqual([
+      'objectExtensions[1].fieldPatches.industry.options.finance',
+      'objectExtensions[2].fieldPatches.industry.options.finance',
+    ]);
+  });
+
   it('leaves a target outside the composed stack to the install door', () => {
     expect(findFieldPatchTargetRefusals({
       objectExtensions: [{ extend: 'crm_account', fieldPatches: { anything: { label: 'X' } } }],
