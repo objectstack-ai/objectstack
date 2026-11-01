@@ -55,9 +55,10 @@
 - ✓ `POST .../ccr/comments/{id}/resolve` · `/unresolve`;`{id}` 是评审评论 id,⛔ 只在自己 PR 上探。
 - ✓ F = `[{"op":"pr_ready","pull":N},{"op":"automerge_enable","pull":N}]`;反向 `pr_draft`/`automerge_disable`。
 - ⛔ draft 上挂 auto-merge 零存储(ccr 路实测 422)⇒ `pr_ready` 排前,首败即停;反向实调如下。
-- ✓ 反向 F = `automerge_disable` 再 `pr_draft`,实调于已挂臂未入队 PR,两 op 皆 200,审批不掉。
+- ✓ 反向 F = `automerge_disable` 再 `pr_draft`,未入队与已入队 PR 各实调一笔,两 op 皆 200。
 - 行即回读:答 `autoMergeRequest` null、`isDraft` true 即 ✓;答仍挂臂或仍 ready ⇒ 记 5 停。
-- 出队未实测;已入队者转 draft 曾答无 `pullRequest` 记 5 却已转且保位,队位只读 timeline。
+- 已入队者回读「in the merge queue」,转 draft 保位照合 ⇒ 反向不踢队;队位只读 timeline。
+- 未入队者审批不掉;已是 draft 再 `pr_draft` 答无 `pullRequest` 记 5:非落地,⛔ 不重试。
 - 直合仓 `PUT .../pulls/{n}/merge`;actor 记令牌类,按账号非会话、逐写回读;见配额段,MCP 恒用户。
 
 ## 不可迁移 —— 只有这三件,围着它们排计划;红窗守候规则住 `platform-readings.md` 配额段
@@ -71,7 +72,7 @@
 - `merged_by` 是入队者,⛔ 不是绕队证据:队列合并归属给入队的账户,对队列与直合零分辨力。
 - 判据 ①:直接合并 `PUT .../pulls/{n}/merge` 在强制队列 ruleset 下回 405。
 - ②:PR 上的 `added_to_merge_queue` timeline 事件。③:对已入队 PR 发 `pr_update_branch` 回不能更新。
-- ①② 与 git 零配额四条的拼写与边界住 `platform-readings.md`,本条只归拢判据。
+- ①② 住 `platform-readings.md` 队列段,git 零配额四条住其配额段,本条只归拢判据。
 - 队列 required 集按 job 与 check-run 名匹配,workflow 名从不作为 check context 出现,搜也搜不到。
 - 改任一 job 名或 test 分片矩阵的形状,必须同一笔更新队列 required 集,否则队列静默挂起。
 - ⛔ required 选择只 gate 等待、不 gate 触发:未列入的检查照跑、算力相同,红了不再挡队列。
