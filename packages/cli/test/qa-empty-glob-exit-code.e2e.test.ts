@@ -25,8 +25,8 @@
  *
  * It has to be a real child process. `process.exit(1)` inside a vitest worker
  * is not an exit status — the number a shell, a `set -e` script or a CI step
- * reads only exists once Node has exited. Spawned through `bin/run-dev.js` +
- * tsx (the pattern `migrate-exit-code.e2e.test.ts` and `emit-json-pipe.test.ts`
+ * reads only exists once Node has exited. Spawned through `bin/run-dev.js`
+ * (the pattern `migrate-exit-code.e2e.test.ts` and `emit-json-pipe.test.ts`
  * already use) so the suite does not depend on `packages/cli/dist` having been
  * built. No server is contacted on this path — the command resolves the glob
  * before it sends anything — so the run needs neither a boot nor a config.

@@ -23,8 +23,8 @@
  * leaves the author hunting for a spelling of something that no longer
  * exists. They run on a REAL CHILD PROCESS and read stdout, for the reasons
  * that file gives (`process.exitCode` in a vitest worker is not an exit
- * status; `printError` writes to stdout), spawned through `bin/run-dev.js` +
- * tsx so the suite does not depend on `packages/cli/dist`.
+ * status; `printError` writes to stdout), spawned through `bin/run-dev.js`
+ * so the suite does not depend on `packages/cli/dist`.
  *
  * ## Why the DOOR is pinned, not only the ledger entry
  *
@@ -96,7 +96,7 @@ let survivor: Run;
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-g-schema-retired-'));
 
-  // Sequential on purpose: five cold tsx starts, each loading every command
+  // Sequential on purpose: five cold CLI starts, each loading every command
   // module, in a container several agents share.
   retired = await runCli([CLI, 'generate', 'schema'], dir);
   retiredAlias = await runCli([CLI, 'g', 'schema', '-o', 'custom.schema.json'], dir);

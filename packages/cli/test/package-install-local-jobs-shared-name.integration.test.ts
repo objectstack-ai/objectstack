@@ -266,8 +266,8 @@ interface InstallRun { exit: number | null; output: string; elapsedMs: number }
  * process draining the server's pipes for the whole install.
  *
  * The child runs until `deadline` (see `SETUP_BUDGET_MS`). It gets its own
- * process group, so the kill reaches the node process `tsx` starts as well.
- * That process holds the pipes, and `close` would wait for it. A kill REJECTS,
+ * process group, so the kill reaches every process the install started.
+ * The CLI process holds the pipes, and `close` would wait for it. A kill REJECTS,
  * naming the install, the wall time and the budget: the rest of the hook could
  * only run into vitest's hook timeout. An install that exits by itself
  * resolves, whatever its code, and the first `it` judges it.

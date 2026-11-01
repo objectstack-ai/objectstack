@@ -272,7 +272,7 @@ describe('os i18n extract --check — the hint is the invocation, not a reconstr
     expect(run.status).toBe(1);
     expect(driftPaths(run.stdout)).toEqual([join('bundles', 'zh-CN.objects.generated.ts')]);
   });
-  // Every case spawns the CLI through `tsx`, and the healing cases spawn it
+  // Every case spawns the CLI's source entry, and the healing cases spawn it
   // three times; measured at ~6 s per run on a shared box, well over vitest's
   // 5 s default. Same instrument and the same generous ceiling as the sibling
   // CLI-spawning pins in this directory.

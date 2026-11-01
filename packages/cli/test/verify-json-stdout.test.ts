@@ -88,9 +88,9 @@ interface Run {
 }
 
 function runCli(dir: string, args: string[]): Run {
-  // Through tsx, so the child runs this checkout's `src/` — under plain node
-  // oclif resolves the command from `dist/`, and the pin would measure
-  // whatever was last built.
+  // `bin/run-dev.js` pins `NODE_ENV=development`, so @oclif/core maps the
+  // command tree to `src/` and registers tsx in-process: the child runs this
+  // checkout's `src/`, never whatever was last built into `dist/`.
   const r = spawnSync(process.execPath, [CLI, ...args], {
     cwd: dir,
     encoding: 'utf8',

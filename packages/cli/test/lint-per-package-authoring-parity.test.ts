@@ -212,7 +212,7 @@ export default defineStack({
 
 const dirs = { flip: '', single: '' };
 
-/** A cold `tsx` spawn of the CLI source entry, the per-case allowance this file always gave one. */
+/** A cold spawn of the CLI source entry, the per-case allowance this file always gave one. */
 const SPAWN_TIMEOUT_MS = 180_000;
 
 /**

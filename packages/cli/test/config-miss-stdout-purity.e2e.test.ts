@@ -120,7 +120,7 @@ beforeAll(async () => {
   // branch misses and the explicit branch resolves against a real cwd.
   dir = mkdtempSync(join(tmpdir(), 'os-config-miss-e2e-'));
 
-  // Sequential: nineteen `tsx` starts at once is the kind of load that makes a
+  // Sequential: nineteen CLI starts at once is the kind of load that makes a
   // shared box report timeouts instead of verdicts. BOTH faces are driven —
   // the `--json` half is the contract this card repaired, the text half is the
   // one it had to leave untouched, and only driving the second proves it.

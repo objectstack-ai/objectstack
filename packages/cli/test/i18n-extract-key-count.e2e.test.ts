@@ -334,7 +334,7 @@ describe('os i18n extract — the number printed is the number written (#16121)'
     );
     expect(summaryRow(wide.stdout).emitted).toBe(1);
   });
-  // Each case spawns the CLI through `tsx`; measured at ~6 s per run on a
+  // Each case spawns the CLI's source entry; measured at ~6 s per run on a
   // shared box, well over vitest's 5 s default. Same instrument and the same
   // generous ceiling as the sibling CLI-spawning pins in this directory.
 }, 900_000);

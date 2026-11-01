@@ -112,13 +112,13 @@ afterAll(async () => {
  * Stop a spawned child and WAIT for it to be gone — SIGTERM first, SIGKILL only
  * as a fallback, which is the shape every other spawner in this directory uses.
  *
- * ⚠️ ⛔ Not a bare `child.kill('SIGKILL')`. The child here is the `tsx` shim,
- * and the `os serve` process is its own child: SIGKILL cannot be forwarded, so
- * killing the shim outright leaves the server running, re-parented to init and
- * still holding this process's stdio pipes — measured while writing this file,
- * where it kept the runner alive after the assertions had all passed. SIGTERM
- * reaches the server through the shim; the 10s SIGKILL is the fallback for a
- * child that ignores it.
+ * ⚠️ ⛔ Not a bare `child.kill('SIGKILL')`. When this file spawned through the
+ * `tsx` shim, `os serve` was the shim's own child and a SIGKILL could not be
+ * forwarded: the server kept running, re-parented to init and still holding
+ * this process's stdio pipes, which kept the runner alive after the assertions
+ * had all passed (measured while writing this file). The child is `os serve`
+ * itself now, and SIGTERM first still lets it shut down and release those
+ * pipes; the 10s SIGKILL is the fallback for a child that ignores it.
  */
 async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;

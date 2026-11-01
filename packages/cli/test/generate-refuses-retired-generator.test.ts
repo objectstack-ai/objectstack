@@ -102,7 +102,7 @@ let afterInherited: string[];
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-g-refuses-retired-'));
 
-  // Sequential on purpose: cold tsx starts in a container several agents share.
+  // Sequential on purpose: cold CLI starts in a container several agents share.
   // Every refusal runs BEFORE the control, so the listings below are what each
   // refusal was measured against.
   schema = await runCli([CLI, 'generate', 'schema'], dir);

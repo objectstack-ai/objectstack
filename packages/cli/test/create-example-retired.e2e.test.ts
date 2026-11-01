@@ -42,8 +42,8 @@
  * `RETIRED_TEMPLATES` is asserted as DATA next door in `create.test.ts`. That
  * is worth nothing on its own: a registry nothing reads prints nothing. What is
  * measured here is a real child process — the exit status a CI script judges by
- * `$?`, and the bytes that reach a terminal. Spawned through `bin/run-dev.js` +
- * tsx so the suite does not depend on `packages/cli/dist` having been built
+ * `$?`, and the bytes that reach a terminal. Spawned through `bin/run-dev.js`
+ * so the suite does not depend on `packages/cli/dist` having been built
  * (`@objectstack/cli#test` depends on `^build` only), the same way
  * `create-refuses-invalid-project-name.e2e.test.ts` and
  * `generate-agent-retired.e2e.test.ts` spawn.
@@ -52,7 +52,7 @@
  *
  * `*.e2e.test.*` is a NAME-decided tier (`scripts/nightly-tiers.mjs`, #16455):
  * these files are excluded from the per-PR and merge-queue population and run
- * in the nightly job. That is the right lane for four cold `tsx` spawns, and it
+ * in the nightly job. That is the right lane for four cold CLI spawns, and it
  * is where both of this pin's closest siblings already live
  * (`create-refuses-invalid-project-name.e2e.test.ts`,
  * `generate-agent-retired.e2e.test.ts`).
@@ -121,7 +121,7 @@ let survivor: Run;
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-create-example-retired-'));
 
-  // Sequential on purpose: four cold tsx starts, each loading every command
+  // Sequential on purpose: four cold CLI starts, each loading every command
   // module, in a container several agents share.
   retired = await runCli(['create', 'example', PROJECT], dir);
   retiredNoName = await runCli(['create', 'example'], dir);

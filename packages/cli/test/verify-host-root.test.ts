@@ -115,7 +115,7 @@ describe('os verify anchors the app at its own directory, not the process cwd (#
     linkSpec(appDir);
     pluginDir = installAppOnlyPlugin(appDir);
 
-    // Through tsx, so the child runs this checkout's `src/` (see verify-json-stdout.test.ts).
+    // `bin/run-dev.js` runs this checkout's `src/` (see verify-json-stdout.test.ts).
     const r = spawnSync(process.execPath, [CLI, 'verify', '--app', join(appDir, 'objectstack.config.mjs')], {
       cwd: elsewhere,
       encoding: 'utf8',

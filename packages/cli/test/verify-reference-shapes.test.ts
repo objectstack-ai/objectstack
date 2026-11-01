@@ -74,7 +74,7 @@ interface Doc {
 }
 
 function runCli(dir: string, args: string[], env: Record<string, string> = {}): Run {
-  // Through tsx, so the child runs this checkout's `src/`.
+  // `bin/run-dev.js` runs this checkout's `src/` (oclif maps its command tree there).
   const r = spawnSync(process.execPath, [CLI, ...args], {
     cwd: dir,
     encoding: 'utf8',

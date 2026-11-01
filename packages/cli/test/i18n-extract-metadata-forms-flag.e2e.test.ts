@@ -245,7 +245,7 @@ describe('os i18n extract — the metadata-form baseline has exactly one home (#
       withoutDuration(off as unknown as Record<string, unknown>),
     );
   });
-  // Each case spawns the CLI through `tsx`; measured at ~6 s per run on a
+  // Each case spawns the CLI's source entry; measured at ~6 s per run on a
   // shared box, well over vitest's 5 s default. Same instrument and same
   // generous ceiling as the sibling CLI-spawning pins in this directory.
 }, 900_000);

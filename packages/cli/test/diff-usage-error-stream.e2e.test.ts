@@ -136,7 +136,7 @@ beforeAll(async () => {
   // assumed, by making sure no stray `objectstack.config.*` is in reach.
   dir = mkdtempSync(join(tmpdir(), 'os-diff-usage-e2e-'));
 
-  // Sequential: concurrent `tsx` starts are the kind of load that makes a
+  // Sequential: concurrent CLI starts are the kind of load that makes a
   // shared box report timeouts instead of verdicts.
   control = await runCli(['diff', '--help'], dir);
   runs = {};

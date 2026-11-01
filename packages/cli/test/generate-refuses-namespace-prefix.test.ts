@@ -164,7 +164,7 @@ beforeAll(async () => {
   brokenBarrel = barrelOf(broken);
   brokenFiles = objectFilesIn(broken);
 
-  // Sequential on purpose: cold tsx starts in a container several agents share.
+  // Sequential on purpose: cold CLI starts in a container several agents share.
   // Every refusal runs BEFORE its project's control, so the barrel and file
   // snapshots above are what each refusal was measured against.
   residual = await runCli([CLI, 'generate', 'object', 'order__line'], namespaced);
