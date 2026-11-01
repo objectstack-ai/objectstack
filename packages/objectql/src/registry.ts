@@ -7298,7 +7298,18 @@ export class SchemaRegistry {
     }
   }
 
-  uninstallPackage(id: string): boolean {
+  /**
+   * Withdraw an installed package: its objects, namespace, items, catalog
+   * claims and record (each step's reason is on it below).
+   *
+   * @param options.keepBootSeed [#28697] Keep `id` in the boot seed of
+   *   disabled packages ({@link setInitialDisabledPackageIds}). The engine's
+   *   withdrawal of a package refused part-way through its first registration
+   *   passes it: that package never existed for an operator, so the persisted
+   *   disable state its next install must honour is not forgotten with the
+   *   row. An operator's uninstall omits it.
+   */
+  uninstallPackage(id: string, options?: { keepBootSeed?: boolean }): boolean {
     const pkg = this.getPackage(id);
     if (!pkg) {
       console.warn(`[Registry] Package not found for uninstall: ${id}`);
@@ -7344,7 +7355,7 @@ export class SchemaRegistry {
     // record removal below rather than at the top: every mutation here is
     // downstream of `unregisterObjectsByPackage`, the one step that can REFUSE
     // (ADR-0029), so a refused uninstall still removes nothing at all.
-    this.initialDisabledPackageIds.delete(id);
+    if (options?.keepBootSeed !== true) this.initialDisabledPackageIds.delete(id);
 
     // Remove package record
     const collection = this.metadata.get('package');
