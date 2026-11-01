@@ -3497,6 +3497,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.directory.invalidTooltip': '{count} invalid item(s) — click to fix',
   'engine.directory.warnTooltip': '{count} item(s) with warnings',
   'engine.directory.itemCountTooltip': '{count} item(s) of this type',
+  // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
+  // filter of the All metadata area, from a base's customization read.
+  'engine.customizationMark.customized': 'Customized ({base})',
+  'engine.customizationMark.customizedTitle': 'The customization package {pair} overrides this item of {base}',
+  'engine.customizationMark.added': 'Added',
+  'engine.customizationMark.addedTitle': 'Added to {base} by its customization package {pair}',
+  'engine.customizationMark.customizationOf': 'Customization of {base}',
+  'engine.customizationMark.customizationOfTitle': 'An item of {pair}, the customization package of {base}',
+  'engine.customizationMark.readFailed': 'Couldn’t read customizations: {message}',
+  'engine.directory.customizations.total': '{customized} customized on {base}',
+  'engine.directory.customizations.tile': '{customized} customized',
+  'engine.directory.customizations.tileTitle': 'Customized items of this type: {customized}',
+  'engine.list.customizations.only': 'Only customizations ({marked})',
   'engine.home.recent': 'Recently viewed',
   'engine.diagnostics.title': 'Metadata Diagnostics',
   'engine.diagnostics.description':

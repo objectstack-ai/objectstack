@@ -3112,6 +3112,19 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.directory.invalidTooltip': '{count} 个无效项 — 点击修复',
   'engine.directory.warnTooltip': '{count} 个条目带有警告',
   'engine.directory.itemCountTooltip': '此类型共 {count} 项',
+  // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
+  // filter of the All metadata area, from a base's customization read.
+  'engine.customizationMark.customized': '已定制（{base}）',
+  'engine.customizationMark.customizedTitle': '定制包 {pair} 覆盖了 {base} 的此项',
+  'engine.customizationMark.added': '新增',
+  'engine.customizationMark.addedTitle': '由 {base} 的定制包 {pair} 新增',
+  'engine.customizationMark.customizationOf': '{base} 的定制',
+  'engine.customizationMark.customizationOfTitle': '{pair} 中的项，即 {base} 的定制包',
+  'engine.customizationMark.readFailed': '无法读取定制：{message}',
+  'engine.directory.customizations.total': '{base} 已定制 {customized} 项',
+  'engine.directory.customizations.tile': '已定制 {customized}',
+  'engine.directory.customizations.tileTitle': '此类型已定制的项：{customized}',
+  'engine.list.customizations.only': '仅看定制（{marked}）',
   'engine.home.recent': '最近访问',
   'engine.diagnostics.title': '元数据诊断',
   'engine.diagnostics.description':
