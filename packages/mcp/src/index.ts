@@ -38,6 +38,7 @@ export type {
   McpActionBridge,
   McpActionSummary,
   McpActionParamSummary,
+  McpActionUnavailable,
   RegisterActionToolsOptions,
   McpFederationBridge,
 } from './mcp-http-tools.js';

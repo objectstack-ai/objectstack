@@ -44,10 +44,12 @@ import {
   ShieldAlert,
   RotateCw,
   Maximize2,
+  Search,
+  Download,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { DataSource, FieldMetadata } from '@object-ui/types';
-import type { ViewFilterRule } from '@objectstack/spec/ui';
+import type { ViewFilterElement } from '@objectstack/spec/ui';
 import { getCellRenderer, resolveCellRendererType, RecordPickerDialog, deriveLookupColumns, MaskedCellRenderer, RecordHoverCard } from '@object-ui/fields';
 import {
   buildExpandFields,
@@ -93,6 +95,7 @@ import {
   RelatedCardCountContext,
   RelatedEnlargeContext,
   RelatedListCompactContext,
+  RelatedListEnlargedContext,
   useSeenOnce,
 } from './relatedListCompact';
 import { relatedCardId } from './synth/relatedArrangement';
@@ -139,16 +142,19 @@ export interface RelatedListProps {
    * insert (e.g. the AI-seat cap) surface as an inline error.
    *
    * `picker.filter` restricts which records the dialog offers, and is typed as
-   * the spec's own `ViewFilterRule[]` rather than `any` (#3831): it goes to
+   * the spec's own `ViewFilterElement[]` rather than `any` (#3831): it goes to
    * `RecordPickerDialog`'s `baseFilter` VERBATIM, so the authored vocabulary is
    * the one enforced — a looser type here is where a wrong shape would hide.
+   * The element is a flat rule or an any-of group `{ or: [rule, ...] }`
+   * (objectstack#28020, #28462); the dialog lowers both through
+   * `toFilterNodeSafely`.
    */
   add?: {
     picker: {
       object: string;
       valueField?: string;
       labelField?: string;
-      filter?: ViewFilterRule[];
+      filter?: ViewFilterElement[];
     };
     linkField?: string;
     label?: string;
@@ -252,13 +258,14 @@ export interface RelatedListProps {
    * for the list's own scope).
    *
    * Two shapes arrive, both produced by our own layers: the spec vocabulary
-   * (`ViewFilterRule[]`) as authored, and an ObjectQL AST node as composed by
+   * (`ViewFilterElement[]`: flat rules and any-of `{ or }` groups,
+   * objectstack#28462) as authored, and an ObjectQL AST node as composed by
    * `ElementDataSourceGate` (which ANDs component/view/binding filters through
    * `mergeFilterNodes` before this component ever sees them). Both are lowered
    * here through that same single sink — the repo's one filter→wire exit — so no
    * second conversion dialect appears.
    */
-  filter?: ViewFilterRule[] | FilterNode;
+  filter?: ViewFilterElement[] | FilterNode;
   /**
    * Enable text filtering. The box keeps a row when a column the list shows
    * contains the term; a masked column (a `password` / `secret` field, or any
@@ -721,6 +728,54 @@ const BodyTableTotals: React.FC<{ rows: readonly any[]; columns: any[] | undefin
   );
 };
 
+/** A chip of the enlarged face's toolbar (objectstack#27524). */
+type EnlargedChip = 'all' | 'mine' | 'overdue';
+
+interface EnlargedChipDef {
+  id: EnlargedChip;
+  /** The narrowing it adds to the list's own rows; none for 全部. */
+  filter?: Record<string, unknown>;
+}
+
+const NO_ENLARGED_CHIPS: readonly EnlargedChipDef[] = [];
+
+/**
+ * The chips of the enlarged face (objectstack#27524, the board's 全部 / 我的 /
+ * 逾期), each drawn only where the child object declares what it says:
+ *  - 我的: the records the signed-in user owns — the object carries the
+ *    platform's `owner_id` column;
+ *  - 逾期: the records whose deadline has passed — the object declares a
+ *    deadline (`dueLike: true` on a `date` / `datetime` field) with no
+ *    `settledWhen`. A settled deadline is a per-record predicate no query can
+ *    ask, and a chip that listed settled records as overdue would say what the
+ *    cells do not.
+ */
+interface EnlargedChipField {
+  name?: unknown;
+  type?: unknown;
+  dueLike?: unknown;
+  settledWhen?: unknown;
+}
+
+function enlargedChipsOf(objectSchema: { fields?: unknown } | null | undefined): readonly EnlargedChipDef[] {
+  const chips: EnlargedChipDef[] = [{ id: 'all' }];
+  const raw = objectSchema?.fields;
+  const fields: Array<[unknown, EnlargedChipField | undefined]> = Array.isArray(raw)
+    ? (raw as Array<EnlargedChipField | undefined>).map((f) => [f?.name, f])
+    : raw && typeof raw === 'object'
+      ? Object.entries(raw as Record<string, EnlargedChipField | undefined>)
+      : [];
+  if (fields.some(([name]) => name === 'owner_id')) {
+    chips.push({ id: 'mine', filter: { owner_id: '{current_user_id}' } });
+  }
+  const deadline = fields.find(
+    ([name, f]) => typeof name === 'string' && f?.dueLike === true && f?.settledWhen == null
+      && (f?.type === 'date' || f?.type === 'datetime'),
+  );
+  if (deadline) chips.push({ id: 'overdue', filter: { [deadline[0] as string]: { $lt: '{today}' } } });
+  return chips;
+}
+
 export const RelatedList: React.FC<RelatedListProps> = ({
   title,
   type,
@@ -885,6 +940,13 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // second column does not fit beside it and the table would be cut off at the
   // column's edge.
   const compact = React.useContext(RelatedListCompactContext);
+  // objectstack#27524 — drawn as the record page's active tab: the toolbar
+  // face below (`RelatedListEnlargedContext`).
+  const enlargedFace = React.useContext(RelatedListEnlargedContext) && !compact;
+  const [enlargedChip, setEnlargedChip] = React.useState<EnlargedChip>('all');
+  // The 全部 chip's count, taken while it is on and nothing narrows the rows.
+  const [allCount, setAllCount] = React.useState<number | null>(null);
+  const [exportState, setExportState] = React.useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
   // objectstack#27056 — the card's count, asked up front with the column's
   // other cards (`RelatedCardStack`); `null` when nothing counted it.
   const cardCount = React.useContext(RelatedCardCountContext);
@@ -899,7 +961,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // as a generic server filter. While the user is typing in it
   // (opt-in `filterable` consumers only) we drop back to the legacy
   // fetch-everything mode so the filter keeps seeing the whole collection.
-  const filterActive = filterable && filterText !== '';
+  const filterActive = (filterable || enlargedFace) && filterText !== '';
   // Windowed (server-paged) mode — issue #2711: on the auto-fetch path with
   // pagination enabled, ask the server for ONE page ($top/$skip) plus the
   // running total instead of dumping every child row into the browser.
@@ -959,6 +1021,21 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   );
   const filterRefusal = listFilterResult.ok ? undefined : listFilterResult.refusal;
   const listFilterNode = listFilterResult.ok ? listFilterResult.node : undefined;
+  // The enlarged face's chips (objectstack#27524): 我的 and 逾期 narrow the
+  // list's own rows, each only where the child object declares what it says
+  // (`enlargedChipsOf`). Resolved and lowered the way the list's filter is.
+  const chips = enlargedFace ? enlargedChipsOf(objectSchema) : NO_ENLARGED_CHIPS;
+  const chipFilter = chips.find((chip) => chip.id === enlargedChip)?.filter;
+  const scopeChipFilter = useResolvedFilter(chipFilter, filterScope);
+  const chipKey = JSON.stringify(scopeChipFilter ?? null);
+  const chipFilterNode = React.useMemo(
+    () => {
+      const lowered = toFilterNodeSafely(scopeChipFilter);
+      return lowered.ok ? lowered.node : undefined;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [chipKey],
+  );
 
   /**
    * The `$expand` roots for the auto-fetch below (objectui#10112).
@@ -1462,9 +1539,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       // freshly lowered AST that means the same thing (the difference is
       // invisible on screen and visible to every caller pinning the wire).
       const queryFilter =
-        listFilterNode === undefined
+        listFilterNode === undefined && chipFilterNode === undefined
           ? parentScope
-          : mergeFilterNodes(parentScope, listFilterNode);
+          : mergeFilterNodes(parentScope, listFilterNode, chipFilterNode);
       if (dataSource && typeof dataSource.find === 'function') {
         const params: Record<string, any> = { $filter: queryFilter };
         // Resolve reference columns server-side, the way every other list in
@@ -1628,7 +1705,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // card's in-view / non-zero gate, a boolean. `compact` decides whether the
     // record page's payload may serve the read (objectstack#27627), a boolean.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady, compact]);
+  }, [api, dataProvided, dataSource, referenceField, referenceFieldIsMultiValue, parentId, refreshNonce, windowed, effectivePageSize, fetchPage, fetchSortField, fetchSortDirection, defaultSortKey, filterKey, chipKey, expandKey, selectKey, wireExpandKey, wireSelectKey, rowsWanted, objectSchemaReady, compact]);
 
   // Windowed mode: a page beyond the (shrunken) collection — e.g. the last
   // row of the last page was just deleted — comes back empty. Step back one
@@ -2558,7 +2635,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // Reset to first page when filter/sort changes
   React.useEffect(() => {
     setCurrentPage(0);
-  }, [filterText, sortField, sortDirection]);
+  }, [filterText, sortField, sortDirection, enlargedChip]);
 
   const handleSort = React.useCallback((field: string) => {
     // A masked column is never sorted by (objectui#10728). The button row
@@ -2631,10 +2708,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const enlargeRelated = React.useContext(RelatedEnlargeContext);
   const ownRelationshipId = objectName && referenceField ? relatedCardId(objectName, referenceField) : null;
   const bodyTable = !compact && !!ownRelationshipId && bodyTableIds.has(ownRelationshipId);
-  // In the tabbed tier's 关联 tab the reader's arrangement hands the full
-  // list its chrome (objectstack#27055): ⠿ moves it and ⋯ hides it. It does
-  // not collapse: a related list has no collapsed state (objectstack#27524).
-  const arrangedFull = !compact && !!cardChrome;
   const isCollapsible = collapsible || bodyTable;
 
   // The row click hands the host the rows on show beside the clicked one
@@ -2755,6 +2828,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   React.useEffect(() => {
     onEmptyChange?.(emptyAnswer);
   }, [emptyAnswer, onEmptyChange]);
+  React.useEffect(() => {
+    if (enlargedFace && enlargedChip === 'all' && !filterActive && !loading && !loadFailure) setAllCount(recordCount);
+  }, [enlargedFace, enlargedChip, filterActive, loading, loadFailure, recordCount]);
   // When the consumer explicitly enables `filterable`, always render the
   // filter input — they're opting in. (data-table's own auto-search is
   // suppressed via the viewSchema below to avoid a duplicate input.)
@@ -3058,6 +3134,195 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     );
   }
 
+  // objectstack#27524 — the record page's active tab (the ride-along ruled at
+  // ③'s preview gate): the toolbar — the filter, 全部 / 我的 / 逾期, the child
+  // object's toolbar actions, 新建, 导出 — over the whole table, with the
+  // count and page line between them. No card header and no card foot: the
+  // tab names the list, and its count is the 全部 chip's.
+  if (enlargedFace) {
+    const shownCount = filterActive ? filteredData.length : recordCount;
+    const chipLabel: Record<EnlargedChip, string> = {
+      all: t('detail.relatedChipAll', { defaultValue: 'All' }),
+      mine: t('detail.relatedChipMine', { defaultValue: 'Mine' }),
+      overdue: t('detail.relatedChipOverdue', { defaultValue: 'Overdue' }),
+    };
+    const exportable = typeof (dataSource as DataSource | undefined)?.exportDownload === 'function'
+      && !!api && !!referenceField && parentId != null && parentId !== '';
+    const handleExport = () => {
+      if (!exportable || exportState.busy) return;
+      setExportState({ busy: true, error: null });
+      void (async () => {
+        try {
+          // The rows the face shows: the parent, the list's own filter, the
+          // chip, the filter text and the order (the list read's sources).
+          const parentScope = composeParentScopeFilter(referenceField!, parentId!, objectSchema?.fields);
+          const fields = (effectiveColumns ?? [])
+            .map((col: any) => col?.accessorKey || columnIdentity(col))
+            .filter((f: unknown): f is string => typeof f === 'string' && f !== '');
+          const blob = await (dataSource as DataSource).exportDownload!(api!, {
+            format: 'csv',
+            filter: mergeFilterNodes(parentScope, listFilterNode, chipFilterNode),
+            ...(fields.length > 0 ? { fields } : {}),
+            ...(filterText ? { search: filterText } : {}),
+            ...(sortField ? { sort: [{ field: sortField, direction: sortDirection }] } : {}),
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${String(title || api).replace(/[\\/:*?"<>|]+/g, '_')}.csv`;
+          a.rel = 'noopener';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          setExportState({ busy: false, error: null });
+        } catch (err) {
+          setExportState({ busy: false, error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+    };
+    return (
+      <section className={cn('flex min-w-0 flex-col gap-3', className)} data-related-enlarged-list="">
+        <div
+          role="toolbar"
+          aria-label={title}
+          className="flex flex-wrap items-center gap-2"
+          data-related-enlarged-toolbar=""
+        >
+          <div className="relative min-w-[12rem] flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
+            <Input
+              type="search"
+              value={filterText}
+              onChange={(e) => setFilterText(e.target.value)}
+              placeholder={t('detail.relatedFilter', { title, defaultValue: 'Filter {{title}}…' })}
+              aria-label={t('detail.relatedFilter', { title, defaultValue: 'Filter {{title}}…' })}
+              className="h-8 pl-8 text-sm"
+              data-related-enlarged-filter=""
+            />
+          </div>
+          {chips.length > 1 && (
+            <div role="group" aria-label={t('detail.relatedChips', { defaultValue: 'Show' })} className="flex items-center gap-1">
+              {chips.map((chip) => {
+                const on = chip.id === enlargedChip;
+                return (
+                  <Button
+                    key={chip.id}
+                    type="button"
+                    variant={on ? 'secondary' : 'ghost'}
+                    size="sm"
+                    aria-pressed={on}
+                    className="h-8 gap-1.5 px-2.5 text-xs shadow-none"
+                    onClick={() => setEnlargedChip(chip.id)}
+                    data-related-chip={chip.id}
+                  >
+                    {chipLabel[chip.id]}
+                    {chip.id === 'all' && allCount !== null && (
+                      <span className="tabular-nums text-muted-foreground">{allCount}</span>
+                    )}
+                  </Button>
+                );
+              })}
+            </div>
+          )}
+          <div className="ml-auto flex items-center gap-1">
+            {onToolbarAction && permittedToolbarActions.map((a) => (
+              <RelatedToolbarButton key={a.name} action={a} onToolbarAction={onToolbarAction} />
+            ))}
+            {add && pickerObject && dataSource && addGranted && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={addBusy}
+                onClick={() => { setAddError(null); setPickerOpen(true); }}
+                className="h-8 gap-1 text-xs shadow-none"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {add.label || t('detail.add', { defaultValue: 'Add' })}
+              </Button>
+            )}
+            {onNew && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={newDisabled}
+                data-testid="related-list-new"
+                onClick={() => onNew()}
+                className="h-8 gap-1 text-xs shadow-none"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                {t('detail.new')}
+              </Button>
+            )}
+            {exportable && (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={exportState.busy}
+                onClick={handleExport}
+                className="h-8 gap-1 text-xs shadow-none"
+                data-related-enlarged-export=""
+              >
+                <Download className="h-3.5 w-3.5" />
+                {t('detail.relatedExport', { defaultValue: 'Export' })}
+              </Button>
+            )}
+          </div>
+        </div>
+        {exportState.error && (
+          <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {exportState.error}
+          </div>
+        )}
+        {loadFailure ? (
+          <RelatedListLoadFailed error={loadFailure.error} onRetry={handleRetryRead} />
+        ) : loading && relatedData.length === 0 ? (
+          <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">{t('detail.loading')}</div>
+        ) : isEmpty || shownCount === 0 ? (
+          <div className="py-6 text-center text-sm text-muted-foreground" data-related-enlarged-empty="">
+            {t('detail.noRelatedRecords')}
+          </div>
+        ) : (
+          <>
+            <div className="text-xs text-muted-foreground" data-related-enlarged-status="">
+              {t('detail.relatedRows', { count: shownCount, defaultValue: '{{count}} rows' })}
+              {showPagination && ` · ${t('detail.pageOf', { current: currentPage + 1, total: totalPages })}`}
+            </div>
+            <div className={cn('min-w-0', loading && 'pointer-events-none opacity-60 transition-opacity')}>
+              <SchemaRenderer schema={viewSchema} />
+            </div>
+            {showPagination && (
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  disabled={currentPage === 0}
+                  onClick={() => setCurrentPage((p) => Math.max(0, p - 1))}
+                >
+                  <ChevronLeft className="h-3 w-3" />
+                  {t('detail.previousPage')}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  disabled={!canGoNext}
+                  onClick={() => setCurrentPage((p) => (canGoNext ? p + 1 : p))}
+                >
+                  {t('detail.nextPage')}
+                  <ChevronRight className="h-3 w-3" />
+                </Button>
+              </div>
+            )}
+            {bodyTable && <BodyTableTotals rows={paginatedData} columns={effectiveColumns} objectSchema={objectSchema} />}
+          </>
+        )}
+        {trailingDialogs}
+      </section>
+    );
+  }
+
   return (
     <Card className={cn('shadow-none border-border/60 bg-transparent', isEmpty && 'bg-muted/10', className)}>
       <CardHeader
@@ -3139,8 +3404,6 @@ export const RelatedList: React.FC<RelatedListProps> = ({
                 {add.label || t('detail.add', { defaultValue: 'Add' })}
               </Button>
             )}
-            {arrangedFull && <RelatedPanelHandle chrome={cardChrome!} title={title} />}
-            {arrangedFull && <RelatedCardMenu chrome={cardChrome!} title={title} />}
             {bodyTable && enlargeRelated && ownRelationshipId && (
               <Button
                 variant="ghost"

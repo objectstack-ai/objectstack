@@ -10,8 +10,8 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, ArrangedRelatedTab, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, type PanelToggleItem } from '@object-ui/components';
+import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ChevronLeft, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, PanelRight } from 'lucide-react';
+import { Database, ArrowLeft, ChevronLeft, ChevronRight, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, PanelRight } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -33,13 +33,13 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
-import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordDrawerUpcomingContext, RecordPageDrawerHost, useRecordPane } from './recordDrawerStack.js';
+import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
+import { phoneRecordHeader } from './recordPhoneHeader.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
+import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
 import { recordPageRelatedLists, recordPageRequestOf, seedRecordPageReaders } from './recordPagePayload.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
-import { RECORD_DETAIL_TAB_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
-
-/** History-state flag: this view pushed the `?related=` entry, so closing pops it. */
-const RELATED_ENLARGE_PUSHED = '__relatedEnlargePushed';
+import { RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
 import { createConsoleServerActionHandler } from '../utils/consoleServerAction.js';
 import { withNewTabUrlFastPath } from '../utils/newTabUrlFastPath.js';
@@ -83,6 +83,7 @@ import {
 } from '../utils/workspacePreference.js';
 import { shortcutKeycaps, useAdvertiseShortcut, type AdvertisedShortcut, type ShortcutChord, type ShortcutLabelTranslate } from '../chrome/advertisedShortcuts.js';
 import { useActionModal } from '../hooks/useActionModal.js';
+import { resolveCascadeDeleteLabels } from '../hooks/useObjectActions.js';
 import { useRecentItems } from '../hooks/useRecentItems.js';
 import { useObjectPresence } from '../hooks/useObjectPresence.js';
 
@@ -112,6 +113,16 @@ interface RecordDetailViewProps {
 }
 
 const FALLBACK_USER = { id: 'current-user', name: 'Demo User' };
+
+/**
+ * The horizontal inset the `page` renderer gives a page's body
+ * (`p-3 md:p-4 lg:p-6` in `@object-ui/components` `renderers/layout/page.tsx`).
+ * The appends this host draws after a page it renders whole (the approvals and
+ * attachments fallbacks and the provenance footer) sit beside that page, not
+ * inside it, so they take the same inset; without it they drew wider than the
+ * page's own cards (objectstack#27520 row 14).
+ */
+const RECORD_PAGE_APPEND_INSET = 'px-3 md:px-4 lg:px-6';
 
 /**
  * `⌘⇧,` / `Ctrl+Shift+,` — show or hide the record page's right column, the
@@ -720,18 +731,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // renders the "← All <object>" back link — switching tabs must keep it.
     setTabSearchParams(sp, { replace: true, state: location.state });
   }, [setTabSearchParams, location.state]);
-  // ── The enlarged related list, `?related=object.field` (objectstack#27055,
-  // Target 9) ── One path to a related list's every record and column: a
-  // card's ⤢ (or its count) opens the list as a full-width table over the
-  // page body, addressed by the URL so it survives a reload and a shared link.
-  // Opening PUSHES an entry (the browser's Back returns to the columns);
-  // closing — Esc or ‹ — pops it when this view pushed it, and otherwise
-  // replaces the URL without the parameter.
+  // ── The active tab, `?related=object.field` (objectstack#27055, Target 9;
+  // objectstack#27524, Targets 8 and 9) ── One path to a related list's every
+  // record and column: a tab of the record's tab row (or a panel's header)
+  // opens the list as a full-width table under the header, addressed by the
+  // URL so it survives a reload and a shared link. Leaving 「概览」 PUSHES an
+  // entry (the browser's Back returns to the page); moving between tabs
+  // REPLACES it, so Back, Esc and 「概览」 all return to the page in one step.
+  // Closing — Esc or 「概览」 — pops the entry when this view pushed it, and
+  // otherwise replaces the URL without the parameter.
   const enlargedRelatedParam = tabSearchParams.get(RECORD_RELATED_ENLARGE_PARAM) ?? undefined;
   const openEnlargedRelated = useCallback((id: string) => {
     const sp = new URLSearchParams(window.location.search);
-    if (sp.get(RECORD_RELATED_ENLARGE_PARAM) === id) return;
+    const open = sp.get(RECORD_RELATED_ENLARGE_PARAM);
+    if (open === id) return;
     sp.set(RECORD_RELATED_ENLARGE_PARAM, id);
+    if (open) {
+      setTabSearchParams(sp, { replace: true, state: location.state });
+      return;
+    }
     const state = location.state && typeof location.state === 'object' ? location.state : {};
     setTabSearchParams(sp, { state: { ...(state as object), [RELATED_ENLARGE_PUSHED]: true } });
   }, [setTabSearchParams, location.state]);
@@ -744,12 +762,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     sp.delete(RECORD_RELATED_ENLARGE_PARAM);
     setTabSearchParams(sp, { replace: true, state: location.state });
   }, [setTabSearchParams, location.state, navigate]);
-  // Inline "← back to parent" link shown above the record body. Prefers an
-  // explicit history-state `from` (legacy, in-session only), then falls back
-  // to the last ancestor in the `?from=` URL trail — which, unlike history
-  // state, survives refresh and shared links. This is the immediate-parent
-  // affordance, and since the top bar draws no record crumb (objectui#12461)
-  // the only one: each parent's own link carries the trail above it.
+  // The way back to where the page was opened from, which the page's top bar
+  // draws (objectstack#27524, Target 7). Prefers an explicit history-state
+  // `from` (legacy, in-session only), then falls back to the last ancestor in
+  // the `?from=` URL trail — which, unlike history state, survives refresh and
+  // shared links. Since the app's top bar draws no record crumb
+  // (objectui#12461) this is the only one: each parent's own link carries the
+  // trail above it.
   const originFromState = (location.state as any)?.from as { pathname?: string; label?: string } | undefined;
   const originFrom = useMemo<{ pathname?: string; label?: string } | undefined>(() => {
     if (originFromState?.pathname && originFromState?.label) return originFromState;
@@ -763,6 +782,20 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       label: parent.t || `#${shortId}`,
     };
   }, [originFromState, location.search, appName]);
+  // objectstack#27524, Target 7 — a page a list opened knows that list: its
+  // top bar steps the list's rows with the counter, ↓ ↑ and `j` / `k` (the
+  // arrow keys scroll the page). A page the row's ↗ opened also offers ⤡
+  // 「Collapse to drawer」, and its object crumb returns to the list. The
+  // counter names the list's view (the origin's label). A record drawn in a
+  // pane has the pane's bar.
+  const pageReturn = useRecordPageReturn(embedded ? undefined : recordId);
+  const pageStepper = useMemo<RecordTopBarStepper | undefined>(
+    () => (pageReturn.stepper && originFromState?.label
+      ? { ...pageReturn.stepper, scope: originFromState.label }
+      : pageReturn.stepper),
+    [pageReturn.stepper, originFromState?.label],
+  );
+  useRecordStepKeys(!embedded && !!pageStepper, pageStepper, { arrows: false });
   // `i18n` with `language`: what a flow launch translates the flow's own
   // toasts in (objectui#12075).
   const { t, language, i18n } = useObjectTranslation();
@@ -812,6 +845,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // can display "Acme Platform Upgrade" instead of "#9U1_MmmxjiGR…". Skip
   // when embedded (drawer/split): the parent list route owns the breadcrumb.
   useRecordBreadcrumbTitle(embedded ? undefined : recordTitle);
+  // In a pane, the record's title is what its top bar's breadcrumb names
+  // (objectstack#27524, Target 7); the pane's slot for the record's ⊟ is there
+  // too (`RecordPaneBarToggles` below).
+  const paneBar = useRecordPaneBar();
+  useEffect(() => {
+    if (embedded && recordId) paneBar?.reportTitle(recordId, recordTitle);
+  }, [embedded, paneBar, recordId, recordTitle]);
 
   // Use the URL recordId as-is — it contains the actual record id.
   // Navigation code passes `record.id || record._id` directly into the URL
@@ -3709,6 +3749,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [historyEnabled, historyEntries, t],
   );
 
+  // objectstack#27058 — the record page on a phone. Its business actions sit
+  // in a bar at the bottom of the page (the header draws them there, through
+  // `PageHeaderPhoneContext`), its top bar is one way back, a page pushed from
+  // a related row has a path row, and going back to a page restores where it
+  // was scrolled. A record drawn in a pane is never on a phone.
+  const phone = usePhoneViewport();
+  const phonePage = phone && !embedded;
+  const [phoneActionBarEl, setPhoneActionBarEl] = useState<HTMLDivElement | null>(null);
+  const [pageScrollerEl, setPageScrollerEl] = useState<HTMLDivElement | null>(null);
+  useRecordPageScrollMemory(phonePage ? pageScrollerEl : null, pageRecordStatus === 'loaded');
+
   if (isLoading) {
     return <SkeletonDetail />;
   }
@@ -4069,7 +4120,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           };
           const deleteTarget =
             (readablePageRecord as Record<string, unknown> | null | undefined) ?? { id: pureRecordId };
-          const copy = recordDelete.confirmCopy(deleteDeps, { record: deleteTarget });
+          // objectstack#28472 — and names the objects the delete cascades into.
+          const cascadeLabels = await resolveCascadeDeleteLabels(dataSource, objectName!, (name) =>
+            objectLabel(objects.find((o: any) => o.name === name) ?? { name, label: name }));
+          const copy = recordDelete.confirmCopy({ ...deleteDeps, cascadeLabels }, { record: deleteTarget });
           // objectui#11001 — asked through this page's own confirm runtime,
           // the in-app `ActionConfirmDialog` the list view's delete asks
           // through too, never the browser's native `window.confirm` (which
@@ -4104,11 +4158,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // synth/slotted pages AND authored full-Lightning pages without
   // mutating the assignedPage tree. `PageHeaderRenderer` dedupes by
   // name so authored business actions still win on collision.
+  //
+  // objectstack#27058, Target 4 — on a phone the default page's header reads
+  // the first two declared text highlights as its subtitle and shows at most
+  // four highlights after them.
+  const phoneHeader = phonePage && !assignedPage
+    ? phoneRecordHeader(objectDef, synthParts.highlightFields, readablePageRecord)
+    : null;
   const composedPage = assignedPage
     ? effectivePage
     : buildDefaultPageSchema(objectDef as any, {
         sections: synthParts.sections,
-        highlightFields: synthParts.highlightFields,
+        highlightFields: phoneHeader ? phoneHeader.highlightFields : synthParts.highlightFields,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
         approvals: synthParts.approvals,
@@ -4169,11 +4230,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // no hook may run.
   const bodyTableIds = assignedPage || namedPageBlocked ? new Set<string>() : bodyTableIdsOf(renderedPage);
 
-  // objectstack#27052 / objectstack#27524, Target 4 — the right-column switch:
-  // ONE ⊟ icon (「右栏」), drawn at the end of the record header's action row
-  // (`PageHeaderTrailingContext`; the top bar takes it in a later slice of
-  // #27524), only where the tier has a right column and the page has a panel
-  // for it — never in the stack.
+  // objectstack#27052 / objectstack#27524, Targets 4 and 7 — the right-column
+  // switch: ONE ⊟ icon (「右栏」), drawn in the record's top bar after its step
+  // group (the page's own bar below; a pane's bar through
+  // `RecordPaneBarToggles`), only where the tier has a right column and the
+  // page has a panel for it — never in the stack.
   const panelToggleItems: PanelToggleItem[] = [];
   if (
     pageColumns
@@ -4193,8 +4254,212 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   drawnPanelSwitch.current = panelToggleItems.length > 0;
   const panelToggles =
     panelToggleItems.length > 0 ? (
-      <PanelToggles label={t('detail.panelToggles', { defaultValue: 'Panels' })} items={panelToggleItems} />
+      <PanelToggles
+        label={t('detail.panelToggles', { defaultValue: 'Panels' })}
+        items={panelToggleItems}
+        className="h-7 [&_[data-panel-toggle]]:h-7 [&_[data-panel-toggle]]:w-7"
+      />
     ) : null;
+
+  // objectstack#27524, Target 7 — the page's top bar: the frame controls in
+  // one 40 px row above the record header, which keeps the business actions.
+  // Left, the breadcrumb: under a `?from=` trail `←` and the path (each
+  // ancestor returns to its page), else 「对象 › 记录名」, the object returning
+  // to the list the page was opened from (or the object's list). Right, each
+  // only where it applies: the counter and ↓ ↑ (a list context), ⊟, ⤡.
+  const pageTrail = embedded ? [] : decodeRecordTrail(new URLSearchParams(location.search).get(RECORD_TRAIL_PARAM));
+  const objectListPath = appName && objectName ? `/apps/${appName}/${objectName}` : undefined;
+  const originPathOnly = originFromState?.pathname?.split('?')[0];
+  // An origin that is a list of this object's records (a view of it) is named
+  // by the object; any other origin (an inbox, a dashboard) by its own label.
+  const originIsObjectList = !!objectListPath && !!originPathOnly
+    && (originPathOnly === objectListPath || originPathOnly.startsWith(`${objectListPath}/`));
+  const withoutPaneParam = (href: string) => {
+    const [path, query = ''] = href.split('?');
+    const sp = new URLSearchParams(query);
+    sp.delete(RECORD_DRAWER_PARAM);
+    const qs = sp.toString();
+    return qs ? `${path}?${qs}` : path;
+  };
+  const crumbClass =
+    'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const shortRecordId = (id: string) => `#${id.length > 12 ? `${id.slice(0, 8)}…` : id}`;
+  const objectDefOf = (name: string) => objects.find((o: any) => o?.name === name);
+  const pageLeading = embedded ? null : pageTrail.length > 0 ? (
+    <>
+      {originFrom?.pathname && (
+        <Link
+          to={originFrom.pathname}
+          aria-label={t('detail.goBack', { defaultValue: 'Go back' })}
+          title={t('detail.goBack', { defaultValue: 'Go back' })}
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-record-crumb-back=""
+        >
+          <ArrowLeft className="h-3.5 w-3.5" />
+        </Link>
+      )}
+      <nav
+        aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
+        className="flex min-w-0 items-center gap-1"
+        data-testid="record-page-trail"
+      >
+        {pageTrail.map((entry, index) => {
+          const entryDef = objectDefOf(entry.o);
+          return (
+            <span key={`${index}:${entry.o}:${entry.i}`} className="flex min-w-0 items-center gap-1">
+              <Link to={buildRecordTrailHref(appName ? `/apps/${appName}` : '', entry, pageTrail.slice(0, index))} className={crumbClass}>
+                {entryDef ? objectLabel(entryDef) : entry.o}{' '}
+                <span className="font-medium text-foreground">{entry.t || shortRecordId(entry.i)}</span>
+              </Link>
+              <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+            </span>
+          );
+        })}
+        <span className="truncate" aria-current="page">{objectDef ? objectLabel(objectDef) : objectName}</span>
+      </nav>
+    </>
+  ) : (
+    <nav
+      aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
+      className="flex min-w-0 items-center gap-1"
+      data-testid="record-page-crumb"
+    >
+      {(() => {
+        const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
+        const objectCrumbClass = cn(crumbClass, 'shrink-0');
+        if (pageReturn.toList) {
+          return (
+            <button type="button" onClick={pageReturn.toList} className={objectCrumbClass} title={originFromState?.label} data-record-crumb-object="">
+              {plural}
+            </button>
+          );
+        }
+        if (originFromState?.pathname && originFromState?.label) {
+          return (
+            <Link
+              to={originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname}
+              className={objectCrumbClass}
+              title={originFromState.label}
+              data-record-crumb-object=""
+            >
+              {originIsObjectList ? plural : originFromState.label}
+            </Link>
+          );
+        }
+        if (objectListPath) {
+          return (
+            <Link to={objectListPath} className={objectCrumbClass} data-record-crumb-object="">
+              {plural}
+            </Link>
+          );
+        }
+        return <span className="shrink-0 px-1">{plural}</span>;
+      })()}
+      <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+      <span className="min-w-0 truncate px-1 font-medium text-foreground" aria-current="page">
+        {recordTitle || (pureRecordId ? shortRecordId(pureRecordId) : '')}
+      </span>
+    </nav>
+  );
+  // objectstack#27058, Target 3 — the top bar on a phone: one link that
+  // returns where the page came from. A top-level page reads
+  // 「‹ <object plural>」, the breadcrumb's object half (the record's name is
+  // the header title directly below), and returns to the list it was opened
+  // from, or to the object's list. A page one level down (Target 8) is named
+  // by where it returns, its parent record (「‹ Acme Corp」): pushed from a
+  // related row or a lookup it goes back in the history, so the parent comes
+  // back where it was scrolled; reached by a `?from=` link it follows the
+  // trail's way back.
+  // Right, the counter and ↓ ↑ when the page knows its siblings. No ⊟ (the
+  // stack has no right column), no ⤡ (there is no drawer to collapse to).
+  const phonePushed = phonePage && isRecordPagePushed(location.state);
+  const phoneBackClass =
+    'inline-flex min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const phoneBack = phonePage ? (() => {
+    const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
+    const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
+    const label = parent
+      ? parent.t || shortRecordId(parent.i)
+      : phonePushed || (originFromState?.pathname && !originIsObjectList)
+        ? originFromState?.label ?? plural
+        : plural;
+    const face = (
+      <>
+        <ChevronLeft className="h-5 w-5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{label}</span>
+      </>
+    );
+    const goBack = t('detail.goBack', { defaultValue: 'Go back' });
+    if (phonePushed) {
+      return (
+        <button type="button" onClick={() => navigate(-1)} className={phoneBackClass} title={goBack} data-record-crumb-back="">
+          {face}
+        </button>
+      );
+    }
+    const to = pageTrail.length > 0
+      ? originFrom?.pathname
+      : originFromState?.pathname
+        ? (originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname)
+        : objectListPath;
+    return to ? (
+      <Link to={to} className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
+    ) : (
+      <span className={phoneBackClass}>{face}</span>
+    );
+  })() : null;
+  // objectstack#27058, Target 8 — the path row of a page one level down
+  // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
+  // parent going back in the history when the page was pushed from it.
+  const phonePathRow = phonePage && pageTrail.length > 0 ? (
+    <nav
+      aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
+      className="flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1.5 text-xs text-muted-foreground"
+      data-testid="record-page-path"
+    >
+      {pageTrail.map((entry, index) => {
+        const entryDef = objectDefOf(entry.o);
+        const face = (
+          <>
+            {entryDef ? objectLabel(entryDef) : entry.o}{' '}
+            <span className="font-medium text-foreground">{entry.t || shortRecordId(entry.i)}</span>
+          </>
+        );
+        const isParent = index === pageTrail.length - 1;
+        return (
+          <span key={`${index}:${entry.o}:${entry.i}`} className="flex min-w-0 shrink-0 items-center gap-1">
+            {isParent && phonePushed ? (
+              <button type="button" onClick={() => navigate(-1)} className={crumbClass}>{face}</button>
+            ) : (
+              <Link to={buildRecordTrailHref(appName ? `/apps/${appName}` : '', entry, pageTrail.slice(0, index))} className={crumbClass}>
+                {face}
+              </Link>
+            )}
+            <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+          </span>
+        );
+      })}
+      <span className="shrink-0" aria-current="page">{objectDef ? objectLabel(objectDef) : objectName}</span>
+    </nav>
+  ) : null;
+  const pageBar = embedded ? null : phonePage ? (
+    <>
+      <RecordTopBar
+        leadingTestId="record-page-leading"
+        leading={phoneBack}
+        stepper={pageStepper}
+      />
+      {phonePathRow}
+    </>
+  ) : (
+    <RecordTopBar
+      leadingTestId="record-page-leading"
+      leading={pageLeading}
+      stepper={pageStepper}
+      toggles={panelToggles ?? undefined}
+      frame={pageReturn.collapse ? <RecordDrawerReturnLink collapse={pageReturn.collapse} /> : undefined}
+    />
+  );
 
   // objectui#11958 (card ② of the objectstack#8346 ruling, M1, zero server) —
   // the record page's "print" action. The page this view renders for the
@@ -4226,10 +4491,19 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   const pageTree = (
     <div ref={setPageRootEl} className="h-full bg-background overflow-hidden flex flex-col relative" data-record-page-root="">
+      {pageBar}
+      {/* In a pane, the record's ⊟ goes into the pane's own top bar. */}
+      {embedded && paneBar && <RecordPaneBarToggles>{panelToggles}</RecordPaneBarToggles>}
       {/* On a print page the shared chrome joins the print chrome row below,
-          so the row's buttons are not drawn under it. */}
+          so the row's buttons are not drawn under it. On the page it sits
+          under the top bar, where it sat before the bar. */}
       {!pageDeclaresPrint && (
-        <div className="absolute top-2 sm:top-4 right-2 sm:right-4 z-50 flex items-center gap-2">
+        <div
+          className={cn(
+            'absolute right-2 sm:right-4 z-50 flex items-center gap-2',
+            pageBar ? 'top-12 sm:top-14' : 'top-2 sm:top-4',
+          )}
+        >
           {sharedChrome}
         </div>
       )}
@@ -4360,33 +4634,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           handlers={{ api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
         >
           <div className="flex-1 overflow-hidden flex flex-row">
-            <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
-              {/* The crumb row: the ways back only — the origin link on the
-                  left and, on a page a drawer's ⤢ opened, the way back into
-                  that drawer on the right (objectstack#26679). The reader's
-                  panel switches are not here: they end the record header's
-                  action row (objectstack#27241). With neither way back the
-                  row has no child, and `empty:hidden` takes it out of the
-                  flow. None of it is drawn inside a drawer: the drawer's own
-                  bar is its way back, and the page's history state is not
-                  its. */}
-              {!embedded && (
-                <div
-                  className="mb-3 flex items-center justify-between gap-3 empty:hidden [&>[data-testid=record-drawer-return]]:ml-auto"
-                  data-record-crumb-row=""
-                >
-                  {originFrom?.pathname && originFrom?.label && (
-                    <Link
-                      to={originFrom.pathname}
-                      className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                      <span>{originFrom.label}</span>
-                    </Link>
-                  )}
-                  <RecordDrawerReturnLink />
-                </div>
-              )}
+            <div ref={setPageScrollerEl} className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
               {/* objectui#12906 — the print page's screen-only chrome. A page
                   that declares `print` holds only the printable component
                   types, and `page:header` is not one of them, so the record's
@@ -4467,6 +4715,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   onDrawnActionsChange={setApprovalBarDrawn}
                 />
               )}
+              {/* objectstack#27058 — on a phone the header's actions are drawn
+                  into the bottom bar below, and the default page's header
+                  takes its subtitle from the declared text highlights. */}
+              <PageHeaderPhoneContext.Provider
+                value={phonePage ? { actionBar: phoneActionBarEl, subtitle: phoneHeader?.subtitle || undefined } : null}
+              >
               <RelatedRecordActionsBridge
                 appName={appName}
                 objects={objects}
@@ -4489,7 +4743,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     Nothing is drawn while the tier is unmeasured (one
                     unpainted commit). */}
                 {pageColumns && recordPageTier ? (
-                  <PageHeaderTrailingContext.Provider value={panelToggles}>
+                  // A record drawn with no top bar of its own (a host's plain
+                  // overlay, not the console's pane) keeps its ⊟ at the end of
+                  // the header's action row.
+                  <PageHeaderTrailingContext.Provider value={embedded && !paneBar ? panelToggles : null}>
                   <RecordPageColumns
                     tier={recordPageTier}
                     columns={pageColumns}
@@ -4516,25 +4773,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   // highlight grid); an authored page keeps its own face.
                   <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                     <RecordBodyTablesContext.Provider value={bodyTableIds}>
-                      {assignedPage || namedPageBlocked ? (
-                        <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
-                      ) : (
-                        // objectstack#27055 — the 关联 tab in the reader's
-                        // arrangement, the same one the related column reads.
-                        <ArrangedRelatedTab
-                          page={renderedPage}
-                          arrangement={relatedArrangement}
-                          onArrangementChange={setRelatedArrangement}
-                        >
-                          {(arranged) => (
-                            <SchemaRenderer schema={withPageTabsUrlSync(arranged as any, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
-                          )}
-                        </ArrangedRelatedTab>
-                      )}
+                      {/* A page drawn as its strip is drawn as written: the
+                          reader's arrangement belongs to the right column and
+                          the tab row (objectstack#27524). */}
+                      <SchemaRenderer schema={withPageTabsUrlSync(renderedPage, { defaultTab: activeTabParam, onTabChange: handleTabChange }) as any} />
                     </RecordBodyTablesContext.Provider>
                   </DefaultRecordPageContext.Provider>
                 )}
               </RelatedRecordActionsBridge>
+              </PageHeaderPhoneContext.Provider>
               {/* Approval visibility fallback (objectui#3461) — synthesized
                   pages surface approvals as a TAB (`record:approvals` via
                   buildDefaultTabs); this bottom append fires only for
@@ -4543,7 +4790,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   nothing when the record has no requests. */}
               {pureRecordId && !hasApprovalsNode && (
                 <RecordApprovalsPanel
-                  className="mt-6"
+                  className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
                   approvals={approvals}
                   currentUserId={user?.id}
                 />
@@ -4556,7 +4803,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   (objectstack#4358), so this bottom append fires only for
                   authored pages that omit the panel. */}
               {filesEnabled && !hasAttachments && pureRecordId && (
-                <div className="mt-6" ref={setAttachmentsFallbackEl} data-record-attachments-fallback="">
+                <div
+                  className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
+                  ref={setAttachmentsFallbackEl}
+                  data-record-attachments-fallback=""
+                >
                   <RecordAttachmentsPanel
                     objectName={objectName!}
                     recordId={pureRecordId}
@@ -4581,6 +4832,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               {!pageColumns && (
                 <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                   <RecordMetaFooter
+                    className={RECORD_PAGE_APPEND_INSET}
                     data={readablePageRecord}
                     objectSchema={objectDef}
                     objectName={objectName}
@@ -4608,6 +4860,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               sections={[{ title: 'Page Schema', data: renderedPage }]}
             />
           </div>
+          {/* objectstack#27058, Target 7 — the phone's bottom action bar: the
+              header's action row in its bar face (the primary action, one more
+              and the `⋯`), at the foot of the page above the safe area, so
+              the body ends where the bar starts. Empty, it is not drawn. */}
+          {phonePage && (
+            <div
+              ref={setPhoneActionBarEl}
+              className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] empty:hidden"
+              data-record-action-bar=""
+            />
+          )}
           {modalElement}
         </ActionProvider>
         </RecordFieldChangesContext.Provider>
@@ -4687,6 +4950,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       </>
     );
   }
+  // A phone has no drawer (objectstack#27058): a related row or a lookup
+  // pushes its record as a page instead (`RelatedRecordActionsBridge`).
+  if (phonePage) return pageTree;
   return (
     <RecordPageDrawerHost
       appName={appName}

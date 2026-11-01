@@ -9,7 +9,7 @@ import { leadWithNameField } from '@object-ui/core';
 import { isFilterValueComplete } from '@object-ui/components';
 import { isSystemManagedField } from '@object-ui/types';
 import { narrowPersonalizationOverlay } from '@object-ui/data-objectstack';
-import { ListViewSchema as SpecListViewSchema, normalizeFilterOperator, VIEW_CONSOLE_ROUND_TRIP_KEYS } from '@objectstack/spec/ui';
+import { isViewFilterOrGroup, ListViewSchema as SpecListViewSchema, normalizeFilterOperator, VIEW_CONSOLE_ROUND_TRIP_KEYS } from '@objectstack/spec/ui';
 import { VALUELESS_FILTER_OPERATORS } from './viewFilterFold.js';
 import { viewEnvelope, type ViewEnvelope } from './runtime-metadata-persistence.js';
 import { buildNewViewSpec } from './newViewSpec.js';
@@ -246,19 +246,38 @@ export function sanitizeViewOverride(override: any): any {
     // Folded before the lookup — see the docblock (objectui#9306).
     const isValueless = (operator: unknown): boolean =>
         VALUELESS_FILTER_OPERATORS.has(normalizeFilterOperator(String(operator)));
-    const kept = override.filter.filter((entry: any) => {
-        if (Array.isArray(entry)) {
-            // Legacy runtime triple: [field, operator, value]
-            if (entry.length < 2) return false;
-            const [, operator, value] = entry;
-            if (isValueless(operator)) return true;
-            return isFilterValueComplete(String(operator), value);
-        }
+    const isEffectiveRule = (entry: any): boolean => {
         if (!entry || typeof entry !== 'object') return false;
         if (typeof entry.field !== 'string' || entry.field === '') return false;
         if (isValueless(entry.operator)) return true;
         const value = entry.value;
         return isFilterValueComplete(String(entry.operator), value);
+    };
+    let changed = false;
+    const kept = override.filter.flatMap((entry: any) => {
+        if (Array.isArray(entry)) {
+            // Legacy runtime triple: [field, operator, value]
+            const effective = entry.length >= 2
+                && (isValueless(entry[1]) || isFilterValueComplete(String(entry[1]), entry[2]));
+            if (!effective) changed = true;
+            return effective ? [entry] : [];
+        }
+        // An any-of group (`{ or: [rule, ...] }`, objectstack#28020) is judged
+        // by its members, the way the live query reads an OR group's rows: an
+        // unfinished member is not a condition, so it leaves the group, and a
+        // group with no effective member left carries no condition at all. A
+        // group whose `or` is not an array is kept as it is, so the server's
+        // refusal of that shape is still what the author sees.
+        if (isViewFilterOrGroup(entry)) {
+            if (!Array.isArray(entry.or)) return [entry];
+            const members = entry.or.filter(isEffectiveRule);
+            if (members.length === entry.or.length) return [entry];
+            changed = true;
+            return members.length > 0 ? [{ ...entry, or: members }] : [];
+        }
+        const effective = isEffectiveRule(entry);
+        if (!effective) changed = true;
+        return effective ? [entry] : [];
     });
 
     // The empty-array case is checked FIRST: `filter: []` (Clear all's write)
@@ -273,7 +292,7 @@ export function sanitizeViewOverride(override: any): any {
         const { filter: _dropped, ...rest } = override;
         return rest;
     }
-    if (kept.length === override.filter.length) return override;
+    if (!changed) return override;
     return { ...override, filter: kept };
 }
 

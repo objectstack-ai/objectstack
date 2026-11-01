@@ -13,7 +13,9 @@ import { definePage } from '@objectstack/spec/ui';
  *   • `record:alert`       — a conditional banner shown only while the task is
  *                            In Review (demonstrates the ADR-0089 component-node
  *                            `visibleWhen` predicate, `has()`-guarded).
- *   • `record:quick_actions` — object Actions surfaced as inline buttons.
+ *   • `record:quick_actions` — object Actions surfaced as inline buttons: the
+ *                            task's `record_section` set, which the header
+ *                            does not draw, so each action shows once.
  *   • `record:highlights` + `record:details` — the standard compact + section
  *                            layout.
  * `kind: 'full'` — this page fully owns the record layout, as the Project
@@ -57,9 +59,8 @@ export const TaskDetailPage = definePage({
               'showcase_mark_done',
               'showcase_log_time',
               'showcase_archive_task',
-              // record_more only — the ⋯ overflow (url, api, api).
+              // record_more only — the ⋯ overflow (url, api).
               'showcase_open_docs',
-              'showcase_recalc_estimate',
               'showcase_recalc_selection',
             ],
           },
@@ -110,10 +111,10 @@ export const TaskDetailPage = definePage({
           properties: {
             location: 'record_section',
             align: 'start',
-            // showcase_archive_task is the `disabled`-predicate specimen:
-            // visible on every task, greyed until `record.done` (contrast with
-            // showcase_mark_done's `visible`, which HIDES once done).
-            actionNames: ['showcase_mark_done', 'showcase_log_time', 'showcase_archive_task'],
+            // The task's `record_section` set, and nothing the header above
+            // draws: one action row per action, never the same buttons twice.
+            // Mark Done, Log Time and Archive live in the header only.
+            actionNames: ['showcase_recalc_estimate'],
           },
         },
         {

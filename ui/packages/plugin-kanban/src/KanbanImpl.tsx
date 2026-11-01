@@ -252,6 +252,26 @@ export interface KanbanBoardProps {
    * from that column (`kanban.dropBlocked`). An open lane carries neither.
    */
   dropBlockedReason?: (fromColumnId: string, toColumnId: string) => string | undefined
+  /**
+   * The cards the board shows, lane by lane (objectstack#28461): every open
+   * lane in board order, with its title and its cards in the order it draws
+   * them — on a swimlane board, row by row down the open swimlanes. A
+   * collapsed lane draws no cards and is left out, and so is an empty one.
+   * Reported on a change of CONTENT — lane ids, titles and card ids — never of
+   * identity. `ObjectKanban` relays it to its host, so a record pane opened
+   * from a card steps within that card's lane.
+   */
+  onLaneRowsChange?: (lanes: readonly KanbanLaneRows[]) => void
+}
+
+/** One open lane's cards, as {@link KanbanBoardProps.onLaneRowsChange} reports them. */
+export interface KanbanLaneRows {
+  /** The lane's column id. */
+  key: string
+  /** The lane's title, as its heading reads it. */
+  label: string
+  /** The cards the lane draws, in order. */
+  rows: ReadonlyArray<KanbanCard>
 }
 
 /**
@@ -934,14 +954,14 @@ function moveOutcomeSentence(outcome: unknown, movedSentence: string): string | 
   return movedSentence
 }
 
-export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, cardsMovable = true, canDropCard, dropBlockedReason }: KanbanBoardProps) {
+export default function KanbanBoard({ columns, onCardMove, onCardClick, className, quickAdd, onQuickAdd, coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, cardsMovable = true, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps) {
   const hasDnd = useHasDndProvider()
 
   if (hasDnd) {
     return (
       <KanbanCardsMovable.Provider value={cardsMovable}>
         <DndBridge>
-          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} />}
+          {(dnd) => <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={dnd} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />}
         </DndBridge>
       </KanbanCardsMovable.Provider>
     )
@@ -949,12 +969,12 @@ export default function KanbanBoard({ columns, onCardMove, onCardClick, classNam
 
   return (
     <KanbanCardsMovable.Provider value={cardsMovable}>
-      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} />
+      <KanbanBoardInner columns={columns} onCardMove={onCardMove} onCardClick={onCardClick} className={className} dnd={null} quickAdd={quickAdd} onQuickAdd={onQuickAdd} coverImageField={coverImageField} conditionalFormatting={conditionalFormatting} objectFields={objectFields} swimlaneField={swimlaneField} countsAreWindowed={countsAreWindowed} canDropCard={canDropCard} dropBlockedReason={dropBlockedReason} onLaneRowsChange={onLaneRowsChange} />
     </KanbanCardsMovable.Provider>
   )
 }
 
-function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, canDropCard, dropBlockedReason }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
+function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, quickAdd, onQuickAdd, coverImageField: _coverImageField, conditionalFormatting, objectFields, swimlaneField, countsAreWindowed, canDropCard, dropBlockedReason, onLaneRowsChange }: KanbanBoardProps & { dnd: ReturnType<typeof useDnd> | null }) {
   const { t } = useKanbanT()
   // The prefix of each swimlane cell's drop-reason element id (#27099).
   const dropReasonIdBase = React.useId()
@@ -1476,6 +1496,34 @@ function KanbanBoardInner({ columns, onCardMove, onCardClick, className, dnd, qu
     }),
     [announceDnd, t, boardColumns],
   )
+
+  // objectstack#28461 — the cards each open lane draws, in the order it draws
+  // them, for a host that steps through a lane (`onLaneRowsChange`). Keyed on
+  // the lane ids, titles and card ids, never on an array's identity
+  // (AGENTS.md #10): the board re-buckets into new arrays on every pass.
+  const shownLanes: KanbanLaneRows[] = []
+  if (onLaneRowsChange) {
+    const swimlaneOf = (card: KanbanCard) =>
+      card[swimlaneField!] != null ? String(card[swimlaneField!]) : UNCATEGORIZED_LANE
+    for (const col of boardColumns) {
+      if (isColumnCollapsed(col)) continue
+      const rows = swimlanes
+        ? swimlanes
+            .filter((lane) => !collapsedLanes.has(lane))
+            .flatMap((lane) => col.cards.filter((card) => swimlaneOf(card) === lane))
+        : col.cards
+      if (rows.length > 0) shownLanes.push({ key: String(col.id), label: String(col.title ?? col.id), rows })
+    }
+  }
+  const shownLanesKey = onLaneRowsChange
+    ? JSON.stringify(shownLanes.map((lane) => [lane.key, lane.label, lane.rows.map((card) => card.id)]))
+    : ''
+  const shownLanesRef = React.useRef({ shownLanes, onLaneRowsChange })
+  shownLanesRef.current = { shownLanes, onLaneRowsChange }
+  React.useEffect(() => {
+    if (!shownLanesKey) return
+    shownLanesRef.current.onLaneRowsChange?.(shownLanesRef.current.shownLanes)
+  }, [shownLanesKey])
 
   return (
     <DndContext

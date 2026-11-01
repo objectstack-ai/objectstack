@@ -16,10 +16,16 @@
 import { describe, it, expect, vi } from 'vitest';
 
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
+import { assembleExecutionContext } from '@objectstack/core';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
-import { CONNECTOR_CONNECTION_CAPABILITY, CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS } from './automation.js';
+import {
+    CONNECTOR_CONNECTION_CAPABILITY,
+    CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS,
+    connectorConnectionDelegatedCaller,
+    connectorConnectionDelegatedCallerRefusal,
+} from './automation.js';
 
 /** An authorization code as a callback carries it — a dummy. */
 const AUTH_CODE = 'dummy-authorization-code';
@@ -55,10 +61,10 @@ function boot(opts: { posture?: 'single' | 'group' | 'isolated'; service?: Recor
     return { dispatcher: new HttpDispatcher(kernel as never), get, begin, complete, revoke };
 }
 
-/** A caller holding exactly `systemPermissions`, in organization `org_a`. */
-const HOLDING = (systemPermissions: string[], userId = 'u_admin'): HttpProtocolContext => ({
+/** A caller holding exactly `systemPermissions`, in organization `tenantId` (default `org_a`). */
+const HOLDING = (systemPermissions: string[], userId = 'u_admin', tenantId = 'org_a'): HttpProtocolContext => ({
     request: {},
-    executionContext: { userId, tenantId: 'org_a', positions: [], permissions: [], systemPermissions },
+    executionContext: { userId, tenantId, positions: [], permissions: [], systemPermissions },
 } as HttpProtocolContext);
 
 /** The connection administrator: the capability, and nothing else. */
@@ -68,11 +74,22 @@ const MEMBER = (): HttpProtocolContext => HOLDING([], 'u_member');
 
 /**
  * The organization administrator's shipped grant (`organization_admin` in
- * plugin-security's default sets), transcribed: it does not carry the
- * connection capability, which an organization administrator holds only by
- * explicit grant.
+ * plugin-security's default sets, which `organization_admin_no_bypass`
+ * inherits), transcribed: since ruling B (record 6545223261) it carries the
+ * connection capability. The source is pinned in plugin-security's
+ * `default-permission-sets.test.ts`; this transcription pins what the door does
+ * with it.
  */
-const ORG_ADMIN_GRANT = ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes'];
+const ORG_ADMIN_GRANT = ['manage_org_users', 'setup.access', 'setup.write', 'manage_mailboxes', 'manage_connector_connections'];
+
+/**
+ * The same organization administrator, active in ANOTHER organization where they
+ * are a plain member. Their `organization_admin` grant is organization-scoped,
+ * and core's resolver applies such a grant only in the organization it names
+ * (`grantAppliesInTenant`), so what reaches the door there is the member
+ * baseline: no system permission at all.
+ */
+const ORG_ADMIN_IN_ANOTHER_ORGANIZATION = (): HttpProtocolContext => HOLDING([], 'u_orgadmin', 'org_b');
 
 const ANONYMOUS = (): HttpProtocolContext => ({ request: {}, executionContext: {} } as HttpProtocolContext);
 
@@ -131,18 +148,23 @@ describe('ADR-0143 D5 — connector connection door: who may reach it', () => {
         }
     });
 
-    it.each(EVERY_MEMBER)('%s: an organization administrator on the shipped grant is refused; granted the capability, admitted', async (_verb, call, member) => {
-        const refused = boot();
-        const denied = await call(refused, HOLDING(ORG_ADMIN_GRANT));
-        expect(statusOf(denied.response)).toBe(403);
-        expect(codeOf(denied.response)).toBe('PERMISSION_DENIED');
-        for (const m of [refused.get, refused.begin, refused.complete, refused.revoke]) expect(m).not.toHaveBeenCalled();
-
+    it.each(EVERY_MEMBER)('%s: an organization administrator on the shipped grant is admitted for their own organization, and refused in another', async (_verb, call, member) => {
         const admitted = boot();
-        const allowed = await call(admitted, HOLDING([...ORG_ADMIN_GRANT, 'manage_connector_connections']));
+        const allowed = await call(admitted, HOLDING(ORG_ADMIN_GRANT, 'u_orgadmin'));
         expect(statusOf(allowed.response)).toBe(200);
         expect(member(admitted)).toHaveBeenCalledTimes(1);
-        expect(member(admitted)).toHaveBeenCalledWith(expect.objectContaining({ context: expect.objectContaining({ tenantId: 'org_a' }) }));
+        // The door acts on the caller's own organization: the service is handed
+        // `org_a` and nothing that could name another.
+        expect(member(admitted)).toHaveBeenCalledWith(
+            expect.objectContaining({ context: expect.objectContaining({ userId: 'u_orgadmin', tenantId: 'org_a' }) }),
+        );
+
+        const refused = boot();
+        const denied = await call(refused, ORG_ADMIN_IN_ANOTHER_ORGANIZATION());
+        expect(statusOf(denied.response)).toBe(403);
+        expect(codeOf(denied.response)).toBe('PERMISSION_DENIED');
+        expect(messageOf(denied.response)).toContain('`manage_connector_connections`');
+        for (const m of [refused.get, refused.begin, refused.complete, refused.revoke]) expect(m).not.toHaveBeenCalled();
     });
 
     it('the system context passes without the capability; an absent capability list is refused (fail-closed)', async () => {
@@ -237,5 +259,121 @@ describe('ADR-0143 D5 — connector connection door: what it accepts', () => {
             expect(statusOf(response)).toBe(501);
             expect(codeOf(response)).toBe('NOT_IMPLEMENTED');
         }
+    });
+});
+
+// ADR-0143 D5 · ruling A (record 6548764795): connecting, reconnecting and
+// revoking an organization's connection is a human administrator's act. The
+// begin (`POST`) and revoke (`DELETE`) legs refuse a caller that acts for a
+// person instead of being that person signed in, by name, whatever it holds;
+// the read leg and the callback are unchanged.
+describe('ADR-0143 D5 — connector connection door: begin and revoke refuse a delegated caller by name', () => {
+    /** The organization administrator's resolved authorization, as core's resolver hands it to the assembler. */
+    const holderAuthz = {
+        userId: 'u_orgadmin',
+        tenantId: 'org_a',
+        positions: ['organization_admin'],
+        permissions: [],
+        directPermissions: [],
+        systemPermissions: ORG_ADMIN_GRANT,
+        org_user_ids: ['u_orgadmin'],
+        accessible_org_ids: ['org_a'],
+    };
+    const ENTRY = { localization: undefined, requestLocale: undefined, accessToken: undefined, authGate: undefined } as const;
+
+    /** The holder, signed in: a session admitted them. */
+    const HOLDER_SIGNED_IN = (): HttpProtocolContext => ({
+        request: {},
+        admission: { credential: 'session', authGate: undefined },
+        executionContext: assembleExecutionContext({ authz: holderAuthz, oauth: undefined, ...ENTRY }),
+    } as HttpProtocolContext);
+
+    /**
+     * An AI agent the holder connected over OAuth with `actions:execute`, as the
+     * shared assembler builds its envelope: `principalKind: 'agent'`,
+     * `onBehalfOf` the holder, and the holder's own capability list.
+     */
+    const AGENT_FOR_HOLDER = (): HttpProtocolContext => ({
+        request: {},
+        admission: { credential: 'session', authGate: undefined },
+        executionContext: assembleExecutionContext({
+            authz: holderAuthz,
+            oauth: { userId: 'u_orgadmin', scopes: ['openid', 'actions:execute'], clientId: 'client_agent', scopePermissions: [], delegatesActions: true },
+            ...ENTRY,
+        }),
+    } as HttpProtocolContext);
+
+    /** An OAuth access token that names no client: the principal stays the holder, the credential is still the token. */
+    const OAUTH_TOKEN_FOR_HOLDER = (): HttpProtocolContext => ({
+        request: {},
+        admission: { credential: 'session', authGate: undefined },
+        executionContext: assembleExecutionContext({
+            authz: holderAuthz,
+            oauth: { userId: 'u_orgadmin', scopes: ['openid', 'actions:execute'], scopePermissions: [], delegatesActions: true },
+            ...ENTRY,
+        }),
+    } as HttpProtocolContext);
+
+    /** An API key the holder minted: it resolves as the holder, admitted by the key. */
+    const API_KEY_FOR_HOLDER = (): HttpProtocolContext => ({
+        request: {},
+        admission: { credential: 'api_key', authGate: undefined },
+        executionContext: assembleExecutionContext({ authz: holderAuthz, oauth: undefined, ...ENTRY }),
+    } as HttpProtocolContext);
+
+    const DELEGATED = [
+        ['agent', AGENT_FOR_HOLDER, 'an agent acting on a person\'s behalf'],
+        ['oauth', OAUTH_TOKEN_FOR_HOLDER, 'an OAuth access token'],
+        ['api_key', API_KEY_FOR_HOLDER, 'an API key'],
+    ] as const;
+
+    it('the fixtures are what they say: each delegated caller holds the capability its human holds', () => {
+        expect(HOLDER_SIGNED_IN().executionContext).toMatchObject({ principalKind: 'human', systemPermissions: ORG_ADMIN_GRANT });
+        expect(AGENT_FOR_HOLDER().executionContext).toMatchObject({ principalKind: 'agent', onBehalfOf: { userId: 'u_orgadmin' }, systemPermissions: ORG_ADMIN_GRANT });
+        expect(OAUTH_TOKEN_FOR_HOLDER().executionContext).toMatchObject({ principalKind: 'human', oauthScopes: ['openid', 'actions:execute'], systemPermissions: ORG_ADMIN_GRANT });
+        expect(API_KEY_FOR_HOLDER().executionContext).toMatchObject({ principalKind: 'human', systemPermissions: ORG_ADMIN_GRANT });
+        for (const [kind, ctx] of DELEGATED) expect(connectorConnectionDelegatedCaller(ctx())).toBe(kind);
+        expect(connectorConnectionDelegatedCaller(HOLDER_SIGNED_IN())).toBeUndefined();
+    });
+
+    it.each(DELEGATED)('%s: refused on begin and on revoke, 403 naming its kind and the rule, and the service is never reached', async (kind, ctx, named) => {
+        for (const [verb, member] of [['POST', (h: Harness) => h.begin], ['DELETE', (h: Harness) => h.revoke]] as const) {
+            const h = boot();
+            const { response } = await connection(h, verb, ctx());
+            expect(statusOf(response)).toBe(403);
+            expect(codeOf(response)).toBe('PERMISSION_DENIED');
+            expect(messageOf(response)).toBe(connectorConnectionDelegatedCallerRefusal(kind));
+            expect(messageOf(response)).toContain(named);
+            expect(messageOf(response)).toContain('human administrator');
+            expect(member(h)).not.toHaveBeenCalled();
+            for (const m of [h.get, h.begin, h.complete, h.revoke]) expect(m).not.toHaveBeenCalled();
+        }
+    });
+
+    it('the same human, signed in, is admitted on begin and on revoke', async () => {
+        const h = boot();
+        const begun = await connection(h, 'POST', HOLDER_SIGNED_IN());
+        expect(statusOf(begun.response)).toBe(200);
+        expect(h.begin).toHaveBeenCalledWith({ connector: 'crm', context: expect.objectContaining({ userId: 'u_orgadmin', tenantId: 'org_a' }) });
+        const revoked = await connection(h, 'DELETE', HOLDER_SIGNED_IN());
+        expect(statusOf(revoked.response)).toBe(200);
+        expect(h.revoke).toHaveBeenCalledTimes(1);
+    });
+
+    it('a system call is admitted on begin and on revoke, even carrying an API-key admission', async () => {
+        const h = boot();
+        const sys = { request: {}, admission: { credential: 'api_key', authGate: undefined }, executionContext: { userId: 'system', isSystem: true } } as HttpProtocolContext;
+        expect(statusOf((await connection(h, 'POST', sys)).response)).toBe(200);
+        expect(statusOf((await connection(h, 'DELETE', sys)).response)).toBe(200);
+        expect(h.begin).toHaveBeenCalledTimes(1);
+        expect(h.revoke).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(DELEGATED)('%s: the read leg and the callback answer as before (admitted for a holder)', async (_kind, ctx) => {
+        const h = boot();
+        expect(statusOf((await connection(h, 'GET', ctx())).response)).toBe(200);
+        expect(statusOf((await callback(h, ctx(), { code: AUTH_CODE, state: 's' })).response)).toBe(200);
+        expect(h.get).toHaveBeenCalledTimes(1);
+        expect(h.complete).toHaveBeenCalledTimes(1);
     });
 });

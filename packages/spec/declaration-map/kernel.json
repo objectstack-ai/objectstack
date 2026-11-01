@@ -154,6 +154,8 @@
     "OpsFilePathSchema": "kernel/OpsFilePath",
     "OpsPluginStructure": "kernel/OpsPluginStructure",
     "OpsPluginStructureSchema": "kernel/OpsPluginStructure",
+    "OverrideDeclaration": "kernel/OverrideDeclaration",
+    "OverrideDeclarationSchema": "kernel/OverrideDeclaration",
     "PackageArtifact": "kernel/PackageArtifact",
     "PackageArtifactSchema": "kernel/PackageArtifact",
     "PackageDependencyConflict": "kernel/PackageDependencyConflict",

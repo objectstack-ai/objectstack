@@ -229,3 +229,109 @@ describe('the runtime publish gate — every finding a refusal, a holeless `${�
     expect(findings('action', invite({ successMessage: 'Invitation sent to {{ result.email }}' }))).toEqual({ errors: [], advisories: [] });
   });
 });
+
+// #27948 (ruling A, step 2) — the param dialog's `description`, each
+// `params[].helpText` and each `outcomeMessages` entry joined the family: the
+// dialog copy over `confirmText`'s roots (`record`; a registered action's
+// `params` is the input list, which binds nothing), an outcome over
+// `successMessage`'s (`result`, `record`). The doors refuse a `${…}` token
+// there exactly as in the other keys, prescribing the `{{ }}` hole.
+describe('validateStackExpressions — description, params[].helpText and outcomeMessages are template slots (#27948)', () => {
+  const newSlotIssues = (stack: Record<string, unknown>) =>
+    validateStackExpressions(stack).filter((i) => /description|helpText|outcomeMessages/.test(i.where));
+  const withParam = (helpText: unknown) => ({ params: [{ name: 'reason', type: 'text', helpText }] });
+
+  it('passes plain text and holes over bound roots — bare, as the envelope, or in a locale map', () => {
+    for (const patch of [
+      { description: 'Resend the invitation to {{ record.email }}?' },
+      { description: { dialect: 'template', source: 'Pause {{ record.name }}?' } },
+      { description: { en: 'Pause {{ record.name }}?', 'zh-CN': '暂停 {{ record.name }}？' } },
+      { description: "Choose the role for {{ record.user_id.name | default:'this member' }}." },
+      withParam('Why pause {{ record.name }}?'),
+      withParam('Plain hint'),
+      { outcomeMessages: { sent: 'Invitation sent to {{ result.email }}', kept: 'Kept {{ record.name }}' } },
+      { outcomeMessages: { sent: { en: 'Sent to {{ result.email }}', 'zh-CN': '已发送至 {{ result.email }}' } } },
+    ]) {
+      expect(newSlotIssues({ objects, actions: [invite(patch)] }), JSON.stringify(patch)).toEqual([]);
+    }
+  });
+
+  it('refuses a `${…}` token in each, as an error at its own path, prescribing the `{{ }}` hole', () => {
+    const issues = newSlotIssues({
+      objects,
+      actions: [invite({
+        description: 'Resend the invitation to ${record.email}?',
+        params: [{ name: 'reason', type: 'text', helpText: 'Why ${record.name}?' }],
+        outcomeMessages: { sent: 'Invitation sent to ${result.email}', kept: { en: 'Kept', 'zh-CN': '保留 ${record.name}' } },
+      })],
+    });
+    expect(issues.map((i) => [i.where, i.severity])).toEqual([
+      ["stack · action 'invite' description", 'error'],
+      ["stack · action 'invite' outcomeMessages.sent", 'error'],
+      ["stack · action 'invite' outcomeMessages.kept.zh-CN", 'error'],
+      ["stack · action 'invite' params[0].helpText", 'error'],
+    ]);
+    expect(issues[0]!.message).toContain("An action's `description`");
+    expect(issues[0]!.message).toContain('as `Resend the invitation to {{ record.email }}?`');
+    expect(issues[1]!.message).toContain("An action's `outcomeMessages` entry");
+    expect(issues[1]!.message).toContain('as `Invitation sent to {{ result.email }}`');
+    expect(issues[3]!.message).toContain("An action param's `helpText`");
+    expect(issues[3]!.message).toContain('as `Why {{ record.name }}?`');
+  });
+
+  it('binds what the runner binds: `result` is refused in the dialog copy, accepted in an outcome', () => {
+    const issues = newSlotIssues({
+      objects,
+      actions: [invite({ description: 'Sent to {{ result.email }}', ...withParam('{{ result.email }}'), outcomeMessages: { sent: '{{ result.email }}' } })],
+    });
+    expect(issues.map((i) => i.where)).toEqual([
+      "stack · action 'invite' description",
+      "stack · action 'invite' params[0].helpText",
+    ]);
+  });
+
+  it('refuses a blank sentence, a single-brace token and an unknown formatter', () => {
+    const issues = newSlotIssues({
+      objects,
+      actions: [invite({ description: ' ', ...withParam('Why {record.name}?'), outcomeMessages: { sent: '{{ result.email | shout }}' } })],
+    });
+    expect(issues.map((i) => i.where)).toEqual([
+      "stack · action 'invite' description",
+      "stack · action 'invite' outcomeMessages.sent",
+      "stack · action 'invite' params[0].helpText",
+    ]);
+    expect(issues[0]!.message).toContain('is blank');
+  });
+
+  it('judges an inline `properties.action` param helpText; an object\'s own action on an object write', () => {
+    const page = pageWith([{
+      type: 'element:button',
+      properties: { action: { type: 'script', target: 'run', params: [{ name: 'reason', type: 'text', helpText: 'Why ${record.name}?' }] } },
+    }]);
+    const pageIssues = runStackExpressionPasses({ objects, pages: [page] }, { runtimeWriteType: 'page' })
+      .filter((i) => /helpText/.test(i.where));
+    expect(pageIssues).toHaveLength(1);
+    expect(pageIssues[0]!.where).toContain('· action params[0].helpText');
+
+    const onObjectWrite = newSlotIssues({ objects: [{ ...objects[0], actions: [invite({ description: 'Hi ${record.name}' })] }] });
+    expect(onObjectWrite.map((i) => i.where)).toEqual(["object 'crm_account' · action 'invite' description"]);
+  });
+
+  it('the publish gate answers each `${…}` with one error and no advisory', () => {
+    const gate = (item: unknown) => {
+      const { errors, advisories } = runRuntimeAuthoringRules({ type: 'action', item, context: { objects } });
+      const copy = (f: { where: string }) => /description|helpText|outcomeMessages/.test(f.where);
+      return { errors: errors.filter(copy), advisories: advisories.filter(copy) };
+    };
+    for (const patch of [
+      { description: 'Resend to ${record.email}?' },
+      withParam('Why ${record.name}?'),
+      { outcomeMessages: { sent: 'Invitation sent to ${result.email}' } },
+    ]) {
+      const { errors, advisories } = gate(invite(patch));
+      expect(errors, JSON.stringify(patch)).toHaveLength(1);
+      expect(advisories, JSON.stringify(patch)).toEqual([]);
+    }
+    expect(gate(invite({ outcomeMessages: { sent: 'Invitation sent to {{ result.email }}' } }))).toEqual({ errors: [], advisories: [] });
+  });
+});

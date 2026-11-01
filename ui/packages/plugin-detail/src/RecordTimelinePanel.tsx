@@ -19,6 +19,13 @@ export interface RecordTimelinePanelProps {
   entries: number;
   /** Open the 动态 tab — the host's `?related=timeline`. Absent: no way out. */
   onViewAll?: () => void;
+  /**
+   * The stream's size as the host holds it — the record page, whose 动态 tab
+   * shows the same number (objectstack#27524, Target 8) — and where the
+   * stream reports it. Absent: the panel keeps its own.
+   */
+  count?: number | null;
+  onCount?: (count: number | null) => void;
 }
 
 /**
@@ -32,12 +39,20 @@ export interface RecordTimelinePanelProps {
  *
  * Not arrangeable: it leads the column whatever the related panels' order.
  */
-export const RecordTimelinePanel: React.FC<RecordTimelinePanelProps> = ({ nodes, entries, onViewAll }) => {
+export const RecordTimelinePanel: React.FC<RecordTimelinePanelProps> = ({
+  nodes,
+  entries,
+  onViewAll,
+  count: hostCount,
+  onCount: hostOnCount,
+}) => {
   const { t } = useDetailTranslation();
-  const [count, setCount] = React.useState<number | null>(null);
+  const [ownCount, setOwnCount] = React.useState<number | null>(null);
+  const count = hostOnCount ? (hostCount ?? null) : ownCount;
+  const onCount = hostOnCount ?? setOwnCount;
   const panel = React.useMemo<RecordTimelinePanelValue>(
-    () => ({ entries, onViewAll, onCount: setCount }),
-    [entries, onViewAll],
+    () => ({ entries, onViewAll, onCount }),
+    [entries, onViewAll, onCount],
   );
   const title = t('detail.timeline', { defaultValue: 'Activity' });
   const countChip = count !== null && (

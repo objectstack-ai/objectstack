@@ -253,6 +253,23 @@
       "evidenceScope": "in-repo",
       "evidence": "packages/rest/src/meta-item-read-gate.ts#holdsRequiredPermissions is the ONE predicate the `/meta` read gate asks of every carrier of the key (an app, its navigation entries, a list view, a dashboard): the caller must hold every capability named, and an absent or empty list is no gate. The `dashboard` arm of packages/rest/src/meta-item-read-gate.ts#createMetaItemReadGate refuses a dashboard whose capabilities the caller does not all hold, 403 PERMISSION_DENIED (the app's whole refusal), on every door and before the ADR-0057 D10 widget gate — so a dashboard's direct URL is refused by the server — and packages/rest/src/meta-item-read-gate.ts#createMetaListReadGate leaves it out of `GET /meta/dashboard`. Pinned per audience (holder served, non-holder not served, no key served to all) on every `/meta/:type/:name` door by packages/rest/src/meta-alternate-door-read-gates.test.ts, and across both transports by packages/runtime/src/domains/meta-item-read-gate-parity.test.ts and packages/runtime/src/domains/meta-list-read-gate-parity.test.ts",
       "note": "planned → live 2026-10-10 (#22639, the rest half of the ruling of record 6095014058, letter A): the `/meta` read gate enforces the key on the list read and the by-name read of `dashboard`. The prior PLANNED note (#22611) is superseded and its flip instruction discharged in this same edit: `authorWarn` / `authorHint` dropped, and the describe's not-enforced clause deleted (packages/spec/src/ui/audience-required-permissions.ts). Boundaries: the refusal is WHOLE and reaches an author as anyone (the app's whole refusal, ruling 5856774816); a caller with no signed-in user is not gated (the app arm's rule — an anonymous caller is refused before any `/meta` read of this type). What the console shows a refused direct URL is objectui's half, filed when this one is accepted. The lint resolves the capability names (packages/lint/src/validate-capability-references.ts), since a misspelled one now hides the dashboard from everyone."
+    },
+    "overrides": {
+      "status": "planned",
+      "verifiedAt": "2026-10-31",
+      "note": "PLANNED RECORD (ADR-0146 D2, the spec card N-08): the override declaration `overrides: { package, basedOn }`, one field set (`OverrideDeclarationFields`, packages/spec/src/kernel/override-declaration.zod.ts) spread on the thirteen types `OVERRIDE_TYPE_CLASSIFICATION` classifies `overridable`. CARRIED today, measured: it survives the metadata save's schema parse, `defineStack()` and `GET /packages/:id/export` (packages/spec/src/kernel/override-declaration.test.ts; packages/runtime/src/domains/packages-export-override-declaration.test.ts). ACTED ON by nothing yet: the write gate that admits a declared override from the paired `<base>.custom` and refuses an undeclared same-named item, and the effective read that serves the declared document over the base's, are later cards of ADR-0146's Rollout (P1). Flip to `live` on the commit that lands the reader, citing it.",
+      "children": {
+        "package": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row): the base package id the declaring item replaces an item of. The pair predicate the write gate will read is `isCustomizationPairOf` (packages/spec/src/kernel/customization-package.ts). The schema refuses a `.custom` id here at parse."
+        },
+        "basedOn": {
+          "status": "planned",
+          "verifiedAt": "2026-10-31",
+          "note": "Planned with its container `overrides` (see that row). RECORDED, NEVER JUDGED by contract (ADR-0146 D2, 'Decided here' item 2): no door compares it with the installed base, produces an upgrade diff from it, or refuses on it. Its whole reading is a person's (Studio's override chip, the export); it stays `planned` until that reader lands, and must never gain a gate."
+        }
+      }
     }
   }
 }

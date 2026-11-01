@@ -28,6 +28,10 @@
  *    the declared default opens again.
  *  - A record open beside the list (the split pane) leaves the same one
  *    switcher in the title.
+ *  - On a phone (objectstack#27058) the page header is not drawn, and the
+ *    same one switcher, count included, leads the list's toolbar row (its
+ *    `toolbarLeading` slot): the same dropdown, and choosing a view switches
+ *    the list.
  */
 
 import * as React from 'react';
@@ -268,5 +272,24 @@ describe('objectstack#27594 — the list title is the view switcher', () => {
     expect(switcher()).toHaveTextContent('View 1');
     expect(screen.queryByTestId('view-tab-bar')).toBeNull();
     expect(screen.queryByTestId('view-tab-row')).toBeNull();
+  });
+
+  it('on a phone (objectstack#27058) the same one switcher leads the list\'s toolbar row, with its count and its dropdown', async () => {
+    setViewportWidth(390);
+    mountLeads();
+    await listToolbar();
+
+    expect(screen.getAllByTestId('list-view-switcher')).toHaveLength(1);
+    expect(screen.getByTestId('list-toolbar-leading').contains(switcher())).toBe(true);
+    expect(screen.queryByRole('heading', { level: 1 })?.contains(switcher()) ?? false).toBe(false);
+    expect(switcher()).toHaveTextContent('View 1');
+    await waitFor(() => expect(screen.getByTestId('list-view-switcher-count')).toHaveTextContent('· 1'));
+    expect(screen.queryByTestId('view-tab-bar')).toBeNull();
+    expect(screen.queryByTestId('view-tab-row')).toBeNull();
+
+    const menu = openSwitcher();
+    expect(allRowIds()).toEqual(['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']);
+    fireEvent.click(within(menu).getAllByTestId('view-switcher-row-v4').at(-1)!.querySelector('button')!);
+    await waitFor(() => expect(switcher()).toHaveTextContent('View 4'));
   });
 });

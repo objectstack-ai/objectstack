@@ -42,8 +42,40 @@ const UPLOAD_SCOPE_LABELS: Record<UploadScope, string> = {
  * under the system context, move these columns: the upload doors through
  * `StorageMetadataStore`, the claim, release and copy of a file field, and the
  * attachment tombstone.
+ *
+ * `key` and `status` are also declared `required`, but the engine does not
+ * enforce that on an INSERT: its record validator checks a `readonly` field
+ * for shape only. Their presence is the storage writers' invariant, not the
+ * engine's: every writer above sets both (a presigned or chunked upload starts
+ * `pending` with its `key`, `/upload/complete` commits it, and a field copy
+ * writes a fresh `key` and `committed`). A non-system create, the one write
+ * that does not come from those writers, has its `key` dropped and starts
+ * `pending`, so no file field can claim it. The declaration stays as it is.
  */
 export const SYS_FILE_STORAGE_OWNED_COLUMNS = ['key', 'mime_type', 'size', 'status', 'etag'] as const;
+
+/**
+ * The `sys_file` columns the file-reference lifecycle owns: which record and
+ * field hold the file (`ref_object`, `ref_id`, `ref_field`) and which record
+ * last let it go (`released_ref_object`, `released_ref_id`), ADR-0104 D3
+ * wave 2.
+ *
+ * They take the same form as {@link SYS_FILE_STORAGE_OWNED_COLUMNS}: each is
+ * `readonly` below, so the engine takes a non-system caller's value back out
+ * of an UPDATE, and the same create-side guard
+ * (`installSysFileStorageOwnedColumnsGuard`) drops them from a non-system
+ * INSERT. Neither refuses the write. Only the lifecycle moves them, under the
+ * system context: a file field's claim, release and copy
+ * (`file-reference-lifecycle.ts`, `field-file-service.ts`) and the operator
+ * backfill of file references.
+ */
+export const SYS_FILE_REFERENCE_COLUMNS = [
+  'ref_object',
+  'ref_id',
+  'ref_field',
+  'released_ref_object',
+  'released_ref_id',
+] as const;
 
 /**
  * System File Object
@@ -170,11 +202,15 @@ export const SystemFile = ObjectSchema.create({
     //
     // NULL on: freshly uploaded but not yet claimed by a record write, and on
     // every attachments-surface file (those are governed by sys_attachment).
+    //
+    // Lifecycle-owned (SYS_FILE_REFERENCE_COLUMNS), as are the two released_*
+    // columns below.
     ref_object: Field.text({
       label: 'Referencing Object',
       maxLength: 128,
       description: 'Short object name of the record whose field owns this file',
       group: 'Field Reference',
+      readonly: true,
     }),
 
     ref_id: Field.text({
@@ -182,6 +218,7 @@ export const SystemFile = ObjectSchema.create({
       maxLength: 64,
       description: 'Primary key of the record whose field owns this file',
       group: 'Field Reference',
+      readonly: true,
     }),
 
     ref_field: Field.text({
@@ -189,6 +226,7 @@ export const SystemFile = ObjectSchema.create({
       maxLength: 128,
       description: 'Field name on the owning record that holds this file id',
       group: 'Field Reference',
+      readonly: true,
     }),
 
     // [#26046] The record whose field last owned this file, kept when that
@@ -203,6 +241,7 @@ export const SystemFile = ObjectSchema.create({
       maxLength: 128,
       description: 'Short object name of the record that last owned this file, after it let the file go',
       group: 'Field Reference',
+      readonly: true,
     }),
 
     released_ref_id: Field.text({
@@ -210,6 +249,7 @@ export const SystemFile = ObjectSchema.create({
       maxLength: 64,
       description: 'Primary key of the record that last owned this file, after it let the file go',
       group: 'Field Reference',
+      readonly: true,
     }),
 
     metadata: Field.text({

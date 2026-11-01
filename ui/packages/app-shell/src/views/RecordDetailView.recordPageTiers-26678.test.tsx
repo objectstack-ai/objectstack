@@ -21,11 +21,15 @@
  *    three columns.
  *  - ≥ 760 px: details | the right column at 320 px, the details grid at two.
  *  - < 760 px (the split pane at 720, a phone at 390): ONE column, the details
- *    then the right column's panels in their order. No tab strip, no rail.
+ *    then the right column's panels in their order. No rail, and no tab
+ *    strip but the record's own tab row under the header (Target 8), the
+ *    same on every tier: 「概览」, 动态, then the related panels. On a phone
+ *    (objectstack#27058: a 390 px window, not only a 390 px root) the stack
+ *    is the same, and the header's actions sit in the bottom bar after it.
  *  - The embedded record (drawer / split pane) follows the same rule.
  *  - The right column opens with the 动态 panel, so History is read at open in
- *    every tier. `?tab=` addresses no strip; `?related=timeline` is the 动态
- *    tab, the full stream.
+ *    every tier. `?tab=` addresses no strip (「概览」 stays the active tab);
+ *    `?related=timeline` is the 动态 tab, the full stream.
  */
 
 import * as React from 'react';
@@ -145,8 +149,9 @@ function makeDataSource() {
   };
 }
 
-function renderPage({ width, embedded = false, search = '' }: { width: number; embedded?: boolean; search?: string }) {
+function renderPage({ width, embedded = false, search = '', windowWidth = 1440 }: { width: number; embedded?: boolean; search?: string; windowWidth?: number }) {
   rootWidth = width;
+  Object.defineProperty(window, 'innerWidth', { value: windowWidth, configurable: true, writable: true });
   dataSource = makeDataSource();
   const metadata = {
     objects: OBJECTS,
@@ -203,6 +208,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  Object.defineProperty(window, 'innerWidth', { value: 1440, configurable: true, writable: true });
 });
 
 const shown = (container: HTMLElement) =>
@@ -218,6 +224,24 @@ const rightPanels = (container: HTMLElement) =>
     (el) => (el.hasAttribute('data-record-timeline-panel') ? 'timeline' : el.getAttribute('data-related-card-id')),
   );
 
+/**
+ * The page's only tablist is its tab row (objectstack#27524, Target 8): the
+ * same tabs on every tier, the active one as `active`.
+ */
+const expectTabRowOnly = (active = 'overview') => {
+  const lists = screen.getAllByRole('tablist');
+  expect(lists).toHaveLength(1);
+  expect(lists[0].closest('[data-record-tab-row]')).not.toBeNull();
+  const tabs = Array.from(lists[0].querySelectorAll('[role="tab"]'));
+  expect(tabs.map((tab) => tab.getAttribute('data-record-tab'))).toEqual([
+    'overview',
+    'timeline',
+    'showcase_task.project',
+    'showcase_note.project',
+  ]);
+  expect(lists[0].querySelector('[aria-selected="true"]')?.getAttribute('data-record-tab')).toBe(active);
+};
+
 describe('RecordDetailView — one record page, laid out by its width (objectstack#26678, objectstack#27524)', () => {
   it('1440 px: details beside the right column at 380 px, the details grid at three columns; 动态 leads; History is read at open', async () => {
     const { container } = renderPage({ width: 1440 });
@@ -226,7 +250,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(shown(container)).toBe('details right');
     expect(columnsGrid(container)).toContain('23.75rem');
     expect(detailsGrid(container)).toContain('@lg:grid-cols-3');
-    expect(screen.queryByRole('tablist')).toBeNull();
+    expectTabRowOnly();
     expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
     // No resident timeline column and no rail: the two columns are all.
     expect(column(container, 'timeline')).toBeNull();
@@ -253,25 +277,38 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     // The same panels as the wide tier — no rail to open first.
     expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
     expect(screen.queryByTestId('record-related-rail-toggle')).toBeNull();
-    expect(screen.queryByRole('tablist')).toBeNull();
+    expectTabRowOnly();
   });
 
   it.each([
-    ['the split pane', 720],
-    ['a phone', 390],
-  ])('%s (%i px): one column — the details, then the 动态 panel and the related panels; no tabs; History is read at open', async (_name, width) => {
-    const { container } = renderPage({ width });
+    ['the split pane', 720, 1440],
+    ['a phone', 390, 390],
+  ])('%s (%i px): one column — the details, then the 动态 panel and the related panels; the tab row; History is read at open', async (name, width, windowWidth) => {
+    const { container } = renderPage({ width, windowWidth });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('stack');
     expect(shown(container)).toBe('details');
     expect(columnsGrid(container)).toContain('grid-cols-1');
-    expect(screen.queryByRole('tablist')).toBeNull();
+    expectTabRowOnly();
     // The panels follow the details, in the right column's order.
     const details = column(container, 'details')!;
     const right = column(container, 'right')!;
     expect(details.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(rightPanels(container)).toEqual(['timeline', 'showcase_task.project', 'showcase_note.project']);
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));
+    // objectstack#27058 — on a phone the stack ends where the bottom action
+    // bar starts: the header's actions are drawn there, after the body, and
+    // the header draws no action row. The split pane keeps the header's row.
+    const bar = container.querySelector('[data-record-action-bar]');
+    const header = container.querySelector('[data-record-page-root] header') as HTMLElement;
+    if (name === 'a phone') {
+      await waitFor(() => expect(bar?.querySelector('[role="toolbar"]')).toBeTruthy());
+      expect(right.compareDocumentPosition(bar!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(header.querySelector('[role="toolbar"]')).toBeNull();
+    } else {
+      expect(bar).toBeNull();
+      await waitFor(() => expect(header.querySelector('[role="toolbar"]')).toBeTruthy());
+    }
   });
 
   it('embedded (drawer / split pane): the same rule — two columns at 1440 px, one at 720 px', async () => {
@@ -284,14 +321,14 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     const { container } = renderPage({ width: 720, embedded: true });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(container)).toBe('stack');
-    expect(screen.queryByRole('tablist')).toBeNull();
+    expectTabRowOnly();
   });
 
   it('`?tab=` addresses no strip on a laid-out page; `?related=timeline` is the 动态 tab: the full stream with its chips', async () => {
     const tabbed = renderPage({ width: 720, search: '?tab=related' });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
     expect(tierOf(tabbed.container)).toBe('stack');
-    expect(screen.queryByRole('tablist')).toBeNull();
+    expectTabRowOnly();
     expect(column(tabbed.container, 'details')).not.toBeNull();
     tabbed.unmount();
 
@@ -307,6 +344,7 @@ describe('RecordDetailView — one record page, laid out by its width (objectsta
     expect(face.getAttribute('aria-label')).toBe('Activity');
     expect(face.querySelector('[data-stream-filters]')).not.toBeNull();
     expect(face.querySelector('[data-record-timeline-peek]')).toBeNull();
+    expectTabRowOnly('timeline');
     // The face takes the page: no columns under it.
     expect(container.querySelector('[data-record-columns]')).toBeNull();
     await waitFor(() => expect(auditReads()).toBeGreaterThan(0));

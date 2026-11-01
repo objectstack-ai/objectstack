@@ -42,6 +42,7 @@ import {
   DialogTitle,
 } from '@object-ui/components';
 import type { RegistryComponentMeta } from '@object-ui/core';
+import { builderRulesOfSpecFilter } from '@object-ui/core';
 import { AlertTriangle, ChevronDown, ChevronsUpDown, ChevronUp, Eye, EyeOff, Plus, Search, Trash2 } from 'lucide-react';
 import { iconNames } from 'lucide-react/dynamic.mjs';
 import { toast } from 'sonner';
@@ -2586,7 +2587,7 @@ function FilterModeWidget({ value, onChange, readOnly, context, ariaLabelledBy }
               {/* Per-tab filter — unified runtime FilterBuilder (popover). */}
               <div className="pl-1" data-testid={`tab-${ti}-filter`}>
                 <FilterBuilderField
-                  value={tab.filter as FilterRuleLite[] | undefined}
+                  value={tab.filter as FilterElementLite[] | undefined}
                   onChange={(f) => patchTab(ti, { filter: f as any })}
                   fields={objectFields}
                   loadError={loadError}
@@ -2737,11 +2738,31 @@ function ActionMultiWidget({ value, onChange, readOnly, context, ariaLabelledBy 
 
 interface FilterRuleLite { field: string; operator: string; value?: unknown }
 
-/** The builder's row group for a stored rule list. */
-function groupOfStoredRules(rules: FilterRuleLite[]) {
+/**
+ * One element of a stored view filter list: a flat rule, or an any-of group
+ * `{ or: [rule, ...] }` (`ViewFilterOrGroupSchema`), which is what the fold
+ * writes for an OR group.
+ */
+type FilterElementLite = FilterRuleLite | { or: FilterRuleLite[] };
+
+/** Every flat rule of a stored list, a group's members included, for the summary. */
+function rulesOfStoredElements(elements: FilterElementLite[]): FilterRuleLite[] {
+  return elements.flatMap((element) => {
+    const members = (element as { or?: unknown }).or;
+    return Array.isArray(members) ? (members as FilterRuleLite[]) : [element as FilterRuleLite];
+  });
+}
+
+/**
+ * The builder's row group for a stored list the builder can show
+ * (`builderRulesOfSpecFilter`): its ONE logic over its flat rules, so an OR
+ * group the fold wrote reads back as the OR group it was.
+ */
+function groupOfStoredRules(shown: { logic: 'and' | 'or'; rules: unknown[] } | null) {
+  const rules = (shown?.rules ?? []) as FilterRuleLite[];
   return {
     id: 'g',
-    logic: 'and' as const,
+    logic: shown?.logic ?? ('and' as const),
     conditions: rules.map((r, i) => ({
       id: `c${i}`,
       // Handed over as stored: the builder reads it through the spec's fold
@@ -2755,8 +2776,8 @@ function groupOfStoredRules(rules: FilterRuleLite[]) {
 }
 
 export function FilterBuilderField({ value, onChange, fields, readOnly, id, ariaLabelledBy, loadError }: {
-  value?: FilterRuleLite[];
-  onChange: (rules: FilterRuleLite[]) => void;
+  value?: FilterElementLite[];
+  onChange: (rules: FilterElementLite[]) => void;
   fields: Array<{ name: string; label?: string; type?: string; options?: Array<{ value: string; label: string }> }>;
   readOnly?: boolean;
   /**
@@ -2786,6 +2807,12 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
   // platform translator (same one ObjectView's toolbar toasts use).
   const { t: tr } = useObjectTranslation();
   const rules = Array.isArray(value) ? value : [];
+  // The stored list as the builder's one logic over flat rows, or `null` when
+  // it holds an any-of group beside other elements: the builder edits one
+  // logic, so loading that list would drop part of it on the next save. Such a
+  // list is shown, never edited, here.
+  const shown = builderRulesOfSpecFilter(rules);
+  const notEditable = shown === null;
   // The stored rules by CONTENT, so a re-render handing over an equal array is
   // not a change (ui/AGENTS.md #10: never key on an identity).
   const rulesKey = JSON.stringify(rules);
@@ -2796,7 +2823,7 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
   // the rows from the stored rules therefore erased the new row on the next
   // render, so no filter could be authored here at all. The held group keeps
   // such a row on screen until it is complete; only the fold's rules leave.
-  const [draft, setDraft] = React.useState(() => groupOfStoredRules(rules));
+  const [draft, setDraft] = React.useState(() => groupOfStoredRules(shown));
   const [seededFrom, setSeededFrom] = React.useState(rulesKey);
   if (seededFrom !== rulesKey) {
     // The stored rules moved. When they are the echo of this builder's own
@@ -2804,7 +2831,7 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
     // editor, a reload, an undo) re-seeds the rows from what is stored.
     setSeededFrom(rulesKey);
     const held = foldFilterGroupToSpecRules(draft);
-    if (!held.ok || JSON.stringify(held.rules) !== rulesKey) setDraft(groupOfStoredRules(rules));
+    if (!held.ok || JSON.stringify(held.rules) !== rulesKey) setDraft(groupOfStoredRules(shown));
   }
   // `options` travel with the column (objectstack#27515): the builder draws a
   // picklist column's value as a picker over them and stores the option's
@@ -2817,14 +2844,16 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
     type: f.type,
     ...(f.options ? { options: f.options } : {}),
   }));
-  const summary = rules.length
-    ? rules.map((r) => `${fields.find((f) => f.name === r.field)?.label || r.field}`).filter(Boolean).join(', ')
+  const storedRules = rulesOfStoredElements(rules);
+  const summary = storedRules.length
+    ? storedRules.map((r) => `${fields.find((f) => f.name === r.field)?.label || r.field}`).filter(Boolean).join(', ')
     : '';
   const handle = (g: any) => {
-    // Shared with the runtime list toolbar (objectstack#5159). A group that
-    // cannot fold losslessly — `logic: 'or'` over several rows, or a nested
-    // group — is refused rather than silently written as AND, which is what
-    // this callback used to do by dropping `g.logic` on the floor.
+    // Shared with the runtime list toolbar (objectstack#5159). An OR group
+    // folds to one any-of element (`{ or: rules }`); a group that cannot fold
+    // losslessly — a nested group — is refused rather than silently written as
+    // something else, which is what this callback used to do by dropping
+    // `g.logic` on the floor.
     const folded = foldFilterGroupToSpecRules(g);
     if (!folded.ok) {
       toast.error(tr(FILTER_FOLD_REFUSAL_KEYS[folded.reason]));
@@ -2834,7 +2863,7 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
     // A row added or edited without completing it folds to the rules already
     // stored: the view has not changed, so nothing is written.
     if (JSON.stringify(folded.rules) === rulesKey) return;
-    onChange(folded.rules as FilterRuleLite[]);
+    onChange(folded.rules as FilterElementLite[]);
   };
   return (
     <Popover>
@@ -2843,7 +2872,8 @@ export function FilterBuilderField({ value, onChange, fields, readOnly, id, aria
           role `button` — axe-core reports it as `aria-allowed-attr`. The other
           ten `'control'` widgets carry it through `controlNaming`. */}
       <PopoverTrigger asChild>
-        <Button {...controlNaming({ id, ariaLabelledBy })} variant="outline" size="sm" disabled={readOnly}
+        <Button {...controlNaming({ id, ariaLabelledBy })} variant="outline" size="sm" disabled={readOnly || notEditable}
+          title={notEditable ? tr('console.objectView.filterOrGroupNotEditable') : undefined}
           className="h-8 w-full justify-between text-xs font-normal" data-testid="filter-builder-trigger">
           <span className="truncate text-left">{summary || <span className="text-muted-foreground">+ Add filter…</span>}</span>
           <ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
@@ -2875,7 +2905,7 @@ function FilterBuilderWidget({ id, ariaLabelledBy, value, onChange, readOnly, co
     <FilterBuilderField
       id={id}
       ariaLabelledBy={ariaLabelledBy}
-      value={value as FilterRuleLite[] | undefined}
+      value={value as FilterElementLite[] | undefined}
       onChange={(rules) => onChange(rules.length ? rules : undefined)}
       fields={fields}
       loadError={loadError}

@@ -5,7 +5,7 @@
 **Builds on**: [ADR-0015](./0015-external-datasource-federation.md) (open mechanism / enterprise lifecycle split), [ADR-0018](./0018-unified-node-action-registry.md) (`connector_action` baseline dispatch + `engine.registerConnector()`), [ADR-0022](./0022-connectors-vs-messaging-channels.md) (Connector = transport/integration mechanism), [ADR-0023](./0023-openapi-to-connector-generator.md) (OpenAPI → Connector generator), [ADR-0024](./0024-mcp-connectors.md) (MCP servers as connectors)
 **Tracking**: framework#2977 (supersedes the interim descriptor-only contract from framework#2612)
 **Consumers**: `@objectstack/spec` (`stack.zod.ts`, `integration/connector.zod.ts`), `@objectstack/service-automation` (boot audit → provider binding), `@objectstack/connector-openapi`, `@objectstack/connector-mcp`, `@objectstack/connector-rest`, the Studio flow palette, AI authoring (stack generation)
-**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2, the vendor app-credential exchange and request signing join `ConnectorInstanceAuthSchema` in the open tier, and those kinds resolve per dispatch; see the notes under §3 and under "Open / enterprise line". PR #26798 (2026-10-27, #26709 item 3(b)) — a credential the MCP server rejects (HTTP `401` / `403`) is a fatal configuration fault, not upstream-unavailable; see the note under "Upstream availability". #27237 (2026-10-28, ruling A on #27230 and the ruling on #27237) — an unresolved `credentialRef` and a rejected credential degrade the instance instead of failing the boot (a refused stored credential holds its instance until it is set again or a restart; an environment or vault one is retried on the backoff), and the open tier reads a `sys_connector_credential` store between the environment and the host's resolver, except under a walled tenancy posture; see the notes under §6 and under "Upstream availability". #28038 (2026-10-30, after #27992 / PR #28014 and #28016 / PR #28037) — a held degraded instance (a configuration fault met on a retry, or a refused stored or declared credential) is not retried, and its dispatch refusal names the edit or the credential that unblocks it; "the platform retries automatically" stays for an instance on the backoff; see the note under "Upstream availability".
+**Amended by**: [ADR-0143](./0143-outbound-connector-auth-is-open-tier.md) (2026-10-27) — OAuth2, the vendor app-credential exchange and request signing join `ConnectorInstanceAuthSchema` in the open tier, and those kinds resolve per dispatch; see the notes under §3 and under "Open / enterprise line". PR #26798 (2026-10-27, #26709 item 3(b)) — a credential the MCP server rejects (HTTP `401` / `403`) is a fatal configuration fault, not upstream-unavailable; see the note under "Upstream availability". #27237 (2026-10-28, ruling A on #27230 and the ruling on #27237) — an unresolved `credentialRef` and a rejected credential degrade the instance instead of failing the boot (a refused stored credential holds its instance until it is set again or a restart; an environment or vault one is retried on the backoff), and the open tier reads a `sys_connector_credential` store between the environment and the host's resolver, except under a walled tenancy posture; see the notes under §6 and under "Upstream availability". #28038 (2026-10-30, after #27992 / PR #28014 and #28016 / PR #28037) — a held degraded instance (a configuration fault met on a retry, or a refused stored or declared credential) is not retried, and its dispatch refusal names the edit or the credential that unblocks it; "the platform retries automatically" stays for an instance on the backoff; see the note under "Upstream availability". #27429 (2026-10-31, after #27237) — on a reload too, an unresolved `credentialRef` degrades its instance instead of being skipped, and a credential that is no longer set takes the live connector down; see the note under "Runtime reconcile".
 
 ---
 
@@ -167,11 +167,25 @@ and skipped**, never crashing the live server; a changed instance's old connecto
 keeps serving until its replacement materializes successfully. Boot keeps the
 "fail loudly" contract.
 
+> **Amendment note (2026-10-31, #27429 — after #27237).** An unresolvable `credentialRef` leaves
+> the reload list above, as it left the boot list (the note under §6). A reference no source
+> answers for degrades the instance naming it, at boot and on a reload alike, and a live
+> connector under that name is torn down first instead of serving on: the value it was
+> materialized with is gone
+> (`packages/services/service-automation/src/plugin.ts#degradeConnectorForCredential`). That is
+> how clearing a stored credential (`DELETE /api/v1/automation/connectors/credential-refs/:ref`)
+> takes its instances down. A stored credential this deployment cannot read right now (the store
+> cannot be read, or no crypto provider is registered yet) degrades the instance too, but leaves a
+> live connector serving, since the value still exists. Both go on the backoff under "Upstream
+> availability". A host resolver that throws keeps the rule above: fatal at boot, logged and
+> skipped on a reload.
+
 ### Upstream availability: degrade, don't die (follow-up, landed — #3017)
 
 The fail-loud contract deliberately distinguishes **configuration** faults from
 **operational** faults. Unknown provider, invalid `providerConfig`, unresolvable
-`credentialRef`, name conflict — authoring mistakes — stay fatal at boot. But a
+`credentialRef`, name conflict — authoring mistakes — stay fatal at boot (an unresolvable
+`credentialRef` no longer does: see the notes under §6 and under "Runtime reconcile"). But a
 provider whose factory must contact an upstream to materialize (the `mcp`
 provider connects and calls `tools/list`) can fail because that upstream is
 *temporarily unreachable*; aborting the whole app boot for one integration's

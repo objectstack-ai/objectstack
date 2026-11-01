@@ -7,10 +7,9 @@
  */
 
 import * as React from 'react';
-import { Button, cn } from '@object-ui/components';
+import { cn } from '@object-ui/components';
 import type { FieldContainerLike } from '@object-ui/core';
-import { SchemaRenderer, toRenderableSchema } from '@object-ui/react';
-import { ChevronLeft } from 'lucide-react';
+import { SchemaRenderer, toRenderableSchema, useRecordContext } from '@object-ui/react';
 import {
   RECORD_PAGE_TIMELINE_PANEL,
   relatedListIdsIn,
@@ -18,11 +17,20 @@ import {
   type RecordPageTier,
 } from './synth/recordPageColumns';
 import { useDetailTranslation } from './useDetailTranslation';
-import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListCompactContext } from './relatedListCompact';
+import { RecordBodyTablesContext, RelatedEnlargeContext, RelatedListCompactContext, RelatedListEnlargedContext } from './relatedListCompact';
 import { DefaultRecordPageContext, DetailsColumnCapContext } from './defaultRecordPage';
 import { RelatedCardStack } from './RelatedCardStack';
 import { RecordTimelinePanel } from './RecordTimelinePanel';
-import { relatedCardId, type RelatedArrangement, type RelatedCardId } from './synth/relatedArrangement';
+import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab } from './RecordTabRow';
+import { RecordTimelineCountContext } from './recordTimelineStream';
+import { RecordTimelineCountProbe } from './renderers/record-activity';
+import {
+  relatedCardId,
+  resolveRelatedArrangement,
+  type RelatedArrangement,
+  type RelatedCardId,
+} from './synth/relatedArrangement';
+import { relatedCountTargetOf, useRelatedCounts, type RelatedCountTarget } from './useRelatedCounts';
 
 export interface RecordPageColumnsProps {
   /** The tier to draw (`recordPageTierFor` of the container's width). */
@@ -52,14 +60,17 @@ export interface RecordPageColumnsProps {
   onRelatedArrangementChange?: (next: RelatedArrangement) => void;
   /**
    * Open a panel's whole face in place — a related list's `object.field`, or
-   * `timeline` for the 动态 stream — the host's `?related=`.
+   * `timeline` for the 动态 stream — the host's `?related=`. It is what a
+   * tab of the tab row does (objectstack#27524, Target 8); absent, the page
+   * draws no tab row.
    */
   onEnlargeRelated?: (id: RelatedCardId) => void;
   /**
-   * The open face (the host's `?related=`): a related list's full table, or
-   * the 动态 stream in full (`timeline`), drawn at the page's full width
-   * under the record header until Esc or ‹ (`onCloseEnlargedRelated`). An id
-   * naming nothing on the page draws the page.
+   * The active tab (the host's `?related=`, objectstack#27524, Target 9): a
+   * related list's full table, or the 动态 stream in full (`timeline`), drawn
+   * at the page's full width under the record header and its tab row, until
+   * Esc or 「概览」 (`onCloseEnlargedRelated`). An id naming nothing on the
+   * page draws the page.
    */
   enlargedRelated?: RelatedCardId;
   onCloseEnlargedRelated?: () => void;
@@ -103,10 +114,12 @@ function isTypingTarget(target: EventTarget | null): target is Element {
 }
 
 /**
- * A panel's whole face, open in place (objectstack#27055, Target 9): under the
- * record header, at the page's full width, with ‹ to return. Esc returns too;
- * a dialog or menu open over the page keeps its own Esc, and so does a field
- * the reader types in.
+ * A panel's whole face, open in place — the active tab (objectstack#27524,
+ * Target 9): under the record header and its tab row, at the page's full
+ * width. The tab names it, so it draws no title of its own; 「概览」 returns,
+ * and so does Esc — a dialog or menu open over the page keeps its own Esc,
+ * and so does a field the reader types in. Not a modal and not a level down:
+ * the header above it stays as it is.
  */
 const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; children: React.ReactNode }> = ({
   id,
@@ -114,7 +127,6 @@ const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; 
   onClose,
   children,
 }) => {
-  const { t } = useDetailTranslation();
   const faceRef = React.useRef<HTMLElement | null>(null);
   React.useEffect(() => {
     if (!onClose) return undefined;
@@ -141,22 +153,14 @@ const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; 
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [onClose]);
   return (
-    <section ref={faceRef} className="flex min-w-0 flex-col gap-3" data-related-enlarged={id} aria-label={title}>
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="ghost"
-          size="sm"
-          className="h-8 gap-1 px-2"
-          onClick={onClose}
-          aria-keyshortcuts="Escape"
-          data-related-enlarged-back=""
-        >
-          <ChevronLeft className="h-4 w-4" aria-hidden />
-          <span>{t('detail.relatedEnlargedBack', { defaultValue: 'Back' })}</span>
-        </Button>
-        <h2 className="truncate text-sm font-semibold">{title}</h2>
-      </div>
+    <section
+      ref={faceRef}
+      role="tabpanel"
+      className="flex min-w-0 flex-col gap-3"
+      data-related-enlarged={id}
+      aria-label={title}
+      aria-keyshortcuts={onClose ? 'Escape' : undefined}
+    >
       {children}
     </section>
   );
@@ -164,8 +168,9 @@ const EnlargedFace: React.FC<{ id: string; title: string; onClose?: () => void; 
 
 /**
  * The enlarged related list (Target 9, the ONE path to a related list's
- * every record): the full `RelatedList` face — every column, paging, sort,
- * inline edit.
+ * every record): every column, paging, sort, inline edit — drawn as the
+ * tab's face (`RelatedListEnlargedContext`): the toolbar over the table,
+ * no card (objectstack#27524).
  */
 function enlargedRelatedList(node: any): React.ReactNode {
   const p = { ...node, ...(node.properties ?? {}) };
@@ -173,7 +178,11 @@ function enlargedRelatedList(node: any): React.ReactNode {
   const enlarged = authoredLimit
     ? node
     : { ...node, properties: { ...(node.properties ?? {}), limit: ENLARGED_PAGE_SIZE } };
-  return <SchemaRenderer schema={toRenderableSchema(enlarged)} />;
+  return (
+    <RelatedListEnlargedContext.Provider value>
+      <SchemaRenderer schema={toRenderableSchema(enlarged)} />
+    </RelatedListEnlargedContext.Provider>
+  );
 }
 
 /** The title an enlarged related list's face names it by. */
@@ -248,6 +257,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   className,
 }) => {
   const { t } = useDetailTranslation();
+  const ctx = useRecordContext();
   const bodyTableIds = React.useMemo(() => new Set(relatedListIdsIn(columns.details)), [columns.details]);
   const hasTimeline = columns.timeline.length > 0;
   const hasPanels = hasTimeline || columns.related.length > 0;
@@ -259,22 +269,78 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     [onEnlargeRelated],
   );
 
-  // The open face: the 动态 stream in full, or a related list — body tables
-  // (in the details) enlarge too (Target 8 names ⤢ on them).
+  // ── The reader's arrangement, read once for the panels and the tab row ──
+  // A host without a preference store keeps the reader's choices here, for
+  // this view, so the stack and the row read the same one.
+  const [localArrangement, setLocalArrangement] = React.useState<RelatedArrangement | undefined>(undefined);
+  const arrangement = onRelatedArrangementChange ? relatedArrangement : localArrangement;
+  const onArrangementChange = onRelatedArrangementChange ?? setLocalArrangement;
+  const panelNodes = new Map<RelatedCardId, any>();
+  for (const node of columns.related) {
+    const id = relatedNodeId(node);
+    if (id && !panelNodes.has(id)) panelNodes.set(id, node);
+  }
+  const [now] = React.useState(() => Date.now());
+  const resolved = resolveRelatedArrangement(Array.from(panelNodes.keys()), arrangement, now);
+
+  // ── The panels' counts, one set for the panels and their tabs ──
+  // The hidden panels are counted too: their tabs sit in the row's dropdown
+  // with their counts (Target 8).
+  const countTargets: RelatedCountTarget[] = [];
+  for (const id of [...resolved.order, ...resolved.hidden]) {
+    const target = relatedCountTargetOf(panelNodes.get(id));
+    if (target) countTargets.push(target);
+  }
+  const counts = useRelatedCounts(countTargets, {
+    parentId: ctx?.recordId,
+    dataSource: ctx?.dataSource,
+    fieldsOf: relatedFieldsOf,
+  });
+  const countOf = (id: RelatedCardId): number | null => {
+    const state = counts.stateOf(id);
+    return state.kind === 'counted' ? state.count : null;
+  };
+
+  // ── The 动态 stream's size, for its panel and its tab ──
+  // Held per record, so a pane stepping to the next record never shows the
+  // last one's number; kept while neither face that reports it is drawn.
+  const recordKey = ctx?.recordId === undefined || ctx?.recordId === null ? '' : String(ctx.recordId);
+  const [timelineCount, setTimelineCount] = React.useState<{ record: string; count: number | null }>({
+    record: recordKey,
+    count: null,
+  });
+  const recordKeyRef = React.useRef(recordKey);
+  recordKeyRef.current = recordKey;
+  const reportTimelineCount = React.useCallback((count: number | null) => {
+    const record = recordKeyRef.current;
+    setTimelineCount((prev) => (prev.record === record && prev.count === count ? prev : { record, count }));
+  }, []);
+  const streamCount = timelineCount.record === recordKey ? timelineCount.count : null;
+
+  // ── The active tab: the open face ──
+  // The 动态 stream in full, or a related list — body tables (in the details)
+  // open in place too (their ⤢), and take a tab of their own while open.
   let enlarged: React.ReactNode = null;
+  let activeTab = RECORD_TAB_OVERVIEW;
+  let openBodyTable: RecordTab | null = null;
   if (enlargedRelated === RECORD_PAGE_TIMELINE_PANEL && hasTimeline) {
+    activeTab = RECORD_PAGE_TIMELINE_PANEL;
     enlarged = (
       <EnlargedFace
         id={RECORD_PAGE_TIMELINE_PANEL}
         title={t('detail.timeline', { defaultValue: 'Activity' })}
         onClose={onCloseEnlargedRelated}
       >
-        {drawNodes(columns.timeline)}
+        <RecordTimelineCountContext.Provider value={reportTimelineCount}>
+          {drawNodes(columns.timeline)}
+        </RecordTimelineCountContext.Provider>
       </EnlargedFace>
     );
   } else if (enlargedRelated) {
     const node = [...columns.related, ...columns.details].find((n) => relatedNodeId(n) === enlargedRelated);
     if (node) {
+      activeTab = enlargedRelated;
+      if (!panelNodes.has(enlargedRelated)) openBodyTable = { id: enlargedRelated, label: relatedNodeTitle(node) };
       enlarged = (
         <EnlargedFace id={enlargedRelated} title={relatedNodeTitle(node)} onClose={onCloseEnlargedRelated}>
           {enlargedRelatedList(node)}
@@ -282,6 +348,28 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       );
     }
   }
+
+  // ── The tab row (Target 8): 概览, 动态, the panels in the reader's order ──
+  const panelTab = (id: RelatedCardId): RecordTab => ({
+    id,
+    label: relatedNodeTitle(panelNodes.get(id)),
+    count: countOf(id),
+  });
+  const tabs: RecordTab[] = [{ id: RECORD_TAB_OVERVIEW, label: t('detail.recordTabOverview', { defaultValue: 'Overview' }) }];
+  if (hasTimeline) {
+    tabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: t('detail.timeline', { defaultValue: 'Activity' }), count: streamCount });
+  }
+  for (const id of resolved.order) tabs.push(panelTab(id));
+  if (openBodyTable) tabs.push(openBodyTable);
+  const hiddenTabs = resolved.hidden.map(panelTab);
+  const selectTab = (id: string) => {
+    if (id === RECORD_TAB_OVERVIEW) onCloseEnlargedRelated?.();
+    else onEnlargeRelated?.(id);
+  };
+  const tabRow =
+    onEnlargeRelated && tabs.length + hiddenTabs.length > 1 ? (
+      <RecordTabRow tabs={tabs} hiddenTabs={hiddenTabs} activeId={activeTab} onSelect={selectTab} />
+    ) : null;
 
   // The provenance line closes the details column in every tier
   // (objectstack#27055): it describes the record the details show.
@@ -302,20 +390,28 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
           nodes={columns.timeline}
           entries={wide ? 5 : 3}
           onViewAll={onEnlargeRelated ? viewAllTimeline : undefined}
+          count={streamCount}
+          onCount={reportTimelineCount}
         />
       )}
       {/* The related panels, in the reader's arrangement (objectstack#27055). */}
       <RelatedListCompactContext.Provider value>
         <RelatedCardStack
           nodes={columns.related}
-          arrangement={relatedArrangement}
-          onArrangementChange={onRelatedArrangementChange}
+          arrangement={arrangement}
+          onArrangementChange={onArrangementChange}
           onEnlarge={onEnlargeRelated}
           fieldsOf={relatedFieldsOf}
+          counts={counts}
         />
       </RelatedListCompactContext.Provider>
     </aside>
   ) : null;
+  // A face with neither the 动态 panel nor its tab drawn — another tab open,
+  // or the right column switched off — still names the stream's count on the
+  // 动态 tab (objectstack#27524): counted from the feed the host holds.
+  const probesTimelineCount = hasTimeline && !!tabRow && activeTab !== RECORD_PAGE_TIMELINE_PANEL
+    && (enlarged !== null || !drawsPanels);
   const sideBySide = besideDetails && drawsPanels;
   const template = sideBySide ? (wide ? GRID_TEMPLATE.wide : GRID_TEMPLATE.twoColumn) : GRID_TEMPLATE.oneColumn;
 
@@ -331,6 +427,8 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       >
         <div className="flex flex-col gap-4">
           {drawNodes(columns.header)}
+          {tabRow}
+          {probesTimelineCount && <RecordTimelineCountProbe nodes={columns.timeline} onCount={reportTimelineCount} />}
           {enlarged ?? (
             <div
               className={cn('grid items-start gap-6', template)}

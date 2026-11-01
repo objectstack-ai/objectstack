@@ -265,6 +265,9 @@ const en = {
     // evaluate, so it leaves the field empty and omits it (objectui#12108).
     // Shown only while the field is empty: a typed value is saved instead.
     serverDefaultHint: 'Set automatically when saved.',
+    // Under an empty field that a visible update action's static `patch` would
+    // make required (objectstack#28382). `{{action}}` is the action's label.
+    requiredForAction: 'Required to run “{{action}}”.',
     // The size-limit hint the flat `ObjectForm` appends to a `file` or `image`
     // field's description when the field declares `maxSize` (objectui#12156).
     // `{{size}}` is the formatted limit ("10.0 MB"); only the words translate.
@@ -1062,6 +1065,7 @@ const en = {
     firstRunMessage: 'Create your first record to get started.',
     noMatches: 'No matching records',
     noMatchesMessage: 'No records match your current filters or search. Try adjusting or clearing them.',
+    clearSearch: 'Clear search',
     viewFilterNoMatchesMessage: 'No records match this view’s filter.',
     ownedNoneTitle: 'Nothing of yours yet',
     ownedNoneMessage: 'This view lists only records that are yours, and you don’t have any yet.',
@@ -1515,6 +1519,18 @@ const en = {
     maximize: 'Maximize',
     restoreSize: 'Restore size',
     recordOf: '{{current}} of {{total}}',
+    // The record top bar's counter, naming its list (objectstack#27524).
+    recordOfScope: '{{current}} of {{total}} in {{scope}}',
+    // The enlarged related list's toolbar (objectstack#27524).
+    relatedFilter: 'Filter {{title}}…',
+    relatedChips: 'Show',
+    relatedChipAll: 'All',
+    relatedChipMine: 'Mine',
+    relatedChipOverdue: 'Overdue',
+    relatedExport: 'Export',
+    relatedRows: '{{count}} rows',
+    relatedRows_one: '{{count}} row',
+    relatedRows_other: '{{count}} rows',
     recordNotFound: 'Record not found',
     recordNotFoundDescription: 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
     goBack: 'Go back',
@@ -1566,7 +1582,12 @@ const en = {
     relatedHiddenCount_one: '{{count}} hidden',
     relatedHiddenCount_other: '{{count}} hidden',
     relatedShowHidden: 'Show',
-    relatedEnlargedBack: 'Back',
+    recordTabs: 'Record tabs',
+    recordTabOverview: 'Overview',
+    recordTabsMore: '{{count}} more tabs',
+    recordTabsMore_one: '{{count}} more tab',
+    recordTabsMore_other: '{{count}} more tabs',
+    recordTabsHidden: 'Hidden',
     bodyTableTotals: 'Totals (this page)',
     streamAll: 'All',
     streamActivity: 'Activity',
@@ -2794,7 +2815,7 @@ const en = {
       objectNotFoundDescription: 'The object "{{objectName}}" does not exist in the current configuration.',
       objectNotFoundHint: 'Check your app navigation settings or select a different object from the sidebar.',
       objectPackageDisabled: 'The object "{{objectName}}" belongs to a package that is disabled, so it is not being served.',
-      filterOrNotSavable: 'This filter uses OR between conditions, which a saved view cannot store yet. It still applies to this list — remove the OR grouping to save it to the view.',
+      filterOrGroupNotEditable: 'This filter has an OR group beside other conditions, which the filter editor cannot show, so it is read-only here. The view still applies it.',
       filterNestedNotSavable: 'This filter uses nested condition groups, which a saved view cannot store. Flatten it to a single list of conditions to save it to the view.',
       systemViewReadonly: 'System view defined in code — read-only.',
       // ObjectView.tsx references ONE edit-denied key from four call sites
@@ -3896,6 +3917,8 @@ const en = {
       confirmNoteSeparate_one: 'Publishing releases the {{count}} pending draft on its own: if it fails, it stays pending.',
       confirmNoteSeparate_other: 'Publishing releases the {{count}} pending drafts one at a time: a draft that fails stays pending while the others go live.',
       publishConfirm: 'Publish all',
+      noteLabel: 'Change note (optional)',
+      notePlaceholder: 'What changed and why. It is shown in each item’s history.',
       // objectui#12517 — the confirm posture's summary line above the list:
       // the item count, then one `{{n}} {{type}}` per type group.
       summaryItems: '{{count}} items',
@@ -4045,6 +4068,7 @@ const en = {
     bulkDeleteConfirmTitle_one: 'Delete {{count}} {{label}} record?',
     bulkDeleteConfirmTitle_other: 'Delete {{count}} {{label}} records?',
     deleteConfirmButton: 'Delete',
+    deleteCascade: 'This also deletes their related records in: {{objects}}.',
     bulkDeleteSuccess: 'Deleted {{count}} {{label}} records',
     bulkDeleteSuccess_one: 'Deleted {{count}} {{label}} record',
     bulkDeleteSuccess_other: 'Deleted {{count}} {{label}} records',
@@ -5042,6 +5066,7 @@ const en = {
     approveOneTitle: 'Approve "{{title}}"?',
     approveOneBody: 'This approves the request with your identity. To add a comment or attachment, open the request instead.',
     flowOrigin: 'Flow-initiated',
+    submittedByYou: 'You submitted this',
     sortBy: 'Sort',
     sortRecent: 'Newest first',
     sortOldest: 'Oldest first',
@@ -5247,6 +5272,8 @@ const en = {
     selectField: 'Select field',
     ascending: 'A → Z',
     descending: 'Z → A',
+    oldestFirst: 'Oldest → Newest',
+    newestFirst: 'Newest → Oldest',
     addSort: 'Add sort',
     removeSort: 'Remove sort',
   },

@@ -255,6 +255,17 @@ function resolveListChartBinding(schema: { chart?: unknown }): ListChartBinding 
  * type each one actually lands on, rather than left to an index signature that
  * types them `any` and erases everything around them.
  */
+/**
+ * One group of the rows a grouped grid or a board shows, as `onRowsChange`
+ * reports it (objectstack#28461): the group's key (a board's lane id), its
+ * heading as the list reads it, and its rows in display order.
+ */
+export interface ListViewRowGroup {
+  key: string;
+  label: string;
+  rows: ReadonlyArray<Record<string, unknown>>;
+}
+
 export interface ListViewProps {
   schema: ListViewSchema;
   className?: string;
@@ -475,13 +486,21 @@ export interface ListViewProps {
    * time that set changes once a load settles — another page, sort, filter or
    * search (objectstack#26679). The console's object page hands it to its
    * record drawer, whose `↑` `↓` at the root step through these rows. Answered
-   * where `onTotalChange` is: a paged grid that draws the rows it fetched; any
-   * other kind (a board, a calendar, a grouped grid) has no single row order
-   * and answers with no rows, so a host never steps through a stale set.
+   * where `onTotalChange` is: a paged grid that draws the rows it fetched.
+   *
+   * A grouped grid and a board answer too (objectstack#28461), with `groups`:
+   * every open group — a board's every open lane — in display order, its
+   * heading and the rows drawn under it; `rows` is those rows end to end. A
+   * collapsed group draws no rows and is not among them. Any other kind (a
+   * calendar, a gantt) has no single row order and answers with no rows and
+   * no groups, so a host never steps through a stale set.
    *
    * A HOST prop, never a schema key: the rows are the list's runtime state.
    */
-  onRowsChange?: (rows: ReadonlyArray<Record<string, unknown>>) => void;
+  onRowsChange?: (
+    rows: ReadonlyArray<Record<string, unknown>>,
+    groups?: ReadonlyArray<ListViewRowGroup>,
+  ) => void;
   /**
    * The Display control's Open records section (objectstack#26681): how a row
    * opens its record — the mode the host resolved for this object and view,
@@ -893,6 +912,36 @@ export function objectHasOwnershipQueue(objectDef: unknown): boolean {
 const WITHHELD_FILTER_GROUP: FilterBuilderRowGroup = { id: 'root', logic: 'and', conditions: [] };
 const WITHHELD_USER_FILTER_CONDITIONS: unknown[] = [];
 
+/**
+ * Whether a filter-panel row is FINISHED: it applies to the query. The same
+ * test `convertFilterGroupToAST` keeps a row by, so the badge, the stored list
+ * state and the query never disagree about what is filtered.
+ */
+function isAppliedFilterRow(row: { operator: string; value?: unknown }): boolean {
+  return isValuelessFilterOperator(row.operator) || isFilterValueComplete(row.operator, row.value as never);
+}
+
+/**
+ * The filter-panel group with its unfinished rows left out (objectstack#27520
+ * row 7): a row with no value yet is not a filter. It is not counted on the
+ * Filter badge, it does not make the list a "no matching records" list, and it
+ * is not what the host stores as the user's list state, so it does not come
+ * back after a reload. The panel itself keeps the whole group, so the user can
+ * still finish the row.
+ *
+ * A record-mode amount's currency companion goes with its amount row: kept
+ * while the amount row is kept, never left behind as a filter of its own.
+ *
+ * Returns `group` itself when every row is finished, so an emit with nothing
+ * to drop hands the host the identity it had before.
+ */
+function appliedFilterGroup(group: FilterBuilderRowGroup): FilterBuilderRowGroup {
+  const rows = group.conditions ?? [];
+  const finished = rows.filter(isAppliedFilterRow);
+  const kept = finished.filter((c) => !isCurrencyCompanion(c, group) || isCurrencyCompanion(c, { ...group, conditions: finished }));
+  return kept.length === rows.length ? group : { ...group, conditions: kept };
+}
+
 export function convertFilterGroupToAST(group: FilterBuilderRowGroup): any[] {
   if (!group || !group.conditions || group.conditions.length === 0) return [];
 
@@ -1026,6 +1075,7 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.firstRunMessage': 'Create your first record to get started.',
   'list.noMatches': 'No matching records',
   'list.noMatchesMessage': 'No records match your current filters or search. Try adjusting or clearing them.',
+  'list.clearSearch': 'Clear search',
   // Emptied by the VIEW's own declared filter, with no user filter or search
   // applied (objectui#11687): the "your filters" wording above would name
   // filters the user never set.
@@ -1804,6 +1854,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       // slots. `position: 'both'` renders both buttons — it used to collapse
       // to `top` through a binary ternary (#2941).
       showAddRecord: addRecordEnabled,
+      // objectstack#27520 row 17 — the empty-state Create, read apart from
+      // the inline add-record slots: withheld only by an explicit opt-out.
+      emptyStateAddRecord: schema.addRecord?.enabled !== false && ua?.addRecordForm !== false,
       showAddRecordTop: addRecordEnabled && addRecordPlacement.top,
       showAddRecordBottom: addRecordEnabled && addRecordPlacement.bottom,
     };
@@ -3834,6 +3887,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     onSearchChange?.(value);
   }, [onSearchChange]);
 
+  // objectstack#27520 row 17 — see `toolbarFlags.emptyStateAddRecord`.
+  // A view that declares the inline block keeps its empty-state Create as
+  // before; a host-supplied create path now offers it too.
+  const emptyStateOffersCreate =
+    toolbarFlags.showAddRecord || (toolbarFlags.emptyStateAddRecord && !!props.onAddRecord);
+
   // --- NavigationConfig support ---
   // No assertion, deliberately. `schema.navigation` is the spec-derived
   // `ListViewSchema['navigation']` and the hook's `NavigationConfig` is now the
@@ -4730,10 +4789,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // otherwise `editable` keeps the pre-verdict answer for the session.
   }, [currentView, schema, authoredFilter, currentSort, effectiveFields, hasAuthoredColumns, groupingConfig, rowColorConfig, navigation.handleClick, hostRoutesRowClicks, density.mode, galleryCardSize, inlineEdit, inlineEditOffered, objectDef, selfQueryFilter, ganttSearchTerm, gridOwnsGroupedFetch, calendarWindowed, handleCalendarVisibleRange, kanbanLanesPaged]);
 
-  const hasFilters = currentFilters.conditions && currentFilters.conditions.length > 0;
   // The count the toolbar shows: a record-mode amount's code condition is
-  // part of its amount row (objectstack#27188), not a filter of its own.
-  const shownFilterCount = (currentFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, currentFilters)).length;
+  // part of its amount row (objectstack#27188), not a filter of its own, and a
+  // row with no value yet is not a filter at all (objectstack#27520).
+  const appliedPanelFilters = React.useMemo(() => appliedFilterGroup(currentFilters), [currentFilters]);
+  const shownFilterCount = (appliedPanelFilters.conditions ?? []).filter((c) => !isCurrencyCompanion(c, appliedPanelFilters)).length;
+  const hasFilters = shownFilterCount > 0;
 
   /**
    * Every field this view can name, before any per-builder rule narrows it.
@@ -4989,7 +5050,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // URL sort; the picker never offers one), so the list IS sorted by the
     // stored ID: said in one line under the rows, only while it is true.
     let picked = false;
-    const fields: Array<{ value: string; label: string; disabled?: boolean }> = [];
+    const fields: Array<{ value: string; label: string; disabled?: boolean; type?: string }> = [];
     for (const field of candidateFields) {
       const readable = canReadField(perms, schema.objectName, field.value);
       if (!readable && !inUse.has(field.value)) continue;
@@ -4997,8 +5058,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       const platformSortable = platformSortability
         ? isPlatformSortableField(platformSortability, field.value)
         : !UNMATERIALIZED_FIELD_TYPES.has(field.type);
+      // `type` lets the picker name a date's direction as time
+      // (objectstack#27520): "Oldest → Newest", not "A → Z".
       if (readable && !relational && platformSortable) {
-        fields.push({ value: field.value, label: field.label });
+        fields.push({ value: field.value, label: field.label, type: field.type });
         continue;
       }
       if (inUse.has(field.value)) {
@@ -5565,15 +5628,59 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   React.useEffect(() => {
     onRowsChangeRef.current = onRowsChange;
   });
+  // objectstack#28461 — a grouped grid and a board hold their rows group by
+  // group (a server-grouped grid and a lane-paged board fetch them
+  // themselves), so they report what they draw (`onRowGroupsChange`) and this
+  // component relays it. Held with the kind that reported it: a report from a
+  // view no longer on screen is never relayed.
+  const rowGroupsSource: 'grid' | 'kanban' | null =
+    currentView === 'kanban'
+      ? 'kanban'
+      : currentView === 'grid' && !paginate && !groupingNeedsHeaderQuery
+        ? 'grid'
+        : null;
+  const [reportedRowGroups, setReportedRowGroups] = React.useState<{
+    source: 'grid' | 'kanban';
+    key: string;
+    groups: ReadonlyArray<ListViewRowGroup>;
+  } | null>(null);
+  const reportRowGroups = React.useCallback(
+    (source: 'grid' | 'kanban', groups: ReadonlyArray<ListViewRowGroup>) => {
+      const key = JSON.stringify(
+        groups.map((group) => [group.key, group.label, group.rows.map((row: any) => row?.id ?? row?._id ?? null)]),
+      );
+      setReportedRowGroups((prev) => (prev && prev.source === source && prev.key === key ? prev : { source, key, groups }));
+    },
+    [],
+  );
+  const handleGridRowGroups = React.useCallback(
+    (groups: ReadonlyArray<ListViewRowGroup>) => reportRowGroups('grid', groups),
+    [reportRowGroups],
+  );
+  const handleBoardRowGroups = React.useCallback(
+    (groups: ReadonlyArray<ListViewRowGroup>) => reportRowGroups('kanban', groups),
+    [reportRowGroups],
+  );
+  const shownRowGroups =
+    rowGroupsSource && reportedRowGroups?.source === rowGroupsSource ? reportedRowGroups : null;
   const rowSequenceShown = paginate && surfaceDrawsFetchedRows;
   const shownRowsSettled = rowSequenceShown ? !loading && !loadError : true;
-  const shownRowsKey = rowSequenceShown
-    ? JSON.stringify(data.map((row: any) => row?.id ?? row?._id ?? null))
-    : '[]';
+  const shownRowsKey = shownRowGroups
+    ? `${shownRowGroups.source}:${shownRowGroups.key}`
+    : rowSequenceShown
+      ? JSON.stringify(data.map((row: any) => row?.id ?? row?._id ?? null))
+      : '[]';
   const shownRowsRef = React.useRef(data);
   shownRowsRef.current = rowSequenceShown ? data : [];
+  const shownRowGroupsRef = React.useRef(shownRowGroups);
+  shownRowGroupsRef.current = shownRowGroups;
   React.useEffect(() => {
     if (!shownRowsSettled) return;
+    const grouped = shownRowGroupsRef.current;
+    if (grouped) {
+      onRowsChangeRef.current?.(grouped.groups.flatMap((group) => group.rows), grouped.groups);
+      return;
+    }
     onRowsChangeRef.current?.(shownRowsRef.current);
   }, [shownRowsKey, shownRowsSettled]);
 
@@ -5831,8 +5938,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   value={currentFilters}
                   extraOperators={LIST_VIEW_EXTRA_OPERATORS}
                   onChange={(newFilters) => {
+                    // The panel keeps every row; the host stores only the
+                    // filter that applies (objectstack#27520).
                     setCurrentFilters(newFilters);
-                    if (onFilterChange) onFilterChange(newFilters);
+                    if (onFilterChange) onFilterChange(appliedFilterGroup(newFilters));
                   }}
                 />
               </div>
@@ -6539,9 +6648,22 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               !!(searchTerm && searchTerm.trim()) ||
               (Array.isArray(appliedUserFilterConditions) && appliedUserFilterConditions.length > 0) ||
               appliedQueueSittingConditions.length > 0 ||
-              (Array.isArray(appliedFilters?.conditions) && appliedFilters.conditions.length > 0)
+              // A panel row with no value yet is not the user's query
+              // (objectstack#27520): the list is not "no matches" for it.
+              (Array.isArray(appliedFilters?.conditions) && appliedFilterGroup(appliedFilters).conditions.length > 0)
             }
-            onAddRecord={toolbarFlags.showAddRecord ? () => props.onAddRecord?.() : undefined}
+            // objectstack#27520 row 17 — the empty list offers Create whenever
+            // the host hands a create path (the console hands its header New's
+            // create only when that New is offered, objectui#13089) and the
+            // user may create (`mayCreate`). The view no longer has to author
+            // an inline `addRecord` block for an empty list to say how to
+            // start; an author's explicit `addRecord: { enabled: false }`, or
+            // `userActions.addRecordForm: false`, still withholds it.
+            onAddRecord={emptyStateOffersCreate ? () => props.onAddRecord?.() : undefined}
+            // objectstack#27520 row 7 — the search persists across
+            // navigation, so a user can come back to a list their own search
+            // emptied: the empty state offers the way out.
+            onClearSearch={searchTerm && searchTerm.trim() ? () => handleSearchChange('') : undefined}
             t={t}
             displayLocale={displayLocale}
           />
@@ -6624,6 +6746,16 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               // objectui#12528 — and the column summaries, drawn in the
               // record-count row below rather than in a row of the grid's own.
               ? { showRowNumbers: rowNumbers, onColumnSummaryChange: setGridSummaries }
+              : {})}
+            {...(onRowsChange && rowGroupsSource === 'grid' && viewComponentSchema.type === 'object-grid'
+              // objectstack#28461 — the grouped grid's open groups and their
+              // rows, on the grid's host channel (a React prop, never a node key).
+              ? { onRowGroupsChange: handleGridRowGroups }
+              : {})}
+            {...(onRowsChange && rowGroupsSource === 'kanban' && viewComponentSchema.type === 'object-kanban'
+              // objectstack#28461 — the board's open lanes and their cards, on
+              // the board's host channel (a React prop, never a node key).
+              ? { onRowGroupsChange: handleBoardRowGroups }
               : {})}
             {...(viewComponentSchema.type === 'object-grid' && rowAdornment
               // objectui#13330 — the host's node beside each row's title, on

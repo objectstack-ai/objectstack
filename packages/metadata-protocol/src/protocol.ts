@@ -147,7 +147,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // [#13331] The cluster fan-out transport type only — the protocol never
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
-import type { IFieldFileService, IPubSub } from '@objectstack/spec/contracts';
+import type { IFieldFileService, IObjectQLEngine, IPubSub } from '@objectstack/spec/contracts';
 import { FIELD_FILE_SERVICE } from '@objectstack/spec/contracts';
 import { applyConversionsToFlow, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer } from '@objectstack/spec/ui';
@@ -6936,6 +6936,34 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#28001] The `cascadeDeleteObjects` beside an `object` item read's
+     * envelope (`GetMetaItemResponseSchema` in `@objectstack/spec`): the
+     * objects a delete of one of `name`'s records can cascade into, as the data
+     * engine answers it from the rule its delete walk runs
+     * (`IObjectQLEngine.getCascadeDeleteObjects`).
+     *
+     * The seam {@link resolveDisabledActionsReader} uses, for its reasons: the
+     * kernel's service table, read by name per call (`objectql`), for an
+     * optional member the engine declares on its contract. This package never
+     * imports the engine, and it holds no copy of which relations cascade.
+     *
+     * `undefined` — so the read serves NO key — for every other type, where no
+     * reachable engine declares the member, and where the engine does not
+     * hold the object. ⛔ Never `[]` in those cases: `[]` is the engine's own
+     * "nothing cascades".
+     */
+    private resolveCascadeDeleteObjects(type: string, name: string): string[] | undefined {
+        if (canonicalMetaType(type) !== 'object') return undefined;
+        const engine = this.getServicesRegistry?.().get('objectql') as
+            | Pick<IObjectQLEngine, 'getCascadeDeleteObjects'>
+            | undefined;
+        const read = engine?.getCascadeDeleteObjects;
+        if (typeof read !== 'function') return undefined;
+        const answer = read.call(engine, name);
+        return Array.isArray(answer) ? [...answer] : undefined;
+    }
+
+    /**
      * [#27842] The list's `disabledActions`: the reader's answer per listed
      * object, keyed by its `name` — or nothing, where
      * {@link resolveDisabledActionsReader} resolves no reader. A pending draft
@@ -11401,6 +11429,11 @@ export class ObjectStackProtocolImplementation implements
         const readDisabledActions = !execution && decorated !== undefined && decorated !== null
             ? this.resolveDisabledActionsReader(request.type)
             : undefined;
+        // [#28001] …and the objects a delete of one of its records can cascade
+        // into ({@link resolveCascadeDeleteObjects}), on the same terms.
+        const cascadeDeleteObjects = !execution && decorated !== undefined && decorated !== null
+            ? this.resolveCascadeDeleteObjects(request.type, request.name)
+            : undefined;
         return {
             type: request.type,
             name: request.name,
@@ -11431,6 +11464,7 @@ export class ObjectStackProtocolImplementation implements
                 }),
             ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
             ...(readDisabledActions ? { disabledActions: readDisabledActions(decorated) } : {}),
+            ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
         };
     }
 
@@ -14560,7 +14594,7 @@ export class ObjectStackProtocolImplementation implements
      * environment → code read order (ADR-0131 D6) — the whole reason this
      * method delegates rather than re-reading.
      */
-    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration; disabledActions?: string[] }> {
+    async getMetaItemCached(request: { type: string, name: string, cacheRequest?: MetadataCacheRequest, locale?: string }): Promise<MetadataCacheResponse & { registration?: FlowRegistration; disabledActions?: string[]; cascadeDeleteObjects?: string[] }> {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. The ETag
         // and the cache entry are keyed by type, so two spellings would cache
         // the same item twice and invalidate only one of them.
@@ -14583,6 +14617,9 @@ export class ObjectStackProtocolImplementation implements
             // ledger switches off, on exactly those terms: live, beside `data`,
             // never hashed (see the 304 note below).
             const disabledActions = (result as { disabledActions?: string[] } | undefined)?.disabledActions;
+            // [#28001] …and the objects a delete of one of its records can
+            // cascade into, on the same terms.
+            const cascadeDeleteObjects = (result as { cascadeDeleteObjects?: string[] } | undefined)?.cascadeDeleteObjects;
 
             if (!item) {
                 // [#5532] Structured: 404 + the catalog's `RESOURCE_NOT_FOUND`.
@@ -14649,7 +14686,12 @@ export class ObjectStackProtocolImplementation implements
             // [#27842] The same holds for `disabledActions`: an administrator's
             // switch moves no byte of the object document, so a 304 would keep
             // the caller on the switched-off list it was served before.
-            if (request.cacheRequest?.ifNoneMatch && registration === undefined && disabledActions === undefined) {
+            // [#28001] So does `cascadeDeleteObjects`: an object registered
+            // later that cascades into this one moves no byte of it either.
+            if (
+                request.cacheRequest?.ifNoneMatch
+                && registration === undefined && disabledActions === undefined && cascadeDeleteObjects === undefined
+            ) {
                 const clientEtag = request.cacheRequest.ifNoneMatch.replace(/^"(.*)"$/, '$1').replace(/^W\/"(.*)"$/, '$1');
                 if (clientEtag === hash) {
                     // Return 304 Not Modified
@@ -14665,6 +14707,7 @@ export class ObjectStackProtocolImplementation implements
                 data: item,
                 ...(registration !== undefined ? { registration } : {}),
                 ...(disabledActions !== undefined ? { disabledActions } : {}),
+                ...(cascadeDeleteObjects !== undefined ? { cascadeDeleteObjects } : {}),
                 etag,
                 lastModified: new Date().toISOString(),
                 cacheControl: {
@@ -23781,7 +23824,13 @@ export class ObjectStackProtocolImplementation implements
     async publishPackageDrafts(request: {
         packageId: string;
         actor?: string;
-        /** ADR-0067 — commit message (for AI turns: the user's instruction). */
+        /**
+         * ADR-0067 — commit message (for AI turns: the user's instruction).
+         * [ADR-0146 D1] Also the change note of every item this publish
+         * promotes: each `sys_metadata_history` row it writes records it as
+         * `change_note`. Absent or empty, those rows keep the sentence naming
+         * the package.
+         */
         message?: string;
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;
@@ -24352,7 +24401,15 @@ export class ObjectStackProtocolImplementation implements
                             // an object draft beside them may name.
                             batchDatasources,
                             ...(request.actor ? { actor: request.actor } : {}),
-                            message: `publish app package '${request.packageId}'`,
+                            // [ADR-0146 D1] The author's change note, when the
+                            // publish carries one, is what every history row
+                            // this batch writes records as its `change_note`
+                            // (the same note the package commit below keeps),
+                            // so the item history says why the item changed.
+                            // With none, the sentence naming the package.
+                            message: request.message
+                                ? request.message
+                                : `publish app package '${request.packageId}'`,
                         });
                         promoted.push({
                             d, singularType,

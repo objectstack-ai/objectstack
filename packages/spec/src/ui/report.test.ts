@@ -12,6 +12,8 @@ import {
   defineReport,
 } from './report.zod';
 import { strictObjectDeclarations } from '../shared/strict-object';
+import { SINGLE_SERIES_CHART_TYPES } from './dashboard.zod';
+import { ChartTypeSchema } from './chart.zod';
 import { getMetadataTypeSchema } from '../kernel/metadata-type-schemas';
 
 /**
@@ -578,5 +580,68 @@ describe('ReportChartSchema', () => {
     const r = ReportChartSchema.safeParse({ type: 'bar', xAxis: 'owner', yAxis: 'amount', seriesBy: ['stage'] });
     expect(r.success).toBe(false);
     expect(r.error?.issues.map((i) => i.path.join('.'))).toContain('seriesBy');
+  });
+});
+
+/**
+ * A `chart.seriesBy` split that cannot split is refused at authoring time, on
+ * the report, at `chart.seriesBy` — not drawn as a refusal panel on the page.
+ * Two arms: a single-series `type` (the dashboard's `SINGLE_SERIES_CHART_TYPES`,
+ * one source), and `seriesBy` naming the `xAxis` dimension. Non-joined only.
+ */
+describe('ReportSchema refuses a chart `seriesBy` that cannot split', () => {
+  const report = (chart: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    name: 'pipeline_by_owner', label: 'Pipeline', type: 'summary',
+    dataset: 'opportunities', rows: ['owner'], values: ['amount'],
+    chart: { xAxis: 'owner', yAxis: 'amount', ...chart },
+    ...extra,
+  });
+  const splitIssues = (doc: unknown) => {
+    const r = ReportSchema.safeParse(doc);
+    return r.success ? [] : r.error.issues.filter((i) => i.path.join('.') === 'chart.seriesBy');
+  };
+
+  it.each(['pie', 'donut', 'funnel'])('refuses `seriesBy` on a `%s` chart, naming the report, the type and the split', (type) => {
+    const issues = splitIssues(report({ type, seriesBy: 'stage' }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].message).toContain('`pipeline_by_owner`');
+    expect(issues[0].message).toContain(`\`type: '${type}'\``);
+    expect(issues[0].message).toContain("`seriesBy: 'stage'`");
+    expect(issues[0].message).toContain('`bar` / `column` / `horizontal-bar`');
+  });
+
+  it('refuses `seriesBy` naming the same dimension as `xAxis`', () => {
+    const issues = splitIssues(report({ type: 'bar', seriesBy: 'owner' }));
+    expect(issues).toHaveLength(1);
+    expect(issues[0].code).toBe('custom');
+    expect(issues[0].message).toContain("`seriesBy: 'owner'`");
+    expect(issues[0].message).toContain('`seriesBy` must name a different dimension than `xAxis`');
+  });
+
+  it('controls: `bar` / `line` with a distinct `seriesBy` parse, and a `pie` without one parses', () => {
+    for (const type of ['bar', 'line']) {
+      const r = ReportSchema.safeParse(report({ type, seriesBy: 'stage' }));
+      expect(r.success, `${type} split by stage`).toBe(true);
+      expect(r.data?.chart?.seriesBy).toBe('stage');
+    }
+    expect(ReportSchema.safeParse(report({ type: 'pie' })).success, 'pie, one series').toBe(true);
+  });
+
+  it('a joined report is untouched — its `chart` refusal stands alone, at `chart`', () => {
+    const joined = {
+      name: 'joined_pipeline', label: 'Joined', type: 'joined',
+      blocks: [{ name: 'open_block', type: 'summary', dataset: 'opportunities', rows: ['owner'], values: ['amount'] }],
+      chart: { type: 'pie', xAxis: 'owner', yAxis: 'amount', seriesBy: 'owner' },
+    };
+    const r = ReportSchema.safeParse(joined);
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.path.join('.'))).toEqual(['chart']);
+  });
+
+  it('one source: the refused type set is exactly the dashboard\'s SINGLE_SERIES_CHART_TYPES', () => {
+    const refused = ChartTypeSchema.options.filter((type) => splitIssues(report({ type, seriesBy: 'stage' })).length > 0);
+    expect([...refused].sort()).toEqual([...SINGLE_SERIES_CHART_TYPES].sort());
+    expect(refused.length).toBeGreaterThan(0);
   });
 });

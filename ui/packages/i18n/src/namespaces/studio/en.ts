@@ -1582,6 +1582,12 @@ const STUDIO_EN: Record<string, string> = {
   'engine.edit.historyEmptyTitle': 'No history yet',
   'engine.edit.historyEmptyDesc':
     'This item has never been edited via an overlay. The first save will create the initial history record.',
+  // Who wrote an event (ADR-0146 D1): the user's name, or the recorded id
+  // marked unresolved when no user row answers for it.
+  'engine.edit.historyBy': 'by',
+  'engine.edit.historyActorUnresolved': 'unresolved user',
+  'engine.edit.historyActorUnresolvedHint':
+    'No user record was found for this id: the user may have been deleted, or you cannot read the user directory.',
   // Reorder buttons (used in InspectorShell header)
   'engine.inspector.reorder.up': 'Move up',
   'engine.inspector.reorder.down': 'Move down',
@@ -2424,6 +2430,18 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.heading': 'Automations',
   'engine.studio.auto.deleteFlow': 'Delete flow',
   'engine.studio.auto.flowDeleted': 'Deleted flow "{item}"',
+  // ADR-0146 D4 — a read-only package's flow: the activation-ledger switch
+  // (this deployment only, never the definition), offered on the item.
+  'engine.studio.auto.ledger.on': 'On for this deployment',
+  'engine.studio.auto.ledger.off': 'Off for this deployment',
+  'engine.studio.auto.ledger.notRunning': 'On for this deployment, not running here',
+  'engine.studio.auto.ledger.hint':
+    'This flow ships in a read-only package. The switch turns it on or off for this deployment only; the package is not changed.',
+  'engine.studio.auto.ledger.walled': 'On this deployment, only the platform operator can switch a packaged flow on or off.',
+  'engine.studio.auto.ledger.switchedOn': '"{label}" is switched on for this deployment.',
+  'engine.studio.auto.ledger.switchedOff': '"{label}" is switched off for this deployment.',
+  'engine.studio.auto.ledger.toggleFailedHttp': 'Could not change activation (HTTP {status}).',
+  'engine.studio.auto.ledger.toggleFailed': 'Could not change activation.',
   'engine.studio.auto.on': 'On',
   'engine.studio.auto.off': 'Off',
   'engine.studio.auto.offTitle': 'Disabled — will not run',

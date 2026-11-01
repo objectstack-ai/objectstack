@@ -404,8 +404,9 @@ describe('#15068 · 0 · the publish-then-read path really runs', () => {
         // caller's execution context does ride along, verbatim: the build
         // probes read a widget's dataset AS that caller (the renderer's path),
         // and nothing in the publish derives a write scope from it.
+        // [ADR-0146 D1] Its user id is the recorded actor; no organization is.
         const caller = PKG_ADMIN(ORG).executionContext;
-        expect(publishRequest()).toEqual({ packageId: PKG, context: caller });
+        expect(publishRequest()).toEqual({ packageId: PKG, actor: caller.userId, context: caller });
         expect(publishRequest()).not.toHaveProperty('organizationId');
     });
 });

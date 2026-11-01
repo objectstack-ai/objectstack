@@ -136,13 +136,13 @@ describe('createConnectorRequestSigner — tencentcloud-tc3-hmac-sha256', () => 
     const auth = { type: 'signed', scheme: 'tencentcloud-tc3-hmac-sha256', keyId: SDK_SECRET_ID, credentialRef: 'TENCENT_SECRET' } as const;
 
     it('binds the scheme the instance names to its key', async () => {
-        const signer = createConnectorRequestSigner('tencent_cvm', auth, SDK_SECRET_KEY, { now: () => new Date(SDK_TIMESTAMP * 1000) });
+        const signer = createConnectorRequestSigner('tencent_cvm', auth, { key: SDK_SECRET_KEY }, { now: () => new Date(SDK_TIMESTAMP * 1000) });
         expect([signer.connector, signer.scheme]).toEqual(['tencent_cvm', 'tencentcloud-tc3-hmac-sha256']);
         expect((await signer.sign(postRequest)).headers.authorization).toBe(SDK_POST_AUTHORIZATION);
     });
 
     it('never carries the key in what it hands back', async () => {
-        const signer = createConnectorRequestSigner('tencent_cvm', auth, SDK_SECRET_KEY);
+        const signer = createConnectorRequestSigner('tencent_cvm', auth, { key: SDK_SECRET_KEY });
         const signature = await signer.sign(postRequest);
         expect(JSON.stringify({ signer, signature })).not.toContain(SDK_SECRET_KEY);
     });

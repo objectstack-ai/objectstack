@@ -342,6 +342,12 @@ export interface HttpReapOptions {
     now?: number;
 }
 
+/** [#28383] Options for {@link IHttpOutbox.hasDueWork}. */
+export interface HttpDueWorkOptions {
+    /** "Now" reference, ms since epoch. Defaults to Date.now(). */
+    now?: number;
+}
+
 export interface HttpAckSuccess {
     success: true;
     httpStatus: number;
@@ -632,6 +638,23 @@ export interface IHttpOutbox {
      * before — correct, at the per-claim cost. Both built-in stores implement it.
      */
     reap?(opts: HttpReapOptions): Promise<void>;
+
+    /**
+     * [#28383] Is ANY row due for dispatch — a `pending` row whose
+     * `nextRetryAt` is unset or not after `now`, in ANY partition and
+     * organization? Exactly what {@link claim} would take, asked as one read
+     * before a dispatcher pays a candidate probe per partition.
+     *
+     * A read and nothing more: it takes no claim and holds no row, so `false`
+     * may be stale the moment it returns. That is the staleness every claim
+     * probe already has — a row enqueued just after it is found by the next
+     * tick, or at once by the enqueuing process's `wake()`.
+     *
+     * Optional, so an outbox written before it keeps working unchanged: the
+     * dispatcher then probes every partition as before. Both built-in stores
+     * implement it.
+     */
+    hasDueWork?(opts: HttpDueWorkOptions): Promise<boolean>;
 
     /**
      * Atomically claim up to `limit` rows whose `nextRetryAt <= now` (or null)

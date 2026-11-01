@@ -12,10 +12,13 @@
  * doubles as an AI tool under ADR-0011.
  *
  * Open-source scope: the MCP client adapter (stdio + http transports),
- * `tools/list` → actions, `tools/call` dispatch, and operator-supplied static
- * credentials passed through the transport. A curated server registry, managed
- * secrets, per-tenant lifecycle, and sandboxed stdio execution are the
- * enterprise tier (ADR-0024 §4).
+ * `tools/list` → actions, `tools/call` dispatch, operator-supplied static
+ * credentials passed through the transport, and — over http — an OAuth-protected
+ * server's per-dispatch token through the host's credential handle, one MCP
+ * session per organization (ADR-0143 D4; the host runs the MCP authorization
+ * flow when an administrator connects the instance). A curated server
+ * registry, sandboxed stdio execution and the rest of ADR-0024 §4 stay the
+ * enterprise tier.
  */
 
 export {

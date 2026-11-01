@@ -21,6 +21,29 @@
 // named, never clamped — is `packages/runtime/src/api-key-lifecycle.pin.test.ts`.
 import { describe, expect, it } from 'vitest';
 import { SysApiKey } from './sys-api-key.object.js';
+import { templateSlotSource } from '@objectstack/spec/automation';
+
+// [#27948] An action's `description`, each param's `helpText` and each
+// `outcomeMessages` entry are `template` slots: the parsed object carries the
+// `{ dialect: 'template', source }` envelope, so the copy is read as written
+// through the template judge's one reader, `templateSlotSource` (a locale map
+// is kept as it is).
+function copyAsWritten<T>(declared: T): T {
+  const a = declared as Record<string, any> | undefined;
+  if (!a) return declared;
+  const text = (v: unknown) => templateSlotSource(v) ?? v;
+  return {
+    ...a,
+    ...(a.description !== undefined ? { description: text(a.description) } : {}),
+    ...(Array.isArray(a.params)
+      ? { params: a.params.map((p: any) => (p && p.helpText !== undefined ? { ...p, helpText: text(p.helpText) } : p)) }
+      : {}),
+    ...(a.outcomeMessages && typeof a.outcomeMessages === 'object'
+      ? { outcomeMessages: Object.fromEntries(Object.entries(a.outcomeMessages).map(([k, v]) => [k, text(v)])) }
+      : {}),
+  } as T;
+}
+
 
 interface DeclaredParam {
   field?: string;
@@ -30,7 +53,7 @@ interface DeclaredParam {
   helpText?: string;
 }
 
-const createKey = (SysApiKey.actions ?? []).find((a) => a.name === 'create_api_key') as
+const createKey = copyAsWritten((SysApiKey.actions ?? []).find((a) => a.name === 'create_api_key')) as
   | { params?: DeclaredParam[]; resultDialog?: { fields?: Array<{ path: string }> } }
   | undefined;
 

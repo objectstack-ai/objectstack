@@ -50,7 +50,7 @@ import { getBadgeColorClasses, getBadgeHexAppearance, getCellRenderer, resolveCe
 import { usePermissions } from '@object-ui/permissions';
 import { KANBAN_UNCOLUMNED_ID } from './index';
 import { KanbanBoardCore } from './KanbanBoardCore';
-import type { KanbanBoardProps } from './KanbanImpl';
+import type { KanbanBoardProps, KanbanLaneRows } from './KanbanImpl';
 import {
   collectRequiredWhenPromptFields,
   type RequiredWhenPromptField,
@@ -434,6 +434,14 @@ export interface ObjectKanbanComponentProps {
    */
   lanePaging?: KanbanLanePagingRequest;
   /**
+   * The cards the board shows, lane by lane (objectstack#28461): every open
+   * lane in board order, with its title and its cards in the order the board
+   * draws them. `ListView` passes it so a record pane opened from a card steps
+   * within that card's lane. A HOST channel, never an authoring key; reported
+   * on a change of content, never of identity.
+   */
+  onRowGroupsChange?: (lanes: readonly KanbanLaneRows[]) => void;
+  /**
    * The record field holding the record's owner, when the host's object has
    * one. Each card shows the owner's avatar from the expanded record. The host
    * resolves it from the object's declared ownership (`ListView` reads the
@@ -486,6 +494,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
   onCardClick,
   lanePaging,
   ownerField,
+  onRowGroupsChange,
   ..._props
 }) => {
   void _props;
@@ -2057,6 +2066,8 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         canDropCard={canDropCard}
         // #27099: why a closed lane is closed — see `dropBlockedReason`.
         dropBlockedReason={dropBlockedReason}
+        // objectstack#28461 — the cards each open lane shows, for the host.
+        onLaneRowsChange={onRowGroupsChange}
         schema={{
           ...effectiveSchema,
           // `5591f03bd` — the lane headers count rows that came back, so when

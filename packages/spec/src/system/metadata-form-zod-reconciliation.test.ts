@@ -354,6 +354,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'record',
     why: "planned, not yet rendered — the binding's one-row query is validated at parse and refused on every page that is not `type: 'app'`, but no renderer mounts it as the page's `record` until the console's page-root binding lands. A form control offered today would let an author bind a row no predicate can read yet",
   },
+  // #28022 — an app's per-audience landing list lands spec-first the same way:
+  // `planned` in the liveness ledger, read by no console until the landing
+  // redirect card. Offering it in the app form first would be the UI half of
+  // declared-not-enforced.
+  {
+    kind: 'omit',
+    type: 'app',
+    path: ROOT_PATH,
+    key: 'landing',
+    why: "planned, not yet rendered — each entry's `item` is refused at parse unless it names an openable entry of the app's own navigation, and its audience predicate is shape-checked, but no console opens an app on it until the landing redirect lands. A form control offered today would let an author set a landing nobody is sent to",
+  },
   // #22228 — a field's cell formatting rules land spec-first the same way:
   // `planned` in the liveness ledger, read by no renderer until objectui's cell
   // card. Offering the key in the field form first would be the UI half of
@@ -657,6 +668,68 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
   // the first arm form rather than for this ledger. `scope` has no live writer
   // of `shared` or `personal`, so there is no platform-written state to give as
   // the reason; `owner` and `hidden` are no longer writable at all.
+
+  // ADR-0146 D2 — the override declaration lands spec-first: `planned` in the
+  // liveness ledger, admitted by no write gate and served by no read until the
+  // ADR-0146 doors land. Studio writes it when an administrator customizes a
+  // base item into its `<base>.custom` package; a form control an author fills
+  // by hand would declare an override nothing yet honours.
+  {
+    kind: 'omit',
+    type: 'report',
+    path: ROOT_PATH,
+    key: 'overrides',
+    why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
+  {
+    kind: 'omit',
+    type: 'dataset',
+    path: ROOT_PATH,
+    key: 'overrides',
+    why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
+  {
+    kind: 'omit',
+    type: 'app',
+    path: ROOT_PATH,
+    key: 'overrides',
+    why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
+  {
+    kind: 'omit',
+    type: 'dashboard',
+    path: ROOT_PATH,
+    key: 'overrides',
+    why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
+  {
+    kind: 'omit',
+    type: 'action',
+    path: ROOT_PATH,
+    key: 'overrides',
+    why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'overrides',
+    why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
+  {
+    kind: 'omit',
+    type: 'flow',
+    path: ROOT_PATH,
+    key: 'overrides',
+    why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
+  {
+    kind: 'omit',
+    type: 'email_template',
+    path: ROOT_PATH,
+    key: 'overrides',
+    why: 'declared, not enforced yet — liveness verdict `planned`: the override declaration (ADR-0146 D2) parses, is stored and travels through export, but no door admits or serves it until the write gate and the effective read land. Studio writes it when it saves a customization into `<base>.custom`; a hand-filled control is not how it is authored',
+  },
 ];
 
 // ────────────────────────────────────────────────────────────────────────────

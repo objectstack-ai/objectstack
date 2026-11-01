@@ -1825,7 +1825,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       outcomeMessages: {
         label: "按结果的成功消息",
-        helpText: "按处理程序结果显示的成功消息，以 JSON 填写：每个键是处理程序在成功返回中给出的 snake_case `outcome` 值，每个值是该结果显示的文字，例如 {\"archived\": \"已归档\", \"already_archived\": \"此前已归档\"}。文字中可插入 ${result.*}。没有对应条目的结果显示成功消息；处理程序从不返回的键永远不会显示。不能与结果对话框或 `operation: 'update'` 同时使用。"
+        helpText: "按处理程序结果显示的成功消息，以 JSON 填写：每个键是处理程序在成功返回中给出的 snake_case `outcome` 值，每个值是该结果显示的文字，例如 {\"archived\": \"已归档\", \"already_archived\": \"此前已归档\"}。文字中可插入 {{ result.* }}。没有对应条目的结果显示成功消息；处理程序从不返回的键永远不会显示。不能与结果对话框或 `operation: 'update'` 同时使用。"
       },
       onSuccess: {
         label: "成功后跳转",

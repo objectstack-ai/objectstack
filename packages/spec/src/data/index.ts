@@ -180,6 +180,9 @@ export * from './api-derivation';
 // so the two can never drift apart (#7521).
 export * from './managed-api-affordance';
 export * from './field.zod';
+// [ADR-0146 D10] The customer extension rules on a base object's fields: the
+// `__c` reservation and the base-field display-property whitelist.
+export * from './field-customization';
 // [ADR-0144 Open item 3] The CLDR fraction digits per currency — the checked-in
 // CLDR snapshot whose key set is the `iso_4217_currency` value domain. Its
 // digit counts are CLDR's, which differ from ISO 4217's minor units for some

@@ -49,6 +49,7 @@
  */
 
 import { VALID_AST_OPERATORS } from '@objectstack/spec/data';
+import { isViewFilterOrGroup } from '@objectstack/spec/ui';
 import { recordsOf } from './object-graph.js';
 
 /** Any plain metadata record. */
@@ -279,6 +280,15 @@ export function walkFilterFieldKeys(
     // Group ['and'|'or', ...members] or a bare list — recurse the members.
     node.forEach((member, i) => {
       if (typeof member === 'string') return; // the leading keyword
+      // [#28020] An any-of group element of a view filter list. It names no
+      // field itself, so it is stepped INTO: read as a condition object it
+      // would report its own key `or` as a field, and its rules would go
+      // unchecked.
+      const rules = filterGroupRules(member);
+      if (rules) {
+        rules.forEach((rule, j) => walkFilterFieldKeys(rule, `${path}[${i}].or[${j}]`, visit, depth + 2));
+        return;
+      }
       walkFilterFieldKeys(member, `${path}[${i}]`, visit, depth + 1);
     });
     return;
@@ -293,4 +303,22 @@ export function walkFilterFieldKeys(
   }
 
   conditionFieldKeys(node, path, '', visit, depth);
+}
+
+/**
+ * [#28020] The rules of an any-of group element of a view filter list
+ * (`{ or: [rule, ...] }`, `ViewFilterOrGroupSchema`), or `undefined` when
+ * `member` is not one.
+ *
+ * Asked only of a MEMBER of a filter array — the position a group element
+ * occupies — so a field-keyed condition object whose field happens to be named
+ * `or` (`{ or: ['a'] }` as a whole filter) is still read as one. Which value
+ * is a group is the spec's own predicate, `isViewFilterOrGroup`, never a
+ * restated test. Exported for the other walks of a filter list in this package,
+ * which must step into a group the same way.
+ */
+export function filterGroupRules(member: unknown): unknown[] | undefined {
+  if (!isViewFilterOrGroup(member)) return undefined;
+  const rules = member.or;
+  return Array.isArray(rules) ? rules : undefined;
 }

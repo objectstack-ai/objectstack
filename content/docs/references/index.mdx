@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1571 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1578 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -21,20 +21,20 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 34 | 452 | REST contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 34 | 454 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 15 | 77 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 31 | 174 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
-| [Integration Protocol](/docs/references/integration) | 1 | 22 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
-| [Kernel Protocol](/docs/references/kernel) | 29 | 151 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
+| [Integration Protocol](/docs/references/integration) | 1 | 23 | The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances. |
+| [Kernel Protocol](/docs/references/kernel) | 30 | 152 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
 | [Marketplace Protocol](/docs/references/marketplace) | 4 | 30 | The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
 | [Security Protocol](/docs/references/security) | 6 | 37 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 37 | 287 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 172 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **204** | **1571** | 14 protocol modules |
+| [UI Protocol](/docs/references/ui) | 16 | 175 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| **Total** | **205** | **1578** | 14 protocol modules |
 
 ---
 
@@ -63,7 +63,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **34 pages, 452 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **34 pages, 454 schemas**
 
 REST contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -92,7 +92,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`package-api-assembled.zod.ts`](/docs/references/api/package-api-assembled) | `AssembledInstalledPackage`, `GetInstalledPackageResponse`, `InstalledPackageAtEitherStage`, `ListInstalledPackagesResponse` |
 | [`package-lifecycle.zod.ts`](/docs/references/api/package-lifecycle) | `DiscardPackageDraftsResponse`, `DuplicatePackageResponse`, `ImportUnmanagedPackageRequest`, `ImportUnmanagedPackageResponse`, `ListPackageCommitsResponse`, `PackageExportManifest`, `PackagePublishResult`, `ReassignOrphanedMetadataResponse`, `RevertPackageCommitResponse`, `RollbackToPackageCommitResponse` |
 | [`plugin-rest-api.zod.ts`](/docs/references/api/plugin-rest-api) | `ErrorHandlingConfig`, `OpenApiGenerationConfig`, `RequestValidationConfig`, `ResponseEnvelopeConfig`, `RestApiEndpoint`, `RestApiPluginConfig`, `RestApiRouteCategory`, `RestApiRouteRegistration`, `ValidationMode` |
-| [`protocol.zod.ts`](/docs/references/api/protocol) | `AiAgentCapabilities`, `AiAgentChatRequest`, `AiAgentSummary`, `AiAgentsResponse`, `AiChatRequest`, `AiChatResponse`, `AiCompleteRequest`, `AiConversation`, `AiMessage`, `AiModelsResponse`, `AiPendingAction`, `AiPendingActionStatus`, `AiStreamChunk`, `ApproveAiPendingActionResponse`, `AuditMetaItemRequest`, `AuditMetaItemResponse`, `AutomationActionsResponse`, `AutomationTriggerRequest`, `AutomationTriggerResponse`, `BatchDataRequest`, `BatchDataResponse`, `CheckPermissionRequest`, `CheckPermissionResponse`, `CloneDataResponse`, `CreateAiConversationRequest`, `CreateDataRequest`, `CreateDataResponse`, `CreateManyDataRequest`, `CreateManyDataResponse`, `DeleteDataRequest`, `DeleteDataResponse`, `DeleteManyDataRequest`, `DeleteManyDataResponse`, `DeleteMetaItemRequest`, `DeleteMetaItemResponse`, `DiffMetaItemResponse`, `DisablePackageRequest`, `DisablePackageResponse`, `EnablePackageRequest`, `EnablePackageResponse`, `FindDataRequest`, `FindDataResponse`, `FindReferencesToMetaResponse`, `FlowRegistration`, `FlowRegistrationRefusal`, `GetDataRequest`, `GetDataResponse`, `GetDiscoveryRequest`, `GetDiscoveryResponse`, `GetEffectivePermissionsRequest`, `GetEffectivePermissionsResponse`, `GetFieldLabelsRequest`, `GetFieldLabelsResponse`, `GetLocalesRequest`, `GetLocalesResponse`, `GetMetaDiagnosticsResponse`, `GetMetaItemCachedRequest`, `GetMetaItemCachedResponse`, `GetMetaItemLayeredRequest`, `GetMetaItemLayeredResponse`, `GetMetaItemRequest`, `GetMetaItemResponse`, `GetMetaItemsRequest`, `GetMetaItemsResponse`, `GetMetaTypesRequest`, `GetMetaTypesResponse`, `GetNotificationPreferencesRequest`, `GetNotificationPreferencesResponse`, `GetObjectPermissionsRequest`, `GetObjectPermissionsResponse`, `GetPackageRequest`, `GetPackageResponse`, `GetPresenceRequest`, `GetPresenceResponse`, `GetPublishedMetaItemResponse`, `GetRecordFieldAccessResponse`, `GetTranslationsRequest`, `GetTranslationsResponse`, `GetUiViewRequest`, `GetUiViewResponse`, `HistoryMetaItemRequest`, `HistoryMetaItemResponse`, `HttpFindQueryParams`, `InstallPackageRequest`, `InstallPackageResponse`, `ListAiConversationsRequest`, `ListAiConversationsResponse`, `ListAiPendingActionsRequest`, `ListAiPendingActionsResponse`, `ListDraftsResponse`, `ListNotificationsRequest`, `ListNotificationsResponse`, `ListPackagesRequest`, `ListPackagesResponse`, `MarkAllNotificationsReadRequest`, `MarkAllNotificationsReadResponse`, `MarkNotificationsReadRequest`, `MarkNotificationsReadResponse`, `MetadataAuthoringClient`, `MetadataAuthoringSurface`, `MetadataConflictError`, `Notification`, `NotificationPreferences`, `PublishMetaItemRequest`, `PublishMetaItemResponse`, `PublishPackageDraftsResponse`, `RealtimeConnectRequest`, `RealtimeConnectResponse`, `RealtimeDisconnectRequest`, `RealtimeDisconnectResponse`, `RealtimeSubscribeRequest`, `RealtimeSubscribeResponse`, `RealtimeUnsubscribeRequest`, `RealtimeUnsubscribeResponse`, `RegisterDeviceRequest`, `RegisterDeviceResponse`, `RejectAiPendingActionResponse`, `RollbackMetaItemResponse`, `RuntimeAuthoringIssue`, `SaveMetaItemRequest`, `SaveMetaItemResponse`, `SearchAllHit`, `SearchAllPageHit`, `SearchAllResponse`, `SetPresenceRequest`, `SetPresenceResponse`, `UninstallPackageRequest`, `UninstallPackageResponse`, `UnregisterDeviceRequest`, `UnregisterDeviceResponse`, `UpdateAiConversationRequest`, `UpdateDataRequest`, `UpdateDataResponse`, `UpdateManyDataRequest`, `UpdateManyDataResponse`, `UpdateNotificationPreferencesRequest`, `UpdateNotificationPreferencesResponse`, `ValidateDataIssue`, `ValidateDataRequest`, `ValidateDataResponse` |
+| [`protocol.zod.ts`](/docs/references/api/protocol) | `AiAgentCapabilities`, `AiAgentChatRequest`, `AiAgentSummary`, `AiAgentsResponse`, `AiChatRequest`, `AiChatResponse`, `AiCompleteRequest`, `AiConversation`, `AiMessage`, `AiModelsResponse`, `AiPendingAction`, `AiPendingActionStatus`, `AiStreamChunk`, `ApproveAiPendingActionResponse`, `AuditMetaItemRequest`, `AuditMetaItemResponse`, `AutomationActionsResponse`, `AutomationTriggerRequest`, `AutomationTriggerResponse`, `BatchDataRequest`, `BatchDataResponse`, `CheckPermissionRequest`, `CheckPermissionResponse`, `CloneDataResponse`, `CreateAiConversationRequest`, `CreateDataRequest`, `CreateDataResponse`, `CreateManyDataRequest`, `CreateManyDataResponse`, `DeleteDataRequest`, `DeleteDataResponse`, `DeleteManyDataRequest`, `DeleteManyDataResponse`, `DeleteMetaItemRequest`, `DeleteMetaItemResponse`, `DiffMetaItemResponse`, `DisablePackageRequest`, `DisablePackageResponse`, `EnablePackageRequest`, `EnablePackageResponse`, `FindDataRequest`, `FindDataResponse`, `FindReferencesToMetaResponse`, `FlowRegistration`, `FlowRegistrationRefusal`, `GetDataRequest`, `GetDataResponse`, `GetDiscoveryRequest`, `GetDiscoveryResponse`, `GetEffectivePermissionsRequest`, `GetEffectivePermissionsResponse`, `GetFieldLabelsRequest`, `GetFieldLabelsResponse`, `GetLocalesRequest`, `GetLocalesResponse`, `GetMetaDiagnosticsResponse`, `GetMetaItemCachedRequest`, `GetMetaItemCachedResponse`, `GetMetaItemLayeredRequest`, `GetMetaItemLayeredResponse`, `GetMetaItemRequest`, `GetMetaItemResponse`, `GetMetaItemsRequest`, `GetMetaItemsResponse`, `GetMetaTypesRequest`, `GetMetaTypesResponse`, `GetNotificationPreferencesRequest`, `GetNotificationPreferencesResponse`, `GetObjectPermissionsRequest`, `GetObjectPermissionsResponse`, `GetPackageRequest`, `GetPackageResponse`, `GetPresenceRequest`, `GetPresenceResponse`, `GetPublishedMetaItemResponse`, `GetRecordFieldAccessResponse`, `GetTranslationsRequest`, `GetTranslationsResponse`, `GetUiViewRequest`, `GetUiViewResponse`, `HistoryMetaItemRequest`, `HistoryMetaItemResponse`, `HttpFindQueryParams`, `InstallPackageRequest`, `InstallPackageResponse`, `ListAiConversationsRequest`, `ListAiConversationsResponse`, `ListAiPendingActionsRequest`, `ListAiPendingActionsResponse`, `ListDraftsResponse`, `ListNotificationsRequest`, `ListNotificationsResponse`, `ListPackagesRequest`, `ListPackagesResponse`, `MarkAllNotificationsReadRequest`, `MarkAllNotificationsReadResponse`, `MarkNotificationsReadRequest`, `MarkNotificationsReadResponse`, `MetadataAuthoringClient`, `MetadataAuthoringSurface`, `MetadataConflictError`, `Notification`, `NotificationPreferences`, `PublicFormSubmitResponse`, `PublishMetaItemRequest`, `PublishMetaItemResponse`, `PublishPackageDraftsRequest`, `PublishPackageDraftsResponse`, `RealtimeConnectRequest`, `RealtimeConnectResponse`, `RealtimeDisconnectRequest`, `RealtimeDisconnectResponse`, `RealtimeSubscribeRequest`, `RealtimeSubscribeResponse`, `RealtimeUnsubscribeRequest`, `RealtimeUnsubscribeResponse`, `RegisterDeviceRequest`, `RegisterDeviceResponse`, `RejectAiPendingActionResponse`, `RollbackMetaItemResponse`, `RuntimeAuthoringIssue`, `SaveMetaItemRequest`, `SaveMetaItemResponse`, `SearchAllHit`, `SearchAllPageHit`, `SearchAllResponse`, `SetPresenceRequest`, `SetPresenceResponse`, `UninstallPackageRequest`, `UninstallPackageResponse`, `UnregisterDeviceRequest`, `UnregisterDeviceResponse`, `UpdateAiConversationRequest`, `UpdateDataRequest`, `UpdateDataResponse`, `UpdateManyDataRequest`, `UpdateManyDataResponse`, `UpdateNotificationPreferencesRequest`, `UpdateNotificationPreferencesResponse`, `ValidateDataIssue`, `ValidateDataRequest`, `ValidateDataResponse` |
 | [`query-adapter.zod.ts`](/docs/references/api/query-adapter) | `ODataQueryAdapter`, `OperatorMapping`, `QueryAdapterConfig`, `QueryAdapterTarget`, `RestQueryAdapter` |
 | [`realtime.zod.ts`](/docs/references/api/realtime) | `RealtimeConfig`, `RealtimeEvent`, `RealtimeEventType`, `RealtimePresence`, `Subscription`, `SubscriptionEvent`, `TransportProtocol` |
 | [`realtime-shared.zod.ts`](/docs/references/api/realtime-shared) | `BasePresence`, `PresenceStatus`, `RealtimeRecordAction` |
@@ -192,19 +192,19 @@ Users and accounts, organizations, positions, SCIM provisioning.
 
 ## Integration Protocol
 
-**Source:** `packages/spec/src/integration/` · **Import:** `@objectstack/spec/integration` · **1 page, 22 schemas**
+**Source:** `packages/spec/src/integration/` · **Import:** `@objectstack/spec/integration` · **1 page, 23 schemas**
 
 The single connector protocol (ADR-0097) — catalog descriptors and provider-bound instances.
 
 | File | Schemas |
 | :--- | :--- |
-| [`connector.zod.ts`](/docs/references/integration/connector) | `Connector`, `ConnectorAction`, `ConnectorActionEffect`, `ConnectorAppCredentialVendor`, `ConnectorInstanceAPIKeyAuth`, `ConnectorInstanceAppCredentialAuth`, `ConnectorInstanceAuth`, `ConnectorInstanceBasicAuth`, `ConnectorInstanceBearerAuth`, `ConnectorInstanceNoAuth`, `ConnectorInstanceOAuth2Auth`, `ConnectorInstanceOAuth2AuthorizationCodeAuth`, `ConnectorInstanceOAuth2ClientCredentialsAuth`, `ConnectorInstanceSignedAliyunAcs3Auth`, `ConnectorInstanceSignedAuth`, `ConnectorInstanceSignedTencentCloudTc3Auth`, `ConnectorOAuth2Grant`, `ConnectorRetryStrategy`, `ConnectorSigningScheme`, `ConnectorType`, `DeclarativeConnectorEntry`, `RetryConfig` |
+| [`connector.zod.ts`](/docs/references/integration/connector) | `Connector`, `ConnectorAction`, `ConnectorActionEffect`, `ConnectorAppCredentialVendor`, `ConnectorInstanceAPIKeyAuth`, `ConnectorInstanceAppCredentialAuth`, `ConnectorInstanceAuth`, `ConnectorInstanceBasicAuth`, `ConnectorInstanceBearerAuth`, `ConnectorInstanceNoAuth`, `ConnectorInstanceOAuth2Auth`, `ConnectorInstanceOAuth2AuthorizationCodeAuth`, `ConnectorInstanceOAuth2ClientCredentialsAuth`, `ConnectorInstanceSignedAlipayV3Auth`, `ConnectorInstanceSignedAliyunAcs3Auth`, `ConnectorInstanceSignedAuth`, `ConnectorInstanceSignedTencentCloudTc3Auth`, `ConnectorOAuth2Grant`, `ConnectorRetryStrategy`, `ConnectorSigningScheme`, `ConnectorType`, `DeclarativeConnectorEntry`, `RetryConfig` |
 
 ---
 
 ## Kernel Protocol
 
-**Source:** `packages/spec/src/kernel/` · **Import:** `@objectstack/spec/kernel` · **29 pages, 151 schemas**
+**Source:** `packages/spec/src/kernel/` · **Import:** `@objectstack/spec/kernel` · **30 pages, 152 schemas**
 
 Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry.
 
@@ -225,6 +225,7 @@ Plugin lifecycle and manifests, capabilities and security, metadata loading, ser
 | [`metadata-loader.zod.ts`](/docs/references/kernel/metadata-loader) | `MetadataFallbackStrategy`, `MetadataManagerConfig` |
 | [`metadata-plugin.zod.ts`](/docs/references/kernel/metadata-plugin) | `MetadataBulkResult`, `MetadataDependency`, `MetadataPluginConfig`, `MetadataPluginManifest`, `MetadataQuery`, `MetadataQueryResult`, `MetadataType`, `MetadataTypeRegistryEntry`, `MetadataValidationResult` |
 | [`metadata-protection.zod.ts`](/docs/references/kernel/metadata-protection) | `MetadataLock`, `MetadataLockSource`, `MetadataProvenance` |
+| [`override-declaration.zod.ts`](/docs/references/kernel/override-declaration) | `OverrideDeclaration` |
 | [`package-artifact.zod.ts`](/docs/references/kernel/package-artifact) | `ArtifactChecksum`, `ArtifactFileEntry`, `ArtifactSignature`, `MetadataCategoryEnum`, `PackageArtifact` |
 | [`package-registry.zod.ts`](/docs/references/kernel/package-registry) | `DisablePackageRequest`, `DisablePackageResponse`, `EnablePackageRequest`, `EnablePackageResponse`, `GetPackageRequest`, `GetPackageResponse`, `InstallPackageRequest`, `InstallPackageResponse`, `InstalledPackage`, `InstalledPackageSource`, `ListPackagesRequest`, `ListPackagesResponse`, `NamespaceConflictError`, `NamespaceRegistryEntry`, `PackageStatusEnum`, `UninstallPackageRequest`, `UninstallPackageResponse` |
 | [`plugin.zod.ts`](/docs/references/kernel/plugin) | `Plugin` |
@@ -371,7 +372,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 172 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 175 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -379,7 +380,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | :--- | :--- |
 | [`action.zod.ts`](/docs/references/ui/action) | `Action`, `ActionAi`, `ActionLocation`, `ActionParam`, `ActionType`, `InlineAction` |
 | [`action-params.zod.ts`](/docs/references/ui/action-params) | `ActionSession` |
-| [`app.zod.ts`](/docs/references/ui/app) | `ActionNavItem`, `App`, `AppBranding`, `AppContextSelector`, `ComponentNavItem`, `DashboardNavItem`, `DocNavItem`, `GroupNavItem`, `NavigationArea`, `NavigationContribution`, `NavigationItem`, `ObjectNavItem`, `PageNavItem`, `ReportNavItem`, `UrlNavItem` |
+| [`app.zod.ts`](/docs/references/ui/app) | `ActionNavItem`, `App`, `AppBranding`, `AppContextSelector`, `AppLandingEntry`, `ComponentNavItem`, `DashboardNavItem`, `DocNavItem`, `GroupNavItem`, `NavigationArea`, `NavigationContribution`, `NavigationItem`, `ObjectNavItem`, `PageNavItem`, `ReportNavItem`, `UrlNavItem` |
 | [`bulk-action.zod.ts`](/docs/references/ui/bulk-action) | `BulkActionDef`, `BulkActionExecution`, `BulkActionOperation`, `BulkActionParam` |
 | [`chart.zod.ts`](/docs/references/ui/chart) | `ChartAggregate`, `ChartAggregateFunction`, `ChartAnnotation`, `ChartAxis`, `ChartConfig`, `ChartDrillDown`, `ChartGroupBy`, `ChartInteraction`, `ChartSeries`, `ChartType` |
 | [`component.zod.ts`](/docs/references/ui/component) | `ActionButtonProps`, `ActionGroupProps`, `ActionIconProps`, `ActionMenuProps`, `ElementButtonProps`, `ElementDefinitionListProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementRepeaterProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGanttProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMapProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `ObjectTimelineProps`, `ObjectTreeProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordAlertAction`, `RecordAlertProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordHistoryProps`, `RecordLineItemsProps`, `RecordPathProps`, `RecordQuickActionsProps`, `RecordReferenceRailProps`, `RecordRelatedListProps`, `ReferenceRailEntry` |
@@ -392,7 +393,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`report.zod.ts`](/docs/references/ui/report) | `JoinedReportBlock`, `Report`, `ReportChart`, `ReportSort`, `ReportType` |
 | [`responsive.zod.ts`](/docs/references/ui/responsive) | `ResponsiveStyles`, `StyleMap` |
 | [`sharing.zod.ts`](/docs/references/ui/sharing) | `SharingConfig` |
-| [`view.zod.ts`](/docs/references/ui/view) | `AddRecordConfig`, `AppearanceConfig`, `CalendarConfig`, `ColumnPrefix`, `ColumnSummary`, `ColumnSummaryConfig`, `EmptyState`, `FormButtonConfig`, `FormField`, `FormSection`, `FormSelectOption`, `FormView`, `GalleryConfig`, `GanttConfig`, `GanttQuickFilter`, `GroupingConfig`, `GroupingField`, `HttpMethodSubset`, `HttpRequest`, `KanbanConfig`, `ListChartConfig`, `ListColumn`, `ListMapConfig`, `ListView`, `NavigationConfig`, `NavigationMode`, `ObjectListView`, `ObjectUserFilters`, `PaginationConfig`, `RowColorConfig`, `RowHeight`, `SelectionConfig`, `TimelineConfig`, `TreeConfig`, `UserActionsConfig`, `UserFilterField`, `UserFilters`, `View`, `ViewData`, `ViewFilterRule`, `ViewItem`, `ViewItemName`, `ViewItemWire`, `ViewKind`, `ViewScope`, `ViewSharing`, `ViewTab`, `VisualizationType` |
+| [`view.zod.ts`](/docs/references/ui/view) | `AddRecordConfig`, `AppearanceConfig`, `CalendarConfig`, `ColumnPrefix`, `ColumnSummary`, `ColumnSummaryConfig`, `EmptyState`, `FormButtonConfig`, `FormField`, `FormSection`, `FormSelectOption`, `FormView`, `GalleryConfig`, `GanttConfig`, `GanttQuickFilter`, `GroupingConfig`, `GroupingField`, `HttpMethodSubset`, `HttpRequest`, `KanbanConfig`, `ListChartConfig`, `ListColumn`, `ListMapConfig`, `ListView`, `NavigationConfig`, `NavigationMode`, `ObjectListView`, `ObjectUserFilters`, `PaginationConfig`, `RowColorConfig`, `RowHeight`, `SelectionConfig`, `TimelineConfig`, `TreeConfig`, `UserActionsConfig`, `UserFilterField`, `UserFilters`, `View`, `ViewData`, `ViewFilterElement`, `ViewFilterOrGroup`, `ViewFilterRule`, `ViewItem`, `ViewItemName`, `ViewItemWire`, `ViewKind`, `ViewScope`, `ViewSharing`, `ViewTab`, `VisualizationType` |
 
 ---
 

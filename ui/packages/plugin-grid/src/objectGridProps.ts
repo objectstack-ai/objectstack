@@ -33,6 +33,21 @@ export interface ObjectGridFooterSummary {
 }
 
 /**
+ * One open group a grouped grid draws rows for, handed to a host through
+ * {@link ObjectGridComponentProps.onRowGroupsChange} (objectstack#28461): the
+ * group's key, its heading (the ancestors' headings before it on a nested
+ * grouping, joined by ` › `) and the rows drawn under it, in display order.
+ */
+export interface ObjectGridRowGroup {
+  /** The group's composite key, unique across levels. */
+  key: string;
+  /** The group's heading as its band reads it, its path on a nested grouping. */
+  label: string;
+  /** The rows drawn under the group, in order. */
+  rows: ReadonlyArray<Record<string, any>>;
+}
+
+/**
  * The HOST-DRIVEN ("external") mode of ObjectGrid — framework#2212.
  *
  * The ordinary authoring surface hands ObjectGrid a `schema` and a `dataSource`

@@ -73,11 +73,12 @@ import {
     anonymousFormObjectName,
 } from '@objectstack/metadata-core';
 import { isEmptyForRequired, isMissing } from '@objectstack/core';
-import type { CreateDataRequest, GetMetaItemsRequest } from '@objectstack/spec/api';
+import type { CreateDataRequest, GetMetaItemsRequest, PublicFormSubmitResponse } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
 import { renderValidationMessage } from '@objectstack/spec/system';
+import { thankYouRecordFieldNames } from '@objectstack/spec/ui';
 import { validationFailure } from '@objectstack/types';
-import { FILE_REFERENCE_TYPES } from '@objectstack/spec/data';
+import { FILE_REFERENCE_TYPES, RUNTIME_OWNED_FIELD_TYPES } from '@objectstack/spec/data';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { isExpectedRouteError, mapDataError } from './error-response.js';
 import { logError } from './log.js';
@@ -103,6 +104,50 @@ export interface FormRouteHost {
     extractLocale: RestServer['extractLocale'];
     translateOptionsFor: (typeof RestServer)['translateOptionsFor'];
     packagedObjectBase: RestServer['packagedObjectBase'];
+}
+
+/**
+ * [#28005, ruling B] The `fields` of the public submit answer: the stored value
+ * of each name the form's `thank-you` panel interpolates
+ * (`thankYouRecordFieldNames`), keyed by name, or `undefined` when none
+ * survives (the answer is then `{ id }` alone).
+ *
+ * A name survives only when, at answer time, its field is declared on the
+ * object with a type in `RUNTIME_OWNED_FIELD_TYPES` (today `autonumber`): a
+ * value the ENGINE generated on insert. Any other stored value may have been
+ * set by a `beforeInsert` / `afterInsert` hook, an elevated one included, from
+ * records the anonymous form grant cannot read. The authoring rule
+ * `thank-you-record-field` refuses such a name at publish; this re-check covers
+ * an object retyped after the form was published, and a name that is no field
+ * at all (a system column, an undeclared name, a prototype key).
+ *
+ * The value is read off the row `createData` answered — already stripped of
+ * `internal: true` fields and masked for the grant — never by a second read. A
+ * name the row does not carry, or carries as anything but a string or a number,
+ * is dropped, never answered as `null`.
+ */
+function thankYouAnswerFields(
+    names: readonly string[],
+    objectDef: any,
+    record: unknown,
+): Record<string, string | number> | undefined {
+    const declared = objectDef?.fields;
+    if (!declared || typeof declared !== 'object' || !record || typeof record !== 'object') return undefined;
+    const fields: Record<string, string | number> = {};
+    let kept = 0;
+    for (const name of names) {
+        // A name that is no declared field (a system column, a prototype key
+        // such as `constructor`) has no string `type` here: dropped.
+        const type = declared[name]?.type;
+        if (typeof type !== 'string' || !RUNTIME_OWNED_FIELD_TYPES.has(type)) continue;
+        // Absent (masked, stripped, never generated), `null`, or any other
+        // shape: dropped.
+        const value = (record as Record<string, unknown>)[name];
+        if (typeof value !== 'string' && typeof value !== 'number') continue;
+        fields[name] = value;
+        kept += 1;
+    }
+    return kept > 0 ? fields : undefined;
 }
 
 /**
@@ -662,9 +707,15 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 const valued = [...allowedFields].filter((name) =>
                     Object.prototype.hasOwnProperty.call(filteredData, name)
                     && !isMissing(filteredData[name]));
+                // The target object's declaration, read at most once per
+                // submission: by the judgements below, and by the answer's
+                // thank-you fields after the write.
+                let objectDefRead: Promise<any> | undefined;
+                const readObjectDef = (): Promise<any> => (objectDefRead ??= this
+                    .readFormObjectDefinitions(p, environmentId)
+                    .then((defs) => defs.find((o: any) => o?.name === match.object)));
                 if (judged.length > 0 || valued.length > 0) {
-                    const objectDef = (await this.readFormObjectDefinitions(p, environmentId))
-                        .find((o: any) => o?.name === match.object);
+                    const objectDef = await readObjectDef();
                     const labelOf = (def: any, name: string): string => {
                         const declared = typeof def?.label === 'string' ? def.label.trim() : '';
                         return declared.length > 0 ? declared : name;
@@ -754,21 +805,33 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 };
                 const result = await p.createData(formCreateRequest);
                 // [#22437] The answer is the created record's id, and
-                // nothing the insert stored. `createData` answers
+                // nothing else the insert stored. `createData` answers
                 // `{ object, id, record, droppedFields? }`, and its `record`
                 // is the row as stored AFTER the insert pipeline: defaults,
                 // and whatever a `beforeInsert` / `afterInsert` hook stamped
                 // — including a value an elevated (`runAs: 'system'`) hook
                 // derived from existing records this anonymous caller's
                 // grant may never read. The whitelist above filters what the
-                // caller WRITES; this line is what filters what it is SHOWN.
+                // caller WRITES; this answer is what filters what it is SHOWN.
                 // The caller already knows what it submitted, so the one
                 // fact it lacks is the id. Projecting the row to the form's
                 // declared fields would not do: a hook may rewrite a
                 // declared field too. The key stays the top-level `id` of a
                 // bare body — where the console's public form page reads
                 // the created id — and no second read builds this answer.
-                res.status(201).json({ id: result.id });
+                //
+                // [#28005, ruling B] The one widening: the values the form's
+                // `thank-you` panel names as `{{record.field_name}}`, under
+                // `fields` (`PublicFormSubmitResponseSchema`) — a web-to-case
+                // visitor's case number. See `thankYouAnswerFields` for which
+                // names survive to the answer.
+                const answer: PublicFormSubmitResponse = { id: result.id };
+                const named = thankYouRecordFieldNames(match.form?.submitBehavior);
+                if (named.length > 0) {
+                    const fields = thankYouAnswerFields(named, await readObjectDef(), result.record);
+                    if (fields) answer.fields = fields;
+                }
+                res.status(201).json(answer);
             } catch (error: any) {
                 const mapped = mapDataError(error);
                 // Distinct message (this is not the "unhandled" channel),

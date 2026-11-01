@@ -103,7 +103,7 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 | `os environments list` / `create` / `switch` | Manage cloud environments (prod/staging/dev) |
 | `os register` | Register the local stack as a deployable target |
 | `os cloud login` / `logout` / `whoami` | Cloud auth subcommands (these three only — there are no `os cloud logs/metrics/status`) |
-| `os package publish [dist/objectstack.json] [--env … --install --visibility org]` | Upload the compiled artifact as a versioned package to the cloud catalog (ADR-0008 P3) |
+| `os package publish [dist/objectstack.json] [--env … --install --visibility org]` | Upload the compiled artifact as a versioned package to the cloud catalog (ADR-0008 P3). Listing file, README, review and every screen the customer's administrator meets: [Marketplace handbook](https://objectstack.ai/docs/deployment/marketplace-handbook) |
 | `os package install <manifest-id │ ./dist/objectstack.json> [--version │ --runtime http://localhost:3000]` | Install a package into a **running** runtime via its install-local endpoint. Catalog mode (by manifest id) or air-gapped local-artifact mode. Auths with the **target runtime's** session (`--email/--password` or `OS_RUNTIME_EMAIL`/`OS_RUNTIME_PASSWORD`), not the cloud login |
 
 > **Cloud connection & marketplace (`@objectstack/cloud-connection`, ADR-0008/0009).**
@@ -111,9 +111,7 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 > `CloudConnectionPlugin`/`createCloudConnectionPlugin`, `MarketplaceProxyPlugin`,
 > `MarketplaceInstallLocalPlugin`, `RuntimeConfigPlugin` — expose the install-local
 > endpoint that `os package install` targets, ship the **Installed Apps** page and
-> marketplace Setup nav as plugin metadata, and maintain `LocalManifestSource`
-> (a local desired-state ledger) plus runtime-identity bind v2 (environment-less
-> self-hosted binding).
+> marketplace Setup nav as plugin metadata.
 
 ## Shipping a plugin
 

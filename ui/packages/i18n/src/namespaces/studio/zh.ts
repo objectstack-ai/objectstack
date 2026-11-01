@@ -1424,6 +1424,10 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.edit.historyEvents': '事件',
   'engine.edit.historyEmptyTitle': '暂无历史',
   'engine.edit.historyEmptyDesc': '此项从未通过覆盖层编辑过。首次保存将创建初始历史记录。',
+  // 事件的操作者(ADR-0146 D1):用户姓名;查不到用户记录时显示记录的 id 并标注未解析。
+  'engine.edit.historyBy': '操作者',
+  'engine.edit.historyActorUnresolved': '未解析的用户',
+  'engine.edit.historyActorUnresolvedHint': '找不到这个 id 对应的用户记录：该用户可能已被删除，或你无权读取用户目录。',
   // Reorder buttons
   'engine.inspector.reorder.up': '上移',
   'engine.inspector.reorder.down': '下移',
@@ -2181,6 +2185,16 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.heading': '自动化',
   'engine.studio.auto.deleteFlow': '删除流程',
   'engine.studio.auto.flowDeleted': '已删除流程「{item}」',
+  // ADR-0146 D4 — 只读软件包的流程：启用账本开关（仅本部署，不改定义）。
+  'engine.studio.auto.ledger.on': '本部署中已开启',
+  'engine.studio.auto.ledger.off': '本部署中已关闭',
+  'engine.studio.auto.ledger.notRunning': '本部署中已开启，但未在此运行',
+  'engine.studio.auto.ledger.hint': '该流程来自只读软件包。此开关只在本部署中开启或关闭它，不改动软件包本身。',
+  'engine.studio.auto.ledger.walled': '在此部署中，只有平台运营方可以开启或关闭打包流程。',
+  'engine.studio.auto.ledger.switchedOn': '「{label}」已在本部署中开启。',
+  'engine.studio.auto.ledger.switchedOff': '「{label}」已在本部署中关闭。',
+  'engine.studio.auto.ledger.toggleFailedHttp': '无法更改启用状态（HTTP {status}）。',
+  'engine.studio.auto.ledger.toggleFailed': '无法更改启用状态。',
   'engine.studio.auto.on': '已启用',
   'engine.studio.auto.off': '已停用',
   'engine.studio.auto.offTitle': '已停用 — 不会运行',

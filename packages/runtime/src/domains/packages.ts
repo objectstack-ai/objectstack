@@ -344,29 +344,27 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
 }
 
 /**
- * [#28414] The identity a package write door records on the history rows and
- * package commits its protocol call writes: the request's authenticated user
- * id, read off the execution context the capability gate above admitted, or
- * nothing for a caller with none (a system context), so the protocol records
- * the actor-less `null` (#4556) — the rule `RestServer.resolveMetaWriteActor`
- * states for the single-item door and the `/meta` dispatcher's save door
- * follows (`meta.ts`).
+ * The actor a package write door records (ADR-0146 D1): the user id of the
+ * execution context this request was authorized as — the same context
+ * {@link requireManageMetadata} judged a few lines earlier — or `undefined`
+ * when the caller carries none, so the protocol's no-actor default (a `NULL`
+ * `recorded_by`) applies and a machine write is never stamped with a person.
  *
- * ⛔ Never read off the body or a header. The doors used to pass a body
- * `actor` straight to the protocol, so any caller holding `manage_metadata`
- * could sign another person's name into the record an administrator reads to
- * decide what to roll back and whom to ask. A body `actor` is ignored, not
- * refused: a client still sending one keeps working and is recorded as
+ * Never the request body: a body `actor` let any caller holding
+ * `manage_metadata` record any name as the one who changed a package. This is
+ * the rule `RestServer.resolveMetaWriteActor` holds for the `/meta` write
+ * doors, so attribution cannot drift from authorization. [#28414] Every
+ * package door that stamps history or a commit reads it: `publish-drafts`
+ * (and its app re-save), `discard-drafts`, `commits/:commitId/revert`,
+ * `rollback`, `adopt-orphans` and `duplicate`. A body `actor` is ignored, not
+ * refused, so a client still sending one keeps working and is recorded as
  * itself. No caller acts on behalf of another identity through these doors
- * (measured: the console and the SDK send none, the CLI calls none); a job
- * that must is served server-side by calling the protocol with its own
- * `actor`, never by trusting a body.
- *
- * One helper for every door; spread its answer into the protocol request.
+ * (measured: the console and the SDK send none, the CLI calls none); one that
+ * must is served server-side by calling the protocol with its own `actor`.
  */
-function packageWriteActor(context: HttpProtocolContext): { actor?: string } {
-    const userId = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
-    return typeof userId === 'string' && userId ? { actor: userId } : {};
+function resolvePackageWriteActor(context: HttpProtocolContext | undefined): string | undefined {
+    const userId: unknown = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
+    return typeof userId === 'string' && userId ? userId : undefined;
 }
 
 /**
@@ -1912,9 +1910,18 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
                 }
                 try {
+                    // [ADR-0146 D1] Who published: the identity this request
+                    // was authorized as, never a name the body supplies — see
+                    // `resolvePackageWriteActor`. A body `actor` is ignored.
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.publishPackageDrafts({
                         packageId: id,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...(actor !== undefined ? { actor } : {}),
+                        // [ADR-0146 D1] The author's change note: the package
+                        // commit and every item history row this publish writes
+                        // carry it. A string, as the single-item publish door
+                        // reads `message`; anything else sends no note.
+                        ...(typeof body?.message === 'string' ? { message: body.message } : {}),
                         // [#24253] Passed through as sent: the protocol judges
                         // its shape and what it names, and refuses the whole
                         // request before anything is published.
@@ -2097,7 +2104,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                         name: app.name,
                                         item,
                                         packageId: id,
-                                        ...packageWriteActor(_context),
+                                        ...(actor !== undefined ? { actor } : {}),
                                     });
                                     flipped.push(app.name);
                                 }
@@ -2260,9 +2267,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.discardPackageDrafts({
                         packageId: id,
-                        ...packageWriteActor(_context),
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     // The twin of `publish-drafts`' 404: an empty discard is the
                     // answer for a package that exists — see `packageIsUnknown`.
@@ -2322,9 +2330,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.revertCommit({
                         commitId,
-                        ...packageWriteActor(_context),
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -2348,9 +2357,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
                 }
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
-                        ...packageWriteActor(_context),
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -2443,9 +2453,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
             }
             try {
+                const actor = resolvePackageWriteActor(_context);
                 const result = await protocol.reassignOrphanedMetadata({
                     targetPackageId: id,
-                    ...packageWriteActor(_context),
+                    ...(actor !== undefined ? { actor } : {}),
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
@@ -2485,12 +2496,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // loop, so a refusal any later still leaves the empty shell behind.
             const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
             try {
+                const actor = resolvePackageWriteActor(_context);
                 const result = await protocol.duplicatePackage({
                     sourcePackageId: id,
                     targetPackageId,
                     ...(typeof body?.targetName === 'string' ? { targetName: body.targetName } : {}),
                     ...(typeof body?.targetNamespace === 'string' ? { targetNamespace: body.targetNamespace } : {}),
-                    ...packageWriteActor(_context),
+                    ...(actor !== undefined ? { actor } : {}),
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {

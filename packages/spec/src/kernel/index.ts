@@ -36,6 +36,11 @@ export * from './platform-capabilities';
 export * from './metadata-loader.zod';
 export * from './metadata-plugin.zod';
 export * from './metadata-protection.zod';
+// [ADR-0146 D2, D3] The override declaration every overridable type spreads,
+// and the paired `<base>.custom` package's identity rules and the closed
+// overridable-type list the doors read.
+export * from './override-declaration.zod';
+export * from './customization-package';
 // The read path's OWN annotations (`_diagnostics`, `_draft`) — the underscore
 // keys that, unlike the protection envelope above, must never survive back into
 // a persisted body or a strict re-parse (#4326, cloud#971).

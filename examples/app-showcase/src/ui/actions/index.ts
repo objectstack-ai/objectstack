@@ -90,10 +90,9 @@ export const MarkDoneAction = defineAction({
   // still reads an unset `done` as "not done". `has()` alone is therefore the
   // whole guard here. Rule: `packages/objectql/src/declared-fields.ts`.
   visible: 'has(record.done) && record.done != true',
-  // `record_section` so the Task Detail page's `record:quick_actions` bar
-  // (which names this action) resolves it — the engine location-filters even
-  // explicitly-named actions, mirroring the platform's own sys-user pages.
-  locations: ['list_item', 'record_header', 'record_section'],
+  // No `record_section`: the Task Detail header already draws it, and its
+  // quick-actions bar carries only what the header does not (one action row).
+  locations: ['list_item', 'record_header'],
   refreshAfter: true,
 });
 
@@ -190,7 +189,11 @@ export const RecalcEstimateAction = defineAction({
   execution: 'perRecord',
   // Names the task (see MarkDoneAction's note on the hole and its fallback).
   successMessage: "Estimate recalculated for {{ record.title | default:'the task' }}.",
-  locations: ['record_more', 'record_section'],
+  // `record_section` only: the Task Detail page's `record:quick_actions` bar
+  // names it, and the engine location-filters even explicitly-named actions.
+  // Not `record_more` too, so the page draws it once, in that bar, and not
+  // again under the header's ⋯ overflow.
+  locations: ['record_section'],
   // The endpoint is record-scoped and rejects a body without an id. On a
   // record surface the page supplies it; invoked from a LIST ROW (see the
   // `legacy_row_actions` view) nothing else can, so name the body key the
@@ -268,8 +271,7 @@ export const LogTimeAction = defineAction({
   // implicitly claims the `default` key), so pointing a form action there opens
   // a list as a form — now a build error (#2554).
   target: 'showcase_task.form',
-  // `record_section` so it surfaces in the Task Detail quick-actions bar too.
-  locations: ['record_header', 'record_related', 'record_section'],
+  locations: ['record_header', 'record_related'],
   refreshAfter: true,
 });
 
@@ -496,7 +498,12 @@ export const ArchiveTaskAction = defineAction({
   // Disabled while the task is not done — visible either way. #8990: `has()`
   // for the sparse face; `!=` against a literal cannot fault, so no `!= null`.
   disabled: 'has(record.done) && record.done != true',
-  locations: ['record_header', 'record_section'],
+  // What the greyed button says while `disabled` holds: why it is
+  // unavailable and what unlocks it. Without it the console falls back to
+  // "Not available for this record", which names neither. Display only; it
+  // never gates the dispatch.
+  disabledReason: 'Mark the task done first.',
+  locations: ['record_header'],
   refreshAfter: false,
 });
 

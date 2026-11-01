@@ -204,11 +204,16 @@ describe('RecordDetailView — `page:header` builds the H1 from the fields the v
     // `titleFormat: '{email}'` it hid `name` while the H1 printed the denied
     // email, and the readable name was on screen nowhere. The H1 now reads the
     // same row: it shows the name, and the hidden `name` row is its duplicate,
-    // as on a backend that strips `email`. The name is on the page once, in
-    // the H1; it does not come back as a body row.
+    // as on a backend that strips `email`. The name is in the record once, in
+    // the H1; it does not come back as a body row. The top bar's crumb
+    // 「对象 › 记录名」 (objectstack#27524) names the record with the same
+    // gated title, never the denied email.
     await renderRecordPage({ titleFormat: '{email}' }, denying('email'), 'Ada Lovelace');
+    const bar = document.querySelector('[data-record-top-bar]');
+    expect(bar?.textContent).toContain('Ada Lovelace');
+    expect(bar?.textContent).not.toContain(EMAIL);
     const text = document.body.textContent ?? '';
-    expect(text.split('Ada Lovelace').length - 1).toBe(1);
+    expect(text.split('Ada Lovelace').length - 1 - ((bar?.textContent ?? '').split('Ada Lovelace').length - 1)).toBe(1);
     expect(text).toContain('555-0100');
   });
 

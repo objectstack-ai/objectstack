@@ -14,6 +14,7 @@
  */
 
 import {
+  isViewFilterOrGroup,
   normalizeFilterOperator,
   VIEW_FILTER_OPERATORS,
   VIEW_FILTER_LIST_VALUE_OPERATORS,
@@ -1386,12 +1387,49 @@ function viewFilterRuleToNode(rule: ViewFilterRuleLike): FilterNode {
 }
 
 /**
+ * Lower ONE any-of group element of a view filter list — `{ or: [rule, ...] }`,
+ * `@objectstack/spec/ui`'s `ViewFilterOrGroupSchema` — to an `or` node of its
+ * rules, so the group sits inside the list's AND as one child.
+ *
+ * Each member is lowered by {@link viewFilterRuleToNode}, so a rule inside a
+ * group meets exactly the operator fold, arity check and comparand refusal it
+ * meets at the top level. One member is returned as its own node: an any-of over
+ * one rule selects what that rule selects.
+ *
+ * A shape the spec refuses is NOT repaired here. A group whose `or` is not a
+ * non-empty array is returned as it arrived, and so is a member that is not a
+ * rule (a blank `field`, a group inside a group): an object in AST position,
+ * which the server refuses with `400 INVALID_FILTER`. Dropping either would
+ * widen or empty the list in silence; the element kinds are told apart by the
+ * spec's own {@link isViewFilterOrGroup}, never by a second test here.
+ */
+function viewFilterOrGroupToNode(group: { or?: unknown }): unknown {
+  const members = group.or;
+  if (!Array.isArray(members) || members.length === 0) return group;
+  const nodes = members.map((member) => (isViewFilterRule(member) ? viewFilterRuleToNode(member) : member));
+  return nodes.length === 1 ? nodes[0] : ['or', ...nodes];
+}
+
+/** One element of a stored view filter list, lowered: a rule, an any-of group, or (untouched) an AST node. */
+function lowerViewFilterElement(element: unknown): unknown {
+  if (isViewFilterRule(element)) return viewFilterRuleToNode(element);
+  if (isViewFilterOrGroup(element)) return viewFilterOrGroupToNode(element);
+  return element;
+}
+
+/** Does this array carry a stored view filter element (a rule or an any-of group) to lower? */
+function carriesViewFilterElement(source: readonly unknown[]): boolean {
+  return source.some((element) => isViewFilterRule(element) || isViewFilterOrGroup(element));
+}
+
+/**
  * Normalize ONE filter source into a single filter node.
  *
  * A "source" is whatever a view hands a renderer, and there are three shapes in
  * circulation, all legitimate:
  *
- *   - `[{ field, operator, value }, ...]`  a spec `ViewFilterRule[]`
+ *   - `[{ field, operator, value }, ...]`  a spec view filter list, whose
+ *     elements may also be any-of groups `{ or: [rule, ...] }`
  *   - `[['stage', '=', 'won'], ...]`       an AST node / legacy flat array
  *   - `{ status: 'active' }`               a MongoDB-style object
  *
@@ -1429,6 +1467,12 @@ function viewFilterRuleToNode(rule: ViewFilterRuleLike): FilterNode {
  * lowering, one place; the same reason the MongoDB-style shape is lowered here
  * rather than at each of its callers.
  *
+ * An any-of group (`{ or: [rule, ...] }`, objectstack#28020) lowers to one `or`
+ * node of its rules, a child of the list's implicit AND like any rule: the list
+ * still ANDs its elements and the group ORs its members. Before this a group
+ * passed through as an object in AST position and the server refused the whole
+ * list (`400 INVALID_FILTER`).
+ *
  * Mixed arrays fold ELEMENT-WISE, because that is what reaches this function in
  * practice: `ObjectView` concatenates a saved view's rules with the
  * `?filter[<field>]=<value>` URL triples into one array. Triples pass through
@@ -1447,13 +1491,12 @@ export function toFilterNode(source: unknown): FilterNode | Record<string, any> 
   if (source === null || source === undefined) return undefined;
   if (Array.isArray(source)) {
     if (source.length === 0) return undefined;
-    // Spec `ViewFilterRule[]` (possibly mixed with AST nodes) → AST nodes. Left
-    // untouched when the array holds no rule objects, which is the common case:
-    // user-filter conditions and URL triples are already nodes.
+    // A spec view filter list (possibly mixed with AST nodes) → AST nodes: a
+    // rule becomes a comparison, an any-of group `{ or: [...] }` an `or` node
+    // of its rules. Left untouched when the array holds neither, which is the
+    // common case: user-filter conditions and URL triples are already nodes.
     return (
-      source.some(isViewFilterRule)
-        ? source.map((el) => (isViewFilterRule(el) ? viewFilterRuleToNode(el) : el))
-        : source
+      carriesViewFilterElement(source) ? source.map(lowerViewFilterElement) : source
     ) as FilterNode;
   }
   if (typeof source !== 'object') return undefined;
@@ -1535,4 +1578,35 @@ export function mergeFilterNodes(
   if (nodes.length === 0) return undefined;
   if (nodes.length === 1) return nodes[0];
   return ['and', ...nodes] as FilterNode;
+}
+
+/** A stored view filter list as the builder's ONE logic over flat rules. */
+export interface BuilderFilterRules {
+  logic: 'and' | 'or';
+  rules: unknown[];
+}
+
+/**
+ * A stored view filter list as the filter builder's one logic over flat rules,
+ * or `null` when the builder cannot show it — the READ direction of
+ * `app-shell`'s `foldFilterGroupToSpecRules`.
+ *
+ * - A list with no any-of group is an AND group of its elements.
+ * - A list that is exactly one any-of group (`[{ or: rules }]`, what the fold
+ *   writes for an OR group, `ViewFilterOrGroupSchema`) is an OR group of its
+ *   rules.
+ * - Anything else that carries a group — a group beside other elements, two
+ *   groups, a group whose `or` is not an array — is `null`. The builder edits
+ *   one logic over flat rows, so loading such a list into it would drop the
+ *   group, or the elements beside it, on the next save, and the view would
+ *   select other records with nobody told. A caller shows it read-only.
+ *
+ * The element kinds are told apart by the spec's own `isViewFilterOrGroup`.
+ */
+export function builderRulesOfSpecFilter(stored: unknown): BuilderFilterRules | null {
+  const elements: unknown[] = Array.isArray(stored) ? stored : [];
+  if (!elements.some(isViewFilterOrGroup)) return { logic: 'and', rules: elements };
+  const only = elements.length === 1 ? elements[0] : undefined;
+  if (isViewFilterOrGroup(only) && Array.isArray(only.or)) return { logic: 'or', rules: only.or };
+  return null;
 }

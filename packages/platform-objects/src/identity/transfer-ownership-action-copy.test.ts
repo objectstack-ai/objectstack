@@ -23,6 +23,28 @@ import { jaJPObjects } from '../apps/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../apps/translations/es-ES.objects.generated.js';
 import { SysMember } from './sys-member.object.js';
 
+// [#27948] An action's `description`, each param's `helpText` and each
+// `outcomeMessages` entry are `template` slots: the parsed object carries the
+// `{ dialect: 'template', source }` envelope, so the copy is read as written
+// through the template judge's one reader, `templateSlotSource` (a locale map
+// is kept as it is).
+function copyAsWritten<T>(declared: T): T {
+  const a = declared as Record<string, any> | undefined;
+  if (!a) return declared;
+  const text = (v: unknown) => templateSlotSource(v) ?? v;
+  return {
+    ...a,
+    ...(a.description !== undefined ? { description: text(a.description) } : {}),
+    ...(Array.isArray(a.params)
+      ? { params: a.params.map((p: any) => (p && p.helpText !== undefined ? { ...p, helpText: text(p.helpText) } : p)) }
+      : {}),
+    ...(a.outcomeMessages && typeof a.outcomeMessages === 'object'
+      ? { outcomeMessages: Object.fromEntries(Object.entries(a.outcomeMessages).map(([k, v]) => [k, text(v)])) }
+      : {}),
+  } as T;
+}
+
+
 interface CopyAction {
   name?: string;
   label?: string;
@@ -43,7 +65,7 @@ function declared(name: string): CopyAction {
   const found = ((SysMember as { actions?: CopyAction[] }).actions ?? []).find((a) => a.name === name);
   expect(found, `${name} is declared`).toBeDefined();
   return {
-    ...found,
+    ...copyAsWritten(found),
     confirmText: templateSlotSource(found?.confirmText),
     successMessage: templateSlotSource(found?.successMessage),
   } as CopyAction;

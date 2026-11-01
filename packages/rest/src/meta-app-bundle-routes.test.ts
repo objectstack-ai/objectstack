@@ -333,3 +333,35 @@ describe('[#27627] an app the caller cannot read refuses the whole request with 
         expect(protocol.getMetaItem).not.toHaveBeenCalled();
     });
 });
+
+// ── [#28001] The objects a delete cascades into ───────────────────────────────
+
+describe('[#28001] a bundled object carries `cascadeDeleteObjects` exactly as its own item read serves it', () => {
+    it('the bundle\'s entry and `GET /meta/object/{name}` answer the same list, beside the item', async () => {
+        const { protocol, route } = setup('member');
+        const plain = protocol.getMetaItem.getMockImplementation();
+        protocol.getMetaItem.mockImplementation(async (request: any) => {
+            const envelope = await plain(request);
+            return singular(request.type) === 'object' && request.name === 'account'
+                ? { ...envelope, cascadeDeleteObjects: ['note'] }
+                : envelope;
+        });
+        const read = async (path: string, params: Record<string, string>) => {
+            const res = makeRes();
+            await route(path).handler({ method: 'GET', path, params, query: {}, body: {}, headers: {} }, res);
+            return res;
+        };
+
+        const bundled = await read(`${META}/app/:appId/bundle`, { appId: 'crm' });
+        expect(bundled.statusCode).toBe(200);
+        expect(AppMetadataBundleResponseSchema.safeParse(bundled.body).success).toBe(true);
+        const account = bundled.body.objects.find((m: any) => m.name === 'account');
+        expect(account.cascadeDeleteObjects).toEqual(['note']);
+        expect(account.item).not.toHaveProperty('cascadeDeleteObjects');
+        // The control: an object the engine did not answer for carries no key.
+        expect(bundled.body.objects.find((m: any) => m.name === 'contact')).not.toHaveProperty('cascadeDeleteObjects');
+
+        const single = await read(`${META}/:type/:name`, { type: 'object', name: 'account' });
+        expect(JSON.stringify(account)).toBe(JSON.stringify(single.body));
+    });
+});

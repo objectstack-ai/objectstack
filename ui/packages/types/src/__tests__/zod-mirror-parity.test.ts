@@ -154,7 +154,12 @@
  *     a delta to this number; count the registry. Nothing asserts it against a written
  *     one, so this line is prose and can rot; the pin that cannot is the one
  *     comparing the two halves to each other.
- *   - **51 entries** in `KnownDrift`, **88 keys** across them — 51 / 87 until
+ *   - **51 entries** in `KnownDrift`, **89 keys** across them — 51 / 88 until
+ *     objectstack#28434 declared `DataTableSchema.renderRowContextMenu`, the
+ *     host's row context menu items, as a runtime slot refused by name on the
+ *     mirror, so it JOINED the same `data-display.zod.ts#DataTableSchema` entry:
+ *     the key total rose by one and the entry count did not move. It was
+ *     51 / 87 until
  *     objectstack#27365 declared `DataTableSchema.isRowEditable`, the host's
  *     per-row inline-edit verdict, as a runtime slot refused by name on the
  *     mirror, so `isRowEditable` JOINED `data-display.zod.ts#DataTableSchema`'s
@@ -2493,7 +2498,11 @@ interface KnownDrift {
     // objectstack#27365 — `isRowEditable` is a RUNTIME SLOT in the objectui#6124
     // shape: `data-table` reads `schema.isRowEditable` and calls it per row;
     // `ObjectGrid` supplies it from the record-grained write verdict.
-    | 'isRowEditable';
+    | 'isRowEditable'
+    // objectstack#28434 — `renderRowContextMenu` is a RUNTIME SLOT of the same
+    // shape: `data-table` calls it with the row when its context menu opens;
+    // `ObjectGrid` supplies the items.
+    | 'renderRowContextMenu';
   /** RUNTIME SLOT (objectui#7759 group E, the objectui#6124 shape): `data-table`, `ObjectGrid` and `VirtualGrid` call `col.cell(value, row)`. */
   'data-display.zod.ts#TableColumnSchema': 'cell';
   /**

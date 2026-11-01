@@ -95,7 +95,9 @@
  *
  * `actionErrorDetail` is the one place this repo reads an ADR-0112 error
  * envelope's message; a fallback string is used ONLY when the response carried
- * no message at all, never in place of one.
+ * no message at all, never in place of one. The toggle request lives in
+ * `packagedFlowLedger.ts`, shared with Studio's Automations pillar, which
+ * offers the same switch on a read-only package's flow (ADR-0146 D4).
  *
  * ## How this page is reached
  *
@@ -156,6 +158,7 @@ import {
   type FlowRuntimeStateRow,
   type PackagedFlowRow,
 } from './packagedFlows.js';
+import { requestFlowToggle, type FlowToggleOutcome } from './packagedFlowLedger.js';
 import { PackagedActionsSection } from './PackagedActionsSection.js';
 import { studioOrgScopePath } from '../studio-design/studioScope.js';
 import { PageHeader } from '../../layout/PageHeader.js';
@@ -238,8 +241,7 @@ interface CloneResult {
   switchRefusal: string | null;
 }
 
-/** The toggle's answer: the flag the server reports, or its refusal verbatim. */
-type ToggleOutcome = { ok: true; enabled: boolean } | { ok: false; message: string };
+type ToggleOutcome = FlowToggleOutcome;
 
 /* -------------------------------------------------------------------------- */
 /* The reason disclosure                                                       */
@@ -364,43 +366,16 @@ export function PackagedAutomationPage() {
    * refusal comes back as the server's sentence, verbatim.
    */
   async function requestToggle(name: string, enabled: boolean): Promise<ToggleOutcome> {
-    try {
-      const res = await fetch(`${apiBase()}/automation/${encodeURIComponent(name)}/toggle`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { ...JSON_HEADERS, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-      const json = await readJson(res);
-      if (!res.ok || envelopeRefused(json)) {
-        // VERBATIM. The posture gate (403) and the subflow guard (409) both
-        // carry the whole of what the admin needs in this string — the second
-        // one names the callers, which nothing on the client could reconstruct.
-        return {
-          ok: false,
-          message: actionErrorDetail(
-            json,
-            // A SEPARATE key from the catch arm's below: this one has a status
-            // to name and that one does not, and one key cannot carry a hole
-            // only half its call sites can fill.
-            t('packagedAutomation.toggleFailedHttp', {
-              defaultValue: 'Could not change activation (HTTP {{status}}).',
-              status: res.status,
-            }),
-          ),
-        };
-      }
-      const reported = envelopeData(json).enabled;
-      return { ok: true, enabled: typeof reported === 'boolean' ? reported : enabled };
-    } catch (e) {
-      return {
-        ok: false,
-        message:
-          e instanceof Error && e.message
-            ? e.message
-            : t('packagedAutomation.toggleFailed', { defaultValue: 'Could not change activation.' }),
-      };
-    }
+    return requestFlowToggle(name, enabled, {
+      // Two keys: the HTTP one has a status to name and the network one does
+      // not, and one key cannot carry a hole only half its call sites can fill.
+      http: (status) =>
+        t('packagedAutomation.toggleFailedHttp', {
+          defaultValue: 'Could not change activation (HTTP {{status}}).',
+          status,
+        }),
+      network: t('packagedAutomation.toggleFailed', { defaultValue: 'Could not change activation.' }),
+    });
   }
 
   /** A toggle the server accepted: the row shows its answer, and the runtime is re-read. */
