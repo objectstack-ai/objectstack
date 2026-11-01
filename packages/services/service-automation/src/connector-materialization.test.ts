@@ -102,6 +102,21 @@ interface BootOptions {
     packages?: Record<string, { source: string }>;
     /** The engine's residual-owner record by id, as `residualOwnerSource` answers it (#28534). */
     residualOwners?: Record<string, 'code' | 'marketplace'>;
+    /**
+     * The connectors a package REGISTRATION filed, as `getArtifactItem` answers
+     * them (#28594). Absent = a registry double with no registered layer.
+     */
+    registered?: unknown[];
+    /** Collects every `logger.error` record the boot writes (#28594: the soft path's record). */
+    logged?: Array<{ msg: string; meta?: unknown }>;
+}
+
+/** `SchemaRegistry.getArtifactItem('connector', name, packageId)` over `registered` (#28594). */
+function artifactReader(registered: unknown[] | undefined) {
+    if (registered === undefined) return undefined;
+    return (type: string, name: string, packageId?: string) => (type !== 'connector' ? undefined : registered.find(
+        (item) => (item as { name?: unknown }).name === name && (item as { _packageId?: unknown })._packageId === packageId,
+    ));
 }
 
 /**
@@ -124,9 +139,20 @@ async function boot(declared: unknown[], opts: BootOptions = {}): Promise<LiteKe
                 registry: {
                     listItems: (type: string) => (type === 'connector' ? declared : []),
                     getPackage: (id: string) => opts.packages?.[id],
+                    getArtifactItem: artifactReader(opts.registered),
                 },
                 residualOwnerSource: (id: string) => opts.residualOwners?.[id],
             });
+            if (opts.logged) {
+                // The kernel hands every plugin the same logger, so the
+                // automation plugin's records arrive here.
+                const logged = opts.logged;
+                const original = ctx.logger.error.bind(ctx.logger);
+                ctx.logger.error = (msg: string, err?: unknown, meta?: unknown) => {
+                    logged.push({ msg, meta });
+                    return original(msg, err, meta);
+                };
+            }
             const automation = ctx.getService('automation');
             if (opts.providerFactory) {
                 automation.registerConnectorProvider(opts.providerKey ?? 'fake', opts.providerFactory, opts.providerOptions);
@@ -191,6 +217,8 @@ async function bootReloadable(
         packages?: Record<string, { source: string }>;
         /** The engine's residual-owner record by id, as `residualOwnerSource` answers it (#28534). */
         residualOwners?: Record<string, 'code' | 'marketplace'>;
+        /** The connectors a package registration filed, as `getArtifactItem` answers them (#28594). */
+        registered?: unknown[];
     },
 ) {
     const state = { declared: initial };
@@ -208,6 +236,7 @@ async function bootReloadable(
                 registry: {
                     listItems: (type: string) => (type === 'connector' ? state.declared : []),
                     getPackage: (id: string) => opts.packages?.[id],
+                    getArtifactItem: artifactReader(opts.registered),
                 },
                 residualOwnerSource: (id: string) => opts.residualOwners?.[id],
             });
@@ -218,9 +247,9 @@ async function bootReloadable(
     kernel.use(harness as never);
     await kernel.bootstrap();
     await flush();
-    const reload = async (next: unknown[]) => {
+    const reload = async (next: unknown[], payload?: unknown) => {
         state.declared = next;
-        await captured.trigger('metadata:reloaded');
+        await captured.trigger('metadata:reloaded', payload);
         await flush();
     };
     return { kernel, engine: automationOf(kernel), reload };
@@ -844,6 +873,214 @@ describe('#28534 — an entry an installed package declares is refused its packa
         await reload([host, ownedBy(providerConnector('installed', { providerConfig: { spec: './specs/billing.json' } }), INSTALLED)]);
         expect(engine.getRegisteredConnectors()).toContain('host_pkg');
         expect(engine.getRegisteredConnectors()).not.toContain('installed');
+        await kernel.shutdown();
+    });
+});
+
+// ── #28594 — a STORED definition's package-relative refs are refused ────────
+//
+// The post-boot declaration is the protocol's execution view: the registry's
+// items with the environment's stored rows (`sys_metadata`, the metadata door)
+// served over and beside them. A stored row is no package's declaration and has
+// no root on disk, so only what a registering door filed (`getArtifactItem`,
+// with the same provider binding) or the host's own artifact carried reads the
+// host's root. Here a row in `declared` that `registered` does not hold is a
+// stored row.
+
+describe('#28594 — a definition stored in this environment is refused its package-relative refs', () => {
+    const HOST = 'com.acme.host';
+    const AUTHORED = 'com.acme.authored';
+    const HOST_RESIDUAL = 'com.acme.host.stack';
+    const packages = { [HOST]: { source: 'code' }, [AUTHORED]: { source: 'authored' } };
+    const residualOwners = { [HOST_RESIDUAL]: 'code' } as const;
+    const ownedBy = <T extends object>(item: T, packageId: string) => ({ ...item, _packageId: packageId });
+    const spec = './specs/billing.json';
+
+    function makeRefProvider() {
+        const reads: string[] = [];
+        const resolved: string[] = [];
+        const factory: ConnectorProviderFactory = async (ctx) => {
+            if (typeof ctx.providerConfig.spec === 'string') reads.push(await ctx.loadPackageFile!(ctx.providerConfig.spec));
+            for (const ref of (ctx.providerConfig.paths as string[] | undefined) ?? []) {
+                resolved.push(await ctx.resolvePackagePath!(ref));
+            }
+            return {
+                def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] } as unknown as Connector,
+                handlers: { ping: async () => ({ ok: true }) },
+            };
+        };
+        return { factory, reads, resolved };
+    }
+
+    /** The host's registered entry, as both the registry and its declaration hold it. */
+    const hostEntry = ownedBy(providerConnector('host_pkg', { providerConfig: { spec, paths: ['.'] } }), HOST);
+    const residualEntry = ownedBy(providerConnector('residual', { providerConfig: { spec } }), HOST_RESIDUAL);
+    const registered = [hostEntry, residualEntry];
+
+    /**
+     * Boot over `declared` (the registry as a restart leaves it, a stored row
+     * hydrated beside the host's registrations). The boot must START: a stored
+     * entry's refused ref is logged and the entry skipped, never a failed boot.
+     */
+    async function bootOverStored(declared: unknown[], opts: BootOptions) {
+        const logged: Array<{ msg: string; meta?: unknown }> = [];
+        const kernel = await boot(declared, { ...opts, logged });
+        const recordOf = (name: string): string => {
+            const record = logged.find((l) => l.msg.includes(`connector instance '${name}'`));
+            return record === undefined ? '' : `${record.msg} ${JSON.stringify(record.meta)}`;
+        };
+        return { kernel, engine: automationOf(kernel), recordOf };
+    }
+
+    it('an environment-wide stored row (no package) naming a file is refused, naming the entry, the ref and the remedy', async () => {
+        const { factory, reads } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored([providerConnector('stored', { providerConfig: { spec } })], {
+            providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
+        });
+        expect(engine.getRegisteredConnectors()).not.toContain('stored');
+        const record = recordOf('stored');
+        expect(record).toContain(`failed to materialize connector instance 'stored'`);
+        expect(record).toContain(`connector instance 'stored' is stored in this environment, not declared by the host's own stack`);
+        expect(record).toContain(`file ref '${spec}' is refused`);
+        expect(record).toContain('Carry the document inline in the definition, or name it by an http(s) URL.');
+        expect(record).not.toContain(path.resolve(fixtureRoot));
+        expect(reads).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('a row of an `authored` package is refused, naming its package', async () => {
+        const { factory, reads } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored(
+            [ownedBy(providerConnector('authored', { providerConfig: { spec } }), AUTHORED)],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, registered },
+        );
+        expect(engine.getRegisteredConnectors()).not.toContain('authored');
+        expect(recordOf('authored')).toContain(`connector instance 'authored' is stored in this environment (package '${AUTHORED}')`);
+        expect(recordOf('authored')).toContain(`file ref '${spec}' is refused`);
+        expect(reads).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('a row of an `authored` package whose package row the boot has not read yet is stored too, not unrecorded', async () => {
+        // On a restart the package's rows reach the boot reconcile before its
+        // package row does: no row, no residual record, nothing filed.
+        const { factory, reads } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored(
+            [ownedBy(providerConnector('authored_early', { providerConfig: { spec } }), 'com.acme.authored.unread')],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, residualOwners, registered },
+        );
+        expect(engine.getRegisteredConnectors()).not.toContain('authored_early');
+        expect(recordOf('authored_early')).toContain(
+            `connector instance 'authored_early' is stored in this environment (package 'com.acme.authored.unread')`,
+        );
+        expect(reads).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('a row claiming the host\'s package that no registration filed is refused', async () => {
+        const { factory, reads } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored(
+            [ownedBy(providerConnector('claims_host', { providerConfig: { spec } }), HOST)],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, registered },
+        );
+        expect(engine.getRegisteredConnectors()).not.toContain('claims_host');
+        expect(recordOf('claims_host')).toContain(`connector instance 'claims_host' is stored in this environment (package '${HOST}')`);
+        expect(reads).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('a row served under the host\'s registered name with another binding is refused (reload: not materialized)', async () => {
+        const { factory, reads } = makeRefProvider();
+        const { engine, reload, kernel } = await bootReloadable([], { providerFactory: factory, packageRoot: fixtureRoot, packages, registered });
+        await reload([ownedBy(providerConnector('host_pkg', { providerConfig: { spec: './specs/../specs/billing.json' } }), HOST)]);
+        expect(engine.getRegisteredConnectors()).not.toContain('host_pkg');
+        expect(reads).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('resolvePackagePath takes the same rule: a stored entry asking for `.` is refused', async () => {
+        const { factory, resolved } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored([providerConnector('tools', { providerConfig: { paths: ['.'] } })], {
+            providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
+        });
+        expect(engine.getRegisteredConnectors()).not.toContain('tools');
+        const record = recordOf('tools');
+        expect(record).toContain(`connector instance 'tools' is stored in this environment`);
+        expect(record).toContain(`path ref '.' is refused`);
+        expect(record).toContain('cannot serve a stored entry');
+        expect(record).not.toContain(path.resolve(fixtureRoot));
+        expect(resolved).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('a restart over stored rows at rest starts: each refused row is skipped, and the host\'s entries beside them serve', async () => {
+        const { factory, reads, resolved } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored(
+            [
+                { ...hostEntry },
+                providerConnector('stored_file', { providerConfig: { spec } }),
+                providerConnector('stored_path', { providerConfig: { paths: ['.'] } }),
+                ownedBy(providerConnector('stored_authored', { providerConfig: { spec } }), AUTHORED),
+                providerConnector('stored_inline', { providerConfig: { spec: { openapi: '3.0.0' } } }),
+            ],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, registered },
+        );
+        const served = engine.getRegisteredConnectors();
+        expect(served).toEqual(expect.arrayContaining(['host_pkg', 'stored_inline']));
+        for (const name of ['stored_file', 'stored_path', 'stored_authored']) {
+            expect(served).not.toContain(name);
+            expect(recordOf(name)).toContain('is refused');
+        }
+        // Only the host's entry read and resolved its root.
+        expect(reads).toEqual([JSON.stringify({ openapi: '3.0.0' })]);
+        expect(resolved).toEqual([path.resolve(fixtureRoot)]);
+        await kernel.shutdown();
+    });
+
+    it('control: a configuration fault other than a refused ref (an unknown provider) still fails the boot', async () => {
+        // The soft path is the stored entry's refused ref alone; a provider the
+        // runtime does not offer keeps the fail-loud contract.
+        const { factory } = makeRefProvider();
+        const err = await rejectionOf(
+            boot([{ ...hostEntry, provider: 'no_such_provider' }], {
+                providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
+            }),
+        );
+        expect(err.message).toContain('host_pkg');
+    });
+
+    it('control: a stored entry carrying its document inline materializes — neither member is reached', async () => {
+        const { factory, reads, resolved } = makeRefProvider();
+        const kernel = await boot([providerConnector('inline', { providerConfig: { spec: { openapi: '3.0.0' } } })], {
+            providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
+        });
+        expect(automationOf(kernel).getRegisteredConnectors()).toContain('inline');
+        expect(reads).toEqual([]);
+        expect(resolved).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('control: the host\'s registered entries read and resolve under its root — a `code` package and a `code` residual', async () => {
+        const { factory, reads, resolved } = makeRefProvider();
+        // Equal bindings, distinct objects: the judgment is the binding, not identity.
+        const kernel = await boot([{ ...hostEntry }, { ...residualEntry }], {
+            providerFactory: factory, packageRoot: fixtureRoot, packages, residualOwners, registered,
+        });
+        expect(automationOf(kernel).getRegisteredConnectors()).toEqual(expect.arrayContaining(['host_pkg', 'residual']));
+        expect(reads).toEqual(Array(2).fill(JSON.stringify({ openapi: '3.0.0' })));
+        expect(resolved).toEqual([path.resolve(fixtureRoot)]);
+        await kernel.shutdown();
+    });
+
+    it('control: an entry the host\'s own artifact reload carries reads its root, stamped or not', async () => {
+        const { factory, reads } = makeRefProvider();
+        const { engine, reload, kernel } = await bootReloadable([], { providerFactory: factory, packageRoot: fixtureRoot, packages, registered });
+        // An edit the registry was never re-told: only the reload payload holds it.
+        const edited = ownedBy(providerConnector('host_pkg', { providerConfig: { spec: './specs/../specs/billing.json' } }), HOST);
+        const unstamped = providerConnector('host_unstamped', { providerConfig: { spec } });
+        await reload([], { metadata: { manifest: { id: HOST }, connectors: [edited, unstamped] } });
+        expect(engine.getRegisteredConnectors()).toEqual(expect.arrayContaining(['host_pkg', 'host_unstamped']));
+        expect(reads).toHaveLength(2);
         await kernel.shutdown();
     });
 });

@@ -18,7 +18,7 @@
  */
 
 import {
-  celEngine,
+  compileCel,
   firstUndeclaredReference,
   firstTypeMismatch,
   inferCelType,
@@ -985,7 +985,9 @@ export function validateExpression(
     ));
     return { ok: false, errors, warnings };
   }
-  const compiled = celEngine.compile(source);
+  // `compileCel` is `celEngine.compile` with the fault's cel-js code kept
+  // beside the verdict (#27904), for the `invalid-cel` params below.
+  const { result: compiled, celCode } = compileCel(source);
   // One parse through the canonical front end, shared by the two passes that
   // read members — field existence and the relationship-traversal arm — and
   // taken only when one of them runs.
@@ -1031,9 +1033,13 @@ export function validateExpression(
     } else if (braces) {
       errors.push(refusal('cel-template-brace', { role: celRole, detail, ref: braces.ref }, source, `${lead} — ${braces.text}`));
     } else {
+      // #27904 — the engine's own fault code and the range it points at, when
+      // it reported them, beside the unchanged sentence: an editor keys its own
+      // words to `celCode` and puts its caret at `pos`. Absent when unknown.
+      const { pos } = compiled.error;
       errors.push(refusal(
         'invalid-cel',
-        { role: celRole, detail },
+        { role: celRole, detail, ...(celCode ? { celCode } : {}), ...(pos ? { pos } : {}) },
         source,
         `${lead} — ${role}s are bare CEL (e.g. \`record.rating >= 4\`).`,
       ));

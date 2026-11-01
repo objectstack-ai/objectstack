@@ -350,6 +350,67 @@ describe('reseed and purge on an entry the rehydrate refused to load', () => {
     });
 });
 
+/**
+ * [#28604] An entry an install wrote before #28535, in the body
+ * `os package install <file>` sends: the manifest nested under `manifest:`,
+ * `id` and `version` lifted beside it, the collections at the top. The doors
+ * read it through the install door's one flatten, so it is answered as the
+ * flat entry with the same range is.
+ */
+function liftedEntryOf(flat: { id: string; version: string; [k: string]: unknown }) {
+    const { objects, translations, data, ...manifest } = flat;
+    return {
+        manifest,
+        objects,
+        ...(translations !== undefined ? { translations } : {}),
+        data,
+        id: flat.id,
+        version: flat.version,
+    };
+}
+
+describe('[#28604] reseed and purge on an entry ledgered in the CLI\'s lifted shape', () => {
+    const LIFTED_REFUSED = liftedEntryOf(REFUSED);
+    const LIFTED_LOADED = liftedEntryOf(LOADED);
+
+    it('PRECONDITION: the rehydrate refused the lifted old entry and loaded the lifted current one', async () => {
+        const h = await restartWith([LIFTED_REFUSED, LIFTED_LOADED], dir);
+        expect(h.registered()).toContain(LOADED.id);
+        expect(h.registered()).not.toContain(REFUSED.id);
+        const said = h.logger.error.mock.calls.map(([m]) => String(m));
+        expect(said).toHaveLength(1);
+        expect(said[0]).toContain(`OS_PROTOCOL_INCOMPATIBLE: ${REFUSED.id}@1.0.0 is NOT loaded`);
+    });
+
+    it('reseed and purge answer the flat entry\'s 422, byte for byte, and nothing moves', async () => {
+        const h = await restartWith([LIFTED_REFUSED, LIFTED_LOADED], dir);
+        const before = h.state();
+        const reseed = await h.reseed(REFUSED.id);
+        const purge = await h.purge(REFUSED.id);
+        expect([reseed.status, reseed.payload.error.code]).toEqual([422, 'OS_PROTOCOL_INCOMPATIBLE']);
+        expect(h.state()).toEqual(before);
+        expect(h.tables.qa_old_account).toEqual([{ id: 'o1', name: 'Acme' }]);
+
+        const flatDir = mkdtempSync(join(tmpdir(), 'mil-sample-not-loaded-flat-'));
+        try {
+            const flat = await restartWith([REFUSED, LOADED], flatDir);
+            expect(JSON.stringify(reseed.payload)).toBe(JSON.stringify((await flat.reseed(REFUSED.id)).payload));
+            expect(JSON.stringify(purge.payload)).toBe(JSON.stringify((await flat.purge(REFUSED.id)).payload));
+        } finally {
+            rmSync(flatDir, { recursive: true, force: true });
+        }
+    });
+
+    it('lit control: on the lifted loadable entry both doors answer 200, as before', async () => {
+        const h = await restartWith([LIFTED_REFUSED, LIFTED_LOADED], dir);
+        const reseed = await h.reseed(LOADED.id);
+        expect(reseed.status, JSON.stringify(reseed.payload)).toBe(200);
+        const purge = await h.purge(LOADED.id);
+        expect(purge.status, JSON.stringify(purge.payload)).toBe(200);
+        expect(purge.payload.data).toMatchObject({ manifestId: LOADED.id, deleted: 1 });
+    });
+});
+
 describe('reseed and purge on a loadable entry answer as before', () => {
     it('reseed: 200 with the loader\'s counts, and its side effects land (the control for every "unchanged" above)', async () => {
         const h = await restartWith([REFUSED, LOADED], dir);

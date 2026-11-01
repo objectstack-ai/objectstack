@@ -10,7 +10,7 @@ import {
   UNMANAGED_INSTALL_REFUSING_DISPOSITIONS,
   unmanagedInstallValueCarries,
 } from './kernel/unmanaged-install';
-import { PLURAL_TO_SINGULAR } from './meta-spelling/manifest-collection-spelling';
+import { PLURAL_TO_SINGULAR, pluralToSingular } from './meta-spelling/manifest-collection-spelling';
 import { validateObjectNamespacePrefix } from './kernel/namespace-prefix';
 import { PLATFORM_CAPABILITY_TOKENS, RETIRED_PLATFORM_CAPABILITY_GUIDANCE } from './kernel/platform-capabilities';
 import { DatasourceSchema } from './data/datasource.zod';
@@ -66,6 +66,7 @@ import { JobSchema } from './system/job.zod';
 import { PositionSchema } from './identity/position.zod';
 import { PermissionSetSchema, findHierarchyScopeGrants } from './security/permission.zod';
 import { judgePermissionSetOwnerBinding } from './security/permission-set-owner-binding';
+import { judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from './kernel/collection-item-owner-stamp';
 import { CapabilityDeclarationSchema } from './security/capabilities';
 import { SharingRuleSchema } from './security/sharing.zod';
 import { QueueSchema } from './security/queue.zod';
@@ -275,6 +276,86 @@ function applyPermissionSetOwnerBindingGate(
     if (typeof name === 'string' && claimed.has(name)) return;
     judge(set, config.manifest?.id, ['permissions', i]);
   });
+}
+
+/**
+ * [ADR-0010] Raise every collection item whose body carries a `_packageId`
+ * other than the package that ships it as a Zod issue at that key: the BUILD
+ * door of the owner-stamp judge ({@link judgeCollectionItemOwnerStamp},
+ * `kernel/collection-item-owner-stamp.ts`, whose header holds the rule, the
+ * collections and the other door). The registration door refuses the same
+ * stamp at boot or install; judged here too, an author hears it where they
+ * wrote it.
+ *
+ * On the SCHEMA rather than inside `defineStack`, for the reason
+ * {@link applyApiEndpointGates} gives: `defineStack`, `os validate`, `os build`,
+ * the lint scorer and the metadata plugin's artifact ingestion all run this one
+ * parse. It reads the PARSED stack, and every item schema of a judged
+ * collection declares `_packageId` (`MetadataProtectionFields`), so the parse
+ * keeps the key for the judge. The owner is the id each item is registered
+ * under, read the way {@link applyPermissionSetOwnerBindingGate} reads a
+ * permission set's:
+ *
+ * - **no `packages[]`**: every top-level item ships from `manifest.id`, and
+ *   from no package when there is no `manifest`;
+ * - **`packages[]`** (ADR-0130 D4): a body's items ship from that body's own
+ *   `id`. A top-level item that no body declares in the same collection under
+ *   the same name is the stack's residual, registered under `manifest.id`; a
+ *   top-level item a body declares is a copy of that body's item, never
+ *   registered from the top level, so the top level does not judge it.
+ *
+ * A stack's `plugins` are runtime plugin instances (`z.unknown()`), not bodies
+ * this parse can read; the registration door judges a nested plugin's items
+ * when it registers them.
+ */
+function applyCollectionItemOwnerStampGate(
+  config: Record<string, unknown> & { manifest?: { id?: unknown } | undefined; packages?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const nameOf = (key: string, item: unknown): string => {
+    const it = (item ?? {}) as { name?: unknown; id?: unknown; object?: unknown };
+    const name = key === 'data' ? it.object : (it.name ?? it.id ?? (key === 'views' ? it.object : undefined));
+    return typeof name === 'string' && name !== '' ? name : '(unnamed)';
+  };
+  const judgeBody = (
+    body: Record<string, unknown>,
+    owner: unknown,
+    path: (string | number)[],
+    skip?: (key: string, name: string) => boolean,
+  ): void => {
+    for (const key of OWNER_STAMP_JUDGED_COLLECTIONS) {
+      const items = body[key];
+      if (!Array.isArray(items)) continue;
+      items.forEach((item: unknown, i: number) => {
+        const name = nameOf(key, item);
+        if (skip?.(key, name)) return;
+        const refusal = judgeCollectionItemOwnerStamp(
+          item,
+          pluralToSingular(key),
+          name,
+          typeof owner === 'string' ? owner : undefined,
+          'build',
+        );
+        if (refusal) ctx.addIssue({ code: 'custom', path: [...path, key, i, '_packageId'], message: refusal.message });
+      });
+    }
+  };
+  if (!Array.isArray(config.packages)) {
+    judgeBody(config, config.manifest?.id, []);
+    return;
+  }
+  // `<collection>:<name>`: no collection key carries a `:`, so the pair is unambiguous.
+  const claimed = new Set<string>();
+  config.packages.forEach((entry: unknown, j: number) => {
+    const body = (entry as { manifest?: Record<string, unknown> } | null | undefined)?.manifest;
+    if (!body || typeof body !== 'object') return;
+    for (const key of OWNER_STAMP_JUDGED_COLLECTIONS) {
+      const items = body[key];
+      if (Array.isArray(items)) for (const item of items) claimed.add(`${key}:${nameOf(key, item)}`);
+    }
+    judgeBody(body, body.id, ['packages', j, 'manifest']);
+  });
+  judgeBody(config, config.manifest?.id, [], (key, name) => claimed.has(`${key}:${name}`));
 }
 
 /** One `objectExtensions` entry as the registry registers it, with where it sits in the stack. */
@@ -2183,6 +2264,7 @@ export const ObjectStackDefinitionSchema = lazySchema(() => strictObject({
   ...STACK_DEFINITION_COLLECTIONS_SHAPE,
 }).superRefine(applyApiEndpointGates)
   .superRefine(applyPermissionSetOwnerBindingGate)
+  .superRefine(applyCollectionItemOwnerStampGate)
   .superRefine(applyControlledByParentExtensionGate));
 
 export type ObjectStackDefinition = z.input<typeof ObjectStackDefinitionSchema>;

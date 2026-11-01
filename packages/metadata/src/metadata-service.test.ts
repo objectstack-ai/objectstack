@@ -977,6 +977,22 @@ describe('MetadataManager — IMetadataService Contract', () => {
         expect(JSON.stringify(await manager.getPublished('flow', 'inbound_hook'))).toContain(SECRET);
       });
     });
+
+    // The built-in `datasource` redactor (no stand-in): a code-registered
+    // datasource's declared ssl secret member is withheld where the body is served.
+    it('withholds the declared ssl secret member of a code-registered datasource', async () => {
+      const KEY = 'TEST_PLACEHOLDER_SSL_KEY';
+      const ssl = { enabled: true, ca: 'TEST_CA_PEM', cert: 'TEST_CERT_PEM' };
+      await manager.register('datasource', 'tls_code', {
+        name: 'tls_code', driver: 'postgres', config: { host: 'db.internal' }, ssl: { ...ssl, key: KEY },
+      });
+
+      const published = await manager.getPublished('datasource', 'tls_code');
+      expect(JSON.stringify(published)).not.toContain(KEY);
+      expect((published as any).ssl).toEqual(ssl);
+      // A serving act: the registered body keeps the key for the connect path.
+      expect(((await manager.get('datasource', 'tls_code')) as any).ssl.key).toBe(KEY);
+    });
   });
 
   describe('integration: edit → publish → edit → revert', () => {
