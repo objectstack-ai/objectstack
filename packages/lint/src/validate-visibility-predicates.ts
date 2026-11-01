@@ -796,17 +796,38 @@ interface SyntaxSurface {
   consequence: string;
   /** A predicate that parses on this surface, quoted in the remedy line. */
   example: string;
+  /**
+   * [#28726, folded under #28725] The over-budget remedy line, given the root
+   * the site's layer binds. It differs per surface for the reason `example`
+   * does: an element collapses onto a field of its row and can precompute into
+   * a formula field, while a nav entry binds no `record`, so neither rewrite is
+   * one its author can make there.
+   */
+  overBudgetHint: (root: string) => string;
 }
 
 const ELEMENT_SURFACE: SyntaxSurface = {
   consequence: NEVER_EVALUATES,
   example: "record.status == 'open'",
+  // [#22161] One remedy line; that it is a SIZE fault and not a dialect
+  // mistake, and why logic this large belongs on the record, are
+  // `os explain visibility-predicate-over-budget`.
+  overBudgetHint: (root) =>
+    `Make the predicate smaller: collapse an \`||\` chain into \`${root}.f in ['a', 'b', …]\`, or precompute ` +
+    'the heavy part into a formula/rollup field on the object and test that one field',
 };
 
 const NAV_SURFACE: SyntaxSurface = {
   consequence: 'so it never evaluates and the entry is hidden from every viewer',
   // The spec's own example on the nav `visible` key (`app.zod.ts`).
   example: "'org_admin' in current_user.positions",
+  // [#22161] One remedy line of at most 200 characters, so one example; the
+  // single-permission-check alternative is `os explain` for this id. `exists`
+  // over the viewer's positions is the nav-shaped collapse of the usual
+  // `'a' in current_user.positions || …` chain.
+  overBudgetHint: () =>
+    'Make the predicate smaller: collapse an `||` chain into one list test, e.g. ' +
+    "`current_user.positions.exists(p, p in ['a', 'b', …])`",
 };
 
 /**
@@ -838,6 +859,36 @@ function syntaxFinding(
         `\`${refusal.token.cel}\`, e.g. \`${refusal.token.example}\`.`
       : `Visibility predicates are bare CEL, e.g. \`${surface.example}\`: fix the syntax ` +
         `error the verdict quotes`,
+  };
+}
+
+/**
+ * The one `visibility-predicate-over-budget` finding (#7217; app navigation
+ * since #28726), built once for the reason {@link syntaxFinding} is: the
+ * verdict sentence cannot drift between a page component and a nav entry, and
+ * only the {@link SyntaxSurface}'s consequence clause and remedy line differ.
+ * `root` is the root the site's layer binds, quoted in an element's remedy.
+ */
+function overBudgetFinding(
+  refusal: CelBoundsFault,
+  where: string,
+  path: string,
+  surface: SyntaxSurface,
+  root: string,
+): VisibilityFinding {
+  // [#22161] The bound names its own limit, so the front end's summary line
+  // is echoed only when it does not; the predicate is not echoed at all —
+  // it is over budget by definition, and the `path` locates it.
+  const named = refusal.overrun.limit && refusal.overrun.limitValue !== null;
+  return {
+    severity: 'error',
+    rule: VISIBILITY_PREDICATE_OVER_BUDGET,
+    where,
+    path,
+    message:
+      `visibility predicate is syntactically valid CEL but overruns ${boundName(refusal.overrun)}` +
+      `${named ? '' : ` (${refusal.overrun.summary})`}, ${surface.consequence}`,
+    hint: surface.overBudgetHint(root),
   };
 }
 
@@ -1390,27 +1441,7 @@ function checkElement(
   // the wording (and the id) #6253 shipped.
   const refusal = source ? celRefusal(source) : null;
   if (source && refusal?.kind === 'bounds') {
-    const bound = boundName(refusal.overrun);
-    const root = CANONICAL_ROOT_BY_LAYER[layer];
-    findings.push({
-      severity: 'error',
-      rule: VISIBILITY_PREDICATE_OVER_BUDGET,
-      where,
-      path,
-      // [#22161] The bound names its own limit, so the front end's summary line
-      // is echoed only when it does not; the predicate is not echoed at all —
-      // it is over budget by definition, and the `path` locates it.
-      message:
-        `visibility predicate is syntactically valid CEL but overruns ${bound}` +
-        `${refusal.overrun.limit && refusal.overrun.limitValue !== null ? '' : ` (${refusal.overrun.summary})`}, ` +
-        NEVER_EVALUATES,
-      // [#22161] One remedy line; that it is a SIZE fault and not a dialect
-      // mistake, and why logic this large belongs on the record, are
-      // `os explain visibility-predicate-over-budget`.
-      hint:
-        `Make the predicate smaller: collapse an \`||\` chain into \`${root}.f in ['a', 'b', …]\`, or precompute ` +
-        'the heavy part into a formula/rollup field on the object and test that one field',
-    });
+    findings.push(overBudgetFinding(refusal, where, path, ELEMENT_SURFACE, CANONICAL_ROOT_BY_LAYER[layer]));
   }
   if (source && refusal?.kind === 'syntax') {
     findings.push(syntaxFinding(source, refusal, where, path, ELEMENT_SURFACE));
@@ -1755,32 +1786,6 @@ function navPredicateSource(v: unknown): string | undefined {
 }
 
 /**
- * [#28726] The `visibility-predicate-over-budget` finding on a nav entry. The
- * verdict sentence is the element one (`checkElement`'s bounds arm) with the
- * nav consequence; the remedy differs because a nav entry binds no `record`,
- * so neither a `record.f in [...]` collapse nor a formula field on the object
- * is a rewrite its author can make. `exists` over the viewer's positions is the
- * nav-shaped collapse of the usual `'a' in current_user.positions || …` chain.
- */
-function navOverBudgetFinding(refusal: CelBoundsFault, where: string, path: string): VisibilityFinding {
-  const named = refusal.overrun.limit && refusal.overrun.limitValue !== null;
-  return {
-    severity: 'error',
-    rule: VISIBILITY_PREDICATE_OVER_BUDGET,
-    where,
-    path,
-    message:
-      `visibility predicate is syntactically valid CEL but overruns ${boundName(refusal.overrun)}` +
-      `${named ? '' : ` (${refusal.overrun.summary})`}, ${NAV_SURFACE.consequence}`,
-    // [#22161] One remedy line of at most 200 characters, so one example; the
-    // single-permission-check alternative is `os explain` for this id.
-    hint:
-      'Make the predicate smaller: collapse an `||` chain into one list test, e.g. ' +
-      "`current_user.positions.exists(p, p in ['a', 'b', …])`",
-  };
-}
-
-/**
  * Walk one navigation list — `navigation` or an area's `navigation` — and the
  * `children` of every entry in it (a `group` and an `object` entry both carry
  * them), judging each entry's `visible`. The finding is located at the key
@@ -1812,7 +1817,7 @@ function walkNavPredicates(
       // the entry withheld), so it gets the id a page predicate of that size
       // gets, with the nav consequence.
       findings.push(refusal.kind === 'bounds'
-        ? navOverBudgetFinding(refusal, where, `${navPath}.visible`)
+        ? overBudgetFinding(refusal, where, `${navPath}.visible`, NAV_SURFACE, 'record' /* unused: the nav remedy names no row root */)
         : syntaxFinding(source, refusal, where, `${navPath}.visible`, NAV_SURFACE));
     }
     walkNavPredicates(entry.children, `${navPath}.children`, appName, findings);
