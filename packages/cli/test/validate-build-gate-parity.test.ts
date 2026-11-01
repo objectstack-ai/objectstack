@@ -241,7 +241,13 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * empty, because it is the only honest place the closed roster has for the
  * next validate-only gate.
  */
-const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {};
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
+  findFieldPatchTargetRefusals:
+    '[ADR-0146 D10, second rule] An object extension\'s `fieldPatches` naming a field or option value its ' +
+    'in-stack target lacks, judged by the marketplace install door\'s own `fieldPatchTargetRefusals`. Wired ' +
+    'where the rollout card asked for it (`os validate` and the install door); `os build` still emits such an ' +
+    'artifact, which the install door then refuses — the build-side gap, reported rather than closed here.',
+};
 
 /**
  * Everything else the two commands call, and the reason each one is NOT an
