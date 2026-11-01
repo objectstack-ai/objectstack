@@ -124,13 +124,13 @@ export const TaskWorkbenchPage = definePage({
 
 A record's create / edit / detail **presents itself adaptively**. You do **not**
 author the surface, the overlay width, or the column count — all three are derived
-at runtime from how heavy the record is + the client viewport, because an author
+at runtime from the client viewport, because an author
 (especially an AI) cannot know the client's screen. **Write the data (fields,
 `fieldGroups`); let the platform lay it out.**
 
 - **Surface.** A clicked record opens in the **drawer**, which expands to the full
   page; `page` only by declaration ([Record Page](./record-page.md) §5–6). Create /
-  edit opens in a **modal** for a field-heavy record, otherwise a drawer.
+  edit opens in a **modal**, or the full-page route when the object declares `editMode: 'page'`.
 - **Field width.** **Omit it** (`auto` sizes by widget type × current columns —
   textarea / rich-text / file take the row). Both keys are valid: `colSpan`
   (1–4) is clamped to the current column count, grid-aligned at every width;

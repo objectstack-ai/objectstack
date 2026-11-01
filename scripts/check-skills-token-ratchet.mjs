@@ -861,10 +861,11 @@ export const CEILINGS = new Map([
   // prescription that objectstack-data → Search Fields carries whole — so the file nets -4
   // and the ceiling follows it down to the new measurement.
   ['skills/objectstack-ui/rules/list-views.md', 3129],
-  // 2273 -> 2197 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`
-  // and the Overlay-width bullet moved there whole (the `size` bucket, the deprecated
-  // pixel keys); the ceiling follows the file down to the measurement (8787 bytes).
-  ['skills/objectstack-ui/rules/navigation.md', 2197],
+  // 2273 -> 2196 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`,
+  // says create / edit is a modal or the `editMode: 'page'` route, and the Overlay-width
+  // bullet moved there whole (the `size` bucket, the deprecated pixel keys); the ceiling
+  // follows the file down to the measurement (8784 bytes).
+  ['skills/objectstack-ui/rules/navigation.md', 2196],
   // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +191 tokens,
   // zero headroom to absorb any of it, ceiling +191. Maintainer ruling
@@ -882,10 +883,11 @@ export const CEILINGS = new Map([
   // produce the page, the relationship flags shape the related column, a slotted page
   // overrides one of six slots (no `tabs`), `kind: 'full'` is the escape hatch, the
   // drawer unless the object declares `page`, and the reader's own choices are not
-  // metadata. PAID DOWN FIRST by the 403 tokens the three rows above gave up (the tab
-  // strip the record page no longer has, SKILL.md 307 + navigation.md 76 + pages.md 23);
+  // metadata. PAID DOWN FIRST by the 404 tokens the three rows above gave up (the tab
+  // strip the record page no longer has, SKILL.md 307 + navigation.md 77 + pages.md 20, its
+  // ceiling 23);
   // the card's binding budget is the package's hand-authored LINE count, +40 at most,
-  // landed at +39 (1876 -> 1915), so the package nets +593 tokens, every one of them
+  // landed at +39 (1876 -> 1915), so the package nets +592 tokens, every one of them
   // teaching the surface `main` ships today and none of it restating a sibling file.
   //   ceil($(wc -c < skills/objectstack-ui/rules/record-page.md) / 4) == ceil(3981 / 4)
   ['skills/objectstack-ui/rules/record-page.md', 996],
