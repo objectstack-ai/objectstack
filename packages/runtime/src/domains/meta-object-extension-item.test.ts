@@ -181,8 +181,8 @@ describe('[#28574] a writable pair saves and publishes an extension of the base\
         const rig = await boot();
         await rig.saveAndPublish(PAIR, regionBody());
 
-        const created: any = await rig.engine.insert(TARGET, { name: 'Acme', region__c: 'EMEA', organization_id: 'org_1' }, { context: { isSystem: true } } as any);
-        const back: any = await rig.engine.findOne(TARGET, { where: { id: created.id }, context: { isSystem: true } } as any);
+        const created: any = await rig.engine.insert(TARGET, { name: 'Acme', region__c: 'EMEA', organization_id: 'org_1' }, { context: { isSystem: true } });
+        const back: any = await rig.engine.findOne(TARGET, { where: { id: created.id }, context: { isSystem: true } });
         expect(back?.region__c).toBe('EMEA');
     }, 60_000);
 
@@ -313,6 +313,20 @@ describe('[#28574] refused at the door, leaving no row', () => {
         expect(caught.status).toBeGreaterThanOrEqual(400);
         expect(caught.status).toBeLessThan(500);
         expect(await rig.rows()).toEqual([]);
+    }, 60_000);
+
+    it('a package-less write: an extension is an item of a package, so a save naming none is refused', async () => {
+        const rig = await boot();
+        let caught: any;
+        try {
+            await rig.protocol.saveMetaItem({ type: TYPE, name: TARGET, item: regionBody(), mode: 'draft' });
+        } catch (e) {
+            caught = e;
+        }
+        expect({ code: caught?.code, status: caught?.status }).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
+        expect(String(caught?.message)).toContain('names none');
+        expect(await rig.rows()).toEqual([]);
+        expect(rig.extenders()).toEqual([]);
     }, 60_000);
 
     it('a row filed under a name other than its target', async () => {
