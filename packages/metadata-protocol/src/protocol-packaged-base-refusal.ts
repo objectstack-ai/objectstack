@@ -36,7 +36,7 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { isOriginGatedType, managedItemSealedSentence } from './packaged-base-regime.js';
+import { isOriginGatedType, managedItemSealedSentence, regimeCDeclaredSaveSentence } from './packaged-base-regime.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 import {
     customizationBasePackageId,
@@ -145,9 +145,14 @@ export function refusePackagedBaseOverride(
         // of the bare seal: the override write gate ({@link judgeOverrideWrite})
         // admits exactly the pair's declaration, so the seal is no longer the
         // whole story.
+        // [#28412] A Regime C type the declared override opens (`flow`) names
+        // the declaration in place of its clone path, keeping its switch.
+        const owner = this.packagedArtifactOwner(request);
+        const declare = sealedDeclareOrRenameClause(request.type, owner, request.packageId);
         const err = new Error(
-            managedItemSealedSentence(request.type, request.name, 'save')
-            + sealedDeclareOrRenameTail(request.type, this.packagedArtifactOwner(request), request.packageId),
+            (declare === undefined ? undefined : regimeCDeclaredSaveSentence(request.type, request.name, declare))
+            ?? managedItemSealedSentence(request.type, request.name, 'save')
+                + sealedDeclareOrRenameTail(request.type, owner, request.packageId),
         );
         (err as any).code = 'NOT_OVERRIDABLE';
         (err as any).status = 403;
@@ -165,9 +170,10 @@ export function refusePackagedBaseOverride(
  *   (ruling A on #28390), so a dependent's one fix is a new name, and the
  *   declare advice would send it to a refusal (`declared_outside_pair`).
  *
- * Empty for a type with no open channel — `flow` and `action` wait for
- * ADR-0146 D9's conditions (their regime rows keep their own routes), and an
- * excluded type has none — and when the shipping package has no pair id.
+ * Empty for a type with no open channel — `action` waits for ADR-0146 D9's
+ * conditions (its regime row keeps its own routes), and an excluded type has
+ * none — and when the shipping package has no pair id. [#28412] `flow` is
+ * open: its sealed sentence names the declaration too.
  */
 function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerPackageId: unknown): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -182,21 +188,83 @@ function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerP
         + `(overrides: { package: '${basePackageId}', basedOn }), or rename the item.`;
 }
 
+/**
+ * [#28412, ADR-0146 D2] {@link sealedDeclareOrRenameTail}'s choice, as the
+ * clause a Regime C sentence carries in place of its clone path
+ * (`regimeCDeclaredSaveSentence`): the pair (or a write naming no package)
+ * may declare from the pair or rename; any other named package may only
+ * rename. `undefined` exactly where the tail is empty.
+ */
+function sealedDeclareOrRenameClause(type: string, basePackageId: unknown, writerPackageId: unknown): string | undefined {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return undefined;
+    const pair = customizationPackageId(basePackageId);
+    if (!pair.ok) return undefined;
+    const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
+    if (writer !== undefined && writer !== pair.value) {
+        return `Rename it to customize it (only '${pair.value}' may declare an override of '${basePackageId}')`;
+    }
+    return `Declare an override from '${pair.value}' or rename it to customize it`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // ADR-0146 D2 — the override write gate (ruling A on decision card #28390)
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
+ * [#28412, ADR-0146 D9] The behavioural types whose D9 conditions this runtime
+ * delivers, so the gate admits their declared override:
+ *
+ *  - `flow` — all four. Served over the code package and rebound in one reload
+ *    (`@objectstack/service-automation`'s flow precedence and the flow view of
+ *    this package, which admit exactly the `.custom` row
+ *    `isServedOverrideRowOf` names); ledger identity inherited (the
+ *    override keeps the base's name, so `packagedFlowOwner`, the toggle door,
+ *    the §7.3 subflow guard and the `FLOW_DISABLED` consult key it as the
+ *    base); version pinning (#28405: a suspended run finishes on the body it
+ *    started on).
+ *
+ * ⛔ Not `action`: its override door is not cut (D9's `action` paragraph), so
+ * its declaration keeps the "not yet available" refusal. A type joins this set
+ * in the change that delivers its conditions, never ahead of it.
+ */
+const CONDITIONS_DELIVERED: ReadonlySet<string> = new Set(['flow']);
+
+/**
  * Whether a declared override of `type` is admitted today: the closed list's
  * disposition is `overridable` AND the type waits for no ADR-0146 D9
- * condition. `flow` (D9 conditions, opened by its own card in this same gate)
- * and `action` (its ledger switch first; refused for the whole epic) carry
- * `conditions`, so they are classified overridable and still refused here.
- * Read from `OVERRIDE_TYPE_CLASSIFICATION`, never re-derived.
+ * condition this runtime has not delivered ({@link CONDITIONS_DELIVERED}).
+ * `flow` carries `conditions` and is delivered; `action` (its door is not cut)
+ * carries them and is not, so it is classified overridable and still refused
+ * here. The disposition and the conditions are read from
+ * `OVERRIDE_TYPE_CLASSIFICATION`, never re-derived.
  */
 function isOpenOverrideType(singular: string): boolean {
     const row = getOverrideTypeClassification(singular);
-    return row?.disposition === 'overridable' && (row.conditions?.length ?? 0) === 0;
+    if (row?.disposition !== 'overridable') return false;
+    return (row.conditions?.length ?? 0) === 0 || CONDITIONS_DELIVERED.has(singular);
+}
+
+/**
+ * [#28412, ADR-0146 D9 item 1] Whether a removal addressed to `packageId`
+ * removes the shipping package's PAIR row of a type whose D9 conditions are
+ * delivered ({@link CONDITIONS_DELIVERED}: `flow` today) — the row the pair's
+ * declared override is stored in. Such a removal is admitted past the
+ * sealed-removal refusal: it removes no managed definition, and the code
+ * package's flow is what every read serves and what the automation engine
+ * arms once the row is gone — the narrowing direction the #6960 ruling names.
+ * ⛔ Only the pair, named: a removal naming no package, or any other package,
+ * keeps the sealed refusal it had. ⛔ Only a delivered type: every other open
+ * type (`view`, `mapping`, …) keeps main's delete verdict — its own removal
+ * carve-out or its sealed refusal — untouched by this card.
+ */
+export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    if (!CONDITIONS_DELIVERED.has(singular) || !isOpenOverrideType(singular)) return false;
+    if (typeof basePackageId !== 'string') return false;
+    if (typeof packageId !== 'string' || packageId.length === 0) return false;
+    const pair = customizationPackageId(basePackageId);
+    return pair.ok && pair.value === packageId;
 }
 
 /**
@@ -352,9 +420,10 @@ export function judgeOverrideWrite(
                 `${item} carries \`overrides\`, but a ${type} takes no override (ADR-0146 D6). `
                 + `Remove \`overrides\` and create your own ${type} under a new name ("new similar").`);
         }
-        // `flow` and `action` are classified overridable and wait for D9's
-        // conditions (`isOpenOverrideType`): "flow customization is not yet
-        // available", and the same sentence for an action.
+        // `action` is classified overridable and waits for D9's conditions
+        // (`isOpenOverrideType`): "action customization is not yet available".
+        // [#28412] `flow`'s conditions are delivered, so it is judged below
+        // like every open type.
         if (!isOpenOverrideType(type)) {
             return refuse('declared_type_not_yet_available',
                 `${item} carries \`overrides\`: ${type} customization is not yet available, so a declared ${type} `

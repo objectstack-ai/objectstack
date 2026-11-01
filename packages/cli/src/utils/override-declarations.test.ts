@@ -98,12 +98,15 @@ describe('#28410 — findOverrideDeclarationRefusals walks the artifact under th
       manifest: manifest(PAIR, [BASE]),
       dashboards: [{ name: 'crm_board', overrides: { package: BASE, basedOn: '1.0.0' } }],
       objects: [{ name: 'crm_account', overrides: { package: BASE, basedOn: '1.0.0' } }],
+      // [#28412, ADR-0146 D9] A declared flow override is admitted now (its D9
+      // conditions are delivered); an `action` declaration still waits.
       flows: [{ name: 'crm_flow', overrides: { package: BASE, basedOn: '1.0.0' } }],
+      actions: [{ name: 'crm_call', objectName: 'crm_account', label: 'Call', overrides: { package: BASE, basedOn: '1.0.0' } }],
       pages: [{ name: 'crm_home', overrides: { package: 'com.unlisted', basedOn: '1.0.0' } }],
     });
     expect(rows.map((r) => [r.path, r.rule])).toEqual([
       ['objects[0]', 'declared_object'],
-      ['flows[0]', 'declared_type_not_yet_available'],
+      ['actions[0]', 'declared_type_not_yet_available'],
       ['pages[0]', 'declared_outside_pair'],
     ]);
   });
