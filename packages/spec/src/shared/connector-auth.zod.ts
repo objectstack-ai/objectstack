@@ -148,6 +148,14 @@ export type ResolvedConnectorAuth = Extract<
 // secret here: stack metadata is authored, versioned, and shipped, so a raw
 // token must never live in it (ADR-0097 §3, ADR-0143 D3).
 //
+// "No field" is not enough on its own: a plain `z.object` drops an undeclared
+// key and the parse still succeeds, so a door that stores what it was sent
+// would keep the secret the shape has no field for. So EVERY kind is a
+// `strictObject` that refuses an undeclared key, and names the secret keys an
+// author is likely to reach for with the `credentialRef` prescription — the
+// refusal ADR-0143 D3 records ("publish keeps refusing an inline secret") and
+// its Acceptance asks for on any variant, with a located error.
+//
 // The four static kinds resolve once, at materialization. The two grant-bearing
 // kinds ADR-0143 D2 adds — `oauth2` (D2.1) and `app-credential` (D2.2) — are
 // open tier (ADR-0143 D1, which reverses the enterprise placement ADR-0097 §3
@@ -158,14 +166,50 @@ export type ResolvedConnectorAuth = Extract<
 // test vectors.
 // ============================================================================
 
+/**
+ * The one `history` sentence the four static kinds share: what an undeclared
+ * key met before these shapes were closed.
+ */
+const STATIC_KIND_HISTORY =
+  'Until this shape was closed, an undeclared key here was dropped at parse rather than refused.';
+
+/**
+ * The guidance a credential meets on `auth: { type: 'none' }`: the kind names
+ * an upstream that takes none, so the fix is a different kind, not a reference.
+ */
+const NO_AUTH_CREDENTIAL_GUIDANCE =
+  "Not authorable on `auth: { type: 'none' }` — `none` declares an upstream that takes no credential, so it "
+  + "carries none. Choose the kind the upstream expects (`bearer`, `api-key`, `basic`, `oauth2`, `app-credential` "
+  + 'or `signed`) and name its secret with `credentialRef`.';
+
 /** No authentication — the upstream is public. */
-export const ConnectorInstanceNoAuthSchema = lazySchema(() => z.object({
+export const ConnectorInstanceNoAuthSchema = lazySchema(() => strictObject({
+  surface: "this `none` connector auth",
+  history: STATIC_KIND_HISTORY,
+  guidance: {
+    token: NO_AUTH_CREDENTIAL_GUIDANCE,
+    key: NO_AUTH_CREDENTIAL_GUIDANCE,
+    apiKey: NO_AUTH_CREDENTIAL_GUIDANCE,
+    password: NO_AUTH_CREDENTIAL_GUIDANCE,
+    secret: NO_AUTH_CREDENTIAL_GUIDANCE,
+    credentialRef: NO_AUTH_CREDENTIAL_GUIDANCE,
+  },
+}, {
   type: z.literal('none'),
 }));
 export type ConnectorInstanceNoAuth = z.input<typeof ConnectorInstanceNoAuthSchema>;
 
 /** Bearer-token auth; the token is resolved from `credentialRef` when the instance materializes. */
-export const ConnectorInstanceBearerAuthSchema = lazySchema(() => z.object({
+export const ConnectorInstanceBearerAuthSchema = lazySchema(() => strictObject({
+  surface: "this `bearer` connector auth",
+  history: STATIC_KIND_HISTORY,
+  guidance: {
+    token: inlineSecretGuidance('bearer', 'token'),
+    accessToken: inlineSecretGuidance('bearer', 'token'),
+    bearerToken: inlineSecretGuidance('bearer', 'token'),
+    secret: inlineSecretGuidance('bearer', 'token'),
+  },
+}, {
   type: z.literal('bearer'),
   credentialRef: z.string().min(1).describe(
     'Secrets-layer reference (e.g. an env-var name in the open tier) resolved to the bearer token at materialization. Never an inline token.',
@@ -174,7 +218,17 @@ export const ConnectorInstanceBearerAuthSchema = lazySchema(() => z.object({
 export type ConnectorInstanceBearerAuth = z.input<typeof ConnectorInstanceBearerAuthSchema>;
 
 /** API-key auth; the key is resolved from `credentialRef` when the instance materializes. */
-export const ConnectorInstanceAPIKeyAuthSchema = lazySchema(() => z.object({
+export const ConnectorInstanceAPIKeyAuthSchema = lazySchema(() => strictObject({
+  surface: "this `api-key` connector auth",
+  history: STATIC_KIND_HISTORY,
+  guidance: {
+    key: inlineSecretGuidance('api-key', 'key'),
+    apiKey: inlineSecretGuidance('api-key', 'key'),
+    value: inlineSecretGuidance('api-key', 'key'),
+    token: inlineSecretGuidance('api-key', 'key'),
+    secret: inlineSecretGuidance('api-key', 'key'),
+  },
+}, {
   type: z.literal('api-key'),
   credentialRef: z.string().min(1).describe(
     'Secrets-layer reference resolved to the API key at materialization. Never an inline key.',
@@ -185,7 +239,15 @@ export const ConnectorInstanceAPIKeyAuthSchema = lazySchema(() => z.object({
 export type ConnectorInstanceAPIKeyAuth = z.input<typeof ConnectorInstanceAPIKeyAuthSchema>;
 
 /** Basic auth; the password is resolved from `credentialRef` when the instance materializes. */
-export const ConnectorInstanceBasicAuthSchema = lazySchema(() => z.object({
+export const ConnectorInstanceBasicAuthSchema = lazySchema(() => strictObject({
+  surface: "this `basic` connector auth",
+  history: STATIC_KIND_HISTORY,
+  guidance: {
+    password: inlineSecretGuidance('basic', 'password'),
+    passwd: inlineSecretGuidance('basic', 'password'),
+    secret: inlineSecretGuidance('basic', 'password'),
+  },
+}, {
   type: z.literal('basic'),
   username: z.string().describe('Username (not a secret; safe to keep in metadata).'),
   credentialRef: z.string().min(1).describe(
@@ -195,10 +257,11 @@ export const ConnectorInstanceBasicAuthSchema = lazySchema(() => z.object({
 export type ConnectorInstanceBasicAuth = z.input<typeof ConnectorInstanceBasicAuthSchema>;
 
 /**
- * The guidance an inline secret meets on an ADR-0143 instance kind (`oauth2`,
- * `app-credential`, `signed`): the strict shape refuses the key by name and
- * sends the author to `credentialRef` (ADR-0143 D3 / Acceptance: "an inline
- * secret on any variant is refused at publish with a located error").
+ * The guidance an inline secret meets on an instance kind that takes one
+ * (`bearer`, `api-key`, `basic`, and ADR-0143's `oauth2`, `app-credential`,
+ * `signed`): the strict shape refuses the key by name and sends the author to
+ * `credentialRef` (ADR-0143 D3 / Acceptance: "an inline secret on any variant
+ * is refused at publish with a located error").
  */
 function inlineSecretGuidance(kind: string, secret: string): string {
   return `Not authorable on \`auth: { type: '${kind}' }\`. The ${secret} is a credential, and a connector `

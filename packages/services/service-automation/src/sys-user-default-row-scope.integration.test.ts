@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: two real-kernel boots (ObjectKernel with ObjectQL, automation, the identity objects and security on better-sqlite3 :memory:), one per describe, each read by all of its cases through its own producer; slowest CI reading 10.6 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up; read before the ten identical boots became two
 
 /**
  * [#24164 ruling E′; ruling A′ on #24449] `sys_user` declares ONE default row
@@ -37,7 +38,7 @@
  * `usr_other` belongs to B only; `usr_loner` belongs to none.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterAll, beforeAll } from 'vitest';
 import { ObjectKernel, resolveUserAuthzGrants, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, bindHooksToEngine, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
@@ -103,7 +104,7 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
   /** The context each non-system `sys_user` read carried to the middleware chain. */
   let readContexts: Array<Record<string, unknown>> = [];
 
-  afterEach(async () => {
+  afterAll(async () => {
     try { await kernel?.shutdown(); } catch { /* noop */ }
   });
 
@@ -179,6 +180,13 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
     ], { packageId: 'app:test', logger: silentLogger });
   }
 
+  // One boot for every case in this block: each case reads through
+  // its own producer on its own context, and what it asserts on is its own —
+  // the last `readContexts` entry its read pushed, the hook firing it counted
+  // from its own `before`. The only rows a case writes are `hook_probe` rows,
+  // which no case reads; the fixture rows are never written after the boot.
+  beforeAll(boot);
+
   /** The context the request path hands ObjectQL: `resolveAuthzContext` copies exactly these grants onto it. */
   async function requestContext(userId: string, tenantId?: string) {
     const grants = await resolveUserAuthzGrants(ql, userId, { tenantId, bypassGrantsCache: true });
@@ -224,7 +232,6 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
   }
 
   it('the premise: the two shipped literals the declaration merges are present and spelled as it joins them', async () => {
-    await boot();
     expect(SHIPPED_LITERALS.map((p) => p.name).sort()).toEqual(['sys_user_org_members', 'sys_user_self']);
     const declared = (ql.registry.getObject('sys_user') as any).defaultRowScope;
     const [self, peers] = ['sys_user_self', 'sys_user_org_members'].map((n) => SHIPPED_LITERALS.find((p) => p.name === n)!);
@@ -233,7 +240,6 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
 
   for (const [producer, read] of Object.entries(producers)) {
     it(`${producer}, acting in organisation A: its own row and A's members, nothing beyond, and exactly the literals' union`, async () => {
-      await boot();
       expect(await read(orgA)).toEqual(['usr_me', 'usr_peer']);
       const context = readContexts[readContexts.length - 1];
       expect(Array.isArray(context.org_user_ids), 'the read carries org_user_ids').toBe(true);
@@ -241,7 +247,6 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
     });
 
     it(`${producer}, acting in no organisation: its own row alone, and exactly the literals' union`, async () => {
-      await boot();
       expect(await read(undefined)).toEqual(['usr_me']);
       const context = readContexts[readContexts.length - 1];
       expect(context.org_user_ids).toEqual(['usr_me']);
@@ -250,7 +255,6 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
   }
 
   it('CONTROL: the rows are the object default\'s — explain names it, and a system read sees all four users', async () => {
-    await boot();
     expect(ids(await ql.find('sys_user', { context: SYS }))).toEqual(['usr_loner', 'usr_me', 'usr_other', 'usr_peer']);
     type Explained = { layers: Array<{ layer: string; verdict: string; detail: string }> };
     const security = kernel.getService<{ explain(input: { object: string; operation: string }, context: object): Promise<Explained> }>('security');
@@ -272,7 +276,7 @@ describe("sys_user's one `||` default keeps the reader's own row on every user-c
  */
 describe('the registry\'s `extend` rule on a booted composition', () => {
   let kernel: ObjectKernel;
-  afterEach(async () => {
+  afterAll(async () => {
     try { await kernel?.shutdown(); } catch { /* noop */ }
   });
 
@@ -295,8 +299,15 @@ describe('the registry\'s `extend` rule on a booted composition', () => {
     return kernel.getService<ObjectQL>('objectql');
   }
 
+  // One boot for both cases: the first only reads the registry, and
+  // the second's contribution is refused, leaving the registry as it was (the
+  // case pins that itself).
+  let ql: ObjectQL;
+  beforeAll(async () => {
+    ql = await bootRegistry();
+  });
+
   it('every `extend` contribution the composition registers is plugin-auth\'s on sys_sso_provider, and it folded', async () => {
-    const ql = await bootRegistry();
     const extensions = ql.registry.getAllObjects().flatMap((o: any) =>
       ql.registry.getObjectContributors(o.name)
         .filter((c: any) => c.ownership === 'extend')
@@ -307,7 +318,6 @@ describe('the registry\'s `extend` rule on a booted composition', () => {
   });
 
   it('a contribution that sets `defaultRowScope` on sys_user is refused by name; the declared default stands', async () => {
-    const ql = await bootRegistry();
     const declared = (ql.registry.getObject('sys_user') as any).defaultRowScope;
     expect(declared?.name).toBe('sys_user_self_or_org_members');
     const err = (() => {

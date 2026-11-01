@@ -101,6 +101,7 @@ import { useObjectGridMobile } from './objectGridMobile';
 import { useObjectGridGenerateColumns } from './objectGridGenerateColumns';
 import { resolveObjectGridPersistedColumns } from './objectGridPersistedColumns';
 import { resolveObjectGridActionsColumn } from './objectGridActionsColumn';
+import { BULK_SELECT_ALL_MATCHING_CAP } from './bulkSelectAllMatchingCap';
 export type { RetiredListColumnKey, ObjectGridColumnHolds, ObjectGridColumnDraft, ObjectGridColumn } from './objectGridColumns';
 export type { ObjectGridColumnState, ObjectGridFooterSummary, ObjectGridExternalPaginationProps, ObjectGridRowGroup } from './objectGridProps';
 
@@ -1940,7 +1941,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const base = { ...bulkFanoutParams } as Record<string, unknown>;
     delete (base as any).$top;
     delete (base as any).$skip;
-    const HARD_CAP = 5000;
+    // The cap the bulk bar names to the user when the match set is larger.
+    const HARD_CAP = BULK_SELECT_ALL_MATCHING_CAP;
     const PAGE = 500;
     const collected: any[] = [];
     let skip = 0;

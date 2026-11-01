@@ -848,7 +848,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "招待を再送",
-        description: "{{ record.email }} に招待を再送しますか？有効期限は改めて始まります。",
+        description: "{{ record.email }} に招待を再送しますか？有効期限は改めて始まります。すでに期限切れの招待は新しい招待に置き換えられます。",
         successMessage: "招待を再送しました",
         outcomeMessages: {
           sent: "{{ result.email }} に招待を再送しました",

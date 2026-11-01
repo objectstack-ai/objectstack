@@ -115,7 +115,6 @@ import { LIVE_PROBE, liveProbeNodeOptions } from './helpers/live-conversion-prob
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const VALIDATE_TS = resolve(HERE, '../src/commands/validate.ts');
 
 /**
@@ -139,7 +138,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', NODE_OPTIONS: liveProbeNodeOptions() }) },
       (err, stdout, stderr) => {

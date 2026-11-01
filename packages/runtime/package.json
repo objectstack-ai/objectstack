@@ -44,6 +44,7 @@
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/driver-sqlite-wasm": "workspace:*",
     "@objectstack/formula": "workspace:*",
+    "@objectstack/lint": "workspace:*",
     "@objectstack/metadata": "workspace:*",
     "@objectstack/objectql": "workspace:*",
     "@objectstack/metadata-protocol": "workspace:*",

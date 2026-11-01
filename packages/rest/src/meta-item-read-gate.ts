@@ -3402,6 +3402,32 @@ export type MetaListAnswer =
     | { ok: true; data: unknown; cacheControl: string; etag?: string }
     | { ok: false; object: string };
 
+/**
+ * [#28548] The list chain's answer to a narrowing filter sent EMPTY — `?id=`
+ * on the app list, `?object=` on the view list. Each was read as absent, so a
+ * caller whose name came out blank — who asked for ONE app, or for the views
+ * of ONE object — was answered every item it may see: the #27484 class (a
+ * blank `$searchFields` read as absent), refused the way that fix refuses it —
+ * `400 VALIDATION_ERROR` naming the parameter, so the caller learns its request
+ * named nothing instead of reading a plausible wrong list.
+ *
+ * Asked by steps 3 and 4 of {@link createMetaListAnswer}, AFTER the per-caller
+ * gate (step 2), which keeps its place. Only the empty string: a value that
+ * names nothing real (`' '`, `nope`) still narrows to the empty list. THROWS,
+ * so each transport's own `catch` shapes it (`RestServer`'s `handleRouteError`,
+ * the dispatcher's `errorFromThrown`), as {@link refuseUnknownMetaListType} does.
+ */
+function refuseEmptyListFilter(param: 'id' | 'object', names: 'app' | 'object', lists: 'app' | 'view'): never {
+    const err: any = new Error(
+        `Query parameter '${param}' names no ${names}; got "". The list was not served: an empty ${names} `
+        + `name is not a filter. Name one ${names}, or leave the parameter out to list every ${lists} you can see.`,
+    );
+    err.status = 400;
+    err.code = 'VALIDATION_ERROR';
+    err.param = param;
+    throw err;
+}
+
 /** The items of a list shape this chain serves, or `null` for anything else (left alone, never replaced). */
 function listItemsOf(raw: unknown): any[] | null {
     if (Array.isArray(raw)) return raw;
@@ -3488,11 +3514,13 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     narrows (permission decides what exists for this caller; the filter
  *     narrows within it, never the reverse, ADR-0045 §3), and on the raw doc
  *     items, before the locale collapse (`_packageId` scopes membership).
- *  3. `app` — `?id=<app>` narrows to the app of that `name` (#7566); empty
- *     and absent spellings mean no filter; no match is an EMPTY list, never a
- *     404.
+ *  3. `app` — `?id=<app>` narrows to the app of that `name` (#7566); absent
+ *     means no filter, and [#28548] an EMPTY value is refused (`400
+ *     VALIDATION_ERROR`), never read as absent; no match is an EMPTY list,
+ *     never a 404.
  *  4. `view` — `?object=<object>` keeps the independent views bound to that
- *     object, sorted by `order` then `name` (the switcher).
+ *     object, sorted by `order` then `name` (the switcher); [#28548] an EMPTY
+ *     value is refused (`400 VALIDATION_ERROR`), never read as absent.
  *  5. `doc` — the ADR-0046 locale collapse (the request's own preference; the
  *     `translations` map is dropped whatever the locale).
  *  6. `doc` — the ADR-0046 content slim, unless `?include=content`.
@@ -3546,9 +3574,11 @@ export function createMetaListAnswer(
             }
         }
 
-        // 3. [#7566] `?id=<app>`.
+        // 3. [#7566] `?id=<app>`. [#28548] An EMPTY one is refused, never
+        // read as absent (see {@link refuseEmptyListFilter}).
         const appIdFilter = metaType === 'app' ? query?.id : undefined;
-        if (typeof appIdFilter === 'string' && appIdFilter !== '') {
+        if (appIdFilter === '') refuseEmptyListFilter('id', 'app', 'app');
+        if (typeof appIdFilter === 'string') {
             const list = listItemsOf(visible);
             if (list) {
                 visible = withItems(visible, list.filter(
@@ -3557,7 +3587,9 @@ export function createMetaListAnswer(
             }
         }
 
-        // 4. `?object=<object>` — the view switcher.
+        // 4. `?object=<object>` — the view switcher. [#28548] An EMPTY one is
+        // refused, never read as absent (see {@link refuseEmptyListFilter}).
+        if (metaType === 'view' && query?.object === '') refuseEmptyListFilter('object', 'object', 'view');
         if (metaType === 'view' && query?.object) {
             const obj = String(query.object);
             const list = listItemsOf(visible);

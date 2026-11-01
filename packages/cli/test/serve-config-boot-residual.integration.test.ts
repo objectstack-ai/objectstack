@@ -63,7 +63,6 @@ import {
   CLI,
   E2E_SECRET_KEY,
   KERNEL_ASSIGNED_PORT,
-  TSX,
   childEnv,
   probeThroughChild,
   readKernelAssignedPort,
@@ -204,7 +203,7 @@ function build(dir: string): Promise<Run> {
 function runCli(dir: string, args: string[]): Promise<Run> {
   return new Promise((done) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
       { cwd: dir, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
@@ -236,7 +235,7 @@ interface LiveServe {
 /** Boot `os serve` in `dir` with `args`; the source entry seeds the dev admin either way. */
 function bootServe(dir: string, args: string[]): Promise<LiveServe> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', ...args, '-p', KERNEL_ASSIGNED_PORT], {
+    const child = spawn(process.execPath, [CLI, 'serve', ...args, '-p', KERNEL_ASSIGNED_PORT], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
@@ -395,7 +394,7 @@ async function read(dir: string, args: string[]): Promise<Reading> {
  */
 function bootRefused(dir: string, args: string[]): Promise<{ code: number | null; output: string }> {
   return new Promise((resolveRefusal, rejectRefusal) => {
-    const child = spawn(TSX, [CLI, 'serve', ...args, '-p', KERNEL_ASSIGNED_PORT], {
+    const child = spawn(process.execPath, [CLI, 'serve', ...args, '-p', KERNEL_ASSIGNED_PORT], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).

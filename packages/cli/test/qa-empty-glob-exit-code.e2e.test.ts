@@ -25,8 +25,8 @@
  *
  * It has to be a real child process. `process.exit(1)` inside a vitest worker
  * is not an exit status — the number a shell, a `set -e` script or a CI step
- * reads only exists once Node has exited. Spawned through `bin/run-dev.js` +
- * tsx (the pattern `migrate-exit-code.e2e.test.ts` and `emit-json-pipe.test.ts`
+ * reads only exists once Node has exited. Spawned through `bin/run-dev.js`
+ * (the pattern `migrate-exit-code.e2e.test.ts` and `emit-json-pipe.test.ts`
  * already use) so the suite does not depend on `packages/cli/dist` having been
  * built. No server is contacted on this path — the command resolves the glob
  * before it sends anything — so the run needs neither a boot nor a config.
@@ -42,7 +42,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** Matches nothing, in a temp dir that contains nothing. */
 const EMPTY_PATTERN = 'qa/nothing-matches-*.test.json';
@@ -59,7 +58,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

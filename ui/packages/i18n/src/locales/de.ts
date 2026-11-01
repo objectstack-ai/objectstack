@@ -468,6 +468,9 @@ const de = {
     bulkAllOnPage_other: "Alle {{count}} auf dieser Seite sind ausgewählt.",
     bulkSelectAllMatching: "Alle {{count}} Treffer auswählen",
     bulkAllMatchingSelected: "Alle {{count}} übereinstimmenden Datensätze sind ausgewählt.",
+    bulkSelectAllMatchingCapped: "Die ersten {{cap}} von {{total}} Treffern auswählen",
+    bulkAllMatchingSelectedCapped: "Nur die ersten {{cap}} von {{total}} übereinstimmenden Datensätzen werden verarbeitet.",
+    bulkSelectedAllMatchesCapped: "{{cap}} ausgewählt (von {{total}} Treffern)",
     bulkActions: "Massenaktionen",
     bulk: {
       confirmDefault: "Dies wird auf {{count}} Datensätze angewendet.",
