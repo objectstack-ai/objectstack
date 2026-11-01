@@ -59,7 +59,6 @@ import {
   CLI,
   E2E_SECRET_KEY,
   KERNEL_ASSIGNED_PORT,
-  TSX,
   childEnv,
   probeThroughChild,
   readKernelAssignedPort,
@@ -146,7 +145,7 @@ interface LiveServe {
 /** Boot `os serve objectstack.config.ts --dev` and keep it running; `--dev` seeds the admin. */
 function bootServe(dir: string): Promise<LiveServe> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
+    const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).

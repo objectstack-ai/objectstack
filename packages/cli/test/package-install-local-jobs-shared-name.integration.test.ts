@@ -57,7 +57,6 @@ import {
   KERNEL_ASSIGNED_PORT,
   probeThroughChild,
   readKernelAssignedPort,
-  TSX,
 } from './helpers/serve-process.js';
 
 /** The banner's tail — every row above it has printed. */
@@ -142,7 +141,7 @@ interface LiveStart {
 
 function bootStart(cwd: string, home: string, extra: string[] = []): Promise<LiveStart> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
+    const child = spawn(process.execPath, [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header. Package
       // scheduled work is OFF by default in every posture (#17396); this
@@ -276,7 +275,7 @@ interface InstallRun { exit: number | null; output: string; elapsedMs: number }
 function packageInstall(appDir: string, live: LiveStart, deadline: number): Promise<InstallRun> {
   return new Promise((done, fail) => {
     const started = Date.now();
-    const child = spawn(TSX, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
+    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
       cwd: appDir,
       env: childEnv({ NO_COLOR: '1' }),
       stdio: ['ignore', 'pipe', 'pipe'],

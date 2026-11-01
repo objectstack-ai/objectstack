@@ -39,7 +39,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 /** A package only the app's own directory declares and installs. */
@@ -116,7 +116,7 @@ describe('os verify anchors the app at its own directory, not the process cwd (#
     pluginDir = installAppOnlyPlugin(appDir);
 
     // Through tsx, so the child runs this checkout's `src/` (see verify-json-stdout.test.ts).
-    const r = spawnSync(TSX, [CLI, 'verify', '--app', join(appDir, 'objectstack.config.mjs')], {
+    const r = spawnSync(process.execPath, [CLI, 'verify', '--app', join(appDir, 'objectstack.config.mjs')], {
       cwd: elsewhere,
       encoding: 'utf8',
       env: childEnv({ NO_COLOR: '1' }),

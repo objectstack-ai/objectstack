@@ -55,7 +55,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
  * The fixture goes under this package's git-ignored `tmp/`; the `--out` root
@@ -120,7 +119,7 @@ afterAll(() => {
 /** Run the real command; returns stdout and the files it left in `--out`. */
 function extract(name: string, flags: string[]): { stdout: string; files: string[]; dir: string } {
   const dir = join(outRoot, name);
-  const stdout = execFileSync(TSX, [CLI, 'i18n', 'extract', CONFIG, '--locales=zh-CN', ...flags, `--out=${dir}`], {
+  const stdout = execFileSync(process.execPath, [CLI, 'i18n', 'extract', CONFIG, '--locales=zh-CN', ...flags, `--out=${dir}`], {
     encoding: 'utf8',
     env: childEnv(),
     timeout: 180_000,
@@ -200,7 +199,7 @@ describe('os i18n extract — the metadata-form baseline has exactly one home (#
   it('--json mirrors the file set in BOTH flag states', () => {
     const runJson = (flags: string[]) => {
       const stdout = execFileSync(
-        TSX,
+        process.execPath,
         [CLI, 'i18n', 'extract', CONFIG, '--locales=zh-CN', '--json', '--no-objects-only', ...flags],
         { encoding: 'utf8', env: childEnv(), timeout: 180_000 },
       );

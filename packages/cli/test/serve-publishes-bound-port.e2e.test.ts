@@ -103,7 +103,6 @@ import { join } from 'node:path';
 import { runtimeStateFileName } from '../src/commands/serve.js';
 import {
   CLI,
-  TSX,
   boundPortFromBanner,
   childEnv,
   E2E_SECRET_KEY,
@@ -222,7 +221,7 @@ interface Booted {
 function bootServe(cwd: string, args: string[], home: string): Promise<Booted> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child: ChildProcess = spawn(
-      TSX,
+      process.execPath,
       [CLI, 'serve', 'objectstack.config.ts', ...args],
       {
         cwd,

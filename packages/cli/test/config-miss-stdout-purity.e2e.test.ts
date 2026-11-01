@@ -68,7 +68,6 @@ import {
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 interface Run {
   key: string;
@@ -80,7 +79,7 @@ interface Run {
 function runCli(argv: string[], cwd: string): Promise<Omit<Run, 'key'>> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...argv],
       { cwd, maxBuffer: 32 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

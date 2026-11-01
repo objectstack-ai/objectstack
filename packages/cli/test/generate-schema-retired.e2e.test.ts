@@ -52,7 +52,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** oclif + tsx cold start, with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 240_000;
@@ -63,10 +62,10 @@ interface Run {
   stderr: string;
 }
 
-function runTsx(args: string[], cwd: string): Promise<Run> {
+function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       args,
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -99,14 +98,14 @@ beforeAll(async () => {
 
   // Sequential on purpose: five cold tsx starts, each loading every command
   // module, in a container several agents share.
-  retired = await runTsx([CLI, 'generate', 'schema'], dir);
-  retiredAlias = await runTsx([CLI, 'g', 'schema', '-o', 'custom.schema.json'], dir);
+  retired = await runCli([CLI, 'generate', 'schema'], dir);
+  retiredAlias = await runCli([CLI, 'g', 'schema', '-o', 'custom.schema.json'], dir);
   // Listed right after the two schema runs and before anything else runs in
   // this directory: the default target and the `-o` target must both be absent.
   writtenBySchemaRuns = readdirSync(dir);
-  agentNoName = await runTsx([CLI, 'g', 'agent'], dir);
-  inherited = await runTsx([CLI, 'g', 'constructor', 'thing'], dir);
-  survivor = await runTsx([CLI, 'g', 'object', 'customer', '--dry-run'], dir);
+  agentNoName = await runCli([CLI, 'g', 'agent'], dir);
+  inherited = await runCli([CLI, 'g', 'constructor', 'thing'], dir);
+  survivor = await runCli([CLI, 'g', 'object', 'customer', '--dry-run'], dir);
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {

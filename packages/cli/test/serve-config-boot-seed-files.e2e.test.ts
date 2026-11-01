@@ -31,7 +31,6 @@ import {
   CLI,
   E2E_SECRET_KEY,
   KERNEL_ASSIGNED_PORT,
-  TSX,
   childEnv,
   probeThroughChild,
   readKernelAssignedPort,
@@ -101,7 +100,7 @@ afterAll(async () => {
 /** Boot `os serve objectstack.config.ts --dev`; `--dev` seeds the admin. Answers the port it bound. */
 function bootServe(): Promise<number> {
   return new Promise((resolveBoot, rejectBoot) => {
-    child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
+    child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: childEnv({

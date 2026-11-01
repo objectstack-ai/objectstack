@@ -35,7 +35,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 import { defineStackSource, defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
 
 const MANIFEST = {
@@ -97,7 +97,7 @@ interface Doc {
 
 function runCli(dir: string, args: string[]): Run {
   // Through tsx, so the child runs this checkout's `src/`.
-  const r = spawnSync(TSX, [CLI, ...args], {
+  const r = spawnSync(process.execPath, [CLI, ...args], {
     cwd: dir,
     encoding: 'utf8',
     env: childEnv({ NO_COLOR: '1' }),

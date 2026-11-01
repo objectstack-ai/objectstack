@@ -59,7 +59,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const CLI_PACKAGE_ROOT = resolve(HERE, '..');
 
 /** One object (2 leaves) + one app (1 leaf); the registry baseline rides along. */
@@ -116,7 +115,7 @@ function plain(text: string): string {
 
 function runExtract(name: string, config: string, flags: readonly string[]): { stdout: string; dir: string; files: string[] } {
   const dir = join(outRoot, name);
-  const stdout = execFileSync(TSX, [CLI, 'i18n', 'extract', config, '--locales=zh-CN', ...flags, `--out=${dir}`], {
+  const stdout = execFileSync(process.execPath, [CLI, 'i18n', 'extract', config, '--locales=zh-CN', ...flags, `--out=${dir}`], {
     encoding: 'utf8',
     env: childEnv(),
     timeout: 180_000,
@@ -238,7 +237,7 @@ describe('os i18n extract — the number printed is the number written (#16121)'
    */
   it('--json counts describe the payload printed beside them, in both sub-tree modes', () => {
     const runJson = (flags: readonly string[]) => {
-      const stdout = execFileSync(TSX, [CLI, 'i18n', 'extract', CONFIG, '--locales=zh-CN', '--json', ...flags], {
+      const stdout = execFileSync(process.execPath, [CLI, 'i18n', 'extract', CONFIG, '--locales=zh-CN', '--json', ...flags], {
         encoding: 'utf8',
         env: childEnv(),
         timeout: 180_000,

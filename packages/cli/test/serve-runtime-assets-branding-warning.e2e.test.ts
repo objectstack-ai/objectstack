@@ -46,7 +46,6 @@ import type { Readable } from 'node:stream';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import {
   CLI,
-  TSX,
   E2E_SECRET_KEY,
   KERNEL_ASSIGNED_PORT,
   childEnv,
@@ -148,7 +147,7 @@ async function bootAndFetchLogo(layout: 'no-assets' | 'cwd-assets' | 'env-assets
   // only for the `assets/` control, that directory — nothing else.
   expect(readdirSync(cwd).sort()).toEqual(layout === 'cwd-assets' ? ['assets', 'objectstack.json'] : ['objectstack.json']);
 
-  const child = spawn(TSX, [CLI, 'serve', '-p', KERNEL_ASSIGNED_PORT], {
+  const child = spawn(process.execPath, [CLI, 'serve', '-p', KERNEL_ASSIGNED_PORT], {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     // `childEnv`, never a bare `...process.env` (`check:cli-test-child-env`).

@@ -78,7 +78,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { CLI, TSX, E2E_SECRET_KEY, childEnv, randomPort } from './helpers/serve-process.js';
+import { CLI, E2E_SECRET_KEY, childEnv, randomPort } from './helpers/serve-process.js';
 
 /**
  * The notice, as ONE regex shared by both cases.
@@ -186,7 +186,7 @@ interface Booted {
  */
 function boot(port: number | string, timeoutMs = 180_000): Promise<Booted> {
   return new Promise((resolveBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '--port', String(port)], {
+    const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--port', String(port)], {
       cwd: dir,
       // The shared child environment, never a bare `...process.env` (commit 1ddda1d00).
       //

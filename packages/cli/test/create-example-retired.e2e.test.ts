@@ -75,7 +75,6 @@ import { RETIRED_TEMPLATES, templates } from '../src/commands/create.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /** oclif + tsx cold start with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 180_000;
@@ -93,7 +92,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
