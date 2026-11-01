@@ -843,13 +843,29 @@ export async function callData(deps: ActionExecutionDeps,
         const engine = (await deps.getObjectQL(requestContext, scopeId))
             ?? await deps.resolveService(requestContext, 'objectql', scopeId).catch(() => null);
         if (engine && typeof engine.aggregate === 'function') {
-            // [#22823] This arm takes no protocol, so it is the engine's door on
+            // [#22823] This arm runs on no protocol data method, so it is the engine's door on
             // every assembly: each nested-relation condition's TARGET in `where`
             // is asked before the engine aggregates, as the query fallback asks
             // it (the engine lowers relation conditions in `where` only, never
             // in an aggregation's own `filter`).
             if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
+            }
+            // The data door's evaluate refusal for a field declared
+            // `internal: true` — a filter (`where`, an aggregation's own
+            // `filter`), a group key or an aggregation operand on it. The query
+            // arm meets it inside `findData`; this arm never reaches `findData`,
+            // so it asks the protocol's ONE gate itself, before the engine, and
+            // throws the door's `400 INVALID_FIELD` word for word. ⛔ Never a
+            // copy of the gate here (route-ownership rule 1). Every caller, as
+            // at the door; a host with no protocol has no door to agree with
+            // and is served as before.
+            if (protocol && typeof protocol.assertNoInternalFieldEvaluated === 'function') {
+                protocol.assertNoInternalFieldEvaluated(params.object, {
+                    where: params.where,
+                    groupBy: params.groupBy,
+                    aggregations: params.aggregations,
+                });
             }
             const rows = await engine.aggregate(
                 params.object,
