@@ -57,7 +57,10 @@ function matches(row: Row, where: Row | undefined): boolean {
 }
 
 const ql = {
-    find: async (object: string, opts: any) => (TABLES[object] ?? []).filter((r) => matches(r, opts?.where)),
+    find: async (object: string, opts: any) => {
+        const rows = (TABLES[object] ?? []).filter((r) => matches(r, opts?.where));
+        return typeof opts?.limit === 'number' ? rows.slice(0, opts.limit) : rows;
+    },
     registry: { getAllApps: () => [], getAllObjects: () => [] },
     getSchema: () => undefined,
 };
