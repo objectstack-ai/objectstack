@@ -14,7 +14,12 @@
 //     asserted against the same constant the door applies, so no facet can be
 //     dropped by omission and no dropped key can ride across;
 //   - every refusal answers in the ADR-0112 envelope (status + code) and saves
-//     nothing.
+//     nothing;
+//   - [ADR-0146 D3/D6] WHERE the copy lands: a packaged source with no target
+//     lands in `<X>.custom` through the ensure door, bound by the save's own
+//     `packageId` and never a body key; a source in a writable package lands
+//     there; a given target is judged by the shared new-similar check; an
+//     environment-authored source is unchanged.
 
 import { describe, it, expect } from 'vitest';
 
@@ -26,6 +31,8 @@ import {
     PERMISSION_SET_CLONE_MUTATED_FIELDS,
     PERMISSION_SET_CLONE_NOTICE,
     clonePermissionSetDefinition,
+    permissionSetCloneNotice,
+    permissionSetObjectNames,
 } from './permission-set-clone.js';
 
 /** A packaged set carrying every facet AND every key the server drops. */
@@ -49,10 +56,30 @@ const PACKAGED = {
     _lock: 'full',
 };
 const ENV_SET = { name: 'env_reader', label: 'Env Reader', objects: { account: { allowRead: true } } };
+/** A set already in a WRITABLE package (a base the customer owns). */
+const OWNED_SET = { name: 'own_reader', label: 'Own Reader', objects: { account: { allowRead: true } }, _packageId: 'com.acme.base' };
 
-const CATALOG: TestSecurityCatalog = { permissions: [PACKAGED, ENV_SET] };
+/** An environment-authored set that grants on a platform object only. */
+const SYS_ONLY_SET = { name: 'sys_only', label: 'Sys Only', objects: { sys_user: { allowRead: true } } };
 
-interface Saved { type: string; name: string; item: Record<string, unknown>; parentVersion?: string | null }
+const CATALOG: TestSecurityCatalog = { permissions: [PACKAGED, ENV_SET, OWNED_SET, SYS_ONLY_SET] };
+
+/**
+ * The package registry the door reads: `crm` is a booted CODE package
+ * (read-only, it owns `account`), `crm.custom` its pair once ensured,
+ * `com.acme.base` a writable base, `com.acme.ext` a writable package that
+ * declares `crm`, `com.acme.island` a writable package that declares nothing,
+ * `com.vendor.app` an installed read-only app (`scope: 'cloud'`).
+ */
+const PACKAGES: Record<string, { manifest: Record<string, unknown> }> = {
+    crm: { manifest: { id: 'crm', namespace: 'crm', version: '1.2.0' } },
+    'com.acme.base': { manifest: { id: 'com.acme.base' } },
+    'com.acme.ext': { manifest: { id: 'com.acme.ext', dependencies: { crm: '^1' } } },
+    'com.acme.island': { manifest: { id: 'com.acme.island' } },
+    'com.vendor.app': { manifest: { id: 'com.vendor.app', scope: 'cloud' } },
+};
+
+interface Saved { type: string; name: string; item: Record<string, unknown>; parentVersion?: string | null; packageId?: string }
 
 interface BootOptions {
     unbound?: boolean;
@@ -61,13 +88,23 @@ interface BootOptions {
     catalogError?: Error;
     /** The `tenancy` service's posture; absent ⇒ no `tenancy` service (the `single` shape). */
     posture?: 'single' | 'isolated' | 'group';
+    /** What the ensure door throws, when it refuses. */
+    ensureError?: Error;
+    /** The protocol has no `ensureCustomizationPackage`. */
+    noEnsure?: boolean;
 }
 
 function boot(opts: BootOptions = {}) {
     // ZERO `sys_permission_set` rows: every data read throws, so the door
     // passing proves it reads no row.
+    const packages: Record<string, { manifest: Record<string, unknown> }> = structuredClone(PACKAGES);
     const engine: any = {
-        registry: { getObject: () => undefined },
+        manifests: new Set(['crm']),
+        registry: {
+            getPackage: (id: string) => packages[id],
+            getObject: (name: string) => (name === 'account' ? { name: 'account' } : name === 'sys_user' ? { name: 'sys_user' } : undefined),
+            getObjectOwner: (name: string) => (name === 'account' ? { packageId: 'crm' } : name === 'sys_user' ? { packageId: 'com.objectstack.platform' } : undefined),
+        },
         find: async (object: string) => { throw new Error(`the clone door read a ${object} row`); },
     };
     if (opts.catalogError) {
@@ -76,13 +113,27 @@ function boot(opts: BootOptions = {}) {
         bindTestSecurityCatalog(engine, CATALOG);
     }
     const saves: Saved[] = [];
-    const protocol = {
+    const ensures: string[] = [];
+    // The ensure door's contract, modeled: the pair `<base>.custom`, created
+    // (and registered as a writable package depending on the base) when
+    // absent, returned unchanged when present.
+    const protocol: Record<string, unknown> = {
         async saveMetaItem(request: Saved) {
             if (opts.saveError) throw opts.saveError;
             saves.push(structuredClone(request));
             return { success: true };
         },
     };
+    if (!opts.noEnsure) {
+        protocol.ensureCustomizationPackage = async ({ basePackageId }: { basePackageId: string }) => {
+            ensures.push(basePackageId);
+            if (opts.ensureError) throw opts.ensureError;
+            const pairId = `${basePackageId}.custom`;
+            const created = packages[pairId] === undefined;
+            if (created) packages[pairId] = { manifest: { id: pairId, dependencies: { [basePackageId]: '^1' } } };
+            return { basePackageId, packageId: pairId, namespace: 'crm_custom', dependencyRange: '^1', created, writable: true };
+        };
+    }
     const services: Record<string, unknown> = { objectql: engine, data: engine };
     if (!opts.noProtocol) services.protocol = protocol;
     if (opts.posture) services.tenancy = { posture: opts.posture };
@@ -92,7 +143,7 @@ function boot(opts: BootOptions = {}) {
         getServiceAsync: async (name: string) => resolve(name),
         context: { getService: resolve },
     };
-    return { dispatcher: new HttpDispatcher(kernel as never), saves };
+    return { dispatcher: new HttpDispatcher(kernel as never), saves, ensures };
 }
 
 const ctx = (executionContext: Record<string, unknown>): HttpProtocolContext =>
@@ -108,7 +159,7 @@ const clone = (h: ReturnType<typeof boot>, c: HttpProtocolContext, source: strin
     h.dispatcher.handleSecurity(`/permission-sets/${source}/clone`, 'POST', body, {}, c);
 
 describe('the permission-set clone door — success', () => {
-    it('copies the whole definition under the new name, drops the declared keys, and saves create-only as an environment item', async () => {
+    it('copies the whole definition under the new name, drops the declared keys, and saves create-only in the source package\'s pair', async () => {
         const h = boot();
 
         const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'my_sales_rep', label: 'My Sales Rep' });
@@ -120,8 +171,11 @@ describe('the permission-set clone door — success', () => {
         expect(save.name).toBe('my_sales_rep');
         // Create-only: a row written under the name in between is refused.
         expect(save.parentVersion).toBeNull();
-        // No organization and no package on the save.
-        expect(Object.keys(save).sort()).toEqual(['item', 'name', 'parentVersion', 'type']);
+        // [ADR-0146 D3/D6] No organization; the package is the SAVE's — the
+        // read-only source's pair, ensured through the ensure door.
+        expect(Object.keys(save).sort()).toEqual(['item', 'name', 'packageId', 'parentVersion', 'type']);
+        expect(save.packageId).toBe('crm.custom');
+        expect(h.ensures).toEqual(['crm']);
 
         // Whole-definition copy: the source minus the declared keys, the two
         // mutated fields set. Deep equality, so a dropped facet fails here.
@@ -134,19 +188,79 @@ describe('the permission-set clone door — success', () => {
             expect(save.item, key).not.toHaveProperty(key);
         }
 
-        // ⛔ No ancestry in the answer.
+        // ⛔ No ancestry in the answer; the landing package is named.
         const data = (res as any).response.body.data;
-        expect(data).toEqual({ permissionSet: save.item, notice: PERMISSION_SET_CLONE_NOTICE });
+        expect(data).toEqual({
+            permissionSet: save.item,
+            package: 'crm.custom',
+            notice: permissionSetCloneNotice({ packageId: 'crm.custom', created: true }),
+        });
+        expect(data.notice).toContain("'crm.custom'");
+        expect(data.notice.endsWith(PERMISSION_SET_CLONE_NOTICE)).toBe(true);
         expect(JSON.stringify(data.permissionSet)).not.toContain(PACKAGED.name);
     });
 
-    it('clones an environment-authored set the same way', async () => {
+    it('a second copy of the same packaged source reuses the pair the first created', async () => {
+        const h = boot();
+
+        await clone(h, HOLDER(), PACKAGED.name, { name: 'first_copy', label: 'First' });
+        const second = await clone(h, HOLDER(), PACKAGED.name, { name: 'second_copy', label: 'Second' });
+
+        expect(statusOf(second)).toBe(200);
+        expect(h.saves.map((s) => s.packageId)).toEqual(['crm.custom', 'crm.custom']);
+        expect((second as any).response.body.data.notice).toBe(permissionSetCloneNotice({ packageId: 'crm.custom', created: false }));
+    });
+
+    it('CONTROL — an environment-authored set copies environment-wide, as before: no package, no ensure', async () => {
         const h = boot();
 
         const res = await clone(h, HOLDER(), ENV_SET.name, { name: 'env_reader_copy', label: 'Env Reader Copy' });
 
         expect(statusOf(res)).toBe(200);
         expect(h.saves[0].item).toEqual({ ...ENV_SET, name: 'env_reader_copy', label: 'Env Reader Copy' });
+        expect(Object.keys(h.saves[0]).sort()).toEqual(['item', 'name', 'parentVersion', 'type']);
+        expect(h.ensures).toEqual([]);
+        expect((res as any).response.body.data.package).toBeNull();
+    });
+
+    it('a set already in a writable package copies into that package, with no ensure', async () => {
+        const h = boot();
+
+        const res = await clone(h, HOLDER(), OWNED_SET.name, { name: 'own_reader_copy', label: 'Own Reader Copy' });
+
+        expect(statusOf(res)).toBe(200);
+        expect(h.saves[0].packageId).toBe('com.acme.base');
+        expect(h.saves[0].item).not.toHaveProperty('_packageId');
+        expect(h.ensures).toEqual([]);
+    });
+
+    it('a given writable target that reaches the set lands there, with no ensure', async () => {
+        const h = boot();
+
+        const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'ext_copy', label: 'Ext Copy', package: 'com.acme.ext' });
+
+        expect(statusOf(res)).toBe(200);
+        expect(h.saves[0].packageId).toBe('com.acme.ext');
+        expect(h.saves[0].item).not.toHaveProperty('packageId');
+        expect((res as any).response.body.data.package).toBe('com.acme.ext');
+        expect(h.ensures).toEqual([]);
+    });
+
+    it('an environment-authored set given a target lands there when the target reaches its objects', async () => {
+        const h = boot();
+
+        const res = await clone(h, HOLDER(), ENV_SET.name, { name: 'env_in_ext', label: 'X', package: 'com.acme.ext' });
+
+        expect(statusOf(res)).toBe(200);
+        expect(h.saves[0].packageId).toBe('com.acme.ext');
+    });
+
+    it('names every object a set grants on: objects, fields and row-level rules', () => {
+        expect(permissionSetObjectNames(PACKAGED).sort()).toEqual(['account']);
+        expect(permissionSetObjectNames({
+            objects: { a: {} }, fields: { 'b.x': {}, 'a.y': {} }, rowLevelSecurity: [{ object: 'c' }, { object: '' }, null],
+        }).sort()).toEqual(['a', 'b', 'c']);
+        expect(permissionSetObjectNames({})).toEqual([]);
     });
 
     it('the copy shares no object with the catalog definition it was read from', () => {
@@ -283,6 +397,49 @@ describe('the permission-set clone door — refusals', () => {
         expect(message).toBe(String((held as any).response.body.error.message).replaceAll(ENV_SET.name, 'x_copy'));
     });
 
+    it('a given target that is unknown or read-only is 422 WRITABLE_PACKAGE_REQUIRED, naming the package, with no ensure and no save', async () => {
+        for (const target of ['com.acme.nowhere', 'crm', 'com.vendor.app']) {
+            const res = await refusal({}, PACKAGED.name, { name: 'x_copy', label: 'X', package: target }, 422, 'WRITABLE_PACKAGE_REQUIRED');
+            expect((res as any).response.body.error.details?.packageId ?? (res as any).response.body.error.packageId, target).toBe(target);
+        }
+    });
+
+    it('a given writable target that cannot reach the source\'s package is 409, with no save', async () => {
+        const res = await refusal({}, PACKAGED.name, { name: 'x_copy', label: 'X', package: 'com.acme.island' }, 409, 'RESOURCE_CONFLICT');
+        expect(String((res as any).response.body.error.message)).toContain("'crm'");
+    });
+
+    it('a given target that cannot reach an object the set grants on is 409, even for an environment-authored source', async () => {
+        // ENV_SET has no package — so no source-package question — but grants on
+        // `account`, which `crm` owns and `com.acme.island` does not declare.
+        const res = await refusal({}, ENV_SET.name, { name: 'x_copy', label: 'X', package: 'com.acme.island' }, 409, 'RESOURCE_CONFLICT');
+        expect(String((res as any).response.body.error.message)).toContain("'account' (package 'crm')");
+    });
+
+    it('CONTROL — a platform object is reachable from any target, as at the save gate', async () => {
+        const h = boot();
+        const res = await clone(h, HOLDER(), SYS_ONLY_SET.name, { name: 'sys_only_copy', label: 'X', package: 'com.acme.island' });
+        expect(statusOf(res), JSON.stringify((res as any)?.response?.body)).toBe(200);
+        expect(h.saves[0].packageId).toBe('com.acme.island');
+    });
+
+    it('an empty or non-string `package` is 400, never read as omitted', async () => {
+        await refusal({}, PACKAGED.name, { name: 'x_copy', label: 'X', package: '' }, 400, 'VALIDATION_FAILED');
+        await refusal({}, PACKAGED.name, { name: 'x_copy', label: 'X', package: 7 }, 400, 'VALIDATION_FAILED');
+    });
+
+    it('a pair the ensure door refuses keeps the ensure door\'s status and code, and nothing is saved', async () => {
+        const refused = Object.assign(new Error("Package 'crm' declares no namespace"), { statusCode: 409, code: 'RESOURCE_CONFLICT' });
+        await refusal({ ensureError: refused }, PACKAGED.name, { name: 'x_copy', label: 'X' }, 409, 'RESOURCE_CONFLICT');
+    });
+
+    it('a packaged source with no ensure door to call is 501 — never a package-less save', async () => {
+        const h = boot({ noEnsure: true });
+        const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'x_copy', label: 'X' });
+        expect(statusOf(res)).toBe(501);
+        expect(h.saves).toEqual([]);
+    });
+
     it('no metadata protocol to save through is 501', async () => {
         const h = boot({ noProtocol: true });
         const res = await clone(h, HOLDER(), PACKAGED.name, { name: 'x_copy', label: 'X' });
@@ -305,6 +462,8 @@ describe('the permission-set clone door — the walled catalog refusal (ADR-0131
             expect(codeOf(res)).toBe('PERMISSION_DENIED');
             expect(String((res as any)?.response?.body?.error?.message)).toContain(`'${posture}' tenancy posture`);
             expect(h.saves).toHaveLength(0);
+            // The walled refusal answers before the pair is ensured.
+            expect(h.ensures).toEqual([]);
         });
 
         it(`${posture}: CONTROL — the platform operator rung clones`, async () => {

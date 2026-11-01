@@ -221,6 +221,19 @@ describe('the permission-set clone door, on a booted showcase', () => {
         }
     });
 
+    it('a platform set (the lock-and-clone rule\'s commonest source) copies into its shipping package\'s pair', async () => {
+        const reader = securityCatalogReaderOf(ql)!;
+        const source = await reader.resolve('permission', 'member_default');
+        expect(source?.packageId, 'member_default is not packaged on this boot').toBeTruthy();
+
+        const res = await clone(token, 'member_default', { name: 'my_member_baseline', label: 'My Member Baseline' });
+        const text = await res.clone().text();
+        expect(res.status, text).toBe(200);
+        const landed = ((await res.json()) as any).data.package;
+        expect(landed).toBe(`${source!.packageId}.custom`);
+        expect((await reader.resolve('permission', 'my_member_baseline'))?.packageId).toBe(landed);
+    });
+
     it('CONTROL — an environment-authored source still copies environment-wide, with no package', async () => {
         const saved = await stack.apiAs(token, 'PUT', '/meta/permission/env_authored_source', {
             name: 'env_authored_source', label: 'Env Authored', objects: { showcase_task: { allowRead: true } },

@@ -67,7 +67,7 @@
  * ## Where the copy lands — ADR-0146 D3/D6 ("new similar")
  *
  * A customer's own set is a NEW set in the package that holds their changes
- * (ADR-0146 D6), so the door decides one package, {@link resolveCloneLanding}:
+ * (ADR-0146 D6), so the door decides one package:
  *
  *  - **`package` given** — it must be an installed, writable package whose
  *    dependency closure reaches the source's package and every object the set
@@ -110,7 +110,7 @@ import { metaWriteCapabilityVerdict, walledCatalogWriteVerdict } from '@objectst
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 import { securityCatalogReaderOf, type SecurityCatalogEntry } from '@objectstack/core';
 import { isWritablePackage, type ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
-import { newSimilarTargetRefusal } from './new-similar-target.js';
+import { newSimilarTargetRefusal, newSimilarTargetRefusalAnswer } from './new-similar-target.js';
 import { validationFailure } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
@@ -150,7 +150,7 @@ export const PERMISSION_SET_CLONE_NOTICE =
     + 'The copy is held by nobody yet: add it to a position, or assign it to users.';
 
 /**
- * Where a clone landed, as the door decided it ({@link resolveCloneLanding}):
+ * Where a clone landed, as the door decided it (module doc, "Where the copy lands"):
  * the package, or `null` for an environment-wide save, and whether the door
  * created that package for this copy (only ever the paired `<X>.custom`).
  */
@@ -239,26 +239,17 @@ export function permissionSetObjectNames(definition: Readonly<Record<string, unk
 }
 
 /**
- * The package a clone lands in — the rules in the module doc's "Where the copy
- * lands". Throws an ADR-0112 refusal (status + code) when a given target is
- * refused or the pair cannot be ensured; nothing has been written by then.
+ * The package a clone lands in when its caller named none — the omitted rows
+ * of the module doc's "Where the copy lands". Throws an ADR-0112 refusal
+ * (status + code) when the pair cannot be ensured; nothing has been written
+ * by then. A target the caller named is judged by `newSimilarTargetRefusal`
+ * in the handler, never here.
  */
-export async function resolveCloneLanding(
+export async function resolveDefaultCloneLanding(
     ql: unknown,
     protocol: Partial<Pick<ObjectStackProtocolImplementation, 'ensureCustomizationPackage'>>,
     source: SecurityCatalogEntry,
-    requested: string | undefined,
 ): Promise<PermissionSetCloneLanding> {
-    if (requested !== undefined) {
-        const refusal = newSimilarTargetRefusal(ql, {
-            target: requested,
-            sourcePackageId: source.packageId,
-            subject: `permission set '${source.name}'`,
-            objects: permissionSetObjectNames(source.definition),
-        });
-        if (refusal) throw refusal;
-        return { packageId: requested, created: false };
-    }
     const sourcePackageId = source.packageId;
     if (sourcePackageId === undefined) return { packageId: null, created: false };
     if (isWritablePackage(ql, sourcePackageId)) return { packageId: sourcePackageId, created: false };
@@ -358,8 +349,9 @@ function readCloneBody(body: unknown): { name: string; label: string; package?: 
  *     `sys_permission_set` row is read. No reader bound, or one that cannot
  *     answer ⇒ 503; unknown ⇒ 404.
  *  5. **Target**: a name the catalog holds ⇒ 409.
- *  6. **Landing**: the package the copy is saved in ({@link resolveCloneLanding}):
- *     a given target is judged (refused with nothing written), an omitted one
+ *  6. **Landing**: the package the copy is saved in: a given target is judged
+ *     by the shared rule (refused with nothing written), an omitted one
+ *     ({@link resolveDefaultCloneLanding})
  *     follows the source — `<X>.custom` through the ensure door for a
  *     read-only X, the source's own writable package, or environment-wide.
  *  7. **The save**, through the metadata protocol's `saveMetaItem`, create-only
@@ -475,7 +467,21 @@ export async function handlePermissionSetCloneWrite(
             };
         }
         // ── 6. landing ──────────────────────────────────────────────────────
-        const landing = await resolveCloneLanding(ql, protocol, source, target.package);
+        let landing: PermissionSetCloneLanding;
+        if (target.package !== undefined) {
+            // The shared "new similar" target rule, asked of the objects the
+            // set grants on as well as of the source's package.
+            const refused = newSimilarTargetRefusal(ql, {
+                target: target.package,
+                subject: `permission set '${source.name}'`,
+                sourcePackageId: source.packageId,
+                objects: permissionSetObjectNames(source.definition),
+            });
+            if (refused) return newSimilarTargetRefusalAnswer(deps, refused);
+            landing = { packageId: target.package, created: false };
+        } else {
+            landing = await resolveDefaultCloneLanding(ql, protocol, source);
+        }
 
         // ── 7. the save ─────────────────────────────────────────────────────
         // [ADR-0131 D6] No organization: the catalog is environment-level. The
