@@ -60,11 +60,13 @@
  * and the derivation is present from module load on every composition.
  *
  * Precedence: an explicit registration wins, then a built-in, then the
- * derivation. `datasource` (schema-reading plus URL scrubbing) and `flow`
- * (nested regions, write-path strip) keep their explicit redactors.
+ * derivation. `datasource` (schema-reading plus URL scrubbing), `connector`
+ * (positions inside a union and a provider-owned record) and `flow` (nested
+ * regions, write-path strip) keep their explicit redactors.
  */
 
 import { redactDatasourceConfig } from '../data/datasource-credential-redaction';
+import { redactConnectorItem } from '../integration/connector-credential-redaction';
 import { derivedCredentialRedactorFor } from './metadata-credential-fields';
 import {
   getMetadataTypeSchema,
@@ -131,9 +133,16 @@ function redactDatasourceItem(item: Record<string, unknown>): MetadataRedactionR
  * A type omitted here serves its stored body unredacted (most types hold no
  * secret). See the module note for why `datasource` is wired here rather than
  * registered from the opt-in admin plugin.
+ *
+ * `connector` is a built-in for the same reason: its rows reach the metadata
+ * save door with or without any connector plugin mounted. Its credential
+ * positions sit inside a union (`auth`) and a provider-owned record
+ * (`providerConfig`), which the schema derivation does not reach, so the
+ * redactor names them (`integration/connector-credential-redaction.ts`).
  */
 const BUILTIN_METADATA_TYPE_REDACTORS: Record<string, MetadataTypeRedactor> = {
   datasource: redactDatasourceItem,
+  connector: redactConnectorItem,
 };
 
 /** Runtime-extensible overlay populated via `registerMetadataTypeRedactor`. */
