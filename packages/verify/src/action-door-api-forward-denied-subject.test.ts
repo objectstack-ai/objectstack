@@ -38,8 +38,6 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 
 import { defineStack, defineFlow } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
-import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
-import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 
 import { bootStack, type VerifyStack } from './harness.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
@@ -50,7 +48,7 @@ const BOOT_TIMEOUT = 120_000;
 // The boot's first load, paid during collection rather than in the
 // `beforeAll` below (see `boot-warm-up.testkit.ts`): the same options and the
 // same `requires` as this file's own boot.
-await warmUpBoot({ automation: true }, { requires: ['automation', 'triggers'] });
+await warmUpBoot({ automation: true }, { requires: ['automation', 'triggers', 'approvals'] });
 
 const OBJECT = 'afd_invoice';
 const SYS = { isSystem: true } as const;
@@ -106,8 +104,10 @@ const fixtureStack = defineStack({
     name: 'Action Door Api Forward Denied Subject Fixture',
     description: 'One private object and a two-approver unanimous sign-off flow on it.',
   },
-  // ADR-0097: the `record-after-create` start node needs the trigger capability.
-  requires: ['automation', 'triggers'],
+  // ADR-0097: the `record-after-create` start node needs the trigger
+  // capability; `approvals` mounts the approvals service and its decision
+  // routes, the providers `objectstack serve` mounts for these tokens.
+  requires: ['automation', 'triggers', 'approvals'],
   objects: [Invoice],
   flows: [flow],
 });
@@ -148,10 +148,7 @@ const approveRows = async (id: string): Promise<any[]> =>
 const pendingOf = (row: any): string[] => String(row?.pending_approvers ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 
 beforeAll(async () => {
-  stack = await bootStack(fixtureStack as never, {
-    automation: true,
-    extraPlugins: [new RecordChangeTriggerPlugin(), new ApprovalsServicePlugin()],
-  });
+  stack = await bootStack(fixtureStack as never, { automation: true });
   ql = await stack.kernel.getServiceAsync('objectql');
   admin = await stack.signIn();
   // The first user is the seeded dev admin, so these sign-ups are plain members.
