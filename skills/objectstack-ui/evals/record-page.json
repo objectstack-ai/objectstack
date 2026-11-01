@@ -1,0 +1,40 @@
+{
+  "skill_name": "objectstack-ui",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "On the lead record page, put the tasks first: our reps want the open tasks table before anything else when they open a lead. The `task` object already has a `lead` master_detail field.",
+      "expected_output": "No page file. One flag on the child's reference field — `relatedList: 'primary'` on `task.lead` — makes the tasks a full-width body table in the lead's details, after the first field section; `relatedListFilter: { status: { $ne: 'done' } }` keeps it to open tasks, and the lead's `relatedLists: ['task', ...]` puts it before the other lists. Not a `definePage` with `kind: 'full'`, and never a `slots.tabs`.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "relatedList: 'primary'",
+          "relatedLists"
+        ],
+        "must_not_contain": [
+          "definePage",
+          "slots.tabs",
+          "kind: 'full'"
+        ]
+      }
+    },
+    {
+      "id": 2,
+      "prompt": "Contracts should open as a full page, not the side drawer. Reps also keep asking for records to open beside the list — add that to the contract object too.",
+      "expected_output": "One declaration: `navigation: { mode: 'page' }` on the contract list view. The pane beside the list is each reader's own choice in the list's Display menu (Open records: split, drawer or full page), kept in the browser and offered for drawer-mode objects only, so nothing is authored for it; `split`, `modal` and `popover` were removed in @objectstack/spec 18.3.0 and are refused.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "navigation: { mode: 'page' }",
+          "Display menu"
+        ],
+        "must_not_contain": [
+          "mode: 'split'",
+          "mode: 'modal'",
+          "mode: 'popover'",
+          "definePage"
+        ]
+      }
+    }
+  ]
+}
