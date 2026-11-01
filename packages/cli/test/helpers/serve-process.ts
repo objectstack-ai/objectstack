@@ -930,6 +930,28 @@ function portOf(args: string[]): string | undefined {
 }
 
 /**
+ * How long `runServe()` lets a child it sent SIGTERM keep running before it
+ * sends SIGKILL.
+ *
+ * The tsx binary used to give this for free: its signal relay forwards the
+ * SIGTERM, waits about 30 ms for the child to acknowledge it, and then
+ * SIGKILLs the child. A node child has no relay in front of it, and a boot that
+ * was refused (`serve-package-declared-capabilities`, the `tiers` case) has
+ * stayed alive after its SIGTERM: one orphaned `os serve` of about 900 MB per
+ * run (#23181). This restores the guarantee the docblock below states.
+ *
+ * ⚠️ The SIGKILL cannot be left to a timer that outlives the call. The vitest
+ * worker is torn down soon after its last case, so a timer there, `unref()`'d
+ * or not, never fires for a file's last boot, and neither does a process
+ * `exit` hook (measured: a child that ignores SIGTERM survived its file every
+ * time with each of the three). So `runServe()` settles only once the child is
+ * gone: SIGTERM first, so a child that drains promptly ends the way it always
+ * did, then SIGKILL at this bound. The output a caller reads is still what the
+ * child had printed when `waitFor` matched.
+ */
+const SIGKILL_GRACE_MS = 1_000;
+
+/**
  * Boot `os serve` in `cwd`, collect its output until `waitFor` matches (or the
  * process exits), then stop it. Never leaves the child running.
  *
@@ -1022,6 +1044,34 @@ export function runServe(
       } catch {
         /* already gone */
       }
+      // The bytes the caller reads are the ones printed up to the match; see
+      // SIGKILL_GRACE_MS for why settling waits until the child is gone.
+      const stdoutAtMatch = stdout;
+      const stderrAtMatch = stderr;
+      void childGone().then(() => settle(err, stdoutAtMatch, stderrAtMatch));
+    };
+
+    const childGone = () =>
+      new Promise<void>((done) => {
+        // No pid: the spawn itself failed (`error`), and no `exit` may follow.
+        if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+          done();
+          return;
+        }
+        const fallback = setTimeout(() => {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* already gone */
+          }
+        }, SIGKILL_GRACE_MS);
+        child.once('exit', () => {
+          clearTimeout(fallback);
+          done();
+        });
+      });
+
+    const settle = (err: Error | undefined, stdout: string, stderr: string) => {
       if (err) {
         rejectRun(err);
         return;
