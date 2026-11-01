@@ -26881,6 +26881,32 @@ export class ObjectStackProtocolImplementation implements
      * 400, `issues[]` locating each field): no row moves and nothing is
      * written through to the registry. An adopted draft is judged when it is
      * promoted (the promotion asks the same judge against its binding).
+     *
+     * ## [ADR-0029 D9.9, ADR-0086 D3, #28776] …and the owner judges, first
+     *
+     * The save door asks two owner judges before the suffix judge, and so
+     * does this adoption, in the same order and with their own envelopes,
+     * before the first storage update: any refusal refuses the adoption whole.
+     *
+     *  - An active `object` row whose name ANOTHER package owns in the
+     *    registry ({@link classifyObjectContribution}'s `mismatch`) is refused
+     *    with {@link overlayPackageMismatchError}
+     *    (`OBJECT_OVERLAY_PACKAGE_MISMATCH` / 422). Adopted, it was rebound in
+     *    storage while the registry kept the other owner
+     *    ({@link releaseAdoptedObjectOwner} answers `false`): two rows for one
+     *    object, the shape D9.9 exists to refuse. ⛔ Not the `'sys_metadata'`
+     *    sentinel owner: an orphan object IS the sentinel's registration, the
+     *    owner this adoption hands over, so asked unchanged the judge would
+     *    refuse every object adoption.
+     *  - An active `permission` row whose body `packageId` disagrees with the
+     *    target is refused with {@link permissionSetOwnerBindingRefusal}
+     *    (`VALIDATION_ERROR` / 400, the save door's words).
+     *
+     * The namespace-prefix judge is deliberately NOT asked here: every
+     * installed package declares a namespace, so it would refuse nearly every
+     * real orphan object, and whether an adoption refuses, renames or leaves
+     * the prefix unjudged is the maintainer's question (#28776's ruling). A
+     * draft is judged by both owner judges when it is promoted.
      */
     async reassignOrphanedMetadata(request: {
         targetPackageId: string;
@@ -26912,6 +26938,35 @@ export class ObjectStackProtocolImplementation implements
                 // (ADR-0070); see the header. The type folds as the save's does.
                 && !this.isArtifactBacked(PLURAL_TO_SINGULAR[r.type] ?? r.type, String(r.name)),
         );
+
+        // [ADR-0029 D9.9, ADR-0086 D3, #28776] ⭐ THE OWNER JUDGES, in the save
+        // door's order (before the `__c` judge below), against the TARGET and
+        // before the first update: refused whole, each with its own envelope.
+        // The object arm skips the `'sys_metadata'` sentinel owner, the orphan's
+        // own registration this adoption hands over; see the header.
+        for (const row of orphans) {
+            if (row?.state !== 'active' || typeof row.name !== 'string') continue;
+            const type = canonicalMetaType(String(row.type));
+            if (type === 'object') {
+                const layer = this.classifyObjectContribution(row.name, request.targetPackageId);
+                if (layer.kind === 'mismatch' && layer.ownerPackageId !== 'sys_metadata') {
+                    throw ObjectStackProtocolImplementation.overlayPackageMismatchError(
+                        row.name, request.targetPackageId, layer.ownerPackageId,
+                    );
+                }
+            } else if (type === 'permission') {
+                let body: unknown;
+                try {
+                    body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+                } catch {
+                    continue;
+                }
+                const ownerRefusal = permissionSetOwnerBindingRefusal(
+                    type, body, row.name, request.targetPackageId, 'save',
+                );
+                if (ownerRefusal) throw ownerRefusal;
+            }
+        }
 
         // [ADR-0146 D10, #28735] ⭐ THE `__c` RESERVATION, JUDGED AGAINST THE
         // TARGET, before the first update below: each active object row this
