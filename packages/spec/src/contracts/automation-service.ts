@@ -23,6 +23,21 @@ import type { FlowRegistration } from '../api/protocol.zod';
 import type { FlowInnerRefusal } from '../api/automation-api.zod';
 
 /**
+ * The write a record-triggered run was dispatched inside (#28251) — see
+ * {@link AutomationContext.saveNotice}.
+ */
+export interface SaveNoticeChannel {
+    /**
+     * Hand the rendered notice to the triggering write. Refuses (throws a
+     * `TypeError`) a message that is not a non-empty string; a later call
+     * replaces an earlier one.
+     */
+    set(message: string): void;
+    /** The writer's locale (BCP-47), when the write's session carries one. */
+    readonly locale?: string;
+}
+
+/**
  * Context passed to a flow/script execution
  */
 export interface AutomationContext {
@@ -183,6 +198,27 @@ export interface AutomationContext {
      * Presentation, not authorization: no security middleware keys on it.
      */
     locale?: string;
+    /**
+     * The write that fired this run, for its `save_notice` nodes (#28251):
+     * where a `save_notice` node hands its rendered message, so the create /
+     * update answer of that write carries it as `notice`.
+     *
+     * Who sets it: the record-change trigger (`trigger-record-change`), the one
+     * door that runs a flow INSIDE a write — its hook handler awaits the run
+     * before the write answers. It wraps the hook face of the write's own
+     * listener (`HookContext.notice`, bound from `onNotice` on every insert /
+     * update dispatch), so this is that channel, never a second one; `locale`
+     * is the writer's (the hook session's `locale`), the language the
+     * `save_notice` executor picks the translated template in.
+     *
+     * In-process only, and only for the run's first leg: a function does not
+     * survive a suspension, so a leg an approval or a wait resumed carries no
+     * channel and its `save_notice` node refuses by name — the write answered
+     * long before. Never inherited by a `subflow` / `map` child (a child is
+     * not started by the write). Absent on every other door's run, which the
+     * flow parse already refuses a `save_notice` node in.
+     */
+    saveNotice?: SaveNoticeChannel;
     /**
      * The tenant default currency of the run's organization (ISO 4217, e.g.
      * `CNY`): the `localization.currency` setting, read the way a currency

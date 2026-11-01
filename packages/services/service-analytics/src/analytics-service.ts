@@ -453,6 +453,25 @@ const RELATIONSHIP_MEMBER_NOUN: Readonly<Record<RelationshipMember['param'], str
 };
 
 /**
+ * The member each leaf of a `where` tree binds against, in tree order, read
+ * through the lowering both strategies compile with
+ * (`normalizeAnalyticsFilterTree` + `collectFilterLeaves`), structure
+ * discarded. A `where` that is not an object, or that the lowering refuses,
+ * names nothing here: it is refused where it already is. One reader for
+ * {@link namedQueryFields}, {@link relationshipMembers} and
+ * {@link previewWhereColumns}, so what each of them judges is the same leaf
+ * list.
+ */
+function whereLeafMembers(where: unknown): string[] {
+  if (!where || typeof where !== 'object') return [];
+  try {
+    return collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * [#28555] Every entry of `query` that reads a column through a relationship
  * path, in request order: `dimensions`, `timeDimensions`, then (with
  * `withMeasures`) `measures`, then the `where` leaves. Each is resolved the
@@ -483,16 +502,7 @@ function relationshipMembers(query: AnalyticsQuery, cube: Cube, withMeasures: bo
   for (const member of query.dimensions ?? []) read(member, 'dimensions', 'dimension');
   for (const td of query.timeDimensions ?? []) read(td?.dimension, 'timeDimensions', 'any');
   if (withMeasures) for (const member of query.measures ?? []) read(member, 'measures', 'measure');
-  const where = (query as { where?: unknown }).where;
-  if (where && typeof where === 'object') {
-    let leaves: string[] = [];
-    try {
-      leaves = collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
-    } catch {
-      leaves = [];
-    }
-    for (const member of leaves) read(member, 'where', 'any');
-  }
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) read(member, 'where', 'any');
   return out;
 }
 
@@ -630,23 +640,14 @@ function namedQueryFields(
     }
     return true;
   };
-  const filterMembers = (where: unknown): string[] => {
-    if (!where || typeof where !== 'object') return [];
-    try {
-      return collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
-    } catch {
-      return [];
-    }
-  };
-
   for (const member of query.dimensions ?? []) name(member, 'dimension', 'aggregate');
   for (const td of query.timeDimensions ?? []) name(td.dimension, 'any', td.granularity ? 'aggregate' : 'predicate');
   for (const member of query.measures ?? []) if (!durationColumns(member, 'aggregate')) name(member, 'measure', 'aggregate');
-  for (const member of filterMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
   for (const measure of query.measures ?? []) {
-    for (const member of filterMembers(scopedMeasureFilter(datasetScope, measure, cube.name))) name(member, 'any', 'predicate');
+    for (const member of whereLeafMembers(scopedMeasureFilter(datasetScope, measure, cube.name))) name(member, 'any', 'predicate');
   }
-  for (const member of filterMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
+  for (const member of whereLeafMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
   const order = (query as { order?: unknown }).order;
   if (order && typeof order === 'object' && !Array.isArray(order)) {
     // An order key naming both a duration measure and a declared member is
@@ -4798,16 +4799,8 @@ function previewEvaluationCube(query: AnalyticsQuery, cube: Cube): Cube {
  * before the evaluator runs.
  */
 function previewWhereColumns(query: AnalyticsQuery, cube: Cube): Record<string, string> {
-  const where = (query as { where?: unknown }).where;
-  if (!where || typeof where !== 'object') return {};
-  let leaves: string[];
-  try {
-    leaves = collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
-  } catch {
-    return {};
-  }
   const out: Record<string, string> = {};
-  for (const member of leaves) {
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) {
     if (out[member] !== undefined) continue;
     const entry = declaredMemberEntry(cube, member, 'any');
     if (!entry) continue;

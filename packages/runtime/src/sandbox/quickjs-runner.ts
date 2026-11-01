@@ -942,6 +942,30 @@ export class QuickJSScriptRunner implements ScriptRunner {
       titleFn.dispose();
     }
 
+    // ── [#28251] `ctx.notice(message)` — tell the saver what the save did ───
+    //
+    // Installed only when the host handed the engine's member over (the hook
+    // face, on an insert / update dispatch). Synchronous: the listener only
+    // records the message, so there is nothing to await and no deferred to
+    // pump. `vm.dump`, like every other host bridge here, so the member sees
+    // what the body passed — and refuses anything but a non-empty string
+    // itself, with a `TypeError` relayed into the VM by `hostErrorToVm`. No
+    // capability gate: the call reads nothing and writes nothing but the
+    // requester's own answer.
+    if (typeof ctx.notice === 'function') {
+      const noticeFn = vm.newFunction('notice', (messageH) => {
+        const message = messageH === undefined ? undefined : vm.dump(messageH);
+        try {
+          ctx.notice!(message as string);
+        } catch (err) {
+          throw hostErrorToVm(vm, err);
+        }
+        return vm.undefined;
+      });
+      vm.setProp(ctxObj, 'notice', noticeFn);
+      noticeFn.dispose();
+    }
+
     vm.setProp(vm.global, '__ctx', ctxObj);
     ctxObj.dispose();
 
