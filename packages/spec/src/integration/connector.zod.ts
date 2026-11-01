@@ -1095,8 +1095,8 @@ const connectorBaseShape = () => ({
 /**
  * Base Connector Schema — the OPEN carrier: core connector configuration shared
  * across all connector types, behind {@link ConnectorSchema} (the def a plugin
- * hands to `registerConnector`, and `defineConnector`). Its posture is unchanged;
- * the closed carrier for an AUTHORED entry is
+ * hands to `registerConnector`). Its posture is unchanged; the closed carrier
+ * for an AUTHORED entry — and the shape `defineConnector()` parses — is
  * {@link DeclarativeConnectorEntryBaseSchema} below.
  */
 const ConnectorBaseSchema = lazySchema(() => z.object(connectorBaseShape()));
@@ -1133,9 +1133,9 @@ const ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE =
  * parse), and every read exit serves that body. On an open shape an undeclared
  * key therefore parsed green and was kept, while `defineStack`, `os validate`
  * and `os compile` dropped it without a word. Closed, every door that parses
- * this schema refuses it by name, located at the key: `defineStack({ connectors
- * })`, `os validate` / `os compile`, the artifact load at boot and reload, and
- * the save door with `422 INVALID_METADATA`. The ADR-0010 protection envelope
+ * this schema refuses it by name, located at the key: `defineConnector()`,
+ * `defineStack({ connectors })`, `os validate` / `os compile`, the artifact load
+ * at boot and reload, and the save door with `422 INVALID_METADATA`. The ADR-0010 protection envelope
  * is declared in the shape, so a stamped, package-loaded entry still parses.
  *
  * The refusal is terminal ({@link strictObject}): a body with an undeclared key
@@ -1199,12 +1199,43 @@ export type Connector = z.input<typeof ConnectorSchema>;
 export type ConnectorParsed = z.infer<typeof ConnectorSchema>;
 
 /**
+ * The shape {@link defineConnector} parses: the CLOSED carrier
+ * {@link DeclarativeConnectorEntryBaseSchema} behind the same retired-default
+ * residue stage as {@link ConnectorSchema} and
+ * {@link DeclarativeConnectorEntrySchema}, so a retired key's emitted default
+ * stays accepted as inert residue here exactly as it is at those two.
+ *
+ * Closed because the helper's value is an AUTHORED entry: every documented and
+ * in-repo `defineConnector({ … })` is a `connectors:` stack entry, and the
+ * helper parsed first. On the open shape an undeclared top-level key was
+ * dropped here, so the closed entry behind `defineStack({ connectors })` never
+ * saw it and the author met no refusal at any door. Now the helper refuses it
+ * by name with the entry's own message, aliases and guidance.
+ *
+ * Not the full {@link DeclarativeConnectorEntrySchema}: its ADR-0097 / ADR-0143
+ * cross-field rules (no inline `authentication`, `providerConfig` / `auth`
+ * need a `provider`, …) bind a connector authored inside a stack, and every
+ * stack door still applies them to the value this helper returns. Module
+ * private on purpose — the published carriers stay the two exports above.
+ */
+const DefineConnectorSchema = lazySchema(() =>
+  acceptRetiredDefaultResidue(DeclarativeConnectorEntryBaseSchema, CONNECTOR_RETIRED_KEY_RESIDUE),
+);
+
+/**
  * Type-safe factory for an external-system connector. Validates at authoring time via
  * `.parse()` and accepts input-shape config (optional defaults, CEL
  * shorthand) — preferred over a bare `: Connector` literal.
+ *
+ * The parse is CLOSED: a top-level key the connector does not declare is
+ * refused by name, located at the key, with the prescription the authored
+ * entry gives (a credential-shaped key → `auth.credentialRef`, a provider
+ * setting → `providerConfig`, `timeout` → `requestTimeoutMs`). The def a plugin
+ * hands to `registerConnector` is parsed there by the open
+ * {@link ConnectorSchema}, whose posture this does not change.
  */
 export function defineConnector(config: z.input<typeof ConnectorSchema>): ConnectorParsed {
-  return ConnectorSchema.parse(config);
+  return DefineConnectorSchema.parse(config);
 }
 
 /**
