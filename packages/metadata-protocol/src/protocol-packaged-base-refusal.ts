@@ -45,6 +45,7 @@ import {
     isCustomizationPairOf,
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
+import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -340,6 +341,62 @@ export function judgeOverrideWrite(
         `${item} in package '${packageId}' bears the name of the ${type} '${base}' ships, inside its dependency `
         + `closure.${notYet} A dependent package adds items under its own names and never replaces a base item. `
         + 'Rename the item (ADR-0146 D2).');
+}
+
+/** One item of a package body, as the override write gate names it. */
+export interface OverrideWriteItem {
+    /** The singular metadata type. */
+    readonly type: string;
+    /** The name the gate's sentence carries. */
+    readonly name: string;
+    /**
+     * The registry identity two packages collide on: an `action` is
+     * `<objectName>:<name>` (the registry's key), every other item its name.
+     */
+    readonly identity: string;
+    /** The item body the declaration is read from. */
+    readonly item: unknown;
+    /** Where it sits in the body, e.g. `dashboards[0]`, prefixed by the caller's `at`. */
+    readonly path: string;
+}
+
+const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
+    v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Every item a package body's collections carry, named the way the registry
+ * names it — the walk `os validate` and the marketplace install door hand
+ * {@link judgeOverrideWrite}, so the two cannot disagree on what an item is
+ * called. A `views:` container is the views it expands into
+ * (`expandViewContainer`, the loader's own expansion); an `action` is keyed
+ * `<objectName>:<name>`. A collection is an array or a name-keyed map.
+ */
+export function overrideWriteItemsOf(body: Record<string, unknown>, at = ''): OverrideWriteItem[] {
+    const out: OverrideWriteItem[] = [];
+    for (const [plural, collection] of Object.entries(body)) {
+        const type = (PLURAL_TO_SINGULAR as Record<string, string | undefined>)[plural];
+        if (type === undefined || collection === null || typeof collection !== 'object') continue;
+        const entries: Array<[string, unknown, string | undefined]> = Array.isArray(collection)
+            ? collection.map((item, i): [string, unknown, string | undefined] => [`${at}${plural}[${i}]`, item, undefined])
+            : Object.entries(collection).map(([key, item]): [string, unknown, string | undefined] => [`${at}${plural}.${key}`, item, key]);
+        for (const [path, item, key] of entries) {
+            if (!isPlainRecord(item)) continue;
+            const declaredName = typeof item.name === 'string' && item.name !== '' ? item.name : key;
+            if (declaredName === undefined) continue;
+            if (type === 'view' && isAggregatedViewContainer(item)) {
+                const object = typeof item.object === 'string' && item.object !== '' ? item.object : declaredName;
+                for (const view of expandViewContainer(object, item)) {
+                    out.push({ type, name: view.name, identity: view.name, item: view.config, path });
+                }
+                continue;
+            }
+            const identity = type === 'action' && typeof item.objectName === 'string' && item.objectName !== ''
+                ? `${item.objectName}:${declaredName}`
+                : declaredName;
+            out.push({ type, name: declaredName, identity, item, path });
+        }
+    }
+    return out;
 }
 
 /**

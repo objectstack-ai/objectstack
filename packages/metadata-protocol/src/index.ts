@@ -34,7 +34,7 @@ export type { MetadataAuthoringChannel } from './protocol.js';
 // [ADR-0146 D2, #28410] The override write gate's one rule, exported for the
 // two gate points outside this package — `os validate` and the marketplace
 // managed install — so all three doors ask one judgement and cannot drift.
-export { judgeOverrideWrite, type OverrideWriteSubject, type OverrideWriteClosure, type OverrideWriteRule, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+export { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteSubject, type OverrideWriteClosure, type OverrideWriteRule, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 
 // The probe-first replacement's shared vocabulary: the raw-SQL seam type the
 // exported migrations below take, and the dialect classifier their reports
