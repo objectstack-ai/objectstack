@@ -20,7 +20,8 @@
  *    with the items once it lands;
  *  - a bundle past its lifetime is asked again with `If-None-Match`, and the
  *    held items answer while that is on the wire;
- *  - an app with no bundle answers `ready` with nothing held;
+ *  - an app with no bundle answers `ready` with nothing held, and keeps answering
+ *    `ready` while it is asked again past its lifetime;
  *  - a cache clear answers `pending` again until the new download lands.
  */
 import { describe, it, expect, vi } from 'vitest';
@@ -155,6 +156,63 @@ describe('objectstack#28645 — peekAppBundle', () => {
     const peek = ds.peekAppBundle();
     expect(peek.status).toBe('ready');
     expect(peek.status === 'ready' && peek.items.size).toBe(0);
+  });
+
+  it('an app with no bundle, past its lifetime, still answers ready with nothing held while it asks again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const { ds, held } = await heldAdapter();
+      const entered = ds.loadAppBundle(APP);
+      await drain();
+      held[0].respond(404, { success: false, error: { code: 'NOT_FOUND', message: 'no' } });
+      await entered;
+      vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000);
+      const revalidating = ds.peekAppBundle();
+      expect(revalidating.status).toBe('ready');
+      if (revalidating.status !== 'ready') return;
+      expect(revalidating.items.size).toBe(0);
+      expect(revalidating.settled).toBeInstanceOf(Promise);
+      await drain();
+      expect(held.map((h) => h.path)).toEqual([BUNDLE_PATH, BUNDLE_PATH]);
+      held[1].respond(404, { success: false, error: { code: 'NOT_FOUND', message: 'no' } });
+      await revalidating.settled;
+      expect(ds.peekAppBundle()).toEqual({ status: 'ready', items: new Map() });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('an app with no bundle, marked stale by a whole-cache invalidation, answers ready while it asks again', async () => {
+    const { ds, held } = await heldAdapter();
+    const entered = ds.loadAppBundle(APP);
+    await drain();
+    held[0].respond(404, { success: false, error: { code: 'NOT_FOUND', message: 'no' } });
+    await entered;
+    ds.invalidateCache();
+    const revalidating = ds.peekAppBundle();
+    expect(revalidating.status).toBe('ready');
+    expect(revalidating.status === 'ready' && revalidating.settled).toBeInstanceOf(Promise);
+    await drain();
+    expect(held).toHaveLength(2);
+  });
+
+  it('an app whose bundle answered with no items, past its lifetime, answers ready while it asks again', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const { ds, held } = await heldAdapter();
+      const entered = ds.loadAppBundle(APP);
+      await drain();
+      held[0].respond(200, {}, { ETag: 'W/"e1"' });
+      await entered;
+      vi.setSystemTime(Date.now() + 24 * 60 * 60 * 1000);
+      const revalidating = ds.peekAppBundle();
+      expect(revalidating.status).toBe('ready');
+      expect(revalidating.status === 'ready' && revalidating.settled).toBeInstanceOf(Promise);
+      await drain();
+      expect(held).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('after a cache clear it answers pending until the new download lands', async () => {

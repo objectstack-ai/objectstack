@@ -145,7 +145,10 @@ export class AppBundleStore {
     // `ask` keeps this state (it is the one held) and sets its `inflight`.
     if (!state.inflight && (state.stale || Date.now() - state.checkedAt >= this.ttlMs)) this.ask(appId);
     const inflight = state.inflight;
-    if (inflight && state.items.size === 0) return { status: 'pending', settled: inflight };
+    // Never answered (a first load, or a reload after `clear()`, both start at
+    // 0) is `pending`. An answer that held nothing (no bundle for this app) is
+    // still an answer: its revalidation rides along as `settled`.
+    if (inflight && state.checkedAt === 0) return { status: 'pending', settled: inflight };
     return inflight ? { status: 'ready', items: state.items, settled: inflight } : { status: 'ready', items: state.items };
   }
 
