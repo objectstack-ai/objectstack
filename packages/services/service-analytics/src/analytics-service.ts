@@ -2895,6 +2895,9 @@ export class AnalyticsService implements IAnalyticsService {
               seedRows!,
               (field) => this.sourceFieldMeta?.(dataset.object, field)?.type,
               compiled.durations,
+              // [#28691] …and each `where` member the live faces read from a
+              // column spelled otherwise is read from that column.
+              previewWhereColumns(q, cube),
             );
           },
         } as IAnalyticsService;
@@ -4775,6 +4778,43 @@ function previewEvaluationCube(query: AnalyticsQuery, cube: Cube): Cube {
     if (entry && entry.key !== member) aliases[member] = cube.dimensions[entry.key];
   }
   return Object.keys(aliases).length > 0 ? { ...cube, dimensions: { ...cube.dimensions, ...aliases } } : cube;
+}
+
+/**
+ * [#28691] The column each `where` member resolves to, for every member
+ * spelled other than its column, which the draft-preview evaluator matches
+ * against the drafted rows (they carry columns). `OBJECT.region`,
+ * `CUBE.region` and a dataset dimension `zone` over `region` all read
+ * `region`, as both live strategies read them. Measured before: each matched
+ * no drafted row (`[]`, or under an `$or` only the other arm's rows) where
+ * both live faces served the rows.
+ *
+ * The leaves are read with the reader the strategies compile with
+ * (`normalizeAnalyticsFilterTree` + `collectFilterLeaves`, as
+ * {@link relationshipMembers} reads them), and each is resolved by
+ * {@link declaredMemberEntry}'s `'any'` arm, the strategies' filter-member
+ * lookup. A member that resolves to no declared entry, or to an expression or
+ * a relationship path, is not listed: it is read as written, or was refused
+ * before the evaluator runs.
+ */
+function previewWhereColumns(query: AnalyticsQuery, cube: Cube): Record<string, string> {
+  const where = (query as { where?: unknown }).where;
+  if (!where || typeof where !== 'object') return {};
+  let leaves: string[];
+  try {
+    leaves = collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
+  } catch {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const member of leaves) {
+    if (out[member] !== undefined) continue;
+    const entry = declaredMemberEntry(cube, member, 'any');
+    if (!entry) continue;
+    const column = typeof entry.sql === 'string' ? entry.sql.trim() : entry.key;
+    if (column !== member && BARE_IDENTIFIER.test(column)) out[member] = column;
+  }
+  return out;
 }
 
 /**
