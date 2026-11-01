@@ -171,6 +171,8 @@ function baseManifest(): Record<string, unknown> {
     return {
         id: BASE,
         name: 'showcase',
+        // [ADR-0146 D3, #28512] The pair's namespace is the base's plus `_custom`.
+        namespace: 'showcase',
         version: '1.0.0',
         objects: [{
             name: 'showcase_task',
@@ -238,10 +240,21 @@ afterEach(() => {
     resetEnvWritableMetadataTypes();
 });
 
-/** Installs a writable package through the package door, depending on the base. */
+/**
+ * Installs a writable package through the package door, depending on the base.
+ * The pair carries what its ensure door writes (ADR-0146 D3): the base's pair
+ * namespace, explicit, and the dependency on the base.
+ */
 async function install(protocol: ObjectStackProtocolImplementation, id: string): Promise<void> {
     await (protocol as any).installPackage({
-        manifest: { id, name: id.split('.').join('-'), version: '0.1.0', type: 'app', dependencies: { [BASE]: '*' } },
+        manifest: {
+            id,
+            name: id.split('.').join('-'),
+            version: '0.1.0',
+            type: 'app',
+            ...(id === PAIR ? { namespace: 'showcase_custom' } : {}),
+            dependencies: { [BASE]: '*' },
+        },
     });
 }
 
