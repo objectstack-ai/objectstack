@@ -468,6 +468,9 @@ const ja = {
     bulkAllOnPage_other: "このページの {{count}} 件がすべて選択されています。",
     bulkSelectAllMatching: "該当する {{count}} 件すべてを選択",
     bulkAllMatchingSelected: "該当する {{count}} 件のレコードがすべて選択されています。",
+    bulkSelectAllMatchingCapped: "該当する {{total}} 件のうち先頭の {{cap}} 件を選択",
+    bulkAllMatchingSelectedCapped: "該当する {{total}} 件のうち、処理されるのは先頭の {{cap}} 件のみです。",
+    bulkSelectedAllMatchesCapped: "{{cap}} 件を選択中（該当 {{total}} 件中）",
     bulkActions: "一括操作",
     bulk: {
       confirmDefault: "{{count}} 件のレコードに適用されます。",

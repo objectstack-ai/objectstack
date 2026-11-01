@@ -283,11 +283,67 @@ describe('#7566 — `GET /meta/app?id=` narrows the list instead of being droppe
         const { rest } = setup(['manage_users']);
 
         expect(namesFrom((await getList(rest, 'app')).body).sort()).toEqual(['account', 'crm']);
-        // `?id=` (empty) is the "no filter" spelling an unset `<select>` submits
-        // — the same falsy gate `?package=` on this route has always used. It
-        // must not become a new 400 or an empty list.
-        expect(namesFrom((await getList(rest, 'app', { id: '' })).body).sort())
-            .toEqual(['account', 'crm']);
+    });
+
+    // [#28548] `?id=` (EMPTY) used to be read as absent and answered the whole
+    // list — the #27484 class (a blank `$searchFields` read as absent). A
+    // caller whose app name came out blank asked for ONE app and got every app
+    // it may see, a plausible wrong answer. It is refused now, exactly as the
+    // #27484 fix refuses a blank search-field override: `400 VALIDATION_ERROR`
+    // naming the parameter, and no list rides along. No producer sends it:
+    // `@objectstack/client`'s `meta.getItems` and the console send no `id`.
+    it('an EMPTY id is refused with 400 naming the parameter — not read as absent (#28548)', async () => {
+        for (const perms of [['studio.access'], ['manage_users'], []]) {
+            const { rest } = setup(perms);
+            const res = await getList(rest, 'app', { id: '' });
+
+            // Thrown to the route's error door, so it is the body that door
+            // writes (the flat `{ error, code }` the unknown-type refusal on
+            // this route answers too); the dispatcher's twin is pinned in
+            // `@objectstack/runtime`'s list parity census.
+            expect(res.statusCode, `caller holding [${perms}]`).toBe(400);
+            expect(res.body?.code).toBe('VALIDATION_ERROR');
+            expect(String(res.body?.error)).toMatch(/^Query parameter 'id' names no app/);
+            expect(res.body?.items).toBeUndefined();
+            expect(Array.isArray(res.body)).toBe(false);
+        }
+        // The plural spelling refuses identically.
+        const plural = await getList(setup(['manage_users']).rest, 'apps', { id: '' });
+        expect(plural.statusCode).toBe(400);
+        expect(plural.body?.code).toBe('VALIDATION_ERROR');
+    });
+
+    // [#28548] The same class one step down the chain: `?object=` (EMPTY) on
+    // the view list was read as absent and served every view, unsorted and
+    // including views bound to no object, instead of the switcher's list for
+    // one object. Refused the same way, after the same gate.
+    it('an EMPTY view `object` is refused with 400 naming the parameter — not read as absent (#28548)', async () => {
+        for (const type of ['view', 'views']) {
+            const { rest, protocol } = setup(['manage_users']);
+            protocol.getMetaItems = vi.fn(async ({ type: t }: any) =>
+                String(t ?? '').startsWith('view')
+                    ? [{ name: 'all_leads', viewKind: 'list', object: 'lead' }, { name: 'loose_view' }]
+                    : []);
+            const res = await getList(rest, type, { object: '' });
+
+            expect(res.statusCode, type).toBe(400);
+            expect(res.body?.code).toBe('VALIDATION_ERROR');
+            expect(String(res.body?.error)).toMatch(/^Query parameter 'object' names no object/);
+            expect(res.body?.items).toBeUndefined();
+            expect(Array.isArray(res.body)).toBe(false);
+
+            // Controls: a named object still switches, an absent one lists all.
+            expect(namesFrom((await getList(rest, type, { object: 'lead' })).body)).toEqual(['all_leads']);
+            expect(namesFrom((await getList(rest, type)).body).sort()).toEqual(['all_leads', 'loose_view']);
+        }
+    });
+
+    it('a WHITESPACE id keeps its answer — a value no app is named, so an empty list (#28548 control)', async () => {
+        const { rest } = setup(['manage_users']);
+        const res = await getList(rest, 'app', { id: ' ' });
+
+        expect(res.statusCode).toBe(200);
+        expect(namesFrom(res.body)).toEqual([]);
     });
 
     it('a MALFORMED id — supplied twice — is refused with 400, not silently resolved', async () => {

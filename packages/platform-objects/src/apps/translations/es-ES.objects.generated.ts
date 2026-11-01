@@ -848,7 +848,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       resend_invitation: {
         label: "Reenviar invitación",
-        description: "¿Reenviar la invitación a {{ record.email }}? Su plazo de vencimiento vuelve a empezar.",
+        description: "¿Reenviar la invitación a {{ record.email }}? El plazo de vencimiento vuelve a empezar, y una invitación que ya ha vencido se sustituye por una nueva.",
         successMessage: "Invitación reenviada",
         outcomeMessages: {
           sent: "Invitación reenviada a {{ result.email }}",

@@ -15,6 +15,7 @@ import { isActionSwitchedOff } from '@object-ui/core';
 import type { BulkActionDef } from '@object-ui/types';
 import { partitionBulkRows, hasVisibilityGate } from '../bulkEligibility';
 import { formatActionLabel } from './RowActionMenu';
+import { BULK_SELECT_ALL_MATCHING_CAP, exceedsBulkSelectAllMatchingCap } from '../bulkSelectAllMatchingCap';
 
 /**
  * Is this rich bulk def offered for this selection? `visible` is evaluated
@@ -207,6 +208,9 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
     && pageSize > 0
     && selectedRows.length >= pageSize
     && totalMatching > pageSize;
+  // Over the cap, every string that counts the match set says that only the
+  // first BULK_SELECT_ALL_MATCHING_CAP records are processed.
+  const overCap = exceedsBulkSelectAllMatchingCap(totalMatching);
 
   return (
     <div
@@ -224,10 +228,16 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
             <>
               <CheckSquare className="h-3 w-3 text-primary shrink-0" />
               <span>
-                {t('grid.bulkAllMatchingSelected', {
-                  count: totalMatching,
-                  defaultValue: 'All {{count}} matching records are selected.',
-                })}
+                {overCap
+                  ? t('grid.bulkAllMatchingSelectedCapped', {
+                      cap: BULK_SELECT_ALL_MATCHING_CAP,
+                      total: totalMatching,
+                      defaultValue: 'Only the first {{cap}} of {{total}} matching records will be processed.',
+                    })
+                  : t('grid.bulkAllMatchingSelected', {
+                      count: totalMatching,
+                      defaultValue: 'All {{count}} matching records are selected.',
+                    })}
               </span>
             </>
           ) : (
@@ -244,10 +254,16 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
                 onClick={onSelectAllMatching}
                 data-testid="bulk-select-all-matching"
               >
-                {t('grid.bulkSelectAllMatching', {
-                  count: totalMatching,
-                  defaultValue: 'Select all {{count}} matching',
-                })}
+                {overCap
+                  ? t('grid.bulkSelectAllMatchingCapped', {
+                      cap: BULK_SELECT_ALL_MATCHING_CAP,
+                      total: totalMatching,
+                      defaultValue: 'Select the first {{cap}} of {{total}} matching',
+                    })
+                  : t('grid.bulkSelectAllMatching', {
+                      count: totalMatching,
+                      defaultValue: 'Select all {{count}} matching',
+                    })}
               </button>
             </>
           )}
@@ -261,10 +277,16 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
           className="inline-block motion-safe:animate-in motion-safe:zoom-in-90 motion-safe:duration-150"
         >
           {allMatchingSelected
-            ? t('grid.bulkSelectedAllMatches', {
-                count: totalMatching,
-                defaultValue: '{{count}} selected (all matches)',
-              })
+            ? overCap
+              ? t('grid.bulkSelectedAllMatchesCapped', {
+                  cap: BULK_SELECT_ALL_MATCHING_CAP,
+                  total: totalMatching,
+                  defaultValue: '{{cap}} selected (of {{total}} matches)',
+                })
+              : t('grid.bulkSelectedAllMatches', {
+                  count: totalMatching,
+                  defaultValue: '{{count}} selected (all matches)',
+                })
             : t('grid.bulkSelected', {
                 count: selectedRows.length,
                 defaultValue: '{{count}} selected',

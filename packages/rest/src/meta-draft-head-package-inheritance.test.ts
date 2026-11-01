@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: 25 cases on 39 real-stack boots (better-sqlite3 :memory:, the real sys_metadata objects, protocol and routes; about 12 ms each, 0.5 s of the file), each case's own save, read, publish and discard sequence on the real /meta routes being its subject, no two the same; slowest CI reading 15.0 s (scheduled full-battery run 41271604267, Test Core shard log) x 1.25, rounded up
 
 /**
  * [#22128] One head row per `/meta` write address: the save's expected-parent

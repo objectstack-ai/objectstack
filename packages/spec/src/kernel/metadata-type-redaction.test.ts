@@ -159,6 +159,42 @@ describe('FAIL-CLOSED: the datasource redactor is a BUILT-IN, not a plugin regis
   });
 });
 
+describe('FAIL-CLOSED: the connector redactor is a BUILT-IN as well', () => {
+  // A connector row reaches the metadata save door with or without any
+  // connector plugin mounted — the same fail-open shape as `datasource` — and
+  // its credential positions sit where the schema derivation does not reach
+  // (a union and a provider-owned record). Every value is a placeholder.
+  const stored = {
+    name: 'vendor',
+    label: 'Vendor',
+    type: 'api',
+    provider: 'rest',
+    providerConfig: { baseUrl: 'https://vendor.example.com', defaultHeaders: { Authorization: 'TEST_PLACEHOLDER_A' } },
+    auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: 'TEST_PLACEHOLDER_B' },
+  };
+
+  it('is resolvable with zero registration calls, and the snapshot lists it', () => {
+    expect(getMetadataTypeRedactor('connector')).toBeDefined();
+    expect(listMetadataTypeRedactorTypes()).toContain('connector');
+  });
+
+  it('withholds the inline secret and the header map, and names both', () => {
+    const { item, redactedKeys } = getMetadataTypeRedactor('connector')!(stored);
+    expect(redactedKeys).toEqual(['auth.token', 'providerConfig.defaultHeaders']);
+    expect(JSON.stringify(item)).not.toMatch(/TEST_PLACEHOLDER/);
+    expect(item.auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_TOKEN' });
+  });
+
+  it('the stored-row seam withholds both on a serialized body, under either type spelling', () => {
+    for (const type of ['connector', 'connectors']) {
+      const row = { id: 'r1', type, name: 'vendor', metadata: JSON.stringify(stored) };
+      const served = redactStoredMetadataRow('sys_metadata', row);
+      expect(served.metadata, type).not.toMatch(/TEST_PLACEHOLDER/);
+      expect(JSON.parse(served.metadata as string).providerConfig.baseUrl, type).toBe('https://vendor.example.com');
+    }
+  });
+});
+
 describe('absence is distinguishable from "nothing to redact" (the consumer contract of the per-type redaction hook)', () => {
   it('a type with no redactor answers undefined — a fact, not a failure', () => {
     expect(getMetadataTypeRedactor('object')).toBeUndefined();

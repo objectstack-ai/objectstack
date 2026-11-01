@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: one shared in-process bootStack boot for 22 cases plus two boots that are their cases' subjects (a posture-only walled boot, an unshared boot with automation); 3.7 s in a local run; slowest CI reading 10.0 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up
 //
 // hotcrm#1579 step 5a (#15951) — the in-process handle drives the REAL engine.
 //

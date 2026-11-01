@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: a fresh real ObjectQL engine per case, 100 cases that each attempt a governed write and read the store back as unmoved, so no boot can be shared; 3.4 s in a local run; slowest CI reading 10.2 s (scheduled full-battery run 41255489006, Test Core shard log) x 1.25, rounded up
 
 /**
  * [#25653, the #25251 principle for the whole family] App-authored automation

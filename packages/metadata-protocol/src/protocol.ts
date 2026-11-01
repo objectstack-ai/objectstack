@@ -184,6 +184,7 @@ import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 // base's name.
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf } from './served-override.js';
+import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
@@ -9739,6 +9740,31 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#28411, ADR-0146 D8 item 4] The served overrides of a base package's
+     * items: each ACTIVE row of its paired `<base>.custom` package that
+     * {@link isServedOverrideRowOf} admits and no read declines, as
+     * `{ type, name, member?, basedOn?, version? }`, ordered by type, name and
+     * member. The overrides half of `GET /packages/:id/customizations`; the
+     * body and its narrowings are `protocol-served-overrides.ts`'s.
+     *
+     * A base with no pair, or an id with no pair, answers `[]`, and the read
+     * never creates the pair. No diff and no `basedOn` verdict: `basedOn` is
+     * copied as recorded (ADR-0146 D2, D6).
+     *
+     * @throws the `sys_metadata` read failure, classified by
+     *         {@link rethrowUnlessMetadataStoreUnprovisioned}; an unprovisioned
+     *         table answers `[]`.
+     */
+    async listServedOverrides(request: { packageId: string }): Promise<ServedOverrideEntry[]> {
+        const host: ThisParameterType<typeof listServedOverrides> = {
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            declinesStoredRow: (...a) => this.declinesStoredRow(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+        };
+        return listServedOverrides.call(host, request);
+    }
+
+    /**
      * The one body behind {@link getMetaItems},
      * {@link getMetaItemsForExecution} and {@link getMetaItemsPerPackage}.
      * `audience` decides ONLY whether the serving decorations are applied at
@@ -14038,7 +14064,17 @@ export class ObjectStackProtocolImplementation implements
         // page, so `records.length` is the page size — NOT the match total. Run a
         // count over the same `where` so the client can render total pages and know
         // whether more pages remain (true server-side pagination). Without a limit
-        // the full result set is returned, so its length already IS the total.
+        // AND without an offset the full result set is returned, so its length
+        // already IS the total.
+        //
+        // [#28547] An offset with no limit is a paged request too. The read
+        // returns every match AFTER the offset, so `records.length` is the
+        // match count MINUS the offset: `?$skip=3&$count=true` over 14 rows
+        // answered `total: 11` while `?$skip=3&$top=100&$count=true` answered
+        // 14, and an offset past the end answered `total: 0`. Adding the offset
+        // back is not the fix (it says 999 for `offset: 999` over 14 rows), so
+        // such a request takes the one count path below, `$count=false` arm
+        // included: `total` is the filtered count whatever the offset.
         //
         // [#22790] The count takes the query's `search` / `searchFields` too: the
         // engine expands them through the one ADR-0061 expander `find` uses, so
@@ -14061,7 +14097,7 @@ export class ObjectStackProtocolImplementation implements
         const pageOffset = typeof options.offset === 'number' && options.offset > 0 ? options.offset : 0;
         let total: number | undefined = records.length;
         let hasMore = false;
-        if (pageLimit !== undefined) {
+        if (pageLimit !== undefined || pageOffset > 0) {
             // `distinct` used to suppress the count here too — #4286 finding 2:
             // the flag's ONLY observable effect platform-wide, on a capability
             // that never deduplicated a row. Removed with `query.distinct`
@@ -14084,7 +14120,9 @@ export class ObjectStackProtocolImplementation implements
                 // `hasMore` is still answered, from the page alone: a FULL page
                 // means there may be more. It never over-reports the data — it
                 // can only say "maybe more" on an exactly-full last page.
-                hasMore = records.length === pageLimit;
+                // With an offset and no limit, every row after the offset came
+                // back, so there is no further page.
+                hasMore = pageLimit !== undefined && records.length === pageLimit;
                 total = undefined;
             } else {
                 // [#10757] `counted` is a separate, always-assigned local so

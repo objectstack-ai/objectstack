@@ -50,8 +50,8 @@ authored after that retirement per the ruling's sequencing (3A).
 ## TypeScript Usage
 
 ```typescript
-import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, EnsureCustomizationPackageRequestSchema, EnsureCustomizationPackageResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
-import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, EnsureCustomizationPackageRequest, EnsureCustomizationPackageResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
+import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, EnsureCustomizationPackageRequestSchema, EnsureCustomizationPackageResponseSchema, GetPackageCustomizationsRequestSchema, GetPackageCustomizationsResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
+import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, EnsureCustomizationPackageRequest, EnsureCustomizationPackageResponse, GetPackageCustomizationsRequest, GetPackageCustomizationsResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = DiscardPackageDraftsResponseSchema.parse(data);
@@ -144,6 +144,70 @@ const result = DiscardPackageDraftsResponseSchema.parse(data);
 | **dependencyRange** | `string` | ✅ | The range the pair declares on its base in `manifest.dependencies`. A created pair declares `^<major>` of the base's version at creation; an existing pair answers the range it declares, unchanged. |
 | **created** | `boolean` | ✅ | True when this call created the pair; false when the pair was already installed and was returned unchanged. |
 | **writable** | `boolean` | ✅ | Whether the pair is a writable package — the verdict the package read doors serve as `writable`. A created pair is writable; an existing pair delivered by code or an installed artifact is not, and its items are authored where it is built. |
+
+
+---
+
+## GetPackageCustomizationsRequest
+
+Per-package customization read request: the base package id, no query parameters.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | The installed BASE package whose customizations are read (e.g. "com.acme.crm"). A paired `<base>.custom` id is refused `400 VALIDATION_ERROR` with a message naming its base; an id no installed package carries answers `404`. |
+
+
+---
+
+## GetPackageCustomizationsResponse
+
+Per-package customization read: overrides, extensions and switched-off items of one installed base.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **packageId** | `string` | ✅ | The base package the customizations are of (the request's id). |
+| **overrides** | `{ type: string; name: string; member?: string; basedOn?: string; … }[]` | ✅ | Every ACTIVE item of the base's paired `<base>.custom` package that declares `overrides.package` = the base and that the effective read serves over the base's item of the same name: the rows the served-override predicate admits (a declaration from any other package, and an undeclared pair item, are not listed), minus the stored rows every read declines (a shipped flow name). Ordered by type, name and member. |
+| **extensions** | `{ object: string; kind: Enum<'field' \| 'validation' \| 'index'>; name?: string; fields?: string[] }[]` | ✅ | Every field, validation rule and index the paired `<base>.custom` package declares in an object extension (`objectExtensions`) of an object the base owns, one entry per member, as the extension declares it. Ordered by object, kind and name. |
+| **switchedOff** | `{ type: string; name: string }[]` | ✅ | Every activation-ledger row (`sys_metadata_activation`) that records the base as its package and `active: false`: the base's items this deployment switched off. Ordered by type and name. |
+| **counts** | `{ overrides: integer; extensions: integer; switchedOff: integer }` | ✅ | Each list's length, derived from the lists in this same answer. |
+
+### Nested Shape: `GetPackageCustomizationsResponse.overrides[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the overriding item, canonical singular (e.g. `view`). |
+| **name** | `string` | ✅ | Name of the item: the base's name it is served under. |
+| **member** | `string` | optional | The bundle member, for a metadata type whose identity is a pair (`email_template`, identified by `(name, locale)`): its discriminator value. Absent for a type whose identity is its name alone. |
+| **basedOn** | `string` | optional | The base package version the declaration records (`overrides.basedOn`), copied as stored and never judged. Absent when the stored body records none. |
+| **version** | `integer` | optional | The overriding item's stored history version, when the row carries one. |
+
+### Nested Shape: `GetPackageCustomizationsResponse.extensions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | The base-owned object the member is added to. |
+| **kind** | `Enum<'field' \| 'validation' \| 'index'>` | ✅ | Which collection of the object the member joins. |
+| **name** | `string` | optional | The member's declared name: the field name, the validation rule name, the index name. Absent only for an index declared without a name. |
+| **fields** | `string[]` | optional | For an index: the fields it covers. Absent for a field or a validation. |
+
+### Nested Shape: `GetPackageCustomizationsResponse.switchedOff[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | The ledger row's metadata type (`flow`, `action`, `position`, …). |
+| **name** | `string` | ✅ | The switched-off item's name. |
+
+### Nested Shape: `GetPackageCustomizationsResponse.counts`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **overrides** | `integer` | ✅ | `overrides.length`. |
+| **extensions** | `integer` | ✅ | `extensions.length`: members, not objects. |
+| **switchedOff** | `integer` | ✅ | `switchedOff.length`. |
 
 
 ---
