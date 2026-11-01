@@ -1024,4 +1024,47 @@ describe('[#28251] a save_notice node tells the person who made the triggering w
     expect(direct.success).toBe(false);
     expect(String(direct.error)).toContain("save_notice 'tell': this run holds no record write to answer");
   }, 15000);
+
+  it('closes the channel once the write has answered, so a leg that outlives the write cannot set a notice', async () => {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' } });
+    await kernel.use(new ObjectQLPlugin());
+    await kernel.use(new AutomationServicePlugin());
+    await kernel.use(new RecordChangeTriggerPlugin());
+    await kernel.bootstrap();
+    const objectql = kernel.getService('objectql') as any;
+    const automation = kernel.getService<AutomationEngine>('automation');
+    await attachSqlite(objectql);
+    objectql.registry.registerObject(objectDef('snx'), 'test', 'test');
+    await objectql.syncSchemas();
+    await installDefaultOrganization(objectql as never);
+    // A node that keeps the run's channel past the run — what a leg held in
+    // memory across a suspension would hold when it resumes.
+    let kept: { set(message: string): void } | undefined;
+    automation.registerNodeExecutor({
+      type: 'probe_keep_channel',
+      async execute(_node: unknown, _variables: unknown, context: any) {
+        kept = context?.saveNotice;
+        return { success: true };
+      },
+    } as any);
+    automation.registerFlow('snx_keep', {
+      name: 'snx_keep', label: 'snx_keep', type: 'record_change',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: 'snx', triggerType: 'record-after-write' } },
+        { id: 'keep', type: 'probe_keep_channel', label: 'Keep' },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'keep' },
+        { id: 'e2', source: 'keep', target: 'end' },
+      ],
+    } as any);
+
+    const heard: unknown[] = [];
+    await objectql.insert('snx', { status: 'quote' }, { context: { userId: 'u_trigger' }, onNotice: (m: unknown) => { heard.push(m); } });
+
+    expect(typeof kept?.set).toBe('function');
+    expect(() => kept!.set('too late')).toThrow(/the write that started this run has already answered/);
+    expect(heard).toEqual([]);
+  }, 15000);
 });
