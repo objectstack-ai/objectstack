@@ -17,7 +17,7 @@
 
 import * as React from 'react';
 import { useDisplayLocale } from '@object-ui/i18n';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, RefreshCw, Loader2, RotateCcw } from 'lucide-react';
 import { Button } from '@object-ui/components';
 import { Badge } from '@object-ui/components';
@@ -35,6 +35,7 @@ import {
 import { t, tFormat, translateConsoleValue, useMetadataLocale } from '../metadata-admin/i18n.js';
 import { useHistoryActorNames, type HistoryActorName } from './historyActors.js';
 import { PageShell } from '../metadata-admin/PageShell.js';
+import { useMetadataAreaHost } from '../metadata-admin/metadataAreaHost.js';
 import {
   useMetadataClient,
   useMetadataTypes,
@@ -89,6 +90,14 @@ export function MetadataResourceHistoryPage({
 
   const [refreshKey, setRefreshKey] = React.useState(0);
   const [eventCount, setEventCount] = React.useState(0);
+  // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area a
+  // read-only package offers no rollback, and "Back to item" names the area's
+  // item page with the query it came with (its `?package=` and scope).
+  const areaHost = useMetadataAreaHost();
+  const { search } = useLocation();
+  const backToItem = areaHost
+    ? `${areaHost.basePath}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${search}`
+    : `../${encodeURIComponent(name)}`;
 
   return (
     <PageShell
@@ -101,7 +110,7 @@ export function MetadataResourceHistoryPage({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate(`../${encodeURIComponent(name)}`)}
+            onClick={() => navigate(backToItem)}
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
             Back to item
@@ -125,7 +134,7 @@ export function MetadataResourceHistoryPage({
           onCount={setEventCount}
           client={client}
           locale={locale}
-          onRollback={() => setRefreshKey((k) => k + 1)}
+          onRollback={areaHost?.readOnly ? undefined : () => setRefreshKey((k) => k + 1)}
         />
       </div>
     </PageShell>

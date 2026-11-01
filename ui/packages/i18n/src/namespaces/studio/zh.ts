@@ -2764,7 +2764,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landingHome': 'Studio 首页',
   'engine.studio.desktopHint': 'Studio 专为桌面屏幕设计。',
   'engine.studio.notFound.package': '未找到包。本部署没有安装 ID 为“{id}”的包，因此无处可构建。',
-  'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面或权限。',
+  'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面、权限或全部元数据。',
   'engine.studio.aiCopilot': 'AI 副驾',
   // objectui#12725 — Studio 右栏：属性或 AI 副驾二选一。
   'engine.studio.slot.label': '右栏',
@@ -2779,6 +2779,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pillar.automations': '自动化',
   'engine.studio.pillar.interfaces': '界面',
   'engine.studio.pillar.access': '权限',
+  'engine.studio.pillar.metadata': '全部元数据',
   // Header · package-level publish + app bridge
   'engine.studio.changes': '变更',
   'engine.studio.publishTitle': '检查并一并发布本软件包的全部待发布草稿',
@@ -2839,6 +2840,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.org.description': '本组织自有、不属于任何软件包的流程,例如软件包流程的克隆副本。可直接编辑。',
   'engine.studio.org.none': '还没有不属于软件包的流程。在 设置 › 打包自动化 中克隆一个软件包流程,即可在这里编辑副本。',
   'engine.studio.org.openSetup': '在设置中打开',
+  'engine.studio.landing.envCatalog.name': '环境目录',
+  'engine.studio.landing.envCatalog.description': '岗位、能力、权限集与共享规则，覆盖所有软件包。',
+  'engine.studio.area.assignments.position': '此岗位的任职人员在设置中分配。',
+  'engine.studio.area.assignments.permission': '此权限集分配给哪些人，在设置中管理。',
+  'engine.studio.area.assignments.open': '在设置中打开',
   'engine.studio.publishedAllFlows': '已发布 {count} 个流程',
   'engine.studio.publishedAllFlowsOne': '已发布流程「{label}」',
   'engine.studio.designer.search': '搜索…',
