@@ -824,8 +824,8 @@ export function lintSummaryRollups(objects: any[], options: SummaryRollupOptions
     for (const { name: fieldName, def } of fieldEntries(obj.fields)) {
       if (def?.type !== 'summary') continue;
       const ops = def.summaryOperations;
-      const fn = ops?.function;
-      const childName = ops?.object;
+      const fn: unknown = ops?.function;
+      const childName: unknown = ops?.object;
       if (typeof childName !== 'string' || childName === '') continue;
       const fieldPath = `objects[${i}].fields.${fieldName}`;
       const child = objectsByName[childName];
