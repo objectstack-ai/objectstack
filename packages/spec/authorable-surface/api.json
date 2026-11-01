@@ -840,6 +840,7 @@
     "api/GetObjectPermissionsResponse:object",
     "api/GetObjectPermissionsResponse:permissions",
     "api/GetPackageCustomizationsRequest:packageId",
+    "api/GetPackageCustomizationsResponse:contributions",
     "api/GetPackageCustomizationsResponse:counts",
     "api/GetPackageCustomizationsResponse:extensions",
     "api/GetPackageCustomizationsResponse:overrides",
