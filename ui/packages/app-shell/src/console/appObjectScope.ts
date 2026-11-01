@@ -58,8 +58,9 @@
  * permission read rather than after it, as the whole list used to.
  */
 
+import { useEffect } from 'react';
 import { matchRoutes, useLocation } from 'react-router-dom';
-import { isRecordPageOf, useMetadata, type MetadataContextValue } from '@object-ui/react';
+import { isRecordPageOf, useAdapter, useMetadata, type MetadataContextValue } from '@object-ui/react';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
@@ -440,14 +441,25 @@ export function readAppObjectScope(
 /**
  * The console root's half: on an app route, start the app's object scope as
  * soon as the app list names the app, before `AppContent` mounts (it mounts
- * below the session's permission read). It reads nothing else and renders
- * nothing; `AppContent` reads the same scope entry when it renders.
+ * below the session's permission read). It renders nothing; `AppContent` reads
+ * the same scope entry when it renders.
+ *
+ * objectstack#28645 — it enters the app's metadata bundle at the same moment
+ * (`loadAppBundle`, which `AppContent` joins), so the scope it starts composes
+ * its views from the bundle instead of reading the `/meta/view` list before
+ * the app was entered.
  */
 export function useAppObjectScopePrefetch(): void {
   const { apps, readObjectScope } = useMetadata();
+  const dataSource = useAdapter() as { loadAppBundle?: (appName: string) => unknown } | null | undefined;
   const { pathname, search } = useLocation();
   const segments = pathname.split('/').filter(Boolean);
-  if (segments[0] !== 'apps' || !segments[1] || !readObjectScope) return;
-  const app = matchAppBySegment(apps, segments[1]);
-  if (app) readAppObjectScope(readObjectScope, app, segments.slice(2).join('/'), search);
+  const app = segments[0] === 'apps' && segments[1] ? matchAppBySegment(apps, segments[1]) : undefined;
+  const bundleAppName = typeof app?.name === 'string' && app.name ? app.name : undefined;
+  useEffect(() => {
+    const load = dataSource?.loadAppBundle;
+    if (!bundleAppName || typeof load !== 'function') return;
+    void load.call(dataSource, bundleAppName);
+  }, [dataSource, bundleAppName]);
+  if (app && readObjectScope) readAppObjectScope(readObjectScope, app, segments.slice(2).join('/'), search);
 }
