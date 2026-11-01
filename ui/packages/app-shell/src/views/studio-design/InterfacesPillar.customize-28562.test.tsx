@@ -262,14 +262,18 @@ function Host({
   listedPair?: string | null;
 }) {
   const [pairId, setPairId] = React.useState<string | null>(listedPair);
-  const ensure = React.useCallback(async () => {
+  const ensurePackage = React.useCallback(async () => {
     const answer = await ensureCustomizationPackage(BASE);
     setPairId(answer.packageId);
-    return answer.packageId;
+    return answer;
   }, []);
+  const ensure = React.useCallback(async () => (await ensurePackage()).packageId, [ensurePackage]);
   const customization = React.useMemo<StudioBaseCustomization | null>(
-    () => (readOnly ? { base: BASE, baseLabel: 'HotCRM', basedOn, walled, pairId, ensure } : null),
-    [readOnly, basedOn, walled, pairId, ensure],
+    () =>
+      readOnly
+        ? { base: BASE, baseLabel: 'HotCRM', basedOn, walled, pairId, ensure, ensurePackage, marks: { status: 'off' } }
+        : null,
+    [readOnly, basedOn, walled, pairId, ensure, ensurePackage],
   );
   return <InterfacesPillar packageId={BASE} readOnly={readOnly} customization={customization} />;
 }

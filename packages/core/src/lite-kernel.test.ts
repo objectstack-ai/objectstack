@@ -271,6 +271,22 @@ describe('LiteKernel with Configurable Logger', () => {
             expect(order).toEqual(['kernel:ready', 'kernel:bootstrapped', 'kernel:listening']);
         });
 
+        it('dispatchesBootPhaseHooks() answers true, read by a plugin during its own start()', async () => {
+            const read: unknown[] = [];
+            const plugin: Plugin = {
+                name: 'boot-phase-reader-plugin',
+                init: async () => {},
+                start: async (ctx) => { read.push(ctx.getKernel().dispatchesBootPhaseHooks()); },
+            };
+
+            kernel.use(plugin);
+            await kernel.bootstrap();
+            await kernel.shutdown();
+
+            expect(read).toEqual([true]);
+            expect(kernel.dispatchesBootPhaseHooks()).toBe(true);
+        });
+
         // #5170 — the LiteKernel half of the cross-kernel pin. This is the
         // behaviour the issue changed: the throw used to be caught inside
         // `triggerHook`, logged as `Hook handler failed: kernel:ready`, and the

@@ -339,6 +339,32 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // [#28726] An app navigation entry whose `visible` is valid CEL but
+        // overruns `maxAstNodes` (the card's 90-clause `||` chain). It saved,
+        // read valid:true and published; the console then withheld the entry
+        // from everyone. A page `visibleWhen` of the same size was refused.
+        rule: 'visibility-predicate-over-budget',
+        type: 'app',
+        item: {
+            name: 'qa_nav_budget_app',
+            label: 'QA Nav Budget App',
+            navigation: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'deal', visible: Array.from({ length: 90 }, () => 'features.cloudManaged != true').join(' || ') }],
+        },
+    },
+    {
+        // [#28726] The same overrun on a group's child entry.
+        rule: 'visibility-predicate-over-budget',
+        type: 'app',
+        item: {
+            name: 'qa_nav_budget_child_app',
+            label: 'QA Nav Budget Child App',
+            navigation: [{
+                id: 'grp', type: 'group', label: 'Group',
+                children: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'deal', visible: Array.from({ length: 90 }, () => 'features.cloudManaged != true').join(' || ') }],
+            }],
+        },
+    },
+    {
         // [#28663] Page variables: a duplicate name.
         rule: 'page-variable-name-duplicate',
         type: 'page',
@@ -492,6 +518,22 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect((await draftDiagnostics(protocol, 'page', 'qa_vars_type')).errors).toContainEqual(
             expect.objectContaining({ path: 'variables.0.defaultValue', code: 'page-variable-default-type' }),
         );
+    });
+
+    it('[#28726] the nav over-budget verdict is located at the key on the draft read; a chain inside the budget reads valid:true', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const c = CASES.find((x) => x.item.name === 'qa_nav_budget_child_app')!;
+        await stageDraft(protocol, c.type, c.item);
+        expect((await draftDiagnostics(protocol, 'app', 'qa_nav_budget_child_app')).errors).toContainEqual(
+            expect.objectContaining({ path: 'navigation.0.children.0.visible', code: 'visibility-predicate-over-budget' }),
+        );
+
+        const under = structuredClone(CASES.find((x) => x.item.name === 'qa_nav_budget_app')!.item) as any;
+        under.name = 'qa_nav_budget_under_app';
+        under.navigation[0].visible = Array.from({ length: 51 }, () => 'features.cloudManaged != true').join(' || ');
+        await stageDraft(protocol, 'app', under);
+        expect(await draftDiagnostics(protocol, 'app', under.name)).toEqual({ valid: true });
     });
 
     it('a reference that resolves inside its own package is judged as "Publish all" judges it — not reported', async () => {

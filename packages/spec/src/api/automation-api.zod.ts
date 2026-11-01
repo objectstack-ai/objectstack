@@ -446,11 +446,13 @@ export const TriggerFlowResponseSchema = lazySchema(() => BaseResponseSchema.ext
       + 'and resumes the run with them.',
     ),
     successMessage: z.string().optional().describe(
-      'Friendly terminal message copied from the flow definition on terminal '
-      + 'success, so a screen-flow runner can show a meaningful toast',
+      'Friendly terminal message rendered from the flow definition on terminal '
+      + 'success (its `{{ }}` holes filled over the run\'s variables, in the run\'s locale), '
+      + 'so a screen-flow runner can show a meaningful toast',
     ),
     errorMessage: z.string().optional().describe(
-      'Friendly terminal message copied from the flow definition on failure',
+      'Friendly terminal message rendered from the flow definition on failure (its `{{ }}` '
+      + 'holes filled over the variables at the failure point, in the run\'s locale)',
     ),
     userMessage: z.string().optional().describe(
       'Producer-marked user-facing refusal text, verbatim, of the refusal a node met inside '
@@ -611,8 +613,8 @@ export type ResumeFailureDetailsParsed = z.infer<typeof ResumeFailureDetailsSche
  */
 export const FlowFailureDetailsSchema = lazySchema(() => z.object({
   errorMessage: z.string().optional().describe(
-    'The flow author\'s own failure text (`flow.errorMessage`), copied verbatim from '
-    + '`AutomationResult.errorMessage`; absent when the author wrote none',
+    'The flow author\'s own failure text (`flow.errorMessage`, rendered by the engine), copied '
+    + 'verbatim from `AutomationResult.errorMessage`; absent when the author wrote none',
   ),
   summary: FlowRunSummarySchema.optional().describe(
     'The run\'s per-node accounting (`AutomationResult.summary`) - which node failed; '

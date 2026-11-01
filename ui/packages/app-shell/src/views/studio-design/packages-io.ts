@@ -229,6 +229,12 @@ export interface EnsuredCustomizationPackage {
   basePackageId: string;
   /** The pair: every write of a customization of the base addresses it. */
   packageId: string;
+  /**
+   * [objectstack#28572] The pair's namespace as the door answers it
+   * (`<base namespace>_custom`, ADR-0146 D3): a new object authored into the
+   * pair is prefixed with it. Never derived here.
+   */
+  namespace: string;
   /** True when this call created the pair (HTTP 201), false when it was there (200). */
   created: boolean;
   writable: boolean;
@@ -263,11 +269,11 @@ export async function ensureCustomizationPackage(baseId: string): Promise<Ensure
   if (!parsed.success) {
     throw new Error(`The customization package of '${baseId}' was answered with a body its declaration refuses.`);
   }
-  const { basePackageId, packageId, created, writable } = parsed.data;
+  const { basePackageId, packageId, namespace, created, writable } = parsed.data;
   if (created && typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('objectui:packages-changed'));
   }
-  return { basePackageId, packageId, created, writable };
+  return { basePackageId, packageId, namespace, created, writable };
 }
 
 /**
