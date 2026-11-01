@@ -112,6 +112,7 @@ export interface RunResumeHost {
     readonly recoverStoredFlow: AutomationEngine['recoverStoredFlow'];
     readonly heldFlowVersion: AutomationEngine['heldFlowVersion'];
     readonly resolveResumeTarget: AutomationEngine['resolveResumeTarget'];
+    readonly renderFlowTerminalMessage: AutomationEngine['renderFlowTerminalMessage'];
 }
 
 /** The body of {@link AutomationEngine.resolveRunContext}; that method's docblock is its contract. */
@@ -1182,7 +1183,7 @@ export function takeSubflowParentStrand(this: Pick<RunResumeHost, 'subflowParent
 
 /** The body of {@link AutomationEngine.resumeInternal}, moved unedited; that method's docblock is its contract. */
 export async function resumeInternal(
-    this: Pick<RunResumeHost, 'resuming' | 'loadSuspendedRunStrict' | 'logger' | 'resolveResumeTarget' | 'flowChecksumOf' | 'settleUnresumableSuspension' | 'creditChildRun' | 'loadSuspendedRun' | 'resumeInternal' | 'persistSuspendedRun' | 'failSuspendedRun' | 'consumedSuspensions' | 'buildSubflowResumeSignal' | 'refuseInvalidScreenInput' | 'cloneVariablesAtPause' | 'resolveDecisionSegmentContext' | 'claimAdvance' | 'evictConsumedSuspension' | 'forgetSuspendedRun' | 'executeNode' | 'traverseNext' | 'recordLog' | 'bubbleToParent' | 'finishRefusedRun' | 'journalConsumedSuspension' | 'failAncestors'>,
+    this: Pick<RunResumeHost, 'resuming' | 'loadSuspendedRunStrict' | 'logger' | 'resolveResumeTarget' | 'flowChecksumOf' | 'settleUnresumableSuspension' | 'creditChildRun' | 'loadSuspendedRun' | 'resumeInternal' | 'persistSuspendedRun' | 'failSuspendedRun' | 'consumedSuspensions' | 'buildSubflowResumeSignal' | 'refuseInvalidScreenInput' | 'cloneVariablesAtPause' | 'resolveDecisionSegmentContext' | 'claimAdvance' | 'evictConsumedSuspension' | 'forgetSuspendedRun' | 'executeNode' | 'traverseNext' | 'recordLog' | 'bubbleToParent' | 'finishRefusedRun' | 'journalConsumedSuspension' | 'failAncestors' | 'renderFlowTerminalMessage'>,
     runId: string,
     // Never `undefined` past the public door: `resume` normalises an
     // absent caller signal to `{}` (commit 7307191db), and the engine's own
@@ -1875,7 +1876,11 @@ export async function resumeInternal(
                 success: true,
                 output,
                 durationMs,
-                successMessage: flow.successMessage,
+                // [#28054] Rendered over the variables the run finished with,
+                // in the locale the run was started in (the persisted context).
+                successMessage: this.renderFlowTerminalMessage(
+                    run.flowName, 'successMessage', flow.successMessage, variables, context,
+                ),
                 flowLabel: flow.label,
                 summary,
             };
@@ -2136,7 +2141,10 @@ export async function resumeInternal(
                 // nothing, so no verb can re-arm them. A different (and
                 // worse) condition, which this stamp must not claim.
                 status: 'stranded',
-                errorMessage: flow.errorMessage,
+                // [#28054] Rendered over the variables at the failure point.
+                errorMessage: this.renderFlowTerminalMessage(
+                    run.flowName, 'errorMessage', flow.errorMessage, variables, context,
+                ),
                 flowLabel: flow.label,
                 // [#15555] Recomputed when the guard above had to abandon
                 // `recordLog`: the same pure function of the same steps

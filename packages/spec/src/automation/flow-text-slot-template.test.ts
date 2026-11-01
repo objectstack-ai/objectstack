@@ -14,9 +14,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FLOW_NODE_TEXT_SLOTS,
+  FLOW_TEXT_SLOTS,
   TEXT_SLOT_TEMPLATE_REFUSAL,
   closedScopeTemplateRefusal,
   flowNodeTextSlotSources,
+  flowTextSlotSources,
   templateSlotSource,
   textSlotTemplateRefusal,
 } from './flow-text-slot-template';
@@ -24,6 +26,7 @@ import { valueSlotTemplateRefusals } from './flow-value-slot-template';
 import { EndConfigSchema, ScreenConfigSchema } from './builtin-node-config.zod';
 import { NotifyConfigSchema } from './io-node-config.zod';
 import { tmpl } from '../shared/expression.zod';
+import { FLOW_TERMINAL_MESSAGE_KEYS } from '../system/i18n-resolver';
 
 describe('FLOW_NODE_TEXT_SLOTS — where the `{{ }}` text slots are', () => {
   it('names exactly the eight slots whose rendered value is only ever text', () => {
@@ -44,6 +47,32 @@ describe('FLOW_NODE_TEXT_SLOTS — where the `{{ }}` text slots are', () => {
     ]);
     // Only `headers` is a map whose every value is a slot of its own.
     expect(FLOW_NODE_TEXT_SLOTS.filter((s) => s.eachValue).map((s) => `${s.nodeType}.${s.key}`)).toEqual(['http.headers']);
+  });
+});
+
+describe('FLOW_TEXT_SLOTS — the flow\'s own text slots (#28054)', () => {
+  it('names the two terminal messages, under the keys the `flows` translation face spells them', () => {
+    expect(FLOW_TEXT_SLOTS.map((s) => s.key)).toEqual(['successMessage', 'errorMessage']);
+    // The engine picks each slot's translation at `flows.<flow>.<key>`, so the
+    // slot list and the face's key list are one list.
+    expect(FLOW_TEXT_SLOTS.map((s) => s.key)).toEqual([...FLOW_TERMINAL_MESSAGE_KEYS]);
+  });
+
+  it('flowTextSlotSources yields each authored string at its flow key, and skips the rest', () => {
+    expect(flowTextSlotSources({ name: 'f', successMessage: '{{ n }} done', errorMessage: 'Failed.' })).toEqual([
+      { path: 'successMessage', label: 'flow successMessage', source: '{{ n }} done' },
+      { path: 'errorMessage', label: 'flow errorMessage', source: 'Failed.' },
+    ]);
+    expect(flowTextSlotSources({ name: 'f' })).toEqual([]);
+    expect(flowTextSlotSources({ name: 'f', successMessage: 42 })).toEqual([]);
+    expect(flowTextSlotSources(null)).toEqual([]);
+  });
+
+  it('judges a flow-level slot with the node slots\' one judge', () => {
+    const [slot] = flowTextSlotSources({ name: 'f', successMessage: '{enrolledCount} contacts enrolled' });
+    const refusal = textSlotTemplateRefusal(slot!.source)!;
+    expect(refusal.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(refusal).toContain('`{{ enrolledCount }} contacts enrolled`');
   });
 });
 
