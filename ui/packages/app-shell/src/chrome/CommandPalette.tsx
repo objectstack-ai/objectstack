@@ -178,7 +178,8 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   const { t, language } = useObjectTranslation();
   // A nav entry's text, the way the sidebar and `nav:menu` name it: an entry
   // with NO `label` shows its target's current label, else its target's machine
-  // name (objectui#9868 — `NavigationSyncEffect` writes such entries). A present
+  // name (objectui#9868 — the console's page and dashboard create sites write
+  // such entries through `useNavigationWrites`). A present
   // label renders as authored — an inline locale map in the viewer's `language`,
   // the locale the sidebar passes (objectui#11299).
   const targetLabel = useNavTargetLabel();
