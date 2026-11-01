@@ -421,8 +421,8 @@ const ERROR_MAPPING_RETIRED =
 // ============================================================================
 //
 // A bounded (`min(1000).max(300000)`), defaulted (`30000`), `.describe()`d key
-// on this schema and — because both published carriers wrap the same private
-// `ConnectorBaseSchema` — on
+// on this schema and — because both published carriers are built from the same
+// private connector shape (`connectorBaseShape`) — on
 // `DeclarativeConnectorEntrySchema`, so it was authorable from `stack.connectors[]`,
 // from `PUT /meta/connector/:name`, and served back by `/meta/connector`. Every
 // signal an authoring surface can give said it worked.
@@ -582,7 +582,7 @@ const CONNECTOR_RETIRED_KEY_RESIDUE = {
 // `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
 // strip (ADR-0104): each carrier key is a `retiredKey()` tombstone below,
 // inherited by `DeclarativeConnectorEntrySchema` because both published
-// carriers wrap the same private `ConnectorBaseSchema`. The shapes behind them
+// carriers are built from the same private `connectorBaseShape`. The shapes behind them
 // leave whole — `integration/ConnectorHealth`, `integration/HealthCheckConfig`,
 // `integration/CircuitBreakerConfig`, `integration/ConnectorStatus`,
 // `integration/WebhookConfig`, `integration/WebhookEvent` and
@@ -1035,7 +1035,7 @@ const connectorBaseShape = () => ({
    * would be a silent strip (ADR-0104); the tombstone makes the removal audible
    * in the two channels an upgrading author actually hits — `tsc` and the
    * parse — and `DeclarativeConnectorEntrySchema` carries it too (both
-   * published carriers wrap the same private `ConnectorBaseSchema`; until the
+   * published carriers are built from the same private `connectorBaseShape`; until the
    * `connectionTimeoutMs` retirement the entry schema was literally
    * `ConnectorSchema.superRefine(...)`), so `stack.connectors[]` and the
    * `/meta/connector` door refuse
