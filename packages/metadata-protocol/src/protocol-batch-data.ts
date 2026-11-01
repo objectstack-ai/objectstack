@@ -319,7 +319,7 @@ export async function runAtomicBatch(
 function landedDespiteStaleSummary(e: unknown, atomic: boolean, object: string): any {
     if (atomic) throw e;
     const stale = staleSummaryRefusalOrThrow(e);
-    for (const line of staleSummaryAnswerLines(stale, object)) console.error(`[protocol] ${line}`);
+    for (const line of staleSummaryAnswerLines(stale, object)) console.error(`[Protocol] ${line}`);
     return stale.written;
 }
 

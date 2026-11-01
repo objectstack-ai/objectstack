@@ -1064,10 +1064,13 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // bridge's answer and carries it on the refusal (#28781's carrier), so
       // the `create_record` tool answers the create it is.
       let stale: SummaryRecomputeRefusal | undefined;
-      const written = (await engine.insert(object, data, { context })
-        .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written)) as
-        | Record<string, unknown>
-        | undefined;
+      let written: Record<string, unknown> | undefined;
+      try {
+        written = (await engine.insert(object, data, { context })) as Record<string, unknown> | undefined;
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+        written = stale.written as Record<string, unknown> | undefined;
+      }
       const record = { ...data, ...(written ?? {}) };
       // [#8497] `written` is the engine's WRITE result, which since #7823 keeps
       // the stored row whole — flagged columns included. This is a generic data
