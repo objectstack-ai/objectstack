@@ -25,7 +25,10 @@
  * without a request.
  */
 
-import { GetPackageCustomizationsResponseSchema } from '@objectstack/spec/api';
+import {
+  GetPackageCustomizationsResponseSchema,
+  type GetPackageCustomizationsResponseParsed,
+} from '@objectstack/spec/api';
 import { isCustomizationPackage } from '@objectstack/spec/kernel';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 
@@ -41,14 +44,19 @@ export interface PackageCustomizationCounts {
 export const packageCustomizationsUrl = (baseId: string) =>
   `/api/v1/packages/${encodeURIComponent(baseId)}/customizations`;
 
+/** One installed base's customization read, as the route served it. */
+export type PackageCustomizations = GetPackageCustomizationsResponseParsed;
+
 /**
- * Read one installed base's customization counts.
+ * Read one installed base's customizations: the served overrides, extensions,
+ * switched-off items and their counts (the All metadata area's marks and
+ * counts, objectstack ADR-0146 D3).
  *
  * Rejects with the server's sentence on a failed read, and with a sentence of
  * its own on an answer the route's declaration refuses; resolves only with
- * counts the server served.
+ * the answer the server served, parsed by that declaration.
  */
-export async function fetchPackageCustomizationCounts(baseId: string): Promise<PackageCustomizationCounts> {
+export async function fetchPackageCustomizations(baseId: string): Promise<PackageCustomizations> {
   if (isCustomizationPackage(baseId)) {
     throw new Error(`Package '${baseId}' is a customization package: customizations are read for its base.`);
   }
@@ -66,6 +74,16 @@ export async function fetchPackageCustomizationCounts(baseId: string): Promise<P
   if (!parsed.success) {
     throw new Error(`The customization read for '${baseId}' answered a body its declaration refuses.`);
   }
-  const { counts } = parsed.data;
+  return parsed.data;
+}
+
+/**
+ * Read one installed base's customization counts.
+ *
+ * Rejects as {@link fetchPackageCustomizations} does; resolves only with
+ * counts the server served.
+ */
+export async function fetchPackageCustomizationCounts(baseId: string): Promise<PackageCustomizationCounts> {
+  const { counts } = await fetchPackageCustomizations(baseId);
   return { customized: counts.overrides + counts.extensions, switchedOff: counts.switchedOff };
 }
