@@ -57,7 +57,7 @@ import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spe
  */
 export interface PackagedBaseRefusalHost {
     isSealedManagedItem: ObjectStackProtocolImplementation['isSealedManagedItem'];
-    isOverlayableManagedItem: ObjectStackProtocolImplementation['isOverlayableManagedItem'];
+    overlayBaseShippers: ObjectStackProtocolImplementation['overlayBaseShippers'];
     isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
     packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
     packagedArtifactOwner: ObjectStackProtocolImplementation['packagedArtifactOwner'];
@@ -220,13 +220,12 @@ export type PackagelessWriteOperation = 'save' | 'publish' | 'delete' | 'rollbac
  *
  * [ADR-0146 D11] The closure of the package-less write onto a packaged item:
  * a write naming no package (`packageId` absent, `null` or empty) onto an item
- * a code package ships, of a type whose registry entry opens an overlay
- * channel ({@link PackagedBaseRefusalHost.isOverlayableManagedItem}: the five
- * `allowEnvironmentOverlay` types), is refused `403 NOT_OVERRIDABLE` — the
- * code and status the sealed write already answers, so no door gains a code.
- * Every other type's packaged item is sealed already
- * ({@link refusePackagedBaseOverride}), so after this no package-less write
- * reaches a packaged item at all.
+ * of one of the five overlay types that a read-only code package ships
+ * ({@link PackagedBaseRefusalHost.overlayBaseShippers}, the reading
+ * `os migrate packageless-overlays` classifies by), is refused
+ * `403 NOT_OVERRIDABLE` — the code and status the sealed write already
+ * answers, so no door gains a code. Every other type's packaged item is
+ * sealed already ({@link refusePackagedBaseOverride}).
  *
  * The sentence names the fix the writer has: the base's paired `.custom`
  * (`?package=<base>.custom`), where the customization is a declared override,
@@ -235,32 +234,45 @@ export type PackagelessWriteOperation = 'save' | 'publish' | 'delete' | 'rollbac
  * moved yet is still served (the read path is not this function's); only its
  * package-less write is refused, by this same sentence.
  *
- * `null` when the write names a package, or the item is no packaged item of an
- * overlay type: a name no package ships is environment metadata and keeps its
- * package-less write (ADR-0146 D11, "is not touched").
+ * `null` when the write names a package; when no read-only code package ships
+ * the name (environment metadata keeps its package-less write, ADR-0146 D11
+ * "is not touched"); and when no base that ships it has a pair at all
+ * (`customizationPackageId` refuses every one of their ids): the ceremony
+ * lists such a row `no_pair` and cannot move it, and D11 closes only what it
+ * has migrated — closing it would leave that customization no write door.
  */
 export function packagelessOverlayWriteRefusal(
-    this: Pick<PackagedBaseRefusalHost, 'isOverlayableManagedItem' | 'packagedArtifactOwner'>,
+    this: Pick<PackagedBaseRefusalHost, 'overlayBaseShippers'>,
     request: { type: string; name: string; packageId?: string | null },
     operation: PackagelessWriteOperation,
 ): Error | null {
     if (typeof request.packageId === 'string' && request.packageId.length > 0) return null;
-    if (!this.isOverlayableManagedItem(request.type, request.name)) return null;
+    const shippers = this.overlayBaseShippers(request.type, request.name);
+    const pairs = shippers.flatMap((base) => {
+        const derived = customizationPackageId(base);
+        return derived.ok ? [{ base, pair: derived.value }] : [];
+    });
+    if (pairs.length === 0) return null;
     const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
     const item = `'${type}/${request.name}'`;
-    const owner = this.packagedArtifactOwner(request);
-    const pairId = typeof owner === 'string' ? customizationPackageId(owner) : undefined;
-    const pair = pairId?.ok ? `'${pairId.value}'` : "the base's paired .custom package";
-    const query = pairId?.ok ? ` (?package=${pairId.value})` : '';
-    const shipped = typeof owner === 'string' ? `ships in '${owner}'` : 'ships in an installed package';
-    const declared = typeof owner === 'string' ? `overrides: { package: '${owner}', basedOn }` : 'overrides: { package, basedOn }';
-    const ceremony = 'A package-less customization stored before this release is still served; run '
-        + `\`os migrate packageless-overlays\` first to move it into ${pair}.`;
+    const shipped = `ships in ${shippers.map((id) => `'${id}'`).join(' and ')}`;
+    const sole = pairs.length === 1 ? pairs[0]! : undefined;
+    // One base: its pair, by name. Several: the pair of the base the writer
+    // customizes, each named — never guessed (the ceremony lists such a row).
+    const into = sole
+        ? `'${sole.pair}' (?package=${sole.pair})`
+        : `the pair of the package it customizes (${pairs.map((p) => `'${p.pair}'`).join(' or ')}, as ?package=<that pair>)`;
+    const declared = sole ? `overrides: { package: '${sole.base}', basedOn }` : 'overrides: { package: <that base>, basedOn }';
+    const ceremony = sole
+        ? 'A package-less customization stored before this release is still served; run '
+            + `\`os migrate packageless-overlays\` first to move it into '${sole.pair}'.`
+        : 'A package-less customization stored before this release is still served; run '
+            + '`os migrate packageless-overlays` first: it lists a name several packages ship for you to place.';
     const fix = operation === 'delete'
-        ? `Remove it from ${pair}${query}. ${ceremony}`
+        ? `Remove it from ${into}. ${ceremony}`
         : operation === 'rollback'
-            ? `Its customization belongs in ${pair}: run \`os migrate packageless-overlays\` to move the row there, then roll it back.`
-            : `${operation === 'publish' ? 'Publish' : 'Save'} it into ${pair}${query}, declaring ${declared}. ${ceremony}`;
+            ? `Its customization belongs in ${into}: run \`os migrate packageless-overlays\` to move the row there, then roll it back.`
+            : `${operation === 'publish' ? 'Publish' : 'Save'} it into ${into}, declaring ${declared}. ${ceremony}`;
     const what = operation === 'rollback' ? 'a rollback of its package-less row' : 'a write naming no package';
     const err = new Error(
         `${item} ${shipped}, and ${what} onto a packaged item is closed: a customization of an installed package `

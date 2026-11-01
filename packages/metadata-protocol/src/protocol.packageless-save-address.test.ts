@@ -432,7 +432,7 @@ describe('an item a CODE package ships: the package-less write is closed (ADR-01
         const name = 'showcase_task_grid';
         const { protocol, rows } = makeProtocol([packagedView(name)]);
 
-        const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Overlaid') }).then(() => undefined, (e) => e);
+        const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Overlaid') }).then(() => undefined, (e: unknown) => e);
 
         closed(refused);
         expect(rows('view', name)).toEqual([]);
@@ -450,7 +450,7 @@ describe('an item a CODE package ships: the package-less write is closed (ADR-01
         // A save naming the package names a package: not the write D11 closes.
         await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Named'), packageId: CODE_PACKAGE });
 
-        const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Unnamed') }).then(() => undefined, (e) => e);
+        const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Unnamed') }).then(() => undefined, (e: unknown) => e);
 
         closed(refused);
         expect(rows('view', name).map((r) => r.package_id ?? null)).toEqual([CODE_PACKAGE]);

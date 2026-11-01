@@ -90,7 +90,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared
 import { storedRowDocument } from './item-lock.js';
 import { OVERLAY_MEMBER_COLUMN } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { shippingPackageIds } from './protocol-environment-rows.js';
+import { readOnlyShippingPackages } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
@@ -298,9 +298,7 @@ export async function listPackagelessOverlays(
         // The read-only code packages that ship the name: a writable package's
         // item is edited in place (ADR-0070) and has no pair (ADR-0146 D3), and
         // the pair itself is writable — the write gate's own narrowing.
-        const shippers = [...shippingPackageIds(this.shippedArtifactsOf(type, name))]
-            .filter((id) => !this.isWritablePackage(id))
-            .sort();
+        const shippers = readOnlyShippingPackages(this.shippedArtifactsOf(type, name), (id) => this.isWritablePackage(id));
         if (shippers.length === 0) {
             environmentRows += 1;
             continue;

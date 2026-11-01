@@ -469,7 +469,7 @@ import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
-import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage, soleShippingPackage } from './protocol-environment-rows.js';
+import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage, readOnlyShippingPackages, soleShippingPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
@@ -16217,17 +16217,21 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [ADR-0146 D11] The other half of {@link isSealedManagedItem}: an item a
-     * managed package ships ({@link isArtifactBacked}) of a type whose registry
-     * entry opens an overlay channel ({@link registryAllowsOverlay}: the five
-     * `allowEnvironmentOverlay` types). The flag no longer opens a write onto
-     * such an item that names no package
-     * ({@link packagelessOverlayWriteRefusal}); it stays the predicate the
-     * migration reads and the read of a row not migrated yet honours.
+     * [ADR-0146 D11] The bases of an item of one of the five overlay types
+     * ({@link registryAllowsOverlay}: the `allowEnvironmentOverlay` types): the
+     * READ-ONLY code packages that ship the name ({@link shippedArtifactsOf}
+     * less {@link isWritablePackage}), sorted — `[]` for every other type, and
+     * for a name no read-only package ships. The reading
+     * `os migrate packageless-overlays` classifies a package-less row by
+     * (`readOnlyShippingPackages`), so the close
+     * ({@link packagelessOverlayWriteRefusal}) and the ceremony agree on what
+     * is a packaged item. The flag no longer opens a package-less write onto
+     * one; it stays the predicate the migration reads and the read of a row not
+     * migrated yet honours.
      */
-    private isOverlayableManagedItem(type: string, name: string): boolean {
-        return this.isArtifactBacked(type, name)
-            && ObjectStackProtocolImplementation.registryAllowsOverlay(type);
+    private overlayBaseShippers(type: string, name: string): string[] {
+        if (!ObjectStackProtocolImplementation.registryAllowsOverlay(type)) return [];
+        return readOnlyShippingPackages(this.shippedArtifactsOf(type, name), (id) => this.isWritablePackage(id));
     }
 
     /**
@@ -17077,11 +17081,13 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [ADR-0146 D11] The package-less write onto a packaged item, closed: the
      * refusal of a save, a publish, a delete (either state) or a rollback that
-     * names no package, of an item a managed package ships, on a type whose
-     * registry entry opens an overlay channel ({@link isOverlayableManagedItem}).
+     * names no package, of an item of one of the five overlay types a
+     * read-only code package ships ({@link overlayBaseShippers}).
      * `null` when the write is not refused on that ground: it names a package
      * (`?package=<base>.custom` stays open, as does every other package's own
-     * door), or no package ships the name (environment metadata).
+     * door), no read-only package ships the name (environment metadata), or no
+     * base that ships it can form a pair (the ceremony's `no_pair`: it cannot
+     * move that row, so D11 does not close its write).
      *
      * Every other type's packaged item is sealed already
      * ({@link refusePackagedBaseOverride}, {@link refusePackagedBaseRemoval}),
@@ -17108,8 +17114,7 @@ export class ObjectStackProtocolImplementation implements
         operation: PackagelessWriteOperation,
     ): Error | null {
         const host: ThisParameterType<typeof packagelessOverlayWriteRefusal> = {
-            isOverlayableManagedItem: (...a) => this.isOverlayableManagedItem(...a),
-            packagedArtifactOwner: (...a) => this.packagedArtifactOwner(...a),
+            overlayBaseShippers: (...a) => this.overlayBaseShippers(...a),
         };
         return packagelessOverlayWriteRefusal.call(host, request, operation);
     }

@@ -669,10 +669,13 @@ describe('the override write gate — only the base\'s paired .custom declares a
         expect(stored()).toEqual([{ type: 'view', name: 'task.crm_list', package_id: UNRELATED, state: 'active' }]);
     });
 
-    it('control: a package-less overlay row is not this gate\'s question (the migration card closes it)', async () => {
+    it('[#28576, ADR-0146 D11] a package-less save is not this gate\'s question: the close refuses it first, naming the pair, and nothing is stored', async () => {
         const { protocol, stored } = gateProtocol();
-        await protocol.saveMetaItem({ type: 'view', name: 'task.crm_list', item: body('view', 'task.crm_list') });
-        expect(stored()).toEqual([{ type: 'view', name: 'task.crm_list', package_id: null, state: 'active' }]);
+        const e = await thrown(protocol.saveMetaItem({ type: 'view', name: 'task.crm_list', item: body('view', 'task.crm_list') }));
+        expect(shape(e)).toEqual({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(String((e as Error).message)).toContain(`'${PAIR}' (?package=${PAIR})`);
+        expect(String((e as Error).message)).toContain('os migrate packageless-overlays');
+        expect(stored()).toEqual([]);
     });
 
     // ── the admit ────────────────────────────────────────────────────────────
