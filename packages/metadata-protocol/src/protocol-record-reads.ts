@@ -50,6 +50,7 @@
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { ConcurrentUpdateError, MalformedVersionTokenError, canonicalVersionInstant } from './protocol.js';
 import { recordNotFoundError } from '@objectstack/core';
+import { declaredHttpStatus } from '@objectstack/types';
 import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 import { isMissingTableError } from '@objectstack/metadata/errors';
 import { canServeApiOperation, resolveSearchFieldResolution } from '@objectstack/spec/data';
@@ -170,6 +171,19 @@ function versionTokensAgree(current: NormalisedVersion, expected: NormalisedVers
 }
 
 /**
+ * Did the caller's own read of a row REFUSE, rather than fault? A refusal
+ * declares a client-band status (`4xx`, in either spelling
+ * `declaredHttpStatus` reads) — the read door's verdict on this caller, which
+ * says nothing about the row. A server-band status, or none at all (a bare
+ * driver `Error`), is a fault, and the OCC comparison lets it propagate as
+ * raised rather than read it as "the caller reads no row".
+ */
+function isCallerReadRefusal(e: unknown): boolean {
+    const status = declaredHttpStatus(e);
+    return status !== undefined && status < 500;
+}
+
+/**
  * The `ObjectStackProtocolImplementation` members the functions below read —
  * every one of them, and no other; each function's `this` is the `Pick` of the
  * members IT reads. Each is typed AS the class member (an indexed access on
@@ -227,8 +241,19 @@ export async function assertVersionOf(
         // it names, turning a resolvable conflict into an unresolvable one.
         const currentVersion = currentToken.instant ?? currentToken.token;
         const expectedVersionText = expected.instant ?? expected.token;
-        const visible = await this.readAsCaller(object, id, context);
-        if (!visible) throw recordNotFoundError(object, id);
+        // A row the caller's own read does not return — absent, or the read
+        // refused — is no conflict this gate may report, and no answer of its
+        // own either: the comparison is dropped and the write door answers,
+        // exactly as it answers the same request without a token. The
+        // method's docblock in `protocol.ts` carries the reasoning.
+        let visible: unknown;
+        try {
+            visible = await this.readAsCaller(object, id, context);
+        } catch (e) {
+            if (!isCallerReadRefusal(e)) throw e;
+            return;
+        }
+        if (!visible) return;
         throw new ConcurrentUpdateError({
             currentVersion,
             currentRecord: visible,
