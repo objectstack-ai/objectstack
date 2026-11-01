@@ -12,7 +12,7 @@ Metadata-protocol: none
 **BREAKING** accept-set narrowing on the app and view list reads (`@objectstack/rest`).
 
 - **Before.** `?id=` (app list) and `?object=` (view list) with an empty value were read as no filter, so a caller who asked for one app, or for one object's views, by a name that came out blank got every app or every view it may see (the views unsorted, and including views bound to no object).
-- **Now.** The list chain refuses either after the per-caller visibility gate: `400 VALIDATION_ERROR`, message `Query parameter 'id' names no app; …` or `Query parameter 'object' names no object; …`, `param` set to the parameter, and no list in the body. This is the answer #27484 gave a blank `$searchFields`.
+- **Now.** The list chain refuses either after the per-caller visibility gate: `400 VALIDATION_ERROR`, message `Query parameter 'id' names no app; …` or `Query parameter 'object' names no object; …` (the message names the parameter), and no list in the body. This is the answer #27484 gave a blank `$searchFields`.
 - **Unchanged.** A non-empty value narrows as before (one app or one object's views, or an empty list when it names none, including `' '`); no value lists every item the caller may see; a repeated `id` or `object` is still the arity 400; `?id=` on any type but `app`, and `?object=` on any type but `view`, are still ignored.
 - **Who sees it.** An API client that sends either parameter empty. `@objectstack/client` and the console send neither on these reads.
 
