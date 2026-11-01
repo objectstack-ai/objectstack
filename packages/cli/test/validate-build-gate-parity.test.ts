@@ -236,6 +236,12 @@ const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
   // the build refuses too is a separate decision, raised on the card.
   findOverrideDeclarationRefusals:
     'card #28410 placed the override write gate at publish, os validate and install; os build is a fourth point it did not name (open question on #28410). The install and publish doors refuse the same items with the same judge.',
+  // [#28564] The same shape for the `__c` reservation (ADR-0146 D10, decided
+  // item 7): the record names publish, `os validate` and the install door, not
+  // `os build`. The artifact a build emits is judged where it lands — the
+  // marketplace install and the save and publish doors ask the same judge.
+  findExtensionFieldSuffixRefusals:
+    'card #28564 placed the __c reservation at the save/restore/publish doors, os validate, the install doors and duplicate; ADR-0146 decided item 7 names publish, os validate and install, not os build. The install and publish doors refuse the same fields with the same judge.',
 };
 
 /**
