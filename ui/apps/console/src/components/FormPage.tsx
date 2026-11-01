@@ -169,6 +169,8 @@ import {
 import { pickLocalized, useObjectTranslation, useSafeFieldLabel } from '@object-ui/i18n';
 import type { FormFieldSpec, FormSectionSpec, FormViewSpec } from '@object-ui/app-shell';
 import type { ObjectFormSection } from '@object-ui/types';
+import { PublicFormSubmitResponseSchema } from '@objectstack/spec/api';
+import { thankYouRecordFieldNames } from '@objectstack/spec/ui';
 import { resolveSubmitRedirect } from './submitRedirect';
 
 const API_BASE = (import.meta.env.VITE_SERVER_URL || '') + '/api/v1';
@@ -1183,6 +1185,58 @@ export function resolveSubmitBehavior(
 ): EffectiveSubmitBehavior {
   if (declared) return declared;
   return mode === 'internal' ? { kind: 'created-record' } : { kind: 'thank-you' };
+}
+
+/** The values a public submit answer carries for its `thank-you` panel, keyed by field name. */
+export type ThankYouAnswerFields = Readonly<Record<string, string | number>>;
+
+/**
+ * The `fields` of a public submit answer (`PublicFormSubmitResponseSchema`,
+ * `@objectstack/spec/api`): the stored values of the engine-generated fields
+ * the form's `thank-you` panel names. An answer that is not that shape, or one
+ * without `fields`, carries none.
+ */
+export function readThankYouAnswerFields(answer: unknown): ThankYouAnswerFields | undefined {
+  const parsed = PublicFormSubmitResponseSchema.safeParse(answer);
+  return parsed.success ? parsed.data.fields : undefined;
+}
+
+/**
+ * A `thank-you` panel's `title` and `message` with each `{{record.field_name}}`
+ * token replaced by the answer's value for that field.
+ *
+ * Which tokens a text holds is `thankYouRecordFieldNames`' answer, the spec's
+ * one reading of the token, so this page carries no grammar of its own: each
+ * named field's token is its literal `{{record.` + name + `}}` spelling. A
+ * name the answer carries no value for fills as empty, never as the token's
+ * own text. A filled value is never read for tokens again, and the page draws
+ * the result as a React text child, so a value shows as text and never as
+ * markup.
+ */
+export function fillThankYouPanel(
+  panel: { title?: string; message?: string },
+  fields: ThankYouAnswerFields | undefined,
+): { title?: string; message?: string } {
+  const names = thankYouRecordFieldNames({ kind: 'thank-you', ...panel });
+  if (names.length === 0) return panel;
+  const fill = (text: string | undefined): string | undefined => {
+    if (text === undefined) return undefined;
+    // Literal runs still to be read for tokens, interleaved with filled values.
+    let parts: Array<{ text: string; filled: boolean }> = [{ text, filled: false }];
+    for (const name of names) {
+      const token = `{{record.${name}}}`;
+      const value = fields && Object.prototype.hasOwnProperty.call(fields, name) ? String(fields[name]) : '';
+      parts = parts.flatMap((part) =>
+        part.filled
+          ? [part]
+          : part.text.split(token).flatMap((run, i) =>
+              i === 0 ? [{ text: run, filled: false }] : [{ text: value, filled: true }, { text: run, filled: false }],
+            ),
+      );
+    }
+    return parts.map((part) => part.text).join('');
+  };
+  return { title: fill(panel.title), message: fill(panel.message) };
 }
 
 /**
@@ -2475,6 +2529,11 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   const errorBannerId = `form-error:${useId()}`;
   const [submitted, setSubmitted] = useState(false);
   /**
+   * The values the public submit answer carries for the `thank-you` panel's
+   * `{{record.field_name}}` tokens ({@link readThankYouAnswerFields}).
+   */
+  const [thankYouFields, setThankYouFields] = useState<ThankYouAnswerFields | undefined>(undefined);
+  /**
    * The outcome of a `redirect` submit behaviour: the in-app route to go to
    * once `delayMs` has elapsed, or the fact that the authored destination was
    * refused (objectui#4190). Null until a redirect submit resolves.
@@ -2864,8 +2923,13 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           setCompletedSteps(new Set());
           break;
         }
-        case 'next-record':
         case 'thank-you':
+          // Only the public answer carries the panel's values: the internal
+          // create answers `CreateDataResponse`, which is not that shape.
+          if (mode === 'public') setThankYouFields(readThankYouAnswerFields(result));
+          setSubmitted(true);
+          break;
+        case 'next-record':
         default:
           setSubmitted(true);
           break;
@@ -2954,8 +3018,10 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
   // away instead. It carries no author-supplied title/message, so it renders
   // the generic confirmation.
   if (submitted && (behavior.kind === 'thank-you' || behavior.kind === 'created-record')) {
-    const title = behavior.kind === 'thank-you' ? behavior.title : undefined;
-    const message = behavior.kind === 'thank-you' ? behavior.message : undefined;
+    const { title, message } =
+      behavior.kind === 'thank-you'
+        ? fillThankYouPanel({ title: behavior.title, message: behavior.message }, thankYouFields)
+        : { title: undefined, message: undefined };
     return (
       <div className="mx-auto max-w-2xl p-6">
         <div className="rounded-md border bg-card p-6 text-center">
