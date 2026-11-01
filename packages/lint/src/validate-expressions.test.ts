@@ -5368,7 +5368,7 @@ describe('a flow\'s own text slots — `successMessage` / `errorMessage` (#28054
     const text = '{enrolledCount} contacts enrolled';
     const found = errorsOf(stackWith({ [key]: text }));
     expect(found).toHaveLength(1);
-    expect(found[0]!.where).toBe(`flow 'enrol' flow ${key}`);
+    expect(found[0]!.where).toBe(`flow 'enrol' ${key}`);
     expect(found[0]!.path).toBe(`flows[0].${key}`);
     expect(found[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
     expect(found[0]!.message).toContain('`{{ enrolledCount }} contacts enrolled`');

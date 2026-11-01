@@ -2722,7 +2722,8 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     // the spec's one single-brace judge, then the `template` compile. A
     // finding carries the flow key's path (`flows[0].successMessage`).
     for (const slot of flowTextSlotSources(flow)) {
-      const slotWhere = `flow '${flowName}' ${slot.label}`;
+      // `flow 'NAME' successMessage` — the key, not the label, so the word `flow` is said once.
+      const slotWhere = `flow '${flowName}' ${slot.path}`;
       const path = flowIndex >= 0 ? { path: `flows[${flowIndex}].${slot.path}` } : {};
       const tokenRefusal = textSlotTemplateRefusal(slot.source);
       if (tokenRefusal !== undefined) {

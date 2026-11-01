@@ -571,7 +571,10 @@ export function validateFlowExpressions(
     // node's text slots below, with the same judge and the same compile, so a
     // hole the engine would refuse to render stops the flow here.
     for (const slot of flowTextSlotSources(flow)) {
-        const slotWhere = `${slot.label} at ${slot.path}`;
+        // The label already names the key (`flow successMessage`), and a flow-level
+        // slot's path IS that key, so no `at …` clause follows it (a node slot's
+        // `at config.…` names a path its label does not).
+        const slotWhere = slot.label;
         const tokenRefusal = textSlotTemplateRefusal(slot.source);
         if (tokenRefusal !== undefined) {
             refuse(slot.path, slotWhere, tokenRefusal, slot.source);

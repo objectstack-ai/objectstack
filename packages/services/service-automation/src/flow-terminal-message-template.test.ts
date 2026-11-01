@@ -240,8 +240,8 @@ describe('#28054 — the doors judge the pair as they judge a node text slot', (
 
         const refusal = textSlotTemplateRefusal(text)!;
         expect(refusal).toContain('`{{ enrolledCount }} contacts enrolled`');
-        expect(flowLevel).toContain('flow successMessage at successMessage');
-        expect(flowLevel).toContain(refusal);
+        // The row names the key once: `flow successMessage: …`, no `flow … flow` or `at successMessage`.
+        expect(flowLevel).toContain(`• flow successMessage: ${refusal}`);
         expect(nodeLevel).toContain(refusal);
     });
 
@@ -253,8 +253,7 @@ describe('#28054 — the doors judge the pair as they judge a node text slot', (
         const flowLevel = registrationRefusal(engine, enrolFlow({ errorMessage: text }));
         const nodeLevel = registrationRefusal(engine, refusingEndFlow(text));
 
-        expect(flowLevel).toContain('flow errorMessage at errorMessage');
-        expect(flowLevel).toContain(compiled);
+        expect(flowLevel).toContain(`• flow errorMessage: ${compiled}`);
         expect(nodeLevel).toContain(compiled);
     });
 

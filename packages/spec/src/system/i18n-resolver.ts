@@ -5264,9 +5264,9 @@ export interface FlowLike {
   /** `Flow.name` — the machine name the `flows` group is keyed by. */
   name: string;
   label?: string;
-  /** The completion toast (`Flow.successMessage`, served verbatim as `AutomationResult.successMessage`). */
+  /** The completion toast (`Flow.successMessage`, a `{{ }}` template the engine renders into `AutomationResult.successMessage`, #28054). */
   successMessage?: string;
-  /** The failure toast (`Flow.errorMessage`, served verbatim as `AutomationResult.errorMessage`). */
+  /** The failure toast (`Flow.errorMessage`, a `{{ }}` template the engine renders into `AutomationResult.errorMessage`, #28054). */
   errorMessage?: string;
   nodes?: FlowNodeLike[];
   [key: string]: any;
