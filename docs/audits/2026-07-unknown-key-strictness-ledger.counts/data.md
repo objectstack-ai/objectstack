@@ -21,7 +21,7 @@ The `strict` column is the one the campaign schedules against; it counts both th
 
 | Dir | Sites | strict | passthrough | catchall | strip |
 |---|---|---|---|---|---|
-| `data/` | 156 | 90 | 2 | 0 | 64 |
+| `data/` | 156 | 91 | 2 | 0 | 63 |
 
 ## `data/` — sites
 
@@ -65,7 +65,7 @@ Per file, how many of its sites still silently discard unknown keys. The `Class`
 column that decides the bucket split is hand-written in the ledger; the arithmetic
 over it is here.
 
-**64 strip of 156**, in 10 file(s).
+**63 strip of 156**, in 10 file(s).
 
 | File | Strip | Sites |
 |---|---|---|
@@ -77,15 +77,15 @@ over it is here.
 | `field.zod.ts` | 1 | 15 |
 | `filter.zod.ts` | 11 | 13 |
 | `hook.zod.ts` | 5 | 8 |
-| `query.zod.ts` | 4 | 5 |
+| `query.zod.ts` | 3 | 5 |
 | `seed-loader.zod.ts` | 12 | 12 |
-| **total** | **64** | **156** |
+| **total** | **63** | **156** |
 
 | Bucket | Sites |
 |---|---|
 | authorable — the ruling's forced scope | 0 |
 | unresolved — needs a per-schema verdict | 0 |
-| wire / open — out of forced scope | 63 |
+| wire / open — out of forced scope | 62 |
 | no door — no carrier, ADR-0049 territory | 1 |
 | no gate — carrier live, no parse | 0 |
 | covered — no carrier, no parse, guarded at every consumer | 0 |
