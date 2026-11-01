@@ -214,4 +214,35 @@ describe('install-local 2d — the override write gate at the managed install (A
         ]);
         expect(collisions[1].message).toMatch(/Declare it/);
     });
+
+    // [#28746] An email template is one item per `(name, locale)`: the base
+    // below ships `crm_welcome` in `en-US` only, so a member is judged alone.
+    const TEMPLATE_HOLDINGS: Holdings = {
+        [BASE]: { email_template: [{ name: 'crm_welcome', locale: 'en-US', subject: 'Welcome' }] },
+    };
+    const DECLARED = { package: BASE, basedOn: '1.0.0' } as const;
+
+    it('[#28746] the paired .custom declaring an override of a locale the base does not ship is refused 403, and nothing is written', async () => {
+        const { res, registered, ledger } = await install({
+            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            emailTemplates: [{ name: 'crm_welcome', locale: 'fr-FR', subject: 'Bienvenue', overrides: { ...DECLARED } }],
+        }, [{ id: BASE }], TEMPLATE_HOLDINGS);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOf(res)).toEqual([['email_template', 'crm_welcome', 'declared_package_ships_no_such_item']]);
+        expect(registered).toEqual([]);
+        expect(ledger).toEqual([]);
+    });
+
+    it('[#28746] CONTROL: the pair overrides the locale the base ships, and adds an undeclared locale of its own', async () => {
+        const { res, registered } = await install({
+            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            emailTemplates: [
+                { name: 'crm_welcome', locale: 'en-US', subject: 'Ours', overrides: { ...DECLARED } },
+                { name: 'crm_welcome', locale: 'fr-FR', subject: 'Bienvenue' },
+            ],
+        }, [{ id: BASE }], TEMPLATE_HOLDINGS);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(registered).toEqual([PAIR]);
+    });
 });

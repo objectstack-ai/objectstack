@@ -131,4 +131,33 @@ describe('#28410 — findOverrideDeclarationRefusals walks the artifact under th
     expect(rows.map((r) => r.rule)).toEqual(['declared_package_outside_closure']);
     expect(rows[0].message).toMatch(/Declare a dependency on 'com\.acme\.crm'/);
   });
+
+  // [#28746] An email template is one item per `(name, locale)`: the base
+  // below ships `crm_welcome` in `en-US` only, so each member is judged alone.
+  const templateBase = pkg(BASE, [], { emailTemplates: [{ name: 'crm_welcome', locale: 'en-US', subject: 'Welcome' }] });
+  const declared = { package: BASE, basedOn: '1.0.0' } as const;
+
+  it('[#28746] the pair declaring an override of a locale the base does not ship is refused', () => {
+    const rows = findOverrideDeclarationRefusals({
+      manifest: manifest('com.acme.bundle'),
+      packages: [templateBase, pkg(PAIR, [BASE], {
+        emailTemplates: [{ name: 'crm_welcome', locale: 'fr-FR', subject: 'Bienvenue', overrides: { ...declared } }],
+      })],
+    });
+    expect(rows.map((r) => [r.path, r.packageId, r.rule])).toEqual([
+      ['packages[1].manifest.emailTemplates[0]', PAIR, 'declared_package_ships_no_such_item'],
+    ]);
+  });
+
+  it('[#28746] controls: the pair overrides the shipped locale and adds an undeclared locale of its own', () => {
+    expect(findOverrideDeclarationRefusals({
+      manifest: manifest('com.acme.bundle'),
+      packages: [templateBase, pkg(PAIR, [BASE], {
+        emailTemplates: [
+          { name: 'crm_welcome', locale: 'en-US', subject: 'Ours', overrides: { ...declared } },
+          { name: 'crm_welcome', locale: 'fr-FR', subject: 'Bienvenue' },
+        ],
+      })],
+    })).toEqual([]);
+  });
 });
