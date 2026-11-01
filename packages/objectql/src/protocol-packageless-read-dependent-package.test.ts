@@ -22,8 +22,9 @@
  *
  *  - the card's three reads answer base / dependent / base, and the layered
  *    read's `effective` and the list scoped to the base agree with them;
- *  - the write address does not move: a save naming no package still writes
- *    the dependent package's row, as {@link packagelessAddress} resolves it;
+ *  - the write address does not move: a save naming no package still
+ *    addresses the dependent package's row, as {@link packagelessAddress}
+ *    resolves it — and since #28410 that write is refused (ADR-0146 D2);
  *  - CONTROL: a writable package's OWN item, a name no code package ships,
  *    is still served to the read naming no package (#23291);
  *  - CONTROL: a package-unbound row (the ADR-0005 overlay Setup writes) still
@@ -226,6 +227,26 @@ async function saveIntoDependent(protocol: ObjectStackProtocolImplementation, na
     await protocol.publishMetaItem({ type: 'view', name, packageId: DEPENDENT } as any);
 }
 
+/**
+ * [#28410, ADR-0146 D2, ruling A on #28390] The card's step 2 under a name the
+ * base ships is refused at the save door now (a dependent package's
+ * same-named item has one fix, rename), so the dependent's row the read pins
+ * below meet is one stored BEFORE that gate: the door's refusal is asserted
+ * first, then the same draft save and per-item publish run with the gate's
+ * verdict held at `not_concerned` for that one write.
+ */
+async function saveIntoDependentBeforeTheGate(protocol: ObjectStackProtocolImplementation, columns: readonly string[]): Promise<void> {
+    await expect(protocol.saveMetaItem({ type: 'view', name: VIEW, item: { ...listBody(columns), name: VIEW }, mode: 'draft', packageId: DEPENDENT } as any))
+        .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    const gated = protocol as any;
+    gated.overrideWriteVerdict = () => ({ verdict: 'not_concerned' });
+    try {
+        await saveIntoDependent(protocol, VIEW, columns);
+    } finally {
+        delete gated.overrideWriteVerdict;
+    }
+}
+
 const read = async (protocol: ObjectStackProtocolImplementation, packageId?: string, name = VIEW) =>
     (await protocol.getMetaItem({ type: 'view', name, ...(packageId ? { packageId } : {}) })) as any;
 
@@ -233,7 +254,7 @@ describe('[#28238] a dependent package\'s row under a name the base ships is not
     it('the card\'s three steps answer base / dependent / base, and the layered read and the base\'s list agree', async () => {
         const { protocol, rowsOf } = await boot();
         await installDependent(protocol);
-        await saveIntoDependent(protocol, VIEW, DEPENDENT_COLUMNS);
+        await saveIntoDependentBeforeTheGate(protocol, DEPENDENT_COLUMNS);
         expect(rowsOf(VIEW).map((r) => [r.package_id, r.state])).toEqual([[DEPENDENT, 'active']]);
 
         expect(columnsOf((await read(protocol, BASE)).item)).toEqual(BASE_COLUMNS);
@@ -254,18 +275,24 @@ describe('[#28238] a dependent package\'s row under a name the base ships is not
         expect(listed.items.filter((i: any) => i.name === VIEW).map((i: any) => columnsOf(i))).toEqual([BASE_COLUMNS]);
     });
 
-    it('the write address does not move: a save naming no package still writes the dependent package\'s row', async () => {
+    it('the write address does not move: a save naming no package still addresses the dependent package\'s row, which the override gate refuses', async () => {
         const { protocol, rowsOf } = await boot();
         await installDependent(protocol);
-        await saveIntoDependent(protocol, VIEW, DEPENDENT_COLUMNS);
+        await saveIntoDependentBeforeTheGate(protocol, DEPENDENT_COLUMNS);
         expect((await (protocol as any).packagelessAddress('view', VIEW)).packageId).toBe(DEPENDENT);
 
-        await protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(['title']) } as any);
+        // [#28410, ADR-0146 D2, ruling A on #28390] The save naming no package
+        // resolves to the dependent package's row — the address does not move
+        // — and that write is a dependent's same-named item, which the
+        // override write gate refuses (rename): the refusal names the
+        // dependent package, and the stored row is untouched.
+        await expect(protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(['title']) } as any))
+            .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, message: expect.stringContaining(`'${DEPENDENT}'`) });
 
         const rows = rowsOf(VIEW).filter((r) => r.state === 'active');
         expect(rows.map((r) => r.package_id)).toEqual([DEPENDENT]);
-        expect(columnsOf(JSON.parse(String(rows[0].metadata)))).toEqual(['title']);
-        expect(columnsOf((await read(protocol, DEPENDENT)).item)).toEqual(['title']);
+        expect(columnsOf(JSON.parse(String(rows[0].metadata)))).toEqual(DEPENDENT_COLUMNS);
+        expect(columnsOf((await read(protocol, DEPENDENT)).item)).toEqual(DEPENDENT_COLUMNS);
         expect(columnsOf((await read(protocol)).item)).toEqual(BASE_COLUMNS);
     });
 
@@ -297,7 +324,7 @@ describe('[#28238] a dependent package\'s row under a name the base ships is not
     it('beside the dependent package\'s row, the package-unbound row is what the read naming no package serves', async () => {
         const { engine, protocol } = await boot();
         await installDependent(protocol);
-        await saveIntoDependent(protocol, VIEW, DEPENDENT_COLUMNS);
+        await saveIntoDependentBeforeTheGate(protocol, DEPENDENT_COLUMNS);
         await storeUnboundRow(engine, ['title', 'priority']);
 
         expect(columnsOf((await read(protocol)).item)).toEqual(['title', 'priority']);
