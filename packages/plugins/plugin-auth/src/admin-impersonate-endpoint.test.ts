@@ -29,9 +29,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { AuthManager } from './auth-manager';
-// ⚠️ Imported from a sibling TEST file on purpose, and the cost is measured, not
-// missed: importing a `.test.ts` re-registers its `describe`s here, so that
-// file's 10 rotation tests also execute inside this one. The alternatives are
+// ⚠️ Imported from a sibling TEST file on purpose. That file registers its
+// `describe`s only when it is the file vitest is running (#23181 slice 30), so
+// the import brings the double and none of its tests. The alternatives are
 // worse. Minting a second engine double is a second looseness risk plus two new
 // `check:engine-double-contract` ledger entries, when this suite needs no
 // fidelity that double does not already have. Extracting it to a plain `.ts`
@@ -40,7 +40,6 @@ import { AuthManager } from './auth-manager';
 // `walk()`), so the pinned entries would go stale and the double would end up
 // scanned by nobody. And a suite-free `*.test.ts` fixture file is not available
 // either: this package runs a bare `vitest run`, with no `--passWithNoTests`.
-// Ten duplicated hermetic tests is the cheapest of the four.
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { ADMIN_SESSION_RECOVERY_RESPONSE_HEADER } from './impersonation-bearer-rotation';
 import { USER_NOT_FOUND } from './admin-impersonate-endpoint';
@@ -52,7 +51,7 @@ import { memoizeScrypt } from './__tests__/scrypt-memo.testkit';
 // through a lazy `await import()` (the package root stays light on purpose), so
 // without these lines the file's first case paid about half a second of vendor
 // module evaluation on a dev container. The list is what the managers in this
-// file (and the bearer-rotation cases it imports) boot through; a module it
+// file (and, until #23181 slice 30, the bearer-rotation cases it imported) boot through; a module it
 // misses is still loaded in the first case, as before. The module cache hands
 // `AuthManager` these same instances, and this file changes no environment the
 // vendor reads at load (better-auth captures `NODE_ENV` when its env module is
