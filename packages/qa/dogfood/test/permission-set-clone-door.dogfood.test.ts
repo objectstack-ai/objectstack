@@ -16,7 +16,15 @@
 //   - the copy GRANTS: a holder of it resolves its object grants;
 //   - the source is read from the catalog, not from a `sys_permission_set` row:
 //     the source's rows are removed first, and the clone still lands;
-//   - a caller without `manage_metadata` is refused 403 and nothing is saved.
+//   - a caller without `manage_metadata` is refused 403 and nothing is saved;
+//   - [ADR-0146 D3/D6] "new similar": a copy of a PACKAGED set with no target
+//     lands in the source package's paired `<X>.custom`, created by N-13's
+//     ensure door on the first copy and reused on the next — the stored row
+//     bound to the pair, the item itself naming no package — and is granted
+//     through a position AND a direct assignment by its bare name; a given
+//     target is judged (writable and in closure lands, read-only / unknown /
+//     out-of-closure are refused with no row); an environment-authored source
+//     still copies environment-wide.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { resolveUserAuthzGrants, securityCatalogReaderOf } from '@objectstack/core';
@@ -34,6 +42,12 @@ const DEFAULT_COPY = 'my_member_default';
 const MEMBER_EMAIL = 'clone.member@example.com';
 const HOLDER_EMAIL = 'clone.holder@example.com';
 const COPY_POSITION = 'clone_door_position';
+/** The showcase's manifest id, and its paired customization package (ADR-0146 D3). */
+const SHOWCASE = 'com.example.showcase';
+const SHOWCASE_PAIR = `${SHOWCASE}.custom`;
+/** A Studio-created writable package that declares the showcase, and one that declares nothing. */
+const IN_CLOSURE = 'com.acme.clone-in-closure';
+const OUT_OF_CLOSURE = 'com.acme.clone-out-of-closure';
 
 interface Engine {
     find(object: string, options?: unknown): Promise<Array<Record<string, unknown>>>;
@@ -82,17 +96,35 @@ describe('the permission-set clone door, on a booted showcase', () => {
         // stage 8 retired the `sys_permission_set` row object.
         expect(ql.getObject?.('sys_permission_set')).toBeFalsy();
 
+        // Anti-vacuity for the landing: the source is the showcase's, and no
+        // pair exists before the first copy.
+        expect(source?.packageId).toBe(SHOWCASE);
+        expect((await stack.apiAs(token, 'GET', `/packages/${SHOWCASE_PAIR}`)).status).toBe(404);
+
         const res = await clone(token, DELEGATE_SET, { name: DELEGATE_COPY, label: 'My Field Ops Delegate' });
         const text = await res.clone().text();
         expect(res.status, text).toBe(200);
-        const data = JSON.parse(text).data as { permissionSet: Record<string, unknown>; notice: string };
+        const data = JSON.parse(text).data as { permissionSet: Record<string, unknown>; package: string | null; notice: string };
         expect(data.permissionSet.name).toBe(DELEGATE_COPY);
         expect(data.permissionSet).not.toHaveProperty('adminScope');
+        expect(data.permissionSet).not.toHaveProperty('packageId');
         expect(data.notice).toContain('adminScope');
+        // [ADR-0146 D3/D6] The copy landed in the showcase's pair, which the
+        // ensure door created for it.
+        expect(data.package).toBe(SHOWCASE_PAIR);
+        expect(data.notice).toContain(`'${SHOWCASE_PAIR}'`);
+        const pair = await stack.apiAs(token, 'GET', `/packages/${SHOWCASE_PAIR}`);
+        expect(pair.status, await pair.clone().text()).toBe(200);
+
+        // The stored row is bound to the pair (its `package_id`), and the item
+        // names no package of its own.
+        const rows = await ql.find('sys_metadata', { where: { type: 'permission', name: DELEGATE_COPY }, context: SYSTEM_CTX });
+        expect(rows.map((r) => r.package_id)).toEqual([SHOWCASE_PAIR]);
+        expect(JSON.parse(String(rows[0].metadata))).not.toHaveProperty('packageId');
 
         const copy = await reader!.resolve('permission', DELEGATE_COPY);
         expect(copy?.name, 'the copy does not resolve through the catalog').toBe(DELEGATE_COPY);
-        expect(copy?.packageId).toBeUndefined();
+        expect(copy?.packageId).toBe(SHOWCASE_PAIR);
         expect(copy?.definition).not.toHaveProperty('adminScope');
         expect(copy?.definition.label).toBe('My Field Ops Delegate');
         // The facets came across whole.
@@ -106,9 +138,16 @@ describe('the permission-set clone door, on a booted showcase', () => {
 
         const res = await clone(token, DEFAULT_SET, { name: DEFAULT_COPY, label: 'My Member Default' });
         expect(res.status, await res.clone().text()).toBe(200);
+        // The second copy REUSES the pair the first created: one pair, the same id.
+        expect(((await res.json()) as any).data.package).toBe(SHOWCASE_PAIR);
+        const listed = ((await (await stack.apiAs(token, 'GET', '/packages')).json()) as any).data;
+        const pairs = (Array.isArray(listed) ? listed : listed?.packages ?? [])
+            .filter((p: any) => (p?.manifest?.id ?? p?.id) === SHOWCASE_PAIR);
+        expect(pairs).toHaveLength(1);
 
         const copy = await reader.resolve('permission', DEFAULT_COPY);
         expect(copy?.name).toBe(DEFAULT_COPY);
+        expect(copy?.packageId).toBe(SHOWCASE_PAIR);
         expect(copy?.definition.isDefault === undefined || copy?.definition.isDefault === false).toBe(true);
         expect(copy?.definition.objects).toEqual(source!.definition.objects);
 
@@ -129,6 +168,86 @@ describe('the permission-set clone door, on a booted showcase', () => {
         const grants = await resolveUserAuthzGrants(ql as never, String(user.id), { tenantId: await sessionOrgOf(stack) });
         expect(grants.positions).toContain(COPY_POSITION);
         expect(grants.permissions).toContain(DEFAULT_COPY);
+    });
+
+    it('a copy in the pair is granted through a direct assignment too, by its bare name', async () => {
+        const email = 'clone.direct@example.com';
+        await stack.signUp(email);
+        const [user] = await ql.find('sys_user', { where: { email }, limit: 1, context: SYSTEM_CTX });
+        expect(user?.id, `no sys_user row for ${email}`).toBeTruthy();
+        const tenantId = await sessionOrgOf(stack);
+        // Anti-vacuity: the user holds no copy before the assignment.
+        const before = await resolveUserAuthzGrants(ql as never, String(user.id), { tenantId });
+        expect(before.permissions).not.toContain(DELEGATE_COPY);
+        await ql.insert(
+            'sys_user_permission_set',
+            { id: 'ups_clone_door_direct', user_id: String(user.id), permission_set: DELEGATE_COPY },
+            { context: SYSTEM_CTX },
+        );
+        const after = await resolveUserAuthzGrants(ql as never, String(user.id), { tenantId });
+        expect(after.permissions).toContain(DELEGATE_COPY);
+    });
+
+    it('a given writable target inside the closure lands there; read-only, unknown and out-of-closure targets are refused with no row', async () => {
+        const reader = securityCatalogReaderOf(ql)!;
+        for (const [id, namespace, dependencies] of [
+            [IN_CLOSURE, 'clone_in', { [SHOWCASE]: '*' }],
+            [OUT_OF_CLOSURE, 'clone_out', {}],
+        ] as const) {
+            const created = await stack.apiAs(token, 'POST', '/packages', {
+                manifest: { id, name: id, version: '0.1.0', type: 'app', namespace, dependencies },
+            });
+            expect(created.status, await created.clone().text()).toBe(201);
+        }
+
+        const landed = await clone(token, DEFAULT_SET, { name: 'in_closure_copy', label: 'In Closure', package: IN_CLOSURE });
+        expect(landed.status, await landed.clone().text()).toBe(200);
+        expect(((await landed.json()) as any).data.package).toBe(IN_CLOSURE);
+        expect((await reader.resolve('permission', 'in_closure_copy'))?.packageId).toBe(IN_CLOSURE);
+
+        const refused: Array<[string, string, number, string]> = [
+            ['read_only_copy', SHOWCASE, 422, 'WRITABLE_PACKAGE_REQUIRED'],
+            ['unknown_copy', 'com.acme.no_such_package', 422, 'WRITABLE_PACKAGE_REQUIRED'],
+            ['out_closure_copy', OUT_OF_CLOSURE, 409, 'RESOURCE_CONFLICT'],
+        ];
+        for (const [name, target, status, code] of refused) {
+            const res = await clone(token, DEFAULT_SET, { name, label: 'X', package: target });
+            const text = await res.clone().text();
+            expect(res.status, `${target}: ${text}`).toBe(status);
+            expect(((await res.json()) as any).error?.code, target).toBe(code);
+            expect(await reader.resolve('permission', name), target).toBeUndefined();
+            const rows = await ql.find('sys_metadata', { where: { type: 'permission', name }, context: SYSTEM_CTX });
+            expect(rows, target).toEqual([]);
+        }
+    });
+
+    it('a platform set (the lock-and-clone rule\'s commonest source) copies into its shipping package\'s pair', async () => {
+        const reader = securityCatalogReaderOf(ql)!;
+        const source = await reader.resolve('permission', 'member_default');
+        expect(source?.packageId, 'member_default is not packaged on this boot').toBeTruthy();
+
+        const res = await clone(token, 'member_default', { name: 'my_member_baseline', label: 'My Member Baseline' });
+        const text = await res.clone().text();
+        expect(res.status, text).toBe(200);
+        const landed = ((await res.json()) as any).data.package;
+        expect(landed).toBe(`${source!.packageId}.custom`);
+        expect((await reader.resolve('permission', 'my_member_baseline'))?.packageId).toBe(landed);
+    });
+
+    it('CONTROL — an environment-authored source still copies environment-wide, with no package', async () => {
+        const saved = await stack.apiAs(token, 'PUT', '/meta/permission/env_authored_source', {
+            name: 'env_authored_source', label: 'Env Authored', objects: { showcase_task: { allowRead: true } },
+        });
+        expect(saved.status, await saved.clone().text()).toBe(200);
+        const source = await securityCatalogReaderOf(ql)!.resolve('permission', 'env_authored_source');
+        expect(source?.packageId, 'the control source is packaged').toBeUndefined();
+
+        const res = await clone(token, 'env_authored_source', { name: 'env_authored_copy', label: 'Env Authored Copy' });
+        expect(res.status, await res.clone().text()).toBe(200);
+        expect(((await res.json()) as any).data.package).toBeNull();
+        expect((await securityCatalogReaderOf(ql)!.resolve('permission', 'env_authored_copy'))?.packageId).toBeUndefined();
+        const rows = await ql.find('sys_metadata', { where: { type: 'permission', name: 'env_authored_copy' }, context: SYSTEM_CTX });
+        expect(rows.map((r) => r.package_id ?? null)).toEqual([null]);
     });
 
     it('a taken name is 409, an unknown source 404, a bad name 400', async () => {

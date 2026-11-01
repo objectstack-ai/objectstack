@@ -50,7 +50,10 @@ function makeDoor(seed: StoredDatasource[] = []) {
   const ops: string[] = [];
 
   const config: DatasourceAdminServiceConfig = {
-    probe: async () => ({ ok: true, latencyMs: 1 }),
+    probe: async () => {
+      ops.push('probe');
+      return { ok: true, latencyMs: 1 };
+    },
     listDatasourceRecords: async () => [...records.values()].map((r) => structuredClone(r)),
     getDatasourceRecord: async (name) => {
       const r = records.get(name);
@@ -273,5 +276,125 @@ describe('#28549 — controls: the doors keep their other answers', () => {
     expect(message).not.toContain(PLACEHOLDER_PASSWORD);
     expect(records.has('wh_cfg')).toBe(false);
     expect(ops).toEqual([]);
+  });
+});
+
+/**
+ * #28612 — the rest of #28549: the unsaved-draft probe, and every top-level
+ * key `DatasourceSchema` refuses, not only the two credential keys.
+ *
+ * `POST /api/v1/datasources/test` built its probe through the same known-key
+ * projection, so a top-level `password` vanished and the probe tested a
+ * different connection than the one described. And the write doors dropped
+ * every other key the strict shape refuses (`foo`, a `url` one level too high,
+ * an alias such as `type`). All three doors now give the schema's own
+ * root refusal for whatever top-level keys it does not declare. Keys the
+ * schema declares stay accepted, and `secret` (split off by the route before
+ * the service sees the draft) stays the credential channel.
+ */
+describe('#28612 — POST /api/v1/datasources/test refuses a top-level key the schema refuses', () => {
+  const PROBE_HEADING = 'This connection draft is not a valid datasource.';
+
+  it.each([
+    ['password', { password: PLACEHOLDER_PASSWORD }],
+    ['connectionString', { connectionString: PLACEHOLDER_DSN }],
+    ['foo', { foo: 'bar' }],
+  ])('refuses a top-level `%s` before any probe runs', async (key, extra) => {
+    const { send, records, secrets, ops } = makeDoor();
+
+    const message = await expectRefusal(await send('POST', '/datasources/test', { ...BASE, ...extra }));
+
+    expect(message).toBe(`${PROBE_HEADING}\n${specRefusal([key])}`);
+    expect(message).not.toContain(PLACEHOLDER_PASSWORD);
+    expect(records.size).toBe(0);
+    expect(secrets.size).toBe(0);
+    expect(ops).toEqual([]);
+  });
+
+  it('refuses it beside a supplied `secret` too', async () => {
+    const { send, ops } = makeDoor();
+
+    const message = await expectRefusal(
+      await send('POST', '/datasources/test', { ...BASE, password: PLACEHOLDER_PASSWORD, secret: PLACEHOLDER_PASSWORD }),
+    );
+
+    expect(message).toBe(`${PROBE_HEADING}\n${specRefusal(['password'])}`);
+    expect(message).not.toContain(PLACEHOLDER_PASSWORD);
+    expect(ops).toEqual([]);
+  });
+});
+
+describe('#28612 — the write doors refuse every top-level key the schema refuses', () => {
+  it.each([
+    ['foo', { foo: 'bar' }],
+    ['url', { url: PLACEHOLDER_DSN }],
+    ['type', { type: 'postgres' }],
+    ['readReplicas', { readReplicas: [] }],
+  ])('POST refuses a top-level `%s`, storing nothing', async (key, extra) => {
+    const { send, records, secrets, ops } = makeDoor();
+
+    const message = await expectRefusal(await send('POST', '/datasources', { name: 'u_key', ...BASE, ...extra }));
+
+    expect(message).toBe(`Invalid datasource 'u_key'.\n${specRefusal([key])}`);
+    expect(message).not.toContain(PLACEHOLDER_PASSWORD);
+    expect(records.has('u_key')).toBe(false);
+    expect(secrets.size).toBe(0);
+    expect(ops).toEqual([]);
+  });
+
+  it('POST names every refused key in one answer', async () => {
+    const { send, records } = makeDoor();
+
+    const message = await expectRefusal(
+      await send('POST', '/datasources', { name: 'u_many', ...BASE, foo: 1, host: 'db.example.invalid', password: PLACEHOLDER_PASSWORD }),
+    );
+
+    expect(message).toBe(`Invalid datasource 'u_many'.\n${specRefusal(['foo', 'host', 'password'])}`);
+    expect(records.has('u_many')).toBe(false);
+  });
+
+  it.each([
+    ['foo', { config: BASE.config, foo: 'bar' }],
+    ['foo', { label: 'Warehouse', foo: 'bar' }],
+    ['hasSecret', { label: 'Warehouse', hasSecret: false }],
+  ])('PATCH refuses a top-level `%s`, leaving the stored record as it was', async (key, body) => {
+    const { send, records, ops } = makeDoor([STORED]);
+
+    const message = await expectRefusal(await send('PATCH', '/datasources/wh', body));
+
+    expect(message).toBe(`Invalid datasource 'wh'.\n${specRefusal([key])}`);
+    expect(records.get('wh')).toEqual(STORED);
+    expect(ops).toEqual([]);
+  });
+});
+
+describe('#28612 — controls: declared keys and the secret channel still pass', () => {
+  it('still probes a valid draft, its credential arriving as `secret`', async () => {
+    const { send, ops } = makeDoor();
+
+    const res = await send('POST', '/datasources/test', { ...BASE, secret: PLACEHOLDER_PASSWORD });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data?: { result?: { ok: boolean } } };
+    expect(body.data?.result?.ok).toBe(true);
+    expect(ops).toEqual(['probe']);
+  });
+
+  it('still creates with a key the schema declares and the projection leaves out (`description`, `origin`)', async () => {
+    const { send, records } = makeDoor();
+
+    const res = await send('POST', '/datasources', { name: 'wh_decl', ...BASE, description: 'Warehouse', origin: 'code' });
+
+    expect(res.status).toBe(201);
+    expect(records.get('wh_decl')?.origin).toBe('runtime');
+  });
+
+  it('still edits with a key the schema declares (`name`, `origin`)', async () => {
+    const { send, records } = makeDoor([STORED]);
+
+    const res = await send('PATCH', '/datasources/wh', { name: 'wh', origin: 'runtime', label: 'Warehouse' });
+
+    expect(res.status).toBe(200);
+    expect(records.get('wh')?.label).toBe('Warehouse');
   });
 });

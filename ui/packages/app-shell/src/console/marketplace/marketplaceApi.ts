@@ -740,6 +740,13 @@ export interface LocalInstallEntry {
    *  (objectui#11645). The entry is still installed: Uninstall and a
    *  compatible re-install act on it. */
   notLoaded?: LocalInstallNotLoaded;
+  /** Present only on a control-plane row ({@link listInstalledPackages}) that
+   *  was uninstalled: the control plane's uninstall is a soft disable that
+   *  keeps the installation row (its consent record and sample-data state)
+   *  and lists it with `status: 'disabled'` / `enabled: false`. Such a row is
+   *  NOT installed: nothing of it is served, and the install door re-enables
+   *  the same row. The install-local listing never carries it. */
+  disabled?: true;
 }
 
 /** A `managed` install-local answer: the package registered as code. */
@@ -933,6 +940,10 @@ export async function listLocalInstalls(): Promise<LocalInstallEntry[]> {
  *
  * `connected: false` means this runtime is self-hosted / not cloud-bound — the
  * caller should fall back to {@link listLocalInstalls}.
+ *
+ * `items` is every row the control plane lists, a soft-uninstalled one
+ * included: that one carries `disabled` ({@link LocalInstallEntry.disabled})
+ * and is not installed, so a reader that counts installs skips it.
  */
 export interface InstalledPackagesResult {
   connected: boolean;
@@ -959,6 +970,9 @@ export async function listInstalledPackages(): Promise<InstalledPackagesResult> 
         installedAt: String(p.installed_at ?? p.installedAt ?? ''),
         installedBy: (p.installed_by ?? p.installedBy ?? null) as string | null,
         withSampleData: p.with_sample_data === true || p.withSampleData === true,
+        // The control plane lists a soft-uninstalled row too. Its `status`
+        // and `enabled` both say so, and either one marks the row disabled.
+        ...(p.status === 'disabled' || p.enabled === false ? { disabled: true as const } : {}),
       };
     });
     return { connected: data.connected === true, items };
@@ -979,7 +993,9 @@ export async function listInstalledPackages(): Promise<InstalledPackagesResult> 
  */
 export async function readMarketplaceInstalls(): Promise<{ source: 'cloud' | 'local'; items: LocalInstallEntry[] }> {
   const cloud = await listInstalledPackages();
-  if (cloud.connected) return { source: 'cloud', items: cloud.items };
+  // A soft-uninstalled control-plane row is not installed: no row is drawn
+  // for it and no action acts on it.
+  if (cloud.connected) return { source: 'cloud', items: cloud.items.filter((i) => !i.disabled) };
   return { source: 'local', items: await fetchLocalInstalls() };
 }
 

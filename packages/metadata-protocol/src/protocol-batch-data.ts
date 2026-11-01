@@ -311,15 +311,16 @@ export async function runBatchDataLoop(
                 }
                 case 'update': {
                     if (!record.id) throw rowRequiredIdError('update');
-                    // [#5088] Same existence gate as `updateMany` and the
-                    // single-record PATCH — a row naming no record must not
-                    // enter the write pipeline, where #4770's stored ⊕
-                    // payload merge has no stored side and #4775 blames the
-                    // hook for the resulting gap.
-                    await this.assertRecordExists(object, record.id);
                     // [#3455] Collect the engine's LEGAL write strips per row.
                     const dropped: DroppedFieldsEvent[] = [];
                     const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any));
+                    // [#5088] Same existence answer as `updateMany` and the
+                    // single-record PATCH, and in the same place: AFTER the
+                    // engine has judged the write (its refusals, then its
+                    // not-found gate ahead of every hook), so a refused row
+                    // reads the same whether or not its id names a record —
+                    // see `assertRecordExists`.
+                    if (updated == null) await this.assertRecordExists(object, record.id);
                     omitInternalFieldsFromWriteResponse(batchSchema, updated); // [#7823]
                     results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
                     succeeded++;
@@ -335,8 +336,8 @@ export async function runBatchDataLoop(
                         // duplicate-keyed — an authorization/update
                         // scenario reported as a key collision — or, on a
                         // store without a unique id constraint, wrote a
-                        // second row. Same probe as the update branch above
-                        // and the single-record path (#4620): it asks the
+                        // second row. The same `probeRecord` the update branch
+                        // above asks after its write (#4620): it asks the
                         // database a fact, and whether the caller may WRITE
                         // the row it proves stays #1994's decision inside
                         // `engine.update`.
@@ -739,17 +740,19 @@ export async function runUpdateManyLoop(
             // handling — at best a 404 with `undefined` interpolated into
             // the message, at worst a where-clause with no id at all.
             if (!record.id) throw rowRequiredIdError('update');
-            // [#5088] Third gap, the same shape: no existence gate. A row
-            // naming no record went straight into `engine.update`, so the
-            // hook pipeline ran over a payload-only record and the row came
-            // back `INTERNAL_ERROR` from #4775's condition abort — blaming
-            // the hook for a caller's stale id. Probe first, per row, so
-            // this face answers what the single-record PATCH answers.
-            await this.assertRecordExists(object, record.id);
             const dropped: DroppedFieldsEvent[] = [];
             const opts: any = { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); } };
             if (context !== undefined) opts.context = context;
             const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, opts));
+            // [#5088] Third gap, the same shape: no existence answer. A row
+            // naming no record came back `INTERNAL_ERROR` from #4775's
+            // condition abort — blaming the hook for a caller's stale id. It
+            // answers what the single-record PATCH answers now, asked where
+            // that door asks it: AFTER the engine has judged the write (its
+            // refusals, then its not-found gate ahead of every hook), so a
+            // refused row reads the same whether or not its id names a
+            // record — see `assertRecordExists`.
+            if (updated == null) await this.assertRecordExists(object, record.id);
             omitInternalFieldsFromWriteResponse(updateManySchema, updated); // [#7823]
             results.push({ id: record.id, success: true, data: updated, index, ...(dropped.length > 0 ? { droppedFields: dropped } : {}) });
             succeeded++;

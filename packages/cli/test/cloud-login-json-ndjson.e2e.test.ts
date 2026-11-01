@@ -75,7 +75,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const CLOUD_LOGIN_SRC = resolve(HERE, '../src/commands/cloud/login.ts');
 const REPO_ROOT = resolve(HERE, '../../..');
 const CLI_DOCS = resolve(REPO_ROOT, 'content/docs/deployment/cli.mdx');
@@ -270,7 +269,7 @@ async function runCloudDeviceLogin(opts: {
   });
 
   const shell = [
-    `'${TSX}' '${CLI}' cloud login${opts.json ? ' --json' : ''} --no-browser`,
+    `'${process.execPath}' '${CLI}' cloud login${opts.json ? ' --json' : ''} --no-browser`,
     `--url 'http://127.0.0.1:${port}'`,
     `> '${outFile}' 2> '${errFile}'`,
   ].join(' ');

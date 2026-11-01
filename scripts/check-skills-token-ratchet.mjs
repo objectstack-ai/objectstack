@@ -581,7 +581,7 @@ export const CEILINGS = new Map([
   // absorbed and the ceiling moves 5997 -> 6014 (+17), the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24055 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6014],
+  ['skills/objectstack-platform/SKILL.md', 6012],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -993,7 +993,7 @@ export const CEILINGS = new Map([
   // 花板,怎么付?」, tap A, verbatim and untranslated: 「A:先削重复,余额按实测提高」.
   ['skills/objectstack-data/references/seeds.md', 1566],
   ['skills/objectstack-platform/references/bootstrap.md', 1351],
-  ['skills/objectstack-platform/references/operations.md', 3125],
+  ['skills/objectstack-platform/references/operations.md', 3119],
   ['skills/objectstack-platform/references/plugin-development.md', 3137],
   ['skills/objectstack-upgrade/references/examples-upgrade.md', 1197],
 

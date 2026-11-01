@@ -425,16 +425,29 @@ package and re-publish it (ADR-0086 two-doors).
 ### Cloning a permission set (ADR-0126 §7.1)
 
 ```text
-POST /api/v1/security/permission-sets/:name/clone    body: { "name": "...", "label": "..." }
+POST /api/v1/security/permission-sets/:name/clone    body: { "name": "...", "label": "...", "package"?: "..." }
 ```
 
 The clone door copies a set's whole definition under a new machine name. It
 reads the source from the security catalog, where every packaged and
 environment-authored set lives. It saves the copy through the metadata layer
-as a set authored in this system: no package, and no link back to the set
-it was copied from, so changes to the source never reach the copy.
+as a **new** set beside the original, with no link back to it, so changes to
+the source never reach the copy.
 
-- **The body is `{ name, label }`, both required, and nothing else.** `name` is
+- **Where the copy lands (ADR-0146 D3/D6).** With no `package`, a copy of a
+  set shipped by a read-only package X is saved in X's paired customization
+  package `<X>.custom`, the package that holds everything you changed about X.
+  The pair is created on the first copy, by the same ensure door as
+  `POST /api/v1/packages/:id/ensure-customization` (its only creation path),
+  and reused after. A copy of a set already in a writable package is
+  saved in that package, and a copy of a set authored in this system stays
+  environment-wide, in no package. With `package`, the copy is saved there: it
+  must be an installed, writable package (else `422`
+  `WRITABLE_PACKAGE_REQUIRED`) whose declared dependencies reach the source's
+  package and every object the set grants on (else `409` `RESOURCE_CONFLICT`).
+  The response's `package` names where the copy went (`null` for
+  environment-wide), and the copy is assigned by its bare name like any set.
+- **The body is `{ name, label, package? }`, `name` and `label` required, and nothing else.** `name` is
   a new snake_case machine name: a name failing that rule answers `400`, and a
   name any permission set already uses (the source's own included) answers `409`
   `RESOURCE_CONFLICT`. An unknown source answers `404`.
@@ -444,8 +457,8 @@ it was copied from, so changes to the source never reach the copy.
   (`packageId`, `protection` and the internal protection envelope),
   and two privilege decisions — `adminScope` (delegated administration) and
   `isDefault` (the `everyone` suggestion). Grant either deliberately on the copy
-  if it needs one. The response, `{ permissionSet, notice }`, says what was not
-  copied.
+  if it needs one. The response, `{ permissionSet, package, notice }`, says
+  where the copy went and what was not copied.
 - **The copy is held by nobody** until you add it to a position or assign it.
 - **Who may call it** is who may save a permission set through the metadata
   API: a holder of `manage_metadata`. Anyone else is refused `403`

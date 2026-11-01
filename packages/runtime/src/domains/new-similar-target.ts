@@ -41,11 +41,24 @@
  * authored in the deployment) asks no closure question here: its references
  * are judged by the save into the target, as every save into a package is.
  *
+ * ## The objects a copy names — when the door can read them off the item
+ *
+ * [#28563] A door whose item DECLARES the objects it reaches (a permission
+ * set's `objects`, `fields` and row-level rules) passes them as `objects`, and
+ * each must survive the save gate's own closure predicate,
+ * `narrowObjectsToPackageClosure` (`@objectstack/lint/runtime`): a platform /
+ * system object, an unpackaged one, or one owned by the target or a package in
+ * its closure. That is what a set copied from an environment-authored source
+ * (no package, so no closure question above) is judged by, and what catches a
+ * packaged set that grants on another package's object. An object no registry
+ * holds is the save's to judge, not this rule's. A door with no honest object
+ * list (a flow) passes none.
+ *
  * Pure over the registry the `objectql` service carries; it writes nothing.
  */
 
 import { isWritablePackage } from '@objectstack/metadata-protocol';
-import { resolvePackageClosure } from '@objectstack/lint/runtime';
+import { narrowObjectsToPackageClosure, resolvePackageClosure } from '@objectstack/lint/runtime';
 import type { HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
 
@@ -65,6 +78,8 @@ export type NewSimilarTargetRefusal = Error & {
 /** The registry slice the rule reads. */
 interface TargetRegistry {
     getPackage?(id: string): { manifest?: unknown } | undefined;
+    getObject?(name: string): unknown;
+    getObjectOwner?(name: string): { packageId?: string } | undefined;
 }
 
 function refusal(
@@ -105,10 +120,12 @@ export function newSimilarTargetRefusalAnswer(
  * - `subject` — the copied item as the sentences name it (`flow 'x'`).
  * - `sourcePackageId` — the package the source belongs to, when it belongs
  *   to one; absent asks no closure question (see the module header).
+ * - `objects` — the objects the copy names, when the item declares them; each
+ *   must be reachable from the target (see the module header).
  */
 export function newSimilarTargetRefusal(
     ql: unknown,
-    request: { target: string; subject: string; sourcePackageId?: string },
+    request: { target: string; subject: string; sourcePackageId?: string; objects?: readonly string[] },
 ): NewSimilarTargetRefusal | undefined {
     const { target, subject, sourcePackageId } = request;
     const registry = (ql as { registry?: TargetRegistry } | null | undefined)?.registry;
@@ -140,6 +157,29 @@ export function newSimilarTargetRefusal(
                 + `dependency in '${target}'s manifest, name a package that depends on '${sourcePackageId}', or `
                 + 'omit `package` to land the copy in the source\'s paired customization package. Nothing was '
                 + 'written.',
+                target);
+        }
+    }
+    if (request.objects !== undefined && request.objects.length > 0) {
+        // Each entry is the registered object as the save gate's predicate
+        // reads it, with its owner stamped the way `getAllObjects` tags one.
+        const entries: Array<{ name: string; _packageId?: string }> = [];
+        for (const name of request.objects) {
+            const object = registry?.getObject?.(name);
+            if (!object || typeof object !== 'object') continue;
+            entries.push({ ...object, name, _packageId: registry?.getObjectOwner?.(name)?.packageId });
+        }
+        const kept = new Set(narrowObjectsToPackageClosure(entries, resolvePackageClosure(target, (id) => getPackage(id))));
+        const outside = entries.filter((entry) => !kept.has(entry));
+        if (outside.length > 0) {
+            const named = outside.map((o) => `'${o.name}' (package '${o._packageId}')`).join(', ');
+            return refusal('RESOURCE_CONFLICT', 409,
+                `[new_similar_target_outside_closure] Cannot land a copy of ${subject} in package '${target}': it names `
+                + `${outside.length === 1 ? 'object' : 'objects'} ${named}, and '${target}' declares no dependency path `
+                + `to ${outside.length === 1 ? 'that package' : 'those packages'}, so the copy's references would not `
+                + `resolve from it. Declare the dependency in '${target}'s manifest, name a package that already depends `
+                + 'on it, or omit `package` to land the copy in the source\'s paired customization package. Nothing '
+                + 'was written.',
                 target);
         }
     }
