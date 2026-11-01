@@ -63,7 +63,7 @@
 - ⛔ 不取会话看起来起来了;零产出即技术性失败。
 - 回滚 = `delete_trigger` + 清空座位登记 + 失败注记。
 - 档位按职责挑,⛔ 不按重要性挑;Routine 席的档位与 cron 是维护者在 UI 上的可调项。
-- 项目席巡查默认每小时(总监席无),现值只记存根 `Patrol: TRIGGER_ID · CRON`;放宽须写理由。
+- 项目席巡查默认每小时(总监席无);存根记 `Patrol: TRIGGER_ID · CRON`、`Mailbox: PR #n`,放宽注由。
 
 ## Epic 车道收尾与僵尸回收
 
