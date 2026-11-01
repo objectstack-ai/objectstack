@@ -217,8 +217,7 @@ export type OverrideWriteRule =
     | 'declared_package_ships_no_such_item'
     | 'declared_type_not_overridable'
     | 'declared_object'
-    | 'declared_flow_not_yet_available'
-    | 'declared_action_not_yet_available';
+    | 'declared_type_not_yet_available';
 
 /**
  * The gate's verdict on one write:
@@ -292,13 +291,11 @@ export function judgeOverrideWrite(
                 `${item} carries \`overrides\`, but a ${type} takes no override (ADR-0146 D6). `
                 + `Remove \`overrides\` and create your own ${type} under a new name ("new similar").`);
         }
-        if (type === 'flow') {
-            return refuse('declared_flow_not_yet_available',
-                `${item} carries \`overrides\`: flow customization is not yet available, so a declared flow `
-                + 'override is refused (ADR-0146 D9). Remove `overrides` and rename the item.');
-        }
+        // `flow` and `action` are classified overridable and wait for D9's
+        // conditions (`isOpenOverrideType`): "flow customization is not yet
+        // available", and the same sentence for an action.
         if (!isOpenOverrideType(type)) {
-            return refuse('declared_action_not_yet_available',
+            return refuse('declared_type_not_yet_available',
                 `${item} carries \`overrides\`: ${type} customization is not yet available, so a declared ${type} `
                 + 'override is refused (ADR-0146 D9). Remove `overrides` and rename the item.');
         }

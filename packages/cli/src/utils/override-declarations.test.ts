@@ -103,7 +103,7 @@ describe('#28410 — findOverrideDeclarationRefusals walks the artifact under th
     });
     expect(rows.map((r) => [r.path, r.rule])).toEqual([
       ['objects[0]', 'declared_object'],
-      ['flows[0]', 'declared_flow_not_yet_available'],
+      ['flows[0]', 'declared_type_not_yet_available'],
       ['pages[0]', 'declared_outside_pair'],
     ]);
   });
