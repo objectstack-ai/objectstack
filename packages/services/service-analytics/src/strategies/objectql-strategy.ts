@@ -221,6 +221,28 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
 }
 
 /**
+ * [#28692, #28744] Append `item` to an `engine.aggregate` `groupBy` unless an
+ * identical key is already there: the same column, or the same column bucketed
+ * at the same granularity. Several dimensions can read one column (two dataset
+ * dimensions declared over it, a relationship's FK column under each dimension
+ * through it), and they share its one group, which every dimension name is
+ * mapped from afterwards. The engine refuses a `groupBy` naming a column twice
+ * (`INVALID_QUERY`), and that refusal stands for a caller that really asks for
+ * two values under one name: the column raw beside its bucket, or two buckets
+ * of it, are different keys, so both are handed on and the engine refuses them.
+ */
+function pushGroupKey(
+  groupBy: Array<string | { field: string; dateGranularity: string }>,
+  item: string | { field: string; dateGranularity: string },
+): void {
+  const same = (a: (typeof groupBy)[number]) =>
+    typeof a === 'string' || typeof item === 'string'
+      ? a === item
+      : a.field === item.field && a.dateGranularity === item.dateGranularity;
+  if (!groupBy.some(same)) groupBy.push(item);
+}
+
+/**
  * ObjectQLStrategy — Priority 2
  *
  * Translates an analytics query into an ObjectQL `engine.aggregate()` call.
@@ -253,18 +275,22 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     for (const td of query.timeDimensions ?? []) {
       if (td.granularity) granByDim.set(td.dimension, td.granularity);
     }
+    // [#28744] Each group key is named once (see {@link pushGroupKey}): two
+    // dimensions over one column (`region`, and `zone` declared over
+    // `region`) share its group, and the row mapping below keys the answer by
+    // every dimension name over it.
     const groupBy: GroupByItem[] = [];
     if (query.dimensions && query.dimensions.length > 0) {
       for (const dim of query.dimensions) {
         const field = this.resolveFieldName(cube, dim, 'dimension');
         const gran = granByDim.get(dim);
-        groupBy.push(gran ? { field, dateGranularity: gran } : field);
+        pushGroupKey(groupBy, gran ? { field, dateGranularity: gran } : field);
         granByDim.delete(dim);
       }
     }
     // Time dimensions not also listed in `dimensions` still bucket + group.
     for (const [dim, gran] of granByDim) {
-      groupBy.push({ field: this.resolveFieldName(cube, dim, 'dimension'), dateGranularity: gran });
+      pushGroupKey(groupBy, { field: this.resolveFieldName(cube, dim, 'dimension'), dateGranularity: gran });
     }
 
     // The compiled dataset's own scope (#10298 / PR #10758), read ONCE and
@@ -1345,21 +1371,21 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         // share it, and the engine refuses a groupBy naming a column twice
         // (`INVALID_QUERY`), where the native strategy served the groups. The
         // re-bucket reads the one column for each dimension.
-        if (!groupBy.includes(cd.fkField)) groupBy.push(cd.fkField);
+        pushGroupKey(groupBy, cd.fkField);
         continue;
       }
       const field = this.resolveFieldName(cube, dim, 'dimension');
       const gran = granByDim.get(dim);
-      // …and a base dimension over that FK column (`account` after
-      // `account.name`) reads the one already grouped.
-      const fkGrouped = !gran && groupBy.includes(field) && plan.crossDims.some((c) => c.fkField === field);
-      if (!fkGrouped) groupBy.push(gran ? { field, dateGranularity: gran } : field);
+      // …and so is a base column two dimensions read: the FK column itself
+      // (`account` beside `account.name`), or one column under two dimension
+      // names (`region`, `zone` over `region`, #28744).
+      pushGroupKey(groupBy, gran ? { field, dateGranularity: gran } : field);
       baseDimFields.push(field);
       granByDim.delete(dim);
     }
     for (const [dim, gran] of granByDim) {
       const field = this.resolveFieldName(cube, dim, 'dimension');
-      groupBy.push({ field, dateGranularity: gran });
+      pushGroupKey(groupBy, { field, dateGranularity: gran });
       baseDimFields.push(field);
     }
 
