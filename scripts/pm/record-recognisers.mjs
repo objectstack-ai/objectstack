@@ -8,6 +8,7 @@
  *   node scripts/pm/record-recognisers.mjs --template   # the record, copyable; no network
  *   node scripts/pm/record-recognisers.mjs --brief-template   # the reviewer's brief, read-only shape built in; no network
  *   node scripts/pm/record-recognisers.mjs --template --paths PATH-ONE PATH-TWO   # face and `Scope:` read off the PR's paths
+ *   node scripts/pm/record-recognisers.mjs --mailbox-keys   # the mailbox doorbell keys, full spellings, copyable; no network
  *   node scripts/pm/record-recognisers.mjs --self-test  # offline, no network
  *   node scripts/pm/record-recognisers.mjs --help       # this usage; no network
  *
@@ -33,7 +34,7 @@
  *   isOutsideReviewSurface   the prose faces a head may move on and keep its record
  *   contractReviewTemplateLines / contractReviewRecordLines   what `--template` prints
  *   contractReviewBriefLines what `--brief-template` prints — the brief a seat hands its reviewer
- *   readMailboxLine / mailboxEvents / MAILBOX_KEYS   the mailbox DOORBELL — `To: <seat>`, then one of the seven keys a `pm:mailbox` comment may carry, read; anything else refused
+ *   readMailboxLine / mailboxEvents / MAILBOX_KEYS   the mailbox DOORBELL — `To: <seat>`, then one key of the table a `pm:mailbox` comment may carry, read; anything else refused; `mailboxKeyLines` is what `--mailbox-keys` prints
  *
  * Every definition below was MOVED, names unchanged, out of
  * `check-clause2-carriers.mjs` at the ruling's last step, which deleted the
@@ -74,7 +75,7 @@
 // row is `GOVERNED_READ_FLOOR` in `dispatch-gates.data.mjs`). The derivation
 // grades it against the read the self-test really performs, so it cannot be
 // satisfied by deleting either half.
-// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md -- the mailbox doorbell battery pins each of the seven key templates verbatim in project-forms.md's 〈信箱 PR〉 section, the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, and the hold-line battery pins the `Contract-review-hold:` template and its listing hours there, so a change to any of those spellings is judged here
+// dispatch-gates: self-test-reads .claude/skills/pm-dispatch/references/project-forms.md .claude/skills/pm-dispatch/references/contract-review.md -- the mailbox doorbell battery pins the key table both ways against project-forms.md's 〈信箱 PR〉 section (every key named there, no other key named there), the claim-line battery pins the `Contract-review-claim:` template and its lapse hours in contract-review.md, and the hold-line battery pins the `Contract-review-hold:` template and its listing hours there, so a change to any of those spellings is judged here
 
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
@@ -1211,18 +1212,23 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// The mailbox DOORBELL — seven first-line keys, a CLOSED vocabulary
+// The mailbox DOORBELL — a table of first-line keys, a CLOSED vocabulary
 // ---------------------------------------------------------------------------
 
 /**
- * The seven keys a mailbox comment may carry — the doorbell a seat rings
- * on a sibling seat's or the triage seat's mailbox PR (`pm:mailbox`, one per
- * seat, opened by `mailbox-open.mjs`), because only a comment on a PR wakes
- * the session subscribed to it; a line on an issue wakes nobody. The protocol
- * text is the pm-dispatch skill's `references/project-forms.md` 〈信箱 PR〉,
- * and this list is its spelling in code: `template` is the line exactly as
- * that text prints it, placeholders included, and the self-test pins each one
- * verbatim in that file, so the text and the reader cannot drift apart.
+ * The keys a mailbox comment may carry — the doorbell a seat rings on another
+ * seat's mailbox PR (`pm:mailbox`, one per seat, opened by `mailbox-open.mjs`),
+ * because only a comment on a PR wakes the session subscribed to it; a line on
+ * an issue wakes nobody. The protocol text is the pm-dispatch skill's
+ * `references/project-forms.md` 〈信箱 PR〉: a SCENARIO TABLE, one row per event
+ * a seat MUST ring for — who rings whom, when, and which key — plus the events
+ * it must NOT ring for. The text names each key as `Kind: key`; this list is
+ * the one home of the FULL spelling (`template`, placeholders included), and
+ * `--mailbox-keys` prints it for a seat to copy. The self-test pins the two
+ * against each other in both directions — every key here is named in that
+ * section, and the section names no key that is not here — so the text and the
+ * reader cannot drift apart, and no full template is restated in rules text
+ * whose line budget is ratcheted.
  *
  * The rules the reader enforces, from the same text: the FIRST line of the
  * comment is `To: <seat>` — the seat the message is for, in `seatKey`'s
@@ -1231,22 +1237,42 @@ export function contractReviewHold(rows, headSha, { now } = {}) {
  * at most {@link MAILBOX_LINE_MAX_BYTES} bytes (the `To:` line is the envelope,
  * as the signature is, and is not counted), keys and numbers only —
  * reasons and readings stay on the card or the PR; no acknowledgement; no
- * re-send. Anything outside the table is a half-state. The vocabulary is
- * CLOSED on the maintainer's word (「只沟通必要的信息」): an eighth key is
- * refused here, never added by a reader that happens to want one.
+ * re-send. Anything outside the table is a half-state (`check-half-states.mjs`
+ * H72 lists the recent ones, report-only, through `mailboxEvents` below — one
+ * reader). The vocabulary is CLOSED on the maintainer's word
+ * (「只沟通必要的信息」): a key outside this list is refused here, never added by a
+ * reader that happens to want one. The scenario rows past the first seven
+ * (`Request: triage`, `Notify: main-red`, `release-blocker`, `unblocked`,
+ * `ruling`, `serial`, `landed`) were admitted on the maintainer's direction that
+ * the lanes were not using their mailboxes (「感觉车道之间还是不太知道使用 邮箱沟通，
+ * 综合评估一下哪些场景应该沟通」): `serial`, `landed` and `ruling` are spellings the
+ * lanes had already invented off-table; the others are events measured with no
+ * doorbell at all. `seat-online` carries the seat's patrol trigger (`patrol
+ * TRIGGER_ID`, or `patrol none` for a seat with no patrol by rule), the same
+ * value its seat post's `Patrol:` line records.
+ *
+ * `from` / `to` / `when` are the row in English, for the printout; the rules
+ * text is the authority on who rings whom.
  *
  * ⛔ No gate, workflow or queue guard reads a mailbox: coordination, never a
  * merge condition. `readMailboxLine` and `mailboxEvents` are the reading a seat
  * or a patrol takes; nothing here changes an exit.
  */
 export const MAILBOX_KEYS = Object.freeze([
-  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'triage', template: 'Request: contract-review · PR #n · head SHA · REASON' },
-  { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
-  { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the finding seat', to: 'triage, or the director when triage is absent', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
-  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'triage', to: 'lane', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
-  { id: 'notify:seat-online', kind: 'Notify', key: 'seat-online', from: 'the seating session', to: 'the lane\'s sibling seats and triage', template: 'Notify: seat-online · LANE#N · LOGIN · mailbox #m · takes: #a #b …' },
-  { id: 'notify:seat-offline', kind: 'Notify', key: 'seat-offline', from: 'the signing-off session', to: 'the lane\'s sibling seats and triage', template: 'Notify: seat-offline · LANE#N · in-flight: … · stay-behind: … · brief ID' },
-  { id: 'notify:split', kind: 'Notify', key: 'split', from: 'a seat of a multi-seat lane', to: 'its sibling seats', template: 'Notify: split · LANE#N · takes: … · leaves: …' },
+  { id: 'request:contract-review', kind: 'Request', key: 'contract-review', from: 'lane', to: 'triage', when: 'in the same stroke as the PR\'s `Contract-review-handoff:` line (the seat\'s own review tier is unavailable)', template: 'Request: contract-review · PR #n · head SHA · REASON' },
+  { id: 'request:triage', kind: 'Request', key: 'triage', from: 'lane', to: 'triage', when: 'a question about a card\'s fate, route or grade', template: 'Request: triage · #n · ONE-LINE-QUESTION' },
+  { id: 'request:urgent-triage', kind: 'Request', key: 'urgent-triage', from: 'any seat', to: 'triage', when: 'a p0 suspect, main red, a deterministic queue red', template: 'Request: urgent-triage · #n · ONE-LINE-CRITERION' },
+  { id: 'request:main-red', kind: 'Request', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'triage, or the director when triage is absent', when: 'the anchor card is filed', template: 'Request: main-red · CHECK-NAME · anchor #n · suggested lane X' },
+  { id: 'notify:main-red', kind: 'Notify', key: 'main-red', from: 'the seat that files the main-red anchor card', to: 'the seat that landed the breaking PR, and the anchor card\'s lane', when: 'the anchor card is filed', template: 'Notify: main-red · anchor #n · breaking PR #m' },
+  { id: 'notify:contract-review', kind: 'Notify', key: 'contract-review', from: 'triage', to: 'lane', when: 'with the record, only when the lane is not subscribed to the PR', template: 'Notify: contract-review PASS or FAIL · PR #n · record ID' },
+  { id: 'notify:release-blocker', kind: 'Notify', key: 'release-blocker', from: 'triage', to: 'the lane it is graded into', when: 'a p0/p1 release blocker is graded into a lane', template: 'Notify: release-blocker · #n' },
+  { id: 'notify:unblocked', kind: 'Notify', key: 'unblocked', from: 'the seat that moved the card to `pm:queue` (triage or an epic seat)', to: 'the card\'s lane seats', when: 'a p0/p1 card\'s `Blocked-by` target closed', template: 'Notify: unblocked · #n · p0 or p1' },
+  { id: 'notify:ruling', kind: 'Notify', key: 'ruling', from: 'the seat that recorded a maintainer ruling', to: 'the seat whose card or draft it changes', when: 'the ruling is recorded', template: 'Notify: ruling · #n · LETTER · record ID' },
+  { id: 'notify:serial', kind: 'Notify', key: 'serial', from: 'a seat', to: 'a sibling seat or another lane', when: 'claimed file surfaces overlap, or one card must land first', template: 'Notify: serial · #a behind #b' },
+  { id: 'notify:landed', kind: 'Notify', key: 'landed', from: 'the seat whose card landed first', to: 'the seat a `serial` held behind it', when: 'the card a `serial` named lands', template: 'Notify: landed · #b' },
+  { id: 'notify:seat-online', kind: 'Notify', key: 'seat-online', from: 'the seating session (or a forced takeover, for the walled account)', to: 'the lane\'s sibling seats and triage', when: 'at seating', template: 'Notify: seat-online · LANE#N · LOGIN · mailbox #m · patrol TRIGGER_ID · takes: #a #b …' },
+  { id: 'notify:seat-offline', kind: 'Notify', key: 'seat-offline', from: 'the signing-off session', to: 'the lane\'s sibling seats and triage', when: 'at sign-off', template: 'Notify: seat-offline · LANE#N · in-flight: … · stay-behind: … · brief ID' },
+  { id: 'notify:split', kind: 'Notify', key: 'split', from: 'a seat of a multi-seat lane', to: 'its sibling seats', when: 'at round open, only when the list changed', template: 'Notify: split · LANE#N · takes: … · leaves: …' },
 ]);
 /** One event, one line: the longest a mailbox line may be, in bytes (the text's 「≤200 字节」). */
 export const MAILBOX_LINE_MAX_BYTES = 200;
@@ -1266,6 +1292,20 @@ const RECORD_REF = /^record `?#?([1-9][0-9]*)`?$/;
 const BRIEF_REF = /^brief `?#?([1-9][0-9]*)`?$/;
 const LANE_REF = /^suggested lane ([A-Za-z][A-Za-z0-9:_-]*)$/;
 const VERDICT_REF = /^contract-review (PASS|FAIL)$/;
+/** `breaking PR #m` — the PR whose landing broke main, on `Notify: main-red`. */
+const BREAKING_REF = /^breaking PR #([1-9][0-9]*)$/;
+/** `p0` or `p1` — the priorities a `Notify: unblocked` is owed for; the template's own `p0 or p1` is a placeholder. */
+const UNBLOCKED_PRIORITY_REF = /^(p0|p1)$/;
+/** `#a behind #b` — the card that waits, then the card it waits for, on `Notify: serial`. */
+const SERIAL_REF = /^#([1-9][0-9]*) behind #([1-9][0-9]*)$/;
+/** A ruling's option LETTER as the record spells it (`A`, `B′`, `乙`): one short token, never a number reference. */
+const RULING_LETTER_REF = /^[^\s#`]{1,12}$/u;
+/**
+ * `patrol TRIGGER_ID` on `Notify: seat-online` — the seat's patrol routine, the value its post's `Patrol:` line
+ * records (`trig_…`), or `patrol none` for a seat with no patrol by rule (the director seat). The template's own
+ * `TRIGGER_ID` is a placeholder, not an id.
+ */
+const PATROL_REF = /^patrol (trig_[A-Za-z0-9]+|none)$/;
 /** GitHub's own login rule, as `mailbox-open.mjs` spells it for `--login`: alphanumerics and single inner hyphens, ≤ 39. */
 const LOGIN_REF = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 /** The attribution block the platform APPENDS to a comment (AGENTS.md): a rule line and the bare or session-URL footer. Not a second line. */
@@ -1316,12 +1356,52 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     const criterion = p.slice(2).join(' · ').trim();
     return card && criterion !== '' ? { card: Number(card[1]), criterion, numbers: [Number(card[1])] } : null;
   },
+  'request:triage': (p) => {
+    if (p.length < 3) return null;
+    const card = NUMBER_REF.exec(p[1]);
+    const question = p.slice(2).join(' · ').trim();
+    return card && question !== '' ? { card: Number(card[1]), question, numbers: [Number(card[1])] } : null;
+  },
   'request:main-red': (p) => {
     if (p.length !== 4) return null;
     const check = p[1].trim();
     const anchor = ANCHOR_REF.exec(p[2]);
     const lane = LANE_REF.exec(p[3]);
     return check !== '' && !/#/.test(check) && anchor && lane ? { check, anchor: Number(anchor[1]), lane: lane[1], numbers: [Number(anchor[1])] } : null;
+  },
+  'notify:main-red': (p) => {
+    if (p.length !== 3) return null;
+    const anchor = ANCHOR_REF.exec(p[1]);
+    const pr = BREAKING_REF.exec(p[2]);
+    return anchor && pr ? { anchor: Number(anchor[1]), pr: Number(pr[1]), numbers: [Number(anchor[1]), Number(pr[1])] } : null;
+  },
+  'notify:release-blocker': (p) => {
+    if (p.length !== 2) return null;
+    const card = NUMBER_REF.exec(p[1]);
+    return card ? { card: Number(card[1]), numbers: [Number(card[1])] } : null;
+  },
+  'notify:unblocked': (p) => {
+    if (p.length !== 3) return null;
+    const card = NUMBER_REF.exec(p[1]);
+    const priority = UNBLOCKED_PRIORITY_REF.exec(p[2]);
+    return card && priority ? { card: Number(card[1]), priority: priority[1], numbers: [Number(card[1])] } : null;
+  },
+  'notify:ruling': (p) => {
+    if (p.length !== 4) return null;
+    const card = NUMBER_REF.exec(p[1]);
+    const letter = RULING_LETTER_REF.test(p[2]) ? p[2] : null;
+    const record = RECORD_REF.exec(p[3]);
+    return card && letter && record ? { card: Number(card[1]), letter, record: Number(record[1]), numbers: [Number(card[1])] } : null;
+  },
+  'notify:serial': (p) => {
+    if (p.length !== 2) return null;
+    const pair = SERIAL_REF.exec(p[1]);
+    return pair ? { card: Number(pair[1]), behind: Number(pair[2]), numbers: [Number(pair[1]), Number(pair[2])] } : null;
+  },
+  'notify:landed': (p) => {
+    if (p.length !== 2) return null;
+    const card = NUMBER_REF.exec(p[1]);
+    return card ? { card: Number(card[1]), numbers: [Number(card[1])] } : null;
   },
   'notify:contract-review': (p) => {
     if (p.length !== 3) return null;
@@ -1331,12 +1411,13 @@ const MAILBOX_FIELD_READERS = Object.freeze({
     return verdict && pr && record ? { verdict: verdict[1], pr: Number(pr[1]), record: Number(record[1]), numbers: [Number(pr[1])] } : null;
   },
   'notify:seat-online': (p) => {
-    if (p.length !== 5) return null;
+    if (p.length !== 6) return null;
     const seat = readSeat(p[1]);
     const login = LOGIN_REF.test(p[2]) ? p[2] : null;
     const mailbox = MAILBOX_REF.exec(p[3]);
-    const takes = readList(p[4], 'takes');
-    return seat && login && mailbox && takes ? { seat, login, mailbox: Number(mailbox[1]), takes, numbers: [Number(mailbox[1]), ...takes] } : null;
+    const patrol = PATROL_REF.exec(p[4]);
+    const takes = readList(p[5], 'takes');
+    return seat && login && mailbox && patrol && takes ? { seat, login, mailbox: Number(mailbox[1]), patrol: patrol[1], takes, numbers: [Number(mailbox[1]), ...takes] } : null;
   },
   'notify:seat-offline': (p) => {
     if (p.length !== 5) return null;
@@ -1359,12 +1440,12 @@ const MAILBOX_FIELD_READERS = Object.freeze({
  * What ONE mailbox comment says, read off its `To:` line and the key line under it. Body in, reading
  * out; nothing is fetched.
  *
- *   read        `To: <seat>`, then one of the seven keys spelling its template: `id`, `kind`, `key`, `to`
+ *   read        `To: <seat>`, then one key of the table spelling its template: `id`, `kind`, `key`, `to`
  *               (the addressed seat's canonical key, `seatKey`'s), the key's own fields, and `numbers`
  *               (every card, PR or mailbox number the line names)
  *   refused     no `To: <seat>` line first — a key on the first line, free text, an acknowledgement —
  *               a `To:` naming no seat (a login is not one), no key line under it, or a key outside the
- *               seven: the half-state the text names
+ *               table: the half-state the text names
  *   unreadable  a known key whose line does not spell its template, runs over the byte cap, or is
  *               followed by a second line of content (the platform's appended footer is not one)
  *
@@ -1396,7 +1477,7 @@ export function readMailboxLine(text) {
   const parts = value.split(MAILBOX_SEPARATOR);
   const word = parts[0].trim().split(/[ \t]+/)[0];
   const entry = MAILBOX_KEYS.find((k) => k.kind === kind && k.key === word) ?? null;
-  if (!entry) return { state: 'refused', kind, reason: `\`${kind}: ${word}\` is not one of the seven keys`, line: quoteLine(first) };
+  if (!entry) return { state: 'refused', kind, reason: `\`${kind}: ${word}\` is not a key of the table (\`MAILBOX_KEYS\`; \`--mailbox-keys\` prints it)`, line: quoteLine(first) };
   if (Buffer.byteLength(first, 'utf8') > MAILBOX_LINE_MAX_BYTES) return unreadable(`over ${MAILBOX_LINE_MAX_BYTES} bytes — one event, one line, keys and numbers only`);
   const tail = lines.slice(at + 1).map((l) => l.trim()).filter((l) => l !== '');
   if (!tail.every((l) => FOOTER_RULE.test(l) || FOOTER_LINE.test(l))) return unreadable('more than one line — reasons and readings stay on the card or the PR');
@@ -1418,6 +1499,22 @@ export function mailboxEvents(rows) {
   if (!Array.isArray(rows)) return { state: 'unreadable', gaps: ["the mailbox's comment thread"] };
   const events = rows.map((row) => ({ ...readMailboxLine(row?.body), comment: row?.id ?? null, at: row?.created_at ?? null, by: row?.user?.login ?? null }));
   return { state: 'read', events, halfStates: events.filter((e) => e.state !== 'read').map((e) => e.comment) };
+}
+
+/**
+ * What `--mailbox-keys` prints: every key's full spelling, copyable, with its row — who rings whom, and when —
+ * under it. The table's one printed form; the rules text names the keys and points here rather than restating the
+ * templates. Pure: no board is read.
+ */
+export function mailboxKeyLines() {
+  return [
+    `Mailbox doorbell — the comment's first line is \`To: <seat>\` (LANE#N), the next is ONE of these ${MAILBOX_KEYS.length} keys:`,
+    `one event, one line of at most ${MAILBOX_LINE_MAX_BYTES} bytes, keys and numbers only; anything else is a half-state.`,
+    '',
+    ...MAILBOX_KEYS.flatMap((k) => [k.template, `    ${k.from} → ${k.to}; ${k.when}`]),
+    '',
+    'Protocol text (who MUST ring, and what is never rung): pm-dispatch references/project-forms.md 〈信箱 PR〉.',
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -2083,7 +2180,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own': 13,
-  '⭐ the mailbox doorbell: `To: <seat>`, then one of the seven keys read — seat, kind, numbers, sha, login, time — and anything else refused': 27,
+  // Raised 27 → 38 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
+  // per new key reading, the patrol and `patrol none` readings, the both-ways table pin that replaced the
+  // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout and the invented
+  // keys that stay refused (31 → 42 cases).
+  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 38,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the lane wins a tie': 21,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
@@ -2620,17 +2721,18 @@ export async function selfTest() {
   // -- the mailbox doorbell -----------------------------------------------------
   //
   // One mailbox PR per seat, and a CLOSED vocabulary on it (the maintainer's
-  // 「只沟通必要的信息」): a mailbox comment is `To: <seat>`, then one of the seven
-  // keys, and nothing else is allowed. These cases read one example of each key
+  // 「只沟通必要的信息」): a mailbox comment is `To: <seat>`, then one key of the
+  // table, and nothing else is allowed. These cases read one example of each key
   // under its `To:` line and refuse a key with no `To:` (the shape before the
-  // seat key), a `To:` naming a login, free text, an acknowledgement, an eighth
-  // key, a second line and an over-long line — the half-state faces — and pin
-  // each key's spelling to the protocol text, so the reader and the text cannot
-  // drift apart. Every refusal of a KEY is asked under a `To:` line, so it
+  // seat key), a `To:` naming a login, free text, an acknowledgement, a key
+  // outside the table (the lanes' invented ones among them), a second line and
+  // an over-long line — the half-state faces — and pin the table against the
+  // protocol text in both directions, so the reader and the text cannot drift
+  // apart. Every refusal of a KEY is asked under a `To:` line, so it
   // cannot pass vacuously on the missing envelope. A key's `LANE#N` field is
   // read with `seatKey` (#27891): the short form and a reserved `domain:` name
   // are refused there exactly as on `To:`.
-  battery('⭐ the mailbox doorbell: `To: <seat>`, then one of the seven keys read — seat, kind, numbers, sha, login, time — and anything else refused');
+  battery('⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused');
   const DB_ROW = (body, id = 5101, at = '2026-10-28T07:00:00Z') => ({ id, created_at: at, user: { login: 'os-bill' }, body });
   // A message: the addressee line, then the key line.
   const MSG = (line, to = 'domain:skills#2') => `To: ${to}\n${line}`;
@@ -2639,30 +2741,48 @@ export async function selfTest() {
     ut: MSG('Request: urgent-triage · #27047 · main red on the merge group, deterministic', 'triage'),
     mr: MSG('Request: main-red · Test Core · anchor #27090 · suggested lane server', 'triage'),
     nc: MSG('Notify: contract-review PASS · PR #26766 · record 6450011111'),
-    on: MSG('Notify: seat-online · domain:skills#2 · os-bill · mailbox #27120 · takes: #27077 #27062', 'domain:skills#1'),
+    on: MSG('Notify: seat-online · domain:skills#2 · os-bill · mailbox #27120 · patrol trig_01PjbHZiLyrERj8ppEGppxjS · takes: #27077 #27062', 'domain:skills#1'),
     off: MSG('Notify: seat-offline · domain:skills#2 · in-flight: #27077 · stay-behind: #27082 #26749 · brief 6450022222', 'domain:skills#1'),
     sp: MSG('Notify: split · domain:skills#2 · takes: #27077 #27062 · leaves: #27047', 'domain:skills#1'),
+    tq: MSG('Request: triage · #27123 · may it close, or does it route to server?', 'triage'),
+    nm: MSG('Notify: main-red · anchor #28622 · breaking PR #28595', 'domain:server#2'),
+    rb: MSG('Notify: release-blocker · #28657', 'domain:devx#1'),
+    ub: MSG('Notify: unblocked · #28560 · p1', 'domain:spec#4'),
+    ru: MSG('Notify: ruling · #28117 · A · record 6545646924', 'domain:server#2'),
+    se: MSG('Notify: serial · #28572 behind #28562', 'domain:ui#5'),
+    la: MSG('Notify: landed · #28562', 'domain:ui#5'),
   };
   t('⭐ `Request: contract-review` reads the PR, the head (7–40 hex) and the reason — the reason may carry a comma', (() => { const r = readMailboxLine(DB.cr); return r.state === 'read' && r.id === 'request:contract-review' && r.kind === 'Request' && r.key === 'contract-review' && r.pr === 26766 && r.head === HO_HEAD && r.reason === `${CONTRACT_REVIEW_TIER_NAME} refused, HTTP 429` && r.numbers.join() === '26766'; })());
   t('⭐ `Request: urgent-triage` reads the card and the one-line criterion', (() => { const r = readMailboxLine(DB.ut); return r.state === 'read' && r.id === 'request:urgent-triage' && r.card === 27047 && r.criterion === 'main red on the merge group, deterministic' && r.numbers.join() === '27047'; })());
   t('⭐ `Request: main-red` reads the check name, the anchor card and the suggested lane', (() => { const r = readMailboxLine(DB.mr); return r.state === 'read' && r.id === 'request:main-red' && r.check === 'Test Core' && r.anchor === 27090 && r.lane === 'server' && r.numbers.join() === '27090'; })());
   t('⭐ `Notify: contract-review` reads the verdict, the PR and the record id — PASS and FAIL, and the template\'s own `PASS or FAIL` is a placeholder, not a verdict', (() => { const p = readMailboxLine(DB.nc); const f = readMailboxLine(DB.nc.replace('PASS', 'FAIL')); const tpl = readMailboxLine(MSG('Notify: contract-review PASS or FAIL · PR #26766 · record 6450011111')); return p.state === 'read' && p.id === 'notify:contract-review' && p.verdict === 'PASS' && p.pr === 26766 && p.record === 6450011111 && p.numbers.join() === '26766' && f.state === 'read' && f.verdict === 'FAIL' && tpl.state === 'unreadable'; })());
-  t('⭐ `Notify: seat-online` reads the seat (lane and number), the login, the mailbox and the takes list', (() => { const r = readMailboxLine(DB.on); return r.state === 'read' && r.id === 'notify:seat-online' && r.seat.lane === 'domain:skills' && r.seat.n === 2 && r.login === 'os-bill' && r.mailbox === 27120 && r.takes.join() === '27077,27062' && r.numbers.join() === '27120,27077,27062'; })());
+  t('⭐ `Notify: seat-online` reads the seat (lane and number), the login, the mailbox, the patrol trigger and the takes list', (() => { const r = readMailboxLine(DB.on); return r.state === 'read' && r.id === 'notify:seat-online' && r.seat.lane === 'domain:skills' && r.seat.n === 2 && r.login === 'os-bill' && r.mailbox === 27120 && r.patrol === 'trig_01PjbHZiLyrERj8ppEGppxjS' && r.takes.join() === '27077,27062' && r.numbers.join() === '27120,27077,27062'; })());
+  t('`Notify: seat-online` with `patrol none` reads — a seat with no patrol by rule says so rather than dropping the field', (() => { const r = readMailboxLine(MSG('Notify: seat-online · director · os-zhuang · mailbox #27120 · patrol none · takes: none')); return r.state === 'read' && r.patrol === 'none' && r.seat.key === 'director#1'; })());
+  t('⛔ `Notify: seat-online` WITHOUT the patrol field — the five-field shape before the patrol rode the key — is unreadable, and so are the placeholder and a value that is no trigger id', ['Notify: seat-online · domain:skills#2 · os-bill · mailbox #27120 · takes: #27077 #27062', 'Notify: seat-online · domain:skills#2 · os-bill · mailbox #27120 · patrol TRIGGER_ID · takes: none', 'Notify: seat-online · domain:skills#2 · os-bill · mailbox #27120 · patrol hourly · takes: none', 'Notify: seat-online · domain:skills#2 · os-bill · mailbox #27120 · takes: none · patrol trig_01'].every((l) => { const r = readMailboxLine(MSG(l)); return r.state === 'unreadable' && /does not spell/.test(r.reason); }));
   t('⭐ `Notify: seat-offline` reads the seat, the in-flight and stay-behind lists and the brief id', (() => { const r = readMailboxLine(DB.off); return r.state === 'read' && r.id === 'notify:seat-offline' && r.seat.n === 2 && r.inFlight.join() === '27077' && r.stayBehind.join() === '27082,26749' && r.brief === 6450022222 && r.numbers.join() === '27077,27082,26749'; })());
   t('⭐ `Notify: split` reads the seat and the takes and leaves lists', (() => { const r = readMailboxLine(DB.sp); return r.state === 'read' && r.id === 'notify:split' && r.seat.lane === 'domain:skills' && r.takes.join() === '27077,27062' && r.leaves.join() === '27047' && r.numbers.join() === '27077,27062,27047'; })());
-  t('⭐ every key\'s template is spelled VERBATIM, in a code span, in the protocol text (`references/project-forms.md` 〈信箱 PR〉) — and that text lists exactly seven', (() => { const forms = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/project-forms.md', import.meta.url), 'utf8'); const keyLines = forms.split('\n').filter((l) => /^- `(Request|Notify): /.test(l)); return MAILBOX_KEYS.every((k) => forms.includes(`\`${k.template}\``)) && keyLines.length === MAILBOX_KEYS.length && MAILBOX_KEYS.length === 7; })());
+  t('⭐ `Request: triage` reads the card and the one-line question — the question may carry a comma', (() => { const r = readMailboxLine(DB.tq); return r.state === 'read' && r.id === 'request:triage' && r.to === 'triage#1' && r.card === 27123 && r.question === 'may it close, or does it route to server?' && r.numbers.join() === '27123'; })());
+  t('⭐ `Notify: main-red` reads the anchor card and the breaking PR — a key of its own beside `Request: main-red`, told apart by its kind', (() => { const r = readMailboxLine(DB.nm); const q = readMailboxLine(DB.mr); return r.state === 'read' && r.id === 'notify:main-red' && r.anchor === 28622 && r.pr === 28595 && r.numbers.join() === '28622,28595' && q.id === 'request:main-red'; })());
+  t('⭐ `Notify: release-blocker` reads the card', (() => { const r = readMailboxLine(DB.rb); return r.state === 'read' && r.id === 'notify:release-blocker' && r.card === 28657 && r.numbers.join() === '28657'; })());
+  t('⭐ `Notify: unblocked` reads the card and its priority — p0 and p1 only, the priorities it is owed for', (() => { const r = readMailboxLine(DB.ub); const p0 = readMailboxLine(DB.ub.replace('p1', 'p0')); return r.state === 'read' && r.id === 'notify:unblocked' && r.card === 28560 && r.priority === 'p1' && p0.priority === 'p0' && r.numbers.join() === '28560' && ['p2', 'P1', 'p0 or p1'].every((v) => readMailboxLine(DB.ub.replace('p1', v)).state === 'unreadable'); })());
+  t('⭐ `Notify: ruling` reads the card, the letter and the record id — a primed or CJK letter reads, a sentence does not', (() => { const r = readMailboxLine(DB.ru); return r.state === 'read' && r.id === 'notify:ruling' && r.card === 28117 && r.letter === 'A' && r.record === 6545646924 && r.numbers.join() === '28117' && readMailboxLine(DB.ru.replace(' A ', ' B′ ')).letter === 'B′' && readMailboxLine(DB.ru.replace(' A ', ' 乙 ')).letter === '乙' && readMailboxLine(MSG('Notify: ruling · #28117 A (record 6545646924, 「同意」) · your draft #28430')).state === 'unreadable'; })());
+  t('⭐ `Notify: serial` reads the waiting card and the card it waits for; `Notify: landed` releases it', (() => { const r = readMailboxLine(DB.se); const l = readMailboxLine(DB.la); return r.state === 'read' && r.id === 'notify:serial' && r.card === 28572 && r.behind === 28562 && r.numbers.join() === '28572,28562' && l.state === 'read' && l.id === 'notify:landed' && l.card === 28562 && l.numbers.join() === '28562' && readMailboxLine(MSG('Notify: serial · #28572 · #28562')).state === 'unreadable'; })());
+  t('⭐ every key of the table is named, as `Kind: key` in a code span, in the protocol text (`references/project-forms.md` 〈信箱 PR〉), and that section names NO other key — the table in both directions — and points at `--mailbox-keys` for the full spellings', (() => { const forms = readFileSync(new URL('../../.claude/skills/pm-dispatch/references/project-forms.md', import.meta.url), 'utf8'); const at = forms.indexOf('\n## 信箱 PR\n'); const section = at < 0 ? '' : forms.slice(at + 1).split(/\n## /)[0]; const named = new Set([...section.matchAll(/`(Request|Notify): ([a-z-]+)`/g)].map((m) => `${m[1]}: ${m[2]}`)); const table = new Set(MAILBOX_KEYS.map((k) => `${k.kind}: ${k.key}`)); return section !== '' && named.size === table.size && [...table].every((k) => named.has(k)) && section.includes('--mailbox-keys'); })());
+  t('⭐ every template, sent VERBATIM, is not an event — a placeholder (`#n`, `SHA`, `LANE#N`, `p0 or p1`, `TRIGGER_ID`, `ID`) never reads as one', MAILBOX_KEYS.every((k) => readMailboxLine(MSG(k.template)).state === 'unreadable'));
+  t('⭐ `--mailbox-keys` prints exactly `mailboxKeyLines()` — every template, with its row under it — and exits 0', (() => { const r = faceCli(['--mailbox-keys']); return r.status === 0 && r.stdout === `${mailboxKeyLines().join('\n')}\n` && MAILBOX_KEYS.every((k) => r.stdout.includes(`${k.template}\n    ${k.from} → ${k.to}; ${k.when}\n`)) && usageLines().join('\n').includes('--mailbox-keys'); })());
   t('decoration reads: a bulleted bolded key and a blockquoted message are the same event', (() => { const a = readMailboxLine(MSG(`- **Request:** contract-review · PR #26766 · head ${HO_HEAD} · quota exhausted`, 'triage')); const b = readMailboxLine(DB.sp.split('\n').map((l) => `> ${l}`).join('\n')); return a.state === 'read' && a.pr === 26766 && b.state === 'read' && b.id === 'notify:split' && b.to === 'domain:skills#1'; })());
   t('the attribution block the platform APPENDS (bare or session-URL footer under a rule line) is not a second line', ['\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_', `\n\n---\n_Generated by [Claude Code](https://claude.ai/code/${RECORD_SESSION})_`].every((tail) => readMailboxLine(`${DB.on}${tail}`).state === 'read'));
   t('⛔ free text, an acknowledgement and an empty comment are REFUSED, naming the line — the half-state the text names', (() => { const a = readMailboxLine(MSG('Seat note: picking up the review now, will report on the card.')); const b = readMailboxLine(MSG('收到,谢谢!')); const c = readMailboxLine(''); const bare = readMailboxLine('收到,谢谢!'); return a.state === 'refused' && /not a `Request:` or `Notify:` key line/.test(a.reason) && typeof a.line === 'string' && b.state === 'refused' && c.state === 'refused' && bare.state === 'refused'; })());
-  t('⛔ an EIGHTH key is refused, whatever its kind — the vocabulary is closed — and the kinds are case-sensitive', ['Request: coffee · #27077', 'Notify: ack · #27077', 'Ack: #27077', 'request: urgent-triage · #27047 · x', 'Request: contract-review-done · PR #1'].every((l) => readMailboxLine(MSG(l)).state === 'refused'));
+  t('⛔ a key OUTSIDE the table is refused, whatever its kind — the vocabulary is closed — and the kinds are case-sensitive', ['Request: coffee · #27077', 'Notify: ack · #27077', 'Ack: #27077', 'request: urgent-triage · #27047 · x', 'Request: contract-review-done · PR #1', 'Notify: unblocked-soon · #1 · p1'].every((l) => readMailboxLine(MSG(l)).state === 'refused'));
+  t('⛔ the off-table keys the lanes invented and the table did NOT admit stay refused (`surface` is `serial`, `take` is `split`), and `main-red cleared` does not spell `Notify: main-red`', ['Notify: surface · #28572', 'Notify: take · domain:ui#1 · takes: #27975'].every((l) => readMailboxLine(MSG(l)).state === 'refused') && readMailboxLine(MSG('Notify: main-red cleared · #28219 closed by #28227')).state === 'unreadable');
   t(`⛔ a line over ${MAILBOX_LINE_MAX_BYTES} bytes is unreadable — keys and numbers only, the reasoning stays on the card`, (() => { const r = readMailboxLine(MSG(`Request: contract-review · PR #26766 · head ${HO_HEAD} · ${'x'.repeat(160)}`)); return r.state === 'unreadable' && /bytes/.test(r.reason) && readMailboxLine(DB.cr).state === 'read'; })());
   t('⛔ a second line of content is unreadable — one event, one line', (() => { const r = readMailboxLine(`${DB.cr}\n\nbecause the reviewer tier was refused twice this round`); return r.state === 'unreadable' && /more than one line/.test(r.reason); })());
-  t('⛔ a known key that does not spell its template is unreadable: no head, a 6-hex head, a login GitHub refuses, no mailbox, no lane, a record that is not a number', [`Request: contract-review · PR #26766 · ${HO_HEAD} · x`, 'Request: contract-review · PR #26766 · head 1b03a9 · x', 'Notify: seat-online · domain:skills#2 · -bad-- · mailbox #27120 · takes: none', 'Notify: seat-online · domain:skills#2 · os-bill · takes: none', 'Request: main-red · Test Core · anchor #27090', 'Notify: contract-review PASS · PR #26766 · record six'].every((l) => { const r = readMailboxLine(MSG(l)); return r.state === 'unreadable' && /does not spell/.test(r.reason); }));
+  t('⛔ a known key that does not spell its template is unreadable: no head, a 6-hex head, a login GitHub refuses, no mailbox, no lane, a record that is not a number', [`Request: contract-review · PR #26766 · ${HO_HEAD} · x`, 'Request: contract-review · PR #26766 · head 1b03a9 · x', 'Notify: seat-online · domain:skills#2 · -bad-- · mailbox #27120 · patrol none · takes: none', 'Notify: seat-online · domain:skills#2 · os-bill · patrol none · takes: none', 'Request: main-red · Test Core · anchor #27090', 'Notify: contract-review PASS · PR #26766 · record six'].every((l) => { const r = readMailboxLine(MSG(l)); return r.state === 'unreadable' && /does not spell/.test(r.reason); }));
   t('lists: `none` is the empty list, `#a #b` the numbers; a comma, an empty list or a `PR #n` item is unreadable', (() => { const ok = readMailboxLine(MSG('Notify: split · domain:skills#2 · takes: none · leaves: #1 #2')); return ok.state === 'read' && ok.takes.length === 0 && ok.leaves.join() === '1,2' && ['Notify: split · domain:skills#2 · takes: #1, #2 · leaves: none', 'Notify: split · domain:skills#2 · takes: · leaves: none', 'Notify: split · domain:skills#2 · takes: PR #1 · leaves: none'].every((l) => readMailboxLine(MSG(l)).state === 'unreadable'); })());
   t('the spaces around the ` · ` separator are optional', readMailboxLine(MSG('Request: urgent-triage·#27047·main red')).state === 'read' && readMailboxLine(MSG('Request: urgent-triage ·#27047· main red')).card === 27047);
   t('a seat with no number reads as seat 1 (`triage` → `triage#1`, as `seatKey` spells it), and the `LANE#N` placeholder itself does not', (() => { const r = readMailboxLine(MSG('Notify: split · triage · takes: none · leaves: none')); return r.seat.lane === 'triage' && r.seat.n === 1 && r.seat.key === 'triage#1' && readMailboxLine(MSG('Notify: split · LANE#N · takes: none · leaves: none')).state === 'unreadable'; })());
-  t('⭐ a key\'s `LANE#N` field is read with `seatKey` — ONE seat grammar (#27891): a well-formed `domain:X#N` reads as before, carries its canonical `key`, and is read lower-cased', (() => { const r = readMailboxLine(DB.on); const u = readMailboxLine(MSG('Notify: seat-online · Domain:Skills#2 · os-bill · mailbox #27120 · takes: none')); return r.state === 'read' && r.seat.key === 'domain:skills#2' && r.seat.lane === 'domain:skills' && r.seat.n === 2 && u.state === 'read' && u.seat.key === 'domain:skills#2'; })());
-  t('⛔ the short form `skills#2` is refused in a key field, the same as on `To:` — the key does not spell its template', ['Notify: seat-online · skills#2 · os-bill · mailbox #27120 · takes: none', 'Notify: seat-offline · skills#2 · in-flight: none · stay-behind: none · brief 6450022222', 'Notify: split · skills#2 · takes: none · leaves: none', 'Notify: split · server · takes: none · leaves: none'].every((l) => { const r = readMailboxLine(MSG(l)); return r.state === 'unreadable' && /does not spell/.test(r.reason); }) && readMailboxLine('To: skills#2\nRequest: urgent-triage · #27047 · x').state === 'refused');
+  t('⭐ a key\'s `LANE#N` field is read with `seatKey` — ONE seat grammar (#27891): a well-formed `domain:X#N` reads as before, carries its canonical `key`, and is read lower-cased', (() => { const r = readMailboxLine(DB.on); const u = readMailboxLine(MSG('Notify: seat-online · Domain:Skills#2 · os-bill · mailbox #27120 · patrol none · takes: none')); return r.state === 'read' && r.seat.key === 'domain:skills#2' && r.seat.lane === 'domain:skills' && r.seat.n === 2 && u.state === 'read' && u.seat.key === 'domain:skills#2'; })());
+  t('⛔ the short form `skills#2` is refused in a key field, the same as on `To:` — the key does not spell its template', ['Notify: seat-online · skills#2 · os-bill · mailbox #27120 · patrol none · takes: none', 'Notify: seat-offline · skills#2 · in-flight: none · stay-behind: none · brief 6450022222', 'Notify: split · skills#2 · takes: none · leaves: none', 'Notify: split · server · takes: none · leaves: none'].every((l) => { const r = readMailboxLine(MSG(l)); return r.state === 'unreadable' && /does not spell/.test(r.reason); }) && readMailboxLine('To: skills#2\nRequest: urgent-triage · #27047 · x').state === 'refused');
   t('⛔ a `domain:` lane named after a reserved lane word is refused in a key field and on `To:` alike — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1'].every((seat) => readMailboxLine(MSG(`Notify: split · ${seat} · takes: none · leaves: none`)).state === 'unreadable' && readMailboxLine(`To: ${seat}\nRequest: urgent-triage · #27047 · x`).state === 'refused') && readMailboxLine(MSG('Notify: split · domain:triage-tools#1 · takes: none · leaves: none')).seat.key === 'domain:triage-tools#1');
   t('⭐ `To: <seat>` reads as the addressed seat\'s canonical key (`seatKey`\'s), beside the key\'s own fields — `to` never shadows a key\'s own `seat`', (() => { const r = readMailboxLine(DB.sp); return r.to === 'domain:skills#1' && r.seat.lane === 'domain:skills' && r.seat.n === 2 && readMailboxLine(DB.ut).to === 'triage#1' && readMailboxLine(MSG('Notify: split · triage · takes: none · leaves: none', 'Domain:UI#4')).to === 'domain:ui#4'; })());
   t('⛔ a key on the FIRST line — the shape a mailbox took before the seat key — is REFUSED, naming the missing `To:`', ['Notify: split · domain:skills#2 · takes: none · leaves: none', `Request: contract-review · PR #26766 · head ${HO_HEAD} · x`].every((l) => { const r = readMailboxLine(l); return r.state === 'refused' && /`To: <seat>`/.test(r.reason) && typeof r.line === 'string'; }));
@@ -2673,7 +2793,7 @@ export async function selfTest() {
   t('⭐ `mailboxEvents` reads a thread: each row\'s comment id, time and author beside its reading (the key id never shadows the comment id), and the half-states by comment id', (() => { const r = mailboxEvents([DB_ROW(DB.cr, 5101, '2026-10-28T07:00:00Z'), DB_ROW('thanks, on it', 5102, '2026-10-28T07:05:00Z'), DB_ROW(DB.on, 5103, '2026-10-28T07:10:00Z')]); return r.state === 'read' && r.events.length === 3 && r.events[0].state === 'read' && r.events[0].id === 'request:contract-review' && r.events[0].comment === 5101 && r.events[0].at === '2026-10-28T07:00:00Z' && r.events[0].by === 'os-bill' && r.events[2].mailbox === 27120 && r.events[2].comment === 5103 && r.halfStates.join() === '5102'; })());
   t('a thread that is not an array is a read that could not be made, never an empty one', mailboxEvents(null).state === 'unreadable' && mailboxEvents([]).state === 'read' && mailboxEvents([]).events.length === 0);
   t('⛔ no gate reads it: the queue guard\'s record reading is untouched — a doorbell comment beside a record on this head still reads FOUND', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, DB_ROW(DB.nc, 5104)] })); return r.state === 'found' && r.id === 3301; })());
-  t('the roster: seven keys, unique ids, each of the two kinds, the byte cap the text states', MAILBOX_KEYS.length === 7 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 7 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.template.startsWith(`${k.kind}: ${k.key}`)) && MAILBOX_LINE_MAX_BYTES === 200);
+  t('the roster: fourteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 14 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 14 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 14 && MAILBOX_LINE_MAX_BYTES === 200);
 
   // -- the signature line (#27113) ----------------------------------------------
   //
@@ -2738,7 +2858,7 @@ export async function selfTest() {
     const ROUNDS = ['**Round-open marker** · triage seat · `session_01x` · **R+236** · fire 2026-09-15T14:51Z', 'R+12 open · triage', '分诊轮收尾 · R+234 · `session_01x`', '# 🔻 收班简报 · 分诊席 · `session_01x` · **R+220 → R+234**'];
     t('round records: every round-artefact headline is the same line signed, and its shape still matches', ROUNDS.every((r) => same(hs.h65Headline, `${r}\n\nbody`) && hs.H65_ROUND_ARTEFACT_SHAPES.some((shape) => shape.re.test(hs.h65Headline(signed(`${r}\n\nbody`))))));
     t('`## 席位核对`: the seat-record heading reads the same signed', SEAT_RECORD_MARKER.test('## 席位核对\n- ① ok') && SEAT_RECORD_MARKER.test(signed('## 席位核对\n- ① ok')));
-    t('⭐ the mailbox doorbell: all seven keys read IDENTICALLY signed — the signature is neither the key nor a second line', Object.values(DB).every((line) => readMailboxLine(line).state === 'read' && same(readMailboxLine, line)) && readMailboxLine(signed(`${DB.ut}\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_`)).state === 'read');
+    t('⭐ the mailbox doorbell: every key of the table reads IDENTICALLY signed — the signature is neither the key nor a second line', Object.values(DB).every((line) => readMailboxLine(line).state === 'read' && same(readMailboxLine, line)) && readMailboxLine(signed(`${DB.ut}\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_`)).state === 'read');
     t('⛔ …a signature with no key under it is refused, and so is a key under a near-miss signature or under two', readMailboxLine(SIG).state === 'refused' && readMailboxLine(`domain:skills#2 - os-justin - session_01QSeKYmhU5KEj1nukYhp1Tg\n${DB.ut}`).state === 'refused' && readMailboxLine(`${SIG}\n${SIG}\n${DB.ut}`).state === 'refused');
     t('triage rulings and director rulings: the first-line shape reads the same signed', ['Triage: lands in domain:skills', '**Grading (skills seat):** p2'].every((r) => hs.isTriageRulingComment(r) && same(hs.isTriageRulingComment, r)) && classifyRulingComment('Ruling: batch #9 item 2 · letter A') !== null && same(classifyRulingComment, 'Ruling: batch #9 item 2 · letter A'));
     t('the act\'s OPENING-line stamp (H56, which post-stamped\'s positional refusal imports) is the same reading under a signature', hs.h56StampedReadings('Claim: x · 2026-10-28T12:44Z\nbody').length === 1 && same(hs.h56StampedReadings, 'Claim: x · 2026-10-28T12:44Z\nbody'));
@@ -2978,8 +3098,8 @@ export async function selfTest() {
       + 'every direction; the copyable template, per face, driven back through the '
       + 'locator and printed by `--template`; the `Local-runs:` reading — none, one named probe, absent not re-judged, '
       + 'unreadable refused; the reviewer brief printed by `--brief-template` with its read-only shape; the mailbox '
-      + 'doorbell — `To: <seat>` then seven keys read, each spelled verbatim in the protocol text, and a key with no `To:`, a `To:` naming a login, free text, an acknowledgement, '
-      + 'an eighth key, a second line and an over-long line refused; the review claim line — read signed and unsigned, '
+      + 'doorbell — `To: <seat>` then each of the table\'s keys read, the table named both ways in the protocol text and printed by `--mailbox-keys`, and a key with no `To:`, a `To:` naming a login, free text, an acknowledgement, '
+      + 'a key outside the table, a second line and an over-long line refused; the review claim line — read signed and unsigned, '
       + 'spelled verbatim in the rule text, lapsing on a moved head or after two hours, the lane winning a tie; the review hold '
       + 'line — read signed and unsigned, spelled verbatim in the rule text, per head and cleared only by a new head, an unreadable '
       + 'line listed and voiding nothing, its 24-hour age a reading '
@@ -3004,7 +3124,7 @@ export async function selfTest() {
  */
 export function usageLines() {
   return [
-    'usage: node scripts/pm/record-recognisers.mjs [--template|--brief-template [--face FACE | --paths PATH...]] [--self-test] [--help]',
+    'usage: node scripts/pm/record-recognisers.mjs [--template|--brief-template [--face FACE | --paths PATH...]] [--mailbox-keys] [--self-test] [--help]',
     '',
     '  --template   print the copyable contract-review record and exit 0 -- no board is read',
     "  --brief-template   print the copyable reviewer's brief, read-only shape built in, and exit 0 -- no board is read",
@@ -3013,6 +3133,7 @@ export function usageLines() {
     "  --paths PATH...  the PR's changed paths, in place of --face: `reviewFace` reads the face off them, and the",
     "               at-tier record's `Scope:` line and the brief print its `hits` filled in. Not with --face.",
     "               Refused when the paths decide no face and one is a changeset: its `Clause-②:` line decides.",
+    '  --mailbox-keys   print every mailbox doorbell key, full spelling, with who rings whom and when, and exit 0 -- no board is read',
     "  --self-test  run this file's own battery, offline -- no board is read",
     '  --help, -h   print this text and exit 0',
     '',
@@ -3076,6 +3197,9 @@ if (isEntrypoint(import.meta.url)) {
       process.exit(1);
     }
     for (const line of lines) console.log(line);
+    process.exit(0);
+  } else if (argv.length === 1 && argv[0] === '--mailbox-keys') {
+    for (const line of mailboxKeyLines()) console.log(line);
     process.exit(0);
   } else if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
     for (const line of usageLines()) console.log(line);
