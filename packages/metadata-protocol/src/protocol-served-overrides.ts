@@ -31,10 +31,12 @@
  *    leaves a legacy organization's out, ADR-0131 D6/D7). No per-organization
  *    axis exists to filter on (ADR-0131 D6), so every caller gets one answer.
  *  - A row the reads decline ({@link ObjectStackProtocolImplementation.declinesStoredRow}:
- *    a stored row under a shipped flow name, a code-defined datasource name,
- *    sealed managed content) is not listed. Its declaration may be well
- *    formed, but the base's document is what every read serves for the name
- *    (ADR-0146 D9's conditions are N-11's), so it overrides nothing yet.
+ *    a code-defined datasource name, sealed managed content) is not listed.
+ *    Its declaration may be well formed, but the base's document is what
+ *    every read serves for the name, so it overrides nothing. [#28412] A
+ *    shipped flow name's declared override is not declined (ADR-0146 D9
+ *    item 1): the reads serve it over the base's flow, so it is listed; the
+ *    row is handed over whole, so the decline judges it on its own binding.
  *
  * ## What it reports, and what it never computes
  *
@@ -112,7 +114,7 @@ export async function listServedOverrides(
         if (typeof row?.name !== 'string' || row.name === '') continue;
         if (!isServedOverrideRowOf(row, base)) continue;
         const type = PLURAL_TO_SINGULAR[row.type] ?? row.type;
-        if (this.declinesStoredRow(type, row.name)) continue;
+        if (this.declinesStoredRow(type, row.name, row)) continue;
         const member = typeof row.bundle_member === 'string' && row.bundle_member !== '' ? row.bundle_member : undefined;
         // `isServedOverrideRowOf` parsed this body already; a body it admitted parses.
         const declaration = (storedRowDocument(row) as { overrides?: { basedOn?: unknown } }).overrides;
