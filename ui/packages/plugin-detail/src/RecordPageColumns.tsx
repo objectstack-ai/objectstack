@@ -22,6 +22,7 @@ import { DefaultRecordPageContext, DetailsColumnCapContext } from './defaultReco
 import { RelatedCardStack } from './RelatedCardStack';
 import { RecordTimelinePanel } from './RecordTimelinePanel';
 import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab } from './RecordTabRow';
+import { partitionRecordTabsByRecords } from './synth/recordTabRow';
 import { RecordTimelineCountContext } from './recordTimelineStream';
 import { RecordTimelineCountProbe } from './renderers/record-activity';
 import {
@@ -350,6 +351,8 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   }
 
   // ── The tab row (Target 8): 概览, 动态, the panels in the reader's order ──
+  // The panels with records first and the empty ones in the dropdown
+  // (objectstack#28469), as the right column folds its empty panels.
   const panelTab = (id: RelatedCardId): RecordTab => ({
     id,
     label: relatedNodeTitle(panelNodes.get(id)),
@@ -359,7 +362,15 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
   if (hasTimeline) {
     tabs.push({ id: RECORD_PAGE_TIMELINE_PANEL, label: t('detail.timeline', { defaultValue: 'Activity' }), count: streamCount });
   }
-  for (const id of resolved.order) tabs.push(panelTab(id));
+  // While the panels' first count set is still out (the right column draws its
+  // count skeletons meanwhile) their tabs wait off the row, so a tab that turns
+  // out empty never draws on the row and then leaves it: the tabs appear once,
+  // already in place. The active tab is always drawn; a list that is never
+  // counted (no source, a refused read) keeps its place in the arrangement.
+  const panelTabs = partitionRecordTabsByRecords(
+    resolved.order.filter((id) => id === activeTab || counts.stateOf(id).kind !== 'pending').map(panelTab),
+  );
+  tabs.push(...panelTabs.withRecords);
   if (openBodyTable) tabs.push(openBodyTable);
   const hiddenTabs = resolved.hidden.map(panelTab);
   const selectTab = (id: string) => {
@@ -367,8 +378,14 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
     else onEnlargeRelated?.(id);
   };
   const tabRow =
-    onEnlargeRelated && tabs.length + hiddenTabs.length > 1 ? (
-      <RecordTabRow tabs={tabs} hiddenTabs={hiddenTabs} activeId={activeTab} onSelect={selectTab} />
+    onEnlargeRelated && tabs.length + panelTabs.empty.length + hiddenTabs.length > 1 ? (
+      <RecordTabRow
+        tabs={tabs}
+        emptyTabs={panelTabs.empty}
+        hiddenTabs={hiddenTabs}
+        activeId={activeTab}
+        onSelect={selectTab}
+      />
     ) : null;
 
   // The provenance line closes the details column in every tier

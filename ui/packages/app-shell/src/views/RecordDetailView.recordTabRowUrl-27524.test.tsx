@@ -121,9 +121,15 @@ const OBJECTS = [
 let rootWidth = 0;
 let dataSource: { find: ReturnType<typeof vi.fn> } & Record<string, unknown>;
 
+/**
+ * The related lists' totals: both have records, so their tabs sit on the tab
+ * row, which keeps empty lists' tabs in its dropdown (objectstack#28469).
+ */
+const RELATED_TOTALS: Record<string, number> = { showcase_task: 2, showcase_note: 1 };
+
 function makeDataSource() {
   return {
-    find: vi.fn(async () => ({ data: [], total: 0 })),
+    find: vi.fn(async (objectName: string) => ({ data: [], total: RELATED_TOTALS[objectName] ?? 0 })),
     create: vi.fn(async (_o: string, row: unknown) => row),
     findOne: vi.fn(async (_o: string, recordId: string) => ({
       id: recordId,
@@ -200,6 +206,13 @@ afterEach(() => {
 
 const search = () => new URLSearchParams(window.location.search).get('related');
 const tab = (id: string) => document.querySelector(`[role="tab"][data-record-tab="${id}"]`) as HTMLElement;
+/** A tab once it is on the row: the panels' tabs join it when their counts land (objectstack#28469). */
+const drawnTab = (id: string) =>
+  waitFor(() => {
+    const el = tab(id);
+    expect(el).toBeTruthy();
+    return el;
+  });
 const activeTab = () => document.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute('data-record-tab') ?? null;
 const face = () => document.querySelector('[data-related-enlarged]');
 
@@ -210,7 +223,7 @@ describe('RecordDetailView — the tab row drives the address (objectstack#27524
     const start = window.history.length;
     expect(activeTab()).toBe('overview');
 
-    fireEvent.click(tab('showcase_task.project'));
+    fireEvent.click(await drawnTab('showcase_task.project'));
     await waitFor(() => expect(face()?.getAttribute('data-related-enlarged')).toBe('showcase_task.project'));
     expect(search()).toBe('showcase_task.project');
     expect(window.history.length).toBe(start + 1);
@@ -237,7 +250,7 @@ describe('RecordDetailView — the tab row drives the address (objectstack#27524
   it('Esc on a tab returns to 「概览」, and so does the browser\'s Back', async () => {
     renderPage({ width: 720 });
     await screen.findAllByText('Tasks', undefined, { timeout: 5000 });
-    fireEvent.click(tab('showcase_task.project'));
+    fireEvent.click(await drawnTab('showcase_task.project'));
     fireEvent.click(await waitFor(() => tab('showcase_note.project')));
     await waitFor(() => expect(search()).toBe('showcase_note.project'));
     fireEvent.keyDown(face()!, { key: 'Escape' });
