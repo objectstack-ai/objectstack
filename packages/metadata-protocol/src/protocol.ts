@@ -17287,14 +17287,19 @@ export class ObjectStackProtocolImplementation implements
      * second code package's claim on the name, ADR-0029 D3), and its artifact
      * lookup reads the owner's layer whatever package is asked for, so the
      * owner is the whole set.
+     *
+     * [#28746] `member` — one bundle member's artifacts, for a type whose
+     * identity is a pair (the override write gate's question, which asks
+     * about the member a write addresses). Omitted, the bundle's artifact
+     * canonical-first, as before: a lock binds the NAME.
      */
-    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages): unknown[] {
+    private shippedArtifactsOf(type: string, name: string, shipping?: ShippingPackages, member?: string): unknown[] {
         // [#25467 cut 15] The body moved to `protocol-artifact-lookup.ts` (see `ArtifactLookupHost`).
         const host: ThisParameterType<typeof shippedArtifactsOf> = {
             lookupArtifactItem: (...a) => this.lookupArtifactItem(...a),
             shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
-        return shippedArtifactsOf.call(host, type, name, shipping);
+        return shippedArtifactsOf.call(host, type, name, shipping, member);
     }
 
     /**
