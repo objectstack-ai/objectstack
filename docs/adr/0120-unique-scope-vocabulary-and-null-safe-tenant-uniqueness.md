@@ -183,7 +183,10 @@ Two properties of this table are the ADR's acceptance criteria:
 > - **Every create door accepts a caller-supplied `id`, and a fresh one lands as given:**
 >   `POST /data/:object`, `POST /data/:object/batch` with `operation: 'create'`, `createMany`,
 >   the cross-object `POST /batch`, import in `insert` mode and in `upsert` mode (an upsert
->   whose match, run as the caller, finds no row creates), and clone's `overrides.id`.
+>   whose match, run as the caller, finds no row creates), and clone's `overrides.id`; and
+>   `POST /data/:object/batch` with `operation: 'upsert'` for a row naming an `id` the caller
+>   cannot read or an `id` that names no row (added by the dated note at the end of this
+>   amendment).
 > - **A create that collides on `id` answers `409 UNIQUE_VIOLATION` and writes nothing**, on a
 >   store that enforces the primary key — the SQL-family drivers do (`driver-sql`, and
 >   `driver-sqlite-wasm` and `driver-turso`, which extend it); `driver-memory`, the
@@ -244,6 +247,37 @@ Two properties of this table are the ADR's acceptance criteria:
 > (same organization, the stock showcase) and
 > [`create-caller-id-collision-walled.dogfood.test.ts`](../../packages/qa/dogfood/test/create-caller-id-collision-walled.dogfood.test.ts)
 > (another organization, `isolated` and `group`).
+>
+> **Amendment (2026-11-01, ruling record
+> [`5985885287`](https://github.com/objectstack-ai/objectstack/issues/21771#issuecomment-5985885287)
+> applied to the per-object batch `upsert` by commit `7b62f0a77`) — `POST /data/:object/batch`
+> with `operation: 'upsert'` is a create door for a row naming an `id` the caller cannot read,
+> and joins the list above.**
+>
+> The by-id upsert matches on the row's `id`, read as the caller — the object-level read
+> admission, then the caller's own read of that id, under the context its write runs with. A
+> row the caller can read is matched and takes the update arm, where the engine still judges
+> the write. A row the caller cannot read is, on the write doors, a row that does not exist
+> (ruling record `5985885287`), so it takes the create arm: the same insert and the same row
+> answer as `operation: 'create'` naming that `id`. Every fact above holds for that arm, and two
+> are particular to it:
+>
+> - **A held `id` the caller cannot read meets the collision, never a match.** Import `upsert`
+>   matches on the mapping's declared key fields; this door's match key is the `id` itself, so
+>   the only answer a held-but-unreadable `id` can get here is the create's: `409
+>   UNIQUE_VIOLATION` on a store that enforces the primary key, the same row error a batch
+>   create naming that `id` carries, identical whether the row is hidden inside the caller's
+>   organization or held by another one. A caller without the create grant gets the create's
+>   refusal instead, the same for a held `id` and for one that names no row.
+> - **On `driver-memory` the create arm lands a second row with that `id`**, as every create
+>   door does there; when that driver runs with persistence (its opt-in `persistence` option
+>   or a custom `persistenceAdapter`), the duplicate is also written to that development store.
+>   Accepted as the same residual: the development and test driver declares no primary key.
+>
+> Pinned at the HTTP door, atomic and not, by
+> [`upsert-by-id-caller-read.dogfood.test.ts`](../../packages/qa/dogfood/test/upsert-by-id-caller-read.dogfood.test.ts)
+> (the stock showcase, and a walled two-organization boot), and at the protocol seam by
+> [`protocol.upsert-existence.test.ts`](../../packages/metadata-protocol/src/protocol.upsert-existence.test.ts).
 
 ## Posture portability: one app package, every tenancy posture
 
