@@ -380,11 +380,12 @@ describe('[#28470] the record\'s streams and the related rows\' names ride in th
         const data = RecordPageResponseSchema.parse(answer.body.data);
         const reads = findData.mock.calls.map(([req]) => req);
 
-        // The related list's read carries its own `$expand`, and its rows the
-        // resolved references.
+        // The related list's read carries its own `$expand` (as the relation
+        // map the list read's normalizer lowers `$expand=owner` to), and its
+        // rows the resolved references.
         expect(reads).toContainEqual({
             object: 'note',
-            query: { object: 'note', where: { account: 'a1' }, limit: 3, count: true, expand: ['owner'] },
+            query: { object: 'note', where: { account: 'a1' }, limit: 3, count: true, expand: { owner: { object: 'owner' } } },
             context: CTX,
         });
         expect(data.related[0]).toEqual({ object: 'note', field: 'account', total: 7, records: [{ id: 'note-1', owner: { id: 'user-1', name: 'Una' } }] });
@@ -415,7 +416,7 @@ describe('[#28470] the record\'s streams and the related rows\' names ride in th
                 orderBy: [{ field: 'timestamp', order: 'desc' }],
                 limit: 200,
                 count: true,
-                expand: ['actor_id'],
+                expand: { actor_id: { object: 'actor_id' } },
             },
             context: CTX,
         });

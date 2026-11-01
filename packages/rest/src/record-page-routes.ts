@@ -58,6 +58,15 @@ const ACTIVITY_OBJECT = 'sys_activity';
 const ATTACHMENT_OBJECT = 'sys_attachment';
 
 /**
+ * A `$expand` list spelled as the relation map the QueryAST declares, as the
+ * list read's normalizer lowers `$expand=a,b` (`{ a: { object: 'a' } }`): the
+ * same map, so a part's rows expand exactly as that read's rows do (#28470).
+ */
+function relationMap(fields: readonly string[]): Record<string, { object: string }> {
+    return Object.fromEntries(fields.map((rel): [string, { object: string }] => [rel, { object: rel }]));
+}
+
+/**
  * The `RestServer` members {@link registerRecordPageEndpoints} reads — every
  * one of them, and no other (`data-action-routes.ts`' header carries why each
  * entry is shaped the way it is). `approvalsServiceProvider` is a getter: it is
@@ -229,7 +238,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                                 ...(entry.sort && entry.sort.length > 0 ? { orderBy: entry.sort } : {}),
                                 // [#28470] the list read's own `$expand`, so
                                 // its rows carry the names the list draws.
-                                ...(entry.expand && entry.expand.length > 0 ? { expand: entry.expand } : {}),
+                                ...(entry.expand && entry.expand.length > 0 ? { expand: relationMap(entry.expand) } : {}),
                             },
                             ...scope,
                         } satisfies ServerScopedDataRequest<FindDataRequest>);
@@ -298,7 +307,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                         orderBy: [{ field: 'timestamp', order: 'desc' }],
                         limit: top,
                         count: true,
-                        expand: ['actor_id'],
+                        expand: relationMap(['actor_id']),
                     });
                     return 'error' in answer ? answer : { total: answer.total, records: answer.records };
                 };
