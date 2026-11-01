@@ -212,8 +212,9 @@ function typecheckProject(root: string): { code: number; output: string } {
   const diagnostics = [...ts.getPreEmitDiagnostics(program), ...program.emit().diagnostics];
   const errors = diagnostics.filter((d) => d.category === ts.DiagnosticCategory.Error);
   return {
-    // `tsc --noEmit` with an error answers ExitStatus.DiagnosticsPresent_OutputsSkipped.
-    code: errors.length === 0 ? 0 : 1,
+    // The exit status `tsc --noEmit` answers an error with, measured on the
+    // canary against TypeScript 6.0.3; the cases read only zero vs non-zero.
+    code: errors.length === 0 ? 0 : 2,
     output: ts.formatDiagnostics(diagnostics, FORMAT_HOST),
   };
 }
