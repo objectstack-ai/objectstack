@@ -173,14 +173,16 @@ jobs:
       #                   the objectui skill bundle; see the filter below);
       #   ui_consumers  — one of the seven packages objectui installs from this
       #                   tree changed, so the Console is compiled (Type Check
-      #                   UI) and built (Build & E2E UI) against the new shape in
-      #                   the PR that moves it;
+      #                   UI), built (Build & E2E UI) and tested (Test UI, since
+      #                   objectstack#28220) against the new shape in the PR
+      #                   that moves it;
       #   ui_tree       — `ui/package.json` exists in this checkout.
       # On merge_group `ui` and `ui_consumers` come from the queue diff
       # (objectstack#25867): an entry whose merged diff against
       # `merge_group.base_sha` touches no ui path and none of the seven
       # packages skips the five ui jobs, exactly as the same diff does on its
-      # PR head; an entry that touches one runs them. If the step fails (the
+      # PR head; an entry that touches one runs them (Lint UI reads `ui`
+      # alone, so one of the seven by itself does not start it). If the step fails (the
       # base cannot be fetched, the diff errors), it is `continue-on-error`
       # there, its outputs are empty and `|| 'true'` runs every ui job.
       #
@@ -557,9 +559,12 @@ jobs:
               # skipped on the PR and in the queue alike.
               - 'package.json'
             # The seven packages objectui installs from this tree (the set its
-            # `.objectstack-pin` used to pack). A change here compiles and builds
-            # the Console in the same PR — the check the retired Spec Shape Gate
-            # ran hourly against a clone of objectui main.
+            # `.objectstack-pin` used to pack). A change here compiles, builds
+            # and tests the Console in the same PR — the check the retired Spec
+            # Shape Gate ran hourly against a clone of objectui main. Test UI
+            # reads this list since objectstack#28220; its selector turns full
+            # for any of these packages, and its test pins this list against
+            # the package graph the selector reads.
             ui_consumers:
               - 'packages/spec/**'
               - 'packages/client/**'
@@ -3727,10 +3732,25 @@ jobs:
   # non-documentation root file, `patches/`, one of the seven packages the
   # `ui_consumers` filter names). The selector's header states the rules and
   # what it does not see; the full battery on `main` is the backstop.
+  #
+  # ── Test UI: when the shards start (objectstack#28220, ruling A) ─────────
+  # On `ui` OR `ui_consumers`, the shape Build UI Deps, Type Check UI and
+  # Build & E2E UI already read. Until this entry the shards read `ui` alone,
+  # so a diff confined to one of the seven packages compiled and built the
+  # Console against the new shape and never ran a ui test that pins it: the
+  # selector above already answered `mode=full` for such a diff, but the job
+  # it answers in never started. The queue build of objectstack#28192
+  # (packages/lint/** + packages/metadata-protocol/**, run 41091107812)
+  # skipped all sixteen shards; the next queue build that started them
+  # (objectstack#28197) failed a ui test that imports @objectstack/lint, and a
+  # bystander was ejected for it. Which files run stays the selector's answer.
+  # `ui/scripts/__tests__/select-affected-tests.test.ts` holds the join: every
+  # package outside ui/ the selector turns full for is covered by a list this
+  # `if:` reads. Lint UI keeps `ui` alone (its eslint reads none of the seven).
   test-ui:
     name: Test UI (${{ matrix.shard }}/16)
     needs: [filter, ui-deps]
-    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false' }}
+    if: ${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -3895,7 +3915,8 @@ jobs:
     #
     # The verdict reads the matrix rollup `needs.test-ui.result`, and only
     # `success` passes, with one exception: `skipped`, when `filter` concluded
-    # `success` AND said the diff reaches no ui path (the shards' own `if:`).
+    # `success` AND said the diff reaches no ui path and none of the seven
+    # packages ui consumes (the shards' own `if:`, objectstack#28220).
     # That is #4928's skipped-only-when-filter-succeeded guard, and it makes a
     # queue build or PR that touches no ui path read green here the way Lint
     # UI and Build & E2E UI read `skipped` there. Everything else is red:
@@ -3926,17 +3947,18 @@ jobs:
           OS_FILTER_RESULT: ${{ needs.filter.result }}
           OS_UI_TREE: ${{ needs.filter.outputs.ui_tree }}
           OS_UI: ${{ needs.filter.outputs.ui }}
+          OS_UI_CONSUMERS: ${{ needs.filter.outputs.ui_consumers }}
         run: |
-          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI')."
+          echo "Test UI (k/16) rollup: '$OS_TEST_UI_RESULT'; filter: '$OS_FILTER_RESULT' (ui_tree='$OS_UI_TREE', ui='$OS_UI', ui_consumers='$OS_UI_CONSUMERS')."
           case "$OS_TEST_UI_RESULT" in
             success)
               echo "✓ Test UI: every shard concluded success."
               ;;
             skipped)
-              if [ "$OS_FILTER_RESULT" = 'success' ] && { [ "$OS_UI_TREE" = 'false' ] || [ "$OS_UI" = 'false' ]; }; then
-                echo "✓ Test UI: the shards were skipped because filter found no ui path in this diff."
+              if [ "$OS_FILTER_RESULT" = 'success' ] && { [ "$OS_UI_TREE" = 'false' ] || { [ "$OS_UI" = 'false' ] && [ "$OS_UI_CONSUMERS" = 'false' ]; }; }; then
+                echo "✓ Test UI: the shards were skipped because filter found no ui path and no ui-consumed package in this diff."
               else
-                echo "::error title=Test UI::the Test UI shards were skipped, but filter (result '$OS_FILTER_RESULT', ui_tree='$OS_UI_TREE', ui='$OS_UI') does not explain the skip. A skip passes only when filter succeeded and said the diff reaches no ui path (#4928)."
+                echo "::error title=Test UI::the Test UI shards were skipped, but filter (result '$OS_FILTER_RESULT', ui_tree='$OS_UI_TREE', ui='$OS_UI', ui_consumers='$OS_UI_CONSUMERS') does not explain the skip. A skip passes only when filter succeeded and said the diff reaches no ui path and none of the seven packages ui consumes (#4928)."
                 exit 1
               fi
               ;;
