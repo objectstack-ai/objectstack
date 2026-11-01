@@ -446,3 +446,349 @@ describe('packagedBaseRefusal — each Regime C type names its OWN sanctioned pa
         }
     });
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-0146 D2 (ruling A on #28390) — the override write gate, at publish.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * The override write gate: only the base's paired `<base>.custom` declares an
+ * override. Inside a base's dependency closure, a dependent's item that bears
+ * a base item's name is refused unless it is the pair's declared override; a
+ * dependent that carries `overrides` is refused; a declaration naming a
+ * package outside the closure, or a package that ships no such item, is
+ * refused; and `overrides` on a type with no override channel is refused by
+ * name. Each refusal is `403 NOT_OVERRIDABLE` (the code the sealed write
+ * already answers) with its own sentence.
+ *
+ * Harness: the real save and promotion paths over a stub engine whose
+ * registry ships the base's artifacts (`_packageId` stamped, as
+ * `SchemaRegistry.getArtifactItem` stamps a code package's) and serves each
+ * package's manifest for the closure walk.
+ */
+describe('the override write gate — only the base\'s paired .custom declares an override (ADR-0146 D2)', () => {
+    const BASE = 'com.acme.crm';
+    const PAIR = 'com.acme.crm.custom';
+    const PARTNER = 'com.acme.partner';
+    const OTHER_PAIR = 'com.zeta.custom';
+    const UNRELATED = 'com.other';
+    const MANIFESTS: Record<string, { dependencies: Record<string, string>; version: string }> = {
+        [BASE]: { dependencies: {}, version: '3.2.0' },
+        [PAIR]: { dependencies: { [BASE]: '^3' }, version: '0.1.0' },
+        [PARTNER]: { dependencies: { [BASE]: '^3' }, version: '1.0.0' },
+        // A pair of ANOTHER base that also depends on this one: the former
+        // "second declarer" — not the base's pair, so it may not declare.
+        [OTHER_PAIR]: { dependencies: { [BASE]: '^3', 'com.zeta': '^1' }, version: '0.1.0' },
+        'com.zeta': { dependencies: {}, version: '1.0.0' },
+        [UNRELATED]: { dependencies: {}, version: '1.0.0' },
+    };
+    /** What the base ships: an overlay type, a sealed type, a flow, an action, a permission set, an object. */
+    const BASE_ITEMS: Array<{ type: string; name: string }> = [
+        { type: 'view', name: 'task.crm_list' },
+        { type: 'dashboard', name: 'crm_board' },
+        { type: 'page', name: 'crm_home' },
+        { type: 'flow', name: 'crm_flow' },
+        { type: 'action', name: 'crm_action' },
+        { type: 'permission', name: 'crm_perm' },
+        { type: 'object', name: 'crm_account' },
+    ];
+    const artifact = (type: string, name: string) =>
+        BASE_ITEMS.some((i) => i.type === type && i.name === name)
+            ? { name, label: name, _packageId: BASE, _provenance: 'package' }
+            : undefined;
+
+    interface GateRow { type: string; name: string; package_id: string | null; state: string; metadata: string; id?: string }
+    const keyOf = (w: Record<string, unknown>) =>
+        `${w.type}|${w.name}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
+    const matches = (r: GateRow, where: Record<string, unknown>): boolean => Object.entries(where).every(([k, v]) => {
+        if (v === undefined) return true;
+        if (k === '$or') return (v as Array<Record<string, unknown>>).some((c) => matches(r, c));
+        if (v !== null && typeof v === 'object' && Array.isArray((v as { $in?: unknown }).$in)) {
+            return (v as { $in: unknown[] }).$in.includes((r as unknown as Record<string, unknown>)[k]);
+        }
+        return (r as unknown as Record<string, unknown>)[k] === v;
+    });
+
+    function gateProtocol() {
+        const rows = new Map<string, GateRow>();
+        let nextId = 0;
+        const findRow = (w: Record<string, unknown>) => {
+            if (w.id !== undefined) {
+                for (const [k, r] of rows) if (r.id === w.id) return { key: k, row: r };
+                return null;
+            }
+            if (w.package_id !== undefined) {
+                const r = rows.get(keyOf(w));
+                if (r) return { key: keyOf(w), row: r };
+            }
+            for (const [k, r] of rows) if (matches(r, w)) return { key: k, row: r };
+            return null;
+        };
+        const packageRecord = (id: string) =>
+            (MANIFESTS[id] ? { manifest: { id, ...MANIFESTS[id] } } : undefined);
+        const engine: any = {
+            // A booted code package is read-only (`isWritablePackage` reads `manifests` first).
+            manifests: new Map([[BASE, {}]]),
+            async findOne(table: string, opts: { where: Record<string, unknown> }) {
+                if (table !== 'sys_metadata') return null;
+                return findRow(opts.where)?.row ?? null;
+            },
+            async find(table: string, opts?: { where?: Record<string, unknown> }) {
+                if (table !== 'sys_metadata') return [];
+                return Array.from(rows.values()).filter((r) => matches(r, opts?.where ?? {}));
+            },
+            async insert(table: string, data: Record<string, unknown>) {
+                if (table !== 'sys_metadata') return { id: 'side_effect_skip' };
+                nextId += 1;
+                const row = { ...(data as unknown as GateRow), id: `r_${nextId}` };
+                rows.set(keyOf(data), row);
+                return { id: row.id };
+            },
+            async update(_t: string, data: Record<string, unknown>, opts: { where: Record<string, unknown> }) {
+                const found = findRow(opts.where);
+                if (!found) return { id: null };
+                const merged = { ...found.row, ...(data as unknown as GateRow) };
+                rows.delete(found.key);
+                rows.set(keyOf(merged), merged);
+                return { id: found.row.id };
+            },
+            async delete(_t: string, opts: { where: Record<string, unknown> }) {
+                const found = findRow(opts.where);
+                if (!found) return { deleted: 0 };
+                rows.delete(found.key);
+                return { deleted: 1 };
+            },
+            async transaction<T>(cb: (ctx: unknown, info: { owned: boolean }) => Promise<T>): Promise<T> {
+                return cb(undefined, { owned: true });
+            },
+            async syncObjectSchema() { return true; },
+            registry: {
+                registerItem: () => {},
+                registerObject: () => {},
+                unregisterItem: () => {},
+                listItems: (type: string) => (type === 'object'
+                    ? [{ name: 'task', fields: { name: { type: 'text' }, title: { type: 'text' } } },
+                        { ...artifact('object', 'crm_account'), fields: { name: { type: 'text' } } }]
+                    : BASE_ITEMS.filter((i) => i.type === type).map((i) => artifact(i.type, i.name))),
+                getItem: () => undefined,
+                getObject: () => undefined,
+                getPackage: packageRecord,
+                getAllPackages: () => Object.keys(MANIFESTS).map(packageRecord),
+                isPackageDisabled: () => false,
+                getArtifactItem: (type: string, name: string) => artifact(type, name),
+            },
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_1') as any;
+        /** Store a draft as one saved before this gate existed would sit. */
+        const seedDraft = (type: string, name: string, packageId: string, body: Record<string, unknown>) => {
+            nextId += 1;
+            const row: GateRow = { type, name, package_id: packageId, state: 'draft', metadata: JSON.stringify(body), id: `r_${nextId}` };
+            rows.set(keyOf(row as unknown as Record<string, unknown>), row);
+        };
+        const stored = () => Array.from(rows.values())
+            .map((r) => ({ type: r.type, name: r.name, package_id: r.package_id, state: r.state }));
+        return { protocol, rows, stored, seedDraft };
+    }
+
+    const DECLARATION = { package: BASE, basedOn: '3.2.0' };
+    const BODIES: Record<string, (name: string) => Record<string, unknown>> = {
+        view: (name) => ({ name, label: 'List', object: 'task', viewKind: 'list', columns: [{ field: 'title', label: 'Title' }] }),
+        dashboard: (name) => ({ name, label: 'Board', widgets: [] }),
+        page: (name) => ({ name, label: 'Home', object: 'task', type: 'list', kind: 'full', regions: [] }),
+        flow: (name) => ({ name, label: 'Flow', type: 'autolaunched', nodes: [], edges: [] }),
+        action: (name) => ({ name, label: 'Action', type: 'script', body: { language: 'js', source: 'return { success: true };' } }),
+        permission: (name) => ({ name, label: 'Perm', objects: {} }),
+        object: (name) => ({ name, label: 'Account', pluralLabel: 'Accounts', fields: {}, sharingModel: 'private' }),
+    };
+    const body = (type: string, name: string, declared = false, declaration: Record<string, unknown> = DECLARATION) =>
+        ({ ...BODIES[type](name), ...(declared ? { overrides: { ...declaration } } : {}) });
+    const thrown = (run: Promise<unknown>) => run.then(() => undefined, (e: any) => e);
+    const REFUSED = { code: 'NOT_OVERRIDABLE', status: 403 };
+
+    // ── (a) an undeclared same name inside the closure ──────────────────────
+
+    for (const [type, name] of [['view', 'task.crm_list'], ['dashboard', 'crm_board']] as const) {
+        it(`a partner's undeclared same-named ${type} is refused — rename (the #28238 shape: today 200)`, async () => {
+            const { protocol, stored } = gateProtocol();
+            const e = await thrown(protocol.saveMetaItem({ type, name, packageId: PARTNER, item: body(type, name) }));
+            expect(shape(e)).toEqual(REFUSED);
+            expect(String(e.message)).toContain(`'${type}/${name}'`);
+            expect(String(e.message)).toContain(BASE);
+            expect(String(e.message)).toMatch(/Rename the item/);
+            expect(String(e.message)).not.toMatch(/declare/i);
+            expect(stored()).toEqual([]);
+        });
+
+        it(`the pair's undeclared same-named ${type} is refused — declare or rename`, async () => {
+            const { protocol, stored } = gateProtocol();
+            const e = await thrown(protocol.saveMetaItem({ type, name, packageId: PAIR, item: body(type, name) }));
+            expect(shape(e)).toEqual(REFUSED);
+            expect(String(e.message)).toContain(`overrides: { package: '${BASE}'`);
+            expect(String(e.message)).toMatch(/or rename the item/);
+            expect(stored()).toEqual([]);
+        });
+    }
+
+    it('an undeclared same name is refused on a draft save too, and nothing is stored', async () => {
+        const { protocol, stored } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({
+            type: 'view', name: 'task.crm_list', packageId: PARTNER, item: body('view', 'task.crm_list'), mode: 'draft',
+        }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(stored()).toEqual([]);
+    });
+
+    it('control: outside the closure a same name coexists — an unrelated package keeps its own view', async () => {
+        const { protocol, stored } = gateProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'task.crm_list', packageId: UNRELATED, item: body('view', 'task.crm_list') });
+        expect(stored()).toEqual([{ type: 'view', name: 'task.crm_list', package_id: UNRELATED, state: 'active' }]);
+    });
+
+    it('control: a package-less overlay row is not this gate\'s question (the migration card closes it)', async () => {
+        const { protocol, stored } = gateProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'task.crm_list', item: body('view', 'task.crm_list') });
+        expect(stored()).toEqual([{ type: 'view', name: 'task.crm_list', package_id: null, state: 'active' }]);
+    });
+
+    // ── the admit ────────────────────────────────────────────────────────────
+
+    for (const [type, name] of [['view', 'task.crm_list'], ['dashboard', 'crm_board'], ['page', 'crm_home']] as const) {
+        it(`the pair's declared override of a ${type} is admitted and stored with its declaration`, async () => {
+            const { protocol, rows, stored } = gateProtocol();
+            await protocol.saveMetaItem({ type, name, packageId: PAIR, item: body(type, name, true) });
+            expect(stored()).toEqual([{ type, name, package_id: PAIR, state: 'active' }]);
+            const row = Array.from(rows.values())[0];
+            expect(JSON.parse(row.metadata).overrides).toEqual(DECLARATION);
+        });
+    }
+
+    // ── (b) `overrides` on a package that is not the base's pair ────────────
+
+    for (const pkg of [PARTNER, OTHER_PAIR]) {
+        it(`${pkg === PARTNER ? 'a partner' : 'another base\'s pair'} that carries \`overrides\` is refused — only the pair declares`, async () => {
+            const { protocol, stored } = gateProtocol();
+            const e = await thrown(protocol.saveMetaItem({
+                type: 'view', name: 'task.crm_list', packageId: pkg, item: body('view', 'task.crm_list', true),
+            }));
+            expect(shape(e)).toEqual(REFUSED);
+            expect(String(e.message)).toContain(`only '${PAIR}' may declare`);
+            expect(stored()).toEqual([]);
+        });
+    }
+
+    it('the second declarer: after the pair declared, a partner declaring the same item is refused', async () => {
+        const { protocol, stored } = gateProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'task.crm_list', packageId: PAIR, item: body('view', 'task.crm_list', true) });
+        const e = await thrown(protocol.saveMetaItem({
+            type: 'view', name: 'task.crm_list', packageId: PARTNER, item: body('view', 'task.crm_list', true),
+        }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(stored()).toEqual([{ type: 'view', name: 'task.crm_list', package_id: PAIR, state: 'active' }]);
+    });
+
+    // ── (c) a declaration naming the wrong package ──────────────────────────
+
+    it('a declaration naming a package outside the closure is refused — declare a dependency', async () => {
+        const { protocol, stored } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({
+            type: 'view', name: 'task.crm_list', packageId: 'com.other.custom',
+            item: body('view', 'task.crm_list', true, { package: UNRELATED, basedOn: '1.0.0' }),
+        }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toMatch(/Declare a dependency on/);
+        expect(stored()).toEqual([]);
+    });
+
+    it('a declaration naming a base that ships no such item is refused', async () => {
+        const { protocol, stored } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({
+            type: 'view', name: 'task.novel', packageId: PAIR, item: body('view', 'task.novel', true),
+        }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toContain(`ships no view named 'task.novel'`);
+        expect(stored()).toEqual([]);
+    });
+
+    // ── (d) an excluded type, (e) an object, flow and action ────────────────
+
+    it('`overrides` on a permission set is refused — new similar (ADR-0146 D6)', async () => {
+        const { protocol, stored } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({ type: 'permission', name: 'crm_perm', packageId: PAIR, item: body('permission', 'crm_perm', true) }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toMatch(/takes no override/);
+        expect(String(e.message)).toMatch(/new similar/);
+        expect(stored()).toEqual([]);
+    });
+
+    it('`overrides` on an object is refused — extend it (ADR-0146 D10)', async () => {
+        const { protocol, stored } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({ type: 'object', name: 'crm_account', packageId: PAIR, item: body('object', 'crm_account', true) }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toMatch(/extended, never replaced/);
+        expect(String(e.message)).toContain('objectExtensions');
+        expect(stored()).toEqual([]);
+    });
+
+    it('a declared flow override is refused — flow customization is not yet available', async () => {
+        const { protocol, stored } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({ type: 'flow', name: 'crm_flow', packageId: PAIR, item: body('flow', 'crm_flow', true) }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toMatch(/flow customization is not yet available/);
+        expect(stored()).toEqual([]);
+    });
+
+    it('a declared action override is refused — action customization is not yet available', async () => {
+        const { protocol, stored } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({ type: 'action', name: 'crm_action', packageId: PAIR, item: body('action', 'crm_action', true) }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toMatch(/action customization is not yet available/);
+        expect(stored()).toEqual([]);
+    });
+
+    // ── the sealed write's sentence ─────────────────────────────────────────
+
+    it('the sealed write of an overridable type says declare or rename, not clone; code and status stay', async () => {
+        const { protocol } = gateProtocol();
+        const e = await thrown(protocol.saveMetaItem({ type: 'page', name: 'crm_home', packageId: UNRELATED, item: body('page', 'crm_home') }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toContain(`'${PAIR}'`);
+        expect(String(e.message)).toMatch(/or rename the item/);
+        expect(String(e.message).toLowerCase()).not.toContain('clone');
+        expect(String(e.message).length).toBeLessThan(500);
+    });
+
+    // ── the promotion doors: a draft stored before the gate ─────────────────
+
+    it('publishMetaItem refuses a partner\'s undeclared same-named draft, and promotes nothing', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('view', 'task.crm_list', PARTNER, body('view', 'task.crm_list'));
+        const e = await thrown(protocol.publishMetaItem({ type: 'view', name: 'task.crm_list', packageId: PARTNER }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(stored()).toEqual([{ type: 'view', name: 'task.crm_list', package_id: PARTNER, state: 'draft' }]);
+    });
+
+    it('publishMetaItem refuses a partner\'s draft that carries `overrides`', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('view', 'task.crm_list', PARTNER, body('view', 'task.crm_list', true));
+        const e = await thrown(protocol.publishMetaItem({ type: 'view', name: 'task.crm_list', packageId: PARTNER }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(String(e.message)).toContain(`only '${PAIR}' may declare`);
+        expect(stored()).toEqual([{ type: 'view', name: 'task.crm_list', package_id: PARTNER, state: 'draft' }]);
+    });
+
+    it('publishMetaItem promotes the pair\'s declared override of a sealed type', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('page', 'crm_home', PAIR, body('page', 'crm_home', true));
+        await protocol.publishMetaItem({ type: 'page', name: 'crm_home', packageId: PAIR });
+        expect(stored()).toEqual([{ type: 'page', name: 'crm_home', package_id: PAIR, state: 'active' }]);
+    });
+
+    it('publishPackageDrafts refuses a partner\'s undeclared same-named draft, and promotes nothing', async () => {
+        const { protocol, stored, seedDraft } = gateProtocol();
+        seedDraft('dashboard', 'crm_board', PARTNER, body('dashboard', 'crm_board'));
+        seedDraft('dashboard', 'partner_board', PARTNER, body('dashboard', 'partner_board'));
+        const e = await thrown(protocol.publishPackageDrafts({ packageId: PARTNER }));
+        expect(shape(e)).toEqual(REFUSED);
+        expect(stored().every((r) => r.state === 'draft')).toBe(true);
+    });
+});
