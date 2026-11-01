@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: ten sequential spawns of the source CLI in one beforeAll, each a distinct (`os g` generator, flags, fixture state) triple over five fixtures (the wired app before and after its object and flow exist, a stack with no `requires`, one requiring `triggers` alone, the pre-fix objects-only config, a bare directory), each refusal read against its own byte snapshot; slowest CI reading 31.0 s (run 41217827347, over the five scheduled ci.yml runs 41199450735 to 41271604267) x 1.25, rounded up
 
 /**
  * PIN (#20215) — after writing, `os generate` says whether the scaffold
