@@ -15475,8 +15475,16 @@ export function h68ClassBWithoutSeamLine(issue) {
 /** H71's clock — the card's own figure: an on-duty lane should claim within the hour its patrol fires, so two hours is one missed fire plus slack. */
 export const QUEUE_ON_DUTY_UNCLAIMED_HOURS = 2;
 
-/** The director seat's post — no patrol by rule (项目席唤醒 … 总监席除外). */
-const DIRECTOR_SEAT_TITLE = /^\[PM seat\]\s*(?:director|总监)/iu;
+/**
+ * The director seat's post — no patrol by rule (项目席唤醒 … 总监席除外). Matched
+ * anywhere in the SEAT-NAME half (before the ` — ` status separator), never at
+ * its first character only: the live `director(项目总监)` and a retitled
+ * `项目总监` must both be excluded, and a status word cannot name the seat.
+ */
+const DIRECTOR_SEAT_TITLE = /^\[PM seat\][^—]*?(?:\bdirector\b|总监)[^—]*—/iu;
+
+/** Labels that make a queued card no candidate for H71 — a pending decision or a re-triage. */
+export const H71_NOT_CANDIDATE_LABELS = Object.freeze(['needs-user-decision', 'pm:retriage']);
 
 /** Is this seat post's status 🟢 — any holder, a `Routine` included? */
 export function seatOnDuty(issue) {
@@ -15519,6 +15527,10 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
   if (!issue || issue.pull_request || issue.state === 'closed') return null;
   const labels = labelNames(issue);
   if (!labels.includes('pm:queue') || labels.includes('pm:epic')) return null;
+  // Not candidates though they may legally pair with `pm:queue` (H29's vocabulary):
+  // a card awaiting the maintainer's decision or a re-triage is never dispatched,
+  // so "that seat claims it" would be the wrong remedy.
+  if (H71_NOT_CANDIDATE_LABELS.some((l) => labels.includes(l))) return null;
   if ((issue.assignees ?? []).length > 0) return null;
   const lanes = [...new Set(labels.filter((l) => /^domain:/u.test(l)).map(canonicalLane))];
   const held = lanes.filter((lane) => (onDutyLanes?.get(lane) ?? []).length > 0);
@@ -15538,7 +15550,8 @@ export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
     'Remedy — WHO and HOW: that seat claims it, or says on its post why not (in hand at its limit, or the card ' +
     'is not ready). ⚠️ Spare concurrency is NOT judged: no seat post states it machine-readably, so a full seat ' +
     'reads the same as an idle one here. ⛔ Report-only: no label or assignee is written from this script. Out ' +
-    'of scope: an assigned queue card (H24), a `pm:epic` subtree card, a lane with no 🟢 seat post.'
+    'of scope: an assigned queue card (H24), a `pm:epic` subtree card, a card awaiting a decision or a ' +
+    're-triage (`needs-user-decision`, `pm:retriage`: not candidates), a lane with no 🟢 seat post.'
   );
 }
 
@@ -24958,7 +24971,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   'H43 hand-off timing': 80,
   // Registered with the seat-patrol rows (#28642), pin just under the count: two
   // free readings, each with its firing controls and its out-of-scope arms inside.
-  'H70/H71 seat patrol': 26,
+  'H70/H71 seat patrol': 30,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28244,6 +28257,8 @@ async function selfTest() {
   b(BATTERY28642, '⛔ H70: a lowercase key is not the line — the spelling stays byte-stable', typeof h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\npatrol: trig_x · 0 * * * *`)), 'string');
   b(BATTERY28642, '⛔ H70: a `🟢 Routine` seat is out of scope — its scheduler is its patrol', h70HeldSeatWithoutPatrol(seat70('[PM seat] triage (objectstack-wide) — 🟢 Routine · trig_01 (hourly)', STUB70)), null);
   b(BATTERY28642, '⛔ H70: the director seat has no patrol by rule — never fires, held or not', h70HeldSeatWithoutPatrol(seat70('[PM seat] director(项目总监) — 🟢 os-zhuang', STUB70)), null);
+  b(BATTERY28642, '⛔ H70: a retitled director post — 总监 inside the seat name, not at its start — is still excluded', h70HeldSeatWithoutPatrol(seat70('[PM seat] 项目总监 — 🟢 os-zhuang', STUB70)), null);
+  b(BATTERY28642, 'H70 control: …and 总监 in the STATUS half does not exclude a lane seat', typeof h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:server — 🟢 os-zhuang · 总监 relay', STUB70)), 'string');
   b(BATTERY28642, 'H70 control: …and the same holder on a LANE seat fires', typeof h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:server — 🟢 os-zhuang', STUB70)), 'string');
   b(BATTERY28642, '⛔ H70: a vacant or paused seat is out of scope', [h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:ui · seat 3 — ⏳ vacant', STUB70)), h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:ui · seat 3 — ⏸️ paused', STUB70))].every((v) => v === null), true);
   b(BATTERY28642, '⛔ H70: a card without `pm:seat`, a closed post, a PR row and a missing row are never judged', [h70HeldSeatWithoutPatrol({ ...seat70(HELD70, STUB70), labels: [{ name: 'domain:spec' }] }), h70HeldSeatWithoutPatrol(seat70(HELD70, STUB70, { state: 'closed' })), h70HeldSeatWithoutPatrol(seat70(HELD70, STUB70, { pull_request: {} })), h70HeldSeatWithoutPatrol(undefined)].every((v) => v === null), true);
@@ -28261,6 +28276,8 @@ async function selfTest() {
   b(BATTERY28642, '⛔ H71: a lane with NO 🟢 seat post is out of scope however old the card', h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:ui']), ON_DUTY71, NOW71), null);
   b(BATTERY28642, '⛔ H71: an ASSIGNED queue card is H24\'s, not this row\'s', h71UnclaimedOnDutyLane({ ...card71(['pm:queue', 'domain:spec']), assignees: [{ login: 'marchtian' }] }, ON_DUTY71, NOW71), null);
   b(BATTERY28642, '⛔ H71: a `pm:epic` subtree card and a card not in `pm:queue` are out of scope', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:epic', 'domain:spec']), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:blocked', 'domain:spec']), ON_DUTY71, NOW71)].every((v) => v === null), true);
+  b(BATTERY28642, '⛔ H71: a queued card awaiting a decision (`needs-user-decision`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'needs-user-decision', 'domain:spec']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a queued card in re-triage (`pm:retriage`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:retriage', 'domain:spec']), ON_DUTY71, NOW71), null);
   b(BATTERY28642, '⛔ H71: a closed card, a PR row and a missing row are never judged', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { state: 'closed' }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { pull_request: {} }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(undefined, ON_DUTY71, NOW71)].every((v) => v === null), true);
   b(BATTERY28642, 'H71: an unreadable `updated_at` must not read as fresh', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: 'not a date' }), ON_DUTY71, NOW71), 'string');
   b(BATTERY28642, 'H71: a retired lane spelling reads through the alias map to the lane that absorbed it', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:engine']), new Map([['domain:server', [6367]]]), NOW71), 'string');
