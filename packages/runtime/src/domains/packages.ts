@@ -33,6 +33,13 @@ import {
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
 import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+// [#28411, ADR-0146 D8 item 4] The per-package customization read's three
+// sources, each read from its owner: the pair's id and a pair's base
+// (`@objectstack/spec/kernel`, the one spelling of the suffix), and the
+// activation ledger's one reader (`@objectstack/core`).
+import { customizationBasePackageId, customizationPackageId } from '@objectstack/spec/kernel';
+import { listPackageMetadataActivations, METADATA_ACTIVATION_TABLE } from '@objectstack/core';
+import type { GetPackageCustomizationsResponse } from '@objectstack/spec/api';
 // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate, asked by
 // every package write door below, never restated here.
 import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
@@ -231,6 +238,11 @@ export type PackagesDomainProtocol =
         reassignOrphanedMetadata?(request: any): Promise<any>;
         duplicatePackage?(request: any): Promise<any>;
         updatePackage?(request: any): Promise<any>;
+        /**
+         * [#28411] The served overrides of a base's items, typed from the
+         * producer's own signature.
+         */
+        listServedOverrides?: ObjectStackProtocolImplementation['listServedOverrides'];
     };
 
 /**
@@ -2433,6 +2445,53 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             return { handled: true, response: deps.success(manifest) };
         }
 
+        // GET /packages/:id/customizations → [#28411, ADR-0146 D8 item 4] what
+        // this deployment changed on an installed base: its `.custom` pair's
+        // served overrides, the members the pair adds to the base's objects,
+        // and the base's items switched off in the activation ledger. See
+        // {@link readPackageCustomizations}.
+        if (parts.length === 2 && parts[1] === 'customizations' && m === 'GET') {
+            // The read authority of `GET /packages/:id`, the same gate, asked
+            // first. ⛔ No second authority check.
+            const denied = requireReadCapability(deps, _context); if (denied) return denied;
+            // Closed query set: the door reads none, so a parameter is a
+            // request it would otherwise answer as if it had been honoured.
+            const unknownQuery = unknownQueryParamRefusalMessage(query, []);
+            if (unknownQuery !== undefined) {
+                return { handled: true, response: deps.error(unknownQuery, 400, { code: 'VALIDATION_ERROR' }) };
+            }
+            const id = decodeURIComponent(parts[0]);
+            // A `.custom` id is refused naming its base, whether or not the
+            // pair is installed: the question is about the id's shape, and the
+            // base's read answers it.
+            const baseOfPair = customizationBasePackageId(id);
+            if (baseOfPair !== null) {
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `Package '${id}' is the customization package of '${baseOfPair}'. Customizations are read for the base: `
+                        + `GET /packages/${encodeURIComponent(baseOfPair)}/customizations.`,
+                        400,
+                        { code: 'VALIDATION_ERROR' },
+                    ),
+                };
+            }
+            // The id lookup of `GET /packages/:id`, with its 404 wording.
+            if (!registry.getPackage(id)) return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+            const protocol = await resolveProtocol(deps, _context);
+            if (!protocol || typeof protocol.listServedOverrides !== 'function') {
+                return { handled: true, response: deps.error('Metadata service not available', 503) };
+            }
+            try {
+                return {
+                    handled: true,
+                    response: deps.success(await readPackageCustomizations(id, protocol, qlService)),
+                };
+            } catch (e: any) {
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
+            }
+        }
+
         // POST /packages/:id/adopt-orphans → bulk-rebind package-less (legacy
         // null / 'sys_metadata') metadata INTO this base (ADR-0070 D5 migration;
         // lets the env retire the "Local / Custom" scope once it has no orphans).
@@ -2894,6 +2953,92 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  * @returns the manifest object, or `null` if the package id is unknown
  *          AND has no overlay-authored metadata.
  */
+/**
+ * [#28411, ADR-0146 D8 item 4, D3] The answer of `GET /packages/:id/customizations`
+ * for the installed base `baseId`: three lists, each read from the one owner
+ * of its fact, and their lengths. Served rows and ledger rows only; ⛔ no diff
+ * against the base and no `basedOn` verdict (ADR-0146 D2, D6).
+ *
+ *  - **overrides** — the protocol's {@link ObjectStackProtocolImplementation.listServedOverrides}:
+ *    the pair's ACTIVE rows the served-override predicate admits, the one the
+ *    effective read serves by (N-10). ⛔ Never re-derived here.
+ *  - **extensions** — the object registry's `extend` contributors bound to the
+ *    pair, on every object the base OWNS (`getObjectOwner`). Each contributor's
+ *    `definition` is the extension body as declared (`registerObject` stores it
+ *    and folds nothing into an `extend` body), so its `fields`, `validations`
+ *    and `indexes` ARE the members it adds: no diff against the base's
+ *    definition is needed, and none is made.
+ *  - **switchedOff** — the activation ledger's rows recording the base as their
+ *    package with `active: false`, through the ledger's one reader
+ *    ({@link listPackageMetadataActivations}). A composition with no ledger
+ *    object has switched nothing off, which is the ledger's own reading of
+ *    absence (ADR-0126 §4: no row means active).
+ *
+ * No per-organization axis (ADR-0131 D6): every source is environment-level,
+ * so every caller the read gate admits gets the same answer. A base with no
+ * pair package answers empty overrides and extensions, and nothing here
+ * creates the pair.
+ */
+async function readPackageCustomizations(
+    baseId: string,
+    protocol: Required<Pick<PackagesDomainProtocol, 'listServedOverrides'>>,
+    ql: any,
+): Promise<GetPackageCustomizationsResponse> {
+    const overrides = await protocol.listServedOverrides({ packageId: baseId });
+
+    const pair = customizationPackageId(baseId);
+    const registry = ql?.registry;
+    type Extension = GetPackageCustomizationsResponse['extensions'][number];
+    const extensions: Extension[] = [];
+    if (pair.ok && typeof registry?.getAllObjects === 'function') {
+        for (const object of registry.getAllObjects(pair.value) as Array<{ name?: unknown }>) {
+            const name = object?.name;
+            if (typeof name !== 'string' || registry.getObjectOwner(name)?.packageId !== baseId) continue;
+            for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
+                if (contributor.packageId !== pair.value || contributor.ownership !== 'extend') continue;
+                const body = contributor.definition ?? {};
+                for (const field of Object.keys(body.fields ?? {})) extensions.push({ object: name, kind: 'field', name: field });
+                for (const rule of Array.isArray(body.validations) ? body.validations : []) {
+                    if (typeof rule?.name === 'string') extensions.push({ object: name, kind: 'validation', name: rule.name });
+                }
+                for (const index of Array.isArray(body.indexes) ? body.indexes : []) {
+                    extensions.push({
+                        object: name,
+                        kind: 'index',
+                        ...(typeof index?.name === 'string' && index.name !== '' ? { name: index.name } : {}),
+                        fields: Array.isArray(index?.fields) ? index.fields.filter((f: unknown): f is string => typeof f === 'string') : [],
+                    });
+                }
+            }
+        }
+    }
+    const kindOrder = { field: 0, validation: 1, index: 2 } as const;
+    extensions.sort((a, b) => a.object.localeCompare(b.object)
+        || kindOrder[a.kind] - kindOrder[b.kind]
+        || (a.name ?? '').localeCompare(b.name ?? ''));
+
+    let ledgerRegistered = true;
+    try {
+        ledgerRegistered = typeof registry?.getObject !== 'function' || !!registry.getObject(METADATA_ACTIVATION_TABLE);
+    } catch {
+        // A registry that cannot answer is not an answer: read, and let the read decide.
+    }
+    const switchedOff = (ledgerRegistered && typeof ql?.find === 'function'
+        ? await listPackageMetadataActivations(ql, baseId)
+        : [])
+        .filter((row) => row.active === false)
+        .map((row) => ({ type: row.metadataType, name: row.name }))
+        .sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
+
+    return {
+        packageId: baseId,
+        overrides,
+        extensions,
+        switchedOff,
+        counts: { overrides: overrides.length, extensions: extensions.length, switchedOff: switchedOff.length },
+    };
+}
+
 async function assemblePackageManifest(
 deps: DomainHandlerDeps,
 packageId: string,

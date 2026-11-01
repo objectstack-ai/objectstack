@@ -257,28 +257,8 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
      * filter on (see the module header).
      */
     async list(): Promise<MetadataActivationRow[]> {
-        const rows = await this.engine.find(METADATA_ACTIVATION_TABLE, {
-            where: { metadata_type: this.metadataType },
-            context: SYSTEM_CTX,
-        });
-        if (!Array.isArray(rows)) return [];
-        const out: MetadataActivationRow[] = [];
-        for (const row of rows) {
-            const r = row as { name?: unknown; package_id?: unknown; active?: unknown };
-            if (typeof r.name !== 'string' || !r.name) continue;
-            out.push({
-                name: r.name,
-                // A row with no package — an environment-authored item — reads
-                // back with `packageId` absent, the spelling it was written in.
-                ...(typeof r.package_id === 'string' && r.package_id !== '' ? { packageId: r.package_id } : {}),
-                // The column defaults to `true`; only an explicit `false`
-                // disarms. A driver that round-trips booleans as 0/1
-                // (SQLite/libsql) is read through the same `=== false || === 0`
-                // test, so a `0` is not mistaken for `true`.
-                active: !(r.active === false || r.active === 0),
-            });
-        }
-        return out;
+        const rows = await readActivationLedgerRows(this.engine, { metadata_type: this.metadataType });
+        return rows.map(({ metadataType: _type, ...row }) => row);
     }
 
     /**
@@ -349,4 +329,69 @@ export class ObjectStoreMetadataActivationStore implements MetadataActivationSto
     async probe(): Promise<void> {
         await this.engine.find(METADATA_ACTIVATION_TABLE, { where: {}, limit: 1, context: SYSTEM_CTX });
     }
+}
+
+/**
+ * [ADR-0146 D8 item 4] One ledger row as the per-package read reports it: the
+ * row of {@link MetadataActivationRow} plus its `metadata_type`, the one column
+ * a per-type store keeps to itself.
+ */
+export interface MetadataActivationLedgerRow extends MetadataActivationRow {
+    /** The row's `metadata_type` discriminator (`'flow'`, `'action'`, …). */
+    metadataType: string;
+}
+
+/**
+ * THE ledger read: one `find` on {@link METADATA_ACTIVATION_TABLE} under the
+ * store's system context, and the one row parse. Every reader of the ledger
+ * goes through it — {@link ObjectStoreMetadataActivationStore.list} with its
+ * `metadata_type`, {@link listPackageMetadataActivations} with a package — so
+ * the `0`-is-false read and the absent-package spelling have one home.
+ */
+async function readActivationLedgerRows(
+    engine: Pick<MetadataActivationStoreEngine, 'find'>,
+    where: Readonly<Record<string, unknown>>,
+): Promise<MetadataActivationLedgerRow[]> {
+    const rows = await engine.find(METADATA_ACTIVATION_TABLE, { where: { ...where }, context: SYSTEM_CTX });
+    if (!Array.isArray(rows)) return [];
+    const out: MetadataActivationLedgerRow[] = [];
+    for (const row of rows) {
+        const r = row as { metadata_type?: unknown; name?: unknown; package_id?: unknown; active?: unknown };
+        if (typeof r.name !== 'string' || !r.name) continue;
+        out.push({
+            metadataType: typeof r.metadata_type === 'string' ? r.metadata_type : '',
+            name: r.name,
+            // A row with no package — an environment-authored item — reads
+            // back with `packageId` absent, the spelling it was written in.
+            ...(typeof r.package_id === 'string' && r.package_id !== '' ? { packageId: r.package_id } : {}),
+            // The column defaults to `true`; only an explicit `false`
+            // disarms. A driver that round-trips booleans as 0/1
+            // (SQLite/libsql) is read through the same `=== false || === 0`
+            // test, so a `0` is not mistaken for `true`.
+            active: !(r.active === false || r.active === 0),
+        });
+    }
+    return out;
+}
+
+/**
+ * [ADR-0146 D8 item 4, D3] Every ledger row one package's items carry, of every
+ * `metadata_type`: the "switched off" half of the per-package customization
+ * read (`GET /packages/:id/customizations`), which asks "what of HotCRM did
+ * this deployment switch off" across flows, actions and the catalog types at
+ * once.
+ *
+ * Read-only, and the one place the ledger is read across types: a write stays
+ * scoped by its store's `metadata_type` (the module header), and no consumer
+ * decides anything from `package_id`, which records provenance. The read and
+ * the parse are {@link readActivationLedgerRows}'s, so a row reads here exactly
+ * as its own type's store reads it. `packageId` must be a non-empty string;
+ * anything else answers no rows, never the package-less ones.
+ */
+export async function listPackageMetadataActivations(
+    engine: Pick<MetadataActivationStoreEngine, 'find'>,
+    packageId: string,
+): Promise<MetadataActivationLedgerRow[]> {
+    if (typeof packageId !== 'string' || packageId === '') return [];
+    return readActivationLedgerRows(engine, { package_id: packageId });
 }

@@ -195,6 +195,8 @@
     "api/GetNotificationPreferencesResponse",
     "api/GetObjectPermissionsRequest",
     "api/GetObjectPermissionsResponse",
+    "api/GetPackageCustomizationsRequest",
+    "api/GetPackageCustomizationsResponse",
     "api/GetPackageRequest",
     "api/GetPackageResponse",
     "api/GetPresenceRequest",

@@ -311,6 +311,90 @@ export const ImportUnmanagedPackageResponseSchema = lazySchema(() => z.object({
   ),
 }));
 
+/**
+ * `GET /packages/:id/customizations` — the request (ADR-0146 D8 item 4).
+ *
+ * The path's package id and nothing else: the door's query set is CLOSED, so
+ * a query parameter is refused `400 VALIDATION_ERROR` naming it rather than
+ * ignored (a `?includeDrafts=true` the door never reads must not answer as if
+ * it had). Unlike its lifecycle siblings this is not a transcription: the
+ * route is new, and this declaration is its contract (Clause-②, widening).
+ */
+export const GetPackageCustomizationsRequestSchema = lazySchema(() => z.object({
+  packageId: z.string().min(1).describe(
+    'The installed BASE package whose customizations are read (e.g. "com.acme.crm"). A paired '
+    + '`<base>.custom` id is refused `400 VALIDATION_ERROR` with a message naming its base; an id no '
+    + 'installed package carries answers `404`.',
+  ),
+}).strict().describe('Per-package customization read request: the base package id, no query parameters.'));
+
+/**
+ * `GET /packages/:id/customizations` — the answer (ADR-0146 D8 item 4, D3).
+ *
+ * "What did we change on HotCRM", in one read, for an installed base X: the
+ * items X's paired `<X>.custom` package overrides, the members it adds to
+ * X's objects, and X's items switched off in this deployment. Served rows and
+ * ledger rows only: nothing is computed from them but the counts. ⛔ No diff
+ * against the base and no `basedOn` verdict (ADR-0146 D2, D6).
+ *
+ * Enveloped like its lifecycle siblings: the dispatcher answers
+ * `{ success, data }`, and this schema declares the `data`. Strict at every
+ * level: a member the door starts serving is a change to this declaration
+ * first.
+ *
+ * X with no `.custom` package answers empty lists and zero counts (the read
+ * never creates the pair); the switched-off list does not depend on the pair.
+ */
+export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object({
+  packageId: z.string().describe('The base package the customizations are of (the request\'s id).'),
+  overrides: z.array(z.object({
+    type: z.string().describe('Metadata type of the overriding item, canonical singular (e.g. `view`).'),
+    name: z.string().describe('Name of the item: the base\'s name it is served under.'),
+    member: z.string().optional().describe(
+      'The bundle member, for a metadata type whose identity is a pair (`email_template`, identified by '
+      + '`(name, locale)`): its discriminator value. Absent for a type whose identity is its name alone.',
+    ),
+    basedOn: z.string().optional().describe(
+      'The base package version the declaration records (`overrides.basedOn`), copied as stored and never '
+      + 'judged. Absent when the stored body records none.',
+    ),
+    version: z.number().int().nonnegative().optional().describe(
+      'The overriding item\'s stored history version, when the row carries one.',
+    ),
+  }).strict()).describe(
+    'Every ACTIVE item of the base\'s paired `<base>.custom` package that declares `overrides.package` = '
+    + 'the base and that the effective read serves over the base\'s item of the same name: the rows the '
+    + 'served-override predicate admits (a declaration from any other package, and an undeclared pair item, '
+    + 'are not listed), minus the stored rows every read declines (a shipped flow name). Ordered by type, '
+    + 'name and member.',
+  ),
+  extensions: z.array(z.object({
+    object: z.string().describe('The base-owned object the member is added to.'),
+    kind: z.enum(['field', 'validation', 'index']).describe('Which collection of the object the member joins.'),
+    name: z.string().optional().describe(
+      'The member\'s declared name: the field name, the validation rule name, the index name. Absent only for '
+      + 'an index declared without a name.',
+    ),
+    fields: z.array(z.string()).optional().describe('For an index: the fields it covers. Absent for a field or a validation.'),
+  }).strict()).describe(
+    'Every field, validation rule and index the paired `<base>.custom` package declares in an object '
+    + 'extension (`objectExtensions`) of an object the base owns, one entry per member, as the extension '
+    + 'declares it. Ordered by object, kind and name.',
+  ),
+  switchedOff: z.array(z.object({
+    type: z.string().describe('The ledger row\'s metadata type (`flow`, `action`, `position`, …).'),
+    name: z.string().describe('The switched-off item\'s name.'),
+  }).strict()).describe(
+    'Every activation-ledger row (`sys_metadata_activation`) that records the base as its package and '
+    + '`active: false`: the base\'s items this deployment switched off. Ordered by type and name.',
+  ),
+  counts: z.object({
+    overrides: z.number().int().nonnegative().describe('`overrides.length`.'),
+    extensions: z.number().int().nonnegative().describe('`extensions.length`: members, not objects.'),
+    switchedOff: z.number().int().nonnegative().describe('`switchedOff.length`.'),
+  }).strict().describe('Each list\'s length, derived from the lists in this same answer.'),
+}).strict().describe('Per-package customization read: overrides, extensions and switched-off items of one installed base.'));
+
 export type DiscardPackageDraftsResponse = z.input<typeof DiscardPackageDraftsResponseSchema>;
 /** Post-parse shape of {@link DiscardPackageDraftsResponse} — defaults applied, transforms run (ADR-0122). */
 export type DiscardPackageDraftsResponseParsed = z.infer<typeof DiscardPackageDraftsResponseSchema>;
@@ -338,3 +422,9 @@ export type ImportUnmanagedPackageRequestParsed = z.infer<typeof ImportUnmanaged
 export type ImportUnmanagedPackageResponse = z.input<typeof ImportUnmanagedPackageResponseSchema>;
 /** Post-parse shape of {@link ImportUnmanagedPackageResponse} — defaults applied, transforms run (ADR-0122). */
 export type ImportUnmanagedPackageResponseParsed = z.infer<typeof ImportUnmanagedPackageResponseSchema>;
+export type GetPackageCustomizationsRequest = z.input<typeof GetPackageCustomizationsRequestSchema>;
+/** Post-parse shape of {@link GetPackageCustomizationsRequest} — defaults applied, transforms run (ADR-0122). */
+export type GetPackageCustomizationsRequestParsed = z.infer<typeof GetPackageCustomizationsRequestSchema>;
+export type GetPackageCustomizationsResponse = z.input<typeof GetPackageCustomizationsResponseSchema>;
+/** Post-parse shape of {@link GetPackageCustomizationsResponse} — defaults applied, transforms run (ADR-0122). */
+export type GetPackageCustomizationsResponseParsed = z.infer<typeof GetPackageCustomizationsResponseSchema>;
