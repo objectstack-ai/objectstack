@@ -207,6 +207,11 @@ import {
     // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate: the
     // same sentence, the same rung, as every environment-metadata write door.
     walledCatalogWriteVerdict,
+    // [ADR-0146 D10, second rule] The field-patch target check — the judge
+    // `os validate` asks and the registry fold names its misses by.
+    fieldPatchTargetRefusals,
+    fieldPatchTargetRefusalMessage,
+    type FieldPatchTargetRefusal,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
@@ -2064,6 +2069,26 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }, 403);
         }
 
+        // 2e. [ADR-0146 D10, second rule] ⭐ THE FIELD-PATCH TARGET CHECK,
+        //     beside the override gate and before any write: a patch naming a
+        //     field its target does not have, or an option value its field does
+        //     not have, would change nothing and say nothing. Refused `400
+        //     VALIDATION_ERROR` on both branches, every refusal located in
+        //     `details.refusals`. The target is the registry's resolved object
+        //     (ADR-0141 D2 admitted the base first) or one this artifact
+        //     delivers.
+        const patchTargetRefusals = this.fieldPatchTargetRefusalsOf(ctx, converted);
+        if (patchTargetRefusals.length > 0) {
+            return c.json({
+                success: false,
+                error: {
+                    code: 'VALIDATION_ERROR',
+                    message: fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals),
+                    details: { refusals: patchTargetRefusals },
+                },
+            }, 400);
+        }
+
         // 3. Hot-register FIRST so a malformed inline manifest fails the
         //    install loudly rather than persisting a broken record that
         //    would also fail on every subsequent rehydrate.
@@ -3232,6 +3257,37 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * Reads nothing it cannot: with no `objectql` registry or no protocol
      * listing, the gate has no closure to judge and answers empty.
      */
+    /**
+     * [ADR-0146 D10, second rule] Step 2e of {@link handleInstall}: every
+     * `objectExtensions[].fieldPatches` entry the converted body carries —
+     * each `packages[]` entry's, or the body's own — judged against its target
+     * by `@objectstack/metadata-core`'s `fieldPatchTargetRefusals`. A target
+     * this artifact delivers is read off its body; any other is the registry's
+     * resolved object. A target neither knows is not judged here: the
+     * extension then registers against an owner that is not loaded, which the
+     * registry already reports.
+     */
+    private fieldPatchTargetRefusalsOf = (ctx: PluginContext, converted: Record<string, any>): FieldPatchTargetRefusal[] => {
+        const multi = Array.isArray(converted.packages);
+        const bodies: Array<{ body: Record<string, any>; prefix: string }> = multi
+            ? converted.packages.flatMap((entry: unknown, index: number) =>
+                isPlainObject(entry) && isPlainObject(entry.manifest)
+                    ? [{ body: entry.manifest as Record<string, any>, prefix: `packages[${index}].manifest.` }]
+                    : [])
+            : [{ body: flattenPackageBody(converted), prefix: '' }];
+        if (!bodies.some(({ body }) => Array.isArray(body.objectExtensions))) return [];
+        const delivered = new Map<string, unknown>();
+        for (const { body } of bodies) {
+            const objects = body.objects;
+            const list = Array.isArray(objects) ? objects : isPlainObject(objects) ? Object.entries(objects).map(([name, o]) => (isPlainObject(o) ? { name, ...o } : o)) : [];
+            for (const object of list) if (isPlainObject(object) && typeof object.name === 'string') delivered.set(object.name, object);
+        }
+        let registry: { getObject?(name: string): unknown } | undefined;
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — only delivered targets are known */ }
+        const getTarget = (name: string): unknown => delivered.get(name) ?? registry?.getObject?.(name);
+        return bodies.flatMap(({ body, prefix }) => fieldPatchTargetRefusals(body.objectExtensions, getTarget, prefix));
+    };
+
     private evaluateOverrideWriteGate = async (
         ctx: PluginContext,
         manifestId: string,
