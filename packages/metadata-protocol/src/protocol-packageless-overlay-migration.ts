@@ -88,7 +88,7 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
-import { OVERLAY_MEMBER_COLUMN, overlayMemberValue } from './migrations/overlay-index.js';
+import { OVERLAY_MEMBER_COLUMN } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { shippingPackageIds } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
@@ -523,74 +523,4 @@ export async function migratePackagelessOverlays(
             .map(([base, line]) => ({ base, ...line }))
             .sort((a, b) => a.base.localeCompare(b.base)),
     };
-}
-
-// ─────────────────────────────────────────────────────────────────────────
-// Until #28576 closes the package-less write: a package-less save landing on
-// a migrated row keeps that row's declaration (N-16a, Wanted 4)
-// ─────────────────────────────────────────────────────────────────────────
-
-/** The class members {@link packagelessPairLanding} reads. */
-export interface PackagelessPairLandingHost {
-    readonly overlayTypes: ReadonlySet<string>;
-    readonly packagelessAddress: ObjectStackProtocolImplementation['packagelessAddress'];
-    readonly packagelessDraftAddress: ObjectStackProtocolImplementation['packagelessDraftAddress'];
-    readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
-}
-
-/**
- * The declared override a package-less save of an overlay type lands on: when
- * the save's own address — {@link ObjectStackProtocolImplementation.packagelessAddress}
- * for a publish-mode save, {@link ObjectStackProtocolImplementation.packagelessDraftAddress}'s
- * `into` for a draft — is a base's paired `<base>.custom`, and that pair's row
- * of the item (the draft's own row first for a draft save, then the active
- * row) is the served override of the base ({@link isServedOverrideRowOf}),
- * answers the pair, the base and the row's `overrides` block. Otherwise
- * `undefined`: nothing changes for the save.
- *
- * Why the save asks it. After `os migrate packageless-overlays` moves Setup's
- * customization into the pair, Setup still saves and resets it naming no
- * package, and the package-less address lands that save on the pair's row
- * (sole binding). Setup's form sends the item as it read it — its `overrides`
- * key included, or not, depending on the editor — and a pair row saved without
- * its declaration is refused by the override write gate as an undeclared same
- * name (ADR-0146 D2, N-09). So the save keeps the row's declaration when the
- * body carries none, and judges a body that carries one as a write into the
- * pair, which is where it lands. #28576 closes the package-less write; this
- * goes with it.
- */
-export async function packagelessPairLanding(
-    this: PackagelessPairLandingHost,
-    request: { type: string; name: string; mode?: string },
-    member: string | undefined,
-): Promise<{ pair: string; base: string; declaration: Record<string, unknown> } | undefined> {
-    const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
-    if (!this.overlayTypes.has(type)) return undefined;
-    const draft = request.mode === 'draft';
-    let into: string | null;
-    if (draft) {
-        const address = await this.packagelessDraftAddress(type, request.name, member);
-        if (address.kind === 'ambiguous') return undefined;
-        into = address.into;
-    } else {
-        const address = await this.packagelessAddress(type, request.name, member, 'active');
-        into = address.candidates.length === 1 ? address.packageId : null;
-    }
-    const base = typeof into === 'string' ? customizationBasePackageId(into) : null;
-    if (base === null || into === null) return undefined;
-    const rows = await this.findEnvironmentRows('sys_metadata', {
-        where: { type, name: request.name, package_id: into },
-        context: SYSTEM,
-    });
-    // The member as the row stores it: `null` (absent here) for the canonical one.
-    const storedMember = overlayMemberValue(type, member) ?? undefined;
-    const at = (state: 'active' | 'draft') =>
-        (rows ?? []).find((row) => row?.state === state && memberOf(row) === storedMember);
-    for (const row of draft ? [at('draft'), at('active')] : [at('active')]) {
-        if (row === undefined || !isServedOverrideRowOf(row, base)) continue;
-        const declaration = (bodyOf(row) as { overrides?: unknown } | undefined)?.overrides;
-        if (declaration === null || typeof declaration !== 'object' || Array.isArray(declaration)) continue;
-        return { pair: into, base, declaration: { ...(declaration as Record<string, unknown>) } };
-    }
-    return undefined;
 }
