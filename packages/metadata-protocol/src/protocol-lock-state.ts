@@ -15,6 +15,11 @@
  * re-indented one level and otherwise unedited: the same reads, in the same
  * order, throwing exactly where they did with the same message.
  *
+ * Edited since: [#28412, ADR-0146 D9 item 1] `declinesStoredRow` takes the
+ * stored row it judges, and does not decline a shipped flow name's row that
+ * the one served-override predicate (`isServedOverrideRowOf`) admits for the
+ * shipping package — its declared `.custom` override, the packaged flow.
+ *
  * ## How the moved bodies reach the class
  *
  * The shape #23050 set for `rest-server.ts` (its `data-action-routes.ts`
@@ -44,6 +49,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { canonicalMetaType } from './protocol.js';
 import type { ItemLock } from './item-lock.js';
 import { isOriginGatedType } from './packaged-base-regime.js';
+import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import {
@@ -131,9 +137,15 @@ export function isStoredFlowEntryOfShippedName(
 
 /** The body of `ObjectStackProtocolImplementation#declinesStoredRow`; the method's docblock there is its contract. */
 export function declinesStoredRow(
-    this: Pick<LockStateHost, 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay'>,
-    type: string, name: unknown): boolean {
-    if (this.isShippedFlowName(type, name)) return true;
+    this: Pick<LockStateHost, 'isDeclaredCodeDatasource' | 'isShippedFlowName' | 'isUnservedSealedOverlay' | 'packagedArtifactOwner'>,
+    type: string, name: unknown, row?: ServedOverrideRow): boolean {
+    if (this.isShippedFlowName(type, name)) {
+        // [#28412, ADR-0146 D9 item 1] …except the one row that IS the
+        // packaged flow now: the shipping package's declared override, judged
+        // on the row's own `package_id` and body by the one served-override
+        // predicate. Every other stored row of the name stays declined.
+        return !isServedOverrideRowOf(row, this.packagedArtifactOwner({ type: 'flow', name: name as string }));
+    }
     if (typeof name !== 'string' || name === '') return false;
     return this.isDeclaredCodeDatasource(type, name) || this.isUnservedSealedOverlay(type, name);
 }

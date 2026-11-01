@@ -30,6 +30,7 @@
 import { describe, expect, it } from 'vitest';
 import { isCodeArtifactBody } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
+import { storedRowBindingOf } from './stored-row-binding.js';
 
 const PACKAGE_ID = 'com.example.pkg';
 const SHIPPED = 'pkg_flow';
@@ -224,5 +225,90 @@ describe('[#20913] the flattened flow view serves a shipped name from the loader
         const { protocol } = harness([storedRow('view', 'pkg_view', { name: 'pkg_view', label: 'OVERLAY VIEW' })]);
         const served = named(await protocol.getMetaItems({ type: 'view' }), 'pkg_view');
         expect(served.map((it) => it.label)).toEqual(['OVERLAY VIEW']);
+    });
+});
+
+/**
+ * [#28412, ADR-0146 D9 item 1] …except ONE stored row: the shipping package's
+ * declared override. A row bound — by its own `package_id` column — to the
+ * package's paired `<package>.custom`, whose body declares
+ * `overrides.package` = the package, is the packaged flow now: the flow view
+ * (both faces), the by-name read, the layered read and the per-package
+ * customization read serve it over the loader's body, under the package's
+ * provenance, once per name. The predicate is the one served-override
+ * predicate (`isServedOverrideRowOf`); every other stored row of the name —
+ * a dependent's declaration, a package-less row whose body names the pair, an
+ * undeclared pair row — stays declined, as above.
+ */
+describe('[#28412] the flow view admits exactly the shipping package\'s declared .custom override', () => {
+    const PAIR = `${PACKAGE_ID}.custom`;
+    const DECLARED = { overrides: { package: PACKAGE_ID, basedOn: '1.0.0' } };
+    const overrideRow = (extra: Partial<StoredRow> = {}, body: Record<string, unknown> = DECLARED) =>
+        storedRow('flow', SHIPPED, flowBody(SHIPPED, 'OVERRIDE', body), { package_id: PAIR, ...extra });
+
+    it('the execution view serves the declared override once, in the package\'s slot, under its provenance', async () => {
+        const { protocol } = harness([overrideRow()]);
+        const served = named(await protocol.getMetaItemsForExecution({ type: 'flow' }), SHIPPED);
+        expect(served.map((it) => it.label)).toEqual(['OVERRIDE']);
+        expect(served[0]._packageId).toBe(PACKAGE_ID);
+        expect(served[0].overrides).toEqual(DECLARED.overrides);
+    });
+
+    it('…on every read: the registry\'s hydrated copy does not add a second entry', async () => {
+        const { protocol } = harness([overrideRow()]);
+        await protocol.getMetaItemsForExecution({ type: 'flow' });
+        const second = named(await protocol.getMetaItemsForExecution({ type: 'flow' }), SHIPPED);
+        expect(second.map((it) => it.label)).toEqual(['OVERRIDE']);
+    });
+
+    it('the served list agrees with the execution view', async () => {
+        // The by-name and layered reads' agreement is pinned over the real
+        // engine (`protocol-flow-custom-override.test.ts`, packages/objectql):
+        // this double answers no `findOne` and no by-name registry read.
+        const { protocol } = harness([overrideRow()]);
+        expect(named(await protocol.getMetaItems({ type: 'flow' }), SHIPPED).map((it) => it.label)).toEqual(['OVERRIDE']);
+    });
+
+    it('the per-package customization read lists the flow override of the package', async () => {
+        const { protocol } = harness([overrideRow()]);
+        expect(await (protocol as any).listServedOverrides({ packageId: PACKAGE_ID }))
+            .toEqual([{ type: 'flow', name: SHIPPED, basedOn: '1.0.0' }]);
+    });
+
+    it('the hydration records the row\'s own package_id on the registry body, never the body\'s stamp', async () => {
+        const { protocol, registry } = harness([overrideRow({}, { ...DECLARED, _packageId: PACKAGE_ID })]);
+        await protocol.getMetaItemsForExecution({ type: 'flow' });
+        const hydrated = registry.bare('flow', SHIPPED)!;
+        expect(storedRowBindingOf(hydrated)).toBe(PAIR);
+        expect(hydrated._packageId).toBe(PACKAGE_ID); // the body's own stamp, kept and never read for the binding
+        expect(JSON.parse(JSON.stringify(hydrated))).not.toHaveProperty('storedRowBinding');
+
+        const packageless = harness([storedRow('flow', SHIPPED, flowBody(SHIPPED, 'STAMPED', { ...DECLARED, _packageId: PAIR }))]);
+        await packageless.protocol.getMetaItemsForExecution({ type: 'flow' });
+        expect(storedRowBindingOf(packageless.registry.bare('flow', SHIPPED))).toBeNull();
+    });
+
+    for (const [label, row] of [
+        ['a dependent package\'s declaration', overrideRow({ package_id: 'com.example.partner' })],
+        ['a package-less row whose body stamps the pair', storedRow('flow', SHIPPED,
+            flowBody(SHIPPED, 'OVERRIDE', { ...DECLARED, _packageId: PAIR }))],
+        ['an undeclared row of the pair', overrideRow({}, {})],
+        ['another base\'s pair declaring this package', overrideRow({ package_id: 'com.other.custom' })],
+    ] as const) {
+        it(`${label} is not admitted: the loader's body is served, and nothing is listed as an override`, async () => {
+            const { protocol } = harness([row]);
+            expect(named(await protocol.getMetaItemsForExecution({ type: 'flow' }), SHIPPED).map((it) => it.label))
+                .toEqual(['LOADER']);
+            expect(named(await protocol.getMetaItems({ type: 'flow' }), SHIPPED).map((it) => it.label)).toEqual(['LOADER']);
+            expect(await (protocol as any).listServedOverrides({ packageId: PACKAGE_ID })).toEqual([]);
+        });
+    }
+
+    it('deleting the override serves the loader\'s body again on the next read', async () => {
+        const rows = [overrideRow()];
+        const { protocol } = harness(rows);
+        expect(named(await protocol.getMetaItemsForExecution({ type: 'flow' }), SHIPPED).map((it) => it.label)).toEqual(['OVERRIDE']);
+        rows.splice(0, 1);
+        expect(named(await protocol.getMetaItemsForExecution({ type: 'flow' }), SHIPPED).map((it) => it.label)).toEqual(['LOADER']);
     });
 });

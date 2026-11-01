@@ -2539,14 +2539,19 @@ export function graftConditionEnvelopes(converted: unknown, parsed: unknown): un
 /**
  * [#11997] Where one flow body came from, as the boot pull could tell.
  *
+ * `'override'` — [#28412, ADR-0146 D9 item 1] the shipping package's declared
+ * override: a stored row bound, by its own `package_id`, to that package's
+ * paired `<package>.custom`, whose body declares `overrides.package` = the
+ * package. `packageId` is the pair. It is the packaged flow now, armed over
+ * the loader's body for the name.
  * `'package'` — a code-shipped artifact (`isCodeArtifactBody`, ADR-0029 D9.6).
  * `'runtime'` — a `sys_metadata`/runtime-authored row with no real package
  * provenance: the ADR-0005 overlay, and the sanctioned override path per
  * ADR-0048 §1.5.
  */
 export interface FlowContender {
-    source: 'package' | 'runtime';
-    /** The owning package id, when a code package ships this body. */
+    source: 'override' | 'package' | 'runtime';
+    /** The owning package id, when a code package ships this body; the `.custom` pair for an override. */
     packageId?: string;
 }
 
