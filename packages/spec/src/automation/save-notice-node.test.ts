@@ -93,7 +93,7 @@ describe('FlowSchema — a save_notice node stands only in a flow a record creat
     const flow = flowWith(undefined);
     (flow.nodes[0] as any).config = { objectName: 'deal', triggerType: ['record-after-create', 'record-after-update'] };
     const issues = placementIssues(FlowSchema.safeParse(flow));
-    expect(issues.map((i) => i.path)).toEqual([['nodes', 1, 'type']]);
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['nodes', 1, 'type']]]);
     expect(issues[0].message).toContain(
       "This flow's start writes `triggerType` as an array (`['record-after-create', 'record-after-update']`). "
         + 'That form is not supported and never binds, so no write waits on the run and the notice would reach '
