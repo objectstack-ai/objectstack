@@ -9,6 +9,10 @@
  *     item in Setup's Integrations group, naming the console component
  *     `automation:connector-credentials` and asking `manage_metadata` — the
  *     capability every verb of the door asks;
+ *   • ADR-0143 D5: a second item names `automation:connector-connections`, the
+ *     Console page of the connector connection door, and asks that door's own
+ *     organization-scoped `manage_connector_connections`, so an organization
+ *     administrator (who holds it, not `manage_metadata`) sees it;
  *   • a booted kernel registers it once, after `kernel:ready`;
  *   • an inert boot (`armRuntime: false`, a one-shot tool) serves no console
  *     and registers no entry; neither does a kernel with no manifest service,
@@ -17,20 +21,24 @@
 import { describe, expect, it } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import { ManifestSchema } from '@objectstack/spec/kernel';
+import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 
 import { AutomationServicePlugin } from './plugin.js';
 import {
     CONNECTOR_CREDENTIALS_COMPONENT_REF,
     CONNECTOR_CREDENTIALS_NAV_CAPABILITY,
     CONNECTOR_CREDENTIALS_UI_BUNDLE,
+    CONNECTOR_CONNECTIONS_COMPONENT_REF,
+    CONNECTOR_CONNECTIONS_NAV_CAPABILITY,
 } from './connector-credentials-ui.js';
+
 
 describe('[#27238] the connector credentials UI bundle', () => {
     it('is a valid manifest', () => {
         expect(() => ManifestSchema.parse(CONNECTOR_CREDENTIALS_UI_BUNDLE)).not.toThrow();
     });
 
-    it('contributes one Setup → Integrations component item, gated on manage_metadata', () => {
+    it('contributes two Setup → Integrations component items, each gated on its own door\'s capability', () => {
         expect(CONNECTOR_CREDENTIALS_COMPONENT_REF).toBe('automation:connector-credentials');
         expect(CONNECTOR_CREDENTIALS_NAV_CAPABILITY).toBe('manage_metadata');
         expect(CONNECTOR_CREDENTIALS_UI_BUNDLE.navigationContributions).toEqual([
@@ -47,9 +55,24 @@ describe('[#27238] the connector credentials UI bundle', () => {
                         icon: 'key-round',
                         requiredPermissions: ['manage_metadata'],
                     },
+                    {
+                        id: 'nav_connector_connections',
+                        type: 'component',
+                        label: 'Connector Connections',
+                        componentRef: 'automation:connector-connections',
+                        icon: 'plug',
+                        requiredPermissions: ['manage_connector_connections'],
+                    },
                 ],
             },
         ]);
+    });
+
+    it('the connections item asks the declared organization-scoped capability the connection door enforces', () => {
+        expect(CONNECTOR_CONNECTIONS_COMPONENT_REF).toBe('automation:connector-connections');
+        expect(CONNECTOR_CONNECTIONS_NAV_CAPABILITY).toBe('manage_connector_connections');
+        const declared = PLATFORM_CAPABILITIES.find((c) => c.name === CONNECTOR_CONNECTIONS_NAV_CAPABILITY);
+        expect(declared?.scope).toBe('org');
     });
 });
 
