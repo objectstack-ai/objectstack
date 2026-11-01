@@ -396,3 +396,106 @@ describe('FileI18nAdapter keeps the owner\'s app label across a module bundle (#
     expect(i18n.t('apps.crm_enterprise.label', 'zh-CN')).toBe('企业 CRM');
   });
 });
+
+describe('FileI18nAdapter reports a translation fallback once (#28109)', () => {
+  // A miss used to be silent: the reader got the fallback locale's text (or the
+  // key) and nobody who could add the translation was told. What `t()` RETURNS
+  // must not move; only a log line is added.
+  type Line = { level: 'warn' | 'debug'; message: string };
+  const capture = () => {
+    const lines: Line[] = [];
+    const logger = {
+      warn: (message: string) => { lines.push({ level: 'warn', message }); },
+      debug: (message: string) => { lines.push({ level: 'debug', message }); },
+    };
+    return { lines, logger };
+  };
+  const build = (logger?: ReturnType<typeof capture>['logger']) => {
+    const i18n = new FileI18nAdapter({ fallbackLocale: 'en', logger });
+    i18n.loadTranslations('en', { k: 'Hello', only_en: 'English only', greet: 'Hi {{name}}' });
+    i18n.loadTranslations('zh-CN', { k: '你好' });
+    return i18n;
+  };
+
+  it('warns once, naming the locale and the key, when the fallback locale serves', () => {
+    const { lines, logger } = capture();
+    const i18n = build(logger);
+    expect(i18n.t('only_en', 'zh-CN')).toBe('English only');
+    expect(i18n.t('only_en', 'zh-CN')).toBe('English only');
+    expect(lines).toHaveLength(1);
+    expect(lines[0].level).toBe('warn');
+    expect(lines[0].message).toContain("'only_en'");
+    expect(lines[0].message).toContain("'zh-CN'");
+    expect(lines[0].message).toContain("'en'");
+  });
+
+  it('a hit in the requested locale logs nothing', () => {
+    const { lines, logger } = capture();
+    const i18n = build(logger);
+    expect(i18n.t('k', 'zh-CN')).toBe('你好');
+    expect(i18n.t('k', 'en')).toBe('Hello');
+    expect(lines).toEqual([]);
+  });
+
+  it('a key no bundle holds is said once at debug, and the key is still returned', () => {
+    const { lines, logger } = capture();
+    const i18n = build(logger);
+    expect(i18n.t('missing', 'zh-CN')).toBe('missing');
+    expect(i18n.t('missing', 'zh-CN')).toBe('missing');
+    expect(i18n.t('missing', 'en')).toBe('missing');
+    expect(lines.map((l) => l.level)).toEqual(['debug', 'debug']);
+    expect(lines[0].message).toContain("'missing'");
+    expect(lines[0].message).toContain("'zh-CN'");
+    expect(lines.every((l) => l.level !== 'warn')).toBe(true);
+  });
+
+  it('a locale with no bundle at all is said once per locale, not once per key', () => {
+    const { lines, logger } = capture();
+    const i18n = build(logger);
+    expect(i18n.t('k', 'fr')).toBe('Hello');
+    expect(i18n.t('only_en', 'fr')).toBe('English only');
+    expect(i18n.t('missing', 'fr')).toBe('missing');
+    expect(lines).toHaveLength(1);
+    expect(lines[0].level).toBe('warn');
+    expect(lines[0].message).toContain("'fr'");
+  });
+
+  it('returns exactly what an adapter without a logger returns', () => {
+    const { logger } = capture();
+    const logged = build(logger);
+    const silent = build();
+    const calls: Array<[string, string, Record<string, unknown>?]> = [
+      ['k', 'zh-CN'], ['k', 'en'], ['only_en', 'zh-CN'], ['missing', 'zh-CN'],
+      ['missing', 'en'], ['k', 'fr'], ['greet', 'zh-CN', { name: 'Ada' }], ['greet', 'fr', { name: 'Ada' }],
+    ];
+    for (const [key, locale, params] of calls) {
+      expect(logged.t(key, locale, params)).toBe(silent.t(key, locale, params));
+    }
+  });
+
+  it('an authored translation counts as the locale\'s bundle and as a hit', () => {
+    const { lines, logger } = capture();
+    const i18n = new FileI18nAdapter({ fallbackLocale: 'en', logger });
+    i18n.loadTranslations('en', { k: 'Hello', other: 'Other' });
+    i18n.replaceAuthoredTranslations({ 'ja-JP': { k: 'こんにちは' } });
+    expect(i18n.t('k', 'ja-JP')).toBe('こんにちは');
+    expect(lines).toEqual([]);
+    expect(i18n.t('other', 'ja-JP')).toBe('Other');
+    expect(lines).toHaveLength(1);
+    expect(lines[0].message).toContain("'other'");
+  });
+
+  it('stops after a bounded number of reports, and says so once', () => {
+    const { lines, logger } = capture();
+    const i18n = build(logger);
+    const bound = FileI18nAdapter.MISSING_TRANSLATION_REPORT_LIMIT;
+    for (let i = 0; i < bound + 50; i += 1) {
+      i18n.loadTranslations('en', { [`n${i}`]: `N${i}` });
+      expect(i18n.t(`n${i}`, 'zh-CN')).toBe(`N${i}`);
+    }
+    const perKey = lines.filter((l) => l.message.includes("'zh-CN'") && /'n\d+'/.test(l.message));
+    expect(perKey).toHaveLength(bound);
+    expect(lines).toHaveLength(bound + 1);
+    expect(lines[bound].level).toBe('warn');
+  });
+});
