@@ -41,9 +41,10 @@
  *      objectstack#27378 such a row's switch draws a muted on-track, and a
  *      `deployment_policy` row says what that policy is in plain words; the
  *      platform's sentence stays behind Details.
- *   8. **the clone result's next steps** (objectui#13270) — a clone runs
- *      beside its source, so the result offers to switch the source off
- *      through the SAME toggle as its row, and links the clone's Studio scope.
+ *   8. **the clone result's next steps** (objectui#13270) — the result offers
+ *      to switch the source off
+ *      through the SAME toggle as its row, and links the copy in the Studio
+ *      package the server named (#28149).
  *      An off source is offered nothing to switch; a refusal is the server's
  *      sentence and the offer stays.
  *   9. **the clone prefill** (objectui#13344) — the dialog opens on
@@ -99,8 +100,11 @@ const CLONE_CONFLICT_REFUSAL =
 
 /** `FLOW_CLONE_NOTICE` — returned on every successful clone. */
 const CLONE_NOTICE =
-  'The copy runs alongside the original until you switch one of them off, ' +
+  'The copy is switched off and does not run until you switch it on, ' +
   'and it still uses the same subflows, actions and objects as the original.';
+
+/** [#28149] The package the server says the copy landed in: the source's paired customization package. */
+const CLONE_PACKAGE = 'com.acme.pkg.custom';
 
 /**
  * `SCHEDULED_WORK_DISABLED_REASON` (`@objectstack/types` 17.5.0), the sentence
@@ -219,7 +223,7 @@ beforeEach(() => {
         const payload = body as { name: string; label: string };
         return response(200, {
           success: true,
-          data: { flow: { name: payload.name, label: payload.label }, notice: CLONE_NOTICE },
+          data: { flow: { name: payload.name, label: payload.label }, packageId: CLONE_PACKAGE, notice: CLONE_NOTICE },
         });
       }
       throw new Error(`unexpected fetch: ${method} ${url}`);
@@ -838,15 +842,30 @@ describe('the clone result offers the next steps', () => {
     expect(screen.getByText('Created flow "crm_notify_owner".')).toBeInTheDocument();
   });
 
-  it('links the clone in the package-less Studio scope (pin b)', async () => {
+  it('links the clone in the Automations pillar of the package the server named (pin b, #28149)', async () => {
     await renderPage();
     await cloneRow('pkg_notify', 'crm_notify_owner');
 
     const open = screen.getByTestId('packaged-clone-open');
     expect(open.textContent).toBe('Open the clone in Studio');
     const href = open.getAttribute('href') ?? '';
-    expect(href.startsWith('/studio/~org/automations')).toBe(true);
-    expect(decodeURIComponent(href)).toContain('crm_notify_owner');
+    // The answer's `packageId`, read — never the package-less scope, where
+    // the copy no longer lives.
+    expect(href.startsWith(`/studio/${encodeURIComponent(CLONE_PACKAGE)}/automations`)).toBe(true);
+    expect(href.startsWith('/studio/~org')).toBe(false);
+    expect(decodeURIComponent(href)).toContain('flow:crm_notify_owner');
+  });
+
+  it('draws no Studio link when the answer names no package — never one that lands nowhere (pin b, control)', async () => {
+    fixture.clone = [{
+      status: 200,
+      body: { success: true, data: { flow: { name: 'crm_notify_owner', label: 'Notify owner (ours)' }, notice: CLONE_NOTICE } },
+    }];
+    await renderPage();
+    await cloneRow('pkg_notify', 'crm_notify_owner');
+
+    expect(screen.getByText('Created flow "crm_notify_owner".')).toBeInTheDocument();
+    expect(screen.queryByTestId('packaged-clone-open')).toBeNull();
   });
 
   it('shows a refused switch-off verbatim and keeps the offer (pin c)', async () => {

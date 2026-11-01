@@ -41,7 +41,8 @@ import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
-import { CloneFlowResponseSchema } from '@objectstack/spec/api';
+import { CloneFlowRequestSchema, CloneFlowResponseSchema } from '@objectstack/spec/api';
+import { ROUTE_LEDGER } from '../route-ledger.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
 import { FLOW_CLONE_NOTICE, FLOW_CLONE_STATUS } from '../flow-clone.js';
@@ -306,5 +307,35 @@ describe('[#28149] a source no package ships has no pair', () => {
         expect(answer.data.packageId).toBe(OTHER.id);
         expect((await rig.rows('local_digest_copy')).map((r) => r.package_id)).toEqual([OTHER.id]);
         expect(answer.data.flow.status).toBe('obsolete');
+    }, 60_000);
+});
+
+describe('[#28149] the contract: the ledger row names the schemas this suite parses with', () => {
+    it('the clone row is SDK surface and names CloneFlowRequestSchema / CloneFlowResponseSchema', () => {
+        const row = ROUTE_LEDGER.find((e) => e.route === 'POST /automation/:name/clone');
+        expect(row, 'the clone row must exist in ROUTE_LEDGER').toBeDefined();
+        expect(row!.disposition).toBe('sdk');
+        expect(row!.client).toBe('automation.clone');
+        expect(row!.requestSchema).toBe('CloneFlowRequestSchema');
+        expect(row!.responseSchema).toBe('CloneFlowResponseSchema');
+    });
+
+    it('each declared member reaches the door as sent, and an undeclared one is refused on its key', async () => {
+        expect(Object.keys(CloneFlowRequestSchema.shape).sort()).toEqual(['label', 'name', 'package']);
+        const rig = await boot();
+
+        const sent = { name: 'ext_sent', label: 'Sent as is', package: EXT.id };
+        expect(CloneFlowRequestSchema.safeParse(sent).success).toBe(true);
+        const landed = await rig.clone(SOURCE, sent);
+        expect(landed.status, JSON.stringify(landed.body)).toBe(200);
+        expect(landed.data.flow).toMatchObject({ name: sent.name, label: sent.label });
+        expect(landed.data.packageId).toBe(sent.package);
+
+        const undeclared = { name: 'ext_status', label: 'Chooses its status', status: 'active' };
+        expect(CloneFlowRequestSchema.safeParse(undeclared).success).toBe(false);
+        const refused = await rig.clone(SOURCE, undeclared);
+        expect(refused.status).toBe(400);
+        expect(refused.body.error.fields).toMatchObject([{ field: 'status', code: 'unknown_field' }]);
+        expect(await rig.rows('ext_status')).toEqual([]);
     }, 60_000);
 });

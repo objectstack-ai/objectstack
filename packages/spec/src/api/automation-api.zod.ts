@@ -665,7 +665,7 @@ export type ToggleFlowResponseParsed = z.infer<typeof ToggleFlowResponseSchema>;
  * a whole-definition copy of the flow at `:name`, under a NEW machine name,
  * written into a writable package and switched off.
  *
- * Closed: the door refuses a key not declared here (400 `VALIDATION_ERROR`,
+ * Closed: the door refuses a key not declared here (400 `VALIDATION_FAILED`,
  * located on the key), so a caller who meant to choose the copy's `status`
  * or its envelope learns that nothing was read. The path's `:name` is the
  * SOURCE; this body's `name` is the copy's.
@@ -689,13 +689,12 @@ export const CloneFlowRequestSchema = lazySchema(() => z.object({
     'The copy\'s display name — mandatory, so the copy and its source are told apart in every list.',
   ),
   package: z.string().min(1).optional().describe(
-    'Id of the package the copy lands in. Given, it must be an installed, writable package (a '
-    + 'read-only one is refused 422 `WRITABLE_PACKAGE_REQUIRED`, an unknown one 404 '
-    + '`RESOURCE_NOT_FOUND`), and the copy is judged against its dependency closure as every save into '
-    + 'a package is: a reference to an object outside it is refused 422 `INVALID_METADATA`. Omitted, '
-    + 'the copy lands in the source\'s paired customization package `<base>.custom`, created on '
-    + 'first use; a source no read-only package ships has no pair and is refused 400 '
-    + '`VALIDATION_ERROR` naming this member.',
+    'Id of the package the copy lands in. Given, it must be an installed, writable package whose '
+    + 'dependency closure holds the source\'s package: an unknown or read-only one is refused 422 '
+    + '`WRITABLE_PACKAGE_REQUIRED`, one that declares no dependency path to the source\'s package 409 '
+    + '`RESOURCE_CONFLICT`, and nothing is written. Omitted, the copy lands in the source\'s paired '
+    + 'customization package `<base>.custom`, created on first use; a source no read-only package ships '
+    + 'has no pair, and the request is refused 400 `VALIDATION_FAILED` located on this member.',
   ),
 }).strict());
 export type CloneFlowRequest = z.input<typeof CloneFlowRequestSchema>;
