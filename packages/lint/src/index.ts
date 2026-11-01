@@ -714,6 +714,14 @@ export {
 } from './validate-report-date-range.js';
 export type { ReportDateRangeFinding } from './validate-report-date-range.js';
 
+// [#28473] ADR-0146 D3: a package namespace too long to have a paired
+// customization namespace, judged with `customizationNamespace` itself.
+export {
+  validateCustomizationNamespace,
+  NAMESPACE_NO_CUSTOMIZATION_PAIR,
+} from './validate-customization-namespace.js';
+export type { CustomizationNamespaceFinding } from './validate-customization-namespace.js';
+
 // [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
 // own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,
 // resolved against the object graph. Its base-object half is

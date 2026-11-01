@@ -156,6 +156,7 @@ import { lintViewRefs } from './lint-view-refs.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
+import { validateCustomizationNamespace } from './validate-customization-namespace.js';
 import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
@@ -2578,6 +2579,27 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['email_template'],
     run: (stack) => validateEmailTemplateHoleGrammar(stack),
+  },
+  // [#28473] ADR-0146 D3: a package whose `manifest.namespace` is too long to
+  // have a paired customization namespace (`customizationNamespace` answers
+  // `base_namespace_too_long`), so the ensure door will refuse to create its
+  // `.custom` pair and its installers can never customize it. Advisory: the
+  // package builds, installs and runs, and only its customization is refused.
+  // `normalized` because it reads one string off each delivered manifest and
+  // needs no parsed stack, so `os lint` judges it too.
+  {
+    name: 'validateCustomizationNamespace',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-customization-namespace.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Not a metadata write: the runtime publish gate judges metadata items, and a package manifest is not '
+      + 'one (no metadata type carries it). A package reaches the runtime through the install doors, where '
+      + 'the ensure door that creates a pair already refuses a base whose namespace has none (409) with its '
+      + 'own sentence; this rule exists to give the author that answer before the package ships.',
+    run: (stack) => validateCustomizationNamespace(stack),
   },
 ];
 
