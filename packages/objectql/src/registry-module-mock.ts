@@ -97,6 +97,8 @@ export interface RegistryDoubleInstance {
   registerItem: any;
   registerApp: any;
   installPackage: any;
+  getPackage: any;
+  getObjectContributors: any;
   reset: any;
   metadata: any;
   [member: string]: any;
@@ -173,6 +175,14 @@ export function createRegistryModuleMock(
     registerItem: vi.fn(),
     registerApp: vi.fn(),
     installPackage: vi.fn(),
+    // [#28697] `registerApp` asks, before it writes anything, whether a refused
+    // first registration of the package could be withdrawn: no package record
+    // under its id, and who already contributes to each object it owns. The
+    // same lesson as `getAllObjects` above: empty is the truthful body for a
+    // suite that installs nothing for real, and an omitted member is a hard
+    // `TypeError` at every `registerApp`.
+    getPackage: vi.fn(() => undefined),
+    getObjectContributors: vi.fn(() => []),
     reset: vi.fn(),
     metadata: { get: vi.fn(() => new Map()) },
     ...instanceOverrides,
