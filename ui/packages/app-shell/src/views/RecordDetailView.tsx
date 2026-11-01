@@ -114,6 +114,16 @@ interface RecordDetailViewProps {
 const FALLBACK_USER = { id: 'current-user', name: 'Demo User' };
 
 /**
+ * The horizontal inset the `page` renderer gives a page's body
+ * (`p-3 md:p-4 lg:p-6` in `@object-ui/components` `renderers/layout/page.tsx`).
+ * The appends this host draws after a page it renders whole (the approvals and
+ * attachments fallbacks and the provenance footer) sit beside that page, not
+ * inside it, so they take the same inset; without it they drew wider than the
+ * page's own cards (objectstack#27520 row 14).
+ */
+const RECORD_PAGE_APPEND_INSET = 'px-3 md:px-4 lg:px-6';
+
+/**
  * `⌘⇧,` / `Ctrl+Shift+,` — show or hide the record page's right column, the
  * reader's ⊟ (objectstack#27052; objectstack#27524, Target 4). The record
  * page owns the listener and advertises this beside it, under the same gate:
@@ -4776,7 +4786,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   nothing when the record has no requests. */}
               {pureRecordId && !hasApprovalsNode && (
                 <RecordApprovalsPanel
-                  className="mt-6"
+                  className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
                   approvals={approvals}
                   currentUserId={user?.id}
                 />
@@ -4789,7 +4799,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   (objectstack#4358), so this bottom append fires only for
                   authored pages that omit the panel. */}
               {filesEnabled && !hasAttachments && pureRecordId && (
-                <div className="mt-6" ref={setAttachmentsFallbackEl} data-record-attachments-fallback="">
+                <div
+                  className={cn('mt-6', !pageColumns && RECORD_PAGE_APPEND_INSET)}
+                  ref={setAttachmentsFallbackEl}
+                  data-record-attachments-fallback=""
+                >
                   <RecordAttachmentsPanel
                     objectName={objectName!}
                     recordId={pureRecordId}
@@ -4814,6 +4828,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               {!pageColumns && (
                 <DefaultRecordPageContext.Provider value={!assignedPage && !namedPageBlocked}>
                   <RecordMetaFooter
+                    className={RECORD_PAGE_APPEND_INSET}
                     data={readablePageRecord}
                     objectSchema={objectDef}
                     objectName={objectName}
