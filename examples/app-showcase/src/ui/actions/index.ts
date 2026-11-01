@@ -496,6 +496,11 @@ export const ArchiveTaskAction = defineAction({
   // Disabled while the task is not done — visible either way. #8990: `has()`
   // for the sparse face; `!=` against a literal cannot fault, so no `!= null`.
   disabled: 'has(record.done) && record.done != true',
+  // What the greyed button says while `disabled` holds: why it is
+  // unavailable and what unlocks it. Without it the console falls back to
+  // "Not available for this record", which names neither. Display only; it
+  // never gates the dispatch.
+  disabledReason: 'Mark the task done first.',
   locations: ['record_header', 'record_section'],
   refreshAfter: false,
 });
