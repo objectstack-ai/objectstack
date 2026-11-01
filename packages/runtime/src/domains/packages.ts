@@ -2485,7 +2485,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             try {
                 return {
                     handled: true,
-                    response: deps.success(await readPackageCustomizations(id, protocol, qlService)),
+                    response: deps.success(await readPackageCustomizations(id, protocol.listServedOverrides.bind(protocol), qlService)),
                 };
             } catch (e: any) {
                 return { handled: true, response: deps.errorFromThrown(e, 500) };
@@ -2981,10 +2981,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  */
 async function readPackageCustomizations(
     baseId: string,
-    protocol: Required<Pick<PackagesDomainProtocol, 'listServedOverrides'>>,
+    listServedOverrides: NonNullable<PackagesDomainProtocol['listServedOverrides']>,
     ql: any,
 ): Promise<GetPackageCustomizationsResponse> {
-    const overrides = await protocol.listServedOverrides({ packageId: baseId });
+    const overrides = await listServedOverrides({ packageId: baseId });
 
     const pair = customizationPackageId(baseId);
     const registry = ql?.registry;
