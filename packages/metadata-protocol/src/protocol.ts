@@ -177,6 +177,11 @@ import {
     type MetadataProvenance,
 } from '@objectstack/spec/kernel';
 import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
+// [#28409, ADR-0146 D3 / D8 item 2] The pair's id, the one spelling N-08 owns,
+// and the one predicate that says a stored row is the served override of a
+// base's name.
+import { customizationPackageId } from '@objectstack/spec/kernel';
+import { isServedOverrideRowOf } from './served-override.js';
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
@@ -438,7 +443,7 @@ import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
-import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage } from './protocol-environment-rows.js';
+import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage, soleShippingPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
@@ -2804,6 +2809,15 @@ function mutationEventMemberOfBody(type: string, body: unknown): { member?: stri
 interface ServedOverlayRowCandidate {
     readonly spelling: 'canonical' | 'other';
     readonly packageId: string | null | undefined;
+    /**
+     * [#28409, ADR-0146 D8 item 2] Set on the one candidate that is a base's
+     * declared override: the base package whose name the row must override.
+     * `packageId` is then the base's pair (`<base>.custom`), and a row there
+     * holds the candidate only when it declares the override
+     * ({@link isServedOverrideRowOf}); an undeclared row of the pair is that
+     * package's own item, never the base's.
+     */
+    readonly overrideOf?: string;
 }
 
 /**
@@ -2832,6 +2846,18 @@ interface StoredRowPlace {
  *  - Then the package (ADR-0048 prefer-local): with a `packageId`, that
  *    package's own row, then the package-less row, never another package's;
  *    with none, any row.
+ *  - [#28409, ADR-0146 D8 item 2] …and, for a read that serves the package's
+ *    name (`servedOverride`), the package's declared override FIRST: the row
+ *    of its paired `<package>.custom` package that declares
+ *    `overrides.package` = the package ({@link isServedOverrideRowOf}), ahead
+ *    of the package's own row and of the package-less row. Ahead of the
+ *    package-less row because a package-less save of such an item writes the
+ *    pair's row whenever it is the item's only binding
+ *    ({@link ObjectStackProtocolImplementation.packagelessAddress}, unchanged):
+ *    serving the package-less row over it would answer a save with a body
+ *    the save never wrote (#23165's shape). A package-unbound row still wins
+ *    over the code package and over another package's row (ADR-0146 D8
+ *    item 1) until the migration moves it into the pair (D11).
  *
  * Both readers of stored content take this order, so they cannot pick
  * differently: {@link ObjectStackProtocolImplementation.findServedOverlayRow}
@@ -2853,12 +2879,31 @@ export function servedOverlayRowCandidates(address: {
      * ({@link ObjectStackProtocolImplementation.strictDraftReadAddress}).
      */
     readonly packageId: string | null | undefined;
+    /**
+     * [#28409, ADR-0146 D8 item 2] Whether the address's declared override
+     * is a candidate: the reads that SERVE a package's name (the active
+     * by-name read and its draft preview, the layered read, the list's merges)
+     * pass `true`. A read that answers a write's address (the strict draft
+     * read, the view container expansion's package order) passes nothing: a
+     * save naming the base writes the base's own partition, never its pair's.
+     */
+    readonly servedOverride?: boolean;
 }): ServedOverlayRowCandidate[] {
-    const packages: Array<string | null | undefined> = address.packageId === null
-        ? [null]
-        : address.packageId ? [address.packageId, null] : [undefined];
+    const base = address.packageId;
+    const pair = address.servedOverride === true && typeof base === 'string' && base !== ''
+        ? customizationPackageId(base)
+        : undefined;
+    const places: ReadonlyArray<Pick<ServedOverlayRowCandidate, 'packageId' | 'overrideOf'>> = base === null
+        ? [{ packageId: null }]
+        : base
+            ? [
+                ...(pair?.ok ? [{ packageId: pair.value, overrideOf: base }] : []),
+                { packageId: base },
+                { packageId: null },
+            ]
+            : [{ packageId: undefined }];
     return (['canonical', 'other'] as const).flatMap((spelling) =>
-        packages.map((packageId) => ({ spelling, packageId })));
+        places.map((place) => ({ spelling, ...place })));
 }
 
 /**
@@ -2996,6 +3041,16 @@ export function mergePackageAwareOverlay(
     records: Array<{ data: unknown; packageId: string | undefined; stored?: StoredRowPlace; standIn?: boolean }>,
     transform?: (data: any, prev: any) => any,
     unseated?: WeakSet<object>,
+    options: {
+        /**
+         * [#28409, ADR-0146 D8 item 2] Serve each package's declared override
+         * over its slot ({@link servedOverlayRowCandidates}' `servedOverride`):
+         * the effective list's merges pass `true`; the per-package layer
+         * ({@link ObjectStackProtocolImplementation.getMetaItemsPerPackage})
+         * and the MetadataService merge pass nothing.
+         */
+        readonly servedOverride?: boolean;
+    } = {},
 ): unknown[] {
     // Per-SLOT, layer-ordered contributions; `pkg: undefined` = package-less.
     // `stored` marks a contribution that is a stored row the caller read;
@@ -3017,12 +3072,24 @@ export function mergePackageAwareOverlay(
     // [#21804] The stored row the served-row resolution picks for package
     // `real` among a slot's contributions: the first candidate of
     // {@link servedOverlayRowCandidates} that one of the rows sits at.
-    const servedStoredRow = (list: readonly Contribution[], real: string | undefined): any => {
-        for (const candidate of servedOverlayRowCandidates({ packageId: real })) {
+    // [#28409] …and says when that row is `real`'s declared override, which
+    // the slot then serves under `real`'s provenance.
+    const servedStoredRow = (
+        list: readonly Contribution[],
+        real: string | undefined,
+    ): { item: any; overrideOf?: string } | undefined => {
+        for (const candidate of servedOverlayRowCandidates({ packageId: real, servedOverride: options.servedOverride })) {
             const hit = list.find((c) => c.stored !== undefined
                 && (c.stored.type === type ? 'canonical' : 'other') === candidate.spelling
-                && (candidate.packageId === undefined || (c.pkg ?? null) === candidate.packageId));
-            if (hit) return hit.item;
+                && (candidate.packageId === undefined || (c.pkg ?? null) === candidate.packageId)
+                // [#28409] The pair's row holds the override candidate only
+                // when it declares the override: judged on the row's own
+                // binding (the contribution's `pkg`, the row's `package_id`)
+                // and its body, never on a stamp the body carries.
+                && (candidate.overrideOf === undefined || isServedOverrideRowOf(
+                    { type: c.stored.type, package_id: c.pkg, metadata: c.item }, candidate.overrideOf,
+                )));
+            if (hit) return candidate.overrideOf === undefined ? { item: hit.item } : { item: hit.item, overrideOf: candidate.overrideOf };
         }
         return undefined;
     };
@@ -3059,13 +3126,16 @@ export function mergePackageAwareOverlay(
             // The stand-in the one candidate order picks among the stored
             // rows here, else (no stored row: a stand-in held back by an
             // earlier merge) the latest.
-            let held = servedStoredRow(list, undefined);
+            let held = servedStoredRow(list, undefined)?.item;
             if (held === undefined) held = list[list.length - 1].item;
             unseated?.add(held);
             out.push(held);
             continue;
         }
-        const reals = Array.from(new Set(list.filter((c) => c.pkg !== undefined).map((c) => c.pkg)));
+        // [#21817, #28409] A stand-in never seats a slot, whatever package it
+        // is bound to: a package-less row has none, and a pair's row that
+        // stands in for its base's declared override is bound to the pair.
+        const reals = Array.from(new Set(list.filter((c) => c.pkg !== undefined && !c.standIn).map((c) => c.pkg)));
         if (reals.length === 0) {
             out.push(list[list.length - 1].item); // latest package-less row wins
             continue;
@@ -3075,7 +3145,8 @@ export function mergePackageAwareOverlay(
             // chosen by the served-row resolution, whatever order the rows
             // came back in; with no stored row of `real`'s own or package-less,
             // the latest lower-layer contribution of either stands, as before.
-            let chosen: any = servedStoredRow(list, real);
+            const served = servedStoredRow(list, real);
+            let chosen: any = served?.item;
             if (chosen === undefined) {
                 for (const c of list) {
                     if ((c.pkg === real || c.pkg === undefined) && c.stored === undefined) chosen = c.item;
@@ -3084,7 +3155,10 @@ export function mergePackageAwareOverlay(
             if (chosen === undefined) continue;
             // A package-less body standing in for package `real` must carry
             // `real`'s provenance (the base row it replaced was `real`'s).
-            if (chosen._packageId === undefined) chosen = { ...chosen, _packageId: real };
+            // [#28409] So must `real`'s declared override: it is served as
+            // `real`'s item, under `real`'s envelope, wherever its row is bound.
+            if (served?.overrideOf !== undefined) chosen = { ...chosen, _packageId: real };
+            else if (chosen._packageId === undefined) chosen = { ...chosen, _packageId: real };
             out.push(chosen);
         }
     }
@@ -9628,19 +9702,62 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The one body behind {@link getMetaItems} and
-     * {@link getMetaItemsForExecution}. `audience` decides ONLY whether the
-     * serving decorations are applied at the very end; every source, merge and
-     * filter above that line is shared, so the list the engine executes and
-     * the list a caller is served cannot disagree about which items exist.
+     * [#28409, ADR-0146 D8] The list as each package's own address holds it,
+     * BEFORE the one effective read: {@link getMetaItems} with the served
+     * decorations, with every package's item of a name kept (ADR-0048,
+     * one item per package of a name), and with no package's declared
+     * override served over that package's own item. The same sources, the
+     * same merges, the same envelope; two steps of the effective read are not
+     * taken, and nothing else differs.
+     *
+     * The list {@link getMetaItems} served before ADR-0146 D8, kept for its
+     * two readers and no other:
+     *
+     *  - **the anonymous form doors' withdrawal judgement** (`form-routes.ts`
+     *    in `@objectstack/rest`). A withdrawal is a kill switch: a public form
+     *    withdrawn by any body the doors honoured is never re-opened (the
+     *    hard requirement ruled on #28238, option 3). So the doors judge it
+     *    against this layer beside the effective list, never against a layer
+     *    narrower than this one — it still holds a dependent package's
+     *    same-named row and the base's own document under a declared override;
+     *  - **the package export** (`GET /packages/:id/export` in
+     *    `@objectstack/runtime`). A package exports its own items: the base's
+     *    export carries the base unchanged, and its pair's export carries the
+     *    overriding item with its `overrides` block (ADR-0146 D8 item 3).
+     *
+     * ⛔ Not a second list for anything else. Every door that serves a
+     * package's name serves {@link getMetaItems}, the one effective read.
+     */
+    async getMetaItemsPerPackage(request: { type: string; packageId?: string; previewDrafts?: boolean }) {
+        // The same #4432 fold {@link getMetaItems} applies, for the same reason.
+        return this.readFlattenedMetaItems(canonicalizeMetaRequestType(request), 'served', 'per-package');
+    }
+
+    /**
+     * The one body behind {@link getMetaItems},
+     * {@link getMetaItemsForExecution} and {@link getMetaItemsPerPackage}.
+     * `audience` decides ONLY whether the serving decorations are applied at
+     * the very end; every source, merge and filter above that line is shared,
+     * so the list the engine executes and the list a caller is served cannot
+     * disagree about which items exist.
+     *
+     * [#28409] `layer` decides ONLY whether the two steps of the one
+     * effective read are taken (ADR-0146 D8): a package's declared override
+     * served over its slot ({@link servedOverlayRowCandidates}'
+     * `servedOverride`), and, naming no package, a name exactly one code
+     * package ships listed once, under that package
+     * ({@link soleShippingPackageOf}). `'effective'` takes both; the
+     * per-package layer takes neither.
      *
      * `request` arrives already folded by the calling face (#4432).
      */
     private async readFlattenedMetaItems(
         request: { type: string; packageId?: string; previewDrafts?: boolean },
         audience: 'served' | 'execution',
+        layer: 'effective' | 'per-package' = 'effective',
     ) {
         const { packageId } = request;
+        const servedOverride = layer === 'effective';
         // ── [ADR-0131 D6] The environment → code read ──────────────────────
         //
         // The list serves the environment's stored rows over the code
@@ -9723,7 +9840,19 @@ export class ObjectStackProtocolImplementation implements
             const records = await this.readActiveOverlayRows(request);
             lockRows = packageId ? await this.readActiveOverlayRows({ type: request.type }) : records;
             const standInRows = packageId ? lockRows.filter((row) => (row?.package_id ?? null) === null) : [];
-            if ((records && records.length > 0) || standInRows.length > 0) {
+            // [#28409, ADR-0146 D8 item 2] …and a list scoped to a package
+            // serves, in each slot the package seats, the package's declared
+            // override: a row of the package's pair (`<package>.custom`) that
+            // declares it ({@link servedOverlayRowCandidates}' first
+            // candidate). Its row read names the package, so the pair's rows
+            // come from the package-agnostic read too. They stand in like the
+            // package-less rows: a pair's item of a name the package does not
+            // ship is the pair's own, and never listed in the package's list.
+            const pairOfScope = servedOverride && packageId ? customizationPackageId(packageId) : undefined;
+            const overrideRows = pairOfScope?.ok
+                ? lockRows.filter((row) => row?.package_id === pairOfScope.value)
+                : [];
+            if ((records && records.length > 0) || standInRows.length > 0 || overrideRows.length > 0) {
                 const isView = (PLURAL_TO_SINGULAR[request.type] ?? request.type) === 'view';
                 const overlays = this.storedOverlayEntries(request, records);
 
@@ -9760,7 +9889,15 @@ export class ObjectStackProtocolImplementation implements
                     .map(({ data, type: recType }) => ({
                         data, packageId: undefined, stored: { type: recType }, standIn: true,
                     }));
-                items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns], (data, prev) => {
+                // [#28409] The pair's rows, placed the same way and bound to
+                // the pair, as stand-ins: the merge serves one only where it
+                // declares the override of the slot's package.
+                const overrideStandIns = this.storedOverlayEntries(request, overrideRows)
+                    .filter(({ data }) => !this.declinesStoredRow(request.type, (data as { name?: unknown } | null)?.name))
+                    .map(({ data, packageId: recPkg, type: recType }) => ({
+                        data, packageId: recPkg, stored: { type: recType }, standIn: true,
+                    }));
+                items = mergePackageAwareOverlay(request.type, items, [...placed, ...standIns, ...overrideStandIns], (data, prev) => {
                     if (isView && data && typeof data === 'object') {
                         const patch = viewIdentityPatch(data as Record<string, unknown>, prev);
                         if (patch) Object.assign(data as Record<string, unknown>, patch);
@@ -9778,7 +9915,7 @@ export class ObjectStackProtocolImplementation implements
                     return this.foldObjectExtendersFromRegistry(
                         request.type, (data as { name?: unknown } | null)?.name, data,
                     );
-                }, unseated);
+                }, unseated, { servedOverride });
 
                 // [#13407] Expand any aggregated `defineView` container this
                 // READ just merged in, INLINE into this response's own `items`
@@ -9859,7 +9996,20 @@ export class ObjectStackProtocolImplementation implements
                     const ownRowNamesAt = new Map<string | undefined, ReadonlySet<string>>();
                     const ownRowNames = (pkg: string | undefined): ReadonlySet<string> => {
                         let names = ownRowNamesAt.get(pkg);
-                        if (names === undefined) ownRowNamesAt.set(pkg, (names = this.namesWithOwnStoredRow(records, pkg)));
+                        if (names === undefined) {
+                            names = this.namesWithOwnStoredRow(records, pkg);
+                            // [#28409] …and a name the package's declared
+                            // override holds ({@link isServedOverrideRowOf}):
+                            // the by-name read naming the package serves that
+                            // override before it asks any expansion.
+                            if (servedOverride && pkg !== undefined) {
+                                const overridden = [...records, ...overrideRows]
+                                    .filter((row) => typeof row?.name === 'string' && isServedOverrideRowOf(row, pkg))
+                                    .map((row) => row.name as string);
+                                if (overridden.length > 0) names = new Set([...names, ...overridden]);
+                            }
+                            ownRowNamesAt.set(pkg, names);
+                        }
                         return names;
                     };
                     const standInNames = this.namesWithOwnStoredRow(standInRows);
@@ -10020,10 +10170,16 @@ export class ObjectStackProtocolImplementation implements
                 // package-agnostic draft read, filtered back to the
                 // package-less rows. The by-name preview arm naming the
                 // package serves that draft when the package has none.
-                const standInDraftRecords = packageId
-                    ? (await queryDrafts(undefined)).filter((record) => (record?.package_id ?? null) === null)
+                const packageAgnosticDrafts = packageId ? await queryDrafts(undefined) : [];
+                const standInDraftRecords = packageAgnosticDrafts.filter((record) => (record?.package_id ?? null) === null);
+                // [#28409] …and the pair's drafts, as stand-ins, as its active
+                // arm previews the pair's rows: the pending edit of the
+                // package's declared override previews over its slot.
+                const pairOfDraftScope = servedOverride && packageId ? customizationPackageId(packageId) : undefined;
+                const overrideDraftRecords = pairOfDraftScope?.ok
+                    ? packageAgnosticDrafts.filter((record) => record?.package_id === pairOfDraftScope.value)
                     : [];
-                if (draftRecords.length > 0 || standInDraftRecords.length > 0) {
+                if (draftRecords.length > 0 || standInDraftRecords.length > 0 || overrideDraftRecords.length > 0) {
                     // ADR-0048 (#1828) — package-aware draft overlay (parity with
                     // the active-overlay merge above): a package-scoped draft
                     // previews only its own package's entry, so two packages'
@@ -10048,6 +10204,7 @@ export class ObjectStackProtocolImplementation implements
                     const drafts = [
                         ...draftRecords.map(placeDraft),
                         ...standInDraftRecords.map((record) => ({ ...placeDraft(record), standIn: true })),
+                        ...overrideDraftRecords.map((record) => ({ ...placeDraft(record), standIn: true })),
                     ];
                     // [#7774] Same bundle slot as the active merge above — a
                     // draft of one locale must preview over that locale, not
@@ -10055,7 +10212,7 @@ export class ObjectStackProtocolImplementation implements
                     items = mergePackageAwareOverlay(request.type, items, drafts, (data) => {
                         if (data && typeof data === 'object') (data as any)._draft = true;
                         return data;
-                    }, unseated);
+                    }, unseated, { servedOverride });
                 }
             } catch (error) {
                 // [#5532] Same rule as the active-overlay read above. Serving
@@ -10162,6 +10319,47 @@ export class ObjectStackProtocolImplementation implements
         // the package does not ship: it is not in the package's list.
         if (unseated) {
             items = (items as any[]).filter((it) => !(it && typeof it === 'object' && unseated.has(it)));
+        }
+
+        // [#28409, ADR-0146 D8 items 1–2, #28238's list half] THE ENV-WIDE
+        // LIST JOINS THE ONE EFFECTIVE READ. Naming no package, a name exactly
+        // one code package ships is listed once, as that package's item
+        // ({@link soleShippingPackage}): the item the by-name read naming no
+        // package serves, which since #28238 takes its content from that
+        // package's address ({@link packagelessContentPackage}) — its declared
+        // override, else its own row, else the package-unbound row, which the
+        // merges above have already served in its slot, else its code item.
+        // An item bound to another package under that name is dropped here: a
+        // dependent package's same-named row, a `.custom` item that does not
+        // declare the override, the pair's row itself (its body is the slot's
+        // when it declares). Each is still served under its own address — the
+        // by-name read naming its package, and the list scoped to it.
+        //
+        // Before, the merge kept one item per package of the name (the
+        // [#21934] rule), and a console keying items by name rendered the last
+        // one, so the base app showed a dependent package's copy. That list is
+        // still read where a narrower one is not allowed:
+        // {@link getMetaItemsPerPackage}, the anonymous form doors' withdrawal
+        // layer and the package export (`layer: 'per-package'`).
+        //
+        // An item bound to no package is kept (the merges seat a package-less
+        // row in its package's slot, so none is left beside it), and so is
+        // every item of a name no package or several packages ship (ADR-0048
+        // §3.3). The `package` type is never narrowed: its items are the
+        // packages themselves.
+        if (servedOverride && !packageId && request.type !== 'package') {
+            const typeShipping = this.shippingPackagesOf(request.type);
+            const soleShipperOf = new Map<string, string | undefined>();
+            items = (items as any[]).filter((it) => {
+                const itemName = it?.name;
+                const bound = boundPackageOf(it?._packageId);
+                if (typeof itemName !== 'string' || bound === undefined) return true;
+                if (!soleShipperOf.has(itemName)) {
+                    soleShipperOf.set(itemName, soleShippingPackage(this.shippedArtifactsOf(request.type, itemName, typeShipping)));
+                }
+                const soleShipper = soleShipperOf.get(itemName);
+                return soleShipper === undefined || soleShipper === bound;
+            });
         }
 
         // Hide metadata owned by a disabled package. `listItems` already drops
@@ -10574,6 +10772,12 @@ export class ObjectStackProtocolImplementation implements
      * selected from those rows, each by the `where` it would have sent the
      * store ({@link rowMatchesOverlayWhere}), instead of one `findOne` each.
      *
+     * [#28409, ADR-0146 D8 item 2] `servedOverride: true`, from a read that
+     * serves the package's name, puts the package's declared override first
+     * ({@link servedOverlayRowCandidates}); the answer's `overrideOf` then
+     * names the package the row overrides, and the caller serves the row as
+     * that package's item.
+     *
      * Returns `undefined` when no row is found. A failed read propagates: each
      * caller owns its #5532 discrimination.
      */
@@ -10585,7 +10789,9 @@ export class ObjectStackProtocolImplementation implements
         packageId?: string | null;
         /** [#22877] The bundle member a by-name door's selector named; omitted, the canonical one. */
         member?: string;
-    }, activeRows?: readonly StoredOverlayRow[]): Promise<{ row: any } | undefined> {
+        /** [#28409] The package's declared override first — see {@link servedOverlayRowCandidates}. */
+        servedOverride?: boolean;
+    }, activeRows?: readonly StoredOverlayRow[]): Promise<{ row: any; overrideOf?: string } | undefined> {
         // [#25467 cut 35] The body moved to `protocol-environment-rows.ts` (see `EnvironmentRowsHost`).
         const host: ThisParameterType<typeof findServedOverlayRow> = {
             findEnvironmentRow: (...a) => this.findEnvironmentRow(...a),
@@ -11016,7 +11222,11 @@ export class ObjectStackProtocolImplementation implements
                 // [#21716] The served-row resolution, on the draft partition
                 // (ADR-0048 prefer-local, parity with the row read below) — see
                 // {@link findServedOverlayRow}.
-                let draftRec = (await this.findServedOverlayRow({
+                // [#28409] A preview serves the package's name, so the
+                // pending edit of its declared override is a candidate
+                // ({@link servedOverlayRowCandidates}' `servedOverride`), as
+                // in the list's draft-preview merge.
+                const servedDraft = await this.findServedOverlayRow({
                     type: request.type,
                     name: request.name,
                     state: 'draft',
@@ -11024,7 +11234,9 @@ export class ObjectStackProtocolImplementation implements
                         ? { packageId: draftContentAddress.packageId }
                         : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                     ...memberOption(member),
-                }))?.row;
+                    servedOverride: true,
+                });
+                let draftRec = servedDraft?.row;
                 // [#23715] Two or more packages and no package-unbound draft:
                 // the best-effort first match, as the strict read below.
                 if (!draftRec && draftContentAddress?.bestEffort) {
@@ -11039,15 +11251,20 @@ export class ObjectStackProtocolImplementation implements
                             ? JSON.parse(draftRec.metadata)
                             : draftRec.metadata,
                     ) as any;
-                    if (draftItem && typeof draftItem === 'object') {
+                    let previewed = draftItem;
+                    if (previewed && typeof previewed === 'object') {
                         const recPkg = (draftRec as { package_id?: string | null }).package_id ?? undefined;
-                        if (recPkg && (draftItem as any)._packageId === undefined) (draftItem as any)._packageId = recPkg;
-                        (draftItem as any)._draft = true;
+                        // [#28409] A declared override's draft previews as the
+                        // overridden package's item, as its active row serves.
+                        if (servedDraft?.overrideOf !== undefined && servedDraft.row === draftRec) {
+                            previewed = { ...previewed, _packageId: servedDraft.overrideOf };
+                        } else if (recPkg && (previewed as any)._packageId === undefined) (previewed as any)._packageId = recPkg;
+                        (previewed as any)._draft = true;
                     }
                     return {
                         type: request.type,
                         name: request.name,
-                        item: await serveDraft(this.governServedObject(request.type, draftItem), draftRec),
+                        item: await serveDraft(this.governServedObject(request.type, previewed), draftRec),
                     };
                 }
             } catch (error) {
@@ -11076,7 +11293,12 @@ export class ObjectStackProtocolImplementation implements
         // [#26707] The draft row this read serves, for its publish verdict.
         let servedDraftRow: { metadata?: unknown; package_id?: string | null } | undefined;
         try {
-            let record = (await this.findServedOverlayRow({
+            // [#28409, ADR-0146 D8 item 2] The active read serves the
+            // package's name, so its declared override is the first candidate
+            // ({@link servedOverlayRowCandidates}' `servedOverride`). The
+            // strict draft read answers the address a draft save writes, never
+            // the pair's: it asks without it.
+            const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: readState,
@@ -11084,7 +11306,9 @@ export class ObjectStackProtocolImplementation implements
                     ? { packageId: draftContentAddress.packageId }
                     : contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
-            }, activeRows))?.row;
+                ...(readState === 'active' ? { servedOverride: true } : {}),
+            }, activeRows);
+            let record = served?.row;
             // [#23715] Two or more packages and no package-unbound draft: the
             // best-effort first match ADR-0048 §3.3 states, as before, served
             // with `version: null` (no row at the address the save naming none
@@ -11107,7 +11331,13 @@ export class ObjectStackProtocolImplementation implements
                 // Surface the persisted software-package binding (parity with
                 // the list path in getMetaItems) so provenance/UI can read it.
                 const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
-                if (recPkg && item && typeof item === 'object' && (item as any)._packageId === undefined) {
+                if (served?.overrideOf !== undefined && served.row === record && item && typeof item === 'object') {
+                    // [#28409] A declared override is served as the package's
+                    // item it overrides, as the list's slot serves it: under
+                    // that package's provenance, so the envelope below is the
+                    // overridden package's artifact's ({@link envelopePackageId}).
+                    item = { ...(item as Record<string, unknown>), _packageId: served.overrideOf };
+                } else if (recPkg && item && typeof item === 'object' && (item as any)._packageId === undefined) {
                     (item as any)._packageId = recPkg;
                 }
                 if (readState === 'draft') {
@@ -11754,12 +11984,18 @@ export class ObjectStackProtocolImplementation implements
             // ADR-0048 prefer-local. [#21716] The ONE served-row resolution
             // {@link getMetaItem} calls too — see {@link findServedOverlayRow}.
             // [#26699] At the addressed member, as that read asks it.
+            // [#28409, ADR-0146 D8 item 2] …with the package's declared
+            // override first, as {@link getMetaItem} serves it: `overlay` is
+            // then the `.custom` item, `code` the base's document and
+            // `effective` the override (the base's document stays reachable
+            // here, ADR-0146 "Decided here" item 5).
             const served = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: 'active',
                 ...(contentPackageId !== undefined ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
+                servedOverride: true,
             });
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
@@ -11818,6 +12054,66 @@ export class ObjectStackProtocolImplementation implements
             }
         }
 
+        // ── [#28409, ADR-0146 D8; N-09 rider gap 3] An ORPHANED row of the name ──
+        //
+        // Nothing stored is served at the address of a name its package X
+        // ships (`code` is X's document), and yet a row of the name is stored in X's pair
+        // (`<X>.custom`) without the override declaration, or in a package
+        // that depends on X (X is in its manifest's dependency closure,
+        // {@link resolveWritePackageScope}). The shape a base upgrade leaves:
+        // the dependent or the pair saved the name before a later version of
+        // X shipped it. Since the effective read serves X's document under
+        // X's name (D8 item 1), that row is no longer served there, and the
+        // env-wide list lists the name once, as X's. It is still the
+        // package's own item, under its own address. The layered read of X's
+        // name REPORTS it, so it is never silently dropped: `overlay` holds
+        // the row as stored, a shadowed layer beside the effective one, as for
+        // a shipped flow name's stored row (#21002), and `effective` stays the
+        // code layer the by-name read serves. The flags below are the address's
+        // as before: the orphan is not this address's row.
+        //
+        // A row of a package outside X's closure is not an orphan of X's name:
+        // it is that package's own item (ADR-0048 §3.3), and not reported here.
+        // With several such rows, the pair's is reported, else the first
+        // package's in id order.
+        let orphaned = false;
+        if (overlay === null && code !== null && typeof contentPackageId === 'string' && contentPackageId !== '') {
+            const base = contentPackageId;
+            let rows: readonly StoredOverlayRow[] = [];
+            try {
+                rows = await this.readItemActiveRows(request.type, request.name);
+            } catch (error) {
+                // [#5707] The same rule as the overlay read above: a read that
+                // did not happen is not an item with no orphan.
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+            }
+            const memberWhere = overlayMemberWhere(request.type, member);
+            const boundTo = (row: StoredOverlayRow): string | undefined => boundPackageOf(row.package_id);
+            const orphan = rows
+                .filter((row) => rowMatchesOverlayWhere(row, memberWhere))
+                .filter((row) => {
+                    const owner = boundTo(row);
+                    if (owner === undefined || owner === base) return false;
+                    if (isServedOverrideRowOf(row, base)) return false;
+                    const pair = customizationPackageId(base);
+                    if (pair.ok && pair.value === owner) return true;
+                    return this.resolveWritePackageScope(owner)?.dependencies.includes(base) === true;
+                })
+                .sort((a, b) => {
+                    const pair = customizationPackageId(base);
+                    const rank = (row: StoredOverlayRow) => (pair.ok && boundTo(row) === pair.value ? 0 : 1);
+                    return rank(a) - rank(b) || String(boundTo(a)).localeCompare(String(boundTo(b)));
+                })[0];
+            if (orphan !== undefined) {
+                overlay = this.convertStoredItem(
+                    String((orphan as { type?: unknown }).type ?? request.type),
+                    storedRowDocument(orphan),
+                );
+                overlayScope = 'env';
+                orphaned = true;
+            }
+        }
+
         // [#4513] `effective` is documented above as "what `getMetaItem` would
         // return", and the response's `_diagnostics` is computed from it — so it
         // carries the same audit-family governance that read now applies, or the
@@ -11873,9 +12169,11 @@ export class ObjectStackProtocolImplementation implements
         // [#21442] A name a stored container expands (above) takes the expanded
         // item as its effective layer: the container row in `overlay` is the
         // layer it derives from, not the value the by-name read serves.
+        // [#28409] …and an orphaned row (above) is a shadowed layer of the
+        // same kind: `effective` is the code layer the by-name read serves.
         const effectiveBase: unknown | null = expandedFrom !== undefined
             ? expandedFrom.item
-            : overlay !== null && !this.declinesStoredRow(request.type, request.name)
+            : overlay !== null && !orphaned && !this.declinesStoredRow(request.type, request.name)
                 ? this.foldObjectExtendersFromRegistry(request.type, request.name, overlay)
                 : code;
         // [#21738] The lock is the one item-lock resolution's — the
@@ -11917,7 +12215,7 @@ export class ObjectStackProtocolImplementation implements
         // doors answer — the same derivation `getMetaItem` publishes.
         const lockState = this.servedLockState(
             request.type, request.name, code ?? overlay ?? {}, artifactBacked, itemLock,
-            overlay !== null && overlay !== undefined,
+            overlay !== null && overlay !== undefined && !orphaned,
         );
 
         // [#8154] The per-type credential redaction, on the ONE read exit

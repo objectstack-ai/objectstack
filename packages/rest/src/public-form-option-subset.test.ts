@@ -175,6 +175,9 @@ describe('[#27606] POST /forms/:slug/submit: a form row\'s `options` subset is e
       if (request?.type === 'object') return [CASE];
       return realGetMetaItems(request);
     };
+    // [#28409] The doors judge withdrawal against the effective list beside
+    // the per-package layer: the injected list is that whole layer here.
+    protocol.getMetaItemsPerPackage = async (request: any) => (request?.type === 'view' ? [FORM, WIDE_FORM, LOOSE_FORM] : []);
     const realCreateData = protocol.createData.bind(protocol);
     createData = vi.fn(realCreateData);
     protocol.createData = createData;
