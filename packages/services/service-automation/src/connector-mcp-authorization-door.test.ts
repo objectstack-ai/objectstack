@@ -161,6 +161,8 @@ function mcpStandIn(lists = false) {
         refuse: new Set<string>(),
         /** What the next listings answer, in order (then `200`): a `403` is thrown as the real provider throws it. */
         listingAnswers: [] as number[],
+        /** Run before a listing answers (e.g. another replica's reconnect landing meanwhile). */
+        beforeListingAnswer: undefined as undefined | (() => Promise<void>),
     };
     const factory: ConnectorProviderFactory = async (ctx) => {
         state.materialized.push(ctx);
@@ -168,6 +170,7 @@ function mcpStandIn(lists = false) {
             const listed = await callWithBorrowedCredential(ctx.credentialHandle!, async (auth) => {
                 const token = auth.type === 'bearer' ? auth.token : '';
                 state.listedWith.push(token);
+                await state.beforeListingAnswer?.();
                 return { status: state.listingAnswers.shift() ?? 200 };
             }, {});
             if (listed.status === 403) {
@@ -453,6 +456,21 @@ describe('ADR-0143 D4 — a borrowed token refused at tool discovery is its conn
             engine.resolveConnectorAction('notion', 'search')!({}, { automation: { tenantId } } as never);
         expect(await dispatch('org_b')).toMatchObject({ status: 200 });
         await expect(dispatch('org_a')).rejects.toMatchObject({ status: 503, message: expect.stringContaining("needs to be reconnected for organization 'org_a'") });
+    });
+
+    it('a reconnect that landed while the refused token was listing keeps its fresh grant; the instance retries', async () => {
+        const { engine, provider, connect, ql } = await boot([notion()], { lists: true });
+        provider.state.listingAnswers.push(403);
+        // Another replica's reconnect: the row is a new connect by the time the refusal is recorded.
+        provider.state.beforeListingAnswer = async () => {
+            provider.state.beforeListingAnswer = undefined;
+            const [row] = await rowsOf(ql);
+            await ql.update(CONNECTOR_CONNECTION_OBJECT, { id: row.id, connected_at: '2999-01-01T00:00:00.000Z' }, { context: SYSTEM } as never);
+        };
+        await (await connect()).done();
+        expect(provider.state.listedWith).toHaveLength(1);
+        expect(await connectionOf(engine, ADMIN_A)).toMatchObject({ status: 'connected' });
+        expect(engine.getConnectorDegradedReason('notion')).toContain("refused the token of organization 'org_a' while it listed its tools (HTTP 403); it retries");
     });
 
     it('CONTROL: a client_credentials token the instance mints itself keeps the client secret\'s attribution', async () => {
