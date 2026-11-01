@@ -21,20 +21,34 @@
 //
 // ## What each case pins
 //
-//   - two locales saved through the metadata door are two rows (the canonical
-//     member's NULL and `zh-CN`), and each sends its own wording at once;
+//   - two customized locales are two rows (the canonical member's NULL and
+//     `zh-CN`), and each sends its own wording at once;
 //   - after a cold boot each locale still sends its own wording, and the
 //     by-name read serves the canonical member's;
 //   - CONTROL: a locale nobody saved keeps the package wording, and a
 //     single-locale re-save is still one row per member;
 //   - [#22877 stage 2] the by-name member selector: `?member=zh-CN` reads
-//     that locale's wording, `DELETE ?member=zh-CN` resets that locale alone
-//     and, after a cold boot, each locale serves the expected wording; a
-//     misspelled or misplaced selector is a located 400.
+//     that locale's wording, a `DELETE` with `?member=en-US` resets that
+//     locale alone and, after a cold boot, each locale serves the expected
+//     wording; a misspelled or misplaced selector is a located 400.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item.
+// The showcase ships this template in `en-US` only, so:
+//
+//   - the `en-US` customization is saved into the showcase's `.custom` pair,
+//     declaring the override, and its reset names the pair;
+//   - the `zh-CN` row is laid down as a release before the close stored it,
+//     package-less with the member `zh-CN`. Such a row stays served (each
+//     locale still sends its own wording), and its package-less save and reset
+//     are refused naming the ceremony. It cannot be written into the pair as
+//     an override (the base ships no `zh-CN`, #28746), and the pair's own
+//     `zh-CN` member is read by name but not listed for a send (#28779's
+//     question), so a pre-close row is how this file holds a second locale.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -47,9 +61,13 @@ const SYS = { isSystem: true, positions: [], permissions: [] };
 
 /** The template the showcase package declares (`com.example.showcase`), in `en-US`. */
 const NAME = 'showcase_task_done_email';
+const BASE = 'com.example.showcase';
+const PAIR = 'com.example.showcase.custom';
 const PACKAGE_SUBJECT = '✅ Task done: {{title}}';
 const ADMIN_EN = 'Done (admin, English): {{title}}';
 const ADMIN_ZH = '已完成（管理员中文）：{{title}}';
+/** The refusal's code — the save door answers it beside a string `error`, an enveloped door inside `error`. */
+const codeOf = (json: any): unknown => json?.code ?? json?.error?.code;
 
 /** What reached the wire — `sendTemplate` returns a delivery result, not the rendered message. */
 const sent: Array<{ subject?: string }> = [];
@@ -102,8 +120,21 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
             context: SYS,
         });
         return rows
-            .map((r) => ({ member: r.bundle_member ?? null, subject: JSON.parse(String(r.metadata)).subject }))
+            .map((r) => ({ member: r.bundle_member ?? null, packageId: r.package_id ?? null, subject: JSON.parse(String(r.metadata)).subject }))
             .sort((a, b) => String(a.member).localeCompare(String(b.member)));
+    };
+    /** The `en-US` customization, saved into the pair as the declared override of the base's member. */
+    const saveEnglish = (served: Record<string, unknown>, subject: string) => {
+        const { overrides: _declared, ...doc }: Record<string, unknown> = { ...served, locale: 'en-US', subject };
+        return call('PUT', inPair(`/meta/email_template/${NAME}`, BASE), declaredOverride(doc, BASE, '0.1.0'));
+    };
+    /** A package-less `zh-CN` row, laid down as a release before ADR-0146 D11 stored it. */
+    const seedPreCloseChinese = async (served: Record<string, unknown>, subject: string) => {
+        const { overrides: _declared, ...doc }: Record<string, unknown> = { ...served, locale: 'zh-CN', subject };
+        const protocol: any = await stack!.kernel.getServiceAsync('protocol');
+        await protocol.getOverlayRepo().put({ type: 'email_template', name: NAME, org: 'env' }, doc, {
+            parentVersion: null, actor: null, source: 'older-release', intent: 'override-artifact', packageId: null,
+        });
     };
     const restart = async () => {
         await stack!.stop();
@@ -118,6 +149,7 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         dbFile = join(dir, 'showcase.db');
         stack = await boot(dbFile);
         token = await stack.signIn();
+        await ensurePair(stack, token, BASE);
     }, 180_000);
 
     afterAll(async () => {
@@ -126,19 +158,18 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         if (dir) rmSync(dir, { recursive: true, force: true });
     });
 
-    it('two locales saved through the metadata door are two rows, and each sends its own wording at once', async () => {
+    it('two locales customized are two rows, the pair\'s `en-US` and a pre-close `zh-CN`, and each sends its own wording at once', async () => {
         const served = await metaBody();
         expect(served.status).toBe(200);
         expect(served.body.subject).toBe(PACKAGE_SUBJECT);
 
-        const en = await call('PUT', `/meta/email_template/${NAME}`, { ...served.body, locale: 'en-US', subject: ADMIN_EN });
+        const en = await saveEnglish(served.body, ADMIN_EN);
         expect(en.status, JSON.stringify(en.json)).toBe(200);
-        const zh = await call('PUT', `/meta/email_template/${NAME}`, { ...served.body, locale: 'zh-CN', subject: ADMIN_ZH });
-        expect(zh.status, JSON.stringify(zh.json)).toBe(200);
+        await seedPreCloseChinese(served.body, ADMIN_ZH);
 
         expect(await overlayRows()).toEqual([
-            { member: null, subject: ADMIN_EN },
-            { member: 'zh-CN', subject: ADMIN_ZH },
+            { member: null, packageId: PAIR, subject: ADMIN_EN },
+            { member: 'zh-CN', packageId: null, subject: ADMIN_ZH },
         ]);
         expect(await sendSubject('en-US')).toBe('Done (admin, English): Ship it');
         expect(await sendSubject('zh-CN')).toBe('已完成（管理员中文）：Ship it');
@@ -154,39 +185,48 @@ describe('[#22877] two locales of one email template survive a cold boot (showca
         expect(await overlayRows()).toHaveLength(2);
     }, 180_000);
 
-    it('control: a locale nobody saved keeps the package ladder, and a re-save of one locale is still one row per member', async () => {
+    it('control: a locale nobody saved keeps the package ladder, a re-save is still one row per member, and the pre-close row\'s package-less re-save is refused', async () => {
         // `ja-JP` is not in the bundle: the ladder falls to `en-US`, the admin's.
         expect(await sendSubject('ja-JP')).toBe('Done (admin, English): Ship it');
 
         const served = await metaBody();
-        const again = await call('PUT', `/meta/email_template/${NAME}`, { ...served.body, locale: 'zh-CN', subject: ADMIN_ZH.replace('：', '（二）：') });
+        const again = await saveEnglish(served.body, ADMIN_EN);
         expect(again.status, JSON.stringify(again.json)).toBe(200);
+        // [#28576] The pre-close row is served, and its package-less write is closed.
+        const zhAgain = await call('PUT', `/meta/email_template/${NAME}`, { ...served.body, overrides: undefined, locale: 'zh-CN', subject: ADMIN_ZH.replace('：', '（二）：') });
+        expect(zhAgain.status, JSON.stringify(zhAgain.json)).toBe(403);
+        expect(codeOf(zhAgain.json)).toBe('NOT_OVERRIDABLE');
+        expect(JSON.stringify(zhAgain.json)).toContain('os migrate packageless-overlays');
         expect((await overlayRows()).map((r) => r.member)).toEqual([null, 'zh-CN']);
 
         await restart();
         expect(await sendSubject('en-US')).toBe('Done (admin, English): Ship it');
-        expect(await sendSubject('zh-CN')).toBe('已完成（管理员中文）（二）：Ship it');
+        expect(await sendSubject('zh-CN')).toBe('已完成（管理员中文）：Ship it');
     }, 180_000);
 
     it('[stage 2] one locale is read and reset by name with the member selector, and each locale serves its wording after a cold boot', async () => {
         // State from the cases above: `en-US` and `zh-CN` both customized.
-        expect(await metaBody('?member=zh-CN')).toMatchObject({ status: 200, body: { subject: ADMIN_ZH.replace('：', '（二）：') } });
+        expect(await metaBody('?member=zh-CN')).toMatchObject({ status: 200, body: { subject: ADMIN_ZH } });
         expect(await metaBody('?member=en-US')).toMatchObject({ status: 200, body: { subject: ADMIN_EN } });
 
-        const reset = await call('DELETE', `/meta/email_template/${NAME}?member=zh-CN`);
+        // [#28576] The pre-close row's package-less reset is closed, naming the ceremony.
+        const closed = await call('DELETE', `/meta/email_template/${NAME}?member=zh-CN`);
+        expect(closed.status, JSON.stringify(closed.json)).toBe(403);
+        expect(codeOf(closed.json)).toBe('NOT_OVERRIDABLE');
+        expect(JSON.stringify(closed.json)).toContain('os migrate packageless-overlays');
+
+        const reset = await call('DELETE', inPair(`/meta/email_template/${NAME}?member=en-US`, BASE));
         expect(reset.status, JSON.stringify(reset.json)).toBe(200);
         expect(reset.json).toMatchObject({ success: true, reset: true });
-        expect(await overlayRows()).toEqual([{ member: null, subject: ADMIN_EN }]);
-        // The package ships `en-US` only, so `zh-CN` now falls to the floor —
-        // the admin's English, untouched by the reset.
-        expect(await sendSubject('zh-CN')).toBe('Done (admin, English): Ship it');
+        expect(await overlayRows()).toEqual([{ member: 'zh-CN', packageId: null, subject: ADMIN_ZH }]);
+        // `en-US` is the package's wording again; `zh-CN` keeps its own, untouched by the reset.
+        expect(await sendSubject('en-US')).toBe('✅ Task done: Ship it');
+        expect(await sendSubject('zh-CN')).toBe('已完成（管理员中文）：Ship it');
 
         await restart();
-        expect(await sendSubject('en-US')).toBe('Done (admin, English): Ship it');
-        expect(await sendSubject('zh-CN')).toBe('Done (admin, English): Ship it');
-        expect(await metaBody()).toMatchObject({ status: 200, body: { subject: ADMIN_EN } });
-        // Nothing stores or ships `zh-CN` now: the read answers it as absent.
-        expect((await metaBody('?member=zh-CN')).status).toBe(404);
+        expect(await sendSubject('en-US')).toBe('✅ Task done: Ship it');
+        expect(await sendSubject('zh-CN')).toBe('已完成（管理员中文）：Ship it');
+        expect(await metaBody()).toMatchObject({ status: 200, body: { subject: PACKAGE_SUBJECT } });
 
         // A located 400 for a misspelled selector, and for one on a type with no members.
         const misspelled = await call('GET', `/meta/email_template/${NAME}?memeber=zh-CN`);
