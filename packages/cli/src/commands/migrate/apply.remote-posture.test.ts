@@ -138,7 +138,14 @@ async function run(
     if (cb) cb();
     return true;
   }) as typeof process.stdout.write);
-  vi.spyOn(process.stderr, 'write').mockImplementation((() => true) as typeof process.stderr.write);
+  // Discarded, but its callback still fires, as the stdout spy's does: both commands end in
+  // `exitOneShotCommand`, which waits for each stream's drain callback and gives up only after
+  // its 2 s timeout. A spy that never calls back cost every run here that 2 s (#23181 slice 24).
+  vi.spyOn(process.stderr, 'write').mockImplementation(((_chunk: unknown, ...rest: unknown[]) => {
+    const cb = rest.find((a) => typeof a === 'function') as (() => void) | undefined;
+    if (cb) cb();
+    return true;
+  }) as typeof process.stderr.write);
   const capture = (...parts: unknown[]) => { said.push(parts.map(String).join(' ')); };
   vi.spyOn(console, 'log').mockImplementation(capture);
   vi.spyOn(console, 'warn').mockImplementation(capture);
