@@ -27,7 +27,13 @@
  * verdict says: that filter is about visibility, not writability.
  */
 
-import { ManifestSchema, deriveNamespaceFromPackageId, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
+import { EnsureCustomizationPackageResponseSchema } from '@objectstack/spec/api';
+import {
+  ManifestSchema,
+  customizationPackageId,
+  deriveNamespaceFromPackageId,
+  validateObjectNamespacePrefix,
+} from '@objectstack/spec/kernel';
 import { readEnvelopeFailureText } from '../../utils/apiErrorEnvelope.js';
 
 export interface PkgEntry {
@@ -181,6 +187,87 @@ export function parseListedPackageManifests(payload: unknown): ReadonlyMap<strin
 /** {@link parseListedPackageManifests}, read from the request {@link fetchPackages} shares. */
 export async function fetchListedPackageManifests(): Promise<ReadonlyMap<string, ListedPackageManifest>> {
   return parseListedPackageManifests(await readPackagesPayload());
+}
+
+/**
+ * [objectstack#28562, ADR-0146 D2] The version a listed package's manifest
+ * declares (`manifest.version`), or `null` when the row carries none: what an
+ * override declaration records as `basedOn`. Read as served, never guessed.
+ */
+export function listedPackageVersion(
+  manifests: ReadonlyMap<string, ListedPackageManifest>,
+  id: string,
+): string | null {
+  const version = manifests.get(id)?.manifest.version;
+  return typeof version === 'string' && version ? version : null;
+}
+
+/**
+ * [objectstack#28562, ADR-0146 D3] The paired customization package of the
+ * base `baseId` when the package list lists it, else `null`. The pair's id is
+ * asked of the spec's pairing rule (`customizationPackageId`) and then looked
+ * up, as the Studio landing links a base's pair: a base with no pair has
+ * nothing to read, and this read never creates one.
+ *
+ * READS only: what Studio shows of a pair that is already there (its pending
+ * drafts, an item's draft in it). ⛔ A write into the pair takes the pair's id
+ * from {@link ensureCustomizationPackage}'s answer, never from here.
+ */
+export function listedCustomizationPairOf(
+  manifests: ReadonlyMap<string, ListedPackageManifest>,
+  baseId: string,
+): string | null {
+  const pair = customizationPackageId(baseId);
+  return pair.ok && manifests.has(pair.value) ? pair.value : null;
+}
+
+/**
+ * [objectstack#28562] The answer of the ensure door, as Studio reads it. The
+ * spec's own declaration (`EnsureCustomizationPackageResponseSchema`) judges it.
+ */
+export interface EnsuredCustomizationPackage {
+  basePackageId: string;
+  /** The pair: every write of a customization of the base addresses it. */
+  packageId: string;
+  /** True when this call created the pair (HTTP 201), false when it was there (200). */
+  created: boolean;
+  writable: boolean;
+}
+
+/**
+ * [objectstack#28562, ADR-0146 D3] `POST /api/v1/packages/:id/ensure-customization`:
+ * the base's paired customization package, created on first use. The ONE
+ * creation path of the pair, so Studio never spells the pair's id itself for
+ * a write: the answer names it.
+ *
+ * Sends no body (the door reads none: the pair's id, namespace and dependency
+ * are derived by the server). Rejects with the server's sentence, verbatim by
+ * the rule every reader here uses ({@link readEnvelopeFailureText}): the wall's
+ * `403` names who may call it, a `409` what the existing pair lacks. A created
+ * pair is a new row of the package list, so the pending list read is dropped
+ * and `objectui:packages-changed` is announced, as a package created anywhere
+ * else in the app announces it.
+ */
+export async function ensureCustomizationPackage(baseId: string): Promise<EnsuredCustomizationPackage> {
+  const res = await fetch(`/api/v1/packages/${encodeURIComponent(baseId)}/ensure-customization`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  }).finally(dropPendingPackageRead);
+  const payload = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!res.ok) {
+    throw new Error(readEnvelopeFailureText(payload) ?? `HTTP ${res.status}`);
+  }
+  // The dispatcher envelope `{ success, data }`; the declaration is the `data`.
+  const parsed = EnsureCustomizationPackageResponseSchema.safeParse(payload?.data);
+  if (!parsed.success) {
+    throw new Error(`The customization package of '${baseId}' was answered with a body its declaration refuses.`);
+  }
+  const { basePackageId, packageId, created, writable } = parsed.data;
+  if (created && typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('objectui:packages-changed'));
+  }
+  return { basePackageId, packageId, created, writable };
 }
 
 /**

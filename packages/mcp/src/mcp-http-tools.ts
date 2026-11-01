@@ -39,9 +39,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { EngineAggregateOptions } from '@objectstack/spec/data';
-// [#28550] The engine's aggregation entry. Each `aggregate_records` entry is
-// built from ITS members, so this door and the REST query door (which parses
-// `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape.
+// [#28550, #28609] The engine's aggregation entry. Each `aggregate_records`
+// entry IS this node, so this door and the REST query door (which parses
+// `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
+// with one refusal.
 import { AggregationNodeSchema } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
@@ -694,56 +695,6 @@ function strictToolInput<T extends z.ZodRawShape>(
 }
 
 /**
- * [#28550] One `aggregate_records` aggregation entry: closed, and carrying the
- * per-aggregation `filter`.
- *
- * The entry used to be a plain `z.object({ function, field, alias })`. Zod's
- * default for an object is `.strip`, and {@link strictToolInput} closes only the
- * tool's TOP-LEVEL keys, so an entry's `filter` was deleted before the handler
- * ran: `{ function: 'count', alias: 'n', filter: { status: 'active' } }` answered
- * the unconditional count, beside the REST query door answering the filtered
- * one for the same body. Any other unknown entry key vanished the same way.
- *
- * Both halves of the fix are the entry's shape, nothing else:
- *
- * - **`filter` is declared**, and it is the engine's own member,
- *   `AggregationNodeSchema.shape.filter` (`FilterConditionSchema`), the slot the
- *   REST door parses. The handler forwards `aggregations` to the bridge
- *   unchanged, and every bridge hands them to `engine.aggregate`, which applies
- *   the filter and runs it through the same refusal doors as `where` (shape,
- *   unknown field, and the security middleware's field-read check). ⛔ No filter
- *   is evaluated here: a second evaluator in this package would be a second
- *   answer to the same question.
- * - **The entry is strict**, through {@link strictToolInput}, so an undeclared
- *   entry key is refused by name, as an undeclared top-level key already is.
- *   The aliases are semantic near-misses for `filter` and `alias`; they are
- *   named in the refusal and never parsed.
- *
- * `function`, `field` and `alias` are the engine's members too. Each keeps the
- * description this tool advertised before; `.describe` copies the schema and
- * leaves its parse unchanged.
- */
-function aggregationEntrySchema() {
-  const node = AggregationNodeSchema.shape;
-  return strictToolInput(
-    {
-      surface: 'this aggregate_records aggregation entry',
-      aliases: { where: 'filter', filters: 'filter', conditions: 'filter', as: 'alias' },
-    },
-    {
-      function: node.function.describe('Aggregation function'),
-      field: node.field.describe('Field to aggregate (omit for count(*))'),
-      alias: node.alias.describe('Result column name'),
-      filter: node.filter.describe(
-        'Optional per-aggregation filter, e.g. {"status":"active"}: only rows matching it feed THIS '
-          + 'aggregation, while the other aggregations in the call still read every row. Same operators '
-          + 'as where.',
-      ),
-    },
-  );
-}
-
-/**
  * The spellings every object-scoped tool shares, split out because they are the
  * same guess wherever an object name is taken.
  */
@@ -1233,7 +1184,15 @@ export function registerObjectTools(
             {
             objectName: z.string().describe('The object/table name'),
             aggregations: z
-              .array(aggregationEntrySchema())
+              // [#28550 → #28609] One entry is the engine's own node, taken whole:
+              // `AggregationNodeSchema` is closed at the producer, so an
+              // undeclared entry key is refused here in the words the REST
+              // query door prints for the same body (`aliases` and the retired
+              // `distinct`'s tombstone included), and `filter` reaches the
+              // bridge unchanged for `engine.aggregate` to apply. ⛔ No local
+              // copy of the entry: the copy this tool closed by itself (#28550)
+              // was a second key list, which this node now is.
+              .array(AggregationNodeSchema)
               .min(1)
               .describe(
                 'Metrics to compute, e.g. [{"function":"sum","field":"amount","alias":"total"},'
