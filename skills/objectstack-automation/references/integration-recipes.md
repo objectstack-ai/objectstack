@@ -27,8 +27,8 @@ connector is declared. Full guide: https://objectstack.ai/docs/automation/connec
   or `paramName` for a query-string key); `basic` (`username`
   stays in metadata); `signed` on `openapi` / `rest` (`scheme`
   `aliyun-acs3-hmac-sha256`, `tencentcloud-tc3-hmac-sha256` or `alipay-v3`,
-  `keyId`) signs each request — WeChat Pay has no scheme yet: mark it blocked,
-  write no plugin; `oauth2` / `app-credential`: recipe 6. A secret in a url path has no variant — use a
+  `keyId`) signs each request — WeChat Pay has no scheme yet: blocked;
+  `oauth2` / `app-credential`: recipe 6. A secret in a url path has no variant — use a
   token-authenticated connector. `authentication: { token }` is refused at `os validate`.
 - `defineConnector`: `@objectstack/spec/integration`; `defineFlow`: `@objectstack/spec`; both register in `defineStack`.
 
@@ -44,14 +44,14 @@ export const StripeConnector = defineConnector({
 // crm_account gains `stripe_available` (currency) and `stripe_synced_at` (datetime).
 export const StripeBalanceSweep = defineFlow({
   name: 'stripe_balance_sweep', label: 'Stripe balance → house account',
-  type: 'schedule', runAs: 'system',          // a scheduled run has no trigger user
+  type: 'schedule', runAs: 'system',
   nodes: [
     { id: 'start', type: 'start', label: 'Nightly 03:00',
       config: { schedule: { type: 'cron', expression: '0 3 * * *' } } },
     { id: 'bal', type: 'connector_action', label: 'GET /v1/balance',
       connectorConfig: { connectorId: 'stripe', actionId: 'GetBalance', input: {} } },
     { id: 'write', type: 'update_record', label: 'Write balance', config: {
-      objectName: 'crm_account', filter: { is_house_account: true }, // multi-tenant: pin the organization too
+      objectName: 'crm_account', filter: { is_house_account: true },
       fields: { stripe_available: { dialect: 'cel', source: 'bal.body.available[0].amount / 100.0' },
                 stripe_synced_at: { dialect: 'cel', source: 'isoDatetime(now())' } } } },
     { id: 'end', type: 'end', label: 'End' },
@@ -89,8 +89,8 @@ export const GitHubMcp = defineConnector({
 `tools/list` definition; a pinned name `include` leaves out is refused at boot.
 Digests: `computeMcpToolsSnapshot(tools)` (`@objectstack/connector-mcp`), or a
 64-hex placeholder pin, then the served digest from the degraded reason. The
-instance degrades with no actions, the reason on `GET /api/v1/automation/connectors`
-naming each tool: a pinned tool served differently is `CONNECTOR_UPSTREAM_CHANGED`
+instance degrades with no actions; the `GET /api/v1/automation/connectors` reason
+names each tool: a pinned tool served differently is `CONNECTOR_UPSTREAM_CHANGED`
 with the digest it now serves (review, re-pin); one no longer listed is
 the credential path when the instance's credential reached the server, as this
 `bearer` does — the stored credential marked `rejected`: fix the credential and
@@ -171,7 +171,8 @@ auth: { type: 'app-credential', vendor: 'feishu', appId: 'cli_a1b2', credentialR
 `client_credentials` and `app-credential` dispatch once the ref is set.
 `authorization_code` is degraded "not connected" until an administrator holding
 `manage_connector_connections` connects it, once per organization, from a
-signed-in session: `POST /api/v1/automation/connectors/:name/connection` answers
-`{ authorizationUrl }`. An `authorization_code` instance on `mcp` may omit the
-`https://` endpoints and `clientId`, discovered at connect.
+signed-in session (an agent or API key is refused):
+`POST /api/v1/automation/connectors/:name/connection` answers `{ authorizationUrl }`;
+the vendor redirects to `GET …/connectors/oauth/callback`. An `authorization_code`
+instance on `mcp` may omit the `https://` endpoints and `clientId`, discovered at connect.
 Still never park a short-lived token behind a `bearer` ref.
