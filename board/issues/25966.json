@@ -1,7 +1,7 @@
 {
   "number": 25966,
   "kind": "issue",
-  "title": "[PM seat] domain:ui — ⏳ vacant",
+  "title": "[PM seat] domain:ui — 🟢 zhuangjianguo · 由 zhuangjianguo 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -13,16 +13,18 @@
   "labels": [
     "pm:seat"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-26T06:24:48Z",
-  "updated_at": "2026-11-01T06:53:12Z",
+  "updated_at": "2026-11-01T13:06:31Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 12,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/25966",
-  "body": "domain:ui#1 · os-tesla · session_01L9qibw2uhdSeHYfnZdAf4V\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n⏳ **vacant** · signed off 2026-11-01T06:51Z on the maintainer's word 「UI 车道当前任务处理完，合并后就下班」 (2026-11-01T04:46Z, in the `os-tesla` account's Claude project). Previous holder: `os-tesla` · session `session_01L9qibw2uhdSeHYfnZdAf4V` · seated 2026-10-31T22:50Z. Successor: `/pm-dispatch 接手`, after reading this post and the sign-off brief below it.\n\n## Handover ledger\n\n- **In flight:** none. **Stay-behind:** none. `check-handover` exited 0 before this write.\n- **Landed this tenure, newest first:**\n  - #28538 (#28469)\n  - #28544 (#25921 B1/B3/B4/B6/B10, `Part of`)\n  - #28532 (#28484)\n  - #28524 (#28497)\n  - #28526 (#27521)\n  - #28498 (Tier H)\n  - #28496\n  - #28495 (#27520)\n  - #28492 (#28461)\n  - #28493 (#28444)\n  - #28490 (#28472)\n  - Earlier landings are in the tenure's landing notes on each card.\n- **Queue snapshot (`domain:ui` + `pm:queue`, open):**\n  - #28561 p1 (taken by seat 4, #26620, notice 6554594704)\n  - #28546 p1\n  - #28552 p2 (taken by seat 4)\n  - #28521 p2\n  - #25921 p3 (B2, B5, B7, B8, B9, B11, B12, B13 untaken; B8 and B11 sit on governed paths)\n  - #25918 p3\n- **Decision box:** #28483 (`needs-user-decision`).\n- **Held, not dispatched:** #28470 p1. It needs a spec payload widening plus a server route first (spec/server lane work), so the ui half waits on that. The maintainer has been told.\n- **Cross-lane memo:** #28519 (spec card, `ActionSchema.cancelText`) carries #27521 row 9; the ui half follows it.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing.\n- **File area:** seat 1 is every `domain:ui` path not split to seats 2–5. Seat 4 (#26620, `zhuangjianguo`, mailbox #28286) was seated again at the time of this sign-off.\n- **Excluded:** the `pm:epic` subtrees (#26676 record page, #8345 multi-currency, #28236 package overrides). `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Standing constraints (maintainer):**\n  - Changesets for ui cards go to the root `.changeset/`.\n  - No PR on the objectui repository.\n  - `node scripts/check-sdui-manifest.mjs` gates every ui card.\n  - A PR that needs the maintainer's approval gets `os-zhuang` requested as reviewer after the seat ACCEPT and a same-head contract PASS.\n  - Seats self-review at the contract tier and land PRs they ACCEPTed; governed Tier H and over-3000-line PRs still wait for the human approval.\n  - Up to 5 card threads per seat.\n  - Seats coordinate within the project's spec and ui seats only; no new cards from other lanes.\n- **Mailbox:** #28480 closed at sign-off; the successor reopens one when seated.\n- **Publication:** a merge to `main` publishes nothing. The release is the Version Packages PR, which a human merges.\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n- **Wall:** none.\n"
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/ui.md`. This is **`domain:ui` seat 1**. Seat 2 is #25995, seat 3 is #27561, seat 4 is #26620, seat 5 is #26945.\n\n## Current PM\n\n🟢 **`zhuangjianguo`** · session `session_01QsR2jUJ19MstFvFhjgiYTu` · seated 2026-11-01T13:03Z · 由 zhuangjianguo 账户的项目负责 (Claude Code project \"objectstack docs ui\", seat thread \"Run second ui lane seat\"). Posture, ledger and round reports live in the project; this body keeps only what other accounts need.\n\n## Handover ledger\n\n- **Inherited:** none in flight. The previous holder (`os-tesla`, `session_01L9qibw2uhdSeHYfnZdAf4V`) signed off clean (brief 6554648505, `check-handover` exit 0, stay-behind none).\n- **Pointer:** canonical ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:ui#1` + `head:claude/` PRs.\n\n## Hot-file serial queue\n\n- **This seat holds:** nothing yet. Each claim names its file surface.\n- **Split with seat 4 (#26620, same account, separate session):** seat 4 keeps #28470 #28568 #28573 #28567 #28562 and #28572 through landing. This seat takes every other unclaimed `domain:ui` `pm:queue` card, starting with #28645, then #28569 #28570 #28578 once #28562 lands. Cards sharing `StudioDesignSurface.tsx` or the studio en/zh packs with seat 4's in-flight PRs serialize behind them (the later PR merges main).\n- **Excluded:** the `pm:epic` subtrees. `ui/.github/**` and the root `ci.yml` stay ⛔ out of bounds for ui cards.\n\n## Notes\n\n- **Standing constraints (maintainer):** changesets for ui cards go to the root `.changeset/`; no PR on the objectui repository; `node scripts/check-sdui-manifest.mjs` is a gate on every ui card; no card thread or reviewer runs on the contract-review tier — a `CONTRACT_REVIEW_TIER` review waits for the director seat; cloud-touching cards go whole to the `repo:cloud` lane.\n- **Mailbox:** opened at seating; its number is in the seat-taken comment below.\n- **Publication:** a merge to `main` publishes nothing; the release is the Version Packages PR, a human act.\n"
 }

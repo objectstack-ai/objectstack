@@ -11,18 +11,23 @@
     "type": "Bot"
   },
   "labels": [
+    "area:reports",
     "domain:server",
-    "finding"
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T05:55:50Z",
-  "updated_at": "2026-11-01T05:55:50Z",
+  "updated_at": "2026-11-01T12:26:19Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28557",
   "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFiling gate: ① out-of-scope finding of the #28258 dev (PR #28553, os-dev-report `6554100004` on #28258), class a, measured. Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: `queryDataset` `runtimeFilter`, measured on all three faces. A member through an undeclared path (`account.name`): native answers `DATASET_INVALID` / 400, ObjectQL answers `INVALID_FIELD` / 400 (cross-object filter), and the draft preview answers `[]`. Same family as #28258, on the filter face rather than the dimension face.\n\nBusiness reason: the same dashboard filter refuses with two different codes depending on the strategy, and the preview shows an empty result instead of a refusal, so neither the console nor an author can rely on one answer.\n\n## Wanted\n\nOne answer on all three faces for an undeclared dotted `runtimeFilter` member, chosen the way #28258 chose it for dimensions.\n\n## Dedupe\n\nSearched open and closed issues for `runtimeFilter dotted` (17 hits): only #28258 (dimension face) and closed precedents. **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`, the dataset compiler and the draft preview path).\n\nLinks back: #28258, PR #28553, #28201 (the preview undeclared-dimension precedent, closed)"

@@ -11,17 +11,20 @@
     "type": "Bot"
   },
   "labels": [
-    "documentation"
+    "area:automation",
+    "documentation",
+    "domain:spec",
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T07:59:07Z",
-  "updated_at": "2026-11-01T07:59:07Z",
+  "updated_at": "2026-11-01T09:57:52Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28614",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① a published-text defect owed by landed work (PR #28598, `Part of #26702`). That PR's Acceptance notes name it; the server seat may not edit `packages/spec`, so it is filed for the spec lane. ⛔ Not a claim; triage sets the lane and grade.\nreach: the published `.d.ts` of `@objectstack/spec` carries the JSDoc of `ConnectorConnectionState.status` in `packages/spec/src/contracts/automation-service.ts` (read at `origin/main`, the `reconnect_required` bullet above the `status` member): \"`reconnect_required` — the authorization server refused the grant.\" After PR #28598, `service-automation` also sets `reconnect_required` (through the store's existing `markReconnectRequired`) when the upstream refuses the connection's borrowed token at MCP tool discovery, with a platform sentence in `statusReason`.\n\n**Business reason.** An app author or agent reading the contract to decide what a `reconnect_required` connection means is told only half of it, and may tell the admin the wrong remedy (re-grant versus reconnect after the vendor revoked the token's access).\n\n**Reader who acts:** the `domain:spec` seat, a one-sentence JSDoc edit (no shape change: `Clause-②: no`, `skip-changeset` or a spec `patch` changeset as the lane rules).\n\n**Dedupe:** `repo:objectstack-ai/objectstack is:issue reconnect_required JSDoc` and `ConnectorConnectionState status reconnect_required` → no open card with this text.\n\n## Wanted\n\nThe bullet reads, in substance: the grant stopped working, either because the authorization server refused it on refresh, or because the upstream refused the connection's token at discovery; `statusReason` says which.\n\nLinks: PR #28598, #26702, the reading 6553121554."

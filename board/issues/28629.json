@@ -1,0 +1,34 @@
+{
+  "number": 28629,
+  "kind": "pull_request",
+  "title": "test(ui-e2e): the read-only member spec names the write routes it watches; the record page read POST is not a write",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T09:08:30Z",
+  "updated_at": "2026-11-01T09:25:03Z",
+  "closed_at": "2026-11-01T09:25:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T09:25:01Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28629",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi9paTx1Lu8ENYwwssthfK3h)_\nFixes #28618\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:只读成员的 live 用例不再把「非 GET 即写」当判据,改为按路由账本点名真正的写路由;记录页的读取 `POST …/:id/page` 不再被算作写。\n- 为什么改:记录页现在通过这个 POST 读取数据,用例把成员自己打开页面误判成两次写,夜间 live 档因此常红,真回归会被这条已知红淹没。\n- 风险与回滚:只动测试代码,不发布任何包;成员真的写入仍会让用例变红(已实测)。回滚即 revert 本 PR。\n- 先看:`ui/e2e/live/data-writes.ts`(写路由清单与判定)、`ui/e2e/live/read-only-member-record.spec.ts`(两处调用点)。\n- 两分钟验证:CI 绿即可;本地实测见下方 Verification,夜间档下一次运行应在这条用例上转绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- New helper `ui/e2e/live/data-writes.ts`: `writesRecordsOf(object)` returns a predicate over Playwright requests that names the write routes on one object instead of treating every non-GET as a write.\n  - PATCH, PUT and DELETE anywhere under `/api/v1/data/:object` are writes by method.\n  - A POST is a write only on a named route: create (`POST /data/:object`), `clone`, `shares`, `import`, `import/jobs`, `batch`, `createMany`, `updateMany`, `deleteMany`, and the three `/actions/...` invocation shapes for the object.\n  - The cross-object `POST /api/v1/batch` counts when one of its operations names the object, or when its body cannot be read.\n  - The two read-shaped POSTs in the ledger, `POST /data/:object/query` and `POST /data/:object/:id/page`, are deliberately not writes.\n  - Every route also matches under the environment-scoped mirror.\n- `read-only-member-record.spec.ts`: the member's write detector uses the predicate, and the \"the member browser attempted no write\" assertion is unchanged. The admin control step's save wait used the same \"non-GET on the record URL\" shape, which the record-page read also matches; it now waits on the same predicate, so only the real save resolves it.\n\nHow the write set was derived: transcribed from the two route ledgers, `packages/rest/src/rest-route-ledger.ts` (families `crud`, `data-actions`, `record-shares`, `batch`) and `packages/runtime/src/route-ledger.ts` (domain `/actions`). A one-time script enumerated every non-GET ledger row whose path names `:object` (21 rows across both ledgers) and classified a URL built from each one. Nothing re-derives the list after this PR, and the helper's header says so: a write route added to a ledger later is not watched until it is added there.\n\nSibling specs: `ui/e2e/live/*.spec.ts` was grepped for the same \"every non-GET is a write\" detector. No other spec has it; the others match one named method and path (`/api/v1/batch`, `PATCH`/`PUT` on a record, `PUT /meta/...`), so nothing else changed.\n\n## Tests\n\n- No test was skipped, renamed or deleted, and the no-write assertion is not weakened.\n- `pnpm --dir ui type-check:e2e`: exit 0. `eslint` on both files: exit 0.\n- Changeset: none, `skip-changeset`. The diff is under `ui/e2e/`, which no package publishes (`ui` is the private root package), and `pnpm check:published-files` exits 0.\n\n## Acceptance notes\n\n- What the detector watches has widened in three places: the `/actions/:object/...` invocations, the cross-object `POST /api/v1/batch`, and the environment-scoped mirror. The old detector missed all three. A neighbour object sharing the name prefix (`showcase_inquiry_x`) is no longer counted; the old substring match counted it.\n- Bound: a POST write route added to a ledger later goes unwatched until someone names it in `data-writes.ts`. That is the cost the card's Expected section accepts, so that a future read-shaped POST cannot red the spec. A permanent pin holding the list against the ledgers would need a cross-tree test input declaration, so it is left to the seat.\n\n## Verification\n\nLive, on head `224a31ec93`: the workspace backend from `ui/e2e/live/ci/start-backend.sh` (this tree's CLI serving `examples/app-showcase`), with the Console built with `VITE_BASE_PATH=/` and served by `vite preview`. This is the nightly harness's stack, step for step.\n\n<details><summary>Fixed spec: 1 passed</summary>\n\n```\n  ✓  1 [chromium] › e2e/live/read-only-member-record.spec.ts:48:1 › a member who may read but not write an inquiry gets a read-only form and no edit affordance; the admin edits it (10.5s)\n  1 passed (12.1s)\n```\n</details>\n\n<details><summary>Original detector on the same stack (spec restored from d5da45b278): reproduces the card's reading</summary>\n\n```\n    Error: the member browser attempted no write\n    - Array []\n    + Array [\n    +   \"POST http://localhost:41874/api/v1/data/showcase_inquiry/SwQodwKP5jp6hr5v/page\",\n    +   \"POST http://localhost:41874/api/v1/data/showcase_inquiry/SwQodwKP5jp6hr5v/page\",\n    + ]\n    > 107 |       expect(writes, 'the member browser attempted no write').toEqual([]);\n```\n</details>\n\n<details><summary>Ablation: a real member write still fails the spec</summary>\n\nA `PATCH /api/v1/data/showcase_inquiry/ID` sent from the member's page, injected through `scripts/ablation-replace.mjs` (anchor 1 to 0, restored to the HEAD blob, `git diff HEAD` empty):\n\n```\n    Error: the member browser attempted no write\n    - Array []\n    + Array [\n    +   \"PATCH http://localhost:41874/api/v1/data/showcase_inquiry/CQkKy5JDU57kmU1n\",\n    + ]\n```\n</details>\n\n<details><summary>The whole nightly list (`test:e2e:live:nightly`): 19 passed</summary>\n\n```\n  19 passed (1.2m)\n```\n</details>\n\n<details><summary>Classification check: 33 cases, 0 failures</summary>\n\nThe card's two captured `POST …/H0mCRgRpfpwhhwLC/page` requests answer `false`, where the old detector answered `true`. Every one of the 21 non-GET ledger rows naming `:object` answers `true`, except `query` and `page`. Also covered: PUT, the environment-scoped mirror, `/batch` with and without the object, GET reads, the prefix neighbour and a query string.\n</details>\n\nSession: https://claude.ai/code/session_017ihL2gLghEqeDKTbDTC7Zd\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

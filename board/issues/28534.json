@@ -2,8 +2,8 @@
   "number": 28534,
   "kind": "issue",
   "title": "connector materializer: an installed package's package-relative `providerConfig` file ref is read from the HOST's package root, so an install-local app can bind the host's own file (measured: it materialized `ready` with the host's OpenAPI document)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:automation",
     "domain:server",
     "finding",
-    "pm:dispatched",
     "pm:epic",
     "priority:p2"
   ],
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T05:12:26Z",
-  "updated_at": "2026-11-01T07:19:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T11:00:44Z",
+  "closed_at": "2026-11-01T10:59:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 9,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28534",
   "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a product defect with a named location, `finding` class (b) (contract text vs runtime). Found by the os-dev on #28505 (PR #28533, report comment 6553750134) and re-read by this seat. Child of #27293 (E4: what an installed connector app reads). ⛔ Not a claim.\n\n`reach:` public door — `POST /api/v1/marketplace/install-local` with an inline manifest whose `provider: 'openapi'` connector names `providerConfig.spec: './src/system/connectors/status-openapi.json'`. Measured by the dev at `origin/main` `23d1303d` against the showcase: the instance materialized `ready` on `GET /api/v1/automation/connectors`, carrying the HOST showcase's own document (its description and its `getHealth` action). A ref that names a file the host lacks fails instead with an ENOENT naming the host path.\n\n## The defect\n\n- Contract (`packages/spec/src/integration/connector-provider.ts:326` and `:344`, read at `origin/main` `bff315cd`): `loadPackageFile` / `resolvePackagePath` resolve a relative path \"against the root of the stack/package that declared the entry\".\n- Runtime (`packages/services/service-automation/src/plugin.ts:2812` and `:2815`): every entry gets `createPackageFileLoader(this.options.packageRoot)` / `createPackagePathResolver(this.options.packageRoot)`, which is the host's root, whichever package declared the entry. An install-local package has no root on disk, because the install caches the artifact JSON alone.\n\n`Seam: spec: packages/spec/src/integration/connector-provider.ts ConnectorProviderContext.loadPackageFile → runtime: packages/services/service-automation/src/plugin.ts createPackageFileLoader(this.options.packageRoot)`\n\nPR #28533 (once merged) means `os build` no longer emits a file ref for `openapi` `spec`, so this defect remains reachable through old artifacts, hand-written manifests, and any future provider key that takes a file. `resolvePackagePath` was read but not measured.\n\n## Work (the dev's options; the dev recommended A)\n\n- **A.** At materialization, refuse a package-relative ref on an entry whose package was installed (not host-owned). Name the entry and say how to fix it (\"rebuild with a current `os build`\", or inline the document). The materializer needs a reader that tells host-owned from installed packages (the install ledger or the package registry's source). This is the framework lane, with no spec change if an existing reader answers.\n- **B.** The install writes carried files beside the cached JSON and stamps each item with its package root. This changes the artifact/manifest contract and needs the spec lane. It is a separate widening that A does not foreclose.\n- **C.** Leave it. The exposure is the cross-package read measured above, which this seat does not take as acceptable.\n\nTests: the dev's measured case (an installed entry naming a host file → refused, not `ready`), the host's own entry still reading its file (control), and a host-path ENOENT turned into the located refusal.\n\n## Business reason\n\nAn installed package must not be able to bind another package's files by guessing a path. Today the host's root is shared by every installed app, and a connector app from the shelf can silently run against a host document.\n\n## Reader\n\nThe triage seat grades and routes it (`domain:server`, `service-automation`); the epic PM of #27293 dispatches.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-01T05:10Z), titles grepped for `host.?s (own )?root|cross-package|installed package.*(file|root)|loadPackageFile|package-relative`: 2 hits, #28505 (the build half, which this card's runtime half was split from) and PR #28533 (its fix); open-issue search `loadPackageFile`: #28505 only. Control `install` on the same set: 20 hits."

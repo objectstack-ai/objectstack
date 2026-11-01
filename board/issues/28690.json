@@ -1,0 +1,32 @@
+{
+  "number": 28690,
+  "kind": "issue",
+  "title": "analytics: the dataset draft preview drops a bucketed timeDimensions entry that is not also in dimensions, so it answers one total instead of the time groups",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T13:54:33Z",
+  "updated_at": "2026-11-01T13:56:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28690",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding of the #28555 dev (PR #28686, os-dev-report `6558864662` on #28555), class a, measured. Filed by `domain:server` seat 3. ⛔ Not a claim. No grade yet: a server seat grades it.\n\nReach: `queryDataset` with `previewDrafts: true`, measured on real SQLite at `0b6a52e8`. `timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }]` on a plain base field: native and ObjectQL group by month (2026-03 → 100, 2026-04 → 80); the preview answers one row, total 180. Only when the same member is also listed in `dimensions` does the preview bucket it.\n\nBusiness reason: an author previewing a draft dataset's time chart sees one bar where the published dataset shows one per month.\n\n## Wanted\n\nThe preview groups a `timeDimensions` entry by its granularity whether or not the member is also in `dimensions`, answering the live strategies' groups.\n\n## Dedupe\n\nSearched open and closed issues for `preview timeDimensions granularity`, `preview time dimension not grouped` and `previewDrafts timeDimensions`: only #28555 (this family, the relationship-path face). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`, the draft-preview path, `preview-evaluator.ts`).\n\nLinks back: #28555, #28556, PR #28686"
+}

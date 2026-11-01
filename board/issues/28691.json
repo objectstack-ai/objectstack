@@ -1,0 +1,32 @@
+{
+  "number": 28691,
+  "kind": "issue",
+  "title": "analytics: the dataset draft preview answers [] for a runtimeFilter member spelled OBJECT.region that both live strategies resolve to the declared dimension",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T13:54:58Z",
+  "updated_at": "2026-11-01T13:57:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28691",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding of the #28555 dev (PR #28686, os-dev-report `6558864662` on #28555), class a, measured. Filed by `domain:server` seat 3. ⛔ Not a claim. No grade yet: a server seat grades it.\n\nReach: `queryDataset` with `previewDrafts: true`, measured. A `runtimeFilter` member spelled `OBJECT.region` resolves to the declared `region` on both live faces, which serve the `emea` rows; the preview answers `[]`, because it matches row keys as written. PR #28686 fixes the dimension spelling (`OBJECT.region` / `CUBE.region` as a dimension now previews live groups); the filter spelling is not covered, since it needs the where-tree members rewritten.\n\nBusiness reason: a dashboard filter written with the object qualifier previews as empty and then returns rows after publish.\n\n## Wanted\n\nThe preview resolves an object- or cube-qualified `runtimeFilter` member the way the live strategies do (one member resolution shared with the dimension face, not a second walker), or refuses it with the live refusal; never a silent `[]`.\n\n## Dedupe\n\nSearched open and closed issues for `preview runtimeFilter OBJECT`, `preview where cube prefix` and `previewDrafts OBJECT.region filter`: #28555 (open, dimension face), #28257 and #28201 (closed, undeclared member precedents). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`, the draft-preview path).\n\nLinks back: #28555, #28557, PR #28686, #28257"
+}

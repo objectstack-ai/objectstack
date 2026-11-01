@@ -1,0 +1,34 @@
+{
+  "number": 28659,
+  "kind": "issue",
+  "title": "formula: label(record.FIELD) on a field that declares no options is admitted at the active authoring door, then reads null on every row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:formula",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T12:20:43Z",
+  "updated_at": "2026-11-01T13:31:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28659",
+  "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiled by the PM seat for the W3-RT runner `session_017xRBcRX4wwwVw5bEckffdp`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\nQA-source: #28656 · api-backend.formula-stdlib-matrix · observed beside the clauses\n\n## What happens\n\nThe active object-authoring door refuses a formula that names an unknown field (`label(record.nope)` → 422 `expression-invalid`) or calls an unregistered function (`sqrt(4)` → 422). But `label()` pointed at a field that exists and declares no options (a text field) is admitted with 200. Every row then reads the formula as `null`, and a WARN line appears in the server log. A compound expression goes through the same way: `label(record.kind) + label(record.first)` → 200.\n\n**Expected:** refused at author time with 422 `expression-invalid` naming the field. The door has the object schema in hand, and `label()` is only meaningful on a select or option-bearing field.\n\nMeasured at framework `6e11a929` (main, 2026-11-01), on a stock showcase boot with a runtime-installed scratch package.\n\n## Reproduction\n\n1. As admin, install a writable scratch package: `POST /api/v1/packages` with manifest `{\"id\":\"com.objectstack.qa.formula\",\"namespace\":\"qaformula\",…}` and `enableOnInstall` → 201.\n2. `PUT /api/v1/meta/object/qaformula_p4?package=com.objectstack.qa.formula` with `{\"name\":\"qaformula_p4\",\"sharingModel\":\"private\",\"fields\":{\"first\":{\"type\":\"text\"},\"kind\":{\"type\":\"select\",\"options\":[{\"value\":\"clean\",\"label\":\"Clean\"}]},\"pf\":{\"type\":\"formula\",\"expression\":\"label(record.first)\"}}}` → **200** (expected 422).\n3. `POST /api/v1/data/qaformula_p4` `{\"first\":\"hello\",\"kind\":\"clean\"}` → 201 with `\"pf\": null`. The boot log shows WARN \"formula field 'pf' on 'qaformula_p4' could not be evaluated … `first` declares no options\".\n\n## Mechanism\n\nNo lint or expression rule checks the target of `label()` (a grep of `packages/lint/src` finds no label-target or option check). The refusal exists only at evaluate time, in `optionLabelOf` in `packages/formula/src/stdlib.ts` (around L412–417). The authoring gate (`expression-invalid`, #22019) type-checks the call and does not look up whether its field argument carries options.\n\nNot a reopen of #22019, which covered unregistered functions; this is a registered macro pointed at the wrong kind of field. Related: #26608 introduced `label()`."
+}

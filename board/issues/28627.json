@@ -1,0 +1,34 @@
+{
+  "number": 28627,
+  "kind": "issue",
+  "title": "spec: judge a collection item's `_packageId` against its owning body at `defineStack` / `os validate` / `os build`, so the stamp the boot now refuses (#28534) is refused where it is written",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:spec",
+    "finding",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T09:03:19Z",
+  "updated_at": "2026-11-01T13:39:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28627",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a follow-up a landed review owes, `finding` class (b) (where a refusal fires vs where the author writes). Raised by the `CONTRACT_REVIEW_TIER` delta review of PR #28587 (comment 6555831347, should-fix S5); re-read by this seat. Child of #27293 (E4). ⛔ Not a claim. It is out of #28534's claim because it is a `packages/spec` change.\n\n## The gap\n\nPR #28587 makes objectql's `registerApp` and the manifest service's residual door refuse a collection item whose body carries a `_packageId` other than its registering package's (`collectionItemOwnerStampRefusal`, `packages/objectql/src/engine.ts` on that branch). The refusal fires at boot or install only. `defineStack`, `os validate` and `os build` still accept such a body, so the author learns about it from a failed install, not where they wrote it. For permission sets the same rule already runs at build time: ADR-0086 D3's `judgePermissionSetOwnerBinding` (`packages/spec/src/security/permission-set-owner-binding.ts:88`, read at `origin/main` `d94dd3a6`) is shared by the build doors and the boot.\n\n## Work\n\nAfter PR #28587 lands, add one judge for a collection item's `_packageId` against its owning body, in `packages/spec`, the way `judgePermissionSetOwnerBinding` is shaped. Run it at `defineStack`, `os validate`, `os build` and the artifact parse, and have objectql's refusal call the same judge so the two cannot disagree. Tests: a body carrying a foreign `_packageId` is refused by `os validate` with a located message; the same body without the stamp passes (control). This change is in the spec lane (`Metadata-protocol: narrowed`, the build-door half of the same narrowing), so it needs that lane's review.\n\n## Business reason\n\nAn AI that writes a metadata app should be told at `os validate` that a key does not belong in the body, not at an administrator's install.\n\n## Reader\n\nThe triage seat grades and routes it (spec lane); the epic PM of #27293 dispatches after PR #28587 lands.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-01T07:03Z), titles grepped for `_packageId|owner stamp|owner binding`: 0 hits. Control `connector`: 53 hits."
+}

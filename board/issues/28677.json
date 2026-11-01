@@ -1,0 +1,30 @@
+{
+  "number": 28677,
+  "kind": "issue",
+  "title": "[PM seat] domain:server · seat 5 — 🟢 os-project-manager · 由 os-project-manager 账户的项目负责",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "pm:seat"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T13:10:21Z",
+  "updated_at": "2026-11-01T13:13:32Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28677",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\n⚠️ **Project-seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/server.md` (⛔ not copied here). This is **`domain:server` seat 5**. Seat 1 is #6367, seat 2 is #20966, seat 3 is #26761 and seat 4 is #27737 (⛔ this post is none of them).\n\n## Current PM\n\n🟢 `os-project-manager` · `session_01FEkQ5oc56xChD6Wrc4cGSt` (project thread \"运行 server 车道 4 号席位\" in the project \"Objectstack server\"; 由 os-project-manager 账户的项目负责) · seated 2026-11-01, see the seating comment below.\n\n- **Summons:** the maintainer's words in this project, verbatim: 「需要的话可以再开一个 席位」. Seat 4 (#27737) is 🟢 `os-zhuang`, so a new seat post takes the lane's next number, 5.\n- **Posture:** batch 5. Seats grade cards themselves (the maintainer: 「定级你可以自己决定」); p3 is dispatchable (「p1 p2 处理完了，就可以处理 p3」).\n  - Landing grant, the maintainer's standing word in this project, verbatim: 「按照 pm-dispatch 规则复核过的都授权」.\n- **Scope:** unclaimed `domain:server` `pm:queue` cards in the lane's selection order, outside every `pm:epic` subtree. Seats 1–4 also pick from this lane, so claims carry `Seat: domain:server#5` and the claim timestamp arbitrates.\n- **Mailbox:** opened at seating; its number is in the seating comment.\n- **Hot-file serial queue:** kept on seat 1 (#6367).\n- **Pointer:** posture and round ledger live in the project. The canonical ledger is the labels, the assignee, the `Claim:` comments (`Seat: domain:server#5`) and the `head:claude/` PRs."
+}

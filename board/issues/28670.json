@@ -1,0 +1,34 @@
+{
+  "number": 28670,
+  "kind": "pull_request",
+  "title": "test(plugin-sharing): seam ObjectQL double holds the caller limit",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T12:50:56Z",
+  "updated_at": "2026-11-01T13:29:59Z",
+  "closed_at": "2026-11-01T13:29:57Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T13:29:57Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28670",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XE31U2cwvwmv9HjQt5Dax7Z)_\nFixes #28608\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：plugin-sharing 测试用的内存 ObjectQL 替身（`makeSeamQl().find`）现在会遵守调用方传入的 `limit`，先按 `where` 过滤、再按 `limit` 截断。\n- 为什么改：真实引擎会遵守 `limit`，`resolveAuthzContext` 读这个替身时也确实传了 `limit`（如选默认组织时的 1 和 2）；替身丢掉它，测试看到的行比运行时多，可能在运行时不会出现的结果上变绿。\n- 风险与回滚：只改测试文件，`dist` 不含这个 testkit，不发版；回滚即 revert 本 PR。\n- 先看：`packages/plugins/plugin-sharing/src/exec-context-seam.testkit.ts`（`find` 的 return 一行），`packages/plugins/plugin-sharing/src/exec-context-seam.limit.test.ts`。\n- 两分钟验证：`pnpm --filter @objectstack/plugin-sharing exec vitest run src/exec-context-seam.limit.test.ts`，预期 3 passed。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `makeSeamQl().find` in `exec-context-seam.testkit.ts` now applies the caller's bound after the `where` filter, by presence: `typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched`. That is the first of the two shapes `scripts/check-objectql-double-limit.mjs` prescribes for a compliant double. It was picked over \"throw on a bound it does not implement\" because `resolveAuthzContext` really does read through this double with bounds (`limit: 1`, `limit: 2`, `limit: 200` and others), so a throwing double would break every importer. `where` handling is unchanged.\n- `makeSeamQl` is now exported, only so its own pin can drive it directly.\n- New pin `exec-context-seam.limit.test.ts`: `limit: 1` over two matching rows answers one row; the bound applies after the filter, not before it; no `limit` answers every match.\n\n## Why\n\nThe double silently dropped `limit`, so a test running through the seam could see more rows than the real engine would hand the resolver. Card #28608 question 1 (triage record 6557807357). Question 2 (widening the two double gates to walk `*.testkit.ts`) is graded out and not touched: neither gate script is edited.\n\n## Tests\n\n- Red first (export applied, fix not yet applied): `answers at most limit rows when more match` fails, `expected [ Array(2) ] to deeply equal [ { id: 'a', …(1) } ]`, Tests 1 failed, 2 passed (3).\n- Green on the fix: Tests 3 passed (3).\n- Ablation through `scripts/ablation-replace.mjs`: the limit line replaced by `return matched;` (anchor x1 to x0, blob d27c845e10d6 to 17d1ac7833f6), the same case reds (1 failed, 2 passed), then restored: blob after restore equals the HEAD blob d27c845e10d6 and `git diff HEAD` is empty. The testkit is source imported relatively by the test, so no dist leg applies.\n- Whole `@objectstack/plugin-sharing` suite on head e410091f: Test Files 59 passed (59), Tests 1299 passed (1299). The three test files that import the seam (`sharing-service.test.ts`, `share-link-enforcement-context.test.ts`, `share-link-tenancy-posture-admission.test.ts`, plus the type-only import in `exec-context-annotation.pin.ts`) pass unchanged.\n- `pnpm --filter @objectstack/plugin-sharing typecheck`: exit 0 (test layer compiles, debt held). `eslint --no-inline-config packages/plugins/plugin-sharing`: exit 0.\n\n## Acceptance notes\n\n- Gate-walk probe the card cites, re-run read-only: `check-objectql-double-limit.mjs` copied with its `testFilesUnder` regex widened to `(test|testkit).ts`, never committed and deleted after. On head: `OK ObjectQL double limit conformance holds: 643 double(s) graded`, no plugin-sharing row. On the base testkit blob, same probe: `exec-context-seam.testkit.ts ... (1 blind ...) line 58: BLIND`, exit 1. Restore proven by blob equality and an empty `git diff HEAD`.\n- `skip-changeset`: plugin-sharing's `files[]` is `dist`, `README.md`, `CHANGELOG.md`. After a build, `makeSeamQl` and `bootRequestContext` have 0 hits there, while the positive control `SharingService` has 4 files in `dist`.\n\n## Verification\n\nLocal subset on head e410091f (`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, 52 derived families), each exit captured before any pipe; reconciled with `--ran`: `52 derived famil(ies) accounted for — 51 run, 1 NOT-MEASURED`.\n\n- 51 families exit 0, including `check:objectql-double-limit`, `check:engine-double-contract`, `check:where-matcher`, `check:query-options-erasure`, `check:test-source-alias`, `check:type-check-debt`, `check:published-files` and `check:nul-bytes`.\n- `check-plugin-teardown-shape.mjs --self-test`: exit 3 on the shallow clone first, exit 0 after fetching its pinned fixture commit.\n- `check:i18n`: exit 3 (CLI not built) first, exit 0 after its one-command prerequisite build (`all bundles in sync`).\n- NOT MEASURED: `check:dual-build-cjs-loads`, exit 3 PREREQUISITE NOT MET (needs every package dist in this fresh worktree); CI runs it.\n- Full dogfood not run: no `!` in the title and no `(narrowing)` arm.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes (scoped to plugin-sharing).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset. (nothing publishes: `skip-changeset`)\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed. (not touched)\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English. (the maintainer brief above is Chinese by the dispatch contract)\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5kA7pasGpR4Pf7mtNb\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5kA7pasGpR4Pf7mtNb)_\n"
+}

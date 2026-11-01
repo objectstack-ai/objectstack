@@ -2,8 +2,8 @@
   "number": 28588,
   "kind": "issue",
   "title": "connector apps: the batch-1 manifests (`connector-github`, `connector-stripe`) carry no `iconUrl`, which marketplace review requires, so cloud's ingestion has to pass `--icon-url` as a stopgap",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:automation",
     "domain:server",
     "finding",
-    "pm:epic",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T07:05:12Z",
-  "updated_at": "2026-11-01T07:56:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T14:02:13Z",
+  "closed_at": "2026-11-01T12:54:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28588",
   "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a product defect with a named location, `finding` class (a). Reported by cloud seat 2 on #27293 (comment 6554555411, the first cloud ingestion run) and re-read by this seat. Child of #27293 (E4). ⛔ Not a claim.\n\n`reach:` publish door — `os package publish` reads `m.iconUrl` from `objectstack.manifest.json` (`packages/cli/src/commands/package/publish.ts:653`, read at `origin/main` `617dcf43`). The handbook says the README and the icon are required for a complete listing (`content/docs/deployment/marketplace-handbook.mdx:39` and `:170`). Cloud's ingestion script published `connector-github` only by passing `--icon-url app=…`.\n\n## The defect\n\n`packages/apps/connector-github/objectstack.manifest.json` and `packages/apps/connector-stripe/objectstack.manifest.json` (read at `617dcf43`) have no `iconUrl`. The one existing official app's manifest carries one: the handbook's own example at `:56` is `app.objectstack.hotcrm`'s `raw.githubusercontent.com/.../assets/icon.svg`.\n\n## Work\n\nGive each batch-1 app an icon that its package owns, and set `iconUrl` to its public http(s) URL, the way hotcrm does. The image must respect the vendor's published brand guidelines; a neutral connector glyph is the safe default when they are unclear. Add a test in each app's `test/` that fails when `iconUrl` is absent or not http(s). That keeps the next shelf app from shipping without one. If the shelf's later apps should share one rule, say so in the report; do not add a repo-wide gate.\n\n## Business reason\n\nThe listing is the administrator's first sight of the app. Without its own icon every listing depends on a flag the cloud script has to remember.\n\n## Reader\n\nThe triage seat grades and routes it; the epic PM of #27293 dispatches.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-01T07:03Z), titles grepped for `iconUrl|icon_url|\\bicon\\b`: 0 hits; control `connector` on the same set: 53 hits."

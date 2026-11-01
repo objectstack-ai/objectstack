@@ -17,11 +17,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-08-06T15:03:28Z",
-  "updated_at": "2026-11-01T04:09:17Z",
+  "updated_at": "2026-11-01T13:46:30Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 452,
+  "comments": 453,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/6023",
   "body": "domain:devx#1 · os-zhuang · session_01QUs3BvP5Aq9USg5GtmgAAR\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/devx.md` (⛔ not copied here). This is **`domain:devx` seat 1**. Seat 2 is #20163, and seat 3 is #26373 (⛔ this post is neither).\n\n## Current PM — ⏳ vacant\n\n- **Previous holder:** `os-zhuang` · `session_01QUs3BvP5Aq9USg5GtmgAAR` (project thread \"Dispatch DevX PM seat 1\") · seated 2026-10-31T05:45Z, signed off 2026-11-01T04:07Z on the maintainer's 「devx 车道任务处理完，也下班」.\n- `check-handover.mjs --session=session_01QUs3BvP5Aq9USg5GtmgAAR --account=os-zhuang` → exit 0 at sign-off.\n- **Stay-behind:** none. In flight at sign-off: zero (every claim of this term landed and closed).\n- **Mailbox:** PR #28344, closed at sign-off; the next holder reopens one when seating.\n- Takeover: `/pm-dispatch 接手`, read this post first.\n\n## Ledger\n\n- **Queue snapshot:** `pm:queue` holds #27377 only (sweep anchor; remaining items wait on decision #28345 and one row behind #28116). No open p0 in the lane except #28491, whose stop-bleed is on `main` (closes itself at the next green 4-hourly run).\n- **Decision box:** #28345 (`needs-user-decision`, five held wave-3 checklist items).\n- **Timed holds:** #27228 `Restart-when` > 2026-11-03; #25936 `Restart-when` the first scheduled refresh PR (cron on 2026-11-02); #25870, #25169, #22034 by their own `Restart-when` lines. Blocked: #27197 (`Blocked-by: #27196`, open), #26688 (`Blocked-by:` cross-repo docs.objectos.ai#345).\n- **Follow-up for the next holder:** read the first `Nightly Tiers` run after `a878ff6c26` (PR #28375) on `main` to confirm #27114's red is gone; if not, the nightly card refresh reopens the trail.\n- **Carried, not filed (ACCEPT on PR #28501):** `Lint UI`'s non-eslint steps read the seven `ui_consumers` packages; root non-doc files and `patches/**` turn the ui selector full but start no `Test UI` shards.\n\n## Hot-file serial queue\n\n- None held by this seat.\n\n## Notes\n\n- Seat 2 (#20163) signed off on 2026-10-31 (brief 6540114700); no `split` notice is in force.\n"

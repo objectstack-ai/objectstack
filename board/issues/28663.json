@@ -1,0 +1,34 @@
+{
+  "number": 28663,
+  "kind": "issue",
+  "title": "authoring gate: an app navigation `visible` with a CEL syntax error passes save, draft diagnostics and publish (a page `visibleWhen` with the same fault is refused), and page variables publish with duplicate, empty or wrong-typed declarations",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T12:22:24Z",
+  "updated_at": "2026-11-01T13:23:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28663",
+  "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiled by the PM seat for the W3-RT runner `session_017xRBcRX4wwwVw5bEckffdp`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\nQA-source: #28656 · studio-authoring.app-and-nav-properties · observed beside the clauses\n\n## What happens\n\n1. **App nav `visible` with a CEL syntax error is admitted.** `PUT /api/v1/meta/app/APP?mode=draft&package=PKG` with `navigation[0].visible = \"'org_owner' in\"` → 200. The draft read shows `_diagnostics {\"valid\":true}`, and `POST /api/v1/packages/PKG/publish-drafts` → `published`. At runtime the entry is withheld from every viewer (it fails closed), and the console logs `[parse] Unexpected token: EOF`. So the author gets no signal; the entry silently disappears for everyone.\n   - **Contrast:** the same fault in a page `visibleWhen` is caught. Draft diagnostics report `visibility-predicate-syntax`, and publish is refused `INVALID_METADATA`.\n2. **Page variable declarations are not validated** (observed from the `studio-authoring.authored-page-slots-and-variables` probe). Each of these publishes with `valid:true`:\n   - duplicate variable names;\n   - an empty variable name;\n   - a `number` variable with `defaultValue: \"abc\"`;\n   - a block `source` naming a component that does not exist;\n   - a `visibleWhen` reading an undeclared `page.nosuch`.\n\n**Expected:** the author-time gate refuses (or at minimum reports in draft `_diagnostics`) a predicate that does not parse on every surface that carries one, nav `visible` included, and refuses page variables that are duplicated, unnamed or whose default does not match their type.\n\nMeasured at framework `6e11a929` (main, 2026-11-01), on a stock showcase boot with scratch packages installed at runtime.\n\n## Reproduction\n\n1. As admin, install a scratch package PKG (`POST /api/v1/packages`) with an object and an app APP.\n2. `PUT /api/v1/meta/app/APP?mode=draft&package=PKG` with a `navigation` entry whose `visible` is `\"'org_owner' in\"` → 200. `GET` the draft → `_diagnostics.valid: true`. Publish → `published`.\n3. Open the app in the console as admin (who holds `org_owner`): the entry is absent, and the console log has `[parse] Unexpected token: EOF`.\n4. Contrast: `PUT /api/v1/meta/page/PAGE?mode=draft&package=PKG` with a block `visibleWhen` that does not parse → draft `_diagnostics` names `visibility-predicate-syntax`; publish → refused `INVALID_METADATA`.\n\n## Mechanism (suspected)\n\nThe runtime authoring gate (`packages/metadata-protocol/src/runtime-authoring-gate.ts` and `protocol-authoring-gate.ts`) runs the predicate-syntax rule over page `visibleWhen` but not over app `navigation[].visible` or `areas[].navigation[].visible`. Page `variables` have no rule for uniqueness, non-empty names or default-versus-type.\n\nRelated: #27457 (closed) made the console evaluate bare-string nav predicates as CEL; this card is the author-time half."
+}

@@ -2,8 +2,8 @@
   "number": 28618,
   "kind": "issue",
   "title": "ui live e2e: read-only-member-record counts the record page's read (POST /data/:object/:id/page) as a write, so the nightly live tier is red",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,18 +11,27 @@
     "type": "Bot"
   },
   "labels": [
+    "area:devpath",
     "bug",
-    "finding"
+    "domain:devx",
+    "finding",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T09:06:26Z",
-  "updated_at": "2026-11-01T09:06:26Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T09:27:45Z",
+  "closed_at": "2026-11-01T09:25:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28618",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a named, reproduced defect, here a test that reads a read as a write. It was measured on PR #28613's own nightly-tiers run, and it is not that PR's: it only reshuffles shards.\nBusiness reason: the nightly `live` tier is the only place the Console live specs run outside the required job (`examples/app-showcase/test/console-live-specs.live.test.ts`). While this spec fails, that tier stays red on `main`, and the red card it files (#28580's channel) hides any real regression behind a known one.\nReader: the `domain:ui` lane, the next PR on `ui/e2e/live/`. Until #28613 lands, the nightly's shard 1 is killed by its 45-minute timeout before this spec runs. Once it lands, this is the next red the card reports.\nDedupe (open AND closed): \"read-only-member-record\" → 9 hits (#27552, closed, is the card that added the spec; none reports this), \"attempted no write\" → 17 hits, none on this spec, \"/page write detector\" → 0 hits.\nreach: measured, nightly `live` tier, run 41286811251 job 124789667673 (`Nightly tiers (4/4)` on PR #28613 head `a9fdb19a1d`), 2026-11-01T08:04Z.\nQA-source: none (CI nightly tier)\ntype: Bug\n\n## Reading (verbatim)\n\n```\n1) [chromium] › e2e/live/read-only-member-record.spec.ts:44:1 › a member who may read but not write an inquiry gets a read-only form and no edit affordance; the admin edits it\n   Error: the member browser attempted no write\n   - Array []\n   + Array [\n   +   \"POST http://localhost:41835/api/v1/data/showcase_inquiry/H0mCRgRpfpwhhwLC/page\",\n   +   \"POST http://localhost:41835/api/v1/data/showcase_inquiry/H0mCRgRpfpwhhwLC/page\",\n   + ]\n   > 107 |       expect(writes, 'the member browser attempted no write').toEqual([]);\n```\n\n## Cause\n\n- The spec's write detector (`ui/e2e/live/read-only-member-record.spec.ts`, near line 28) records every non-`GET` request under `/api/v1/data/showcase_inquiry` as a write.\n- `POST /api/v1/data/:object/:id/page` is a read. It returns the record page payload (#27627; `packages/rest/src/rest-route-ledger.ts`, `client: 'data.recordPage'`), and the record page now loads through it (`ui/packages/data-objectstack/src/index.ts`, `data.recordPage`).\n- So the member's own page load is counted as two writes.\n\n## Expected\n\nThe detector excludes the record-page read (`POST …/:id/page`). The safest form names the write routes it means: `POST` to the collection, `PATCH` / `PUT` / `DELETE` on a record, and the batch and action routes. That way a future read-shaped `POST` cannot red it again. The assertion that the member sends no write stays. The spec still fails if the member's browser really writes."

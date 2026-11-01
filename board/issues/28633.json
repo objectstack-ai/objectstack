@@ -1,0 +1,39 @@
+{
+  "number": 28633,
+  "kind": "issue",
+  "title": "Datasources: the admin create and edit doors drop the schema-declared `ssl`, `autoConnect` and `description`, so a datasource created there loses its TLS settings",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3",
+    "security"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T09:32:44Z",
+  "updated_at": "2026-11-01T13:59:38Z",
+  "closed_at": "2026-11-01T13:53:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 11,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28633",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① a product defect with a named landing point, an in-flight derivative of #28612 (PR #28632), found by that card's dev (os-dev-report 6556117106, out-of-scope finding). Sub-issue of #28612; domain inherits (`domain:server`), grade inherits (p3), with `security` added because the dropped key is the TLS block. Dispatched as a security fix under the maintainer's standing rule 「security cards — no issue/advisory, dispatch the fix directly」(maintainer, 2026-10-26).\nreach: measured by the dev through the real route on PR #28632's head, and re-read by the seat at `origin/main`: `DatasourceAdminService.toRecord` (`packages/services/service-datasource/src/datasource-admin-service.ts`) copies `name`, `label`, `driver`, `schemaMode`, `config`, `external`, `pool` and `active` only. `DatasourceSchema` (`packages/spec/src/data/datasource.zod.ts`) declares `ssl`, `autoConnect` and `description` as well, and the driver factory reads `record.ssl` when it opens the connection.\n\n**Business reason.** An admin who creates or edits a datasource from the API or the Console and sets its TLS options gets a 201/200, but the stored record has no `ssl`, so the connection opens with the driver's defaults and nothing says so. `autoConnect` and `description` are lost the same way. After #28632, an undeclared key is refused by name; these three are declared, so they pass the refusal and are still dropped. That is the worse half: the door accepts the request and does something other than what it says.\n\n**Reader who acts:** `domain:server` seat 3 dispatches it to a card thread, stacked on PR #28632 (same file).\n\n**Dedupe:** `repo:objectstack-ai/objectstack is:issue datasource ssl toRecord` → 2 hits: the parent #28612 and the closed #21058 (cross-field refinements, a different defect). `is:open datasource ssl dropped` → only #28612 and seat posts. `autoConnect datasource admin` → 14 hits, all closed and on other defects (#14198 is the update-patch field set for `schemaMode`).\n\n## Wanted\n\n1. Create and edit keep every top-level key `DatasourceSchema` declares and the door accepts: at least `ssl`, `autoConnect` and `description`. The stored record holds them, a read returns them under the existing redaction rules, and the connection opened from that record uses the stored `ssl`.\n2. The kept key set is derived from the schema, not from a second hand list beside `toRecord`, so a key the schema adds later is not dropped again.\n3. The Test door builds its probe from the same projection, so a test honours the same `ssl` the save will store.\n\n## Notes for the dev\n\n- Model: PR #28607 and PR #28632 (diffs, contract reviews, os-dev-reports). Stack on #28632's head and merge `origin/main` once it lands.\n- Any secret inside `ssl` (for example a client key) follows the existing credential rules: never echoed or logged, redacted on read, as `config` secrets are today.\n- This widens what the doors store, but only to keys the published schema already declares. Expected `Clause-②: no`; if the dev finds a new served member or a spec change is needed, report it (spec lane)."
+}

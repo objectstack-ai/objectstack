@@ -2,8 +2,8 @@
   "number": 28589,
   "kind": "issue",
   "title": "connector credentials: the answer to `PUT /api/v1/automation/connectors/credential-refs/:ref` names the wrong `packageId` for the stripe connector (reported by the cloud ingestion run, measure first)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -22,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T07:05:51Z",
-  "updated_at": "2026-11-01T07:55:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T10:29:58Z",
+  "closed_at": "2026-11-01T10:29:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28589",
   "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a product defect with a named location, `finding` class (a). The report comes from cloud seat 2 on #27293 (comment 6554555411, item 4, the first cloud ingestion run, recorded in the cloud repository's E4 card). This seat has NOT re-measured it: the reading below is code only. Child of #27293 (E2/E4: the credential page an administrator fills after install). ⛔ Not a claim.\n\n`reach:` public door — `PUT /api/v1/automation/connectors/credential-refs/:ref`. Cloud measured it on a hosted-path local stack (cloud pin `fa74b489`, apps built at `071bda62`): the answer for the stripe connector's credential ref named a package other than the stripe app.\n\n## Where the value comes from (read at `origin/main` `617dcf43`)\n\n- `packages/services/service-automation/src/plugin.ts:3919` writes `packageIds` from `declaredBy`, which comes from `declaredCredentialRefs` (`:3751`).\n- `declaredCredentialRefs` takes `packageId` from each connector entry's `_packageId` stamp (`:3758`).\n- `connector-credentials.ts:314` stores the joined ids in `package_id`, and the answer is read back from that row (`:190`).\n\nTwo candidate causes, neither yet distinguished:\n- The `_packageId` stamp on an installed entry is wrong (the install or the registry stamps the host's id or another app's id).\n- Two packages declare the same `credentialRef`, and the row carries both or the first one.\n\n## Work\n\nMeasure first. Install `connector-github` and `connector-stripe` (both on `main`) into one runtime, then `PUT` each app's ref and read the answer and `GET /connectors/credential-refs`. Record which `packageId` each answer names and where the stamp came from. Then fix the stamp or the selection, whichever the measurement shows. Tests: two installed apps, each ref answered with its own package id, plus a host-declared ref answered with the host's id or none (control). If the measurement does not reproduce, close this card with that reading, and send the reproduction question back to cloud on this card.\n\n## Business reason\n\nThe credential page and its audit trail tell an administrator which app a secret belongs to. A wrong package id points them at the wrong app, the step where a shelf install either works or does not.\n\n## Reader\n\nThe triage seat grades and routes it; the epic PM of #27293 dispatches.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-01T07:03Z), titles grepped for `packageId|package_id|credential-refs`: 0 hits; control `connector` on the same set: 53 hits."

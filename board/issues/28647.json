@@ -1,0 +1,32 @@
+{
+  "number": 28647,
+  "kind": "issue",
+  "title": "connector-github: ship `providerConfig.toolsSnapshot` for `search_issues` and `issue_read`, digests measured against GitHub's live MCP server, so the listing's sha256 is the pin set (ruling 6556740185, #28590 B)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "enhancement",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T11:05:20Z",
+  "updated_at": "2026-11-01T12:03:46Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28647",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ④ execution of a maintainer ruling. Ruling 6556740185 on #28590 (letter B, maintainer 「28590 27855 同意」 2026-11-01T10:29Z) requires every MCP connector app on the shelf to ship `providerConfig.toolsSnapshot` for every tool it includes. The listing's `sha256` is the digest of that pin set. Child of #27293 (E4). ⛔ Not a claim.\n\nRuling-ref: 6556740185\n\n## Work\n\n`packages/apps/connector-github/src/connectors/github.connector.ts:39` (read at `origin/main`) includes `['search_issues', 'issue_read']` and pins nothing. Do the following:\n- Add `providerConfig.toolsSnapshot` with one sha256 per included tool. Take the digests as `computeMcpToolsSnapshot` (`@objectstack/connector-mcp`, PR #28515) computes them over the live `tools/list` answer of `https://api.githubcopilot.com/mcp/`, with the headers the app already sends (`X-MCP-Readonly: true`). Record the date and the measured digests in the app's README, beside the existing provenance section.\n- Add a test in `packages/apps/connector-github/test/` that fails when an included tool has no pin or a pin is not 64 lowercase hex. It must stay offline (no live call in CI).\n- Give the listing a provenance line: `upstream` = the server URL, `commit` = the package commit, `sha256` = the digest of the pin set. The digest is `stableStringify` of the record, then sha256. Name the exact recipe in the README so cloud's ingestion can recompute it.\n- Re-pinning when GitHub changes a tool is the shelf's routine. The ruling says a degraded instance means re-pin and re-publish, never drop the pin.\n\n**Measurement constraint:** `tools/list` on GitHub's server needs a token whose scopes list both tools. A session without one cannot measure the digests. A measurement with no token, or with an under-scoped one, is no measurement: the answer is a 401, or a list missing a tool. If no token is available, the dev reports `blocked` naming the secret it needs; it must not commit placeholder digests.\n\n## Business reason\n\n#27293's Done-when gives each shelf listing a verifiable `upstream`, `commit` and `sha256`. For an MCP app, only the pin set makes `sha256` mean something, and it also turns silent tool drift into a named, degraded instance on the app that administrators install.\n\n## Reader\n\nThe epic PM of #27293 dispatches it (`domain:server`, `packages/apps/*`). Cloud seat 2 reads the provenance recipe for its ingestion (#28278).\n\n## Dedupe\n\nThe 200 most recent issues and PRs (read 2026-11-01T11:05Z), titles grepped for `toolsSnapshot|\\bpin\\b`: 3 hits (PR #28515, the mechanism; #28582 and PR #28597, the skills recipe); none pins a shelf app. Control `connector`: 21 hits."
+}

@@ -2,8 +2,8 @@
   "number": 28560,
   "kind": "issue",
   "title": "spec: a per-field display patch slot on ObjectExtensionSchema, derived from BASE_FIELD_DISPLAY_WHITELIST; structural keys refused at parse",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "domain:spec",
     "enhancement",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T05:56:56Z",
-  "updated_at": "2026-11-01T06:07:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T12:36:23Z",
+  "closed_at": "2026-11-01T12:34:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28560",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P2, cut 2026-11-01 on the maintainer's 「四项提速措施全部按推荐执行」, schedule reviewed) · plan of record: ADR-0146 Rollout P2 \"N-23a/b/c object extension — the field-patch whitelist\". ⛔ Not a claim.\n\nPart of #28236 (P2, child **N-23a**) · governs: ADR-0146 D10 second rule (the per-field patch in the extension body), decided-here item 4 · lane: `domain:spec` (`packages/spec` only) · size: S.\n\n**What is left.** The whitelist itself landed with N-08: `BASE_FIELD_DISPLAY_WHITELIST` in `packages/spec/src/data/field-customization.ts` (PR #28467). This card adds only the slot that carries a patch.\n\n**Business reason.** A customer who wants HotCRM's \"Industry\" field to read \"Sector\", with better help text, should change exactly that and nothing else. The field's type, values and rules stay the vendor's, so the next HotCRM upgrade still applies. Today an extension can only add a field or replace one whole.\n\n**Measured (`35b178bd0a`).**\n- `field-customization.ts:20-22`: \"the shape that carries a per-field patch on an object extension, and the merge that applies it, are not declared here\".\n- The whitelist (about `:74`): field keys `label`, `description`, `inlineHelpText`, `placeholder`; option key `label`, the option addressed by its stored `value`.\n- `data/object.zod.ts:4709#ObjectExtensionSchema` is a strict object with keys `extend`, `fields`, `label`, `pluralLabel`, `description`, `validations`, `indexes`, `priority`. `fields` is \"Fields to add/override\".\n- `objectql/src/registry.ts:567-569#mergeObjectDefinitions` spreads `fields`, so a same-named base field is replaced whole.\n- `objectql/src/engine.ts:8820-8829` copies exactly the declared keys onto the extension it registers. A new slot is dropped there until N-23d carries it.\n- `field-customization.test.ts` holds `STRUCTURAL_FIELD_KEYS`, the measured non-display keys.\n- Generated: `content/docs/references/data/object.mdx`. Not verified: whether `check:liveness` walks `ObjectExtensionSchema` (no ledger row names it).\n\n**Wanted.**\n1. One optional per-field map on `ObjectExtensionSchema`. Working name `fieldPatches`; the PR settles one name.\n   - Key: the target object's field name.\n   - Value: a closed object whose keys are derived from `BASE_FIELD_DISPLAY_WHITELIST.field`, plus `options`, a map keyed by an option's stored `value` whose entries' keys are derived from `BASE_FIELD_DISPLAY_WHITELIST.option`.\n   - Derived from the constant, ⛔ never a restated list: widening the whitelist widens the slot.\n2. Refusals at parse, each with a prescription:\n   - a structural key (`type`, `required`, `options` membership, an option's `value`, …) names the whitelist and says it stays the vendor's (D6);\n   - a patch key spelled as an extension field (`isExtensionFieldName`) says \"declare it in `fields`; it is your own field\".\n3. Pure shape. Whether the target has the field or the option, and who may patch, belong to the server (N-23d).\n4. Until N-23d wires the merge, the slot reads `[EXPERIMENTAL — not enforced]` in its `.describe()`, and any liveness row reads `planned`, naming N-23d. N-23d flips both.\n5. Regenerate the spec artifacts and the reference page. `Metadata-protocol: added`, minor changeset.\n\n**Tests.** Every whitelist member is accepted, field and option. Every `STRUCTURAL_FIELD_KEYS` key is refused with the prescription. An option patch keyed by value takes `label` only. An `__c` key is refused. `object-strictness-batch20.test.ts` and the existing extension fixtures parse unchanged.\n\n**Release safety.** An optional key with a not-enforced marker. A release right after this card accepts a patch and says it is not applied yet; no runtime reads it before N-23d.\n\n**Not here.** `__c` enforcement at the write, publish and install doors, which also refuses a `.custom` extension `fields` key without the suffix (#28564). Carrying and merging the patch, and the target-field check (#28565). Studio add-field (#28575).\n\n**Dedupe.** Searched `field patch whitelist extension` (61 hits; only #28236 and #28467 on topic) and `objectExtensions is:open` (4 hits: #28531, a refusal-envelope refactor, and seat cards). No card declares the slot.\n\nLinks back: #28236, #28404, #28467, ADR-0146 D6, D10, ADR-0029 D9.2a.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_\n"

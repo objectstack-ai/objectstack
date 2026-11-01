@@ -14,17 +14,20 @@
     "area:identity",
     "domain:server",
     "finding",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T02:42:48Z",
-  "updated_at": "2026-10-31T02:56:21Z",
+  "updated_at": "2026-11-01T13:30:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28280",
   "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFiling gate: seat ruling on #27857 PR 2 (the dialog half was dropped from that PR because it trips the feature-gate registry guard). Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nLinks back: #27857, #27869\n\n\nReported by the #27857 card thread (session_016WV4cwXFwjU2YZW2dRuZZt), measured on objectstack main 8ec00cf0 (on 10-30). Not built: seat ruling B dropped it from PR 2.\n\n## What the administrator sees\n\nSetup → Users → Create User shows Email as an optional field, with no required mark. With phone sign-in off (the default), Email is in fact required: the endpoint refuses an empty email with 400 `INVALID_REQUEST` \"Email is required\" (wording from PR 2). With phone sign-in on, an email or a phone number is required.\n\n## Why it is not a one-line fix\n\n- `sys_user.create_user` (`packages/platform-objects/src/identity/sys-user.object.ts`) declares `{ field: 'email', required: false }`. A param's `required` is a static boolean (`ActionSchema` params, `packages/spec/src/ui/action.zod.ts`). No required-when predicate exists.\n- The measured workaround is two params on the one field: `{ field: 'email', required: true, visible: 'features.phoneNumber != true' }` and `{ field: 'email', required: false, requiresFeature: 'phoneNumber' }`.\n  - `ObjectSchema.safeParse` accepts it.\n  - The console's `ActionParamDialog` collects and submits only visible params, so exactly one Email field shows. `getPublicConfig` always serves `features.phoneNumber` as a boolean, so neither gate faults.\n  - The pins, and the ablation (required made optional → 3 failed / 1 passed), were green.\n- It trips `packages/platform-objects/src/feature-gate-guard.test.ts` (#2874):\n  - **Reverse guard.** Every `features.*` reference in an action or param `visible` must be booked in `PUBLIC_AUTH_FEATURES[flag].gatedInputs` (`packages/spec/src/kernel/public-auth-features.ts`, a spec-lane file). Both params reference `features.phoneNumber` and resolve to the same path, `sys_user.actions.create_user.params.email`. Result: 2 failed.\n  - **Forward guard.** It resolves a path to the FIRST param with that name or field, and wants the flag's canonical gate as a conjunct (`features.phoneNumber == true`, opt-in). The required param carries the negation, which the registry does not model.\n\n## Options for whoever takes it\n\n1. Book `sys_user.actions.create_user.params.email` in `phoneNumber.gatedInputs` and put the optional, positive-gated param first. This is mechanical: one spec line plus the object edit. The cost is that one booked path stands for two params, one of them negatively gated, which the guard was not written for.\n2. Model it: a required-when predicate on action params (spec + console), so one Email param says \"required unless phone sign-in is on\". This is a contract widening (`Clause-②: yes`).\n3. Teach the registry a negated booking (for example `hiddenWhenOnInputs`) and the guard to read it.\n\nDedupe words: create_user email required, action param required when, feature gate negated booking, gatedInputs phoneNumber email."

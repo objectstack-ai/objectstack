@@ -2,7 +2,7 @@
   "number": 28607,
   "kind": "pull_request",
   "title": "fix(service-datasource)!: refuse a top-level password or connectionString at the datasource admin write doors",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T07:48:27Z",
-  "updated_at": "2026-11-01T09:06:37Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-01T09:32:12Z",
+  "closed_at": "2026-11-01T09:32:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T09:32:12Z",
   "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28607",

@@ -1,0 +1,33 @@
+{
+  "number": 28642,
+  "kind": "issue",
+  "title": "pm-dispatch: a project seat can sit with no hourly patrol routine and nothing notices — make the patrol a step of seat-online, record it in the seat post, and flag an on-duty lane's unclaimed pm:queue card",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T10:33:11Z",
+  "updated_at": "2026-11-01T13:52:31Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28642",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ① the maintainer asked about this incident: 「28560 等了4 个小时，是你的技能有什么问题吗」 and 「为什么会停了定时巡查，skills 是否需要优化」 (2026-11-01 10:23Z / 10:29Z, project thread). Filed by `domain:spec` seat 4 (`marchtian`), the seat that missed it. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:skills`, `.claude/skills/pm-dispatch/SKILL.md` 〈唤醒〉 and `references/seat-lifecycle.md` 〈坐席〉 / 〈停止条件与待命〉, `references/seat-post-protocol.md` L66, `scripts/pm/check-half-states.mjs`.\nDedupe (open AND closed): \"patrol seat hourly\", \"巡查\", \"seat patrol trigger\" → only seat posts and #9857 (the half-state patrol view). No card about a missing seat patrol.\nreach: any project seat. Measured on spec seat 4 (#18917), 2026-11-01. #28560 (p1, `domain:spec`) entered `pm:queue` at 05:56Z and was not claimed until 10:29Z, 4.5 h later, while the seat was on duty with 0 cards in hand.\n\n## What happened (measured from the seat's own session)\n\n- The seat never created the hourly patrol routine at any point in its tenure (since 2026-10-29 15:26Z). It woke only on PR subscriptions, coordinator relays and its own one-shot `send_later` reminders. That is the \"`send_later` 链\" the skill forbids.\n- When its last PR merged (2026-10-31 23:30Z), the queue was empty. The seat scheduled two one-shot checks (00:33Z, 02:35Z), found nothing, and stopped checking. It wrote \"不再定时查\" on its checklist.\n- The skill already says the right thing in three places, and the seat broke all three:\n  - SKILL.md:72: 项目席唤醒 = PR 订阅 + 每项目一个自建自绑巡查 routine; ⛔ 无 `send_later` 链;\n  - `seat-lifecycle.md` 〈停止条件与待命〉: 常设座位队列清空不等于退场，是切换待命姿态;\n  - `seat-post-protocol.md:66`: 项目席巡查默认每小时.\n- Why the text did not hold:\n  - Creating the routine is not a step of `seat-online` (seat-lifecycle L41), so taking the seat never asks for it.\n  - The seat post carries no patrol line, so neither the maintainer nor triage can see that a seat has none.\n  - Nothing measures an on-duty lane whose `pm:queue` card sits unclaimed.\n  - The agent's generic habit (\"after a few checks with no change, stop polling\") overrode the seat rule. The skill does not say that it outranks that habit.\n\n## Wanted\n\n1. **`seat-online` includes the patrol.** Taking a project seat creates one self-bound hourly patrol routine (`create_trigger`, cron, bound to the seat session) in the same act. The `seat-online` record and the seat post carry `Patrol: <trigger_id> · <cron>`. `seat-offline` deletes it in the same act as the clock-out brief.\n2. **Empty queue is standby, not a stop.** One explicit line in 〈停止条件与待命〉: the patrol runs until `seat-offline`, empty queue included. \"Back off and stop after N quiet checks\" never applies to a seat's patrol. Only the maintainer's order or clock-out stops it.\n3. **A report-only measurement** in `check-half-states.mjs`, or the triage daily sweep:\n   - (a) a seat post 🟢 with no `Patrol:` line;\n   - (b) a `pm:queue` card of a lane with an on-duty seat that has spare concurrency, unclaimed for over 2 h.\n\n   Both are printed as readings, not gates (instrument-discipline).\n4. **The patrol prompt names the work:** queue claim up to the seat's concurrency, in-flight PR follow-up, and `Restart-when:` / `pm:blocked` unlock re-checks.\n\n## Not here\n\nThe seat-4 patrol itself was created at 2026-11-01 10:31Z: hourly at :48, routine `Spec seat 4 hourly patrol`. #28560 is claimed (6556731523).\n\nLinks back: #18917, #28560, SKILL.md:72, `seat-lifecycle.md` 〈停止条件与待命〉, `seat-post-protocol.md:66`."
+}

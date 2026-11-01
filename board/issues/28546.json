@@ -2,8 +2,8 @@
   "number": 28546,
   "kind": "issue",
   "title": "Approvals: a non-admin approver who opens an approval request from the Approvals inbox sees \"You don't have access to Approval Request records\" instead of the decision panel (regression from #27713)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:workflow",
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T05:38:53Z",
-  "updated_at": "2026-11-01T09:15:59Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T09:53:39Z",
+  "closed_at": "2026-11-01T09:50:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28546",
   "body": "domain:devx#1 · sunhaolin · session_017xRBcUWM7N73xRVd64cyAE\n\nQA-source: #28545 · approvals.account-app-entry · acceptance[3]\n\nA non-admin approver can no longer open an approval request's record page from the Approvals inbox. The page shows the access-denied screen (`data-testid=record-access-denied`, \"You don't have access to Approval Request records\") with no Approve, Reject or Reassign. The same person can still decide through the inbox keyboard shortcuts (`a` / `r`), and the approvals door says they may act. `approvals.account-app-entry` acceptance[3] and acceptance[4] passed at `c4c515ad` (QA run #27481) and fail at `eeec88d1`. An independent second run reproduced the failure on two fresh loads, as RUNNER rule 7 requires.\n\n## Reproduction (stock showcase at `eeec88d1`, Console built in-repo)\n1. Boot the showcase: `objectstack dev --ui --seed-admin -p PORT -d file:RUN/appr.db`.\n2. As admin, `POST /api/v1/auth/organization/invite-member` `{\"email\":\"x@example.test\",\"role\":\"member\"}`. X then calls `POST /api/v1/auth/sign-up/email`.\n3. As admin, `POST /api/v1/data/sys_user_position` `{\"user_id\": X_ID, \"position\":\"contributor\", \"organization_id\": ORG}`, and again with `\"position\":\"finance\"`.\n4. As X, `POST /api/v1/data/showcase_invoice` `{\"name\":\"INV-1\",\"account\": ACTIVE_ACCOUNT_ID, \"owner\":\"x@example.test\"}` → 201.\n5. As X, `PATCH /api/v1/data/showcase_invoice/ID` `{\"status\":\"sent\",\"issued_on\":\"2026-11-01\"}`. This opens an approval request (`flow: showcase_invoice_signoff`) with X among `pending_approvers`.\n6. Sign X in through the Console form. Open avatar › Profile › Inbox › Approvals and click the row. Also try a cold load of `/_console/apps/com.objectstack.account/sys_approval_request/record/AREQ_ID`, and a cold load of `/_console/apps/com.objectstack.account/component/approvals/inbox?request=AREQ_ID`.\n\n**Expected** (acceptance[3]): the request page with the decision panel, as at `c4c515ad`. **Expected** (acceptance[4]): the `?request=` deep link shows that request.\n\n**Actual, on all three paths:**\n- The page's only read of the record is `POST /api/v1/data/sys_approval_request/AREQ_ID/page`, which answers **403** `{\"code\":\"PERMISSION_DENIED\",\"object\":\"sys_approval_request\"}`. The page renders the access-denied screen with no Retry.\n- The same user's `GET /api/v1/approvals/requests/AREQ_ID` answers **200** with `viewer: {can_act: true, …}`, but the page never calls it: 0 occurrences in the network log.\n- The `?request=` link does replace itself with the record route, so the routing half of acceptance[4] holds; the landed page is the same lock screen.\n\n**Ruled out:**\n- a stale bundle: the served `/_console/` entry `assets/index-RFCp05oY.js` is byte-identical to `packages/console/dist`;\n- a hydration race: screenshots at 3 s and 8 s are identical;\n- the wrong persona: get-session shows the invited user, `isPlatformAdmin: false`;\n- the automation input: cold loads need no click.\n\n## Same root cause, for any approver, admin included\nAs an admin who is a pending approver, a cold load of `/_console/apps/com.objectstack.setup/sys_approval_request/record/AREQ_ID` gives `/page` → 200 and the page renders, but:\n- there is **no Approve or Reject** (the ⋯ menu offers only Refresh / Add to favorites / Share);\n- the \"Waiting on\" strip draws **one chip per character** of the approver ids: `i`, `S · holds 2 approver slots`, `B · holds 3 approver slots`, and so on.\n\nTwo runners saw this, under both the account and the setup app segments.\n\n## Mechanism (read at `eeec88d1`)\n- #27713 (`0027c4a2b8`, \"one request opens a record page\") made `RecordDetailView` take the opened record from `dataSource.getRecordPage(...)`. That is the generic data-API door `POST /api/v1/data/:object/:id/page` (`ui/packages/app-shell/src/views/RecordDetailView.tsx`, the record-page effect at about lines 2202–2246; the record-load effect about 1180–1222 takes `page.record`; a 403 is classified `forbidden` and draws `record-access-denied`).\n- `routeApprovalRecordReads` in `ui/apps/console/src/services/approvalRequestsDataSource.ts` overrides only `find` and `findOne`. `forwardToHost` passes every other member, `getRecordPage` included, straight to the host adapter (`ui/packages/data-objectstack/src/index.ts` `getRecordPage` → `client.data.recordPage`).\n- The data door has no object-level read of `sys_approval_request` for these positions: `GET /api/v1/data/sys_approval_request/AREQ_ID` is also 403. So the request read that `GET /approvals/requests/:id` would serve never happens.\n- Even when `/page` answers (admin), a data-door row carries no `viewer` block and serves `pending_approvers` as a comma-joined string, while the approvals door serves an array plus `viewer`. The decision actions' `record.viewer.can_act` predicates fail closed, and the chip renderer iterates the string character by character.\n\nThis is the same class as the closed 18.1.0 blocker #25228, reached through a new door. Not fixed by any open PR at the time of this run. #28470 (open) proposes adding more to the same record-page payload.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

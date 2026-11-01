@@ -2,8 +2,8 @@
   "number": 28509,
   "kind": "issue",
   "title": "skills/docs: teach the one effective read of a `.custom` declared override (N-10's owed Skills-docs follow-up; the first slice of N-30)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:studio",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T03:59:29Z",
-  "updated_at": "2026-11-01T06:59:28Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T12:48:55Z",
+  "closed_at": "2026-11-01T10:24:28Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28509",
   "body": "domain:server#4 · os-zhuang · session_01QUs3BtyH9zgxKzYrJiH18J\n\nFiling gate: ④ child of epic #28236 (the P3 row **N-30 skills and docs**, not cut yet) · filed by the lane seat because PR #28507 (N-10, #28409) declares `Metadata-protocol: semantic` and owes `Skills-docs: follow-up owed`; the review checklist has the seat file that card and rewrite the line to `#N` before ACCEPT. ⛔ Not a claim.\n\nPart of #28236 (child N-30, first slice) · lane: the epic PM's skills/docs PR (`skills/**` is a governed surface, Tier H) · size: S.\n\n**Business reason.** An author or an AI agent who customizes an installed package (HotCRM) learns from the skills and the docs where the change lives and what the platform serves. After #28507, the served document for a name X ships is X's `<X>.custom` item that declares `overrides.package = X`, on every read. That covers the read naming no package, `?package=X`, the layered read, the list scoped to X or not, and X's app. The export of `<X>.custom` carries the `overrides` block. A skill that still teaches the Setup overlay as the only customization path writes rows that the read treats as orphans, or as package-unbound rows awaiting N-16's migration. If nothing is done, agents keep writing the old shape.\n\n**What to teach (from #28507, read at head `f62e0af4`).**\n1. The `overrides: { package, basedOn }` declaration takes effect on the read only in X's pair. The pair is bound by the row's `package_id`, the type must be overridable, and `basedOn` is recorded and never judged. A declaration in any other package is ignored.\n2. The env-wide list serves one item per name a single code package ships. A dependent package's same-named item stays under its own `?package=` address. A package-unbound row still wins until ADR-0146 D11 / N-16.\n3. The layered read reports orphans (an undeclared pair row, or a row in a dependent package) in `overlay` with `effective` = X's code document.\n4. Public forms: an override can narrow anonymous intake but never re-open a form any honoured body withdrew.\n5. Export: `GET /packages/<X>.custom/export` carries the override with `overrides`. X's own export is unchanged.\n\n**Readers who act.** The epic PM of #28236, folding this into N-30 when it cuts P3. Candidate surfaces, unmeasured: `skills/objectstack-platform/SKILL.md`, `content/docs/references/system/metadata-persistence.mdx`, `content/docs/references/api/package-api.mdx`, `content/docs/ui/forms.mdx`.\n\n**Dedupe.** Searched issues: `\"N-30\"` (69 hits, none a card for it; #28236 lists it as plan of record), `overrides skills docs custom` (42 hits, none on teaching the read), `\"effective read\" override skills` (11 hits, none). No existing card covers it.\n\n**Not here.** The write gate (N-09) and the flow override (N-11) owe their own teaching when they land. N-30 keeps the rest of the epic's skills and docs."

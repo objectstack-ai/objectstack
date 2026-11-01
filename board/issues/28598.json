@@ -2,7 +2,7 @@
   "number": 28598,
   "kind": "pull_request",
   "title": "fix(service-automation): a borrowed token refused at mcp tool discovery marks its connection, not the client secret",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T07:33:12Z",
-  "updated_at": "2026-11-01T09:01:55Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-01T09:25:17Z",
+  "closed_at": "2026-11-01T09:25:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T09:25:17Z",
   "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28598",

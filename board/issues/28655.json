@@ -1,0 +1,29 @@
+{
+  "number": 28655,
+  "kind": "issue",
+  "title": "spec(object-extension `fieldPatches`): refuse a field both replaced in `fields` and patched in `fieldPatches` of one extension, key option patches by the option-value grammar, carry the whitelisted aliases, and derive the describe's member list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T12:08:38Z",
+  "updated_at": "2026-11-01T12:08:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28655",
+  "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② should-fixes A–D that a contract review carried out of scope (triage contract review 6557713679 on PR #28650, card #28560, epic #28236 N-23a, verdict PASS with no must-fix). Filed by `domain:spec` seat 4 · `marchtian`. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec` (all four are in `packages/spec/src/data/object.zod.ts`). It may ride #28565 (N-23d, the merge that first reads the slot) if that card's dev takes it.\nDedupe: these findings were raised by the review at 12:07Z today. Open issues titled `fieldPatches`: none besides this one.\nreach: none yet. The slot is `[EXPERIMENTAL — not enforced]`: the engine drops it at registration until #28565, so no accepted input changes behaviour today.\n\n## Wanted (from the review, verbatim in substance)\n\n- **A.** In `ObjectExtensionSchema`'s root `superRefine`, refuse a field name that appears in both `fields` and `fieldPatches` of the same extension. Locate the issue at `fieldPatches.NAME` and prescribe: patch the vendor's field or declare your own, not both. Today both parse, and the patch then lands on the whole-field replacement.\n- **B.** Key the `options` map by `SelectOptionSchema.shape.value` (derived, not restated), so a key like `'Tech Sector'` that no option can carry is refused. Consider `refuseRecordProtoKey` on `fieldPatches` and its sibling `fields`: a `__proto__` own key is silently dropped today. That was measured at schema level only.\n- **C.** Carry, onto the two patch surfaces, the source shape's `aliases` whose target is a whitelisted key. Derive them by filter: `title`, `help`, `helpText`, `hint`, `tooltip` for the field; `text`, `name`, `title` for the option. Today `helpText` on a patch gets an unrecognized-key refusal with no rename.\n- **D.** Build the `fieldPatches` `.describe()` member list from `BASE_FIELD_DISPLAY_WHITELIST`, or drop the enumeration, so that widening the whitelist cannot leave the published description stale.\n\nEach item lands with a refusal test (zod code, path, named subject) and a control.\n\nRelated: #28560 / PR #28650, #28565, ADR-0146 D10."
+}

@@ -2,9 +2,9 @@
   "number": 28620,
   "kind": "pull_request",
   "title": "fix(console): an uninstalled cloud package is not drawn as installed",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -19,11 +19,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T09:18:42Z",
-  "updated_at": "2026-11-01T09:19:39Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
-  "comments": 0,
+  "updated_at": "2026-11-01T09:50:39Z",
+  "closed_at": "2026-11-01T09:50:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T09:50:39Z",
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28620",
   "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb2Q8KcRWK76vkEfK3pDPdRy)_\n\nFixes #28521\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：云托管环境里卸载过的软件包（控制面软停用、保留安装记录），控制台不再显示为\"已安装\"。市场页\"你的组织\"卡片改为显示\"重新安装\"按钮；设置 → 软件包页不再把它列为已安装。\n- **为什么改**：客户卸载应用后，卡片仍写\"已安装\"且没有任何按钮，客户既看不出它已停用，也装不回来。\n- **风险与回滚**：只改控制台读法，不改云端、不改协议。回滚即还原本 PR 的两个源文件。\n- **先看**：`ui/packages/app-shell/src/console/marketplace/marketplaceApi.ts`（`listInstalledPackages` 的停用判定与 `readMarketplaceInstalls` 的过滤）、`MarketplacePage.tsx`（卡片按钮分支）。\n- **两分钟验证**：`cd ui && pnpm exec vitest run packages/app-shell/src/console/marketplace/__tests__/MarketplacePage.disabledInstall-28521.test.tsx`，预期 6 个用例全绿。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\nThe control plane's uninstall is a soft disable that keeps the installation row; `GET /api/v1/cloud-connection/installed` still lists that row with `status: 'disabled'` and `enabled: false` (measured by the cloud seat on the card). The Console read every listed row as installed.\n\n- `marketplaceApi.ts` `listInstalledPackages()` reads `status` and `enabled` and marks a disabled row with a new optional `LocalInstallEntry.disabled: true` member. It is absent on an installed row and never sent by the install-local listing, the same convention as `notLoaded`.\n- `MarketplacePage.tsx`: a disabled cloud row no longer joins `installedIds`. The org card draws **Reinstall** (the existing `marketplace.action.reinstall` key) instead of the Installed badge. The button calls the same `doOrgInstall`, so on a cloud-managed environment it posts to `POST /api/v1/cloud-connection/install`, which answers `reinstalled` and re-enables the row; the page then re-reads the listing and draws Installed.\n- `readMarketplaceInstalls()` (the Setup → Packages read) drops disabled rows on the cloud leg, so the page neither lists a soft-uninstalled package as an install nor offers its Details/Uninstall actions.\n\nThe public catalog grid and the package detail page needed no change: the grid reads the install-local ledger only, and the detail page reads `GET /cloud-connection/installation`, which already answers `installed: false` for a disabled row.\n\n## Tests\n\n- New `MarketplacePage.disabledInstall-28521.test.tsx` (6 cases) runs the real `listInstalledPackages`, `readMarketplaceInstalls` and `installPackage` against a stubbed `fetch`:\n  - the client marks only the disabled row, and the marker is absent on an installed one;\n  - `status: 'disabled'` alone and `enabled: false` alone each mark the row;\n  - Setup → Packages' read keeps only the installed row;\n  - the org card offers Reinstall, its click posts `{ package_id, seed_sample_data }` to the install door, and the re-enabled row then reads Installed with no button;\n  - CONTROL: an installed row reads Installed; a package with no row offers Install.\n- Ablations (each through `scripts/ablation-replace.mjs`, restored to the HEAD blob with `git diff HEAD` empty):\n  - `MarketplacePage` counting every cloud row installed: the Reinstall case goes red (1 failed / 5 passed);\n  - `readMarketplaceInstalls` keeping disabled rows: the Setup → Packages case goes red (1 failed / 5 passed).\n\n## Acceptance notes\n\n- The card offered two shapes: the Install button, or 已停用 with 重新安装. This PR draws Reinstall alone. A separate 已停用 badge would need a new `@object-ui/i18n` key, which widens the published catalogue (Clause-② yes); the existing Reinstall key already says the package was installed and is off now.\n- Setup → Packages drops the disabled row rather than drawing it with a reinstall action. That page lists what is installed; reinstall stays a marketplace action.\n- Not measured against a live hosted stack from this container: the cloud repository is not readable here. The row shape in the test is the one the card measured.\n\n## Verification\n\n<details><summary>Local runs</summary>\n\n- `pnpm exec vitest run` over the 71 ui test files naming `MarketplacePage`, `marketplaceApi`, `readMarketplaceInstalls`, `listInstalledPackages` or `PackagesPage` (a declared narrowing; CI's Test UI runs the rest): 71 files, 710 tests passed.\n- After merging `origin/main` (head `5f3027f6`; the 2 incoming commits touch `packages/cli` and the metadata layer, not this diff): the new file plus every test under `ui/packages/app-shell/src/views/metadata-admin/`, 686 files, 7259 tests passed, 1 skipped.\n- `pnpm --filter @object-ui/app-shell run type-check`: exit 0.\n- Derived gates (`dispatch-gates.mjs --commands`, 34 families): all 34 exit 0, `--ran` reconciliation 34 run / 0 NOT-MEASURED. Each command is in the card's os-dev report.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jVBzmHX5zVyRfxqBc3)_\n"

@@ -19,11 +19,11 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-09-18T05:48:48Z",
-  "updated_at": "2026-10-29T15:34:19Z",
+  "updated_at": "2026-11-01T13:42:44Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 71,
+  "comments": 72,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/18917",
   "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\n**This post is the seat (`domain:spec` seat 4).** Project-seat stub: only what another account must read lives here. The job description is versioned at `.claude/skills/pm-dispatch/references/lanes/spec.md`, ⛔ not copied here. The previous body (⏳ vacant, written by `session_01HbmCEPMBmMLU3VZCEzfec7`, `zhuangjianguo`, with its clock-out brief 6446137877) is the prior revision of this body.\n\n## Current PM\n\n🟢 `marchtian` · `session_017ihL2fi9zfJhUTubyJYb6V` (a thread of the Claude Code project \"Objectstack 本体 skills\" on the `marchtian` account) · seated 2026-10-29T15:26Z on the maintainer's summons in that project (「你再接一个 spec 车道，并发5」).\n\n- Posture, round ledger and round reports live in the project, ⛔ not here (project-seat stub).\n- The same account also sits `domain:skills` seat 1 (#7623) from a different project thread (`session_017ihL2dPRZXfgE1A2Vct3FU`). The two seats are told apart by the claim's `Seat:` line and the session id, never by the assignee (`marchtian` for both). Precedent for one account on two seats: the maintainer's exception recorded on this post at 6412472115.\n- Concurrency: up to 5 running slots (`batch:5`, the maintainer ceiling), on the maintainer's word above.\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `fleet-write/dispatch.mjs`, `issue-create.mjs`) as `objectstack-fleet[bot]`; ⛔ GitHub MCP writes; ⛔ the `marchtian` account writes no content (assignee only).\n\n## Inherited ledger\n\nIn flight at seating: none (no `Seat: domain:spec#4` claim on any open lane card; the predecessor's brief 6446137877 lists every seat-4 card as landed or handed over). Untouched candidates named by that brief stay in `pm:queue`.\n\n## Hot-file serial queue\n\n- Every lane file: FREE (no claim, no open PR of this seat yet). Claims on the cards carry each in-flight surface.\n\n## Notes\n\n- Mailbox: one mailbox per login (`mailbox-open.mjs` ①), so this seat shares `marchtian`'s mailbox #27523 with skills seat 1; a doorbell line names its `LANE#N`.\n- Other `domain:spec` seats: #6017 (seat 1), #18549 (seat 2, ⏳ vacant), #18883 (seat 3), #19357 (seat 5). ⛔ No liveness judgement on them.\n"

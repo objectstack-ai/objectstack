@@ -14,18 +14,20 @@
     "area:automation",
     "domain:server",
     "finding",
-    "pm:epic",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T07:21:07Z",
-  "updated_at": "2026-11-01T07:53:57Z",
+  "updated_at": "2026-11-01T12:52:33Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28594",
   "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ① a product defect with a named location, `finding` class (b) (contract text vs runtime). Found by the `CONTRACT_REVIEW_TIER` boundary review of PR #28587 (comment 6554878186, should-fix S2, the dev's open question Q1) and re-read by this seat. It is a sibling of #28534: PR #28587 closes that card for packages installed through install-local, and this card covers every other origin. Child of #27293 (E4). ⛔ Not a claim.\n\n`reach:` the metadata door. The reviewer read this reach in the code; it was NOT MEASURED. `packages/spec/src/kernel/metadata-type-schemas.ts` binds `connector` to `DeclarativeConnectorEntrySchema`, which carries `provider` / `providerConfig`. A stored row with `provider: 'openapi'` and `providerConfig.spec: './x.json'` is therefore storable. The post-boot reconcile reads stored rows through `readMetaItemsFromProtocol`. `packages/metadata-protocol/src/protocol-stored-overlay-reads.ts:164-166` (read at `origin/main` `cd065d36`) stamps each row's `_packageId` from its `package_id` column, but only when the body carries no `_packageId` of its own. Such a row is either an `'authored'` package's (`POST /api/v1/packages`, Studio) or belongs to no package (an environment-authored connector). Even after PR #28587, both reach the materializer as host entries and get `createPackageFileLoader(this.options.packageRoot)`, the host's root.\n\n## The defect\n\nThe contract (`packages/spec/src/integration/connector-provider.ts` ~:326/:344) resolves a relative ref against the root of the declaring package. A stored, authored or environment row has no package root on disk, yet it is read against the host's root. On a hosted tenant that means a tenant's admin can bind the host's files by path. The body-carried `_packageId` that the stamp leaves alone is a second self-stamp road, the same class as review must-fix M1 on PR #28587.\n\n## Work\n\nMeasure first: store a provider-bound `openapi` connector through the metadata door, naming a host file, and list `GET /api/v1/automation/connectors`. Then extend #28534's rule. Only entries the host stack itself declares (the boot artifact, `source: 'code'`, stamped by the registry and not by the body) read the host root. Every stored, authored or environment row is refused its package-relative refs with #28534's message (entry, ref, remedy: inline the document or use a URL). An http(s) URL or an inline document is unaffected. The `_packageId`-left-alone branch at `:165` is measured and closed with the same rule as M1. Tests: a stored row naming a host file → refused (not `ready`), an authored package row → refused, a host-declared entry → still reads (control).\n\n## Business reason\n\nA hosted environment's administrator authors connectors in Studio. A connector authored there must not be able to read the platform's own files by naming a path.\n\n## Reader\n\nThe triage seat grades and routes it (`domain:server`, `service-automation` / `metadata-protocol`); the epic PM of #27293 dispatches it after PR #28587 lands, because it builds on that PR's refusal.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-01T07:03Z), titles grepped for `authored.*connector|stored connector|environment-authored`: 2 hits, #28249 and #28163. Both concern `os migrate meta --stored` and template tokens in a stored `connector_action`, not file refs. Control `connector`: 53 hits."

@@ -2,8 +2,8 @@
   "number": 28552,
   "kind": "issue",
   "title": "grid: \"select all matching\" banner counts every match, but the bulk action processes only the first 5000",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,8 +14,6 @@
     "area:records",
     "bug",
     "domain:ui",
-    "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T05:48:13Z",
-  "updated_at": "2026-11-01T09:03:51Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T09:30:46Z",
+  "closed_at": "2026-11-01T09:28:41Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28552",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ③ a maintainer-directed task. Ruling 6545938831 on #28345, item ④, verbatim: 「bulk-select-all-matching: file a product defect card — the banner names the cap (e.g. 「将处理前 5000 条」); the checklist gains one criterion pinning it.」 (the maintainer's 「同意」 to batch #434, recorded by the director seat).\nBusiness reason: an admin who selects \"all matching\" on a list with more than 5000 matches and runs a bulk action (delete, update, approve) believes every match was processed. Only the first 5000 are, and nothing on screen says so. Not fixing it leaves a silent partial execution on a destructive path.\nReader: the `domain:ui` lane (`ui/packages/plugin-grid`), the next PR that touches the bulk bar. The checklist criterion that pins it is `records-forms.bulk-select-all-matching` acceptance[5] (PR #28551).\nDedupe (open AND closed): \"select all matching 5000\" → 78 hits, \"HARD_CAP bulk\" → 8 hits, \"bulkAllMatchingSelected\" → 0 hits, \"all matching records cap banner\" → 97 hits; none is this defect (the hits are QA run records, the sweep anchor and the decision card).\nreach: public UI entry (the Console grid's bulk bar), read from source at `origin/main` 37184244; the over-cap leg has not been driven live.\nQA-source: #27377 · records-forms.bulk-select-all-matching · census row 161 (decision #28345 item ④)\ntype: Bug\n\n## What happens\n\n- `ui/packages/plugin-grid/src/components/BulkActionBar.tsx`: the cross-page banner (`showCrossPageAffordance`, `data-testid=\"bulk-cross-page-banner\"`) renders three strings off the uncapped `totalMatching`: `grid.bulkAllMatchingSelected` (\"All {{count}} matching records are selected.\"), `grid.bulkSelectAllMatching` (\"Select all {{count}} matching\") and `grid.bulkSelectedAllMatches` (\"{{count}} selected (all matches)\").\n- `ui/packages/plugin-grid/src/ObjectGrid.tsx` `resolveBulkRows`: `const HARD_CAP = 5000;`, pages of 500, then `return collected.slice(0, HARD_CAP);`. So with 7,200 matches the banner says 7,200 and the action gets 5,000.\n\n## Expected (ruling ④)\n\nWhen `totalMatching` exceeds the cap, the banner names the cap, for example 「将处理前 5000 条」 / \"The first 5,000 of 7,200 matching records will be processed\". The cap and the banner read one constant, so they cannot drift apart. At or under the cap, the banner is unchanged.\n\n## Acceptance\n\n- A test drives `totalMatching` above the cap and asserts the banner text names the cap; another at or under the cap asserts today's text.\n- `records-forms.bulk-select-all-matching` acceptance[5] scores PASS on the next run."

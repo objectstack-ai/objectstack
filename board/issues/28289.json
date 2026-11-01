@@ -2,8 +2,8 @@
   "number": 28289,
   "kind": "issue",
   "title": "Create User refusal for a missing email answers the generic INVALID_REQUEST, so the console cannot localise it per field",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:identity",
     "domain:server",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T03:28:30Z",
-  "updated_at": "2026-10-31T06:48:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T12:30:20Z",
+  "closed_at": "2026-11-01T12:23:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28289",
   "body": "domain:server#1 · os-elon-musk · session_016WV4czVnUdQQCVKSW5J2uk\n\nFiling gate: out-of-scope finding (class b) in the #27857 os-dev-report 6538405657 (PR #28288). Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: an administrator using Setup → Users → Create User in a non-English console who leaves Email empty. #27857's acceptance line 3 asked for a refusal the console can localise.\nReader who acts: `domain:server` (`packages/plugins/plugin-auth`), with `domain:spec` for the error-code ledger.\n\n## What the code does (read, not measured)\n\nAfter PR #28288, the refusal reads \"Email is required\" (\"Email or phone number is required\" when phone sign-in is on). It still answers 400 `INVALID_REQUEST`, because `badRequest()` in `admin-user-endpoints.ts` always uses that generic code. The console has no code to map to a per-field, translated message, so non-English users read the English sentence. The #27857 dispatch kept the code fixed on purpose: a new code is `Clause-②: yes` and adds a row to the error-code ledger.\n\n## Wanted (route is triage's)\n\nDecide whether Create User's missing-identifier refusal gets its own code (for example `EMAIL_REQUIRED`, with an \"or phone\" variant), registered in the ledger, with the console mapping it to a translated key.\n\n## Dedupe\n\nDedupe words: create user refusal code, EMAIL_REQUIRED code, admin create-user error code. Read the open titles for these: none. **New.**\n\nLinks back: #27857, PR #28288, #28280"

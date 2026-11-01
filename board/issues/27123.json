@@ -2,8 +2,8 @@
   "number": 27123,
   "kind": "issue",
   "title": "ADR-0025 M1 — local T0 install loop for first-party, self-signed plugins: os plugin install (signature + integrity, materialize, record), boot-time loader with the tier dispatch point, disable/uninstall, Stripe sample as acceptance",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:devpath",
     "domain:server",
     "enhancement",
-    "pm:queue",
     "priority:p1"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-28T06:59:59Z",
-  "updated_at": "2026-10-30T12:18:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T13:03:54Z",
+  "closed_at": "2026-11-01T13:03:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 24,
+  "comments": 25,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/27123",
   "body": "Ruled: 6467932167 · letter B′ · 2026-10-28T11:35Z\n\nPart of #27108 (M1). Filing gate: ③ maintainer-directed — ruling 6461953053 on objectstack#26553 (「插件包分发 同意，应该立专题卡吧？」) and ADR-0025 v2 §3.5 / §4 (PR #27118, merged). Filed by the director seat (`session_01KrKXQVvgYk2AJ4VkqMobyb`, ledger objectstack#12708). ⛔ Not a claim. ⛔ No `domain:*`: the work spans `packages/cli` and `packages/core` / `packages/runtime`; triage grades and sets the lane(s) and may split this card by lane. Dedupe: #17757 (closed design card), #13457 (closed, F4 registration); no open card carries the install loop.\n\n## 维护者速读\n\n本地安装闭环，只限首方/自签插件（T0，`node`）：`os plugin install ./x.osplugin` → 校验整包 Ed25519 签名与逐文件 integrity → 落盘 `<OS_HOME>/plugins/<env>/<id>/<version>/` → 写安装记录 → 下次启动加载器扫描、`dynamic import dist/index.mjs`、走现有 plugin-loader 的依赖排序，带 tier 分派点（本期只接 `node`）→ 禁用/卸载复用包的 disable-state store。验收：cloud 的 `plugins/connector-stripe` 样例装得上、跑得起、禁得掉。⛔ 不上任何市场面；T0 = 宿主进程内跑作者代码。\n\n## What lands (ADR-0025 v2 §3.5 M1, §3.3, §3.6)\n\n1. **`os plugin install ./x.osplugin`** (`packages/cli/src/commands/plugin/install.ts`): read the archive (`readTarGz`, today publish-only); verify the whole-artifact signature from the `.sig` sidecar against the host's trusted keys via `verifyPluginArtifact` (`packages/core/src/security/plugin-artifact-signature.ts`, first production caller); re-verify every file against `integrity` at unpack; refuse on any mismatch; `--trust-unsigned` as the explicit dev override, logged loudly. Materialize to `<OS_HOME>/plugins/<env>/<id>/<version>/`. Write the installation record (`sys_package_installation` shape, v2 §3.8) to the local store (ADR-0016 §9.7 `package-state-store.ts` pattern).\n2. **Loader** (`packages/core` / `packages/runtime`): at boot, scan installed plugins, dynamic-import `dist/index.mjs`, reuse `plugin-loader.ts` dependency ordering and health checks; a tier dispatch point that M1 wires for `runtime:'node'` only and that refuses `sandbox` / `worker` with a clear message until M3 (no silent in-process fallback). Load-time signature check becomes a real verification (today format-only, `plugin-loader.ts:512–535`).\n3. **Disable / uninstall** through the package disable-state store; uninstall removes the materialized dir on next boot.\n4. **Retire the build-side `manifest-deps` half** (`build.ts:159–207`; Q6) and add the native-addon refusal to `os plugin build` (v2 §3.3).\n5. **Delete the self-descriptions as they stop being true**: `manifest.zod.ts` integrity \"NOT RE-VERIFIED AT UNPACK… there is no `os plugin install`\", `PluginRuntimeSchema` \"nothing dispatches on the tier\" (replace with the M1 wording: `node` dispatched, others refused until M3).\n6. **Acceptance**: an e2e that builds, signs (test key), installs and boots the cloud `plugins/connector-stripe` sample on a standalone stack, exercises one of its tools, disables it, and asserts the tamper cases (bad signature, bad integrity, `sandbox` tier) are refused.\n\n## Not in M1\n\n- Cloud download route, `os plugin install <id>@<version>` — M2.\n- Per-plugin `SecurePluginContext` enforcement — M2 (M1 loads first-party code with the enforcer registered, as today).\n- T1 / T2 tiers, publish scans, secret-refs — M3.\n- Any marketplace listing of installed plugins.\n\n## Acceptance\n\n- `os plugin install` + loader + disable work end to end on the Stripe sample (e2e in CI).\n- Tamper cases refused with one diagnostic each; `--trust-unsigned` logs the override.\n- The listed self-descriptions are deleted in the same PRs; no new \"NOT ENFORCED\" prose is added.\n- ADR-0025 v2 §3.5 M1 bullet becomes a ✅ line in a one-line docs follow-up (Tier H).\n\n**Size:** L (two or three PRs; triage may split by lane: cli install command · core/runtime loader · build retirements). **Clause-②:** no (no authorable key changes; `PluginPackagingSchema` narrows to `bundled` — if that is judged a spec narrowing, the lane declares the arm). **Metadata-protocol:** none.\n\n## Related\n\n#27108 (epic, Q1–Q3, Q6), ADR-0025 v2 §3.3 / §3.5 / §3.6, ADR-0016 §9, #26553 ruling 6461953053, cloud `plugins/connector-stripe`."

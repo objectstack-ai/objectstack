@@ -1,0 +1,35 @@
+{
+  "number": 28643,
+  "kind": "issue",
+  "title": "cli: `os build` does not run the override-declaration judge that `os validate`, publish and install run",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T10:37:27Z",
+  "updated_at": "2026-11-01T14:02:40Z",
+  "closed_at": "2026-11-01T13:44:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28643",
+  "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFiled from the contract review of PR #28554 (#28410, N-09 of #28236), note 1 of record `6556791212`. A follow-up, not a defect on `main`: nothing is admitted silently today.\n\n## Reading\n\n- #28410 wires one override-declaration rule (`judgeOverrideWrite`) into the save door, the promotion, `os validate` (`findOverrideDeclarationRefusals`) and the managed install.\n- `os build` (`packages/cli/src/commands/compile.ts`) does not call `findOverrideDeclarationRefusals`. The PR records that honestly as a `VALIDATE_ONLY_GATES` row.\n- Cost today: an artifact that `os build` emits with a refused override declaration (or an undeclared same-named item) is refused later, at the managed install and the publish doors, by the same judge. It is a late refusal, never a false acceptance.\n\n## Question for triage\n\nShould `os build` run `findOverrideDeclarationRefusals` beside `checkDependencyRanges`, so that the refusal arrives at build time? The reviewer recommends A (wire it in a follow-up card). This adds a refusal point to `os build`, so under 「新增门禁默认否」 it needs triage's grade before code.\n\nRefs: #28410, PR #28554, ADR-0146 D2/D6, #28390 ruling A.\n"
+}

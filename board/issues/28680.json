@@ -1,0 +1,34 @@
+{
+  "number": 28680,
+  "kind": "issue",
+  "title": "[Decision] console: write app navigation when a page or dashboard is created or deleted, instead of diffing the whole page and dashboard lists on every app page",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T13:15:52Z",
+  "updated_at": "2026-11-01T13:38:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28680",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate ②: a decision only the maintainer can make. Part of #28645 (the second of its two PRs).\n\n## 维护者速读\n\n- **改了什么：** 现在每次打开任一应用页面，控制台都会在首屏后拉一遍全部页面和全部仪表板列表，跟上一次比对名字，发现多了或少了就往每个应用的导航里写条目。提议改为在新建、删除、改名页面或仪表板的那一刻，显式地写导航。\n- **为什么改：** 这两次列表请求是 #28645（应用页少 3 次请求，cloud 预算 24 → 21）剩下的大头；只要比对还在，应用页就最少 23 次。比对本身还是一条隐式写路径：谁让列表“看起来变了”，它就往所有应用写导航。\n- **风险与回滚：** 改的是“什么时候写导航”。漏接一个新建或删除入口，那个入口建出来的页面就不会自动进导航。回滚即恢复比对。\n- **先看：** `ui/packages/app-shell/src/hooks/useNavigationSync.ts` 的 `NavigationSyncEffect`（约 590–740 行），以及同文件里已存在但无人调用的 `sync…AllApps` 六个方法（约 215–225、485 行起）。\n- **需要你做的：** 选 A / B / C。\n\n## Background\n\n`NavigationSyncEffect` is mounted on every app page (`AppContent.tsx:1440`). After first paint it reads `metadata.pages` and `metadata.dashboards` (two `GET /meta/{type}` list reads), diffs the name sets against the previous render, and for every added or removed name calls `syncPageCreated` / `syncPageDeleted` / `syncDashboardCreated` / `syncDashboardDeleted` on every syncable app (`useNavigationSync.ts` ~707-735). The explicit per-event writers `syncPageCreatedAllApps`, `syncDashboardCreatedAllApps`, `syncPageDeletedAllApps`, `syncDashboardDeletedAllApps`, `syncPageRenamedAllApps`, `syncDashboardRenamedAllApps` exist in the same hook and have no caller (`git grep -n AllApps origin/main -- ui/packages/app-shell/src`).\n\nMeasured by #28645's card thread at `origin/main` `2678600d`; full reading with file:line in the project file `issue-28645/needs-decision.md`.\n\nGoverning text: none found (`git grep -n -i \"navigation sync\" -- AGENTS.md docs/adr ui/AGENTS.md` → 0 hits on a write-timing rule; ADR-0037 only disables the diff in preview).\n\n## Options\n\n| Option | What happens | Customer-visible | Work |\n|---|---|---|---|\n| A — explicit writes | The create / delete / rename sites in the console call the existing `sync…AllApps` writers; `NavigationSyncEffect` stops reading the two lists. | App pages open with two fewer calls (#28645 reaches ~21). A page or dashboard made outside the console (CLI, package install) is not added to nav by a console visit any more. | ui lane, 1 PR, ~3-5 files; no precedent PR |\n| B — keep the diff, scope it | Keep the diff, but run it only on routes that create or delete pages/dashboards (Studio, Setup). | App pages lose the two calls; the diff still writes nav, from fewer places. | ui lane, 1 PR, small |\n| C — no change | #28645 lands its first PR only (by-name reads); app pages stay at ~23 calls. | Nothing changes. | none |\n\nBusiness reading: A is \"update the menu when you add the item\"; B is \"re-count the shelves only in the stock room\"; C keeps today's re-count on every visit.\n\n## Recommendation: A\n\nTwo years out, a mainstream platform writes navigation when the author adds the item (Salesforce Lightning app nav, Airtable interfaces), not by re-listing everything on each visit. A leaves one declared write path and removes an implicit one that writes into every app. Only ① decides: A. ②③④ flip it: no.\n\nConfidence gap: items created outside the console (CLI deploy, package install) would no longer reach nav through a console visit; the card thread checks whether any such path relies on the diff today before writing code.\n\nAfter a ruling: A or B go to the #28645 card thread as its second PR, `Part of #28645`; C closes this card not planned and #28645 closes on its first PR.\n\nos-decision-facets\n- ① Long-term: A shrinks the special cases (one explicit write per event instead of a diff heuristic with a preview carve-out).\n- ② Business pull: measured — cloud's call budget accepted 23 → 24 and tracks the way back down (#28645).\n- ③ AI error: A makes nav writes declared at the call site; today an AI-authored page change can trigger nav writes into every app silently.\n- ④ No sprawl: A adds no new surface; it calls six writers that already exist and retires one effect.\nPrior rulings read: NavigationSyncEffect, \"navigation sync\" → 1 hit (#20290, unrelated, closed); ADR none; thread: #28645 6558417171.\n\nReader: ui seat 1 (`domain:ui#1`, #25966) dispatches the ruled option to #28645's card thread.\nDedup: `repo:objectstack-ai/objectstack is:issue NavigationSyncEffect` → 1 hit, #20290 (closed, a draft-baseline merge issue, not this)."
+}

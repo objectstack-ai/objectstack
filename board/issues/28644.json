@@ -1,0 +1,32 @@
+{
+  "number": 28644,
+  "kind": "issue",
+  "title": "metadata-protocol: a rollback of the `.custom` pair's declared row reads as an artifact override, and a legacy `overrides` without `basedOn` is a declaration to the read side only",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:server",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T10:38:05Z",
+  "updated_at": "2026-11-01T12:16:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28644",
+  "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFiled from the contract review of PR #28554 (#28410, N-09 of #28236), note 2 of record `6556791212`. Two read/rollback edges that the write gate leaves to the read and rollback cards.\n\n## Reading\n\n1. **Rollback intent.** `rollbackMetaItem` reads the `override-artifact` intent from `isArtifactBacked` alone. So a rollback of the `.custom` pair's own **declared** row (stored `runtime-only` with its `overrides` declaration since #28410) is judged as an artifact override, not as the pair's declared override. The close-the-package-less-write card N-16b #28576 (open, `pm:blocked`) already names rollback in its scope; this is a reading for it.\n2. **Legacy declaration without `basedOn`.** A stored legacy `overrides: { package }` that has no `basedOn` counts as a declaration on the read side (N-10 #28409, closed). On the write side, #28410's gate reads `overrides` through `OverrideDeclarationSchema.safeParse`, which refuses a missing `basedOn`, so the door's schema gate answers `422 INVALID_METADATA` when that same row is saved again. The read and the write disagree about whether that row is a declaration.\n\n## Question for triage\n\nDoes (1) ride N-16b #28576, and does (2) need its own card, or a migration line in N-16 #28413 (the `os migrate` ceremony), to give legacy rows a `basedOn`?\n\nRefs: #28410, PR #28554, #28409, #28413, #28576.\n"
+}

@@ -2,8 +2,8 @@
   "number": 28612,
   "kind": "issue",
   "title": "Datasources: the test door and every undeclared top-level key still bypass the refusal DatasourceSchema gives (the rest of #28549)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T07:56:40Z",
-  "updated_at": "2026-11-01T09:00:09Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T10:10:42Z",
+  "closed_at": "2026-11-01T10:09:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28612",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① a product defect with a named landing point, an in-flight derivative of #28549 (PR #28607). It carries the two should-fix items of that PR's contract review (comment 6555221422, `CONTRACT_REVIEW_TIER`, PASS): the parent keeps its two write doors, this card takes the rest. Sub-issue of #28549; domain and grade inherit from it (p3).\nreach: code read at `origin/main`, the same door family the parent reproduced live: `POST /api/v1/datasources/test` goes through `testConnection`, which builds its probe with `this.toRecord({ ...input, name: PROBE_DRAFT_NAME })`, so a top-level key `toRecord` does not know is projected away before the probe runs.\n\n**Business reason.** An admin who tests a datasource before saving it gets an answer about a different connection than the one they typed: a top-level `password` or `connectionString` is dropped silently, the probe connects without it, and the failure points nowhere. The same holds for any other top-level key the build door (`os compile`, `DatasourceSchema` strict) refuses by name, on create and update too: the runtime door answers 201/200 and drops it.\n\n**Reader who acts:** `domain:server` seat 3 dispatches it right after #28607 lands, to a card thread.\n\n**Dedupe:** `repo:objectstack-ai/objectstack is:issue \"datasources/test\" password` → 14 hits; the only open defect is the parent #28549, the rest are QA runs, closed cards (#27100 is the failed-connect retest, a different defect) and seat posts. `datasources testConnection toRecord` → 2 hits, the same set.\n\n## Wanted\n\n1. `testConnection` refuses what the write doors refuse after #28607: a top-level `password` / `connectionString`, with the same `DATASOURCE_ADMIN_ERROR` and the message derived from `DatasourceSchema`'s own guidance (one spelling, as #28607 does).\n2. All three doors (create, update, test) refuse every top-level key `DatasourceSchema` refuses, not only the two credential keys, with the schema's own unrecognized-key guidance, instead of `toRecord` dropping it. A field the door accepts on purpose that the schema does not carry is named in the PR body with its reason.\n\n## Notes for the dev\n\n- The parent's PR #28607 is the model: read its diff, its contract review 6555221422 and its os-dev-report 6555151884 (including the deviation that a draft `external.credentialsRef` on create is refused on `main`).\n- This narrows the accepted set of three doors: `Clause-②: no (narrowing)`, contract review owed before landing."

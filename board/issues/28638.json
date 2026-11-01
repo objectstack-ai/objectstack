@@ -1,0 +1,28 @@
+{
+  "number": 28638,
+  "kind": "issue",
+  "title": "pm-dispatch(execution): a seat that reports \"nothing to dispatch\" lists every queue card with its live labels and exact blocker; a card whose remaining work is under ui/ is dispatched, never skipped",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T10:24:17Z",
+  "updated_at": "2026-11-01T10:24:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28638",
+  "body": "coordinator#1 · os-project-manager · session_01FEkQ5pHkocukhr7WQqXUVs\n\nFiling gate ③ (maintainer-directed). Filed for the `domain:server` lane on the maintainer's instruction, 2026-11-01 10:21Z. ⛔ Not a claim.\n\n## The maintainer's words (verbatim, in order)\n\n1. The coordinator proposed, after reading why server seat 3 had reported an empty queue (its words, given for context only): 「我建议更新 skills（pm-dispatch），加两条：1. 席位报「无卡可派」时，必须逐张列出卡号、实时标签和具体卡点，不能只给一句结论。2. 写明 UI 已在 objectstack 的 `ui/` 里，剩下部分是 UI 的卡照常派。」\n2. 「立卡更新skills」 (Leehom, 2026-11-01T10:21Z, in reply to that proposal)\n\n## What happened\n\n- Around 2026-11-01 10:10Z, `domain:server` seat 3 told the maintainer the queue had nothing to dispatch.\n- The maintainer then read `is:issue state:open label:pm:queue label:domain:server` and found 7 graded, unassigned cards on it.\n- Seat 3 had skipped them because each card's remaining half was UI work, read as \"not this lane's\". UI has lived in this repo's `ui/` tree since objectui was merged in (`references/cross-repo-coordination.md` L11), so nothing outside the repo blocked them.\n- Once corrected, the seat dispatched #28289, #26702 and #27928 among them. The cost: a lane idle on a full queue, caught only because the maintainer re-ran the query by hand.\n\n## Text today\n\n- `SKILL.md` L74 「队列空 + 无在飞 + 无待复核 + 决策箱无新答复 ⇒ 自退。」 and `references/seat-lifecycle.md` L87 「停:队列空或 `rounds` 用尽…」 let \"queue empty\" stand as a bare verdict. Nothing says what reading backs it.\n- `references/execution-duties.md` L8 defines a candidate; L43–44 「排队卡含他车道项 ⇒ 发现席自拆…」 covers another lane's item. Neither line says what to do with a card whose remainder lands in `ui/**`, so a seat can read it as \"skip\".\n\n## Wanted\n\n1. **An empty-queue report is a per-card table, not a verdict.** Whenever a seat reports \"nothing to dispatch\" (to the maintainer, the coordinator or its round report), it lists every card the lane's queue filter returns at that moment: the number, its live labels and assignee read in the same turn (never a cached reading), and the exact blocker for that card (assignee, `needs-user-decision`, `pm:retriage`, open `Blocked-by: #N`, no triage audit comment, a sibling seat's claim, and so on). A card with no named blocker is a candidate, and the report may not say \"empty\". Home: `references/seat-lifecycle.md` 停止条件与待命, with the SKILL.md L74 line pointing at it.\n2. **A remainder under `ui/` is dispatched as normal.** A lane-queue card whose remaining work lands in `ui/**` is a candidate like any other: `ui/` is in this repo, so the same worktree, gates and merge queue apply. ⛔ It is never skipped as \"UI\" or \"another repo\". Home: `references/execution-duties.md` 候选与批次, next to L43–44.\n3. The implementer reconciles item 2 with the `domain:ui` row of the SKILL.md lane table and the self-split line L43–44, so no reader finds \"skip\" and \"dispatch\" side by side. If the two cannot be squared without a choice the maintainer did not make (for example, whether the server seat dispatches the `ui/` half itself or splits it to the `domain:ui` queue at once), that choice goes to the decision box; ⛔ either way the card is not left undispatched and unsplit.\n\n## Reach\n\nEvery execution seat on every lane, and the coordinator, which relays a seat's empty-queue report to the maintainer. Text only under `.claude/skills/pm-dispatch/**`, Tier S (lands after the required review). No code or gate change. `SKILL.md` stays inside its line ratchet (`pnpm check:pm-skill-ratchet`): the new text lives in the two reference files, and the skill text cites no issue numbers (`pnpm check:pm-skill-id-lint`).\n\n## Related\n\n- #27061 (closed, landed by PR #27320): a lane seat may self-triage a card that blocks its own in-flight work. Same lane, same filing shape, different rule: it governs grading, this card governs reporting and candidate selection. No overlap in the lines touched.\n\n## Filing gate\n\n- Category: ③, the maintainer's line quoted above.\n- Business reason: the lane sat idle with 7 graded, unassigned cards while the seat said the queue was empty; without the per-card list the maintainer is the only check, by re-running the query by hand.\n- Reader who acts: the `domain:skills` seat that claims this card writes the text; every execution seat reads it at each refill.\n- Duplicate check (open and closed): `repo:objectstack-ai/objectstack is:issue \"nothing dispatchable\"` 72 hits, `\"nothing to dispatch\"` 291, `\"queue empty\" pm-dispatch` 486, `pm-dispatch \"ui/\" remainder` 217; the first six of each read, none covers either rule."
+}
