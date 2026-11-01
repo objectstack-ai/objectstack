@@ -3463,12 +3463,9 @@ export class SchemaRegistry {
    * writes, such as an upgrade of an installed package — and, when it throws,
    * put back exactly the entries it wrote, then throw the same error.
    *
-   * Every refusal a verb below raises keeps its code and words; this changes
-   * only what is left afterwards. A refusal raised after some of the run's
-   * writes (an object another package owns, a field with no `type`, a
-   * picklist value already added, …) would otherwise leave those writes
-   * serving beside the entries they replaced: an upgrade's new package record
-   * and the objects it reached, next to the installed version's remainder.
+   * Every refusal a verb below raises keeps its code and words; this decides
+   * only what is left afterwards, wherever in the run the refusal came from:
+   * the entries as they were before the run.
    *
    * What is recorded, each entry before the run's first write to it: an
    * object's contributor list (an `extend` or overlay layer of another package

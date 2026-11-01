@@ -7,7 +7,8 @@
  *
  * An installed `1.0.0` of a package (a v1-only object, a shared object, an
  * object a tenant has overlaid, an object another package extends, an app, a
- * page, a picklist, a datasource) is re-registered as a `2.0.0` that the
+ * page, a default record page, a permission set, a picklist, a datasource) is
+ * re-registered as a `2.0.0` that the
  * registry refuses part-way, once for each refusal the registry raises after
  * the new package record is written:
  *
@@ -51,7 +52,8 @@ const V1 = () => ({
     version: '1.0.0',
     objects: [object('probeup_a'), object('probeup_shared', { label: 'v1 shared' }), object('probeup_old')],
     apps: [app('probeup_app', 'probeup_a')],
-    pages: [{ name: 'probeup_v1_page', type: 'app' }],
+    pages: [{ name: 'probeup_v1_page', type: 'app' }, { name: 'probeup_v1_record', type: 'record', object: 'probeup_a', isDefault: true }],
+    permissions: [{ name: 'probeup_v1_ps', objects: {} }],
     picklists: [{ name: 'probeup_tier', label: 'Tier', options: [{ label: 'Gold', value: 'gold' }] }],
     datasources: [{ name: 'probeup_ds_v1', driver: 'memory' }],
 });
@@ -71,7 +73,8 @@ const V2 = (fault: Record<string, unknown> = {}) => {
             ...faultObjects,
         ],
         apps: [app('probeup_app_v2', 'probeup_new')],
-        pages: [{ name: 'probeup_v2_page', type: 'app' }],
+        pages: [{ name: 'probeup_v2_page', type: 'app' }, { name: 'probeup_v2_record', type: 'record', object: 'probeup_new', isDefault: true }],
+        permissions: [{ name: 'probeup_v2_ps', objects: {} }],
         datasources: [{ name: 'probeup_ds_v2', driver: 'memory' }],
         ...rest,
     };
@@ -123,7 +126,7 @@ function served(engine: ObjectQL) {
         picklists: Object.fromEntries(['probeup_tier', 'probeup_industry', 'probeup_list'].map((p) => [p, registry.resolvePicklistOptions(p)])),
         namespaces: Object.fromEntries([NS, 'probeupinner'].map((ns) => [ns, registry.getNamespaceOwners(ns)])),
         catalog: (['permission', 'position', 'capability'] as const).map((type) => registry.securityCatalogNamesHeldBy(PKG, type as any)),
-        defaultPages: ['probeup_a', 'probeup_held'].map((o) => registry.defaultRecordPageHoldersOf(o)),
+        defaultPages: ['probeup_a', 'probeup_new', 'probeup_held'].map((o) => registry.defaultRecordPageHoldersOf(o)),
         datasources: engine.listDatasourceDefs().map((d) => d.name).filter((n) => n.startsWith('probeup_')).sort(),
     };
 }
@@ -228,6 +231,8 @@ describe('[#28697] refused-upgrade controls', () => {
         expect(Object.keys((registry.getObject('probeup_old') as any)?.fields ?? {})).toContain('ext_note');
         expect(registry.listItems('app').map((a: any) => a.name)).toContain('probeup_app_v2');
         expect(engine.listDatasourceDefs().map((d) => d.name)).toContain('probeup_ds_v2');
+        expect(registry.securityCatalogNamesHeldBy(PKG, 'permission' as any)).toEqual(['probeup_v1_ps', 'probeup_v2_ps']);
+        expect(registry.defaultRecordPageHoldersOf('probeup_new').map((h: any) => h.page)).toEqual(['probeup_v2_record']);
     });
 
     it('a refusal the package door raises before its first write leaves v1 as before', () => {
