@@ -1,12 +1,12 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 '@objectstack/rest': patch
 ---
 
 feat(rest): the record page payload carries the record's discussion, activity and attachments, and the related rows' names (#28470)
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 `POST /api/v1/data/{object}/{id}/page` answers the reads a record page still made on its own after the payload arrived. Each new part is the read it replaces, asked as the same caller behind that object's own exposure gate, and each is refused on its own:
 
