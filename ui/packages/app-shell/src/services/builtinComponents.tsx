@@ -21,7 +21,7 @@ import { registerMetadataResource } from '../views/metadata-admin/registry.js';
 import { PermissionMatrixEditPage } from '../views/metadata-admin/PermissionMatrixEditor.js';
 import { PackagesPage } from '../views/metadata-admin/PackagesPage.js';
 import { PositionGrantedSetsCell, PositionHolderCountCell } from '../views/metadata-admin/PositionGrantCells.js';
-import { PackagedAutomationPage } from '../views/setup/PackagedAutomationPage.js';
+import { PackagedActionsPage } from '../views/setup/PackagedActionsPage.js';
 import { ConnectorCredentialsPage } from '../views/setup/ConnectorCredentialsPage.js';
 import { CONNECTOR_CREDENTIALS_REF } from '../views/setup/connectorCredentials.js';
 import { ConnectorConnectionsPage } from '../views/setup/ConnectorConnectionsPage.js';
@@ -142,17 +142,19 @@ registerAppComponent({
 });
 
 /**
- * ADR-0126 §7.4 — the Setup page for the flows installed packages ship:
- * on/off for this scope, and clone. Contributed the way every other
- * framework-owned Setup surface is, by ref rather than by route, so the Setup
- * app's navigation names `automation:packaged` and `ComponentNavView` resolves
- * it. Automation AUTHORING stays in Studio; this page is operational state.
+ * ADR-0126 §7.4 — the Setup page for the actions installed packages ship:
+ * on/off for this deployment. Contributed the way every other framework-owned
+ * Setup surface is, by ref rather than by route, so the Setup app's navigation
+ * names `automation:packaged-actions` and `ComponentNavView` resolves it.
+ * objectstack ADR-0146 D4 keeps the action switch in Setup; the packaged
+ * FLOWS' page (`automation:packaged`) retired with D11, its switch and its
+ * clone being Studio's.
  */
 registerAppComponent({
-  ref: 'automation:packaged',
-  label: 'Packaged Automation',
+  ref: 'automation:packaged-actions',
+  label: 'Packaged Actions',
   source: '@object-ui/app-shell',
-  component: PackagedAutomationPage,
+  component: PackagedActionsPage,
 });
 
 /**

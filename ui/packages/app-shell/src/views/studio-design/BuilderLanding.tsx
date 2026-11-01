@@ -36,7 +36,6 @@ import { PackageIdInput } from './PackageIdInput.js';
 import { studioOrgScopePath } from './studioScope.js';
 import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataArea.js';
 import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.js';
-import { componentRefToUrlSegments } from '../../services/componentRegistry.js';
 
 /**
  * objectui#11808 — the two places a read-only package's card sends the author.
@@ -54,17 +53,6 @@ import { componentRefToUrlSegments } from '../../services/componentRegistry.js';
 const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
 export const overlayPath = (packageId: string) =>
   `/apps/setup/metadata?package=${encodeURIComponent(packageId)}`;
-
-/**
- * objectui#12513 — Setup › Packaged automation, where a packaged flow is
- * cloned into the organization's own package-less flows. The Setup app's
- * navigation reaches the page by its component ref (`automation:packaged`,
- * registered in `builtinComponents`), so the URL is built from that ref the
- * way the console's component route reads it, never spelled out by hand.
- */
-const PACKAGED_AUTOMATION_REF = 'automation:packaged';
-export const packagedAutomationPath = () =>
-  `/apps/setup/component/${componentRefToUrlSegments(PACKAGED_AUTOMATION_REF).join('/')}`;
 
 /** objectui#11863 — how many recent packages the landing lists: one row of cards. */
 const RECENT_PACKAGES_SHOWN = 3;
