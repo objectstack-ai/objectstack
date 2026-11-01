@@ -756,8 +756,8 @@ Refused at parse, at the entry's own path:
   that exist). Items another package contributes through
   `navigationContributions` are not part of the app being parsed and cannot be
   named;
-- an `item` that names a `group`, `separator` or `action` entry — none of them
-  opens a page;
+- an `item` that names a `group`, `separator`, `action` or `url` entry — none of
+  them opens a page inside the app (a `url` entry leaves it);
 - an entry without `visible`. A landing for everyone is still "put that entry
   first in `navigation`"; `landing` is for different audiences;
 - a `visible` that reads `data` — a landing entry has no `dataSource`.
