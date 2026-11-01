@@ -23,7 +23,12 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { SysSecret } from '@objectstack/platform-objects';
 import { callWithBorrowedCredential } from '@objectstack/types';
 import type { CryptoContext, CryptoHandle, ICryptoProvider } from '@objectstack/spec/contracts';
-import type { Connector, ConnectorProviderContext, ConnectorProviderFactory } from '@objectstack/spec/integration';
+import {
+    ConnectorCredentialRejectedError,
+    type Connector,
+    type ConnectorProviderContext,
+    type ConnectorProviderFactory,
+} from '@objectstack/spec/integration';
 
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
@@ -149,14 +154,25 @@ function notion(auth: Record<string, unknown> = {}, transportUrl?: string) {
  * the real provider's `tools/list` does: an ask that names no organization.
  */
 function mcpStandIn(lists = false) {
-    const state = { materialized: [] as ConnectorProviderContext[], sent: [] as string[], listedWith: [] as string[], refuse: new Set<string>() };
+    const state = {
+        materialized: [] as ConnectorProviderContext[],
+        sent: [] as string[],
+        listedWith: [] as string[],
+        refuse: new Set<string>(),
+        /** What the next listings answer, in order (then `200`): a `403` is thrown as the real provider throws it. */
+        listingAnswers: [] as number[],
+    };
     const factory: ConnectorProviderFactory = async (ctx) => {
         state.materialized.push(ctx);
         if (lists) {
-            await callWithBorrowedCredential(ctx.credentialHandle!, async (auth) => {
-                state.listedWith.push(auth.type === 'bearer' ? auth.token : '');
-                return { status: 200 };
+            const listed = await callWithBorrowedCredential(ctx.credentialHandle!, async (auth) => {
+                const token = auth.type === 'bearer' ? auth.token : '';
+                state.listedWith.push(token);
+                return { status: state.listingAnswers.shift() ?? 200 };
             }, {});
+            if (listed.status === 403) {
+                throw new ConnectorCredentialRejectedError(`connector-mcp provider: connector '${ctx.name}' was refused by its MCP server (HTTP 403)`, 403);
+            }
         }
         return {
             def: {
@@ -382,6 +398,72 @@ describe('ADR-0143 D4, ruled B — the connection an mcp instance lists its tool
         expect(provider.state.materialized).toHaveLength(2);
         expect(orgOfToken(provider.state.listedWith[provider.state.listedWith.length - 1])).toBe('org_b');
         await expect(dispatch()).rejects.toMatchObject({ status: 422 });
+    });
+});
+
+describe('ADR-0143 D4 — a borrowed token refused at tool discovery is its connection\'s, not the client secret\'s', () => {
+    const SECRET_REF = 'NOTION_CLIENT_SECRET';
+    const STORED_SECRET = 'dummy-stored-secret-26702';
+    const OPERATOR = { userId: 'usr_admin' } as never;
+    const secretRow = async (engine: AutomationEngine) =>
+        (await engine.listConnectorCredentialRefs()).find((r) => r.ref === SECRET_REF);
+    const connectionOf = (engine: AutomationEngine, as: { userId: string; tenantId: string }) =>
+        engine.getConnectorConnection({ connector: 'notion', context: as as never });
+
+    it('the discovery organization\'s connection needs reconnecting; a reconnect there lists again', async () => {
+        const { engine, provider, connect, call } = await boot([notion()], { lists: true });
+        provider.state.listingAnswers.push(403);
+        await (await connect()).done();
+        expect(provider.state.listedWith).toHaveLength(1);
+
+        // The connection whose token was refused is the one marked, with the platform's sentence.
+        await vi.waitFor(async () => expect(await connectionOf(engine, ADMIN_A)).toMatchObject({
+            status: 'reconnect_required',
+            statusReason: expect.stringContaining('refused the token of this connection while it listed its tools (HTTP 403)'),
+        }));
+        await vi.waitFor(() => expect(engine.getConnectorDegradedReason('notion')).toContain("needs to be reconnected for organization 'org_a'"));
+        expect(engine.getConnectorDegradedReason('notion')).toContain('while it listed its tools (HTTP 403)');
+        await expect(call()).rejects.toMatchObject({ status: 503 });
+
+        // A reconnect by the same organization re-attempts discovery, and the instance serves.
+        await (await connect()).done();
+        await vi.waitFor(() => expect(engine.getConnectorDegradedReason('notion')).toBeUndefined());
+        expect(provider.state.listedWith).toHaveLength(2);
+        expect(await connectionOf(engine, ADMIN_A)).toMatchObject({ status: 'connected' });
+        expect(await call()).toMatchObject({ status: 200 });
+    });
+
+    it('the stored client secret stays `set`; the instance lists as the next organization, each dispatch keeps its own', async () => {
+        const { engine, provider, connect } = await boot([notion({ clientId: 'notion-app', credentialRef: SECRET_REF })], { lists: true });
+        await engine.setConnectorCredential({ ref: SECRET_REF, value: STORED_SECRET, context: OPERATOR });
+        await (await connect(undefined, ADMIN_A)).done();
+        await (await connect(undefined, ADMIN_B)).done();
+        expect(provider.state.materialized).toHaveLength(1);
+
+        // The secret is set again: the instance materializes again, listing as org_a (the earliest), which is refused.
+        provider.state.listingAnswers.push(403);
+        await engine.setConnectorCredential({ ref: SECRET_REF, value: `${STORED_SECRET}-2`, context: OPERATOR });
+        await vi.waitFor(() => expect(provider.state.materialized).toHaveLength(3));
+        await vi.waitFor(() => expect(engine.getConnectorDegradedReason('notion')).toBeUndefined());
+
+        expect(await secretRow(engine)).toMatchObject({ status: 'set' });
+        expect(await connectionOf(engine, ADMIN_A)).toMatchObject({ status: 'reconnect_required' });
+        expect(await connectionOf(engine, ADMIN_B)).toMatchObject({ status: 'connected' });
+        const dispatch = (tenantId: string) =>
+            engine.resolveConnectorAction('notion', 'search')!({}, { automation: { tenantId } } as never);
+        expect(await dispatch('org_b')).toMatchObject({ status: 200 });
+        await expect(dispatch('org_a')).rejects.toMatchObject({ status: 503, message: expect.stringContaining("needs to be reconnected for organization 'org_a'") });
+    });
+
+    it('CONTROL: a client_credentials token the instance mints itself keeps the client secret\'s attribution', async () => {
+        const { engine, provider } = await boot([notion({
+            grant: 'client_credentials', clientId: 'notion-app', tokenUrl: `${mcp.base}/auth/token`, credentialRef: SECRET_REF,
+        })], { lists: true });
+        provider.state.listingAnswers.push(403);
+        await engine.setConnectorCredential({ ref: SECRET_REF, value: STORED_SECRET, context: OPERATOR });
+        await vi.waitFor(() => expect(provider.state.listedWith).toHaveLength(1));
+        await vi.waitFor(async () => expect(await secretRow(engine)).toMatchObject({ status: 'rejected' }));
+        expect(engine.getConnectorDegradedReason('notion')).toContain('HTTP 403');
     });
 });
 
