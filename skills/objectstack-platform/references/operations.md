@@ -49,10 +49,9 @@ os build        # the same three gates, plus emits dist/objectstack.json
 3. **Widget-binding integrity (ADR-0021)** — every dashboard widget's
    `dataset` / `dimensions` / `values` resolves to a declared dataset/field.
 
-Both exit non-zero with a located, corrective message; `os build` additionally
-emits the artifact. Use `os validate` as the fast inner-loop check after editing
-metadata and `os build` when you need `dist/`. In a scaffolded project these are
-`npm run validate` / `npm run build`.
+Both exit non-zero with a located, corrective message. Use `os validate` as the
+fast inner-loop check after editing metadata and `os build` when you need
+`dist/`. In a scaffolded project these are `npm run validate` / `npm run build`.
 
 **Rule of thumb: never report a metadata change as done until `os validate`
 passes.** (`os lint` is a *separate* style/convention pass — naming, labels,
@@ -93,7 +92,7 @@ Port resolution is the same for `os dev` and `os start` (both spawn `os serve`):
 | `os data create` / `get` / `query` / `update` / `delete` | Record-level CRUD against a running server (there is no `os data seed` / `export` / `import` — seed data in the `data:` collection loads automatically at boot) |
 | `os diff` | Compare two ObjectStack config files and detect breaking changes |
 | `os meta register` | Register (create/update) metadata on a target server (there is no `os meta apply`) |
-| `os migrate plan` / `os migrate apply` | Dry-run / apply physical-DB drift reconciliation from metadata (forward-only — no batch rollback; `os rollback` was removed) |
+| `os migrate plan` / `os migrate apply` | Preview / reconcile DB drift from metadata; `apply` loosens only, `--allow-destructive` for drops/tightenings (forward-only; `os rollback` was removed) |
 
 ## Environments & deploy
 

@@ -98,7 +98,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["hotcrm.custom", "overrides:", "package: 'hotcrm'", "basedOn"],
-        "must_not_contain": ["objectExtensions", "allowEnvironmentOverlay"]
+        "must_not_contain": ["PUT /api/v1/meta/view/crm_account_grid", "PUT /meta/view/crm_account_grid"]
       }
     }
   ]

@@ -127,9 +127,10 @@ document **whole** for every read that serves the base's name
   override, `effective` = the override), the list scoped to the base and the
   environment-wide list all serve the override, stamped `_packageId: 'hotcrm'`. The
   declaration counts only from the pair — the stored row's own `package_id` must be
-  `hotcrm.custom` — and only for an overridable type (`OVERRIDABLE_METADATA_TYPES` in
-  `@objectstack/spec/kernel`; a `flow` or `action` override is not served until ADR-0146 D9's
-  conditions land). A declaration from any other package is ignored.
+  `hotcrm.custom` — and today only for a `view`, `dashboard`, `report`, `email_template`
+  or `translation`: the rest of `OVERRIDABLE_METADATA_TYPES` (`@objectstack/spec/kernel`)
+  — `page`, `app`, `dataset`, `doc`, `book`, `mapping`, `flow` and `action` — waits for
+  its doors and is not served yet. A declaration from any other package is ignored.
 - **The environment-wide list** serves one item per name that exactly one code package
   ships. A dependent package's same-named item is not listed beside it and stays under
   its own `?package=` address. A package-unbound row — the overlay row of the table
