@@ -123,7 +123,7 @@ import { quoteLine, readClause2Line } from './clause2-line.mjs';
 // A mailbox message's `To:` line names a SEAT, spelled as the mailbox opener spells a seat — its
 // `seatKey`, imported, ⛔ never a second seat shape. That file imports nothing of this graph's
 // top-level-await half (only the relay validator and `gh-pages.mjs`), so the edge adds no cycle.
-import { seatKey } from './mailbox-open.mjs';
+import { MAILBOX_LABEL, seatKey } from './mailbox-open.mjs';
 
 
 // ── the tier FOLLOWS THE FACE that made the review owed ─────────────────────
@@ -2180,11 +2180,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ letter C: the at-tier review of a mixed diff is SCOPED — `hits` plus what they claim, on the `Scope:` line': 18,
   '⭐ letter B: a declared NARROWING is a face of its own at CONTRACT_REVIEW_TIER — keyed on the `Clause-②:` line, exact': 17,
   '⭐ the `Contract-review-handoff:` line — names the current head ⇒ triage\'s review; head moved ⇒ stale; absent ⇒ the seat\'s own': 13,
-  // Raised 27 → 38 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
+  // Raised 27 → 40 with the scenario table's seven admitted keys and the `seat-online` patrol field: one pin
   // per new key reading, the patrol and `patrol none` readings, the both-ways table pin that replaced the
-  // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout and the invented
-  // keys that stay refused (31 → 42 cases).
-  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 38,
+  // verbatim-template pin, the placeholder-is-no-event pin, the `--mailbox-keys` printout, the invented
+  // keys that stay refused, and the two end-to-end pins through check-half-states H72 (31 → 44 cases).
+  '⭐ the mailbox doorbell: `To: <seat>`, then one key of the table read — seat, kind, numbers, sha, login, time — and anything else refused': 40,
   '⭐ the signature line: the reader reads LANE#N · ACCOUNT · SESSION exactly, and one leading signature changes no first-line reading': 22,
   '⭐ the `Contract-review-claim:` line — session, FULL head, time; lapses on a moved head or after two hours; the lane wins a tie': 21,
   '⭐ the `Contract-review-hold:` line — session, head, reason, until; a new head clears it; at 24 hours it reads overdue and still holds': 23,
@@ -2793,6 +2793,22 @@ export async function selfTest() {
   t('⭐ `mailboxEvents` reads a thread: each row\'s comment id, time and author beside its reading (the key id never shadows the comment id), and the half-states by comment id', (() => { const r = mailboxEvents([DB_ROW(DB.cr, 5101, '2026-10-28T07:00:00Z'), DB_ROW('thanks, on it', 5102, '2026-10-28T07:05:00Z'), DB_ROW(DB.on, 5103, '2026-10-28T07:10:00Z')]); return r.state === 'read' && r.events.length === 3 && r.events[0].state === 'read' && r.events[0].id === 'request:contract-review' && r.events[0].comment === 5101 && r.events[0].at === '2026-10-28T07:00:00Z' && r.events[0].by === 'os-bill' && r.events[2].mailbox === 27120 && r.events[2].comment === 5103 && r.halfStates.join() === '5102'; })());
   t('a thread that is not an array is a read that could not be made, never an empty one', mailboxEvents(null).state === 'unreadable' && mailboxEvents([]).state === 'read' && mailboxEvents([]).events.length === 0);
   t('⛔ no gate reads it: the queue guard\'s record reading is untouched — a doorbell comment beside a record on this head still reads FOUND', (() => { const r = locateReviewOfRecord(pairOf({ prComments: [RECORD_ON_9AF9, DB_ROW(DB.nc, 5104)] })); return r.state === 'found' && r.id === 3301; })());
+  {
+    // ⭐ ONE reader, end to end: H72 in check-half-states judges what `mailboxEvents` reads — imported HERE,
+    // in the self-test body (that module cannot import this one back; its H72 banner says why).
+    const hs = await import('./check-half-states.mjs');
+    const NOW72 = Date.parse('2026-11-01T14:00:00Z');
+    const rows72 = [
+      DB_ROW(DB.on, 7001, '2026-11-01T13:00:00Z'),
+      DB_ROW('domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n## To triage#1 · may #27123 close?', 7002, '2026-11-01T12:14:00Z'),
+      DB_ROW(MSG('Notify: surface · #28572', 'domain:ui#5'), 7003, '2026-11-01T11:00:00Z'),
+      DB_ROW(MSG('Notify: seat-online · domain:ui#1 · zhuangjianguo · mailbox #28672 · takes: #28645'), 7004, '2026-11-01T13:07:00Z'),
+      DB_ROW(MSG('Notify: surface · #28000', 'domain:ui#5'), 7005, '2026-10-30T11:00:00Z'),
+    ];
+    const row = String(hs.h72OffTableMailboxLines(mailboxEvents(rows72), NOW72) ?? '');
+    t('⭐ ONE reader: check-half-states H72 judges the REAL reader\'s readings — a free-form question, an off-table key and a five-field `seat-online` are listed, a table key is not, and a bell older than the window has aged out', row.includes('3 comment(s)') && ['comment 7002', 'comment 7003', 'comment 7004'].every((c) => row.includes(c)) && !row.includes('comment 7001') && !row.includes('comment 7005') && hs.h72OffTableMailboxLines(mailboxEvents([rows72[0]]), NOW72) === null);
+    t('⭐ …and its population is the OPENER\'s label — an open mailbox touched inside the window owes a page, the same PR without the label does not', hs.h72NeedsThread({ number: 28646, state: 'open', labels: [{ name: MAILBOX_LABEL }], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === true && hs.h72NeedsThread({ number: 28646, state: 'open', labels: [], updated_at: '2026-11-01T13:00:00Z' }, MAILBOX_LABEL, NOW72) === false);
+  }
   t('the roster: fourteen keys, unique ids, each of the two kinds with a reader, every row spelled (from, to, when), the byte cap the text states', MAILBOX_KEYS.length === 14 && new Set(MAILBOX_KEYS.map((k) => k.id)).size === 14 && MAILBOX_KEYS.every((k) => ['Request', 'Notify'].includes(k.kind) && k.id === `${k.kind.toLowerCase()}:${k.key}` && k.template.startsWith(`${k.kind}: ${k.key}`) && typeof MAILBOX_FIELD_READERS[k.id] === 'function' && [k.from, k.to, k.when].every((v) => typeof v === 'string' && v !== '')) && Object.keys(MAILBOX_FIELD_READERS).length === 14 && MAILBOX_LINE_MAX_BYTES === 200);
 
   // -- the signature line (#27113) ----------------------------------------------
