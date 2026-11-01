@@ -48,6 +48,19 @@ vi.mock('../metadata-admin/index.js', () => ({
   MetadataResourceHistoryPage: () => <PageStub page="history" />,
 }));
 
+/**
+ * objectstack#28569 — the form editor of an email template or a translation,
+ * a stub printing the host and the member it opens (the editor itself is
+ * pinned in `StudioBundleItemEditor.customize-28569.test.tsx`).
+ */
+vi.mock('./StudioBundleItemEditor.js', () => ({
+  StudioBundleItemEditor: ({ type, name, member, readOnly }: { type: string; name: string; member?: string; readOnly: boolean }) => (
+    <div data-testid="form-editor" data-item={JSON.stringify({ type, name, member: member ?? null, readOnly })}>
+      <PageStub page="form-editor" />
+    </div>
+  ),
+}));
+
 /** `GET /api/v1/packages` as the listed manifests read it: one writable, one read-only, one kernel. */
 let listed: Map<string, { id: string; name: string; writable: boolean; manifest: Record<string, unknown> }>;
 let listFails = false;
@@ -127,7 +140,7 @@ describe('the area mounts the metadata pages (objectstack#28561)', () => {
   });
 
   it('a kernel package, which the switcher hides, is read-only too', async () => {
-    mount(`/studio/${KERNEL}/metadata/translation/t1?package=${KERNEL}`);
+    mount(`/studio/${KERNEL}/metadata/agent/a1?package=${KERNEL}`);
     expect((await page()).host.readOnly).toBe(true);
   });
 
@@ -191,8 +204,8 @@ describe('a pillar type opened from the area opens its pillar', () => {
     });
   }
 
-  it('a translation opens the generic page', async () => {
-    mount(`/studio/${WRITABLE}/metadata/translation/ui_en?package=${WRITABLE}`);
+  it('a type no pillar designs opens the generic page', async () => {
+    mount(`/studio/${WRITABLE}/metadata/agent/support_bot?package=${WRITABLE}`);
     expect((await page()).page).toBe('item');
   });
 
@@ -209,5 +222,33 @@ describe('a pillar type opened from the area opens its pillar', () => {
     mount('/studio/~all/metadata/permission/admin_full_access?scope=environment');
     expect((await page()).page).toBe('item');
     expect(screen.queryByTestId('pillar')).toBeNull();
+  });
+});
+
+describe('an email template or a translation opens the form editor (objectstack#28569)', () => {
+  const item = () => JSON.parse(screen.getByTestId('form-editor').getAttribute('data-item') ?? 'null');
+
+  it('a translation of a writable package', async () => {
+    mount(`/studio/${WRITABLE}/metadata/translation/ui_en?package=${WRITABLE}`);
+    expect((await page()).page).toBe('form-editor');
+    expect(item()).toEqual({ type: 'translation', name: 'ui_en', member: null, readOnly: false });
+  });
+
+  it('an email template of a read-only package, at the locale the list row names', async () => {
+    mount(`/studio/${READ_ONLY}/metadata/email_template/welcome?package=${READ_ONLY}&member=zh-CN`);
+    expect((await page()).host.readOnly).toBe(true);
+    expect(item()).toEqual({ type: 'email_template', name: 'welcome', member: 'zh-CN', readOnly: true });
+  });
+
+  it('`?review=1` opens the generic page and its review', async () => {
+    mount(`/studio/${WRITABLE}/metadata/email_template/welcome?package=${WRITABLE}&review=1`);
+    expect((await page()).page).toBe('item');
+    expect(screen.queryByTestId('form-editor')).toBeNull();
+  });
+
+  it('the cross-package leg opens the generic page: it names no package to write', async () => {
+    mount('/studio/~all/metadata/translation/ui_en?package=all');
+    expect((await page()).page).toBe('item');
+    expect(screen.queryByTestId('form-editor')).toBeNull();
   });
 });

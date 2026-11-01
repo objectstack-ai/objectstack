@@ -3589,6 +3589,12 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // receiver above) and the provenance index (`unprovisionedIndex` /
       // `anchors`), whose keys are Map/Set methods, never metadata keys.
       'pending', 'celNode', 'celRecv', 'anchors', 'unprovisionedIndex',
+      // [#28659] The object's `[name, def]` field pairs and the set of their
+      // names, read to collect the fields `label()` can answer on. Their keys
+      // are Array / Set methods (`filter`, `map`, `has`), never metadata keys;
+      // the metadata reads, `options` and `picklist`, go through
+      // `declaresOptionsOnceServed`.
+      'fieldList', 'declaredNames',
       // [#13935] The field-rule verdict, split into a compute half and a push
       // half so the walk can tell `check` a verdict was issued. `verdict`'s
       // keys are this helper's own `{ root, message, source }`, never metadata

@@ -1340,12 +1340,20 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     for (const dim of query.dimensions ?? []) {
       const cd = crossByDim.get(dim);
       if (cd) {
-        groupBy.push(cd.fkField);
+        // [#28692] Once per FK column: two dimensions through one relationship
+        // (`account.id` and `account.name`, or `account` beside `account.name`)
+        // share it, and the engine refuses a groupBy naming a column twice
+        // (`INVALID_QUERY`), where the native strategy served the groups. The
+        // re-bucket reads the one column for each dimension.
+        if (!groupBy.includes(cd.fkField)) groupBy.push(cd.fkField);
         continue;
       }
       const field = this.resolveFieldName(cube, dim, 'dimension');
       const gran = granByDim.get(dim);
-      groupBy.push(gran ? { field, dateGranularity: gran } : field);
+      // …and a base dimension over that FK column (`account` after
+      // `account.name`) reads the one already grouped.
+      const fkGrouped = !gran && groupBy.includes(field) && plan.crossDims.some((c) => c.fkField === field);
+      if (!fkGrouped) groupBy.push(gran ? { field, dateGranularity: gran } : field);
       baseDimFields.push(field);
       granByDim.delete(dim);
     }
@@ -1454,7 +1462,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
     const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
     const rows = await ctx.executeAggregate(refObject, {
-      groupBy: ['id', attr],
+      // [#28692] `<relation>.id` resolves the FK to the related record's own
+      // id: `id` is already the key, and naming it twice is a groupBy the
+      // engine refuses (`INVALID_QUERY`).
+      groupBy: attr === 'id' ? ['id'] : ['id', attr],
       aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
       filter,
       context: ctx.context,

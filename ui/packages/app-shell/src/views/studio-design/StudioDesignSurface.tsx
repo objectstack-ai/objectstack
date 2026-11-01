@@ -2682,7 +2682,17 @@ export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps):
             ) : tab === STUDIO_METADATA_AREA ? (
               // objectstack#28561 — keyed by package like the pillars: every
               // page under it holds that package's scope and gate.
-              <StudioMetadataArea key={packageId} packageId={packageId} />
+              // objectstack#28569 — its form editor customizes an email
+              // template or a translation of a read-only base with the
+              // Interfaces pillar's customization, and Publish and the
+              // pending count are this header's.
+              <StudioMetadataArea
+                key={packageId}
+                packageId={packageId}
+                customization={customization}
+                publishNonce={publishNonce}
+                onDraftSaved={onDraftSaved}
+              />
             ) : !pillarKnown ? (
               <StudioEmptyState
                 icon={FileQuestion}

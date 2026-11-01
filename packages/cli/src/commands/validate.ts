@@ -77,6 +77,7 @@ import { findViewContainerNameRefusals } from '../utils/view-container-names.js'
 // [ADR-0146 D2, #28410] The override write gate's author-time half: the publish
 // door's own judge, walked over the artifact's packages.
 import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
+import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
 // A field `picklist` that names no picklist the stack declares — refused, or
 // reported when the declaring package depends on packages outside the stack.
 // Walked the way the load path registers, like the refusal above.
@@ -686,6 +687,34 @@ export default class Validate extends Command {
         printBulletList(
           overrideRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
           { noun: 'override refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-iv. [ADR-0146 D10, #28564] The `__c` extension-field reservation,
+      //     at author time: a field spelled `__c` only in a base's paired
+      //     `.custom` package, and every `objectExtensions[].fields` key of a
+      //     `.custom` pair suffixed. The verdict is the save and install doors'
+      //     own (`judgeExtensionFieldSuffix`), so a green validate is an
+      //     artifact they admit; see `utils/extension-field-suffix.ts`.
+      const suffixRefusals = findExtensionFieldSuffixRefusals(result.data as Record<string, unknown>);
+      if (suffixRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: suffixRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = suffixRefusals.length;
+        console.log('');
+        printError(`${n} field${n > 1 ? 's break' : ' breaks'} the \`__c\` extension-field reservation (ADR-0146 D10)`);
+        printBulletList(
+          suffixRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }
