@@ -5,7 +5,7 @@
 
 fix(cli): the compiled plugin manifest's filename has one spelling, the runtime's
 
-Clause-②: no (robustness tidy, no behaviour change)
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 `os plugin build` writes the compiled manifest under the CLI's `MANIFEST_FILENAME`, and `os plugin publish` / `install` exempt that entry from the integrity map by it, while the runtime's reader finds the entry by `COMPILED_PLUGIN_MANIFEST_FILE`. The two were the same string kept by hand. `MANIFEST_FILENAME` is now the runtime's constant itself, so they cannot drift. The filename is unchanged (`objectstack.plugin.json`), so every artifact built before reads the same.
