@@ -932,7 +932,7 @@ export interface ActionParamDef {
  * (#2358 trap 1). `@objectstack/spec` documents the canonical CEL identity
  * scope as `os.user.*` (server formula / validation / sharing), while client
  * contexts historically only bound `user`. Deriving the alias here means an
- * action `visible` predicate authored as `os.user.role == "admin"` evaluates
+ * action `visible` predicate authored as `os.user.isPlatformAdmin == true` evaluates
  * identically on client and server instead of throwing (and being fail-closed
  * hidden). `os.user` always tracks `context.user`; other consumer-provided
  * keys under `os` are preserved.

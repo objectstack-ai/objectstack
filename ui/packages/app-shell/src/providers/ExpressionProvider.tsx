@@ -547,7 +547,9 @@ function reportAppShellVisibleFault(
  * Supports:
  * - boolean: true/false
  * - string "true"/"false"
- * - template expression: "${user.role === 'admin'}"
+ * - template expression: "${current_user.isPlatformAdmin === true}" (the
+ *   platform-admin gate; never `user.role`, better-auth's legacy scalar that
+ *   reads `'user'` for a platform admin too)
  * - `{ dialect: 'cel', source }` envelopes — the shape the spec's
  *   `ExpressionInputSchema` normalizes every authored `visible` string into,
  *   which is what nav/area items carry after the server serves the app schema
