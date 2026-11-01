@@ -113,6 +113,7 @@ import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
 import { validateComponentTypes } from './validate-component-types.js';
 import { validatePrintPageBlocks } from './validate-print-page-blocks.js';
+import { validatePageVariables } from './validate-page-variables.js';
 import { validatePagePredicateBounds } from './validate-page-predicate-bounds.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
 import { validateJsxPages } from './validate-jsx-pages.js';
@@ -1355,6 +1356,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['page'],
     run: (stack) => validatePrintPageBlocks(stack),
   },
+  // #28663 — a page's `variables` declarations: each named once, by a
+  // non-empty name, with a `defaultValue` of its declared `type`. The schema
+  // types each entry alone and nothing judged the list, so a duplicate name
+  // (the console keeps the last), an empty name (unreachable as `page.NAME`)
+  // and a `number` seeded with `"abc"` all published `valid: true`. Gating on
+  // every door from birth: page-local, so a `page` write's per-write snapshot
+  // (`pages: [item]`) is the whole input. Measured at birth: the shipped
+  // corpus declares 5 variables on 2 showcase pages, 0 findings. Stored pages
+  // keep loading and serving; only the next save of one with a finding is
+  // refused, with the fix.
+  {
+    name: 'validatePageVariables',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-page-variables.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
+    run: (stack) => validatePageVariables(stack),
+  },
   // ADR-0065 — a styled node's responsiveStyles must be scopable (needs an
   // `id`), name real CSS properties + design tokens, and carry a `large` base.
   {
@@ -1782,6 +1803,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `visibleWhen` only, the one key the family reads — on a page component as
   // on a view form (the page-side `visibility` retired with the view-side
   // `visibleOn`).
+  //
+  // ─── …and on `app` writes (#28663) ───
+  //
+  // An app navigation entry's `visible` is a predicate the console evaluates
+  // as CEL (#27457), and its gate falls CLOSED: a `visible` that does not parse
+  // hides the entry from every viewer. Before this, `"'org_owner' in"` there
+  // saved, read `valid: true` as a draft, published and passed `os validate`,
+  // while the same fault in a page `visibleWhen` was refused. The rule now
+  // walks `apps[].navigation` / `areas[].navigation` (and `children`) for the
+  // SYNTAX verdict alone — the rule's module note says why the root-binding
+  // verdicts stay off a nav entry. `app` maps to `apps`, and an app snapshot
+  // holds the item as `apps: [item]` with no `views` or `pages`, so the view
+  // and page halves contribute nothing on an app write, as the app half
+  // contributes nothing on a view or page write. `validatePredicatePathRefs`
+  // declares `app` with it for the one-wall reason above and judges nothing
+  // there. Stored apps keep loading and serving; only the next save of an app
+  // with such a predicate is refused, with the fix.
   {
     name: 'validateVisibilityPredicates',
     tier: 'gating',
@@ -1789,7 +1827,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-visibility-predicates.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['view', 'page'],
+    runtimeTypes: ['view', 'page', 'app'],
     run: (stack) => validateVisibilityPredicates(stack),
   },
   // #7010 — the same predicate surface, one question further in. The three
@@ -1828,9 +1866,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // was reverted; it is wired now because its siblings are. It declares
     // `page` with its sibling (#24491, ruling B on #23388) and judges nothing
     // there: it walks `stack.views` only, so a page write draws no finding from
-    // it at either door.
+    // it at either door. `app` likewise (#28663): declared with its sibling,
+    // judging nothing on an app write.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['view', 'page'],
+    runtimeTypes: ['view', 'page', 'app'],
     run: (stack) => validatePredicatePathRefs(stack),
   },
   // #24953 — the CEL slots INSIDE a page component's `properties` bag (a

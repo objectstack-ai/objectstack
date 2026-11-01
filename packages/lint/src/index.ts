@@ -674,6 +674,16 @@ export {
 } from './validate-print-page-blocks.js';
 export type { PrintPageBlockFinding } from './validate-print-page-blocks.js';
 
+// #28663 — a page's `variables` declarations: unique, named, and seeded with
+// a `defaultValue` of the declared `type`.
+export {
+  validatePageVariables,
+  PAGE_VARIABLE_NAME_DUPLICATE,
+  PAGE_VARIABLE_NAME_EMPTY,
+  PAGE_VARIABLE_DEFAULT_TYPE,
+} from './validate-page-variables.js';
+export type { PageVariableFinding } from './validate-page-variables.js';
+
 // #24953 — a CEL slot inside a page component's `properties` (a `page:tabs`
 // item `visibleWhen`, an `object-form` section predicate, an `action:*`
 // `visible`, …) over the platform's parse bounds. A warning in 18.x.

@@ -3523,6 +3523,102 @@ describe('runtime authoring gate on PAGE writes — the component visibleWhen ve
     });
 });
 
+// #28663 — an app navigation entry's `visible` that does not parse, and a
+// page's `variables` declarations that are duplicated, unnamed or seeded with a
+// value of the wrong type, at the ACTIVE save door (the draft read and the
+// publish are `protocol.draft-publish-verdict.test.ts`). Before: each saved
+// 200; the nav entry then vanished for every viewer. The lint-level pins are
+// `@objectstack/lint`'s `runtime-gate.app-nav-visible-predicate-writes.test.ts`
+// and `runtime-gate.page-variable-writes.test.ts`.
+//
+// ⚠️ This package reaches `@objectstack/lint` through its built `dist/`.
+describe('runtime authoring gate on APP and PAGE writes — nav `visible` syntax and page variables (#28663)', () => {
+    const app = (visible: unknown) => ({
+        name: 'qa_app',
+        label: 'QA App',
+        navigation: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'qa_note', visible }],
+    });
+    const page = (variables: unknown[]) => ({
+        name: 'vars_page',
+        label: 'Vars',
+        type: 'app',
+        variables,
+        regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Vars' } }] }],
+    });
+    const activeRows = (rows: Map<string, Row>, type: string) =>
+        Array.from(rows.values()).filter((r) => r.type === type && r.state === 'active');
+    const buildErrors = (stack: Record<string, unknown>) =>
+        runAuthoringRules('build', { normalized: stack, parsed: stack }).filter((f) => f.severity === 'error');
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it('REFUSES an active app save whose nav `visible` does not parse, with the build\'s finding; nothing stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const item = app("'org_owner' in");
+
+        const err = await protocol.saveMetaItem({ type: 'app', name: 'qa_app', item }).catch((e: any) => e);
+
+        expect(err, 'the save resolved — the door still accepts the nav predicate').toBeInstanceOf(Error);
+        expect({ code: err.code, status: err.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issues = err.issues.filter((i: any) => i.rule === 'visibility-predicate-syntax');
+        expect(issues, JSON.stringify(err.issues)).toHaveLength(1);
+        expect(issues[0]).toMatchObject({ path: 'apps[0].navigation[0].visible', where: 'app "qa_app" · nav "nav_admin_only"' });
+        const atBuild = buildErrors({ apps: [item] }).filter((f) => f.rule === 'visibility-predicate-syntax');
+        for (const k of ['rule', 'where', 'path', 'message', 'hint'] as const) {
+            expect(issues[0][k], `door and build disagree on '${k}'`).toBe(atBuild[0]![k]);
+        }
+        expect(activeRows(rows, 'app')).toEqual([]);
+    });
+
+    it('an app whose nav `visible` parses saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        await expect(
+            protocol.saveMetaItem({ type: 'app', name: 'qa_app', item: app("'org_owner' in current_user.positions") }),
+        ).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'app')).toHaveLength(1);
+    });
+
+    for (const [rule, variables, path] of [
+        ['page-variable-name-duplicate', [{ name: 'count', type: 'number' }, { name: 'count', type: 'string' }], 'pages[0].variables[1].name'],
+        ['page-variable-name-empty', [{ name: '', type: 'string' }], 'pages[0].variables[0].name'],
+        ['page-variable-default-type', [{ name: 'count', type: 'number', defaultValue: 'abc' }], 'pages[0].variables[0].defaultValue'],
+    ] as const) {
+        it(`REFUSES an active page save carrying [${rule}], located at the entry; nothing stored`, async () => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await protocol
+                .saveMetaItem({ type: 'page', name: 'vars_page', item: page([...variables]) })
+                .catch((e: any) => e);
+
+            expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+            expect(err.issues.filter((i: any) => i.rule === rule).map((i: any) => i.path)).toEqual([path]);
+            expect(activeRows(rows, 'page')).toEqual([]);
+        });
+    }
+
+    it('a page with clean variables saves, and the row lands', async () => {
+        const { protocol, rows } = makeProtocol();
+
+        await expect(protocol.saveMetaItem({
+            type: 'page',
+            name: 'vars_page',
+            item: page([{ name: 'count', type: 'number', defaultValue: 0 }, { name: 'picked', type: 'record_id' }]),
+        })).resolves.toMatchObject({ success: true });
+
+        expect(activeRows(rows, 'page')).toHaveLength(1);
+    });
+});
+
 // #25002 — a CEL slot INSIDE a page component's `properties` bag that overruns
 // the platform's parse bounds (`page-predicate-over-budget`,
 // `validatePagePredicateBounds`) is refused at the runtime save door, as

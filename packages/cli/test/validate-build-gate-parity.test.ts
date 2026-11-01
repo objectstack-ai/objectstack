@@ -183,6 +183,20 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // and the walk reads every dataset where it sits, the package bodies
   // included, across the whole artifact.
   'judgeSeedRecordValues',
+  // [ADR-0146 D2, #28410, #28643] The override write gate: an item bearing a
+  // name a package in its dependency closure ships, or an `overrides`
+  // declaration the gate does not admit, judged by the publish door's own
+  // `judgeOverrideWrite`. Not a registry rule: the WALK decides which packages
+  // of the artifact are in each package's closure and which of them ship the
+  // same name, so it is cross-package by construction.
+  //
+  // ⭐ This row is the #28410 VALIDATE_ONLY_GATES entry CLOSED. That entry read
+  // "os build is a fourth point it did not name", and it was right: the build
+  // emitted an artifact the managed install and the publish doors refused
+  // later. `compile.ts` now makes the same call (#28643), so the row moved
+  // here — deleted there rather than reworded, for the reason the
+  // `runPerPackageAuthoringRules` row above gives.
+  'findOverrideDeclarationRefusals',
 ];
 
 /**
@@ -221,21 +235,22 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * SHARED_NON_REGISTRY_GATES instead.
  *
  * EMPTY is this ledger's steady state: every row is a gap the build carries.
- * Its one row, `findViewContainerNameRefusals` (#20331), moved to
- * SHARED_NON_REGISTRY_GATES when `compile.ts` gained the call (#20393). The
- * ledger stays, empty, because it is the only honest place the closed roster
- * has for the next validate-only gate.
+ * Two rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
+ * gained the call: `findViewContainerNameRefusals` (#20331 → #20393) and
+ * `findOverrideDeclarationRefusals` (#28410 → #28643). It holds one today,
+ * `findExtensionFieldSuffixRefusals` (#28564), whose card did not name the
+ * build.
  */
 const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
-  // [#28410] A real gap in the build's direction, reported and not closed:
-  // card #28410 (ADR-0146 D2, ruling A on #28390) named three gate points for
-  // the override write gate — the publish doors, `os validate` and the
-  // install door — and `os build` is not one of them. The artifact a build
-  // emits is still judged where it lands: the marketplace managed install
-  // and the publish doors refuse the same items with the same judge. Whether
-  // the build refuses too is a separate decision, raised on the card.
-  findOverrideDeclarationRefusals:
-    'card #28410 placed the override write gate at publish, os validate and install; os build is a fourth point it did not name (open question on #28410). The install and publish doors refuse the same items with the same judge.',
+  // [#28564] A real gap in the build's direction, reported and not closed —
+  // the shape `findOverrideDeclarationRefusals` held until #28643 closed it.
+  // Card #28564 (ADR-0146 D10, decided item 7) named the `__c` reservation's
+  // doors — the save, restore and publish doors, `os validate`, the install
+  // doors and the duplicate — and `os build` is not one of them. The artifact
+  // a build emits is still judged where it lands: the marketplace install and
+  // the save and publish doors refuse the same fields with the same judge.
+  findExtensionFieldSuffixRefusals:
+    'card #28564 placed the __c reservation at the save/restore/publish doors, os validate, the install doors and duplicate; os build is a further point it did not name (as #28410 left the override gate until #28643). The install and publish doors refuse the same fields with the same judge.',
 };
 
 /**

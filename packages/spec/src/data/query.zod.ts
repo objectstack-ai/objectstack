@@ -270,8 +270,32 @@ const AGGREGATION_DISTINCT_REMOVED =
  *   ],
  *   groupBy: ['lead_source']
  * }
+ *
+ * Closed (#28609): a key this node does not declare is refused by name, with
+ * the unknown-key campaign's message, on every door that takes an entry —
+ * `POST /data/:object/query` (REST and the runtime dispatcher, both through
+ * `FindDataRequestSchema`), `EngineAggregateOptionsSchema.aggregations`, and the
+ * MCP tool `aggregate_records`, which takes this node as its entry. Before, the
+ * key was stripped and the call answered; MCP alone refused it, from a copy of
+ * the entry (#28550), so one entry shape got two verdicts by door. The retired
+ * `distinct` keeps its own tombstone sentence: a declared-but-unwritable key is
+ * answered by its prescription, never by the generic refusal.
  */
-export const AggregationNodeSchema = lazySchema(() => z.object({
+export const AggregationNodeSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this aggregation entry',
+    history:
+      'Until this shape was closed, an undeclared key here was dropped silently and the '
+      + 'aggregation answered as if it had not been sent — a `where` meant as the entry\'s own `filter` '
+      + 'computed over every row of the group under an ordinary 200.',
+    // `where` is the QUERY's filter one level up; the entry's own predicate is
+    // `filter`. `filters` / `conditions` are the plural and the third-party
+    // spellings of the same intent, and `as` is SQL's alias keyword. The MCP
+    // tool `aggregate_records` hinted exactly these from its own copy of the
+    // entry (#28550) until this node closed and the copy folded into it.
+    aliases: { where: 'filter', filters: 'filter', conditions: 'filter', as: 'alias' },
+  },
+  {
   function: AggregationFunction.describe('Aggregation function'),
   field: z.string().optional().describe('Field to aggregate (optional for COUNT(*))'),
   alias: z.string().describe('Result column alias'),
@@ -295,7 +319,8 @@ export const AggregationNodeSchema = lazySchema(() => z.object({
    * and avg/min/max answer null (`emptyGroupValueFor`, aggregation-policy.ts).
    */
   filter: FilterConditionSchema.optional().describe('Per-aggregation filter (SQL FILTER (WHERE …) semantics): narrows the source rows THIS aggregation reads, leaving sibling aggregations unfiltered. Enforced by engine.aggregate: lowered in memory for drivers without native conditional aggregation; a driver reached directly refuses rather than silently dropping it.'),
-}));
+},
+));
 
 // ─── Joins: REMOVED (#4286, ADR-0049) ────────────────────────────────────────
 // The whole join cluster — `JoinType`, `JoinStrategy`, the internal
