@@ -3207,6 +3207,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.customize.restore': 'Restore package original',
   'engine.studio.customize.restoreConfirm': 'Restore {package}’s “{item}”?',
   'engine.studio.customize.restoreBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s version is served again.',
+  'engine.studio.customize.restoreFlowBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s flow runs again in its place, under the same on/off switch.',
   'engine.studio.customize.restoreDraft': 'Its unpublished draft is discarded first.',
   'engine.studio.customize.restoreDone': '“{item}” is back to {package}’s version',
   // objectstack#28572 — one surface for a read-only base and its customization package.

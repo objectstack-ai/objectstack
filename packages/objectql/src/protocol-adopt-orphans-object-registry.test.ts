@@ -44,8 +44,11 @@
  *    refuses to drop it), said once at `error`;
  *  - CONTROL: an adoption of non-object items leaves the object registry
  *    untouched, and the view write-through follows the view as before;
- *  - CONTROL: a package-less row of an object another package's row owns is
- *    rebound in storage and the registry keeps that owner, as before.
+ *  - a package-less row of an object another package's row owns: the
+ *    registry keeps that owner (#23646), and since #28776 the adoption is
+ *    refused whole with the save door's D9.9 refusal
+ *    (`OBJECT_OVERLAY_PACKAGE_MISMATCH` / 422), so storage no longer rebinds
+ *    the row beside the owner's (this was a CONTROL pinning that rebind).
  *
  * The negative control (the object limb removed, these pins red) is a one-off
  * ablation recorded in the PR body, not a test.
@@ -342,7 +345,7 @@ describe('#23646 — an orphan adoption moves an adopted object\'s registry owne
         expect((k.engine.registry.getItem('view', VIEW) as { _packageId?: string } | undefined)?._packageId).toBe(Q);
     });
 
-    it('CONTROL: a package-less row of an object another package\'s row owns is rebound in storage, and that owner stays', async () => {
+    it('[#28776] a package-less row of an object another package\'s row owns: the adoption is refused whole (D9.9), nothing is rebound, and that owner stays', async () => {
         const stores: Stores = new Map();
         const drops: string[] = [];
         const k = await boot(stores, drops);
@@ -356,11 +359,16 @@ describe('#23646 — an orphan adoption moves an adopted object\'s registry owne
         const registerItem = vi.spyOn(k.engine.registry, 'registerItem');
         const unregisterObject = vi.spyOn(k.engine.registry, 'unregisterObject');
 
-        const adopted = await k.protocol.reassignOrphanedMetadata({ targetPackageId: Q });
+        const refused = await k.protocol.reassignOrphanedMetadata({ targetPackageId: Q }).then(
+            () => undefined, (e: any) => e,
+        );
 
-        expect(adopted).toMatchObject({ reassignedCount: 1, reassigned: [{ type: 'object', name: NAME }] });
-        expect(storedBindings(stores).sort()).toEqual([Q, R].sort());
-        // Nothing of the residue reaches the registry, in either half.
+        // The save door's D9.9 refusal, naming the target and the owner.
+        expect({ code: refused?.code, status: refused?.status }).toEqual({ code: 'OBJECT_OVERLAY_PACKAGE_MISMATCH', status: 422 });
+        expect(String(refused?.message)).toContain(`owned by package '${R}'`);
+        // Nothing is rebound: the residue stays package-less beside R's row.
+        expect(storedBindings(stores).map((b) => b ?? 'none').sort()).toEqual([R, 'none'].sort());
+        // [#23646] …and that owner stays: nothing reaches the registry, in either half.
         expect(unregisterObject).not.toHaveBeenCalled();
         expect(registerObject).not.toHaveBeenCalled();
         expect(registerItem.mock.calls.filter(([type]) => type === 'object')).toEqual([]);

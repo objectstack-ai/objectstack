@@ -4905,7 +4905,8 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
     // is not "unsupported yet" — there is no slot for it to arrive through.
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
-      '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes` only. ' +
+      '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes`, and ' +
+      'applies `fieldPatches`, and nothing else. ' +
       "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
       '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
       'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +

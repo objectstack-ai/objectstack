@@ -116,6 +116,7 @@ import {
   type DimensionLabelDeps,
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
+import { assertPreviewGroupColumnsDistinct } from './preview-group-column-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { scopedMeasureFilter } from './scoped-measure-key.js';
@@ -2890,6 +2891,11 @@ export class AnalyticsService implements IAnalyticsService {
             // under one `null` key (and a filter on one matched no row) where
             // the live strategies join it. See {@link assertPreviewJoinsNothing}.
             this.assertPreviewJoinsNothing(q, cube);
+            // [#28765] …and a selection asking one column for two values
+            // under one name (raw beside its own bucket, or two buckets of
+            // it), with the refusal the engine gives both live faces for the
+            // same keys, where the evaluator served both columns.
+            assertPreviewGroupColumnsDistinct(q, cube);
             return evaluateAnalyticsQueryOverRows(
               q,
               previewEvaluationCube(q, cube),
