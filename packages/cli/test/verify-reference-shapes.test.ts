@@ -26,7 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CLI, TSX, childEnv } from './helpers/serve-process.js';
+import { CLI, childEnv } from './helpers/serve-process.js';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
 
 const STACK = {
@@ -74,8 +74,8 @@ interface Doc {
 }
 
 function runCli(dir: string, args: string[], env: Record<string, string> = {}): Run {
-  // Through tsx, so the child runs this checkout's `src/`.
-  const r = spawnSync(TSX, [CLI, ...args], {
+  // `bin/run-dev.js` runs this checkout's `src/` (oclif maps its command tree there).
+  const r = spawnSync(process.execPath, [CLI, ...args], {
     cwd: dir,
     encoding: 'utf8',
     env: childEnv({ NO_COLOR: '1', OS_ALLOW_LAX_VALUE_SHAPES: undefined, ...env }),

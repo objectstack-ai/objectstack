@@ -98,6 +98,10 @@ interface BootOptions {
     credentialResolver?: CredentialResolver;
     /** Stack/package root that relative file refs resolve against (#3016). */
     packageRoot?: string;
+    /** The package registry's rows by id, as `getPackage` answers them (#28534). */
+    packages?: Record<string, { source: string }>;
+    /** The engine's residual-owner record by id, as `residualOwnerSource` answers it (#28534). */
+    residualOwners?: Record<string, 'code' | 'marketplace'>;
 }
 
 /**
@@ -119,7 +123,9 @@ async function boot(declared: unknown[], opts: BootOptions = {}): Promise<LiteKe
             ctx.registerService('objectql', {
                 registry: {
                     listItems: (type: string) => (type === 'connector' ? declared : []),
+                    getPackage: (id: string) => opts.packages?.[id],
                 },
+                residualOwnerSource: (id: string) => opts.residualOwners?.[id],
             });
             const automation = ctx.getService('automation');
             if (opts.providerFactory) {
@@ -177,7 +183,15 @@ function makeClosableProvider() {
  */
 async function bootReloadable(
     initial: unknown[],
-    opts: { providerFactory: ConnectorProviderFactory; credentialResolver?: CredentialResolver; packageRoot?: string },
+    opts: {
+        providerFactory: ConnectorProviderFactory;
+        credentialResolver?: CredentialResolver;
+        packageRoot?: string;
+        /** The package registry's rows by id, as `getPackage` answers them (#28534). */
+        packages?: Record<string, { source: string }>;
+        /** The engine's residual-owner record by id, as `residualOwnerSource` answers it (#28534). */
+        residualOwners?: Record<string, 'code' | 'marketplace'>;
+    },
 ) {
     const state = { declared: initial };
     let captured: any;
@@ -191,7 +205,11 @@ async function bootReloadable(
         async init(ctx: any) {
             captured = ctx;
             ctx.registerService('objectql', {
-                registry: { listItems: (type: string) => (type === 'connector' ? state.declared : []) },
+                registry: {
+                    listItems: (type: string) => (type === 'connector' ? state.declared : []),
+                    getPackage: (id: string) => opts.packages?.[id],
+                },
+                residualOwnerSource: (id: string) => opts.residualOwners?.[id],
             });
             ctx.getService('automation').registerConnectorProvider('fake', opts.providerFactory);
         },
@@ -669,6 +687,163 @@ describe('#22434 — the materializer hands resolvePackagePath anchored to packa
         expect(desc?.actions.map((a) => a.key)).toEqual(['ping']);
         expect(desc?.origin).toBe('declarative');
         expect(calls).toHaveLength(1);
+        await kernel.shutdown();
+    });
+});
+
+// ── #28534 — an INSTALLED package's package-relative refs are refused ───────
+//
+// `loadPackageFile` / `resolvePackagePath` resolve a relative ref against the
+// root of the package that DECLARED the entry. A package installed into the
+// runtime (registry source `marketplace`) has no root on disk, and the host's
+// root is not its own, so its entries are handed members that refuse every
+// ref; the host's own entries keep reading their files exactly as before.
+
+describe('#28534 — an entry an installed package declares is refused its package-relative refs', () => {
+    const INSTALLED = 'com.acme.installed';
+    const HOST = 'com.acme.host';
+    const packages = { [INSTALLED]: { source: 'marketplace' }, [HOST]: { source: 'code' } };
+    const HOST_RESIDUAL = 'com.acme.host.stack';
+    const INSTALLED_RESIDUAL = 'com.acme.installed.bundle';
+    const residualOwners = { [HOST_RESIDUAL]: 'code', [INSTALLED_RESIDUAL]: 'marketplace' } as const;
+    const ownedBy = <T extends object>(item: T, packageId: string) => ({ ...item, _packageId: packageId });
+
+    /**
+     * A provider that dereferences `providerConfig.spec` through
+     * `loadPackageFile` only when it is a string, and resolves each of
+     * `providerConfig.paths` through `resolvePackagePath` — so an inline
+     * document reaches neither member.
+     */
+    function makeRefProvider() {
+        const reads: string[] = [];
+        const resolved: string[] = [];
+        const factory: ConnectorProviderFactory = async (ctx) => {
+            if (typeof ctx.providerConfig.spec === 'string') reads.push(await ctx.loadPackageFile!(ctx.providerConfig.spec));
+            for (const ref of (ctx.providerConfig.paths as string[] | undefined) ?? []) {
+                resolved.push(await ctx.resolvePackagePath!(ref));
+            }
+            return {
+                def: { name: ctx.name, label: ctx.label, type: 'api', authentication: { type: 'none' }, actions: [{ key: 'ping', label: 'Ping' }] } as unknown as Connector,
+                handlers: { ping: async () => ({ ok: true }) },
+            };
+        };
+        return { factory, reads, resolved };
+    }
+
+    it('reload: an installed entry naming a file the host has is not materialized, and nothing is read', async () => {
+        const { factory, reads } = makeRefProvider();
+        const { engine, reload, kernel } = await bootReloadable([], { providerFactory: factory, packageRoot: fixtureRoot, packages });
+        await expect(
+            reload([ownedBy(providerConnector('billing', { providerConfig: { spec: './specs/billing.json' } }), INSTALLED)]),
+        ).resolves.toBeUndefined();
+        expect(engine.getRegisteredConnectors()).not.toContain('billing');
+        expect(reads).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('the refusal names the entry, its package, the ref and the remedy (the boot reconcile throws it)', async () => {
+        const { factory, reads } = makeRefProvider();
+        const err = await rejectionOf(
+            boot([ownedBy(providerConnector('billing', { providerConfig: { spec: './specs/billing.json' } }), INSTALLED)], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+                packages,
+            }),
+        );
+        expect(err.message).toContain(`failed to materialize connector instance 'billing'`);
+        expect(err.message).toContain(`connector instance 'billing' is declared by package '${INSTALLED}'`);
+        expect(err.message).toContain(`file ref './specs/billing.json' is refused`);
+        expect(err.message).toContain('`os build`');
+        // Never the host's path: the ref was not resolved at all.
+        expect(err.message).not.toContain(path.resolve(fixtureRoot));
+        expect(reads).toEqual([]);
+    });
+
+    it('resolvePackagePath takes the same rule: an installed entry asking for `.` is refused, naming the path ref', async () => {
+        const { factory, resolved } = makeRefProvider();
+        const err = await rejectionOf(
+            boot([ownedBy(providerConnector('tools', { providerConfig: { paths: ['.'] } }), INSTALLED)], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+                packages,
+            }),
+        );
+        expect(err.message).toContain(`connector instance 'tools' is declared by package '${INSTALLED}'`);
+        expect(err.message).toContain(`path ref '.' is refused`);
+        expect(err.message).not.toContain(path.resolve(fixtureRoot));
+        expect(resolved).toEqual([]);
+    });
+
+    it('control: an installed entry carrying its document inline materializes — neither member is reached', async () => {
+        const { factory, reads, resolved } = makeRefProvider();
+        const kernel = await boot([ownedBy(providerConnector('billing', { providerConfig: { spec: { openapi: '3.0.0' } } }), INSTALLED)], {
+            providerFactory: factory,
+            packageRoot: fixtureRoot,
+            packages,
+        });
+        expect(automationOf(kernel).getRegisteredConnectors()).toContain('billing');
+        expect(reads).toEqual([]);
+        expect(resolved).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('control: the host\'s own entries read and resolve under its root — a `code` row, the residual owner a `code` door recorded, no stamp', async () => {
+        const { factory, reads, resolved } = makeRefProvider();
+        const spec = './specs/billing.json';
+        const kernel = await boot(
+            [
+                ownedBy(providerConnector('host_pkg', { providerConfig: { spec, paths: ['.'] } }), HOST),
+                // The host artifact's residual owner: no package row, but the
+                // `manifest` service recorded the boot door's `code` for it.
+                ownedBy(providerConnector('residual', { providerConfig: { spec } }), HOST_RESIDUAL),
+                providerConnector('unstamped', { providerConfig: { spec } }),
+            ],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, residualOwners },
+        );
+        const registered = automationOf(kernel).getRegisteredConnectors();
+        expect(registered).toEqual(expect.arrayContaining(['host_pkg', 'residual', 'unstamped']));
+        expect(reads).toEqual(Array(3).fill(JSON.stringify({ openapi: '3.0.0' })));
+        expect(resolved).toEqual([path.resolve(fixtureRoot)]);
+        await kernel.shutdown();
+    });
+
+    it('a stamp no registration answers for is refused, never read as the host\'s — no row and no residual record', async () => {
+        const { factory, reads } = makeRefProvider();
+        const err = await rejectionOf(
+            boot([ownedBy(providerConnector('billing', { providerConfig: { spec: './specs/billing.json' } }), 'com.acme.nobody')], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+                packages,
+                residualOwners,
+            }),
+        );
+        expect(err.message).toContain(`connector instance 'billing' names package 'com.acme.nobody' as its owner`);
+        expect(err.message).toContain(`file ref './specs/billing.json' is refused`);
+        expect(err.message).not.toContain(path.resolve(fixtureRoot));
+        expect(reads).toEqual([]);
+    });
+
+    it('an installed bundle\'s residual owner (recorded by an install, no row) is installed: refused', async () => {
+        const { factory, reads } = makeRefProvider();
+        const err = await rejectionOf(
+            boot([ownedBy(providerConnector('billing', { providerConfig: { spec: './specs/billing.json' } }), INSTALLED_RESIDUAL)], {
+                providerFactory: factory,
+                packageRoot: fixtureRoot,
+                packages,
+                residualOwners,
+            }),
+        );
+        expect(err.message).toContain(`connector instance 'billing' is declared by package '${INSTALLED_RESIDUAL}', which was installed`);
+        expect(reads).toEqual([]);
+    });
+
+    it('control: one installed entry refused on reload leaves the host\'s entry beside it serving', async () => {
+        const { factory } = makeRefProvider();
+        const host = ownedBy(providerConnector('host_pkg', { providerConfig: { spec: './specs/billing.json' } }), HOST);
+        const { engine, reload, kernel } = await bootReloadable([host], { providerFactory: factory, packageRoot: fixtureRoot, packages });
+        await reload([host, ownedBy(providerConnector('installed', { providerConfig: { spec: './specs/billing.json' } }), INSTALLED)]);
+        expect(engine.getRegisteredConnectors()).toContain('host_pkg');
+        expect(engine.getRegisteredConnectors()).not.toContain('installed');
         await kernel.shutdown();
     });
 });

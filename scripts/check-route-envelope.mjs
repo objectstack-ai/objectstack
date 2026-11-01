@@ -1039,6 +1039,9 @@ const DISPATCHER_DOMAINS = {
     handBuilt: 2,
     note: 'the translations 200, which must carry `ETag` and `Cache-Control: private, no-cache` (`deps.success` takes none) and whose body is `deps.success`\'s envelope spread; and the body-less 304 a matching `If-None-Match` is answered, carrying the same two headers',
   },
+  // The "new similar" target rule both clone doors share (ADR-0146 D3/D6):
+  // its one answer, `newSimilarTargetRefusalAnswer`, goes through `deps.error`.
+  'new-similar-target.ts': { handBuilt: 0 },
   'notifications.ts': { handBuilt: 0 },
   'packages.ts': { handBuilt: 0 },
   // The `/security` domain's permission-set clone door (ADR-0126 §7.1), beside

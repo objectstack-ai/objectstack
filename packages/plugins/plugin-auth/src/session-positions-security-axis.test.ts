@@ -39,9 +39,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { celEngine } from '@objectstack/formula';
 import { AuthManager } from './auth-manager';
 // Imported from a sibling TEST file for the reason `platform-admin-standing.
-// consolidation.test.ts` documents at its own import: re-registering that
-// file's `describe`s here is cheaper than minting a second engine double (a
-// second looseness risk plus new `check:engine-double-contract` ledger rows).
+// consolidation.test.ts` documents at its own import: sharing that file's
+// double is better than minting a second engine double (a second looseness
+// risk plus new `check:engine-double-contract` ledger rows).
 import { createMemoryEngine } from './impersonation-bearer-rotation.test';
 import { inviteForAudienceGate } from './audience-gate-test-support';
 

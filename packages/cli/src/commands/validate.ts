@@ -74,6 +74,9 @@ import type { PermissionSetNameCollisionDiagnostic } from '@objectstack/plugin-s
 // over the parsed stack the way the load path registers it. The verdict is
 // `@objectstack/objectql`'s; see the module header.
 import { findViewContainerNameRefusals } from '../utils/view-container-names.js';
+// [ADR-0146 D2, #28410] The override write gate's author-time half: the publish
+// door's own judge, walked over the artifact's packages.
+import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
 // A field `picklist` that names no picklist the stack declares — refused, or
 // reported when the declaring package depends on packages outside the stack.
 // Walked the way the load path registers, like the refusal above.
@@ -656,6 +659,35 @@ export default class Validate extends Command {
           printAuthoringRuleErrors(perPackage.errors, { remedy: JSON_FULL_LIST_REMEDY });
           this.exit(1);
         }
+      }
+
+      // 3a-iii. [ADR-0146 D2, #28410] The override write gate, at author time.
+      //     Only the base's paired `<base>.custom` declares an override; a
+      //     dependent's item bearing the name a package in its closure ships is
+      //     refused (rename), and an `overrides` declaration the gate does not
+      //     admit is refused. The verdict is the publish door's own
+      //     (`judgeOverrideWrite`), so a green validate is a publish the door
+      //     accepts; see `utils/override-declarations.ts` for the walk.
+      const overrideRefusals = findOverrideDeclarationRefusals(result.data as Record<string, unknown>);
+      if (overrideRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: overrideRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = overrideRefusals.length;
+        console.log('');
+        printError(`The publish door would refuse ${n} item${n > 1 ? 's' : ''} under the override write gate (ADR-0146 D2)`);
+        printBulletList(
+          overrideRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'override refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
       }
 
       // 3b. [#3366] Installable-provider preflight — the shift-left of the

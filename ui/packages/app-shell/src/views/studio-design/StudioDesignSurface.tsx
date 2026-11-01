@@ -178,6 +178,7 @@ import {
   ArrowUpRight,
   FileQuestion,
   PackageX,
+  Library,
   type LucideIcon,
 } from 'lucide-react';
 import {
@@ -282,6 +283,8 @@ import {
   isStudioOrgScope,
   studioOrgScopePath,
 } from './studioScope.js';
+import { STUDIO_METADATA_AREA, studioMetadataAreaPath } from './metadataArea.js';
+import { StudioMetadataArea } from './StudioMetadataArea.js';
 import { useMetadataRefreshNonce } from './useMetadataRefreshNonce.js';
 import { useHomePath } from '../../hooks/useHomePath.js';
 import { resolveSurface, findSurfaceInTree, isSameSurface, type NavNode, type Surface } from './navSurface.js';
@@ -439,6 +442,18 @@ const PILLARS: ReadonlyArray<{ key: string; label: string; Icon: LucideIcon }> =
   { key: 'interfaces', label: 'Interfaces', Icon: LayoutDashboard },
   { key: 'access', label: 'Access', Icon: Shield },
 ];
+/**
+ * objectstack ADR-0146 D1 (#28561) — the "All metadata" area joins the four
+ * pillars in the header: a package's type directory, lists, generic item page,
+ * history and diagnostics (`StudioMetadataArea`). Not a pillar: it designs no
+ * type of its own, and its URLs are the area's (`/studio/<package>/metadata/…`,
+ * `metadataArea.ts`), so `PILLARS` and the not-found check do not hold it.
+ */
+const METADATA_AREA_TAB: { key: string; label: string; Icon: LucideIcon } = {
+  key: STUDIO_METADATA_AREA,
+  label: 'All metadata',
+  Icon: Library,
+};
 /**
  * objectui#11357 — the body the Interfaces pillar saves for its open leaf. A
  * page goes through the `page` registration's `fromDraft`, the serialiser
@@ -1512,9 +1527,15 @@ function PackageSwitcher({
 export interface StudioDesignSurfaceProps {
   /** Open-core slot — the cloud edition injects its AI copilot panel here. */
   aiSlot?: React.ReactNode;
+  /**
+   * objectstack#28561 — the surface is mounted on the "All metadata" area's
+   * route (`/studio/:packageId/metadata/*`), which has no `:tab` segment: the
+   * header marks the area and the body renders it.
+   */
+  area?: typeof STUDIO_METADATA_AREA;
 }
 
-export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React.ReactElement {
+export function StudioDesignSurface({ aiSlot, area }: StudioDesignSurfaceProps): React.ReactElement {
   const params = useParams<{ packageId?: string; tab?: string }>();
   // The route segment: a package id, or the package-less scope's reserved
   // segment (objectui#11553, `studioScope.ts`). URLs are built from it.
@@ -1523,7 +1544,7 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
   // publish below keys on this value, so none of them can be handed the
   // reserved segment as though it named a package.
   const packageId: string | null = isStudioOrgScope(scopeSegment) ? null : scopeSegment;
-  const tab = params.tab ?? 'interfaces';
+  const tab = area ?? params.tab ?? 'interfaces';
   // objectstack#26708 — a segment no pillar has is a not-found state, never
   // the Interfaces pillar it used to fall through to.
   const pillarKnown = PILLARS.some((p) => p.key === tab);
@@ -2363,10 +2384,11 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
             <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">
               {/* objectui#11553 — the package-less scope offers its one pillar. */}
               {/* objectstack#26708 — a package that is not there has no pillars. */}
-              {(packageId === null ? PILLARS.filter((p) => p.key === STUDIO_ORG_SCOPE_PILLAR) : pkgMissing ? [] : PILLARS).map((p) => (
+              {/* objectstack#28561 — and a package has the "All metadata" area beside its pillars. */}
+              {(packageId === null ? PILLARS.filter((p) => p.key === STUDIO_ORG_SCOPE_PILLAR) : pkgMissing ? [] : [...PILLARS, METADATA_AREA_TAB]).map((p) => (
                 <Link
                   key={p.key}
-                  to={`/studio/${scopeSegment}/${p.key}`}
+                  to={p.key === STUDIO_METADATA_AREA ? studioMetadataAreaPath(scopeSegment) : `/studio/${scopeSegment}/${p.key}`}
                   aria-current={tab === p.key ? 'page' : undefined}
                   // No click handler of its own (objectui#13253): a dirty
                   // pillar is registered with the shell's seam, whose
@@ -2386,8 +2408,12 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
                   <p.Icon className={'h-3.5 w-3.5 ' + (tab === p.key ? 'text-primary' : '')} />
                   {/* objectui#12725 — named from 1024 px up; below that the
                       pillars read as icons, the name kept in the accessible
-                      name and the tooltip. */}
-                  <span className="sr-only lg:not-sr-only">{t(`engine.studio.pillar.${p.key}`, locale)}</span>
+                      name and the tooltip. objectstack#28561 — the "All
+                      metadata" area is named from 1280 px: the top bar's
+                      1024 px row was sized for the four pillar names. */}
+                  <span className={p.key === STUDIO_METADATA_AREA ? 'sr-only xl:not-sr-only' : 'sr-only lg:not-sr-only'}>
+                    {t(`engine.studio.pillar.${p.key}`, locale)}
+                  </span>
                 </Link>
               ))}
             </nav>
@@ -2554,6 +2580,10 @@ export function StudioDesignSurface({ aiSlot }: StudioDesignSurfaceProps): React
                   </Button>
                 }
               />
+            ) : tab === STUDIO_METADATA_AREA ? (
+              // objectstack#28561 — keyed by package like the pillars: every
+              // page under it holds that package's scope and gate.
+              <StudioMetadataArea key={packageId} packageId={packageId} />
             ) : !pillarKnown ? (
               <StudioEmptyState
                 icon={FileQuestion}
@@ -4310,6 +4340,16 @@ export function InterfacesPillar({
   });
   // `?surface=` capture + mirror — shared plumbing (see useSurfaceDeepLink).
   const initialSurface = useSurfaceDeepLink(current);
+  // objectstack#28561 — a deep link to a page, dashboard, report or view that
+  // no nav entry opens: the "All metadata" area opens such an item here by
+  // URL. The app load below finds no entry for it, so it holds its first-leaf
+  // default in `offNavFallbackRef`, and the effect after the package-items read
+  // opens the item from those lists, or that default when the package has no
+  // such item. Decided once, for the link this pillar mounted with.
+  const offNavDeepLinkRef = React.useRef<'pending' | 'done'>(
+    initialSurface && (OFF_NAV_TYPES as readonly string[]).includes(initialSurface.type) ? 'pending' : 'done',
+  );
+  const offNavFallbackRef = React.useRef<Surface | null>(null);
   // objectui#8219 — lift the open leaf's label to the dock (see the prop doc).
   // Keyed on the primitives, and the callback read through a ref, so neither a
   // re-created Surface object nor a non-memoized callback refires the report.
@@ -4518,6 +4558,20 @@ export function InterfacesPillar({
     };
   }, [client, packageId, locale, publishNonce, draftNonce, metadataRefreshNonce]);
 
+  // objectstack#28561 — the off-nav deep link (see `offNavDeepLinkRef`), once
+  // both reads it waits on have answered: the app (or its absence), and this
+  // package's off-nav lists.
+  React.useEffect(() => {
+    if (offNavDeepLinkRef.current !== 'pending' || !initialSurface) return;
+    if (appStatus === 'loading' || packageItems?.packageId !== packageId) return;
+    offNavDeepLinkRef.current = 'done';
+    const item = (packageItems.byType[initialSurface.type as OffNavType] ?? []).find(
+      (i) => i.name === initialSurface.name,
+    );
+    const target: Surface | null = item ? { type: item.type, name: item.name, label: item.label } : offNavFallbackRef.current;
+    setCurrent((cur) => cur ?? target);
+  }, [appStatus, packageItems, packageId, initialSurface]);
+
   // Resolve THIS package's App → load its navigation tree. The query is scoped
   // to the package (`list('app', { packageId })`) so a design surface only ever
   // shows the current package's app — never another package's. `list()` sees
@@ -4637,6 +4691,12 @@ export function InterfacesPillar({
         // Its `?nav=` entry id, when that entry still exists, picks the entry
         // among several that open one target (objectui#11774).
         const deepLinked = initialSurface ? findSurfaceInTree(tree, initialSurface, locale, resolveTarget) : null;
+        // objectstack#28561 — an off-nav deep link no entry opens waits for the
+        // package's own lists (the effect after the package-items read).
+        if (!deepLinked && offNavDeepLinkRef.current === 'pending') {
+          offNavFallbackRef.current = firstLeaf;
+          return;
+        }
         setCurrent((cur) => cur ?? deepLinked ?? firstLeaf);
       } catch (e) {
         if (!cancelled) {

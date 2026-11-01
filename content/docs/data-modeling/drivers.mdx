@@ -154,7 +154,11 @@ Two things live **outside** `config`, because they are not driver-specific:
   delete the rejected keys; they were reaching nothing either way.
 - **TLS certificates** — the `ssl` block on the datasource (`enabled`,
   `rejectUnauthorized`, `ca`, `cert`, `key`). Inside `config`, `ssl` is the
-  on/off boolean shorthand.
+  on/off boolean shorthand. A datasource created or edited in Setup
+  (`POST` / `PATCH /api/v1/datasources`) stores the block, and its connection
+  test probes with it, but `key` is refused there: that door seals only the
+  `secret` it is sent, so a client private key would sit in the stored row in
+  cleartext.
 - **`schemaMode`** — the ADR-0015 ownership mode, declared next to `driver`.
 
 A plugin-contributed driver (`com.vendor.snowflake`) has no contract in this

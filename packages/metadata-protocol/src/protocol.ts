@@ -386,7 +386,13 @@ import { applyPublishBackfill, planPublishBackfill } from './protocol-publish-ba
 // [#25467 cut 12] The `_drafts` list read and the one-draft discard.
 import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 // [#25467 cut 13] The package door's save refusal and the origin-gated removal verdict.
-import { originGatedRemovalRefusal, refusePackagedBaseOverride } from './protocol-packaged-base-refusal.js';
+import {
+    originGatedRemovalRefusal,
+    overrideWriteRefusalError,
+    overrideWriteVerdict,
+    refusePackagedBaseOverride,
+} from './protocol-packaged-base-refusal.js';
+import type { OverrideWriteSubject, OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
 import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
@@ -14418,35 +14424,29 @@ export class ObjectStackProtocolImplementation implements
 
     async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
         this.assertObjectRegistered(request.object); // [#3770]
-        // [#4435] ONE probe serves both gates.
+        // [#4435] A PATCH of an id that names no row answers `404
+        // RECORD_NOT_FOUND`, as `getData` does — never `200 { record: null }`,
+        // a SUCCESS payload a client had to null-check to learn its write
+        // never landed.
         //
-        // A PATCH of an id that names no row answered `200 { record: null }` —
-        // the caller had to null-check a SUCCESS payload to discover its write
-        // never landed, which is exactly what a client that PATCHes a
-        // concurrently deleted record does not do. `getData` has always
-        // answered 404 for the same id; the two verbs now agree.
+        // ⭐ The write is judged FIRST and existence after, the order
+        // `deleteData` below has always had. `engine.update` answers its
+        // refusals — the security middleware's object- and row-level verdicts,
+        // the external datasource's write guard — before its by-id branch asks
+        // whether the row exists (the engine's not-found gate, which runs
+        // inside the middleware chain and ahead of every `before*` hook). So an
+        // update by id answers the same refusal whether or not the id exists,
+        // as delete does, and a caller the write is open to still gets the 404.
         //
-        // Existence is asked BEFORE the write rather than read off what comes
-        // back: the engine's update returns the post-write READBACK, which is
-        // also `null` when the row still exists but the write moved it out of
-        // the caller's row scope (reassigning `owner_id` away from yourself
-        // under an owner-scoped RLS policy). Reading that as "not found" would
-        // answer 404 to a write that succeeded. So ask existence directly.
+        // ⛔ No existence probe in front of the engine: existence is asked only
+        // once the write has been authorized, on this door (below the write)
+        // and on the by-id bulk faces ({@link assertRecordExists}).
         //
-        // The probe asks EXISTENCE, not visibility — see `probeRecord` for why
-        // that distinction is load-bearing (it keeps this fix out of the RLS
-        // model and keeps the #1994 by-id-write proof able to go red).
-        //
-        // OCC already had to read the same row for its `updated_at`, so the two
-        // gates share this single read instead of issuing a probe each. Two
-        // round-trips per PATCH would have been a performance regression no
-        // gate reports, and the second read could even disagree with the first.
-        const current = await this.probeRecord(request.object, request.id);
-        if (!current) throw recordNotFoundError(request.object, request.id);
-        // 404 wins over 409 when both could apply: OCC has always declined to
-        // treat a missing record as a concurrency conflict, and "this record
-        // does not exist" is the more specific answer.
-        await this.assertVersionOf(request.object, request.id, current, request.expectedVersion, request.context);
+        // OCC is asked the way `deleteData` asks it — a probe only when the
+        // caller sent a token ({@link assertVersionMatch}) — and a row that
+        // probe does not find is left to the engine's answer: OCC has never
+        // treated a missing record as a concurrency conflict.
+        await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
         // [#3407/#3431] Capture the engine's LEGAL write strips (static `readonly`
@@ -14490,8 +14490,8 @@ export class ObjectStackProtocolImplementation implements
         // this caller has already named the row twice — in the URL and in `where` —
         // and the three gates around this line all judge THAT row:
         //
-        //   probe   → `probeRecord(object, request.id)`      (existence, #4435)
-        //   OCC     → `assertVersionOf(…, request.id, …)`    (If-Match / expectedVersion)
+        //   OCC     → `assertVersionMatch(…, request.id, …)` (If-Match / expectedVersion)
+        //   engine  → the by-id write, its refusals, then its not-found gate
         //   receipt → `{ id: request.id, record: result }`
         //
         // Passing `request.data` verbatim let a body `{"id":"rec_2"}` on
@@ -14528,6 +14528,18 @@ export class ObjectStackProtocolImplementation implements
             ? { ...(request.data as Record<string, unknown>), id: request.id }
             : request.data;
         const result = byIdUpdateRecord(await this.engine.update(request.object, writeData, opts));
+        // The engine resolved, so the write was authorized. A `null` readback
+        // is two answers by contract (`IDataEngine.update`): the row is not
+        // there, or the write moved it out of the caller's row scope
+        // (reassigning `owner_id` away from yourself under an owner-scoped
+        // policy) and LANDED — answering 404 to that would report a write that
+        // succeeded as one that never happened. Existence tells them apart,
+        // asked now, after authorization, through the system-context
+        // {@link probeRecord}. ObjectQL refuses a row that is not there
+        // itself, so this reads only on a `null` readback.
+        if (result == null && !(await this.probeRecord(request.object, request.id))) {
+            throw recordNotFoundError(request.object, request.id);
+        }
         // [#7823] The PATCH 200 body is the surface #7728's fourth measurement
         // caught: a client revoking a `sys_api_key` (apiMethods keeps `update`
         // open, #7727) got the stored hash back in this response. That closure
@@ -14651,17 +14663,36 @@ export class ObjectStackProtocolImplementation implements
      * where it was. The one behaviour this adds is the 404 the issue asked for:
      * an id that names no row at all.
      *
-     * One place, because two gates need this row — the existence gate and OCC's
-     * `updated_at` comparison — and issuing a probe each would put two
-     * round-trips on every PATCH.
+     * ⛔ And it is never asked IN FRONT of the write's authorization. Its
+     * readers are OCC's `updated_at` comparison, asked only when the caller sent
+     * a token ({@link assertVersionMatch}), and the by-id update's existence
+     * check, asked only after `engine.update` has judged and resolved the write
+     * (`updateData`, and the bulk faces through {@link assertRecordExists}) —
+     * so an update by id answers the same refusal whether or not the id
+     * exists, as delete does.
      */
     private async probeRecord(object: string, id: string): Promise<any> {
         return this.engine.findOne(object, { where: { id }, context: { isSystem: true } } as any);
     }
 
     /**
-     * [#5088] The same existence gate {@link updateData} runs, for the BY-ID
-     * BULK write faces — `updateManyData` and `batchData`'s `update` branch.
+     * [#5088] The by-id update's existence answer for the BY-ID BULK write
+     * faces (`updateManyData` and `batchData`'s `update` branch), one per row —
+     * the same check {@link updateData} makes inline below its write.
+     *
+     * ⭐ Asked AFTER `engine.update` has judged the write, and only when it
+     * resolved a `null` readback — never in front of the engine. The engine
+     * answers its refusals (object- and row-level authorization, the external
+     * datasource's write guard) and then refuses a row that is not there
+     * itself, ahead of every `before*` hook, so a write the caller may not make
+     * is refused whether or not the id names a row, as a delete is. What is
+     * left for this check is the readback `IDataEngine.update` declares as two
+     * answers: a row that is not there (an engine that resolves rather than
+     * refuses), or a write that LANDED and moved the row out of the caller's
+     * row scope — which this tells apart by asking existence, so the second
+     * keeps its success.
+     *
+     * The history below is why the bulk faces carry the check at all.
      *
      * #4435's "a write that touched zero rows must not report success" landed on
      * 2 of the 5 write faces in this file: `updateData` (probe) and
@@ -14676,14 +14707,13 @@ export class ObjectStackProtocolImplementation implements
      * undeclared field. Three contracts disagreeing because one of them never
      * ran; the probe is what makes them agree again.
      *
-     * Deliberately the same `probeRecord` the single-record path uses, for the
+     * Deliberately the same `probeRecord` the OCC comparison uses, for the
      * reason documented there: it asks EXISTENCE, not visibility, which keeps
-     * this gate out of the RLS model (the by-id write policy stays #1994's
+     * this check out of the RLS model (the by-id write policy stays #1994's
      * decision, inside `engine.update`) and keeps the `rls-by-id-write` proof
-     * able to go red. And deliberately BEFORE the write, never inferred from a
-     * null readback — `updateData`'s note explains why that inference would
-     * answer 404 to a write that succeeded by moving the row out of the
-     * caller's scope.
+     * able to go red. And never inferred from the `null` readback alone —
+     * `updateData`'s note explains why that inference would answer 404 to a
+     * write that succeeded by moving the row out of the caller's scope.
      *
      * Inside the atomic arm this still reads the batch's own uncommitted state:
      * `engine.transaction` runs its callback inside the ambient `txStore`
@@ -14700,11 +14730,10 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * Optimistic Concurrency Control — the COMPARISON half, over the row the
-     * existence probe has already read. A token that agrees (or no token)
-     * issues no query of its own, which is what lets `updateData` run the gate
-     * on its existence probe's result rather than re-reading the record
-     * (#4435). Only a MISMATCH reads again — see the conflict paragraph below.
+     * Optimistic Concurrency Control — the COMPARISON half, over the row
+     * {@link assertVersionMatch}'s probe has already read. A token that agrees
+     * (or no token) issues no query of its own. Only a MISMATCH reads again —
+     * see the conflict paragraph below.
      *
      * When the caller passes a non-empty `expectedVersion` token (typically the
      * `updated_at` value they read), a mismatch throws `ConcurrentUpdateError`,
@@ -14721,8 +14750,8 @@ export class ObjectStackProtocolImplementation implements
      *    guard. Every other falsy shape (no header/field at all, `''`,
      *    whitespace-only) is untouched by this and still opts out.
      *  - Record not found → no check. We intentionally do not treat "missing
-     *    record" as a concurrency conflict; `updateData` has already answered
-     *    404 by this point, and `deleteData` lets the driver report it.
+     *    record" as a concurrency conflict; both `updateData` and `deleteData`
+     *    leave it to the engine, which judges the write first.
      *  - Record has no `updated_at` field (timestamps disabled) → no check.
      *    Logging would be noisy here; OCC is opt-in and the absence of a
      *    version column is an explicit "this object doesn't support OCC"
@@ -14771,10 +14800,12 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * OCC gate for `deleteData`, which — unlike `updateData` — needs no
-     * existence probe of its own: the driver's own `delete` return reports
-     * whether a row matched (#4435). So this still probes ONLY when the caller
-     * actually opted into OCC, keeping a plain DELETE at zero extra reads.
+     * OCC gate for the two single-record by-id writes, `updateData` and
+     * `deleteData`. Neither asks existence ahead of the engine — the engine
+     * judges the write and then refuses a row that is not there (#4435, and
+     * `deleteData` reads the driver's `false` besides) — so this probes ONLY
+     * when the caller actually opted into OCC, keeping a plain PATCH or DELETE
+     * at zero extra reads.
      *
      * [#13576] The malformed-token check runs FIRST, before the probe — a
      * malformed client token is a request defect independent of whether the
@@ -16883,8 +16914,33 @@ export class ObjectStackProtocolImplementation implements
         const host: ThisParameterType<typeof refusePackagedBaseOverride> = {
             isSealedManagedItem: (...a) => this.isSealedManagedItem(...a),
             isWritablePackage: (...a) => this.isWritablePackage(...a),
+            packagedArtifactOwner: (...a) => this.packagedArtifactOwner(...a),
         };
         return refusePackagedBaseOverride.call(host, request);
+    }
+
+    /**
+     * [ADR-0146 D2, ruling A on #28390] The override write gate's verdict on
+     * one item written into one package: `admit` for the base's paired
+     * `<base>.custom` declaring an override of an item the base ships, one
+     * named `refuse`, or `not_concerned`. The rule is
+     * `judgeOverrideWrite` (`protocol-packaged-base-refusal.ts`), the one
+     * judgement `os validate` and the marketplace install door ask too; this
+     * method supplies its two registry facts — the written package's
+     * dependency closure ({@link resolveWritePackageScope}) and which closure
+     * packages ship the name ({@link shippedArtifactsOf}).
+     *
+     * Asked by the save door ahead of {@link refusePackagedBaseOverride}, and
+     * by the promotion ({@link promoteDraftForPublish}, so both
+     * `publishMetaItem` and `publishPackageDrafts`) on the draft's body.
+     */
+    private overrideWriteVerdict(request: OverrideWriteSubject): OverrideWriteVerdict {
+        const host: ThisParameterType<typeof overrideWriteVerdict> = {
+            isWritablePackage: (...a) => this.isWritablePackage(...a),
+            resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+        };
+        return overrideWriteVerdict.call(host, request);
     }
 
     /**
@@ -20893,6 +20949,27 @@ export class ObjectStackProtocolImplementation implements
         // are no caller's claim about anything: a row stored before the
         // #16702 strip may still carry stale stamps, and rewriting it keeps
         // the silent strip it always had rather than failing the rewrite.
+        // [ADR-0146 D2, ruling A on #28390] The override write gate — on every
+        // save, whatever its source, and ahead of the flow-only sealed check
+        // below, so a declared or same-named item meets its own named
+        // refusal rather than a regime sentence: only the base's paired
+        // `<base>.custom` declares an override; a dependent's same-named item
+        // is refused (rename, or for the pair declare-or-rename); `overrides`
+        // on a dependent, on a package outside the closure or on a type with
+        // no override channel is refused. An admitted declaration is the
+        // pair's own row: the sealed refusal does not apply to it, and the
+        // store is told a runtime-only write (both below).
+        //
+        // A refused DECLARATION throws here. An undeclared same name throws
+        // just before the store is asked (below), after every refusal this
+        // door already answered for that write, so no existing refusal's code
+        // or status changes (a view container's name collision keeps its
+        // 400, a lock its ITEM_LOCKED).
+        const overrideVerdict = this.overrideWriteVerdict(request);
+        if (overrideVerdict.verdict === 'refuse' && overrideVerdict.rule !== 'undeclared_same_name') {
+            throw overrideWriteRefusalError(overrideVerdict);
+        }
+        const declaredOverride = overrideVerdict.verdict === 'admit';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
@@ -21069,7 +21146,10 @@ export class ObjectStackProtocolImplementation implements
         // [#23577] Every write over a sealed name reads one sentence: the
         // first-write pin (`If-None-Match: *`) declares no create, so the door
         // advises neither a create nor an edit.
-        this.refusePackagedBaseOverride(request);
+        // [ADR-0146 D2] An admitted declared override (see the gate above) is
+        // the pair's own row: the sealed refusal judges the base's managed
+        // item, so it does not apply to it.
+        if (!declaredOverride) this.refusePackagedBaseOverride(request);
 
         // ADR-0010 L3 — per-item lock. Artifact `_lock` (or persisted
         // overlay `_lock`) blocks save independent of the L1 type-level
@@ -22053,9 +22133,37 @@ export class ObjectStackProtocolImplementation implements
         // Callers that pass an explicit `parentVersion` (e.g. Studio after
         // reading an item) get true optimistic-lock conflict detection
         // surfaced as a 409.
+        // [ADR-0146 D2] The override write gate's undeclared-same-name
+        // refusal (see the gate above): the last refusal before the store.
+        //
+        // A save naming no package was judged above as package-less (`not
+        // concerned` for an undeclared item), but its address may have given
+        // it a package since: the row it lands in, as the package-less address
+        // resolved it (publish) or the draft address names it (draft). Judged
+        // again here for THAT package, so a package-less save cannot write a
+        // dependent's undeclared same-named row the same save naming the
+        // dependent is refused. A declaration never reaches this re-judgement:
+        // a package-less declaration was refused above.
+        let lateOverrideVerdict = overrideVerdict;
+        if (
+            namedNoPackage
+            && overrideVerdict.verdict === 'not_concerned'
+            && request.source === undefined
+            && request.writeFace !== 'package-duplicate'
+        ) {
+            const inheritedPackage = mode === 'draft'
+                ? draftAddress && draftAddress.kind !== 'ambiguous' ? draftAddress.into : null
+                : request.packageId ?? null;
+            if (typeof inheritedPackage === 'string' && inheritedPackage.length > 0) {
+                lateOverrideVerdict = this.overrideWriteVerdict({ ...request, packageId: inheritedPackage });
+            }
+        }
+        if (lateOverrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(lateOverrideVerdict);
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
-        const intent: 'override-artifact' | 'runtime-only' = artifactBacked
+        // [ADR-0146 D2] An admitted declared override writes the pair's own
+        // row; it edits no managed item, so the store judges a runtime write.
+        const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact'
             : 'runtime-only';
         // D1 (ADR-0070) — a brand-new, DB-only ("runtime-only") metadata
@@ -23619,6 +23727,24 @@ export class ObjectStackProtocolImplementation implements
             );
             if (nameCollision) throw nameCollision;
         }
+        // [ADR-0146 D2] …and the override write gate, on the draft's body and
+        // the package it is promoted into, with the save door's judge and
+        // envelope: a draft stored before the gate (or under a package whose
+        // closure has since gained the name) is refused here, before
+        // `repo.promoteDraft` writes, so a batch publish aborts on it as on the
+        // refusals above. An admitted declaration is promoted as the pair's own
+        // row (the runtime-only intent below).
+        // Judged here and thrown just before the store promotes (below), so no
+        // refusal this door already answered changes its code. (The save door
+        // judged this draft when it was stored; a refusal here is a draft
+        // stored before the gate, or one whose closure has since gained the
+        // name.)
+        const overrideVerdict: OverrideWriteVerdict = draftForGate
+            ? this.overrideWriteVerdict({
+                type: singularType, name: request.name, packageId: promoteInto, item: draftForGate.body,
+            })
+            : { verdict: 'not_concerned' };
+        const declaredOverride = overrideVerdict.verdict === 'admit';
         // [#23015] …and one default record page per object per deployment: a
         // draft saved while no other page held its object's default can meet
         // one by the time it is published, since the save door judged only the
@@ -23730,8 +23856,10 @@ export class ObjectStackProtocolImplementation implements
             })
             : [];
 
+        // [ADR-0146 D2] The override write gate's refusal, the last before the store.
+        if (overrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(overrideVerdict);
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
-        const intent: 'override-artifact' | 'runtime-only' = artifactBacked
+        const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !declaredOverride
             ? 'override-artifact' : 'runtime-only';
         const ref = {
             type: singularType,

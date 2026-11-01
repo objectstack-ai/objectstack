@@ -39,8 +39,9 @@
  *
  * ## Spawn shape
  *
- * The tsx source entry (`bin/run-dev.js`), as every `runServe()` caller spawns
- * it, for `os start` and for `os package install` alike. It pins
+ * The source entry (`bin/run-dev.js`), as every `runServe()` caller spawns it
+ * but under this process's own `node` rather than the tsx binary, for
+ * `os start` and for `os package install` alike. It pins
  * `NODE_ENV=development`, where a taken port is a hop rather than an exit, so
  * each boot takes a kernel-assigned port and reads it back off its own ready
  * banner (`readKernelAssignedPort`) before any request is addressed to it. The CLI runs
@@ -64,7 +65,6 @@ import {
   KERNEL_ASSIGNED_PORT,
   probeThroughChild,
   readKernelAssignedPort,
-  TSX,
 } from './helpers/serve-process.js';
 
 /** The banner's tail — every row above it has printed. */
@@ -76,7 +76,7 @@ const OBJECT = 'tasks_app_task';
 /**
  * The development dev-admin seed (`objectstack dev`'s documented, loginable
  * admin — `admin@objectos.ai` / `admin123`, promoted to platform admin): the
- * tsx entry runs `os start` in development, which seeds it on every boot that
+ * source entry runs `os start` in development, which seeds it on every boot that
  * finds no login, so it is the operator on all three boots and holds the
  * `manage_metadata` capability the install route demands.
  */
@@ -144,7 +144,7 @@ interface LiveStart {
 
 function bootStart(cwd: string, home: string, extra: string[] = []): Promise<LiveStart> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
+    const child = spawn(process.execPath, [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header.
       env: childEnv({ NO_COLOR: '1', OS_CLOUD_URL: 'off', OS_LOG_LEVEL: 'warn', OS_SECRET_KEY: E2E_SECRET_KEY }),
@@ -247,7 +247,7 @@ async function authenticate(live: LiveStart): Promise<string> {
  */
 function packageInstall(appDir: string, live: LiveStart): Promise<{ exit: number | null; output: string }> {
   return new Promise((done) => {
-    const child = spawn(TSX, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
+    const child = spawn(process.execPath, [CLI, 'package', 'install', './dist/objectstack.json', '--runtime', live.base, '--email', EMAIL, '--password', PASSWORD], {
       cwd: appDir,
       env: childEnv({ NO_COLOR: '1' }),
       stdio: ['ignore', 'pipe', 'pipe'],

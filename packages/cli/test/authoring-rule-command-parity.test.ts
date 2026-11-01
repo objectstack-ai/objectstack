@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: three spawns of the source CLI (os lint, os validate, os build) over one planted-defect stack, every one a distinct triple whose exit code is the contract; the nine rule cases run in process; slowest CI reading 12.5 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * The BEHAVIOURAL half of #4409, next to the structural ratchet in

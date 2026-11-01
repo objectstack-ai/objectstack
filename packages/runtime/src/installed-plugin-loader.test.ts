@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 20 — spawns the real producer once per single-cause fixture: two real Node child processes (node --import tsx), each resolving an installed plugin's imports in a process of its own, that being the case's subject (about 1 s each locally), beside 57 in-process cases over real signed tarballs in a temporary OS_HOME; 2.5 s in a local run; slowest CI reading 10.4 s (scheduled full-battery run 41199450735, Test Core shard log) x 1.25, rounded up
 
 /**
  * [#27123 slice 2] The boot-time loader for installed plugins (ADR-0025 §3.5

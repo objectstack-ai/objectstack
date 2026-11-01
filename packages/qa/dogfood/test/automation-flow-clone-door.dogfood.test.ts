@@ -45,6 +45,8 @@ const SOURCE = 'crm_convert_lead_wizard';
 /** A customer-owned machine name no shipped flow uses. */
 const CLONE = 'crm_convert_lead_wizard_clone_20676';
 const CLONE_LABEL = 'Convert Lead (clone)';
+/** [#28149] The CRM app's paired customization package (`<base>.custom`, ADR-0146 D3). */
+const CRM_PAIR = 'com.example.crm.custom';
 
 interface ErrorBody { success?: boolean; error?: { code?: string; httpStatus?: number } }
 
@@ -76,7 +78,7 @@ describe('#20676 — POST /automation/:name/clone is mounted on the dispatcher b
     expect(readBack.status).toBe(404);
   });
 
-  it('a legal clone answers 200 with the flow and FLOW_CLONE_NOTICE, and the clone reads back', async () => {
+  it('a legal clone answers 200 with the flow, its package and FLOW_CLONE_NOTICE, and the clone reads back', async () => {
     // Control: the target does not exist before the clone, so the read-back
     // below is evidence of THIS request rather than of the fixture.
     const before = await stack.apiAs(adminToken, 'GET', `/automation/${CLONE}`);
@@ -90,11 +92,14 @@ describe('#20676 — POST /automation/:name/clone is mounted on the dispatcher b
     expect(res.status, `legal clone: ${text}`).toBe(200);
     const body = (await res.json()) as {
       success?: boolean;
-      data?: { flow?: { name?: string; label?: string; status?: string }; notice?: string };
+      data?: { flow?: { name?: string; label?: string; status?: string }; packageId?: string; notice?: string };
     };
     expect(body.success).toBe(true);
     expect(body.data?.notice).toBe(FLOW_CLONE_NOTICE);
-    expect(body.data?.flow).toMatchObject({ name: CLONE, label: CLONE_LABEL, status: 'draft' });
+    // [#28149, ADR-0146 D4] "New similar": switched off, in the CRM's paired
+    // customization package, which the clone ensured on first use.
+    expect(body.data?.flow).toMatchObject({ name: CLONE, label: CLONE_LABEL, status: 'obsolete' });
+    expect(body.data?.packageId).toBe(CRM_PAIR);
 
     const readBack = await stack.apiAs(adminToken, 'GET', `/automation/${CLONE}`);
     const readText = await readBack.clone().text();

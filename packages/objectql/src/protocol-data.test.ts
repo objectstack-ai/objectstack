@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { ObjectStackProtocolImplementation, recordNotFoundError } from '@objectstack/metadata-protocol';
 
 /**
  * Tests for the Protocol Implementation's data methods (findData, getData).
@@ -406,13 +406,12 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
     describe('Optimistic Concurrency Control', () => {
         beforeEach(() => {
             // Both update and delete need `update` / `delete` on the engine,
-            // plus `findOne` for the record probe.
+            // plus `findOne` for the OCC probe.
             //
-            // [#4435] The record now has to EXIST for a PATCH to proceed at
-            // all: `updateData` refuses an id that names no row instead of
-            // answering `200 { record: null }`. The default probe result is
-            // therefore a real row — these cases are about OCC, not about
-            // missing records (which `updateData refuses an id …` covers).
+            // [#4435] A PATCH of an id that names no row answers 404, never
+            // `200 { record: null }` — answered after the write is judged, as a
+            // delete's is (`updateData refuses an id …` below covers it). The
+            // default probe result is a real row: these cases are about OCC.
             mockEngine.findOne.mockResolvedValue({ id: 'r1', updated_at: '2026-05-22T07:14:00.000Z' });
             mockEngine.update = vi.fn().mockResolvedValue({ id: 'r1', updated_at: '2026-05-22T07:14:33.000Z' });
             mockEngine.delete = vi.fn().mockResolvedValue(true);
@@ -420,11 +419,13 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
 
         it('updateData proceeds when no expectedVersion is supplied (legacy callers)', async () => {
             await protocol.updateData({ object: 'task', id: 'r1', data: { name: 'New' } });
-            // [#4435] One probe — the EXISTENCE probe, which every PATCH now
-            // makes. No OCC comparison happens (no token was supplied), which
-            // is what "legacy callers are unaffected" means: they are not
-            // subject to 409, only to the 404 that GET already answered.
-            expect(mockEngine.findOne).toHaveBeenCalledOnce();
+            // No token, so no OCC comparison — which is what "legacy callers
+            // are unaffected" means: they are not subject to 409. And no read
+            // ahead of the engine either: an update by id is judged before its
+            // row is looked up, as a delete is, so a plain PATCH whose write
+            // lands reads nothing beside it (`deleteData without a token issues
+            // NO probe at all` below is the twin).
+            expect(mockEngine.findOne).not.toHaveBeenCalled();
             expect(mockEngine.update).toHaveBeenCalledOnce();
         });
 
@@ -436,20 +437,23 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                 data: { name: 'New' },
                 expectedVersion: '2026-05-22T07:14:00.000Z',
             });
-            // [#4435] Still exactly ONE read. The existence gate and OCC both
-            // need this row, so they share the probe rather than issuing one
-            // each — two round-trips per PATCH would be a performance
-            // regression no gate reports, and the second read could disagree
-            // with the first.
+            // Exactly ONE read: OCC's probe, asked because a token was sent, as
+            // `deleteData` asks it. The write landed (a non-null readback), so
+            // nothing else is read.
             expect(mockEngine.findOne).toHaveBeenCalledOnce();
+            expect(mockEngine.findOne.mock.calls[0][1]).toMatchObject({ where: { id: 'r1' }, context: { isSystem: true } });
             expect(mockEngine.update).toHaveBeenCalledOnce();
         });
 
-        it('updateData refuses an id that names no row, before any OCC verdict', async () => {
+        it('updateData refuses an id that names no row, before any OCC verdict — the engine\'s not-found gate', async () => {
             // [#4435] 404 wins over 409 when both could apply: OCC has always
             // declined to treat a missing record as a concurrency conflict, and
-            // "this record does not exist" is the more specific answer.
+            // "this record does not exist" is the more specific answer. OCC's
+            // probe finds no row and leaves it to the engine, which — as
+            // ObjectQL does — judges the write and then refuses the row that is
+            // not there with the shared envelope.
             mockEngine.findOne.mockResolvedValue(null);
+            mockEngine.update = vi.fn().mockRejectedValue(recordNotFoundError('task', 'gone'));
             await expect(
                 protocol.updateData({
                     object: 'task',
@@ -458,7 +462,36 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
                     expectedVersion: '2026-05-22T07:14:00.000Z',
                 })
             ).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
-            expect(mockEngine.update).not.toHaveBeenCalled();
+            expect(mockEngine.update).toHaveBeenCalledOnce();
+            // The one read is OCC's probe, as the system; it found nothing, so
+            // no 409 was answered and nothing else was read.
+            expect(mockEngine.findOne).toHaveBeenCalledOnce();
+            expect(mockEngine.findOne.mock.calls[0][1]).toMatchObject({ where: { id: 'gone' }, context: { isSystem: true } });
+        });
+
+        it('updateData refuses an id that names no row — an engine that resolves a null readback', async () => {
+            // `IDataEngine.update` declares `null` as a readback, so an engine
+            // may RESOLVE for a row that is not there. The protocol then asks
+            // existence itself, as the system, after the engine has judged the
+            // write: no row ⇒ the same 404, and still no 409 from the token.
+            mockEngine.findOne.mockResolvedValue(null);
+            mockEngine.update = vi.fn().mockResolvedValue(null);
+            await expect(
+                protocol.updateData({
+                    object: 'task',
+                    id: 'gone',
+                    data: { name: 'New' },
+                    expectedVersion: '2026-05-22T07:14:00.000Z',
+                })
+            ).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
+            expect(mockEngine.update).toHaveBeenCalledOnce();
+            // OCC's probe, then the existence check after the write — both as
+            // the system, the second strictly after the engine was asked.
+            expect(mockEngine.findOne).toHaveBeenCalledTimes(2);
+            for (const call of mockEngine.findOne.mock.calls) {
+                expect(call[1]).toMatchObject({ where: { id: 'gone' }, context: { isSystem: true } });
+            }
+            expect(mockEngine.update.mock.invocationCallOrder[0]).toBeLessThan(mockEngine.findOne.mock.invocationCallOrder[1]);
         });
 
         it('updateData strips RFC-7232 quotes from the If-Match token', async () => {
@@ -508,15 +541,16 @@ describe('ObjectStackProtocolImplementation - Data Operations', () => {
         });
 
         it('updateData skips the check when expectedVersion is empty string', async () => {
-            // A blank token opts OUT of OCC — the record still has to exist
-            // (#4435), so the probe happens; what must NOT happen is a 409.
+            // A blank token opts OUT of OCC — no 409, and, like a PATCH with no
+            // token, no read ahead of the engine: the record's existence is the
+            // engine's to answer, after it has judged the write (#4435).
             await protocol.updateData({
                 object: 'task',
                 id: 'r1',
                 data: { name: 'New' },
                 expectedVersion: '   ',
             });
-            expect(mockEngine.findOne).toHaveBeenCalledOnce();
+            expect(mockEngine.findOne).not.toHaveBeenCalled();
             expect(mockEngine.update).toHaveBeenCalledOnce();
         });
 

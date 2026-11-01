@@ -249,6 +249,34 @@ async function saveInto(
     await protocol.publishMetaItem({ type: 'view', name: VIEW, packageId } as any);
 }
 
+/**
+ * [#28410, ADR-0146 D2, ruling A on #28390] A row the override write gate now
+ * refuses at the save door — a dependent package's (or the pair's undeclared)
+ * row under the name X ships, or a declaration from a package that is not X's
+ * pair — laid down as one stored BEFORE that gate: the door's refusal is
+ * asserted first, then the same body goes through the same draft save and
+ * per-item publish with the gate's verdict held at `not_concerned` for that
+ * one write. The read pins below are about such rows, which storage still
+ * holds.
+ */
+async function saveIntoBeforeTheGate(
+    protocol: ObjectStackProtocolImplementation,
+    packageId: string,
+    columns: readonly string[],
+    extra: Record<string, unknown> = {},
+): Promise<void> {
+    const body = { ...listBody(columns), name: VIEW, ...extra };
+    await expect(protocol.saveMetaItem({ type: 'view', name: VIEW, item: body, mode: 'draft', packageId } as any))
+        .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    const gated = protocol as any;
+    gated.overrideWriteVerdict = () => ({ verdict: 'not_concerned' });
+    try {
+        await saveInto(protocol, packageId, columns, extra);
+    } finally {
+        delete gated.overrideWriteVerdict;
+    }
+}
+
 /** An active row laid down through the engine as the repository's write lays one down: package-unbound, or bound as given. */
 const storeRow = (engine: ObjectQL, columns: readonly string[], packageId: string | null = null, extra: Record<string, unknown> = {}) =>
     engine.insert('sys_metadata', {
@@ -306,7 +334,7 @@ describe('[#28409] the five reads of a name X ships serve X\'s declared `.custom
     it('a declaration from a package that is not X\'s pair is ignored: every read of X\'s name serves X\'s document', async () => {
         const { protocol } = await boot();
         await install(protocol, DEPENDENT);
-        await saveInto(protocol, DEPENDENT, DEPENDENT_COLUMNS, { overrides: { ...DECLARATION } });
+        await saveIntoBeforeTheGate(protocol, DEPENDENT, DEPENDENT_COLUMNS, { overrides: { ...DECLARATION } });
 
         expect(columnsOf(await read(protocol))).toEqual(BASE_COLUMNS);
         expect(columnsOf(await read(protocol, BASE))).toEqual(BASE_COLUMNS);
@@ -320,7 +348,7 @@ describe('[#28409] the five reads of a name X ships serve X\'s declared `.custom
     it('an undeclared row of the pair is the pair\'s own item, not the override', async () => {
         const { protocol } = await boot();
         await install(protocol, PAIR);
-        await saveInto(protocol, PAIR, OVERRIDE_COLUMNS);
+        await saveIntoBeforeTheGate(protocol, PAIR, OVERRIDE_COLUMNS);
 
         expect(columnsOf(await read(protocol))).toEqual(BASE_COLUMNS);
         expect(columnsOf(await read(protocol, BASE))).toEqual(BASE_COLUMNS);
@@ -333,7 +361,7 @@ describe('[#28409] the env-wide list joins the one read', () => {
     it('a dependent package\'s same-named row no longer replaces X\'s item; the per-package layer still holds it', async () => {
         const { protocol } = await boot();
         await install(protocol, DEPENDENT);
-        await saveInto(protocol, DEPENDENT, DEPENDENT_COLUMNS);
+        await saveIntoBeforeTheGate(protocol, DEPENDENT, DEPENDENT_COLUMNS);
 
         expect(await listed(protocol)).toEqual([[BASE, BASE_COLUMNS]]);
         expect(await listed(protocol, BASE)).toEqual([[BASE, BASE_COLUMNS]]);
@@ -346,7 +374,7 @@ describe('[#28409] the env-wide list joins the one read', () => {
     it('a package-unbound row keeps winning over X\'s code item in the list, beside a dependent package\'s row', async () => {
         const { engine, protocol } = await boot();
         await install(protocol, DEPENDENT);
-        await saveInto(protocol, DEPENDENT, DEPENDENT_COLUMNS);
+        await saveIntoBeforeTheGate(protocol, DEPENDENT, DEPENDENT_COLUMNS);
         await storeUnboundRow(engine, UNBOUND_COLUMNS);
 
         expect((await listed(protocol)).map(([, columns]) => columns)).toEqual([UNBOUND_COLUMNS]);
@@ -392,7 +420,7 @@ describe('[#28409] orphans of X\'s name are reported, never dropped silently', (
         it(`${label}: the layered read reports it in \`overlay\`, \`effective\` = X's document`, async () => {
             const { protocol } = await boot();
             await install(protocol, owner);
-            await saveInto(protocol, owner, DEPENDENT_COLUMNS);
+            await saveIntoBeforeTheGate(protocol, owner, DEPENDENT_COLUMNS);
 
             for (const scope of [undefined, BASE]) {
                 const layers = await layered(protocol, scope);

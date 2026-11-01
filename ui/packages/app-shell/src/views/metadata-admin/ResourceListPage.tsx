@@ -72,6 +72,7 @@ import {
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
 import { buildPackageScopeOptions } from './package-scope.js';
 import { ENVIRONMENT_SCOPE_QUERY, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
 import {
   audienceAnchorsOf,
   hasCatalogActivation,
@@ -190,6 +191,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // the description. Read off the route's `:appName`; the same page anywhere
   // else (the directory, Studio's "Open in Setup" target) keeps its shell.
   const inSetup = useInSetupApp();
+  // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area the
+  // package scope is the area's, never picked or repaired here, and a
+  // read-only package offers no create.
+  const host = useMetadataAreaHost();
   // objectstack#27356 — under Setup the header names the page as the sidebar
   // entry that opens it does ("Positions"); the type's label otherwise.
   const { app } = useExpressionContext();
@@ -306,6 +311,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // package set. `null` while packages are still loading (fail closed).
   const urlPackage = searchParams.get('package');
   const activePackage = React.useMemo(() => {
+    if (host?.packageId) return host.packageId;
     if (!projectPackages) return null;
     if (urlPackage && projectPackages.some((p) => p.id === urlPackage)) return urlPackage;
     if (projectPackages.length === 0) return null;
@@ -328,7 +334,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       if (n > bestN) { best = p.id; bestN = n; }
     }
     return best ?? projectPackages[0]?.id ?? null;
-  }, [projectPackages, urlPackage, items, appPackage]);
+  }, [host, projectPackages, urlPackage, items, appPackage]);
 
   // Repair `?package=` so the sidebar selector, deep-links and create/edit
   // navigation all agree on the active scope. Runs once packages resolve
@@ -336,6 +342,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   React.useEffect(() => {
     // The environment scope lists every package's items: no package to repair.
     if (envScope) return;
+    // The area's package is its route's.
+    if (host?.packageId) return;
     if (!projectPackages || projectPackages.length === 0) return;
     if (urlPackage && projectPackages.some((p) => p.id === urlPackage)) return;
     // If the current app's package is known we can repair immediately; otherwise
@@ -369,6 +377,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       navigate(`./new?${ENVIRONMENT_SCOPE_QUERY}`);
       return;
     }
+    // The Studio area creates into its own package.
+    if (host?.packageId) {
+      navigate(`./new${pkgSuffix}`);
+      return;
+    }
     const bases = projectPackages ?? [];
     if (projectPackages !== null && bases.length === 0) {
       setShowCreateBase(true);
@@ -379,7 +392,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       return;
     }
     navigate(`./new${pkgSuffix}`);
-  }, [projectPackages, activePackage, pkgSuffix, navigate, envScope]);
+  }, [projectPackages, activePackage, pkgSuffix, navigate, envScope, host?.packageId]);
 
   // objectui#7611 — the activation state the switch column shows. Re-read on
   // the list's own refresh, never on an unrelated render. The anchors arrive
@@ -599,14 +612,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const typeWritable = !!(entry?.allowEnvironmentOverlay || entry?.allowRuntimeCreate);
   // A declaration-only catalog is never authored here: its items are created
   // on the authored object's page.
-  const canCreate = typeWritable && !walled && (!envScope || canAuthor) && !authoredObject;
+  const canCreate = typeWritable && !walled && (!envScope || canAuthor) && !authoredObject && !host?.readOnly;
   // The wall is the gate to NAME only where the type would otherwise admit a
   // write: a type with no runtime write channel is read-only for the operator
   // too, and its page says nothing about the wall.
   const walledDeciding = walled && typeWritable;
   // Packages load only for the package scope; the environment scope never
   // waits on them.
-  const packagesPending = !envScope && projectPackages === null;
+  const packagesPending = !envScope && !host?.packageId && projectPackages === null;
 
   // Localise default column labels — registered columns keep their
   // hand-authored labels (consumers may want bespoke wording).
@@ -784,7 +797,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             {error}
           </div>
         )}
-        {!loading && !error && !envScope && projectPackages !== null && projectPackages.length === 0 && (
+        {!loading && !error && !envScope && !host?.packageId && projectPackages !== null && projectPackages.length === 0 && (
           <Empty>
             <EmptyTitle>No project packages installed</EmptyTitle>
             <EmptyDescription>
@@ -793,7 +806,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             </EmptyDescription>
           </Empty>
         )}
-        {!loading && !error && !packagesPending && (envScope || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
+        {!loading && !error && !packagesPending && (envScope || !!host?.packageId || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
           <Empty>
             <EmptyTitle>
               {scopedItems.length === 0

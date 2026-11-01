@@ -27,7 +27,7 @@
  *
  * Projects live under this package's `node_modules`, so a config's
  * `@objectstack/spec` import resolves to the workspace copy without an
- * install. Spawned through `bin/run-dev.js` + tsx, so the suite does not
+ * install. Spawned through `bin/run-dev.js` + `node`, so the suite does not
  * depend on `packages/cli/dist`. Commands print through `utils/format.ts`,
  * which writes to stdout, so stdout is what is read.
  */
@@ -41,9 +41,8 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
-/** oclif + tsx cold starts, eight of them, sequential. */
+/** oclif cold starts, eight of them, sequential. */
 const RUN_TIMEOUT_MS = 300_000;
 
 interface Run {
@@ -55,7 +54,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 8 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {
@@ -106,7 +105,7 @@ beforeAll(async () => {
     read(join(dirs.broken, 'src', 'objects', 'index.ts')) + "export { default as legacy } from './legacy.object';\n",
   );
 
-  // Sequential on purpose: cold tsx starts in a container several agents share.
+  // Sequential on purpose: cold CLI starts in a container several agents share.
   runs.generate = await runCli(['g', 'object', 'order_line'], dirs.namespaced);
   runs.prefixed = await runCli(['g', 'object', 'my_app_invoice'], dirs.namespaced);
   runs.legacyForm = await runCli(['g', 'object', 'order__line'], dirs.namespaced);

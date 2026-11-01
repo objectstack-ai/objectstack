@@ -713,6 +713,14 @@ field is left unchanged.
 > lacks edit permission on is *rejected* with `403 PermissionDeniedError`, not
 > stripped.
 
+**Refusals come before the record lookup:**
+The update is judged before the record is looked up, as a delete is. A caller who may
+not update the object (no edit permission, or an external data source that refuses
+writes) gets the same `403` whether or not `{record_id}` names a record, and so does
+each row of `updateMany` and of `batch` with `operation: "update"`. A caller who may
+update the object gets `404 RECORD_NOT_FOUND` for an id that names no record, and for
+a record its row-level access hides.
+
 ### Delete Record
 
 Delete a record by ID.

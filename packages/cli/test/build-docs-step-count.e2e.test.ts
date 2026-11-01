@@ -44,7 +44,7 @@
  * and the `--json` face must stay one JSON document, so the machine face is
  * asserted to parse and to carry no step text at all.
  *
- * ALTITUDE: this spawns the CLI (`bin/run-dev.js` through tsx) rather than
+ * ALTITUDE: this spawns the CLI (`bin/run-dev.js` under `node`) rather than
  * calling a helper, because the defect is in the ORDER of two statements inside
  * the command body — there is no seam below the process that can observe it.
  * Same spawn shape and the same `childEnv()` as
@@ -62,7 +62,6 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 interface Run {
   code: number;
@@ -73,7 +72,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

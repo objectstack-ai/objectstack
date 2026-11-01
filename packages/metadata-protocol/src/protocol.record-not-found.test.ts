@@ -26,25 +26,44 @@ import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SCHEMA = { name: 'task', fields: { title: { name: 'title', type: 'text' } } };
 
+/** The refusal a write the engine judges unauthorized answers — before the row is looked up. */
+function writeRefusal(): Error {
+  return Object.assign(new Error('You do not have permission to perform this action.'), {
+    code: 'PERMISSION_DENIED',
+    status: 403,
+  });
+}
+
 /**
  * An engine whose `delete` honours the driver contract
  * (`IDataDriver.delete` — "True if deleted, false if not found") and whose
  * `findOne` answers from the same row set, so existence means one thing here.
+ *
+ * `refuse` names a caller whose writes the engine refuses, in ObjectQL's order:
+ * the write is judged before the row is looked up. `leavesScope` names rows a
+ * landed update moves out of the caller's row scope, so their readback is
+ * `null` while the row is still there.
  */
-function makeProtocol(rows: Record<string, any> = {}) {
+function makeProtocol(
+  rows: Record<string, any> = {},
+  opts: { refuse?: string; leavesScope?: ReadonlySet<string> } = {},
+) {
   const store = new Map<string, any>(Object.entries(rows));
-  const findOne = vi.fn(async (_object: string, opts: any) => { assertEngineFindOnePredicate(_object, opts); return store.get(String(opts?.where?.id)) ?? null; });
-  const update = vi.fn(async (_object: string, data: any, opts: any) => {
-    assertEngineUpdateDispatch(data, opts);
-    const id = String(opts?.where?.id);
+  const refused = (o: any) => opts.refuse !== undefined && o?.context?.userId === opts.refuse;
+  const findOne = vi.fn(async (_object: string, o: any) => { assertEngineFindOnePredicate(_object, o); return store.get(String(o?.where?.id)) ?? null; });
+  const update = vi.fn(async (_object: string, data: any, o: any) => {
+    assertEngineUpdateDispatch(data, o);
+    if (refused(o)) throw writeRefusal();
+    const id = String(o?.where?.id);
     if (!store.has(id)) return null;
     const next = { ...store.get(id), ...data };
     store.set(id, next);
-    return next;
+    return opts.leavesScope?.has(id) ? null : next;
   });
-  const del = vi.fn(async (_object: string, opts: any) => {
-    assertEngineDeleteDispatch(opts);
-    return store.delete(String(opts?.where?.id));
+  const del = vi.fn(async (_object: string, o: any) => {
+    assertEngineDeleteDispatch(o);
+    if (refused(o)) throw writeRefusal();
+    return store.delete(String(o?.where?.id));
   });
   const engine = {
     registry: { getObject: (n: string) => (n === 'task' ? SCHEMA : undefined) },
@@ -71,14 +90,21 @@ async function expectRecordNotFound(run: () => Promise<unknown>, id: string) {
 
 describe('[#4435] updateData refuses an id that names no row', () => {
   it('PATCH of a nonexistent id is 404 RECORD_NOT_FOUND, not 200 { record: null }', async () => {
-    const { p, update } = makeProtocol({ real: { id: 'real', title: 'x' } });
+    // This engine RESOLVES a `null` readback for a row that is not there (the
+    // shape `IDataEngine.update` declares), rather than refusing it the way
+    // ObjectQL's own not-found gate does — so the 404 here is the protocol's.
+    const { p, update, findOne } = makeProtocol({ real: { id: 'real', title: 'x' } });
     await expectRecordNotFound(
       () => p.updateData({ object: 'task', id: 'definitely_not_a_row', data: { title: 'y' } } as any),
       'definitely_not_a_row',
     );
-    // …and the engine was never asked to write. A refused PATCH must not fire
-    // hooks, automation or an audit row for a record that does not exist.
-    expect(update).not.toHaveBeenCalled();
+    // The write is judged FIRST, and existence is asked only after the engine
+    // resolved — the order `deleteData` has. (That no hook, automation or
+    // audit row fires for a row that is not there is the engine's to hold:
+    // its by-id branch refuses it ahead of every `before*` hook.)
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(findOne).toHaveBeenCalledTimes(1);
+    expect(update.mock.invocationCallOrder[0]).toBeLessThan(findOne.mock.invocationCallOrder[0]);
   });
 
   it('the SAME id answers 404 on the read path — the two verbs agree now', async () => {
@@ -89,37 +115,61 @@ describe('[#4435] updateData refuses an id that names no row', () => {
     );
   });
 
-  it('an existing record still updates and returns the row', async () => {
-    const { p, update } = makeProtocol({ real: { id: 'real', title: 'x' } });
+  it('an existing record still updates and returns the row — and nothing is read ahead of the engine', async () => {
+    const { p, update, findOne } = makeProtocol({ real: { id: 'real', title: 'x' } });
     const res: any = await p.updateData({ object: 'task', id: 'real', data: { title: 'y' } } as any);
     expect(update).toHaveBeenCalledTimes(1);
     expect(res).toMatchObject({ object: 'task', id: 'real', record: { title: 'y' } });
+    expect(findOne).not.toHaveBeenCalled();
   });
 
-  it('the existence probe asks EXISTENCE, not the caller\'s visibility', async () => {
-    // Load-bearing, and the first cut of this fix got it backwards. Probing
-    // with the CALLER's context turns the existence gate into an authorization
-    // gate: a row the caller cannot read comes back null and the PATCH 404s.
-    // That would (a) move an RLS decision out of the write policy where #1994
-    // put it, and (b) disarm `@proof: rls-by-id-write` — the dogfood fixture
-    // whose RED half asserts that a member who cannot READ a row but has no
-    // write policy still mutates it by id. A caller-scoped probe makes that
-    // proof go green, so the gate could no longer prove it can go red, and a
-    // future revert of #1994 would be masked by this probe.
+  it('the existence check asks EXISTENCE, not the caller\'s visibility — a write that moved its row out of scope keeps its 200', async () => {
+    // Load-bearing, and the first cut of this fix got it backwards. Asking
+    // with the CALLER's context turns the existence check into an
+    // authorization gate: a row the caller cannot read comes back null and the
+    // PATCH 404s. That would (a) move an RLS decision out of the write policy
+    // where #1994 put it, and (b) disarm `@proof: rls-by-id-write` — the
+    // dogfood fixture whose RED half asserts that a member who cannot READ a
+    // row but has no write policy still mutates it by id.
     //
-    // So the probe runs as system: "does this row exist", nothing more.
-    // Authorization stays inside engine.update, exactly where it was.
-    const { p, findOne } = makeProtocol({ real: { id: 'real' } });
-    await p.updateData({ object: 'task', id: 'real', data: {}, context: { userId: 'u1' } } as any);
+    // So it is asked as the system: "does this row exist", nothing more —
+    // and only after the engine has judged and resolved the write, on its
+    // `null` readback. Here that readback is a write that LANDED and moved
+    // the row out of the caller's row scope, so the row exists and the PATCH
+    // keeps its success.
+    const { p, findOne, store } = makeProtocol({ real: { id: 'real', owner: 'u1' } }, { leavesScope: new Set(['real']) });
+    const res: any = await p.updateData({ object: 'task', id: 'real', data: { owner: 'u2' }, context: { userId: 'u1' } } as any);
+    expect(res).toMatchObject({ object: 'task', id: 'real', record: null });
+    expect(store.get('real')).toMatchObject({ owner: 'u2' });
+    expect(findOne).toHaveBeenCalledTimes(1);
     expect(findOne.mock.calls[0][1]).toMatchObject({
       where: { id: 'real' },
       context: { isSystem: true },
     });
   });
 
-  it('a PATCH the caller may not see is still decided by RLS, not by the probe', async () => {
-    // The row exists, so the probe passes it through to the engine — where the
-    // write policy answers, as it always has. The probe must not pre-empt it.
+  it('a write the engine refuses answers the same refusal whether or not the id exists, as delete does', async () => {
+    // The engine judges the write before it asks whether the row exists, so a
+    // caller it refuses is refused alike for both ids — and this door asks
+    // nothing ahead of it.
+    const { p, findOne, store } = makeProtocol({ real: { id: 'real', title: 'x' } }, { refuse: 'u1' });
+    const answer = (run: () => Promise<unknown>) => run().then(
+      () => { throw new Error('expected a refusal, but the call resolved'); },
+      (e: any) => ({ code: e.code, status: e.status, message: e.message }),
+    );
+    const patchReal = await answer(() => p.updateData({ object: 'task', id: 'real', data: { title: 'y' }, context: { userId: 'u1' } } as any));
+    const patchMissing = await answer(() => p.updateData({ object: 'task', id: 'definitely_not_a_row', data: { title: 'y' }, context: { userId: 'u1' } } as any));
+    const deleteMissing = await answer(() => p.deleteData({ object: 'task', id: 'definitely_not_a_row', context: { userId: 'u1' } } as any));
+    expect(patchReal).toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+    expect(patchMissing).toEqual(patchReal);
+    expect(deleteMissing).toEqual(patchReal);
+    expect(findOne).not.toHaveBeenCalled();
+    expect(store.get('real')).toEqual({ id: 'real', title: 'x' });
+  });
+
+  it('a PATCH the caller may not see is still decided by RLS, not by an existence read', async () => {
+    // The write goes to the engine — where the write policy answers, as it
+    // always has. Nothing at this door pre-empts it.
     const { p, update } = makeProtocol({ hidden: { id: 'hidden' } });
     await p.updateData({ object: 'task', id: 'hidden', data: { title: 'x' }, context: { userId: 'nobody' } } as any);
     expect(update).toHaveBeenCalledOnce();

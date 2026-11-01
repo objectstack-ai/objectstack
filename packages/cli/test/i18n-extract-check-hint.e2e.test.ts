@@ -77,7 +77,6 @@ import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const CLI_PACKAGE_ROOT = resolve(HERE, '..');
 
 /**
@@ -117,7 +116,7 @@ beforeAll(() => {
   // entry point in first would edit the very bytes under test.
   shimRoot = mkdtempSync(join(tmpdir(), 'os-i18n-14895-bin-'));
   const shim = join(shimRoot, 'os');
-  writeFileSync(shim, `#!/bin/sh\nexec ${JSON.stringify(TSX)} ${JSON.stringify(CLI)} "$@"\n`, 'utf8');
+  writeFileSync(shim, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(CLI)} "$@"\n`, 'utf8');
   chmodSync(shim, 0o755);
 });
 
@@ -142,7 +141,7 @@ interface Run {
 
 /** The CLI, from source, with `--check`'s non-zero exit treated as data. */
 function runCli(args: readonly string[], cwd: string = CLI_PACKAGE_ROOT): Run {
-  const child = spawnSync(TSX, [CLI, 'i18n', 'extract', ...args], {
+  const child = spawnSync(process.execPath, [CLI, 'i18n', 'extract', ...args], {
     cwd,
     encoding: 'utf8',
     env: childEnv(),
@@ -273,7 +272,7 @@ describe('os i18n extract --check — the hint is the invocation, not a reconstr
     expect(run.status).toBe(1);
     expect(driftPaths(run.stdout)).toEqual([join('bundles', 'zh-CN.objects.generated.ts')]);
   });
-  // Every case spawns the CLI through `tsx`, and the healing cases spawn it
+  // Every case spawns the CLI's source entry, and the healing cases spawn it
   // three times; measured at ~6 s per run on a shared box, well over vitest's
   // 5 s default. Same instrument and the same generous ceiling as the sibling
   // CLI-spawning pins in this directory.

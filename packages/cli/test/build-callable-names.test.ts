@@ -42,7 +42,7 @@
  *
  * Each kind's fixture carries both collisions against an authored `functions`
  * entry (a shared function; an equal name) under disjoint names, round-trips
- * through `objectstack build` (`bin/run-dev.js`, source via tsx) and then the
+ * through `objectstack build` (`bin/run-dev.js`, source under `node`) and then the
  * runtime's own `loadArtifactBundle`, and asserts that each authored name ships
  * under itself and answers its own code, and that each hook or action ref
  * answers its own code. Every callable names a module-scope constant, so no
@@ -66,9 +66,8 @@ import { locateCallables } from '../src/utils/build-runtime.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const LOWER_CALLABLES = resolve(HERE, '../src/utils/lower-callables.ts');
-/** A cold `tsx` spawn of the CLI source entry runs well past vitest's 5 s default. */
+/** A cold spawn of the CLI source entry runs well past vitest's 5 s default. */
 const SPAWN_TIMEOUT_MS = 120_000;
 
 // ── The census ──────────────────────────────────────────────────────────────
@@ -258,7 +257,7 @@ interface Run {
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
-      TSX,
+      process.execPath,
       [CLI, ...args],
       { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
       (err, stdout, stderr) => {

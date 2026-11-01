@@ -364,6 +364,131 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
     return (relativePath: string) => resolveInsidePackageRoot(packageRoot, relativePath, 'paths');
 }
 
+/**
+ * [#28534] The package-anchored members a connector entry is handed when it is
+ * not the host's own ({@link nonHostDeclaringPackageOf}) — the package that
+ * declared it was INSTALLED into this runtime, or its stamp names a package no
+ * registration records as the host's: both
+ * {@link ConnectorProviderContext.loadPackageFile} and
+ * {@link ConnectorProviderContext.resolvePackagePath} refuse every ref.
+ *
+ * The contract resolves a relative ref against the root of the package that
+ * declared the entry. An installed package has no root on this runtime's disk
+ * — the install keeps its artifact JSON and nothing else — and the only root
+ * the host holds is its own, so answering would read, or point a launched
+ * process at, ANOTHER package's files: an install-local app naming
+ * `./src/system/connectors/status-openapi.json` materialized against the host
+ * showcase's own document. So the ref is refused, naming the entry, the
+ * package, the ref and the remedy.
+ *
+ * Members, not `undefined`: a factory handed `undefined` takes the
+ * no-filesystem path, which for `resolvePackagePath` means "keep the
+ * behaviour without it" (a stdio child inherits the host's working
+ * directory), the same cross-package reach by another road. A refusal thrown
+ * from the member is the factory's own failure, handled by the materializer
+ * like every other configuration fault (fatal at boot, a skipped entry on
+ * reload); a factory that never dereferences a ref (an inline document, an
+ * http(s) URL) never meets it.
+ */
+export function createInstalledPackageRefRefusal(
+    connectorName: string,
+    declaring: NonHostDeclaringPackage,
+    member: 'reads' | 'paths',
+): (relativePath: string) => Promise<never> {
+    return async (relativePath: string) => {
+        const whose = declaring.why === 'installed'
+            ? `is declared by package '${declaring.packageId}', which was installed into this runtime and has no ` +
+                'package root on its disk'
+            : `names package '${declaring.packageId}' as its owner, which no package registration in this runtime ` +
+                'records as the host\'s';
+        const head =
+            `connector instance '${connectorName}' ${whose}, so its package ${member === 'reads' ? 'file' : 'path'} ref ` +
+            `'${String(relativePath)}' is refused: a relative ref resolves only against the root of the package that ` +
+            `declared it, never against the host's.`;
+        const remedy = member === 'reads'
+            ? ' Rebuild the package with a current `os build`, which carries an `openapi` spec file into the artifact, ' +
+                'or inline the document in the package.'
+            : ' A provider that needs a location inside the package (a stdio MCP server\'s working directory) cannot ' +
+                'serve an installed package\'s entry; declare a transport that needs none, such as an http MCP server.';
+        throw new Error(head + remedy);
+    };
+}
+
+/**
+ * [#28534] What {@link nonHostDeclaringPackageOf} reads: the objectql engine's
+ * package registry rows, and its record of each artifact residual's origin.
+ */
+export interface DeclaringPackageReaders {
+    /** `SchemaRegistry.getPackage` — the row the registering door wrote, with its `source`. */
+    getPackage?: (id: string) => { source?: unknown } | undefined;
+    /** `ObjectQL.residualOwnerSource` — the registering door's statement for a residual owner id, which has no row. */
+    residualOwnerSource?: (id: string) => 'code' | 'marketplace' | undefined;
+}
+
+/**
+ * [#28534] A declaring package whose entries are NOT the host's own: one the
+ * runtime installed (`installed`), or a stamp no registration records as the
+ * host's (`unrecorded`).
+ */
+export interface NonHostDeclaringPackage {
+    packageId: string;
+    why: 'installed' | 'unrecorded';
+}
+
+/**
+ * [#28534] Whether a connector entry is the host's own, whose package-relative
+ * refs resolve against the host's root, or not — then the answer names the
+ * package and why, and its refs are refused
+ * ({@link createInstalledPackageRefRefusal}).
+ *
+ * ## What it trusts
+ *
+ * Only what a REGISTERING DOOR wrote: the package registry's row for the
+ * entry's `_packageId` and that row's `source` (`InstalledPackageSchema.source`,
+ * #23972), and, for an artifact residual's owner, which has no row, the
+ * door's statement the `manifest` service recorded (`ObjectQL.residualOwnerSource`).
+ * The install-local door registers `'marketplace'` at install and at every
+ * restart's rehydrate, for every member of a `packages[]` bundle whatever its
+ * entry states (`asMarketplaceRegistration`, `@objectstack/cloud-connection`);
+ * the host's boot, its multi-package artifact's members and every plugin
+ * package register `'code'`.
+ *
+ * ## What it does not trust
+ *
+ * The item's own stamp, as a statement of ownership: it is used only as the
+ * key the door's record is looked up under, and the registration refuses a
+ * body whose `_packageId` differs from the package registering it
+ * (`collectionItemOwnerStampRefusal`, `@objectstack/objectql`), so a stamp on
+ * a registered item is the registering door's. Nor an artifact entry's stated
+ * `source` — it reaches here only as the row the door wrote.
+ *
+ * ## The answers
+ *
+ *  - no registry at all: the host's (no door could have registered a package);
+ *  - no stamp: the host's (an item registered into no package);
+ *  - a row: `'marketplace'` is `installed`; any other source is the host's
+ *    (`'authored'` packages keep today's reading, a separate question);
+ *  - no row, but the stamp is a residual owner a `'code'` door recorded: the
+ *    host's; one an install recorded: `installed`;
+ *  - any other stamp — no row and no residual record, or not a non-empty
+ *    string: `unrecorded`, refused. Fail closed: a stamp nobody's registration
+ *    answers for is never read as the host's.
+ */
+export function nonHostDeclaringPackageOf(
+    entry: unknown,
+    readers: DeclaringPackageReaders | undefined,
+): NonHostDeclaringPackage | undefined {
+    if (readers === undefined) return undefined;
+    const stamp = (entry as { _packageId?: unknown } | null | undefined)?._packageId;
+    if (stamp === undefined) return undefined;
+    if (typeof stamp !== 'string' || stamp.length === 0) return { packageId: String(stamp), why: 'unrecorded' };
+    const row = readers.getPackage?.(stamp);
+    if (row !== undefined) return row.source === 'marketplace' ? { packageId: stamp, why: 'installed' } : undefined;
+    const residual = readers.residualOwnerSource?.(stamp);
+    if (residual === 'code') return undefined;
+    return { packageId: stamp, why: residual === 'marketplace' ? 'installed' : 'unrecorded' };
+}
+
 // The credential resolver lives in ./credential-resolver.ts so the engine reads
 // the same one for an `api` flow's `config.secretRef`; re-exported unchanged.
 export { defaultEnvCredentialResolver, type CredentialResolver };
@@ -705,6 +830,26 @@ function connectorInstanceSignature(entry: {
         // the inputs that actually change the transport.
         requestTimeoutMs: entry.requestTimeoutMs ?? null,
     });
+}
+
+/**
+ * [#28591] The provider-bound instances a declaration asks the reconcile for,
+ * as one comparable string: the name and {@link connectorInstanceSignature} of
+ * every named, provider-bound entry not `enabled: false`, sorted. Two reads
+ * with the same fingerprint ask for the same set of instances with the same
+ * inputs. Credential and connection state are not in it: they are read by the
+ * reconcile itself, not declared.
+ */
+function declaredInstanceFingerprint(declared: readonly unknown[]): string {
+    const parts: string[] = [];
+    for (const raw of declared) {
+        const entry = raw as DeclaredConnectorItem | undefined;
+        if (typeof entry?.name !== 'string' || entry.name.length === 0) continue;
+        if (typeof entry.provider !== 'string' || entry.provider.length === 0) continue;
+        if (entry.enabled === false) continue;
+        parts.push(`${entry.name}=${connectorInstanceSignature(entry)}`);
+    }
+    return stableStringify(parts.sort());
 }
 
 /**
@@ -1067,6 +1212,13 @@ export class AutomationServicePlugin implements Plugin {
      * pre-edit one.
      */
     private reloadedConnectors?: { items: unknown[]; owners: ReadonlySet<string> };
+    /**
+     * [#28591] The {@link declaredInstanceFingerprint} of the declaration the
+     * most recent reconcile read. The `kernel:bootstrapped` check compares the
+     * registry against it, so a boot whose registry did not change after
+     * `start()` runs no second reconcile.
+     */
+    private reconciledDeclaration?: string;
     /** Serializes reconcile runs — see {@link materializeDeclaredConnectors}. */
     private reconcileQueue: Promise<void> = Promise.resolve();
     private destroyed = false;
@@ -1975,6 +2127,20 @@ export class AutomationServicePlugin implements Plugin {
         // An operational blip in one integration must not take the whole app down.
         await this.materializeDeclaredConnectors(ctx, { fatal: true });
 
+        // ── [#28591] Connectors registered after start(), during the boot ─────
+        // The reconcile above reads the registry as `start()` leaves it. A
+        // package a plugin registers in its own `kernel:ready` handler arrives
+        // after it — the install-local rehydrate re-registers every installed
+        // package there — and announces no reload, so its connectors were never
+        // materialized until some unrelated reload. Its flows already bind: the
+        // `kernel:ready` flow sync below reads the protocol's view after the
+        // rehydrate. Connectors are read again at `kernel:bootstrapped`, which
+        // fires once every `kernel:ready` handler has settled, whatever the
+        // plugin order. See {@link reconcileConnectorsRegisteredDuringBoot}.
+        ctx.hook('kernel:bootstrapped', async () => {
+            await this.reconcileConnectorsRegisteredDuringBoot(ctx);
+        });
+
         // ── Runtime re-bind: re-sync flow triggers on 'metadata:reloaded' ──────
         // Fires on two RUNTIME events (never on a cold boot — the kernel:ready
         // bind below covers that): a dev `os dev` artifact recompile (MetadataPlugin
@@ -2254,6 +2420,32 @@ export class AutomationServicePlugin implements Plugin {
     }
 
     /**
+     * [#28534] The readers {@link nonHostDeclaringPackageOf} judges a
+     * connector entry's origin with, off the `objectql` engine the declared
+     * items are listed out of ({@link readDeclaredConnectorItems}): its package
+     * registry's rows and its residual-owner record. `undefined` when no
+     * `objectql` service is registered: then no door has registered a package
+     * in this kernel either.
+     */
+    private declaringPackageReadersOrNone(ctx: PluginContext): DeclaringPackageReaders | undefined {
+        let ql: {
+            registry?: { getPackage?: (id: string) => { source?: unknown } | undefined };
+            residualOwnerSource?: (id: string) => 'code' | 'marketplace' | undefined;
+        } | undefined;
+        try {
+            ql = ctx.getService('objectql');
+        } catch {
+            return undefined; // no registry service
+        }
+        if (!ql) return undefined;
+        const registry = ql.registry;
+        return {
+            getPackage: registry && typeof registry.getPackage === 'function' ? (id) => registry.getPackage!(id) : undefined,
+            residualOwnerSource: typeof ql.residualOwnerSource === 'function' ? (id) => ql!.residualOwnerSource!(id) : undefined,
+        };
+    }
+
+    /**
      * The declarative `connectors:` entries this plugin should treat as the
      * current declaration — the input to both the descriptor audit and the
      * ADR-0097 reconcile.
@@ -2285,6 +2477,7 @@ export class AutomationServicePlugin implements Plugin {
      * down every live connector on a reload. Same rule as the flow re-sync's
      * `null` read: never tear down on an absent answer.
      */
+
     private async readDeclaredConnectorItems(
         ctx: PluginContext,
         opts: { post: boolean },
@@ -2397,6 +2590,36 @@ export class AutomationServicePlugin implements Plugin {
      * re-materialize. Degraded instances are retried with exponential backoff
      * ({@link DECLARATIVE_RETRY_BASE_MS}) and on every reconcile.
      */
+    /**
+     * [#28591] Reconcile once more at `kernel:bootstrapped`, only when the
+     * registry's connector declaration differs from the one the last reconcile
+     * read — i.e. a plugin registered (or changed) a provider-bound entry after
+     * the boot reconcile in `start()`. A boot that registered nothing more runs
+     * no second reconcile.
+     *
+     * Reload semantics (`fatal: false`): an entry registered here arrives the
+     * way a hot install's does, so a configuration fault in it is logged and
+     * the entry skipped, as on install — it never fails the boot. A run that
+     * throws anyway is reported at `warn`: a connector that is not live is a
+     * functional degradation, visible on `GET /automation/connectors`.
+     */
+    private reconcileConnectorsRegisteredDuringBoot(ctx: PluginContext): Promise<void> {
+        return this.onReconcileQueue(async () => {
+            if (!this.engine || this.destroyed) return;
+            const declared = await this.readDeclaredConnectorItems(ctx, { post: false });
+            if (!declared || declaredInstanceFingerprint(declared) === this.reconciledDeclaration) return;
+            try {
+                await this.reconcileDeclaredConnectors(ctx, { fatal: false });
+            } catch (err) {
+                ctx.logger.warn(
+                    '[Automation] the connector reconcile for packages registered during the boot failed — their '
+                        + 'connector instances are not live until the next metadata reload or restart.',
+                    describeThrownForLog(err),
+                );
+            }
+        });
+    }
+
     private materializeDeclaredConnectors(ctx: PluginContext, opts: { fatal: boolean }): Promise<void> {
         // Serialize runs: boot, `metadata:reloaded`, and the degraded-retry
         // timer can all request a reconcile; concurrent runs would race the
@@ -2432,6 +2655,7 @@ export class AutomationServicePlugin implements Plugin {
         // wrote after boot.
         const declared = await this.readDeclaredConnectorItems(ctx, { post: !opts.fatal });
         if (!declared) return; // no registry, no reloaded artifact — nothing declared
+        this.reconciledDeclaration = declaredInstanceFingerprint(declared);
 
         // Report a reconcile problem: fatal (boot) throws; soft (reload) logs.
         //
@@ -2582,6 +2806,11 @@ export class AutomationServicePlugin implements Plugin {
         for (const name of [...this.credentialRefusalAttempts.keys()]) {
             if (!desired.has(name)) this.credentialRefusalAttempts.delete(name);
         }
+
+        // [#28534] The engine's package rows and residual-owner record, read
+        // once per run (each lookup is live), answer which declaring packages
+        // are not the host's own ({@link nonHostDeclaringPackageOf}).
+        const declaringReaders = this.declaringPackageReadersOrNone(ctx);
 
         // 2. Add new instances and re-materialize changed ones (signature diff).
         let changed = 0;
@@ -2819,6 +3048,7 @@ export class AutomationServicePlugin implements Plugin {
                 retryConfig = parsed.data;
             }
 
+            const notHost = nonHostDeclaringPackageOf(entry, declaringReaders);
             const providerCtx: ConnectorProviderContext = {
                 name,
                 label: entry.label ?? name,
@@ -2839,11 +3069,18 @@ export class AutomationServicePlugin implements Plugin {
                 requestTimeoutMs: entry.requestTimeoutMs,
                 // #3016 — lets a factory dereference relative file refs (e.g.
                 // openapi's `providerConfig.spec: './billing-openapi.json'`),
-                // confined to the stack/package root.
-                loadPackageFile: createPackageFileLoader(this.options.packageRoot),
+                // confined to the stack/package root. [#28534] An entry that is
+                // not the host's own (an INSTALLED package's, or one whose stamp
+                // no registration answers for) is handed refusals instead: such
+                // a package has no root here, and the host's is not its own.
+                loadPackageFile: notHost === undefined
+                    ? createPackageFileLoader(this.options.packageRoot)
+                    : createInstalledPackageRefRefusal(name, notHost, 'reads'),
                 // #22434 — the same root as a location (e.g. a launched
                 // process's working directory), under the same confinement.
-                resolvePackagePath: createPackagePathResolver(this.options.packageRoot),
+                resolvePackagePath: notHost === undefined
+                    ? createPackagePathResolver(this.options.packageRoot)
+                    : createInstalledPackageRefRefusal(name, notHost, 'paths'),
             };
 
             let materialization;

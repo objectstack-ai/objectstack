@@ -113,10 +113,15 @@ describe('PUT / DELETE /api/v1/meta/flow/:name on a packaged flow — the refusa
         expect(r.status).toBe(403);
         expect(r.code).toBe('NOT_OVERRIDABLE');
         // [#23577] What the door knows and where the names are listed — no
-        // create advice, no source-artifact advice.
+        // create advice, no source-artifact advice. [#28410, ADR-0146 D2] On a
+        // type a declared override can replace, the sentence then names the
+        // author's two fixes: declare the override from the base's paired
+        // `.custom`, or rename (the card's "declare or rename" sealed sentence).
         expect(r.message).toBe(
             `'page/${PACKAGED_PAGE}' is provided by a managed package and is sealed: it cannot be written here. `
-            + 'GET /api/v1/meta/page lists the names in use.',
+            + 'GET /api/v1/meta/page lists the names in use. '
+            + "To change it, declare an override from 'com.example.pkg.custom' "
+            + "(overrides: { package: 'com.example.pkg', basedOn }), or rename the item.",
         );
     });
 });
