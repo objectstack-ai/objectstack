@@ -42,10 +42,19 @@
  * run closes it, then the runner toasts as before. A refused run leaves it
  * open with every value as typed and the refusal shown above the buttons, so
  * the user can fix the input and confirm again, or cancel. The refusal is the
- * run's own `error`, shown as it came: the dialog marks no field from it,
- * because nothing in the result names one (the runner's `ActionResult`
- * carries the refusal as text only). Without `run` the dialog closes on
+ * run's own `error`, shown as it came. Without `run` the dialog closes on
  * Confirm, as it always did.
+ *
+ * ## A refusal naming a required param marks it (objectstack#28289)
+ *
+ * A refused run whose `ActionResult.fieldErrors` holds a `required` entry for
+ * a param this dialog draws marks that param the way the dialog's own
+ * required check does: the translated `actionDialog.requiredError` sentence
+ * with the param's label, so the user reads it in their language, not the
+ * server's English. Create User left without an email answers that way. When
+ * every entry is marked, the refusal box is not drawn, since it would only
+ * repeat the marks in English; any entry the dialog cannot mark (another
+ * code, a param it does not draw) keeps the box, with the server's text.
  */
 
 import { Suspense, useState, useEffect, useMemo } from 'react';
@@ -136,6 +145,29 @@ function refusalText(result: ActionResult): string | null {
   if (typeof raw === 'string') return raw || null;
   const nested = (raw as { message?: unknown } | null | undefined)?.message;
   return typeof nested === 'string' && nested ? nested : null;
+}
+
+/**
+ * The marks a refused run's `fieldErrors` put on the dialog's params, as the
+ * error keys the dialog's own check uses (see the header, objectstack#28289),
+ * and whether they cover every entry. Only a `required` entry whose `field`
+ * names a collected param is marked: that is the one the dialog can word
+ * itself. `complete` is false when there is nothing to mark, so a refusal
+ * without entries keeps its box.
+ */
+export function refusalParamMarks(
+  result: ActionResult,
+  params: readonly ActionParamDef[],
+): { marks: Record<string, string>; complete: boolean } {
+  const entries = result.fieldErrors ?? [];
+  const collected = new Set(params.filter((p) => !p.unresolvedField && !p.carryOver).map((p) => p.name));
+  const marks: Record<string, string> = {};
+  let unmarked = 0;
+  for (const entry of entries) {
+    if (entry.code === 'required' && collected.has(entry.field)) marks[entry.field] = 'actionDialog.requiredError';
+    else unmarked += 1;
+  }
+  return { marks, complete: entries.length > 0 && unmarked === 0 };
 }
 
 interface ActionParamDialogProps {
@@ -589,7 +621,9 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
         setSubmitting(false);
       }
       if (!result.success) {
-        setRefusal(refusalText(result));
+        const { marks, complete } = refusalParamMarks(result, visibleParams);
+        setErrors(marks);
+        setRefusal(complete ? null : refusalText(result));
         return;
       }
     }

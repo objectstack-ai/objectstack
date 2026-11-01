@@ -576,6 +576,7 @@ const result = ApiMethod.parse(data);
 | :--- | :--- | :--- | :--- |
 | **extend** | `string` | ✅ | Target object name (FQN) to extend |
 | **fields** | `Record<string, { name?: string; label?: string; type: Enum<'text' \| 'textarea' \| 'email' \| 'url' \| 'phone' \| 'password' \| 'secret' \| …>; description?: string; … }>` | optional | Fields to add/override |
+| **fieldPatches** | `Record<string, { label?: string; description?: string; inlineHelpText?: string; placeholder?: string; … }>` | optional | [EXPERIMENTAL — not enforced] Display patches of the target object's own fields, keyed by field name: change a vendor field's display properties (BASE_FIELD_DISPLAY_WHITELIST: label, description, help text, placeholder, option labels) without taking the field over, so its type, values and rules stay the vendor's and its upgrades still apply (ADR-0146 D10). Nothing applies a patch yet: the registry merge that does is rollout card N-23d, and until it lands the engine drops this slot at registration. Example: `fieldPatches: { industry: { label: 'Sector', inlineHelpText: 'The market the account sells into', options: { tech: { label: 'Technology' } } } }`. |
 | **label** | `string` | optional | Override label for the extended object |
 | **pluralLabel** | `string` | optional | Override plural label for the extended object |
 | **description** | `string` | optional | Override description for the extended object |
@@ -668,6 +669,16 @@ const result = ApiMethod.parse(data);
 | **_packageId** | `string` | optional | Owning package machine id. |
 | **_packageVersion** | `string` | optional | Owning package version. |
 | **_lockDocsUrl** | `string` | optional | Optional documentation link surfaced next to _lockReason. |
+
+### Nested Shape: `ObjectExtension.fieldPatches[string]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | optional | Human readable label |
+| **description** | `string` | optional | Tooltip/Help text |
+| **inlineHelpText** | `string` | optional | Help text displayed below the field in forms |
+| **placeholder** | `string` | optional | Placeholder text rendered inside the empty input (the HTML placeholder attribute); disappears once a value is entered. Distinct from `inlineHelpText` (always-visible help rendered beside/under the input) and `description` (tooltip/developer documentation). |
+| **options** | `Record<string, { label?: string }>` | optional | Display patches of the base field's options, keyed by each option's stored `value` (which stays the vendor's); each entry takes the option display keys of BASE_FIELD_DISPLAY_WHITELIST. |
 
 ### Nested Shape: `ObjectExtension.indexes[number]`
 

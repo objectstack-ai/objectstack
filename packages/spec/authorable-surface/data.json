@@ -688,6 +688,7 @@
     "data/ObjectDependencyNode:references",
     "data/ObjectExtension:description",
     "data/ObjectExtension:extend",
+    "data/ObjectExtension:fieldPatches",
     "data/ObjectExtension:fields",
     "data/ObjectExtension:indexes",
     "data/ObjectExtension:label",

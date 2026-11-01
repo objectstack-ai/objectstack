@@ -499,7 +499,7 @@
       "title": "CRUD × permission-set matrix: every access-matrix.json row holds — allowed verbs succeed, withheld verbs 403, VAMA bounded",
       "since": "v15",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -521,13 +521,13 @@
         ]
       },
       "steps": [
-        "boot the showcase on its own port and DB; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set by inserting the sys_user_permission_set row (system context), mirroring showcase-permission-zoo.dogfood.test.ts. ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (a pending sys_invitation row admits the sign-up), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
+        "boot the showcase on its own port and DB; admin session; for each permission set in access-matrix.json create a fresh member (unique email) and grant exactly that set with one sys_user_permission_set row. A live run writes it as the admin over HTTP: POST /api/v1/data/sys_user_permission_set {\"user_id\": MEMBER_ID, \"permission_set\": SET_NAME} answers 201 and the grant takes effect (QA run #28545; the object declares create among its apiMethods, packages/plugins/plugin-security/src/objects/sys-user-permission-set.object.ts). The pins insert the same row in system context (showcase-permission-zoo.dogfood.test.ts, showcase-crud-persona-matrix.dogfood.test.ts). ⚠️ the stock showcase declares no auth.audience, so its posture is the invite_only default and an uninvited POST /api/v1/auth/sign-up/email answers 403 SELF_REGISTRATION_CLOSED: mint each member by an admin POST /api/v1/auth/organization/invite-member for that address first (a pending sys_invitation row admits the sign-up), or by an admin POST /api/v1/auth/admin/create-user, which answers mustChangePassword:true",
         "as admin (or a helper member), seed one FOREIGN-owned probe row per object under test (e.g. a showcase_private_note, showcase_inquiry, showcase_invoice + line, showcase_announcement owned by someone other than the persona)",
         "for every row of access-matrix.json drive all four verbs as that persona: POST /api/v1/data/<object> {minimal valid payload}, GET /api/v1/data/<object> + GET /api/v1/data/<object>/<probe id>, PATCH /api/v1/data/<object>/<own or probe id>, DELETE /api/v1/data/<object>/<id> — capture status + the top-level body.code for each cell (acceptance[1])",
         "for rows with viewAllRecords:true (auditor on showcase_inquiry/showcase_invoice/showcase_invoice_line/showcase_private_note): GET the foreign probe by id and list; for the SAME objects re-run as a persona whose row says viewAllRecords:false",
         "for rows with modifyAllRecords:true (ops on showcase_announcement): PATCH the foreign-owned announcement; re-run the same PATCH as member_default (modifyAllRecords:false)",
         "for the guest_portal row pair on showcase_inquiry (create:true, read:false): record clause 5 blocked(dependency, #23267) per knownGaps[2]: no door binds a set to the guest anchor (ADR-0138 D3 item 5, ruling C), a member holding the set reads inquiries through the baseline, and REST anonymous answers 401 to both verbs",
-        "for the 4 showcase_field_ops_delegate × sys_* rows: their 16 cells are pinned by the dogfood case 'the 16 showcase_field_ops_delegate × sys_* cells answer the matrix' (automated.ref) — cite its output per RUNNER rule 6 rather than re-deriving it; when a run drives the delegate live as well, for its sys_user_position edit and delete cells, probe a row the DELEGATE created — a row another principal created meets the platform's write ownership floor (member_default owner_only_writes / owner_only_deletes, created_by == current_user.id), so its verdict does not read the delegate's grant",
+        "for the 4 showcase_field_ops_delegate × sys_* rows: their 16 cells are pinned by the dogfood case 'the 16 showcase_field_ops_delegate × sys_* cells answer the matrix' (automated.ref) — cite its output per RUNNER rule 6 rather than re-deriving it; when a run drives the delegate live as well, for its sys_user_position edit and delete cells, probe a row the DELEGATE created — a row another principal created meets the platform's write ownership floor (member_default owner_only_writes / owner_only_deletes, created_by == current_user.id), so its verdict does not read the delegate's grant. A live delegate needs its Field Operations membership beside the set grant of steps[0], or its sys_user_position cells have no subtree to act in: the admin writes POST /api/v1/data/sys_business_unit_member {\"business_unit_id\": \"bu_field_ops\", \"user_id\": DELEGATE_ID} (QA run #28545), the row the pin inserts in system context (showcase-crud-persona-matrix.dogfood.test.ts; bu_field_ops and its offices bu_west_coast and bu_east_coast are seeded in examples/app-showcase/src/data/seed/index.ts)",
         "record the full verb × set × object verdict matrix and diff it against access-matrix.json (unioned with the baseline per the known gap above)"
       ],
       "acceptance": [
@@ -664,6 +664,12 @@
           "date": "2026-10-31",
           "change": "Two findings of QA run #27481. acceptance[1] (clause, verify) and steps[2] said error.code PERMISSION_DENIED; the data door answers {error: MESSAGE, code, object} (packages/types/src/data-error-classification.ts mapDataError), and showcase-crud-persona-matrix.dogfood.test.ts reads the top-level code for every denial and for the 405 OBJECT_API_METHOD_NOT_ALLOWED cells. The clause now names body.code, and the verify says body.error.code does not exist on this door. acceptance[6].verify and steps[6] still called the 16 showcase_field_ops_delegate × sys_* cells hand-driven, though automated.ref has pinned them since revision 9 (that revision's row noted both were left behind). Both now name the pin case, so the pin covers all 45 rows × 4 verbs; steps[6]'s own-row rule for sys_user_position stays for a live pass. No assertion is weakened. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6493994883",
           "ref": "#27481"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-01",
+          "change": "QA run #28545 (W3-C1R) finding: steps[0] and steps[6] described the set grant only as a system-context insert. steps[0] now names the live door, an admin POST /api/v1/data/sys_user_permission_set {user_id, permission_set} (201, effective, as #28545 drove it; sys-user-permission-set.object.ts declares create), and keeps the pins' system-context insert as theirs. steps[6] adds the delegate's POST /api/v1/data/sys_business_unit_member into bu_field_ops, the membership the pin places beside the grant (showcase-crud-persona-matrix.dogfood.test.ts). No clause changed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
+          "ref": "#28545"
         }
       ]
     },
@@ -672,7 +678,7 @@
       "title": "Sharing-model / OWD matrix: private, public_read, public_read_write, controlled_by_parent each enforce their declared baseline",
       "since": "v15",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -693,7 +699,7 @@
         "boot the showcase on its own port and DB; create members A and B (baseline), two contributor members C1/C2 (grant showcase_contributor), an ops member, an auditor member",
         "private: as A create a showcase_private_note; as B list, GET by id, PATCH it",
         "public_read: as admin (or ops) create a showcase_announcement owned by someone other than B; as B GET list + by id, then PATCH it; as ops PATCH the same announcement (modifyAllRecords contrast)",
-        "public_read_write: as admin create a showcase_project with status 'planned' in the body — project_status_flow declares initialStates ['planned'] with insert among its events, so any other initial status answers 400 invalid_initial_state (examples/app-showcase/src/data/objects/project.object.ts; QA run #27481); as C1 (allowEdit:true on projects, no project RLS) GET it and PATCH a non-FLS field (e.g. name suffix) — record-level write open by OWD; as A (member_default, allowEdit:false) attempt the same PATCH — the object-level bit must still gate",
+        "public_read_write: as admin create a showcase_project with {\"name\": \"…\", \"status\": \"planned\", \"account\": \"<a seeded showcase_account id>\"} — account is a required lookup (required: true in examples/app-showcase/src/data/objects/project.object.ts), so a body without it is refused 400 (QA run #28545 read 'Account is required'); and project_status_flow declares initialStates ['planned'] with insert among its events, so any other initial status answers 400 invalid_initial_state (examples/app-showcase/src/data/objects/project.object.ts; QA run #27481); as C1 (allowEdit:true on projects, no project RLS) GET it and PATCH a non-FLS field (e.g. name suffix) — record-level write open by OWD; as A (member_default, allowEdit:false) attempt the same PATCH — the object-level bit must still gate",
         "controlled_by_parent: as C1 POST /api/v1/data/showcase_invoice {\"name\": \"INV-C1-1\", \"owner\": \"<C1 email>\", \"account\": \"<a seeded, non-churned showcase_account id>\", \"status\": \"draft\"} (account is a required lookup, so a body without it is refused 400, and an invoice on a churned account is refused by the no_invoice_for_churned_account rule — examples/app-showcase/src/data/objects/invoice.object.ts; QA run #27481) then POST /api/v1/data/showcase_invoice_line {\"invoice\": <that id>, \"product\": <seeded product id>, \"quantity\": 1}; as C2 list lines, GET C1's line by id, PATCH it",
         "as C1: GET/PATCH their OWN line by id (the entitled side of ADR-0055 derivation)",
         "as auditor: list showcase_invoice_line — viewAllRecords crosses the derived scope",
@@ -815,6 +821,12 @@
           "date": "2026-10-31",
           "change": "steps[3] and steps[4] name the bodies the showcase accepts, as QA run #27481 found. steps[4]'s invoice body omitted account, a required lookup on showcase_invoice (examples/app-showcase/src/data/objects/invoice.object.ts), and an account must not be churned (rule no_invoice_for_churned_account). steps[3]'s project create names status 'planned': project_status_flow declares initialStates ['planned'] with insert among its events (project.object.ts), so any other initial status answers 400 invalid_initial_state, which #27481 hit with 'completed'. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6493994883",
           "ref": "#27481"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-01",
+          "change": "QA run #28545 (W3-C1R) finding: steps[3]'s project body named status 'planned' but not the account lookup, which project.object.ts declares required: true, so the create answered 400 'Account is required'. The body is now spelled in full, {name, status: 'planned', account: a seeded showcase_account id}, beside the existing initial-state note. The 400 wording is #28545's live reading; the required flag is read from source. No clause changed. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
+          "ref": "#28545"
         }
       ]
     },
@@ -3802,7 +3814,7 @@
       "title": "Under a walled posture (group / isolated) environment metadata and the security catalog belong to the platform operator: an org owner holding manage_metadata is refused 403 on every /meta write verb, every /packages write, install-local of a catalog-carrying package, _migrate-stored and POST /automation — and the single posture is unchanged",
       "since": "v18",
       "status": "active",
-      "revision": 7,
+      "revision": 8,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -3824,7 +3836,7 @@
       },
       "steps": [
         "walled boot, as the org owner: PUT /api/v1/meta/object/qa_walled_probe (a minimal object body that declares sharingModel, e.g. 'private': the admitted repeats in steps[2] and steps[3] reach the save door's authoring rules, which refuse an object with no authored sharingModel 422 security-owd-unset (packages/lint/src/validate-security-posture.ts#SECURITY_OWD_UNSET), a 422 that reads as the admission failing); PUT /api/v1/meta/permission/showcase_member_default (any body; an EXISTING set, so the refusal is of an overwrite — the showcase declares no showcase_member_access, whose read-back answers 404, and naming it tests a create-refusal instead); POST /api/v1/meta/view/SOME_VIEW/publish; DELETE /api/v1/packages/com.example.showcase",
-        "walled boot, as the org owner: POST /api/v1/security/permission-sets/SOME_SET/clone",
+        "walled boot, as the org owner: POST /api/v1/security/permission-sets/SOME_SET/clone; POST /api/v1/meta/_migrate-stored with {} (the preview: the walled refusal answers before anything is read, preview and apply alike, packages/rest/src/meta-migrate-stored-walled-refusal.test.ts); POST /api/v1/automation with a minimal flow definition named qa_walled_flow (the walled refusal answers right after the manage_metadata gate, before the automation service is touched, packages/runtime/src/domains/automation-walled-definition-write.test.ts), then GET /api/v1/automation/qa_walled_flow, which must not find it",
         "walled boot, as the operator: repeat the object PUT and confirm it is admitted (then delete the probe)",
         "single-posture boot, as admin: the same object PUT is admitted (control)"
       ],
@@ -3832,11 +3844,11 @@
         {
           "clause": "every environment-metadata and catalog write door refuses a non-operator under a walled posture — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
           "oracle": "test",
-          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=1 FILE`, one package at a time, never through a bare `--`: RUNNER environment facts hold the Tier 1 vitest pins under this container's memory limit only at --maxWorkers=1); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "each org-owner write on the walled boot answers 403 (FORBIDDEN on /meta, PERMISSION_DENIED on the dispatcher /packages and /security doors) and stores nothing (GET of the item afterwards is unchanged/404)",
+          "clause": "each org-owner write on the walled boot answers 403 (FORBIDDEN on /meta, POST /meta/_migrate-stored included; PERMISSION_DENIED on the dispatcher /packages, /security and /automation doors, POST /automation included) and stores nothing (GET of the item afterwards is unchanged/404; the automation read-back finds no qa_walled_flow)",
           "oracle": "api",
           "verify": "status + error.code per call + a read-back",
           "evidence": "one line per call + the read-backs"
@@ -3906,6 +3918,12 @@
           "date": "2026-10-31",
           "change": "Three findings of the wave-3 sweep. steps[0] PUT /api/v1/meta/permission/showcase_member_access named a set the showcase does not have (QA runs #27409 and #27481: the read-back answers 404), so the refusal it scored was a create-refusal; it now names the existing showcase_member_default (examples/app-showcase/src/security/permission-sets.ts), so the refused write is an overwrite and acceptance[1]'s read-back is 'unchanged', not 404. fixtures.requires[0] keeps `pnpm dev -- --fresh` and adds the shared-checkout boot: a default os dev compiles objectstack.config.ts into the app's dist/objectstack.json (packages/cli/src/commands/dev.ts, compile flag default on), so concurrent runners boot `objectstack dev --fresh --no-compile -p PORT`, which serves the existing artifact (still compiled when missing; warns when stale) — #27481's own boot line. knownGaps[1] is added for the install-local leg #27481 parked as a gap: it rests on the wall-environment-metadata-refusal dogfood pin (acceptance[0]), and a live leg boots from a scratch copy per RUNNER.md's install-isolation fact. No clause changed. Read from source at base efdddc9060. Wave anchor #27377, wave-3 accuracy slice S3; finding parked in anchor comment 6488948228 (C2a) and 6493994883 (C1)",
           "ref": "#27481"
+        },
+        {
+          "revision": 8,
+          "date": "2026-11-01",
+          "change": "Two QA run #28545 (W3-C1R) findings. acceptance[0].verify prescribed --maxWorkers=2 against RUNNER's memory fact (the Tier 1 vitest pins hold under the container's limit only at --maxWorkers=1); it now says --maxWorkers=1, one package at a time, as cli.organization-ownership-ceremony acceptance[0] does. The title names _migrate-stored and POST /automation, but no step drove them: steps[1] adds both doors as the org owner, and acceptance[1] names their codes, 403 FORBIDDEN (the /meta door, pinned by meta-migrate-stored-walled-refusal.test.ts) and 403 PERMISSION_DENIED (the dispatcher, pinned by automation-walled-definition-write.test.ts), the codes #28545 read live. acceptance[1] gains two calls; no clause weakened. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
+          "ref": "#28545"
         }
       ]
     },

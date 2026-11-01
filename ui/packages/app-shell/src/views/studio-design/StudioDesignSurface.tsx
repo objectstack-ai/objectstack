@@ -79,7 +79,7 @@ import {
   type StudioPendingDrafts,
 } from './studioItemDraftStatus.js';
 import { packagedAutomationPath } from './BuilderLanding.js';
-import { FlowItemMoreMenu } from './FlowItemMoreMenu.js';
+import { FlowItemMoreMenu, type FlowCopied } from './FlowItemMoreMenu.js';
 import { FlowLedgerSwitch } from './FlowLedgerSwitch.js';
 import { requestFlowToggle, useFlowLedgerWalledReadOnly } from '../setup/packagedFlowLedger.js';
 import { activationReading } from '../setup/packagedFlows.js';
@@ -8739,6 +8739,32 @@ function withStartTrigger(
 /** No navigation order: one shared empty list, so the rail's memo holds across renders. */
 const NO_OBJECT_ORDER: readonly string[] = [];
 
+/**
+ * objectstack#28567 — what the Automations pillar's "New similar" strip says:
+ * the copy the clone door saved, shown on that copy in the package the answer
+ * named, or an answer that named no package (nothing opened). `notice` is the
+ * door's sentence, shown as sent.
+ */
+type FlowCopiedStrip =
+  | { kind: 'landed'; name: string; packageId: string; notice: string }
+  | { kind: 'noPackage'; name: string; notice: string };
+
+/** The navigation-state key the copy's landing rides to the copy's pillar on. */
+const FLOW_COPIED_ARRIVAL_STATE = 'flowNewSimilar';
+
+/**
+ * The landing a "New similar" navigation carried, kept only when it names
+ * THIS package, so a stale history entry of another package shows nothing.
+ */
+function readFlowCopiedArrival(state: unknown, packageId: string | null): FlowCopiedStrip | null {
+  const arrival = (state as Record<string, unknown> | null | undefined)?.[FLOW_COPIED_ARRIVAL_STATE] as
+    | Partial<Extract<FlowCopiedStrip, { kind: 'landed' }>>
+    | undefined;
+  if (!arrival || arrival.kind !== 'landed' || packageId === null || arrival.packageId !== packageId) return null;
+  if (typeof arrival.name !== 'string' || arrival.name === '') return null;
+  return { kind: 'landed', name: arrival.name, packageId, notice: typeof arrival.notice === 'string' ? arrival.notice : '' };
+}
+
 export function AutomationsPillar({
   packageId,
   objectOrder = NO_OBJECT_ORDER,
@@ -8770,6 +8796,18 @@ export function AutomationsPillar({
   const client = useMetadataClient();
   const locale = useMetadataLocale();
   const navigate = useNavigate();
+  const location = useLocation();
+  // objectstack#28567 — "New similar" (`FlowItemMoreMenu`): the strip that
+  // shows the copy the clone door saved, with the door's sentence that it is
+  // switched off, as sent. The copy usually opens in ANOTHER package (a
+  // read-only base's pair), which remounts this pillar (keyed by package), so
+  // the landing rides the navigation's state and is read once here.
+  const [flowCopied, setFlowCopied] = React.useState<FlowCopiedStrip | null>(() =>
+    readFlowCopiedArrival(location.state, packageId),
+  );
+  // The copy to open once the rail re-reads, when it landed in THIS package.
+  const openAfterListRef = React.useRef<string | null>(null);
+  const canAuthorFlows = useCanAuthorMetadata();
   // The draft writes' package binding (objectui#11553): none in the
   // package-less scope, so the draft row stays as package-less as the flow it
   // edits. The client sends no `package=` for an absent id.
@@ -8999,6 +9037,14 @@ export function AutomationsPillar({
         }
         const keepEmpty = keepEmptyAfterDeleteRef.current;
         keepEmptyAfterDeleteRef.current = false;
+        // objectstack#28567 — a copy "New similar" saved in this package opens.
+        const copied = openAfterListRef.current;
+        openAfterListRef.current = null;
+        const copiedFlow = copied ? items.find((f) => f.name === copied) : undefined;
+        if (copiedFlow) {
+          setCurrent(copiedFlow);
+          return;
+        }
         setCurrent((c) => (keepEmpty ? c : (c ?? deepLinked ?? (named ? null : items[0]) ?? null)));
       } catch (e) {
         if (!cancelled) setError(plainRefusal(e));
@@ -9280,6 +9326,35 @@ export function AutomationsPillar({
     onDraftSaved?.({ type: 'flow', name: flow.name });
     toast.success(tFormat('engine.studio.auto.flowDeleted', locale, { item: flow.label || flow.name }));
   }, [client, current, packageId, hasDraft, onDraftSaved, locale]);
+  // objectstack#28567 (ADR-0146 D4) — "New similar" saved a copy. It opens
+  // only where the door's answer says it landed: in this pillar after a
+  // re-read when that is this package, else that package's Automations pillar
+  // on the copy (a read-only base's pair, `<base>.custom`). An answer naming
+  // no package opens nothing and says so; the landing is never derived here.
+  const onFlowCopied = React.useCallback(
+    (copy: FlowCopied) => {
+      setError(null);
+      if (copy.packageId === null) {
+        setFlowCopied({ kind: 'noPackage', name: copy.name, notice: copy.notice });
+        return;
+      }
+      const landed: FlowCopiedStrip = { kind: 'landed', name: copy.name, packageId: copy.packageId, notice: copy.notice };
+      onDraftSaved?.({ type: 'flow', name: copy.name });
+      if (copy.packageId === packageId) {
+        setFlowCopied(landed);
+        openAfterListRef.current = copy.name;
+        setFlowListNonce((n) => n + 1);
+        return;
+      }
+      navigate(studioPillarItemPath(copy.packageId, 'automations', { type: 'flow', name: copy.name }), {
+        state: { [FLOW_COPIED_ARRIVAL_STATE]: landed },
+      });
+    },
+    [packageId, navigate, onDraftSaved],
+  );
+  // A landing is shown on its copy; an answer that names no package, on any flow.
+  const flowCopiedShown =
+    flowCopied && (flowCopied.kind === 'noPackage' || flowCopied.name === current?.name) ? flowCopied : null;
   // ADR-0146 D4 — a read-only package's open flow offers the activation-ledger
   // switch (`FlowLedgerSwitch`). It reads the engine's `_status` row for the
   // flow, never the draft's `status`, in `activationReading`'s three readings,
@@ -9792,13 +9867,26 @@ export function AutomationsPillar({
                   />
                 )}
                 {!flowTabsEl && autoReadOnlyLinkEl}
-                {current && flowLoaded && !readOnly && packageId !== null && (
+                {/* objectstack#28567 — New similar on a read-only package's
+                    flow and on a writable one's (the door picks the pair for
+                    a read-only base; a writable package is the target);
+                    Delete on a writable package's flow only. The
+                    package-less scope has no pair and no package to name. */}
+                {current && flowLoaded && packageId !== null && (
                   <FlowItemMoreMenu
                     name={current.name}
                     label={current.label}
                     locale={locale}
                     disabled={!!saving}
-                    onDelete={() => void deleteOpenFlow()}
+                    onDelete={readOnly ? undefined : () => void deleteOpenFlow()}
+                    newSimilar={{
+                      target: readOnly ? undefined : packageId,
+                      blocked: canAuthorFlows ? null : t('engine.edit.capabilityReadOnly', locale),
+                      // The copy opens in place of this flow, which drops a
+                      // held edit; asked before the dialog, as New is.
+                      confirmOpen: () => confirmDropUnsavedWork(flowHeld !== null, locale),
+                      onCopied: onFlowCopied,
+                    }}
                   />
                 )}
               </>
@@ -9809,6 +9897,35 @@ export function AutomationsPillar({
               no padded band and no bordered card around the canvas. A refusal
               or a held edit sits above it, inside the column's gutter. */}
           <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {flowCopiedShown && (
+              <div className="shrink-0 px-6 pt-3">
+                <div
+                  role={flowCopiedShown.kind === 'landed' ? 'status' : 'alert'}
+                  data-testid="auto-new-similar-strip"
+                  className="flex items-start gap-2 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <p>
+                      {flowCopiedShown.kind === 'landed'
+                        ? tFormat('engine.studio.auto.newSimilar.done', locale, {
+                            name: flowCopiedShown.name,
+                            package: flowCopiedShown.packageId,
+                          })
+                        : tFormat('engine.studio.auto.newSimilar.noPackage', locale, { name: flowCopiedShown.name })}
+                    </p>
+                    {/* The door's sentence that the copy is switched off, VERBATIM. */}
+                    {flowCopiedShown.notice && <p data-testid="auto-new-similar-notice">{flowCopiedShown.notice}</p>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setFlowCopied(null)}
+                    className="shrink-0 rounded-md px-1.5 text-[12px] hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                  >
+                    {t('engine.studio.auto.newSimilar.dismiss', locale)}
+                  </button>
+                </div>
+              </div>
+            )}
             {(error || flowHeld) && (
               <div className="shrink-0 space-y-2 px-6 pb-1 pt-3">
                 {error && (

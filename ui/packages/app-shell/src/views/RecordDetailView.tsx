@@ -48,7 +48,7 @@ import { actionContextOrg } from '../utils/actionContextOrg.js';
 import { resolveHostAppSegment } from '../utils/appRoute.js';
 import { hostInConsolePath } from '../utils/hostInConsolePath.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
-import { apiActionFailureMessage } from '../utils/flowResponse.js';
+import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { findDeclaredApiAction, isSameOriginApiTarget, readApiActionDoorSuccess, sendApiActionThroughDoor } from '../utils/apiActionDoor.js';
 import { useNavigationContext, useRecordBreadcrumbTitle } from '../context/NavigationContext.js';
 // Audit provenance renders as the one-line <RecordMetaFooter>; the other
@@ -1529,9 +1529,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
             params,
           });
           if (!door.answered) return door.result;
-          if (!door.res.ok) {
-            return { success: false, error: apiActionFailureMessage(door.res, door.json, `HTTP ${door.res.status}`, language) };
-          }
+          if (!door.res.ok) return apiActionRefusalResult(door.res, door.json, `HTTP ${door.res.status}`, language);
           const answer = readApiActionDoorSuccess(door, `Action "${action.name}"`);
           if (!answer.ok) return { success: false, error: answer.error };
           if (action.refreshAfter === true) notifyRecordChanged();
@@ -1638,7 +1636,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         if (!res.ok) {
           let errBody: any = null;
           try { errBody = await res.json(); } catch { /* response body not JSON */ }
-          return { success: false, error: apiActionFailureMessage(res, errBody, `HTTP ${res.status}`, language) };
+          return apiActionRefusalResult(res, errBody, `HTTP ${res.status}`, language);
         }
         const data = await res.json().catch(() => ({}));
         if (action.refreshAfter === true) notifyRecordChanged();
