@@ -70,7 +70,6 @@ vi.mock('../../layout/ConsoleLayout', () => ({
 vi.mock('../../chrome/CommandPalette', () => ({ CommandPalette: () => null }));
 vi.mock('../../chrome/KeyboardShortcutsDialog', () => ({ KeyboardShortcutsDialog: () => null }));
 vi.mock('../../chrome/OnboardingWalkthrough', () => ({ OnboardingWalkthrough: () => null }));
-vi.mock('../../hooks/useNavigationSync', () => ({ NavigationSyncEffect: () => null }));
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   useObjectTranslation: () => ({

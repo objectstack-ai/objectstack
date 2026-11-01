@@ -233,7 +233,6 @@ export {
   useNavActionDispatch,
   useNavPins,
   useNavigationSync,
-  NavigationSyncEffect,
   useResponsiveSidebar,
   useActionModal,
   useHomePath,
