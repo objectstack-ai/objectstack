@@ -230,7 +230,7 @@ export const PUBLIC_AUTH_FEATURES = {
   phoneNumber: {
     surface: 'crud',
     semantics: 'opt-in',
-    gatedInputs: ['sys_user.actions.create_user.params.phoneNumber'],
+    gatedInputs: ['sys_user.actions.create_user.params.phoneNumber', 'sys_user.actions.create_user.params.email'],
     notes:
       'The fix this registry generalizes: create-user\'s phone field ' +
       'follows the opt-in phoneNumber plugin instead of offering a field ' +
