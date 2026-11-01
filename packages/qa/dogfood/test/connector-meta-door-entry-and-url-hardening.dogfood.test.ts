@@ -267,9 +267,9 @@ describe('connector metadata doors: undeclared entry keys refused; URL credentia
       expect(atRest.providerConfig.baseUrl).toBe(carriedUrl);
 
       await waitReady(CARRIED);
-      // No request path: the rest provider appends a path to the base URL as
-      // text, so the base URL's own query stays the query only without one.
+      // The base URL's own query stays the query with and without a request path.
       expect(await dispatch(CARRIED, '')).toBe(`/v1?api_key=${PLACEHOLDERS.carried}&region=eu`);
+      expect(await dispatch(CARRIED, '/probe')).toBe(`/v1/probe?api_key=${PLACEHOLDERS.carried}&region=eu`);
     });
   });
 });
