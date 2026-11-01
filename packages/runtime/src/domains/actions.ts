@@ -907,7 +907,7 @@ async function dispatchAdmittedRestAction(
             if ('message' in built) {
                 return { handled: true, response: deps.error(built.message, built.status) };
             }
-            const answer = await actionExec.forwardApiAction(inject, _context, built, { objectName, actionName, target: actionDef?.target });
+            const answer = await actionExec.forwardApiAction(inject, _context, built, { objectName, actionName, target: actionDef?.target, ...(recordId ? { recordId: String(recordId) } : {}) });
             const relayed = Object.keys(answer.headers).length > 0 ? { headers: answer.headers } : {};
             if (answer.status >= 200 && answer.status < 300) {
                 return { handled: true, response: { ...deps.success(actionExec.apiActionResultOf(answer)), ...relayed } };

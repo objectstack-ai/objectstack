@@ -309,8 +309,15 @@ async function credentialRejectionStatus(err: unknown): Promise<number | undefin
  * tool names, with the `openapi` provider's meaning. An `include` that is not
  * an array of non-empty strings is refused before connecting, and an entry
  * naming a tool the server's `tools/list` does not carry is refused after
- * listing (the connection is closed first); both are configuration faults,
- * thrown plain. The instance never falls back to exposing every tool.
+ * listing (the connection is closed first); both are configuration faults.
+ * The instance never falls back to exposing every tool. The second refusal is
+ * thrown plain when the handshake carried no instance credential, and as
+ * {@link ConnectorCredentialRejectedError} when it did: a server may list only
+ * the tools a credential is allowed to use (GitHub's hides a tool a classic
+ * token's scopes do not cover), and nothing in a `tools/list` answer tells a
+ * tool hidden from this credential apart from one the server never had, so the
+ * refusal names both and takes the credential's path — the instance degraded,
+ * a stored credential marked `rejected`, the boot not failed.
  *
  * `providerConfig.toolsSnapshot` (optional) pins tools by name: each value is
  * the sha256 of that tool's definition (`mcpToolDigest` in
@@ -491,13 +498,25 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         { cause: err },
       );
     }
+    // [#27237] The handshake carried the instance's credential only over
+    // http, and only as a header (an api-key `paramName` is not sent): then
+    // the server's answer was given to that credential.
+    //
+    // A grant-bearing instance's borrowed token (`ctx.credentialHandle`)
+    // reaches the server too, and is deliberately not counted here: the
+    // credential path a refusal below takes holds and marks the instance's
+    // `credentialRef` row, which for such an instance is its client secret —
+    // a value the listing never depended on — while the token that was sent
+    // belongs to an organization's connection, which that path neither marks
+    // nor re-attempts on a reconnect. Until the materializer has a route for
+    // it, such an instance keeps the plain fault.
+    const credentialSent = transport.kind === 'http' && sendsInstanceAuth(ctx.auth);
     if (includeList) {
-      // An entry naming a tool the server does not list is a configuration
-      // fault, thrown plain — fatal at boot, a skipped entry on reload — after
-      // the connection is released. Ignoring it would bring the instance up
-      // without the tool the author listed (a typo, or a tool the server
-      // renamed or dropped), and the first sign would be a flow failing at
-      // run time.
+      // An entry naming a tool the server does not list is refused after the
+      // connection is released. Ignoring it would bring the instance up
+      // without the tool the author listed (a typo, a tool the server renamed
+      // or dropped, or one hidden from this credential), and the first sign
+      // would be a flow failing at run time.
       // A pinned entry is left to the pin below: its absence is the server's
       // change, reported with the pin's other findings, not a typo.
       const offered = new Set(listedTools);
@@ -505,15 +524,47 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
       const unknown = [...new Set(includeList)].filter((entry) => !offered.has(entry) && !pinned.has(entry));
       if (unknown.length > 0) {
         await bundle.close().catch(() => {});
+        const named = unknown.map((entry) => `'${entry}'`).join(', ');
         // At most 20 of the server's tool names, as the openapi refusal lists.
         const sample = [...offered].slice(0, 20);
         const more = offered.size > sample.length ? `, … ${offered.size - sample.length} more` : '';
+        const listed =
+          `the server lists ${offered.size} tool(s): ` + `${sample.map((name) => `'${name}'`).join(', ')}${more}.`;
+        if (credentialSent) {
+          // A server may list only the tools the credential it was sent is
+          // allowed to use: GitHub's hides each tool a classic token's scopes
+          // do not cover, and its answer carries nothing about what it hid —
+          // no field in the tools/list result, no response header. So a
+          // missing tool is the credential's fault or the declaration's, and
+          // which one cannot be read off the answer. It takes the credential's
+          // path, like a 401 / 403 above: the instance degraded naming both
+          // causes, a stored credential marked `rejected` (cleared by setting
+          // it again, or by a handshake that lists every entry), and never a
+          // failed boot for a value the administrator supplies and can fix.
+          // Status 403: the server answered 200 and refused nothing in so many
+          // words, and 403 is the status a credential short of the scopes a
+          // resource needs is answered with (RFC 6750 §3.1, insufficient_scope;
+          // GitHub's server answers a tools/call outside its token's scopes
+          // that way). The message quotes no HTTP status for that reason.
+          throw new ConnectorCredentialRejectedError(
+            `connector-mcp provider: connector '${ctx.name}' providerConfig.include names ${named}, which the MCP ` +
+              `server does not list for the credential this instance sent. A server may list only the tools a ` +
+              `credential is allowed to use, and its tools/list answer cannot tell the two causes apart: either the ` +
+              `credential lacks the scopes or permissions these tools need — fix the credential, then set it ` +
+              `again — or the declaration names a tool this server does not have — fix providerConfig.include. ` +
+              `For this credential, ${listed}`,
+            403,
+          );
+        }
+        // The instance's `auth` did not reach the server, so its list was not
+        // filtered for a credential the administrator supplies; one written
+        // into `providerConfig.transport.headers` is part of the declaration,
+        // fixed by editing it. A configuration fault, thrown plain — fatal at
+        // boot, a skipped entry on reload.
         throw new Error(
           `connector-mcp provider: connector '${ctx.name}' providerConfig.include names ` +
-            `${unknown.map((entry) => `'${entry}'`).join(', ')}, which the MCP server does not list. ` +
-            `Each entry must be the name of a tool from the server's tools/list; ` +
-            `the server lists ${offered.size} tool(s): ` +
-            `${sample.map((name) => `'${name}'`).join(', ')}${more}.`,
+            `${named}, which the MCP server does not list. ` +
+            `Each entry must be the name of a tool from the server's tools/list; ${listed}`,
         );
       }
     }
@@ -526,10 +577,8 @@ export function createMcpProviderFactory(deps: McpProviderDeps = {}): ConnectorP
         throw toolsSnapshotDriftError(ctx.name, drift);
       }
     }
-    // [#27237] The handshake carried the instance's credential only over
-    // http, and only as a header (an api-key `paramName` is not sent): then
-    // the server's answer proved it.
-    const credentialVerified = transport.kind === 'http' && sendsInstanceAuth(ctx.auth);
+    // [#27237] Then the server's answer proved the credential.
+    const credentialVerified = credentialSent;
     return {
       def: bundle.def,
       handlers: bundle.handlers,

@@ -12,7 +12,15 @@ ADR-0005's five-type tier, ADR-0048 §3.3 and §3.4 (inside a base's dependency 
 **amends** ADR-0009 (the resume reading of `executionPinned`) and ADR-0029 D7 — each clause quoted in the
 [Supersede table](#supersede-table), each record's Status line carrying the dated pointer. The 2026-10-30
 draft's D1, D5, D6 and D7 stand as written; its D2 (in-place overlay editing) and D3 (`<base>.customize`) are replaced
-here, and its D4 keeps the ledger switch and loses the clone.
+here, and its D4 keeps the ledger switch and loses the clone. · **Amended in place** (2026-10-31, ruling **A** on
+decision card [#28390](https://github.com/objectstack-ai/objectstack/issues/28390), ruling record
+[`6542177429`](https://github.com/objectstack-ai/objectstack/issues/28390#issuecomment-6542177429), maintainer, verbatim:
+「同意」): only the paired `<base>.custom` declares an override — the rider of ruling record 6540351677 that opened the
+declaration to any package in the closure is withdrawn, and a dependent's same-named item has one fix, rename ([D2](#d2),
+[D8](#d8), [D9](#d9)); `basedOn` records the base package's `manifest.version` (ruling record
+[`6549129352`](https://github.com/objectstack-ai/objectstack/issues/28404#issuecomment-6549129352) on #28404, follow-up c);
+[D9](#d9)'s `action` paragraph reads the landed ledger switch; the [Consequences](#consequences) carry the base-upgrade
+displacement cost. The amendment lands as the rewrite did — by the maintainer's hand-merge of the PR cut from #28390.
 **Decided by**: the maintainer, 2026-10-30, in the desktop session that re-planned the epic, verbatim and
 untranslated as epic #28236 records them — the direction 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」; the suffix 「同意 后缀改成 .custom」; the eight questions 「等我拍板的 8 个问题，全部同意」; the extension
 fields 「扩展字段用 __c 后缀，只有 .custom 包能用。」; the item toolbar 「同意新增 2h「Studio 项工具栏」并放在 2a 之前」;
@@ -186,19 +194,20 @@ extension of a base object ([D10](#d10)). Code and Studio use the one mechanism:
 `hotcrm.custom` in a repository and what an administrator does in Studio produce the same package, which is exported
 (`GET /packages/:id/export`), committed, reviewed and deployed to another environment as any package is (ADR-0070 D4).
 Maintainer, verbatim: 「方向定为包级覆盖：代码和 Studio 用同一机制，定制都进 .custom。」 A dependent package a vendor or partner
-ships may carry the same declaration (the refusal paragraph below); the customer's own changes still live in `.custom`.
+ships adds items under its own names; it never declares an override (the refusal paragraph below).
 
-**How an existing item is overridden — by declaration, in the body.** An item of a package in the base's dependency closure — the
-customer's `.custom`, or a dependent package that ships one — that carries the base's name and declares in its own body
+**How an existing item is overridden — by declaration, in the body.** An item of the base's paired `.custom` package
+([D3](#d3)) that carries the base's name and declares in its own body
 
 ```ts
-overrides: { package: '<base package id>', basedOn: '<the base item's version the override was taken from>' }
+overrides: { package: '<base package id>', basedOn: '<the base package's manifest.version the override was taken from>' }
 ```
 
 replaces the base's item **whole** for every read that serves the base's name ([D8](#d8)). The declaration lives in the
 item document — not in a manifest list, not in a side table — so it travels with the item through export and git, and
 the `.custom` manifest needs no index of what it overrides (Q2, 「全部同意」: declaration in the item body). `package`
-names the base; `basedOn` records which version of the base's item the author started from. **`basedOn` is recorded,
+names the base; `basedOn` records which version of the base **package** — its `manifest.version`, not a history version
+of the item — the author started from (ruling record 6549129352 on #28404, aligned here). **`basedOn` is recorded,
 not judged**: no door compares it with the installed base's version, no upgrade diff is produced, and nothing is
 refused on it (epic #28236, *Not in this epic*: upgrade diff / `basedOn` checking, recorded only). Whole-document
 replace is ADR-0005's binding principle 3 and ADR-0131 D6's O rule carried over unchanged: no field-level patch, no
@@ -207,16 +216,23 @@ three-way merge — the author who changes one column ships the whole view.
 **Undeclared same-name is refused at publish — one rule for the whole dependency closure** (Q1; scope ruled 2026-10-31
 on decision card [#28364](https://github.com/objectstack-ai/objectstack/issues/28364)). Inside a base's dependency closure, an item of **any** dependent package — the
 paired `.custom` or an ordinary dependent such as a partner's extension — that bears a base item's name **without** the
-declaration is refused when its package publishes, for every overridable type alike; the refusal names both fixes:
-declare the override, or rename the item. It is never served as a silent replacement and never kept as "that package's
-own item" under the base's name. The declaration is open to every package in the closure, not only `.custom`: a
-dependent that declares replaces the base's item exactly as `.custom` does ([D8](#d8)). **One declarer per base item**:
-a second package declaring the same base item is refused at publish, naming the first. Outside the closure nothing
+declaration is refused when its package publishes, for every overridable type alike. For the paired `.custom` the
+refusal names both fixes: declare the override, or rename the item; for any other dependent it names the one fix it has:
+rename. It is never served as a silent replacement and never kept as "that package's own item" under the base's name.
+**The declaration is admitted from the paired `.custom` alone** (ruled **A** on decision card #28390, 2026-10-31, ruling
+record 6542177429; the rider of ruling record 6540351677 that opened it to any package in the closure is withdrawn): a
+dependent that carries `overrides` is refused at publish, at `os validate` and at the install door — the three points
+[D10](#d10) uses for `__c` — so the overrider of a base item is fixed by role, never by publish order: `.custom` is the
+customer's layer, a dependent is a contribution layer, the customer always has the last word, and the layered read keeps
+its two layers ([D8](#d8)). A partner that wants a different base view ships it under its own name and reaches it through
+its own navigation contribution (ADR-0029 D7); a real partner need to replace a base item, when it appears, reopens
+#28390 as its option B with that evidence. Outside the closure nothing
 changes — two packages with no dependency relation keep ADR-0048 §3.3/§3.4's coexistence on a bare name, each under its
 own package id; the exception this record writes into §3.4 is the closure case only ([Supersede
 table](#supersede-table)). Maintainer, 2026-10-31, verbatim: 「没写这行声明、又恰好同名，是否建议统一规则，要么申明覆盖，要么禁止。这样会有什么坏处吗」, then
-「同意」 to the uniform rule; its cost, on record there, is renaming a generic name — a dependent's own `home` page — when
-the dependent is not overriding the base's. This is the rule Context §5 was missing and the rule N-09 implements: a name
+「同意」 to the uniform rule; its cost, on record there, is renaming a generic name — a dependent's own `home` page — and
+under ruling A renaming is also a dependent's only route to a different version of a base item. This is the rule Context
+§5 was missing and the rule N-09 implements: a name
 is overridden because the author said so, and the read can tell ([D8](#d8)). **N-09's precondition** (decision card
 #28364): before the gate lands, the examples and test deployments are counted for undeclared same-name rows inside a
 closure — zero, and the gate lands as is; otherwise the list goes to the maintainer before a migration is chosen.
@@ -228,7 +244,7 @@ an item outside the closure is refused with "declare a dependency" as the fix, t
 
 **Which types.** The declared override applies to the item types a package ships as standalone documents and Studio
 or the metadata API can author: at least the five former overlay types (`view`, `dashboard`, `report`, `translation`,
-`email_template`), `flow` (under [D9](#d9)'s conditions), `action` (direction only — after its ledger switch, under [D9](#d9)'s
+`email_template`), `flow` (under [D9](#d9)'s conditions), `action` (direction only — its ledger switch landed 2026-10-30; under [D9](#d9)'s
 conditions 1–3; no door in this epic), `page`, `app`, `dataset`, `doc`, `book` and `mapping`; the spec card (N-08) closes the list against the registry
 (`packages/spec/src/kernel/metadata-plugin.zod.ts#allowRuntimeCreate`), and the closed list is a constant the write gate
 reads, never a judgement the gate makes. Three types are excluded whatever the registry says — the ones the security
@@ -405,9 +421,9 @@ from **one** resolution:
 2. **Within X's address, a declared override is served over the base's document.** The read that serves X's name — the
    package-less read, the read naming X (`?package=X`), the layered read (`packages/metadata-protocol/src/protocol.ts#getMetaItemLayered`: `code` = the base's
    document, `override` = the `.custom` item, `effective` = the served one), the list (`GET /api/v1/meta/:type`, scoped
-   to X or not) and the export of X's app surface — serves the **one** document the declaration selects, whichever closure package declared it. An item of a
-   dependent package that bears X's name **without** the declaration has no place under this record: it is refused
-   when that package publishes ([D2](#d2)), the pair and every other dependent alike; until N-09 lands, item 1 keeps
+   to X or not) and the export of X's app surface — serves the **one** document the declaration selects, the `.custom` item that declares it. An item of the pair that
+   bears X's name **without** the declaration, and an item of any other dependent that bears X's name — declared or not —
+   have no place under this record: each is refused when its package publishes ([D2](#d2)); until N-09 lands, item 1 keeps
    the code package the owner of X's address, so such a row is not served as X's (N-03). A same-named item of a package
    **outside** X's closure is not a candidate for X's address at all; it is that package's own item, served under its
    own address (ADR-0048 §3.3's qualified reference).
@@ -431,8 +447,8 @@ A flow is behavioural (ADR-0126 §2): two live versions double-fire, and a repla
 The declared override of [D2](#d2) applies to `flow` under four conditions, all of them this record's:
 
 1. **Served over the code package.** `resolveFlowPrecedence` arms the item that declares `overrides` on the base's
-   name — from `.custom` or from any package in the closure ([D2](#d2)) — **over** the loader's body for that name. An
-   *undeclared* row of a held name inside the closure is refused at publish ([D2](#d2)); the rank keeps shadowing — and
+   name — from `.custom` ([D2](#d2)) — **over** the loader's body for that name. An *undeclared* row of a held name
+   inside the closure, and a dependent's row declared or not, is refused at publish ([D2](#d2)); the rank keeps shadowing — and
    warning on — every undeclared runtime row that still reaches it (a package-less row until [D11](#d11) migrates it, a
    row of a package outside the closure, and a dependent's until N-09 lands), exactly as today. The rank gains one
    case, "declared override", and the remedy it prints for the undeclared case names the declaration or a new name
@@ -459,12 +475,14 @@ naming the callers), the `FLOW_DISABLED` consult at `execute()`, and the walled 
 (ADR-0126 §5).
 
 **`action`, the other Regime C type, takes the same shape later** (ruled 2026-10-31 on decision card #28364, in Q3's
-pattern). A declared override of a base's `action` is admitted once the action ledger switch lands (#27842, #27504 —
-outside this epic, [D4](#d4)), under conditions 1–3 above read for an action: served over the code package's name,
-rebound in one reload, one ledger row for the name; condition 4 does not apply — an action has no suspended run. Until
-then there is no override door for `action`, no interim gate, and no card of this epic opens one; a customer's own
-button is a new action in `.custom` ([D4](#d4), "new similar"). ADR-0126 §3 places `action` in Regime C on the
-maintainer's 「动作 可能是需要开关的，因为有的 action 我不想启用。」, which is why the switch comes first.
+pattern). Its precondition has landed: the action ledger switch is on `main` (#27842 and #27504, both closed 2026-10-30 —
+outside this epic, [D4](#d4)). A declared override of a base's `action` is admitted, once its door is cut, under conditions 1–3
+above read for an action: served over the code package's name, rebound in one reload, one ledger row for the name;
+condition 4 does not apply — an action has no suspended run. The door itself is not cut here: there is no override door
+for `action` yet, no interim gate, and no card of this epic opens one. An undeclared same-name `action` in a dependent is
+refused at publish like any other overridable kind ([D2](#d2)); until the action override opens, the only fix is rename.
+A customer's own button is a new action in `.custom` ([D4](#d4), "new similar"). ADR-0126 §3 places `action` in Regime C
+on the maintainer's 「动作 可能是需要开关的，因为有的 action 我不想启用。」, which is why the switch came first.
 
 ### D10 — Object extension: `__c` fields are reserved to `.custom`, and a base field changes only within a display-property whitelist {#d10}
 
@@ -496,7 +514,7 @@ name suffixed, the base untouched (N-23c).
 
 - **Migrate** (N-16, Q5). Every `sys_metadata` row with `package_id` NULL that overlays an item a code package ships
   becomes a declared override of that item in the base's `<base>.custom` (created by [D3](#d3)'s ensure door as needed),
-  `basedOn` set to the base item's version at migration. A package-less row for an item **no** package ships is
+  `basedOn` set to the installed base package's `manifest.version` at migration. A package-less row for an item **no** package ships is
   environment metadata, not an overlay, and is not touched. The migration is idempotent and reports per base what it
   moved; it runs as a CLI ceremony the administrator invokes, in the shape ADR-0131 D10 set.
 - **Close** (N-16). After the migration, a package-less write onto a packaged item (`PUT /api/v1/meta/:type/:name` with
@@ -521,13 +539,13 @@ recorded sentences stay in their records; their Status lines carry the dated poi
 
 | Record · clause | Recorded (verbatim) | Rule now | Gate and pin that change |
 |:---|:---|:---|:---|
-| **ADR-0126 D1** (§2, Regime C for behavioural types; §3 assigns `flow`) | "→ **Disable + clone** (Regime C — amendment ruling 2, the landed #11513 shape generalized). Three independent parts, no ceremony connecting them: the packaged base is **locked** — in-place edit refused loudly at the write door, the refusal naming the sanctioned path; each packaged behavioral artifact carries an **enable/disable switch** — a ledger row flip (§4), operator-gated per §5; customization is **authoring an ordinary sibling artifact** (clone or from scratch; new machine name mandatory, whole-definition copy — §7.1). There is no designated-replacement linkage. ⛔ Never silent override, never an overlay read path." | The base stays locked and the switch stays ([D4](#d4)); customization of a behavioural item is a **declared override** in `.custom`, served over the base's name under [D9](#d9)'s four conditions. "Never silent" stands — the override is declared and refused when undeclared ([D2](#d2)); "never an overlay read path" is superseded for the declared case. | `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#refusePackagedBaseOverride` admits a declared override from a package in the base's closure and keeps refusing every other write onto a sealed item; `packages/services/service-automation/src/flow-precedence.ts#resolveFlowPrecedence` gains the declared rank. Pins: `packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts`, `packages/services/service-automation/src/flow-name-shadowing.test.ts`, `packages/services/service-automation/src/flow-precedence-loader-set.test.ts`. Cards N-09, N-11. |
+| **ADR-0126 D1** (§2, Regime C for behavioural types; §3 assigns `flow`) | "→ **Disable + clone** (Regime C — amendment ruling 2, the landed #11513 shape generalized). Three independent parts, no ceremony connecting them: the packaged base is **locked** — in-place edit refused loudly at the write door, the refusal naming the sanctioned path; each packaged behavioral artifact carries an **enable/disable switch** — a ledger row flip (§4), operator-gated per §5; customization is **authoring an ordinary sibling artifact** (clone or from scratch; new machine name mandatory, whole-definition copy — §7.1). There is no designated-replacement linkage. ⛔ Never silent override, never an overlay read path." | The base stays locked and the switch stays ([D4](#d4)); customization of a behavioural item is a **declared override** in `.custom`, served over the base's name under [D9](#d9)'s four conditions. "Never silent" stands — the override is declared and refused when undeclared ([D2](#d2)); "never an overlay read path" is superseded for the declared case. | `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#refusePackagedBaseOverride` admits a declared override from the base's paired `.custom` and keeps refusing every other write onto a sealed item; `packages/services/service-automation/src/flow-precedence.ts#resolveFlowPrecedence` gains the declared rank. Pins: `packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts`, `packages/services/service-automation/src/flow-name-shadowing.test.ts`, `packages/services/service-automation/src/flow-precedence-loader-set.test.ts`. Cards N-09, N-11. |
 | **ADR-0126 D4 wall 1** (§6 item 1) | "**The #6190 phantom-overlay wall.** Any design that needs `allowOrgOverride` flipped on a behavioral type has drifted back into #6190 — that is a stop-and-report, not a pin to update. The identity pin (`protocol.org-scoped-write-refused.test.ts`, exactly five overlay types) turning red on such a flip is the pin working. This wall's corollary stands too: name-redirection — resolving a packaged artifact's name to some other artifact at dispatch — is an overlay **read** path under another name, rejected on the record (2026-08-25 discussion); with no designation linkage in the model (§4) there is also nothing to redirect to." | No registry flag is flipped and no organization axis returns: the opt-in is the item's own declaration, judged against the closure ([D2](#d2)). The corollary is superseded for the **declared** case only: a declared override is served at the base's name ([D8](#d8), [D9](#d9)); an undeclared redirection stays refused. | `packages/metadata-protocol/src/protocol.org-scoped-write-refused.test.ts` **stays green and unchanged** — it pins that no organization-scoped write is accepted, which this record keeps; the five-type exemption it once guarded is retired by [D11](#d11), not re-opened. The declared rank lands in `packages/services/service-automation/src/flow-precedence.ts#resolveFlowPrecedence`. Card N-11. |
-| **ADR-0126 §7.1** (Clone, first bullet) | "⛔ No same-name clone in a second package: storage legitimately holds both — the uniqueness index keys on `(type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, ''))` (ADR-0005, amended 2026-08-09 by #6825 and 2026-10-12 by #22877 ruling A; ADR-0048 governs the cross-package coexistence) — and the engine's name-keyed flow map makes the winner insertion-order: measured as a silent, non-deterministic replacement (#11665 §2.2; #11997 tracks the shadow diagnostics independently of this model)." | A same-name item in a second package is admitted in exactly one shape: the **declared** override from a package in the base's dependency closure — the paired `.custom` or a dependent that declares, one declarer per item ([D2](#d2)) — served by its declaration and never by insertion order ([D8](#d8), [D9](#d9)). "New similar" keeps the mandatory new machine name ([D4](#d4)); the prohibition stands for every undeclared shape. | `packages/services/service-automation/src/flow-precedence.ts#resolveFlowPrecedence` arms by declaration, not arrival; `packages/runtime/src/flow-clone.ts#cloneFlowDefinition` keeps the new name mandatory. Pins: `packages/services/service-automation/src/flow-name-shadowing.test.ts`, `packages/services/service-automation/src/flow-sync-one-precedence.test.ts`. Cards N-09, N-11, N-21. |
+| **ADR-0126 §7.1** (Clone, first bullet) | "⛔ No same-name clone in a second package: storage legitimately holds both — the uniqueness index keys on `(type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, ''))` (ADR-0005, amended 2026-08-09 by #6825 and 2026-10-12 by #22877 ruling A; ADR-0048 governs the cross-package coexistence) — and the engine's name-keyed flow map makes the winner insertion-order: measured as a silent, non-deterministic replacement (#11665 §2.2; #11997 tracks the shadow diagnostics independently of this model)." | A same-name item in a second package is admitted in exactly one shape: the **declared** override from the base's paired `.custom`, the one package admitted to declare ([D2](#d2)) — served by its declaration and never by insertion order ([D8](#d8), [D9](#d9)). "New similar" keeps the mandatory new machine name ([D4](#d4)); the prohibition stands for every undeclared shape. | `packages/services/service-automation/src/flow-precedence.ts#resolveFlowPrecedence` arms by declaration, not arrival; `packages/runtime/src/flow-clone.ts#cloneFlowDefinition` keeps the new name mandatory. Pins: `packages/services/service-automation/src/flow-name-shadowing.test.ts`, `packages/services/service-automation/src/flow-sync-one-precedence.test.ts`. Cards N-09, N-11, N-21. |
 | **ADR-0131 D6** (Managed; regimes re-homed at environment scope) | "**No door edits a managed definition** — not Setup, not Studio, not the data or metadata API; to change one, the vendor publishes a version and upgrades reach it untouched. What the customer changes lives **beside** the managed item, as environment-level state that upgrades never touch — the three regimes of [ADR-0126](./0126-packaged-metadata-customization-model.md), kept and re-homed at environment scope:" · O: "an environment row of the **same name** replaces the managed item **whole** — ADR-0005's environment layer, exactly as today, with the per-organization axis retired." · C: "**clone** is a whole-definition sibling under a **new name** with no linkage to the base (ADR-0126 §7.1, amendment ruling 2)." | The managed definition is still never edited. What the customer changes is an **item of `<base>.custom`** — a package, exported and deployed — not an environment row: O becomes the declared override (same whole replace), C's clone becomes "new similar" into `.custom` and the behavioural override of [D9](#d9), E's extension lives in `.custom` under [D10](#d10)'s rules. Environment scope stands; no per-organization axis. | `packages/metadata-protocol/src/protocol-environment-rows.ts#packagelessAddress` stops addressing a packaged name to an unbound row once [D11](#d11) has run; `packages/metadata-protocol/src/protocol.ts#servedOverlayRowCandidates` serves the declared override within the base's address. Pins: `packages/metadata-protocol/src/protocol.packageless-save-address.test.ts`, `packages/metadata-protocol/src/protocol.item-active-rows-one-read.test.ts`, `packages/metadata-protocol/src/protocol.item-read-overlay-cache.test.ts`. Cards N-10, N-16. |
 | **ADR-0005 five-type tier** (binding principle 5; the 2026-05-22 amendment's whitelist; addendum (d)'s registry opt-in, spelled `allowEnvironmentOverlay` since protocol 18) | "**Whitelist by type.** Only types explicitly enabled for overlay can be saved through `PUT /api/v1/meta/*`. Phase 1 ships with `view` and `dashboard` enabled; other types return `400 customization_not_allowed`." · "only the metadata types whose runtime semantics are **render-time** can be overridden per organization. Anything that influences the **physical schema, persisted contract, or automation guarantees** must be platform-global." · "The **opt-in for runtime org customization** lives in exactly one place: the `allowOrgOverride` boolean on its `DEFAULT_METADATA_TYPE_REGISTRY` entry." | What a customer may override is decided by **declaration and closure** ([D2](#d2)), for every runtime-creatable item type except the three of [D6](#d6); the per-type tier no longer opens a write door. The registry flag survives as the migration's predicate and the read of an unmigrated row ([D11](#d11)). ADR-0005's whole-document rule, its `id`-stripping rule and its storage shape are untouched. | `packages/spec/src/kernel/metadata-plugin.zod.ts#allowEnvironmentOverlay` stops gating the write; the type half of the sealed-item predicate in `packages/metadata-protocol/src/protocol.ts` reads the declaration instead. Pins: `packages/objectql/src/environment-overlay-five-types.test.ts` (re-judged for the migrated state), `packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts`. Cards N-08, N-09, N-16. |
 | **ADR-0048 §3.3** (prefer-local, qualify-to-cross) | "A *context-free* read (`getItem` with no package id) is best-effort: it returns the first match and the caller is expected to pass the package id when it cares." | A context-free read of a name a code package ships has an **owner**: that package, or its declared override in `.custom`; a same-named item of a package outside the closure is served only under its own address ([D8](#d8)); inside the closure it is a declared override or refused at publish (the §3.4 row). "First match" is no longer an answer for a read carrying a type and a name. | `packages/metadata-protocol/src/protocol-environment-rows.ts#packagelessAddress` (the code package becomes a candidate); `packages/metadata-protocol/src/protocol.ts#packagelessReadAddress`. Pin: the five-read agreement test of #28238 (new) beside `packages/metadata-protocol/src/protocol.item-read-overlay-cache.test.ts`. Cards N-03, N-10. |
-| **ADR-0048 §3.4** (per-item cross-package detection retires) | "The cross-package **throw is retired**; two distinct packages coexist on the same bare name by construction." | Stands for packages with **no dependency relation**. Inside a base's dependency closure it is superseded: a dependent package's item bearing a base item's name is admitted only as a **declared** override — one declarer per base item — and is otherwise refused at publish, declare or rename ([D2](#d2); ruled 2026-10-31 on #28364). The same-package overwrite sentence and the 2026-10-08 narrowing stand. | The N-09 write gate reads the closure (`packages/metadata-protocol/src/protocol-write-package-scope.ts#resolveWritePackageScope`) and refuses the undeclared same-name item at publish; `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#refusePackagedBaseOverride` admits the declared one from any closure package. Pins: `packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts` (new case); the five-read agreement test of #28238. Cards N-09, N-10. |
+| **ADR-0048 §3.4** (per-item cross-package detection retires) | "The cross-package **throw is retired**; two distinct packages coexist on the same bare name by construction." | Stands for packages with **no dependency relation**. Inside a base's dependency closure it is superseded: the paired `.custom`'s item bearing a base item's name is admitted only as a **declared** override and is otherwise refused at publish — declare or rename; any other dependent's item bearing a base item's name is refused at publish, declared or not — rename ([D2](#d2); ruled 2026-10-31 on #28364 and #28390). The same-package overwrite sentence and the 2026-10-08 narrowing stand. | The N-09 write gate reads the closure (`packages/metadata-protocol/src/protocol-write-package-scope.ts#resolveWritePackageScope`) and refuses the undeclared same-name item at publish; `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#refusePackagedBaseOverride` admits the declared one from the paired `.custom` alone. Pins: `packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts` (new case); the five-read agreement test of #28238. Cards N-09, N-10. |
 | **ADR-0009 `executionPinned`** (§2, §2.1 `flow`, §2.4) — the resume reading; **amended, not superseded** | "A type with `executionPinned: true` gives a **stronger guarantee** than `supportsVersioning: true`" · `flow`: "Step executions can pause across redeploys" · "The row stores **only** the triple — never an inlined snapshot. The snapshot is recovered on demand via `repo.getByHash(ref, hash)`." | Nothing in ADR-0009 is reversed; its guarantee is **delivered** for `flow`: a suspended run resumes on the version it started on, and the version a flow's name serves may be a declared override's ([D9](#d9)). What changes is the engine's reading of the flag — resume by name, i.e. HEAD — which the record never sanctioned and the code did; ADR-0009's Status line says "Amended by", because no sentence of it is reversed. | `packages/services/service-automation/src/run-resume.ts#resolveResumeTarget` resolves the pinned version instead of `flows.get(name)`, through `packages/metadata-protocol/src/sys-metadata-repository.ts#getByHash` or the engine's recorded version. Pin: `packages/services/service-automation/src/unresumable-suspension-cause.test.ts` (re-judged: a renamed node on HEAD is no longer `RUN_NOT_FOUND` for a run pinned to the old version). Card N-12. |
 | **ADR-0141 D3** (deferred, by name) — the uninstall row | "**Uninstall protection** — refusing to uninstall a package another installed package depends on" · "The uninstall proceeds; the dependent's lookups dangle. Only ADR-0029's extender refusal stands" · "A first customer uninstall that strands a dependent" | For the **paired case** the item is decided: uninstalling a base is refused while its `<base>.custom` exists, naming it ([D3](#d3)). The general item — a dependent that is not the base's own `.custom` — stays deferred with its trigger. | `packages/objectql/src/registry.ts#uninstallPackage` gains the pair check beside the ADR-0029 extender refusal (`packages/objectql/src/registry.ts#PackageUninstallExtendedError` is the shape). Pin: `packages/objectql/src/registry-assert-package-uninstallable.test.ts`. Card N-14. |
 | **ADR-0070 D3** (select-or-create a base first) and **D5** (retire the stopgaps via a migration affordance) — the paired case | D3: "Every authoring surface follows the same contract; none silently defaults into a catch-all:" · D5: "Existing `package_id = null` rows are not broken." · "A small migration (or admin action) can bulk-assign legacy orphans to a default base named for the environment." | For a customer's first customization of an installed base, the base is `<base>.custom`, created by the ensure door without a prompt ([D3](#d3)) — a deterministic, declared, per-base target, not a catch-all; everywhere else D3's prompt stands. A package-less overlay row of a packaged item migrates into that pair as a declared override, not into "a default base named for the environment", and the package-less write then closes ([D11](#d11)); a package-less row no package ships keeps D5's treatment. | `packages/metadata-protocol/src/protocol-write-package-scope.ts#resolveWritePackageScope` (the target package the ensure door hands the write); `packages/metadata-protocol/src/protocol-environment-rows.ts#packagelessAddress` (closes after the migration). Pin: `packages/metadata-protocol/src/protocol.packageless-save-address.test.ts`. Cards N-13, N-16. |
@@ -550,7 +568,7 @@ is fixed above where it bites.
 
 | # | Question | Agreed answer | Where |
 |:---|:---|:---|:---|
-| Q1 | Undeclared same-name item of a base's item | Refused at publish — every dependent package in the base's closure, every overridable type; declare or rename (scope ruled 2026-10-31, #28364) | [D2](#d2) |
+| Q1 | Undeclared same-name item of a base's item | Refused at publish — every dependent package in the base's closure, every overridable type; the paired `.custom` declares or renames, any other dependent renames (scope ruled 2026-10-31, #28364; the declarer ruled A on #28390) | [D2](#d2) |
 | Q2 | Where the override is declared | In the item body (`overrides: { package, basedOn }`) | [D2](#d2) |
 | Q3 | Flows under a changing definition | Real version pinning first; the override after it | [D9](#d9) |
 | Q4 | The pair's namespace | Explicit `<base namespace>_custom`, never derived | [D3](#d3) |
@@ -577,8 +595,15 @@ is fixed above where it bites.
 - **Cost, stated.** A base's uninstall needs the pair removed first; a customer with many bases has many `.custom`
   packages (one per base, folded under each in Studio); the migration of [D11](#d11) is an administrator's ceremony;
   the Setup overlay path customers use today closes once migrated; `__c` is a visible suffix on every customer field;
-  a dependent that wants its own item under a name its base already uses renames it or declares the override (#28364).
-  Flow customization waits for pinning (N-12), so the first thing a customer can override is a view, not a flow.
+  a dependent that wants its own item under a name its base already uses renames it — only the paired `.custom` declares an
+  override (#28364, #28390), so a partner that wants a different base view ships it under its own name, and a real partner
+  need to replace a base item reopens #28390 as its option B with that evidence. Flow customization waits for pinning
+  (N-12), so the first thing a customer can override is a view, not a flow.
+- **A base upgrade that adds a name a `.custom` item already holds displaces that item.** The base's name has an owner
+  and only a declared override is served over it ([D8](#d8) items 1–2), so the pair's item — authored when no base item
+  bore the name, hence undeclared — stops being served and becomes an orphan; no door judges a base upgrade today
+  (ADR-0141 D3 deferred). N-09 makes the install and upgrade door name each such collision, and N-10 surfaces the orphan
+  in the layered read.
 - Setup's item pages for the pillar types stop editing; QA checklist items and e2e specs that drive the Setup designer
   as "a sibling door onto the same save" (`docs/qa/platform-checklist/areas/studio-authoring.json`,
   `docs/qa/platform-checklist/areas/ux-conventions.json`, the live `ui/e2e/live/studio-object-designer.spec.ts`) are
@@ -600,8 +625,8 @@ record merges* bind no seat before that merge. The item toolbar (N-05) runs **ah
    pickers inside the closure · N-27 #28241 the two Setup pages ([D7](#d7)).
 2. **P1 — the override core** (cut after this record merges): N-06 change note and actor name (after N-05) · N-08
    spec — the override declaration, the `.custom` constants, the namespace rule, the `__c` reservation, the
-   display-property whitelist · N-09 the write gate — admit declared (from any closure package), refuse undeclared / out-of-closure / excluded type
-   / second declarer ([D2](#d2); precondition: the #28364 count of existing closure same-name rows) · N-10 one effective read across the five read kinds ([D8](#d8)) · N-12 real flow
+   display-property whitelist · N-09 the write gate — admit declared (from `.custom`), refuse undeclared / out-of-closure / excluded type
+   / a dependent's declaration ([D2](#d2); precondition: the #28364 count of existing closure same-name rows) · N-10 one effective read across the five read kinds ([D8](#d8)) · N-12 real flow
    version pinning ([D9](#d9) item 4) · N-11 flow override — served over the code package, rebound in one reload,
    ledger identity inherited ([D9](#d9) items 1–3; after N-12) · N-13 the `.custom` ensure door — explicit namespace,
    walled 403 ([D3](#d3)) · N-14 uninstall protection for the pair ([D3](#d3)) · N-15 the per-package customization
@@ -671,6 +696,8 @@ of Q1's refusal and `action` — were ruled by the maintainer on 2026-10-31 (dec
   [#28239](https://github.com/objectstack-ai/objectstack/issues/28239), [#28240](https://github.com/objectstack-ai/objectstack/issues/28240),
   [#28241](https://github.com/objectstack-ai/objectstack/issues/28241), [#28149](https://github.com/objectstack-ai/objectstack/issues/28149),
   decision card [#28364](https://github.com/objectstack-ai/objectstack/issues/28364) (the scope of Q1's refusal and `action`, ruling record 6540351677);
+  decision card [#28390](https://github.com/objectstack-ai/objectstack/issues/28390) (the declarer — ruled A, ruling record 6542177429, scope 6543281223;
+  `basedOn` records the base package's version, ruling record 6549129352 on [#28404](https://github.com/objectstack-ai/objectstack/issues/28404));
   PR [#28145](https://github.com/objectstack-ai/objectstack/pull/28145) (closed unmerged; its three wording fixes
   S13–S15 are folded into this rewrite); PR [#28045](https://github.com/objectstack-ai/objectstack/pull/28045) (the
   Proposed draft this rewrite replaces, hand-merged 2026-10-30).

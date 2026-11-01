@@ -1,0 +1,7 @@
+{
+  "file": "packages/runtime/src/action-execution.ts",
+  "adrs": [
+    "ADR-0090"
+  ],
+  "invariant": "ADR-0090 D10 rule 5 (amended 2026-10-31, #28367) — the credential × target-door table flips at exactly two cells, `oauth` × `identity` and `oauth` × `platform`, and only for a caller the MCP door resolved to an agent principal. `api_key` × `identity` keeps refusing by name (a key is its owner's credential, not an agent: the 2026-09-16 note). The platform cell is bounded by the scope-family rule (every forward needs `actions:execute`; any state-changing method needs `data:write`; a state-changing metadata-door forward stays refused), read from one predicate by `run_action`, the REST action door and `list_actions`. An agent's forward carries none of the caller's identity headers and gets no credential-rotation header back; the credential is minted only after every gate of the action door has passed."
+}

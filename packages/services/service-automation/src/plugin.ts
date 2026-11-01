@@ -17,9 +17,10 @@ import type {
 import { isConnectorCredentialRejected, isConnectorUpstreamChanged, isConnectorUpstreamUnavailable, RetryConfigSchema } from '@objectstack/spec/integration';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
-import type { MetadataMutationEvent } from '@objectstack/metadata-protocol';
+import type { MetadataMutationEvent, SysMetadataEngine } from '@objectstack/metadata-protocol';
+import { SysMetadataRepository } from '@objectstack/metadata-protocol';
 import { AutomationEngine } from './engine.js';
-import type { AutomationEngineOptions, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
+import type { AutomationEngineOptions, FlowHistorySource, RefusalI18nService, RunSummaryLogLevel } from './engine.js';
 import { describeThrownForLog, thrownMessageText } from './thrown-cause-diagnostics.js';
 import { defaultEnvCredentialResolver, type CredentialResolver } from './credential-resolver.js';
 import { registerFlowCredentialRedactor } from './flow-credential-projection.js';
@@ -841,6 +842,47 @@ export function packagedFlowReader(ctx: Pick<PluginContext, 'getService'>): (nam
 }
 
 /**
+ * [#28405, ADR-0009 §2.1] The engine's reader of a flow's stored versions by
+ * content identity: the metadata repository's `getByHash` over
+ * `sys_metadata_history`, which history GC never prunes for an
+ * `executionPinned` type. A resume reads the body a waiting run started on
+ * through it once the flow was republished (`resolveResumeTarget`).
+ *
+ * The repository is built here over the data engine rather than asked of the
+ * protocol: the protocol keeps its repository private and offers no read by
+ * checksum, and `getByHash` is a single system read of the history table that
+ * needs nothing else of it. Resolved at QUESTION time, never at boot, for
+ * {@link packagedFlowReader}'s reason. A composition with no data engine, or
+ * one that registers no `sys_metadata_history` (no metadata protocol), stores
+ * no flow version, so the answer is `null`: the run's body is then recovered
+ * only from what this process registered, or the resume says it could not be.
+ * A history that IS registered and fails to answer rejects — see
+ * `FlowHistorySource`.
+ */
+export function flowHistoryReader(ctx: Pick<PluginContext, 'getService'>): FlowHistorySource {
+    let built: { engine: unknown; repository: SysMetadataRepository } | undefined;
+    return async (name, checksum) => {
+        let engine: (SysMetadataEngine & { getSchema?(object: string): unknown }) | undefined;
+        try {
+            engine = ctx.getService('objectql');
+        } catch {
+            try {
+                engine = ctx.getService('data');
+            } catch {
+                return null;
+            }
+        }
+        if (!engine || typeof engine.findOne !== 'function') return null;
+        if (typeof engine.getSchema === 'function' && !engine.getSchema('sys_metadata_history')) return null;
+        if (built?.engine !== engine) {
+            built = { engine, repository: new SysMetadataRepository({ engine, orgLabel: 'env' }) };
+        }
+        const item = await built.repository.getByHash({ org: 'env', type: 'flow', name }, checksum);
+        return item?.body ?? null;
+    };
+}
+
+/**
  * [#22450] The engine's reader of the `i18n` service, through which a refusing
  * `end` node picks its translated message in the run's locale — objectql's
  * validation-message bridge (`ObjectQLPlugin`, `setI18nService`), made lazy.
@@ -1392,6 +1434,11 @@ export class AutomationServicePlugin implements Plugin {
         // its locked-base verdict reads — never the stamps on a definition.
         // See `packagedFlowReader`.
         this.engine.setPackagedFlowSource(packagedFlowReader(ctx));
+
+        // [#28405] A waiting run resumes on the flow body it started on, read
+        // back from the metadata history once the flow was republished. See
+        // `flowHistoryReader`.
+        this.engine.setFlowHistorySource(flowHistoryReader(ctx));
 
         // [#20552] Every metadata read exit withholds the inbound hook's secret
         // from a served flow from here on — the `flow` entry of the per-type

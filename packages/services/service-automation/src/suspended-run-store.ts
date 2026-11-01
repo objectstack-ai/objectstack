@@ -972,6 +972,9 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       organization_id: org,
       flow_name: run.flowName,
       flow_version: run.flowVersion ?? null,
+      // [#28405] The identity of the body the run is executing — what its
+      // resume continues on. NULL for a run that recorded none.
+      flow_checksum: run.flowChecksum ?? null,
       node_id: run.nodeId,
       // Node TYPE, not just id — the resume gate (#3801) keys on what produced
       // the pause, and it has to survive the restart the pause itself survives.
@@ -1003,6 +1006,8 @@ export class ObjectStoreSuspendedRunStore implements SuspendedRunStore {
       runId: String(row.id),
       flowName: String(row.flow_name ?? ''),
       flowVersion: row.flow_version ?? undefined,
+      // [#28405] A row written before the column existed reads "no identity".
+      flowChecksum: readFlowChecksum(row),
       nodeId: String(row.node_id ?? ''),
       nodeType: row.node_type ?? undefined,
       variables: parseJson<Record<string, unknown>>(row.variables_json, {}),
@@ -1036,6 +1041,8 @@ function serializeConsumedSuspension(
     screen_json: null,
     node_type: null,
     correlation: null,
+    // [#28405] The identity a restore re-arms the pause pinned to.
+    flow_checksum: null,
   };
   if (!run) return empty;
   const variables_json = JSON.stringify(run.variables ?? {});
@@ -1078,7 +1085,17 @@ function serializeConsumedSuspension(
     screen_json,
     node_type: run.nodeType ?? null,
     correlation: run.correlation ?? null,
+    flow_checksum: run.flowChecksum ?? null,
   };
+}
+
+/**
+ * [#28405] A row's `flow_checksum`, or `undefined` for one that carries none —
+ * a row written before the column existed, or by a run that recorded no
+ * identity. Both resume as every run did before (see `resolveResumeTarget`).
+ */
+function readFlowChecksum(row: any): string | undefined {
+  return typeof row.flow_checksum === 'string' && row.flow_checksum !== '' ? row.flow_checksum : undefined;
 }
 
 /**
@@ -1116,6 +1133,7 @@ function deserializeConsumedSuspension(row: any): SuspendedRun | undefined {
     runId: rawId.startsWith(HISTORY_PREFIX) ? rawId.slice(HISTORY_PREFIX.length) : rawId,
     flowName: String(row.flow_name ?? ''),
     flowVersion: typeof row.flow_version === 'number' ? row.flow_version : undefined,
+    flowChecksum: readFlowChecksum(row),
     nodeId: String(row.node_id ?? ''),
     nodeType: row.node_type ?? undefined,
     variables: parseJson<Record<string, unknown>>(row.variables_json, {}),

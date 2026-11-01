@@ -40,7 +40,9 @@ import {
     apiActionOAuthForwardRefusal,
     apiForwardCredentialRefusal,
     API_FORWARD_MARK_HEADER,
+    apiForwardAgentOf,
 } from '../action-execution.js';
+import { FORWARD_CREDENTIAL_HEADER, redeemForwardCredential } from '@objectstack/rest';
 import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { ActionActivationProjection } from '@objectstack/objectql';
 
@@ -824,8 +826,14 @@ describe('[#28217] an API-key caller is refused by name before a forward to an i
 // read — and `list_actions` MARKS such an action instead of hiding it. The
 // table states what each door accepts; it widens none (a server-built forward
 // credential is #28367, a separate decision).
-describe('[#28178] the credential × target-door table: an OAuth-connected agent is refused by name, and the listing marks it', () => {
-    /** An agent the MCP door admitted by OAuth access token: the envelope carries its scopes. */
+describe('[#28178] the credential × target-door table: an OAuth caller with no agent to carry is refused by name, and the listing marks it', () => {
+    /**
+     * An OAuth caller whose envelope carries scopes but that the MCP door did
+     * not resolve to an agent principal (no `principalKind: 'agent'`, no
+     * client). [ADR-0090 D10 rule 5, #28367] There is no agent for a forward
+     * credential to carry, so the #28178 refusal still answers it; the agent
+     * principal's flipped cells are pinned in the describe below.
+     */
     const OAUTH_CTX = (): HttpProtocolContext => {
         const ctx: any = CTX({ authorization: 'Bearer oat_agent_token' });
         delete ctx.request.headers.cookie;
@@ -965,5 +973,192 @@ describe('[#28178] the credential × target-door table: an OAuth-connected agent
         });
         expect(keyed[RECALC_LEAD.name]).toBeDefined();
         expect(keyed[RECALC_LEAD.name].unavailable).toBeUndefined();
+    });
+});
+
+describe('[ADR-0090 D10 rule 5, #28367] the two flipped cells: an OAuth agent is forwarded with a forward credential, under the scope-family rule', () => {
+    /** The agent principal the MCP door assembles from a verified OAuth access token. */
+    const AGENT_CTX = (scopes: string[] = ['actions:execute', 'data:read', 'data:write'], over: Record<string, unknown> = {}): HttpProtocolContext => {
+        const ctx: any = CTX({ authorization: 'Bearer oat_agent_token', cookie: 'better-auth.session_token=ambient' });
+        ctx.admission = { credential: 'session', authGate: undefined };
+        ctx.executionContext = {
+            ...ctx.executionContext,
+            principalKind: 'agent',
+            onBehalfOf: { userId: 'u_member', principalKind: 'human' },
+            performedBy: { clientId: 'client_agent' },
+            oauthScopes: scopes,
+            ...over,
+        };
+        return ctx as HttpProtocolContext;
+    };
+    const KEY_CTX = (): HttpProtocolContext => {
+        const ctx: any = CTX({ 'x-api-key': 'osk_member_key' });
+        delete ctx.request.headers.authorization;
+        delete ctx.request.headers.cookie;
+        ctx.admission = { credential: 'api_key', authGate: undefined };
+        return ctx as HttpProtocolContext;
+    };
+    const SESSION_CTX = (): HttpProtocolContext =>
+        ({ ...CTX(), admission: { credential: 'session', authGate: undefined } } as unknown as HttpProtocolContext);
+    const deps = (h: ReturnType<typeof boot>, request = h.request): any => ({
+        resolveService: async (_ctx: unknown, service: string) =>
+            service === 'metadata' ? h.metadata
+            : service === 'automation' ? null
+            : service === 'http.server' ? { getRawApp: () => ({ request }) }
+            : h.ql,
+        getObjectQL: async () => h.ql,
+    });
+    const runViaMcp = async (h: ReturnType<typeof boot>, ctx: HttpProtocolContext, name: string, input: any = {}, request = h.request) =>
+        invokeBusinessAction(deps(h, request), ctx as any, name, input, {
+            driver: h.ql,
+            ec: (ctx as any).executionContext,
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id } }),
+        });
+    const listFor = async (h: ReturnType<typeof boot>, ctx: HttpProtocolContext): Promise<any[]> =>
+        (h.dispatcher as any).buildMcpBridge(ctx).listActions();
+    const api = (target: string, method?: string) => ({ name: 'probe', type: 'api', target, ...(method ? { method } : {}) });
+    const doors = { identity: '/api/v1/auth/admin/ban-user', mcp: '/api/v1/mcp', platform: '/api/v1/data/crm_lead/{id}' };
+
+    it('the table, cell by cell: exactly oauth × identity and oauth × platform flip; api_key × identity keeps refusing by name', () => {
+        const cell = (ctx: HttpProtocolContext, target: string) => apiForwardCredentialRefusal(ctx, api(target)) === null ? 'ok' : 'refused';
+        const table = Object.fromEntries(
+            (Object.entries({ session: SESSION_CTX, api_key: KEY_CTX, oauth: () => AGENT_CTX() }) as Array<[string, () => HttpProtocolContext]>)
+                .map(([kind, ctx]) => [kind, Object.fromEntries(Object.entries(doors).map(([door, t]) => [door, cell(ctx(), t)]))]),
+        );
+        expect(table).toEqual({
+            session: { identity: 'ok', mcp: 'ok', platform: 'ok' },
+            api_key: { identity: 'refused', mcp: 'ok', platform: 'ok' },
+            oauth: { identity: 'ok', mcp: 'ok', platform: 'ok' },
+        });
+        expect(apiForwardCredentialRefusal(KEY_CTX(), api(doors.identity))).toMatchObject({
+            status: 401, message: apiActionIdentityRouteKeyRefusal(api(doors.identity), doors.identity),
+        });
+    });
+
+    it('an OAuth caller the door did not resolve to an agent (no client named) has no agent to carry: still refused by name', () => {
+        const noClient = AGENT_CTX(undefined, { performedBy: undefined });
+        expect(apiForwardAgentOf(noClient)).toBeUndefined();
+        expect(apiForwardCredentialRefusal(noClient, api(doors.identity))).toMatchObject({
+            status: 401, message: apiActionOAuthForwardRefusal(api(doors.identity), doors.identity, 'identity'),
+        });
+        const notAgent = AGENT_CTX(undefined, { principalKind: 'human' });
+        expect(apiForwardCredentialRefusal(notAgent, api(doors.platform))?.status).toBe(401);
+    });
+
+    it('the scope-family rule: actions:execute always; a safe method needs a data scope; any other method needs data:write', () => {
+        const readOnly = AGENT_CTX(['actions:execute', 'data:read']);
+        // A read-consented agent reads through an action and never changes state through one, at either door.
+        expect(apiForwardCredentialRefusal(readOnly, api(doors.platform, 'GET'))).toBeNull();
+        expect(apiForwardCredentialRefusal(readOnly, api('/api/v1/auth/get-session', 'GET'))).toBeNull();
+        for (const [target, method] of [[doors.identity, 'POST'], [doors.platform, 'PATCH'], [doors.platform, 'DELETE'], ['/api/v1/auth/update-user', undefined]] as const) {
+            const refusal = apiForwardCredentialRefusal(readOnly, api(target, method));
+            expect(refusal, `${method ?? 'POST'} ${target}`).toMatchObject({ status: 403, code: standardErrorCodeForHttpStatus(403) });
+            expect(refusal!.message).toMatch(/may run only with the 'data:write' scope, and this connection was not granted it\. The action was not run\./);
+        }
+        // No data scope at all: not even a read.
+        expect(apiForwardCredentialRefusal(AGENT_CTX(['actions:execute']), api(doors.platform, 'GET'))?.message)
+            .toMatch(/only with the 'data:read' scope/);
+        // No actions:execute: nothing is minted for any method.
+        expect(apiForwardCredentialRefusal(AGENT_CTX(['data:read', 'data:write']), api(doors.platform, 'GET'))?.message)
+            .toMatch(/only with the 'actions:execute' scope/);
+        // The MCP door is not a flipped cell: the rule does not reach it.
+        expect(apiForwardCredentialRefusal(readOnly, api(doors.mcp, 'POST'))).toBeNull();
+    });
+
+    it('a state-changing method on the metadata door stays outside the flip, whatever the scopes; a read of it is served', () => {
+        const full = AGENT_CTX(['actions:execute', 'data:read', 'data:write', 'metadata:write']);
+        for (const target of ['/api/v1/meta/object/crm_lead', '/api/v1/environments/env_1/meta/view/x']) {
+            for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {
+                const refusal = apiForwardCredentialRefusal(full, api(target, method));
+                expect(refusal, `${method} ${target}`).toMatchObject({ status: 403 });
+                expect(refusal!.message).toMatch(/metadata endpoint .* does not change metadata through an action\. The action was not run\./);
+            }
+            expect(apiForwardCredentialRefusal(full, api(target, 'GET'))).toBeNull();
+        }
+        // A data route whose name merely starts with "meta" is not the metadata door.
+        expect(apiForwardCredentialRefusal(full, api('/api/v1/metadata-like/x', 'POST'))).toBeNull();
+    });
+
+    it('MCP `run_action`: the agent\'s identity-route action is forwarded with a forward credential and none of the caller\'s identity headers', async () => {
+        const h = boot();
+        let redeemed: unknown;
+        let handle = '';
+        const request = vi.fn(async (url: string, init: RequestInit) => {
+            h.injected.push({ url, init });
+            handle = headersOf(init)[FORWARD_CREDENTIAL_HEADER]!;
+            // What the target's door does: redeem the presented handle for this request.
+            redeemed = redeemForwardCredential(handle, String(init.method), url);
+            return new Response(JSON.stringify({ success: true, data: { banned: true } }), {
+                status: 200,
+                headers: [['content-type', 'application/json'], ['set-auth-token', 'rotated'], ['set-cookie', 'better-auth.session_token=new; HttpOnly']],
+            });
+        });
+
+        const result: any = await runViaMcp(h, AGENT_CTX(), BAN_LEAD.name, { recordId: 'u_target' }, request);
+
+        expect(result.ok).toBe(true);
+        expect(request).toHaveBeenCalledTimes(1);
+        const sent = headersOf(h.injected[0]!.init);
+        expect(sent.authorization).toBeUndefined();
+        expect(sent.cookie).toBeUndefined();
+        expect(sent['x-api-key']).toBeUndefined();
+        expect(handle).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        expect(handle).not.toContain('oat_agent_token');
+        expect(redeemed).toEqual({ userId: 'u_member', clientId: 'client_agent', scopes: ['actions:execute', 'data:read', 'data:write'], organizationId: 'org_1' });
+        // Revoked once the forward answered; and nothing the target minted, nor the handle, comes back.
+        expect(redeemForwardCredential(handle, 'POST', h.injected[0]!.url)).toBeUndefined();
+        const answer = JSON.stringify(result);
+        expect(answer).not.toContain(handle);
+        expect(answer).not.toContain('rotated');
+        expect(answer).not.toContain('session_token=new');
+    });
+
+    it('REST door: the agent\'s platform action is forwarded with a forward credential, and the answer relays no credential header', async () => {
+        const h = boot({ answer: { body: { success: true, data: { recalculated: 1 } }, headers: [['set-auth-token', 'rotated'], ['set-cookie', 'a=b']] } });
+
+        const res: any = await h.dispatcher.handleActions(`/${OBJECT}/${RECALC_LEAD.name}`, 'POST', { recordId: 'u_target' }, AGENT_CTX());
+
+        expect(statusOf(res)).toBe(200);
+        expect(h.injected).toHaveLength(1);
+        const sent = headersOf(h.injected[0]!.init);
+        expect(sent[FORWARD_CREDENTIAL_HEADER]).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        expect(sent.authorization).toBeUndefined();
+        expect(sent.cookie).toBeUndefined();
+        const relayed = JSON.stringify(res?.response?.headers ?? {});
+        expect(relayed).not.toMatch(/set-auth-token|set-cookie|rotated/i);
+    });
+
+    it('a refused agent run mints nothing: the read-only agent\'s state-changing action is refused 403 by name and the target is never called', async () => {
+        const h = boot();
+
+        const thrown = await runViaMcp(h, AGENT_CTX(['actions:execute', 'data:read']), BAN_LEAD.name, { recordId: 'u_target' }).catch((e) => e);
+
+        expect((thrown as any).status).toBe(403);
+        expect((thrown as any).code).toBe(standardErrorCodeForHttpStatus(403));
+        expect(String(thrown.message)).toMatch(/^Action 'ban_lead' sends a POST request to '\/api\/v1\/auth\/admin\/ban-user', which an AI agent may run only with the 'data:write' scope/);
+        expect(h.request).not.toHaveBeenCalled();
+    });
+
+    it('`list_actions` marks from the same predicate: the read-only agent sees its state-changing actions marked 403, a full agent sees none marked', async () => {
+        const h = boot();
+
+        const readOnly = Object.fromEntries((await listFor(h, AGENT_CTX(['actions:execute', 'data:read']))).map((a) => [a.name, a]));
+        expect(readOnly[BAN_LEAD.name]?.unavailable).toMatchObject({ code: standardErrorCodeForHttpStatus(403) });
+        expect(readOnly[BAN_LEAD.name].unavailable.reason).toMatch(/only with the 'data:write' scope/);
+        const thrown = await runViaMcp(h, AGENT_CTX(['actions:execute', 'data:read']), BAN_LEAD.name, { recordId: 'u_target' }).catch((e) => e);
+        expect(String(thrown.message)).toBe(readOnly[BAN_LEAD.name].unavailable.reason);
+
+        const full = await listFor(h, AGENT_CTX());
+        expect(full.filter((a) => a.unavailable && [BAN_LEAD.name, RECALC_LEAD.name].includes(a.name))).toEqual([]);
+    });
+
+    it('a session caller is forwarded exactly as before: its own credentials, no forward credential', async () => {
+        const h = boot();
+        const result: any = await runViaMcp(h, SESSION_CTX(), BAN_LEAD.name, { recordId: 'u_target' });
+        expect(result.ok).toBe(true);
+        const sent = headersOf(h.injected[0]!.init);
+        expect(sent.authorization).toBe('Bearer tok_member');
+        expect(sent[FORWARD_CREDENTIAL_HEADER]).toBeUndefined();
     });
 });

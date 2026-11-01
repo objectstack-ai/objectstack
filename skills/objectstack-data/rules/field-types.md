@@ -26,8 +26,8 @@ fields: {
 
 > **Config columns list only real `FieldSchema` keys.** Per-type display knobs
 > beyond these do **not** exist — an unknown field key is REFUSED at parse
-> (`unrecognized_keys`), so don't invent `theme`, `rows`, or
-> `fileAttachmentConfig`. Source of truth:
+> (`unrecognized_keys`), so don't invent `theme`, `rows`,
+> `vectorConfig` or `fileAttachmentConfig`. Source of truth:
 > `node_modules/@objectstack/spec/src/data/field.zod.ts`.
 
 ## Text & Content
@@ -51,7 +51,7 @@ fields: {
 |:-----|:------------|:-------|
 | `number` | Generic numeric value | `min`, `max`, `precision`, `scale` |
 | `currency` | Monetary amounts | `currencyConfig` (currencyMode, defaultCurrency, currencyField, homeAmount) |
-| `percent` | Percentage values (0-100) | `min`, `max`, `precision` |
+| `percent` | Percentage values (0-100) | `min`, `max`, `precision`, `percentDisplay` — the read-only face: unset or `'bar'` draws a progress bar, `'plain'` the number alone, for a rate or a probability |
 
 ## Date & Time
 
@@ -90,10 +90,19 @@ options: [
 
 | Type | When to Use | Key Config |
 |:-----|:------------|:-----------|
-| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior` |
-| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused) |
+| `lookup` | Reference another object (independent) | `reference`, `lookupFilters`, `multiple`, `deleteBehavior`, `lookupAutofill` |
+| `master_detail` | Parent–child with lifecycle control | `reference`, `deleteBehavior` (`cascade`/`restrict` — `set_null` is refused), `lookupAutofill` |
 | `tree` | Hierarchical self-reference | `reference` — optional; when written, this object's own name (any other object is refused at parse) |
 | `user` | Person picker — a lookup specialized to `sys_user` (assignee, watchers). Stored identically to `lookup` | `multiple` (collaborators), `defaultValue: 'current_user'` |
+
+**`lookupAutofill: [{ target, source, overwrite? }]`** (single-value `lookup` /
+`master_detail`): a pick copies the picked record's `source` into this object's
+`target` (`[{ target: 'unit_price', source: 'list_price' }]` on a product lookup),
+in the form and the line-item grid. `target`: a field of this object an author
+writes (not the lookup, `readonly` or computed), named once. `source`: a declared,
+non-`internal` field of `reference` the target can hold. A pick fills an empty
+target or an earlier pick's fill; `overwrite: true` always replaces. Client-side
+only; in a grid a declared target leaves the same-named `autofill` copy.
 
 ## Media
 
@@ -142,19 +151,6 @@ Stored as JSON on the parent row — no separate table / FK:
 
 ## Common Field Configurations
 
-### Email with Uniqueness
-
-```typescript
-{
-  type: 'email',
-  required: true,
-  // State the scope (ADR-0120): 'organization' = one holder per organization
-  // (NULL-safe), 'global' = one across the whole installation. Bare `true` at
-  // field level still means 'organization' and stays valid.
-  unique: 'organization',
-}
-```
-
 ### Currency
 
 ```typescript
@@ -182,20 +178,6 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
 (`date`/`datetime`) rate, and that rate in `rateField` (`number`), both
 `readonly: true`. Cross-currency totals sum `field`.
 
-### Select with Default
-
-```typescript
-{
-  type: 'select',
-  required: true,
-  options: [
-    { label: 'Low', value: 'low' },
-    { label: 'Medium', value: 'medium', default: true },
-    { label: 'High', value: 'high', color: '#e74c3c' },
-  ],
-}
-```
-
 ### Lookup (One-to-Many)
 
 ```typescript
@@ -206,17 +188,6 @@ home-currency amount in `field` (a `'dynamic'` `currency`) at the `rateDate`
   lookupFilters: [
     { field: 'status', operator: 'eq', value: 'active' },
   ],
-}
-```
-
-### Lookup (Many-to-Many)
-
-```typescript
-{
-  type: 'lookup',
-  reference: 'tag',
-  multiple: true,
-  max: 10,
 }
 ```
 
@@ -280,9 +251,6 @@ The `format` is literal text interleaved with `{...}` tokens:
   dimensions: 1536,  // flat sibling — OpenAI ada-002
 }
 ```
-
-There is **no** `vectorConfig` block — an authored `vectorConfig` is refused at
-parse. `dimensions` is the flat field-level key.
 
 ## Incorrect vs Correct
 

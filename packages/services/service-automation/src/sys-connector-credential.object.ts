@@ -104,7 +104,7 @@ export const SysConnectorCredential = ObjectSchema.create({
       required: true,
       defaultValue: 'set',
       description:
-        "`set` when a value is stored; `rejected` when an upstream refused it (an instance's materialization or call answered 401 / 403). Back to `set` only when the value is set again or a provider proves it while materializing (mcp); a call answered 2xx does not, since the endpoint may not check the credential. A reference no source answers for is `missing` in the listing and has no row.",
+        "`set` when a value is stored; `rejected` when an upstream refused it (an instance's materialization or call answered 401 / 403, or an MCP server it was sent to did not list a tool the instance's `include` names). Back to `set` only when the value is set again or a provider proves it while materializing (mcp); a call answered 2xx does not, since the endpoint may not check the credential. A reference no source answers for is `missing` in the listing and has no row.",
     }),
 
     status_reason: Field.textarea({
