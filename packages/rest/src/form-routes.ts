@@ -165,25 +165,38 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
     // `sharing.allowAnonymous === true` and a `publicLink` naming the slug.
     //
     // A withdrawal is a kill switch: layering may only narrow anonymous
-    // intake, never re-open it. The doors read one list, the
-    // environment's (environment → code), which holds one item per
-    // package of a view name, and judge every candidate against that same
-    // list as the layer beneath it: a candidate is served only when no
-    // body of its view name explicitly withdraws the same form
+    // intake, never re-open it. [#28409, ADR-0146 D8] The doors offer the
+    // forms of the ONE effective read — the environment's list
+    // (environment → code) as every door that serves a view name serves it:
+    // one item per name a code package ships, that package's declared
+    // override where one is stored. They judge every candidate's withdrawal
+    // against a layer never narrower than the one they judged before: that
+    // same list beside the per-package layer
+    // (`ObjectStackProtocolImplementation.getMetaItemsPerPackage`), which
+    // still holds one item per package of a view name and the base's own
+    // document under its override (the hard requirement ruled on #28238,
+    // option 3). A candidate is served only when no body of its view name
+    // in that layer explicitly withdraws the same form
     // (`anonymousFormIntakeWithdrawnIn`: matched by slot or by slug, the
     // link kept with a switch set to `false`), so a withdrawal in one
     // package closes the name's form in every package (a known limit that
     // fails closed). Another view publishing the same slug is a different
     // form and closes nothing.
+    //
+    // A form only a body the effective read no longer serves offered — a
+    // dependent package's same-named row, the base's form the override
+    // removed — is not offered: that narrows intake, the direction a layer
+    // may take.
     const findPublicFormView = (
         views: any[],
+        withdrawalLayer: any[],
         slug: string,
     ): { view: any; form: any; object: string } | null => {
         for (const view of views ?? []) {
             if (!view || typeof view !== 'object') continue;
             for (const c of anonymousFormIntakeCandidates(view)) {
                 if (c.slug !== slug) continue;
-                if (anonymousFormIntakeWithdrawnIn(views, view, c)) continue;
+                if (anonymousFormIntakeWithdrawnIn(withdrawalLayer, view, c)) continue;
                 const objectName = anonymousFormObjectName(view, c.form);
                 if (!objectName) continue;
                 return { view, form: c.form, object: objectName };
@@ -235,7 +248,14 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 ? result
                 : []);
         const items = listOf(await p.getMetaItems(viewsRequest));
-        const match = findPublicFormView(items, slug);
+        // [#28409] The per-package layer, where the protocol serves one: a
+        // server-only extension, feature-detected like the other extensions
+        // the doors read. A protocol without it serves no narrower list than
+        // the one it lists, which is then the whole layer.
+        const perPackage = typeof (p as any).getMetaItemsPerPackage === 'function'
+            ? listOf(await (p as any).getMetaItemsPerPackage(viewsRequest))
+            : [];
+        const match = findPublicFormView(items, [...items, ...perPackage], slug);
         if (!match) return null;
         // [#21476] A form that cannot take intake on this posture is not
         // offered: `null` here IS the withdrawn form's answer on both

@@ -138,6 +138,9 @@ describe('[#24131] POST /forms/:slug/submit enforces the form\'s own `required`'
       if (request?.type === 'object') return [LEAD];
       return realGetMetaItems(request);
     };
+    // [#28409] The doors judge withdrawal against the effective list beside
+    // the per-package layer: the injected list is that whole layer here.
+    protocol.getMetaItemsPerPackage = async (request: any) => (request?.type === 'view' ? [FORM] : []);
     const rest = new RestServer(mockServer() as any, protocol, { api: { requireAuth: false } } as any);
     rest.registerRoutes();
     const submit = rest.getRoutes().find((r: any) => r.method === 'POST' && r.path === '/api/v1/forms/:slug/submit');

@@ -639,7 +639,13 @@ export const CEILINGS = new Map([
   //   ceil($(wc -c < skills/objectstack-ui/SKILL.md) / 4) == ceil(15424 / 4)
   // 3856 -> 3851: A2′ — the release-stamp line left the count (see
   // STAMP_LINE_REPIN); the file's count fell by the same 5, headroom unchanged.
-  ['skills/objectstack-ui/SKILL.md', 3851],
+  // 3851 -> 3544 (#27059, record-page epic #26676 child 8): LOWERED. The two related-list
+  // paragraphs that taught a Details / Related / Timeline tab strip (false since the
+  // record page's tab row and right column landed) left for a two-line pointer at
+  // `rules/record-page.md`; one Detailed Rules link and the CRM blueprint row reworded.
+  // The file is 14194 bytes less its stamp line -> 3544 tokens; the ceiling follows it
+  // down to the measurement, the ratchet's ordinary direction.
+  ['skills/objectstack-ui/SKILL.md', 3544],
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -855,13 +861,36 @@ export const CEILINGS = new Map([
   // prescription that objectstack-data → Search Fields carries whole — so the file nets -4
   // and the ceiling follows it down to the new measurement.
   ['skills/objectstack-ui/rules/list-views.md', 3129],
-  ['skills/objectstack-ui/rules/navigation.md', 2273],
+  // 2273 -> 2196 (#27059): LOWERED. The Surface bullet points at `rules/record-page.md`,
+  // says create / edit is a modal or the `editMode: 'page'` route, and the Overlay-width
+  // bullet moved there whole (the `size` bucket, the deprecated pixel keys); the ceiling
+  // follows the file down to the measurement (8784 bytes).
+  ['skills/objectstack-ui/rules/navigation.md', 2196],
   // 5501 -> 5692 (#19715, card item 4): a 5-line table of contents at the top,
   // anchors to the file's existing headings, nothing else changed. +191 tokens,
   // zero headroom to absorb any of it, ceiling +191. Maintainer ruling
   // 2026-09-22 on decision batch #213 item 1, verbatim and untranslated:
   // 「1 2 4 同意」.
-  ['skills/objectstack-ui/rules/pages.md', 5692],
+  // 5692 -> 5669 (#27059): LOWERED. The `tabs`-slot sentence is a one-line pointer at
+  // `rules/record-page.md`; the ceiling follows the file down to the measurement (22673 bytes).
+  ['skills/objectstack-ui/rules/pages.md', 5669],
+  // objectstack-ui `rules/record-page.md` — the sixth rules file, ordered by card #27059
+  // (record-page epic #26676 child 8, dispatched by ui seat 1 2026-11-01, with the seat's
+  // ruling that the record page gets its own rules file rather than rows in the files
+  // PR #28488 holds open). INITIAL measurement AT its landed count, on the same terms as
+  // the #14296 rows above: zero headroom, the next token added here is paid for by
+  // deleting one from this file. What it teaches, in order: the object's declarations
+  // produce the page, the relationship flags shape the related column, a slotted page
+  // overrides one of six slots (no `tabs`), `kind: 'full'` is the escape hatch, the
+  // drawer unless the object declares `page`, and the reader's own choices are not
+  // metadata. PAID DOWN FIRST by the 404 tokens the three rows above gave up (the tab
+  // strip the record page no longer has, SKILL.md 307 + navigation.md 77 + pages.md 20, its
+  // ceiling 23);
+  // the card's binding budget is the package's hand-authored LINE count, +40 at most,
+  // landed at +39 (1876 -> 1915), so the package nets +592 tokens, every one of them
+  // teaching the surface `main` ships today and none of it restating a sibling file.
+  //   ceil($(wc -c < skills/objectstack-ui/rules/record-page.md) / 4) == ceil(3981 / 4)
+  ['skills/objectstack-ui/rules/record-page.md', 996],
 
   // ── 2026-09-22 the #19715 split — decision batch #213 item 1 ─────────────
   // The maintainer ruled the four over-500-line published SKILL.md files split

@@ -30,9 +30,10 @@
  *    wins over the code package; beside the dependent package's row it is now
  *    what that read serves (the dependent package's row was, before).
  *
- * Not pinned: a declared override (the epic's override core, #28236, has no
- * declaration on `main` to leave untouched), and the env-wide list, which
- * keeps one slot per package that holds the name (#21934).
+ * Not pinned here: the declared override, the env-wide list (which no
+ * longer keeps a dependent package's slot beside the base's under a name the
+ * base ships) and the layered read's orphan report — the one effective read
+ * of #28409, pinned in `protocol-custom-override-effective-read.test.ts`.
  *
  * Test-path resolution: the protocol is `@objectstack/metadata-protocol`'s
  * `dist/`, so a change there is read here after that package is rebuilt.
@@ -243,7 +244,11 @@ describe('[#28238] a dependent package\'s row under a name the base ships is not
 
         const layered: any = await (protocol as any).getMetaItemLayered({ type: 'view', name: VIEW });
         expect(columnsOf(layered.effective)).toEqual(BASE_COLUMNS);
-        expect(layered.overlay).toBeNull();
+        // [#28409] The dependent's row under the base's name is an orphan of
+        // that name (ADR-0146 D8, N-10 Wanted 5): the layered read REPORTS it
+        // as a shadowed `overlay` layer instead of dropping it silently, while
+        // `effective` stays the base document the by-name read serves.
+        expect(columnsOf(layered.overlay)).toEqual(DEPENDENT_COLUMNS);
 
         const listed: any = await protocol.getMetaItems({ type: 'view', packageId: BASE });
         expect(listed.items.filter((i: any) => i.name === VIEW).map((i: any) => columnsOf(i))).toEqual([BASE_COLUMNS]);

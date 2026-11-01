@@ -226,6 +226,14 @@ export type { MetadataHostEngine } from './host-engine.js';
 export { isWritablePackage, READ_ONLY_PACKAGE_SCOPES } from './package-writability.js';
 export type { PackageWritabilityEngine } from './package-writability.js';
 
+// [#28409, ADR-0146 D8 item 2] "Is this stored row the served override of base
+// X's name": the one predicate the effective read asks, exported so the flow
+// override, the per-package customization read and the package-less overlay
+// migration (ADR-0146 Rollout N-11, N-15, N-16) ask the same one. ⛔ No second
+// spelling.
+export { isServedOverrideRowOf } from './served-override.js';
+export type { ServedOverrideRow } from './served-override.js';
+
 // [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
 // function `importUnmanagedPackage` raises, exported so the install door
 // (`@objectstack/cloud-connection` install-local) answers it with the same

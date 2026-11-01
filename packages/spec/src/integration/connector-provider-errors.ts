@@ -78,18 +78,30 @@ export function isConnectorUpstreamUnavailable(err: unknown): boolean {
  * message — never the value. A value from an environment variable or the
  * host's resolver can change where the process cannot see it, so its instance
  * is retried on the backoff.
+ *
+ * An upstream that accepts the credential but answers it with less than the
+ * instance declares is the same outcome: an MCP server that lists only the
+ * tools a credential may use, and so leaves out a tool the instance's
+ * `include` names, is answered with this marker by the `mcp` provider.
  */
 export const CONNECTOR_CREDENTIAL_REJECTED = 'CONNECTOR_CREDENTIAL_REJECTED' as const;
 
 /**
  * Thrown by a connector provider factory when the upstream it contacted to
- * materialize an instance refused the credential it sent (HTTP 401 / 403).
- * Carries {@link CONNECTOR_CREDENTIAL_REJECTED} as its `code` and the HTTP
- * status. ⛔ The message must not carry the credential.
+ * materialize an instance refused the credential it sent (HTTP 401 / 403), or
+ * accepted it and withheld what the instance declares (see
+ * {@link CONNECTOR_CREDENTIAL_REJECTED}). Carries
+ * {@link CONNECTOR_CREDENTIAL_REJECTED} as its `code` and the HTTP status.
+ * ⛔ The message must not carry the credential.
  */
 export class ConnectorCredentialRejectedError extends Error {
   readonly code = CONNECTOR_CREDENTIAL_REJECTED;
-  /** The upstream's HTTP status: 401 or 403. */
+  /**
+   * The upstream's HTTP status: 401 or 403. For an upstream that answered
+   * `2xx` and withheld what the instance declares, 403: the status a
+   * credential short of the scopes a resource needs is answered with
+   * (RFC 6750 §3.1, `insufficient_scope`).
+   */
   readonly status: number;
   /** The underlying failure, kept for diagnostics. */
   readonly cause?: unknown;
