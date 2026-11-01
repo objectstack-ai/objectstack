@@ -123,6 +123,7 @@ import {
   PackagePublishResult,
   DiscardPackageDraftsResponse,
   ListPackageCommitsResponse,
+  GetPackageCustomizationsResponse,
   RevertPackageCommitResponse,
   RollbackToPackageCommitResponse,
   PackageExportManifest,
@@ -3107,6 +3108,19 @@ export class ObjectStackClient {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/export`);
         return this.unwrapResponse<PackageExportManifest>(res);
+    },
+
+    /**
+     * [#28411, ADR-0146 D8 item 4] What this deployment changed on an installed
+     * base: its `.custom` pair's served overrides, the members the pair adds to
+     * the base's objects, and the base's switched-off items, with counts.
+     * A `.custom` id is refused naming its base; a base with no pair answers
+     * empty lists.
+     */
+    customizations: async (id: string): Promise<GetPackageCustomizationsResponse> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/customizations`);
+        return this.unwrapResponse<GetPackageCustomizationsResponse>(res);
     },
 
     /** ADR-0070 D5: bulk-rebind package-less (orphaned) metadata into this base. */
