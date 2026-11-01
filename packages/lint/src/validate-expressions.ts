@@ -94,6 +94,7 @@ import {
   SCOPE_ROOTS,
   analyzeRelationshipTraversals,
   buildScope,
+  declaresOptionsOnceServed,
 } from '@objectstack/formula';
 import type { RelationshipTraversalAnalysis } from '@objectstack/formula';
 import {
@@ -147,7 +148,7 @@ import {
   unboundFlowCelRootMessage,
 } from './flow-cel-root-scope.js';
 import type { FlowCelEntrance } from './flow-cel-root-scope.js';
-import { injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
+import { injectedColumnDefsFor, injectedColumnsFor, unprovisionedInjectedColumnsFor } from './system-fields.js';
 import { findUnguardedNullableOperands, nullGuardMessage } from './validate-null-guards.js';
 import type { NullGuardOutcome } from './validate-null-guards.js';
 import { recordsOf } from './object-graph.js';
@@ -3106,6 +3107,23 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
               .map(([n, def]) => [n, def as AnyRec] as [string, AnyRec])
           : []);
 
+    // [#28659] The fields of this object a formula's `label()` can answer on:
+    // each declared field, and each column the registry injects beside them
+    // (the field index lists those too), read through
+    // `declaresOptionsOnceServed`. This walk reads the AUTHORED body, where a
+    // picklist-bound field names its list instead of declaring `options`; the
+    // registry writes the list onto the served field, which is the form the
+    // engine builds `label()`'s map from (`declaresOptions`). So inline
+    // `options` or a `picklist` name both answer. A declared field wins over
+    // an injected one of the same name, as it does at registration.
+    const declaredNames = new Set(fieldList.map(([n]) => n));
+    const optionFieldNames = [
+      ...fieldList.filter(([, f]) => declaresOptionsOnceServed(f)).map(([n]) => n),
+      ...[...injectedColumnDefsFor(obj)]
+        .filter(([n, def]) => !declaredNames.has(n) && declaresOptionsOnceServed(def))
+        .map(([n]) => n),
+    ];
+
     // (ADR-0062 D7's `field.columnName`-on-external-objects rejection was removed
     // with `field.columnName` itself in #2377: the field no longer exists, so there
     // is no dual-source ambiguity to guard — external column mapping is `external.columnMap`.)
@@ -3204,6 +3222,12 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // read. So one hop passes here, and the two shapes that path cannot
         // serve — a second hop, and a reference read both through and as a
         // value — are refused with the formula-worded prescription.
+        //
+        // [#28659] `optionFields`: the object's fields that declare options
+        // once served (inline `options` or a `picklist` name, see
+        // `optionFieldNames` above). A `label(record.<field>)` naming any other
+        // declared field faults on every row and reads null, so it is refused
+        // here, in the evaluator's own words.
         const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
           objectName
             ? {
@@ -3212,6 +3236,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
                 fieldTypes: fieldTypeIndex.get(objectName),
                 scope: 'record',
                 traversalHydration: true,
+                optionFields: optionFieldNames,
               }
             : { scope: 'record' });
         // Names the KEY the author edits, not the field type. Saying "formula"

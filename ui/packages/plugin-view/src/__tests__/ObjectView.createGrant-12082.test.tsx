@@ -23,7 +23,7 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { ObjectViewSchema, DataSource } from '@object-ui/types';
 
 vi.mock('@object-ui/react', async (importOriginal) => {
@@ -67,11 +67,12 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; create: bool
   { shape: 'full', bits: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true }, create: true },
 ];
 
-const envelope = (bits: Record<string, boolean>): MePermissionsResponse => ({
+const envelope = (bits: Record<string, boolean>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits },
   fields: {},

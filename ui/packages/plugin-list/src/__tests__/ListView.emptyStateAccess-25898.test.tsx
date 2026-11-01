@@ -38,7 +38,7 @@ import { render, waitFor, cleanup } from '@testing-library/react';
 import { ListView } from '../ListView';
 import { filterNamesCurrentUser } from '../ListEmptyState';
 import { SchemaRendererProvider, FilterScopeProvider } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { ListViewSchema } from '@object-ui/types';
 
 afterEach(cleanup);
@@ -59,11 +59,12 @@ function emptyDataSource() {
 const READ_ONLY = { allowCreate: false, allowRead: true, allowEdit: false, allowDelete: false };
 const FULL = { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true };
 
-const envelope = (bits: Record<string, boolean>): MePermissionsResponse => ({
+const envelope = (bits: Record<string, boolean>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: USER,
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits },
   fields: {},
