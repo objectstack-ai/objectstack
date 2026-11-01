@@ -516,8 +516,8 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   object_extension: {
-    label: "Object Extension",
-    description: "Fields and rules a package adds to an object another package defines"
+    label: "对象扩展",
+    description: "一个软件包为另一个软件包定义的对象添加的字段和规则"
   },
   field: {
     label: "字段",

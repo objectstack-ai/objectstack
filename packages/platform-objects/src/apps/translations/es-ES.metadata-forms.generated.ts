@@ -516,8 +516,8 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   object_extension: {
-    label: "Object Extension",
-    description: "Fields and rules a package adds to an object another package defines"
+    label: "Extensión de Objeto",
+    description: "Campos y reglas que un paquete añade a un objeto que define otro paquete"
   },
   field: {
     label: "Campo",

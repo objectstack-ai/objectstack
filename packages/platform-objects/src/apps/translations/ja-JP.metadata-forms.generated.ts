@@ -516,8 +516,8 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
     }
   },
   object_extension: {
-    label: "Object Extension",
-    description: "Fields and rules a package adds to an object another package defines"
+    label: "オブジェクト拡張",
+    description: "パッケージが、別のパッケージの定義するオブジェクトに追加するフィールドとルール"
   },
   field: {
     label: "フィールド",
