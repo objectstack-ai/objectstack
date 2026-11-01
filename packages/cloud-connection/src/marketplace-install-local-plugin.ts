@@ -3248,32 +3248,6 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * [ADR-0146 D2, ruling A on #28390; #28410] THE OVERRIDE WRITE GATE at the
-     * managed install — the door a package's items enter through as code
-     * (`manifest.register`), so the publish doors never see them. The rule is
-     * the publish doors' own (`judgeOverrideWrite`), over the walk `os
-     * validate` takes (`overrideWriteItemsOf`):
-     *
-     *  - `refusals` — the incoming package's items the gate refuses: an
-     *    undeclared same name a read-only package in its dependency closure
-     *    ships, or an `overrides` declaration the gate does not admit (a
-     *    dependent declaring, a base outside the closure, an excluded type,
-     *    an object, a flow or action while their channel waits). A `.custom`
-     *    package's admitted declarations install as at publish.
-     *  - `collisions` — on a (re)install of a base, the names an installed
-     *    dependent (a package whose closure holds this one) already holds,
-     *    undeclared, that this version now ships. Listed on the answer, never
-     *    refused (see {@link OverrideUpgradeCollision}).
-     *
-     * The card placed this gate point at `installPackage`; that door takes a
-     * manifest and no items (`PackageInstallManifestSchema`), and the
-     * unmanaged install copies through the save door (already gated), so the
-     * managed install is where a package's items arrive unjudged.
-     *
-     * Reads nothing it cannot: with no `objectql` registry or no protocol
-     * listing, the gate has no closure to judge and answers empty.
-     */
-    /**
      * [ADR-0146 D10, second rule] Step 2e of {@link handleInstall}: every
      * `objectExtensions[].fieldPatches` entry the converted body carries —
      * each `packages[]` entry's, or the body's own — judged against its target
@@ -3304,6 +3278,32 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         return bodies.flatMap(({ body, prefix }) => fieldPatchTargetRefusals(body.objectExtensions, getTarget, prefix));
     };
 
+    /**
+     * [ADR-0146 D2, ruling A on #28390; #28410] THE OVERRIDE WRITE GATE at the
+     * managed install — the door a package's items enter through as code
+     * (`manifest.register`), so the publish doors never see them. The rule is
+     * the publish doors' own (`judgeOverrideWrite`), over the walk `os
+     * validate` takes (`overrideWriteItemsOf`):
+     *
+     *  - `refusals` — the incoming package's items the gate refuses: an
+     *    undeclared same name a read-only package in its dependency closure
+     *    ships, or an `overrides` declaration the gate does not admit (a
+     *    dependent declaring, a base outside the closure, an excluded type,
+     *    an object, a flow or action while their channel waits). A `.custom`
+     *    package's admitted declarations install as at publish.
+     *  - `collisions` — on a (re)install of a base, the names an installed
+     *    dependent (a package whose closure holds this one) already holds,
+     *    undeclared, that this version now ships. Listed on the answer, never
+     *    refused (see {@link OverrideUpgradeCollision}).
+     *
+     * The card placed this gate point at `installPackage`; that door takes a
+     * manifest and no items (`PackageInstallManifestSchema`), and the
+     * unmanaged install copies through the save door (already gated), so the
+     * managed install is where a package's items arrive unjudged.
+     *
+     * Reads nothing it cannot: with no `objectql` registry or no protocol
+     * listing, the gate has no closure to judge and answers empty.
+     */
     private evaluateOverrideWriteGate = async (
         ctx: PluginContext,
         manifestId: string,
