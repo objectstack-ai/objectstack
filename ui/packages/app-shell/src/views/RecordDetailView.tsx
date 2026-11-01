@@ -11,7 +11,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
-import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
+import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
 import { useDisplayLocale, useLocalization, pickLocalized } from '@object-ui/i18n';
@@ -19,7 +19,7 @@ import { ActionProvider, useObjectTranslation, useObjectLabel, useActionTextLoca
 import { buildExpandFields, captureUpdateUndoData, recordDelete, resolveAffordance, resolveRecordIdParamSeed, userActionPredicates, withoutDeniedFields, type AffordanceGrantPrincipal, type SchemaLike } from '@object-ui/core';
 import { toast } from 'sonner';
 import { useRecordPresence, PresenceAvatars, isCommentAuthor } from '@object-ui/collaboration';
-import { Database, ArrowLeft, ChevronRight, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, PanelRight } from 'lucide-react';
+import { Database, ArrowLeft, ChevronLeft, ChevronRight, Lock, AlertTriangle, RotateCw, Printer, FileText, CheckCircle2, Inbox, PanelRight } from 'lucide-react';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
 import { SkeletonDetail } from '../skeletons/index.js';
 import { ManagedByBadge, useManagedByNote } from '../components/ManagedByBadge.js';
@@ -33,6 +33,9 @@ import { ActionResultDialog, type ResultDialogState } from './ActionResultDialog
 import { FlowRunner, type ScreenFlowState, type ScreenSpec } from './FlowRunner.js';
 import { FlowRefusalNotice, type FlowRefusalState } from './FlowRefusalNotice.js';
 import { RelatedRecordActionsBridge } from './RelatedRecordActionsBridge.js';
+import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.js';
+import { phoneRecordHeader } from './recordPhoneHeader.js';
+import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
 import { recordPageRelatedLists, recordPageRequestOf, seedRecordPageReaders } from './recordPagePayload.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
@@ -3736,6 +3739,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     [historyEnabled, historyEntries, t],
   );
 
+  // objectstack#27058 — the record page on a phone. Its business actions sit
+  // in a bar at the bottom of the page (the header draws them there, through
+  // `PageHeaderPhoneContext`), its top bar is one way back, a page pushed from
+  // a related row has a path row, and going back to a page restores where it
+  // was scrolled. A record drawn in a pane is never on a phone.
+  const phone = usePhoneViewport();
+  const phonePage = phone && !embedded;
+  const [phoneActionBarEl, setPhoneActionBarEl] = useState<HTMLDivElement | null>(null);
+  const [pageScrollerEl, setPageScrollerEl] = useState<HTMLDivElement | null>(null);
+  useRecordPageScrollMemory(phonePage ? pageScrollerEl : null, pageRecordStatus === 'loaded');
+
   if (isLoading) {
     return <SkeletonDetail />;
   }
@@ -4134,11 +4148,18 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // synth/slotted pages AND authored full-Lightning pages without
   // mutating the assignedPage tree. `PageHeaderRenderer` dedupes by
   // name so authored business actions still win on collision.
+  //
+  // objectstack#27058, Target 4 — on a phone the default page's header reads
+  // the first two declared text highlights as its subtitle and shows at most
+  // four highlights after them.
+  const phoneHeader = phonePage && !assignedPage
+    ? phoneRecordHeader(objectDef, synthParts.highlightFields, readablePageRecord)
+    : null;
   const composedPage = assignedPage
     ? effectivePage
     : buildDefaultPageSchema(objectDef as any, {
         sections: synthParts.sections,
-        highlightFields: synthParts.highlightFields,
+        highlightFields: phoneHeader ? phoneHeader.highlightFields : synthParts.highlightFields,
         headerActions: synthParts.headerActions,
         related: synthParts.related,
         approvals: synthParts.approvals,
@@ -4330,7 +4351,97 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       </span>
     </nav>
   );
-  const pageBar = embedded ? null : (
+  // objectstack#27058, Target 3 — the top bar on a phone: one link that
+  // returns where the page came from. A top-level page reads
+  // 「‹ <object plural>」, the breadcrumb's object half (the record's name is
+  // the header title directly below), and returns to the list it was opened
+  // from, or to the object's list. A page one level down (Target 8) is named
+  // by where it returns, its parent record (「‹ Acme Corp」): pushed from a
+  // related row or a lookup it goes back in the history, so the parent comes
+  // back where it was scrolled; reached by a `?from=` link it follows the
+  // trail's way back.
+  // Right, the counter and ↓ ↑ when the page knows its siblings. No ⊟ (the
+  // stack has no right column), no ⤡ (there is no drawer to collapse to).
+  const phonePushed = phonePage && isRecordPagePushed(location.state);
+  const phoneBackClass =
+    'inline-flex min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const phoneBack = phonePage ? (() => {
+    const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
+    const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
+    const label = parent
+      ? parent.t || shortRecordId(parent.i)
+      : phonePushed || (originFromState?.pathname && !originIsObjectList)
+        ? originFromState?.label ?? plural
+        : plural;
+    const face = (
+      <>
+        <ChevronLeft className="h-5 w-5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{label}</span>
+      </>
+    );
+    const goBack = t('detail.goBack', { defaultValue: 'Go back' });
+    if (phonePushed) {
+      return (
+        <button type="button" onClick={() => navigate(-1)} className={phoneBackClass} title={goBack} data-record-crumb-back="">
+          {face}
+        </button>
+      );
+    }
+    const to = pageTrail.length > 0
+      ? originFrom?.pathname
+      : originFromState?.pathname
+        ? (originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname)
+        : objectListPath;
+    return to ? (
+      <Link to={to} className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
+    ) : (
+      <span className={phoneBackClass}>{face}</span>
+    );
+  })() : null;
+  // objectstack#27058, Target 8 — the path row of a page one level down
+  // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
+  // parent going back in the history when the page was pushed from it.
+  const phonePathRow = phonePage && pageTrail.length > 0 ? (
+    <nav
+      aria-label={t('common.breadcrumb', { defaultValue: 'Breadcrumb' })}
+      className="flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto border-b px-2 py-1.5 text-xs text-muted-foreground"
+      data-testid="record-page-path"
+    >
+      {pageTrail.map((entry, index) => {
+        const entryDef = objectDefOf(entry.o);
+        const face = (
+          <>
+            {entryDef ? objectLabel(entryDef) : entry.o}{' '}
+            <span className="font-medium text-foreground">{entry.t || shortRecordId(entry.i)}</span>
+          </>
+        );
+        const isParent = index === pageTrail.length - 1;
+        return (
+          <span key={`${index}:${entry.o}:${entry.i}`} className="flex min-w-0 shrink-0 items-center gap-1">
+            {isParent && phonePushed ? (
+              <button type="button" onClick={() => navigate(-1)} className={crumbClass}>{face}</button>
+            ) : (
+              <Link to={buildRecordTrailHref(appName ? `/apps/${appName}` : '', entry, pageTrail.slice(0, index))} className={crumbClass}>
+                {face}
+              </Link>
+            )}
+            <ChevronRight className="h-3 w-3 shrink-0" aria-hidden="true" />
+          </span>
+        );
+      })}
+      <span className="shrink-0" aria-current="page">{objectDef ? objectLabel(objectDef) : objectName}</span>
+    </nav>
+  ) : null;
+  const pageBar = embedded ? null : phonePage ? (
+    <>
+      <RecordTopBar
+        leadingTestId="record-page-leading"
+        leading={phoneBack}
+        stepper={pageStepper}
+      />
+      {phonePathRow}
+    </>
+  ) : (
     <RecordTopBar
       leadingTestId="record-page-leading"
       leading={pageLeading}
@@ -4513,7 +4624,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           handlers={{ api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler }}
         >
           <div className="flex-1 overflow-hidden flex flex-row">
-            <div className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
+            <div ref={setPageScrollerEl} className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 scroll-pb-48">
               {/* objectui#12906 — the print page's screen-only chrome. A page
                   that declares `print` holds only the printable component
                   types, and `page:header` is not one of them, so the record's
@@ -4594,6 +4705,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   onDrawnActionsChange={setApprovalBarDrawn}
                 />
               )}
+              {/* objectstack#27058 — on a phone the header's actions are drawn
+                  into the bottom bar below, and the default page's header
+                  takes its subtitle from the declared text highlights. */}
+              <PageHeaderPhoneContext.Provider
+                value={phonePage ? { actionBar: phoneActionBarEl, subtitle: phoneHeader?.subtitle || undefined } : null}
+              >
               <RelatedRecordActionsBridge
                 appName={appName}
                 objects={objects}
@@ -4654,6 +4771,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   </DefaultRecordPageContext.Provider>
                 )}
               </RelatedRecordActionsBridge>
+              </PageHeaderPhoneContext.Provider>
               {/* Approval visibility fallback (objectui#3461) — synthesized
                   pages surface approvals as a TAB (`record:approvals` via
                   buildDefaultTabs); this bottom append fires only for
@@ -4727,6 +4845,17 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               sections={[{ title: 'Page Schema', data: renderedPage }]}
             />
           </div>
+          {/* objectstack#27058, Target 7 — the phone's bottom action bar: the
+              header's action row in its bar face (the primary action, one more
+              and the `⋯`), at the foot of the page above the safe area, so
+              the body ends where the bar starts. Empty, it is not drawn. */}
+          {phonePage && (
+            <div
+              ref={setPhoneActionBarEl}
+              className="shrink-0 border-t bg-background px-4 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)] empty:hidden"
+              data-record-action-bar=""
+            />
+          )}
           {modalElement}
         </ActionProvider>
         </RecordFieldChangesContext.Provider>
@@ -4806,6 +4935,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       </>
     );
   }
+  // A phone has no drawer (objectstack#27058): a related row or a lookup
+  // pushes its record as a page instead (`RelatedRecordActionsBridge`).
+  if (phonePage) return pageTree;
   return (
     <RecordPageDrawerHost
       appName={appName}

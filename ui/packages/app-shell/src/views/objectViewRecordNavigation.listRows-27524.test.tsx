@@ -38,6 +38,8 @@ function mount(navigation?: { mode: 'page' | 'drawer' }) {
       unlabelledViewText: 'Untitled view',
       language: 'en',
       recordOpenPreference: 'object' as never,
+      // A desktop console: on a phone every record opens as a page.
+      phone: false,
     }),
     { wrapper: ({ children }: { children: React.ReactNode }) => <MemoryRouter initialEntries={['/apps/crm/crm_lead?view=all']}>{children}</MemoryRouter> },
   );

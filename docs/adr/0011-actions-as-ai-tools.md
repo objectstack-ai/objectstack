@@ -324,7 +324,12 @@ three buckets, and the declarations were written in the same change as this adde
 | **C** exposed, confirmed | a destructive or privilege-changing lifecycle act that is reversible or bounded | `ai: { exposed: true, description, requiresConfirmation: true }`. ⛔ The confirmation is never relaxed. |
 | **E** exposed | an additive or self-scoped act with no credential and no privilege escalation | `ai: { exposed: true, description }`; confirmation is the author's choice (none is declared today). |
 
-**H — human-only (20):** `sys_user.impersonate_user` · `sys_user.set_user_password` ·
+> Amended (2026-10-31, ruling of record `6540309323` on #27900, the maintainer 「其他同意」): both
+> `enable_two_factor` actions move from E to H, since each takes the user's password and answers a new
+> sign-in factor, and `sys_invitation.copy_invitation_link` is assessed H, since it answers the
+> invitation's accept link, a bearer credential. The lists below are the amended record.
+
+**H — human-only (23):** `sys_user.impersonate_user` · `sys_user.set_user_password` ·
 `sys_user.create_user` · `sys_user.delete_my_account` · `sys_user.change_my_password` ·
 `sys_user.change_my_email` · `sys_user.disable_two_factor` · `sys_user.generate_backup_codes` ·
 `sys_two_factor.disable_two_factor` · `sys_two_factor.regenerate_backup_codes` ·
@@ -332,7 +337,8 @@ three buckets, and the declarations were written in the same change as this adde
 `sys_oauth_application.create_oauth_application` · `sys_oauth_application.rotate_client_secret` ·
 `sys_sso_provider.register_sso_provider` · `sys_sso_provider.register_saml_provider` ·
 `sys_sso_provider.verify_domain` · `sys_member.transfer_ownership` · `sys_member.update_member_role` ·
-`sys_organization.delete_organization`.
+`sys_organization.delete_organization` · `sys_user.enable_two_factor` ·
+`sys_two_factor.enable_two_factor` · `sys_invitation.copy_invitation_link`.
 
 **C — exposed, confirmed (17):** `sys_user.ban_user` · `sys_user.unban_user` · `sys_user.unlock_user` ·
 `sys_user.set_user_manager` · `sys_api_key.revoke_api_key` · `sys_session.revoke_session` ·
@@ -342,22 +348,22 @@ three buckets, and the declarations were written in the same change as this adde
 `sys_oauth_application.delete_oauth_application` · `sys_sso_provider.delete_sso_provider` ·
 `sys_organization.leave_organization` · `sys_account.unlink_account`.
 
-**E — exposed (21):** `sys_user.invite_user` · `sys_invitation.invite_user` ·
+**E — exposed (19):** `sys_user.invite_user` · `sys_invitation.invite_user` ·
 `sys_organization.invite_user` · `sys_member.invite_user` · `sys_invitation.resend_invitation` ·
 `sys_invitation.accept_invitation` · `sys_member.add_member` · `sys_team_member.add_team_member` ·
 `sys_team.add_team_member` · `sys_team.create_team` · `sys_team.update_team` ·
 `sys_organization.create_organization` · `sys_organization.update_organization` ·
 `sys_organization.rename_organization` · `sys_organization.set_active_organization` ·
-`sys_oauth_application.enable_oauth_application` · `sys_user.enable_two_factor` ·
-`sys_two_factor.enable_two_factor` · `sys_user.update_my_profile` ·
+`sys_oauth_application.enable_oauth_application` · `sys_user.update_my_profile` ·
 `sys_user.resend_verification_email` · `sys_sso_provider.request_domain_verification`.
 
-That is 58 actions and 38 `ai` blocks. The card's bucket headers read H 19 and E 22; its name lists,
-which the ruling adopted, hold 20 and 21, and the names are the record.
+That is 59 actions and 36 `ai` blocks (H 23 / C 17 / E 19). The 2026-10-30 assessment covered 58
+actions in 38 blocks: the card's bucket headers read H 19 and E 22, its name lists, which the ruling
+adopted, held 20 and 21, and the names are the record. `sys_invitation.copy_invitation_link`, added
+after that assessment, and the two `enable_two_factor` moves came with the 2026-10-31 amendment.
 
-**Not assessed.** `sys_invitation.copy_invitation_link` was added after the assessment (the link-only
-invitation delivery). It declares no `ai` block, which is this ADR's default, and it is not assessed
-until a maintainer ruling names it.
+**Not assessed.** `sys_approval_request`'s 9 actions (`plugin-approvals`) are outside this assessment:
+they are unassessed and human-only, with no `ai` block, until a maintainer ruling assesses them.
 
 **No automatic check.** The maintainer struck the pin test the assessment proposed:
 「自动检查 有必要吗？每一个元数据应用都有类似的问题，后续都要检查吗」. This table lives only here; a reviewer
@@ -368,14 +374,14 @@ activation switch.
 **How the declarations reach an agent.** Over MCP, a `sys_*` action is listed and run only when the
 action itself declares `ai.exposed: true` — ADR-0066 D4's 2026-10-30 note records that mechanism
 (`packages/runtime/src/action-execution.ts#systemObjectActionExposureError`). As of this addendum the
-38 E and C actions above are the platform `sys_*` actions that declare it. Every gate after admission
+36 E and C actions above are the platform `sys_*` actions that declare it. Every gate after admission
 still runs: ADR-0066 D4's capability gate, the ADR-0126 §8 activation switch, the
 `ai.requiresConfirmation` gate (a C action is refused `428 ACTION_CONFIRMATION_REQUIRED`, nothing run,
 until the call carries `confirm: true`; `packages/runtime/src/action-execution.ts#actionConfirmationRefusal`),
 and the target's own authorization.
 
-**Declared is not yet runnable for an OAuth-connected agent.** All 38 are `type: 'api'` actions that
-forward to an identity route: 37 to the better-auth routes under `/api/v1/auth/`, and
+**Declared is not yet runnable for an OAuth-connected agent.** All 36 are `type: 'api'` actions that
+forward to an identity route: 35 to the better-auth routes under `/api/v1/auth/`, and
 `sys_api_key.revoke_api_key` to the REST data route. Those targets accept a signed-in session, and the
 forward of an OAuth-connected agent's call is answered `401` there. Which credentials a forward
 target accepts is not decided here; it is the open decision on #28178. Until that lands, an

@@ -50,7 +50,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from './protocol.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
-import type { RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
+import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
 import { savedItemNameRefusal } from '@objectstack/metadata/view-container-name';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -435,6 +435,13 @@ export async function judgeRuntimeAuthoringRules(
     // read here per publish and passed in so the gate stays pure.
     const hierarchyResolverMounted = this.hierarchyResolverMounted();
 
+    // [#28448] The registry's verdict on an object body's copies of packaged
+    // validation rules — a host fact of the same kind, read here per publish
+    // and passed in so the gate stays pure.
+    const packagedRuleCopyRefusal = singular === 'object'
+        ? packagedRuleCopyRefusalOf(this.engine, evt.name, evt.body)
+        : undefined;
+
     const verdict = evaluateRuntimeAuthoringGate({
         type: singular,
         name: evt.name,
@@ -463,8 +470,40 @@ export async function judgeRuntimeAuthoringRules(
         ...(rlsMembershipResolverKeys !== undefined ? { rlsMembershipResolverKeys } : {}),
         // [#26188] With it the gate refuses a hierarchy scope no resolver enforces.
         ...(hierarchyResolverMounted !== undefined ? { hierarchyResolverMounted } : {}),
+        // [#28448] With it the gate refuses a rule copy that changes what the package owns.
+        ...(packagedRuleCopyRefusal !== undefined ? { packagedRuleCopyRefusal } : {}),
     });
     return verdict;
+}
+
+/**
+ * [#28448 · ADR-0029 D9.2a, 2026-10-30 note; rulings of record 6524229156
+ * (letter C′) and 6545641964 (letter B)] Ask the live registry whether a tenant
+ * `object` body carries a copy of a packaged validation rule that changes what
+ * the package owns — `SchemaRegistry.tenantRuleCopyRefusal`, the one predicate
+ * the registry's load report reads too, so the save door and the load judge
+ * one way. Its refusal is reduced to the fields the gate locates it with.
+ *
+ * `undefined` when the engine's registry carries no such predicate (a
+ * metadata-only host, a test double): nothing is judged, as on the CLI.
+ */
+function packagedRuleCopyRefusalOf(
+    engine: { registry?: unknown } | undefined,
+    name: string,
+    body: unknown,
+): PackagedRuleCopyRefusal | null | undefined {
+    const registry = engine?.registry as { tenantRuleCopyRefusal?: unknown } | null | undefined;
+    if (!registry || typeof registry.tenantRuleCopyRefusal !== 'function') return undefined;
+    const refusal = (registry.tenantRuleCopyRefusal as (name: string, body: unknown) => unknown)
+        .call(registry, name, body) as { ruleName?: unknown; changedKeys?: unknown; message?: unknown } | null;
+    if (!refusal) return null;
+    return {
+        ruleName: typeof refusal.ruleName === 'string' ? refusal.ruleName : '',
+        changedKeys: Array.isArray(refusal.changedKeys)
+            ? refusal.changedKeys.filter((key): key is string => typeof key === 'string')
+            : [],
+        message: typeof refusal.message === 'string' ? refusal.message : String(refusal),
+    };
 }
 
 /** The body of `ObjectStackProtocolImplementation#draftPublishVerdict`; the method's docblock there is its contract. */

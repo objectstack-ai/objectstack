@@ -64,20 +64,20 @@ export function ObjectNotFoundState({ objectName, packageDisabled = false }: { o
  * `userActions.editInline: true` on such a view brings the toggle back.
  */
 /**
- * Tailwind's `sm` breakpoint (px): from here up the list page draws its
- * saved-view tabs in the list toolbar; below it the app bar's mobile view
- * switcher is the page's only view control (objectui#12440).
+ * Tailwind's `sm` breakpoint (px): from here up the list page draws its page
+ * header, whose title is the view switcher (objectstack#27594); below it the
+ * header is hidden and the same switcher leads the list's toolbar row instead
+ * (objectstack#27058).
  */
 const VIEW_TABS_MIN_WIDTH = 640;
 
 /**
  * Is the viewport at least {@link VIEW_TABS_MIN_WIDTH} wide? The matchMedia
  * idiom of `useIsMobile` / `useIsWideViewport`, except the first answer is
- * read synchronously: the tab strip is the first thing on the page's list row,
- * and resolving it in an effect would draw the row once without it and then
- * jump. objectui#12440 — this decides whether the strip is HANDED to the list
- * at all, so below `sm` nothing is passed and nothing is drawn (the CSS
- * `hidden sm:block` it replaces only hid it).
+ * read synchronously: it decides whether the switcher is HANDED to the list's
+ * toolbar at all, and resolving it in an effect would draw the row once
+ * without it and then jump (objectui#12440, which first drew the saved-view
+ * tab strip there).
  */
 function viewTabsFitNow(): boolean {
     return typeof window !== 'undefined' && window.innerWidth >= VIEW_TABS_MIN_WIDTH;

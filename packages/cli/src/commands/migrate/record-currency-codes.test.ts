@@ -8,8 +8,10 @@
  * `record-currency-backfill.test.ts`. What is pinned here is what a unit test
  * of the backfill cannot see: the command is dry-run-by-default, its three
  * naming flags are required, they reach `backfillRecordCurrencyCodes` as given,
- * a refusal reaches the `--json` envelope with its code, and the human face's
- * dry-run line is followed by the journal-mode note on a SQLite target only.
+ * a refusal reaches the `--json` envelope with its code, a code outside ISO
+ * 4217 is refused before the occupancy probe, the `--apply` prompt and the boot
+ * (card #28168), and the human face's dry-run line is followed by the
+ * journal-mode note on a SQLite target only.
  * The seams that would boot a database or walk a real engine are replaced; the
  * command's own parse and control flow run for real, and the report's formatter
  * and the refusal are the real ones.
@@ -31,6 +33,19 @@ vi.mock('../../utils/migrate-occupancy-gate.js', () => ({
   probeMigrationTarget: vi.fn(),
 }));
 vi.mock('../../utils/data-migration-plugins.js', () => ({ buildDataMigrationPlugins: vi.fn(async () => []) }));
+// The `--apply` confirmation: a prompt opened at all is recorded, and answered
+// no, so a case that should never reach it can say so instead of hanging.
+const prompt = vi.hoisted(() => ({ opened: 0 }));
+vi.mock('node:readline', async (importOriginal) => {
+  const real = await importOriginal<typeof import('node:readline')>();
+  return {
+    ...real,
+    createInterface: (() => {
+      prompt.opened++;
+      return { question: (_q: string, answer: (a: string) => void) => answer('n'), close: () => {} };
+    }) as unknown as typeof real.createInterface,
+  };
+});
 vi.mock('@objectstack/objectql', async (importOriginal) => {
   const real = await importOriginal<typeof import('@objectstack/objectql')>();
   return {
@@ -134,28 +149,87 @@ describe('os migrate record-currency-codes', () => {
     expect(payload).toMatchObject({ code: 'OBJECT_NOT_FOUND' });
   }, RUN_TIMEOUT);
 
-  it('a refused code reaches the --json envelope with its code and httpStatus, and exits 1', async () => {
+  it('a refusal from the backfill reaches the --json envelope with its code and httpStatus, and exits 1', async () => {
     const real = await vi.importActual<typeof import('@objectstack/objectql')>('@objectstack/objectql');
-    const recordEngine = {
-      ...engine,
-      getObject: () => ({
-        fields: { amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } } },
-      }),
-    };
-    const refusal = await real.backfillRecordCurrencyCodes(recordEngine, { info() {}, warn() {} }, {
-      object: 'opportunity', field: 'amount', code: 'usd',
-    }).then(() => { throw new Error('expected the code to be refused'); }, (e: unknown) => e as Error);
+    // A member code on a field that is not record-mode: the refusal only the
+    // booted engine can make, since it reads the object's declaration.
+    const plainEngine = { ...engine, getObject: () => ({ fields: { amount: { type: 'currency' } } }) };
+    const refusal = await real.backfillRecordCurrencyCodes(plainEngine, { info() {}, warn() {} }, {
+      object: 'opportunity', field: 'amount', code: 'USD',
+    }).then(() => { throw new Error('expected the field to be refused'); }, (e: unknown) => e as Error);
     vi.mocked(backfillRecordCurrencyCodes).mockRejectedValue(refusal);
 
-    const err = await MigrateRecordCurrencyCodes.run(
-      ['--json', '--object', 'opportunity', '--field', 'amount', '--code', 'usd'],
-      { root: CLI_ROOT },
-    ).catch((e: unknown) => e);
+    const err = await MigrateRecordCurrencyCodes.run(['--json', ...NAMING], { root: CLI_ROOT }).catch((e: unknown) => e);
     expect(isExitSignal(err)).toBe(true);
     expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(1);
     const payload = JSON.parse(stdout.mock.calls.map((c: unknown[]) => String(c[0])).join(''));
     expect(payload).toMatchObject({ code: 'INVALID_FIELD', httpStatus: 400, error: refusal.message });
   }, RUN_TIMEOUT);
+
+  describe('a code outside ISO 4217 is refused before the probe, the prompt and the boot', () => {
+    /** The engine's own refusal of the same code, for the envelope and wording it is held to. */
+    const engineRefusal = async (code: string): Promise<Error & { code?: string; httpStatus?: number }> => {
+      const real = await vi.importActual<typeof import('@objectstack/objectql')>('@objectstack/objectql');
+      const recordEngine = {
+        ...engine,
+        getObject: () => ({
+          fields: { amount: { type: 'currency', currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' } } },
+        }),
+      };
+      return real.backfillRecordCurrencyCodes(recordEngine, { info() {}, warn() {} }, {
+        object: 'opportunity', field: 'amount', code,
+      }).then(() => { throw new Error('expected the code to be refused'); }, (e: unknown) => e as Error);
+    };
+    /** Up to the clause naming the field, which only the booted engine can name. */
+    const leadingClause = (message: string): string => message.slice(0, message.indexOf(', so '));
+
+    beforeEach(() => {
+      vi.mocked(bootSchemaStack).mockClear();
+      vi.mocked(probeMigrationTarget).mockClear();
+      prompt.opened = 0;
+    });
+
+    it('--json --apply: the engine\'s INVALID_FIELD / 400 envelope, never confirmation_required, and nothing opened', async () => {
+      const err = await MigrateRecordCurrencyCodes.run(
+        ['--json', '--apply', '--object', 'opportunity', '--field', 'amount', '--code', 'usd'],
+        { root: CLI_ROOT },
+      ).catch((e: unknown) => e);
+      expect(isExitSignal(err)).toBe(true);
+      expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(1);
+      const payload = JSON.parse(stdout.mock.calls.map((c: unknown[]) => String(c[0])).join(''));
+      const refusal = await engineRefusal('usd');
+      expect(payload).toMatchObject({ code: refusal.code, httpStatus: refusal.httpStatus });
+      expect(payload).toMatchObject({ code: 'INVALID_FIELD', httpStatus: 400 });
+      expect(leadingClause(payload.error)).toBe(leadingClause(refusal.message));
+      expect(vi.mocked(bootSchemaStack)).not.toHaveBeenCalled();
+      expect(vi.mocked(probeMigrationTarget)).not.toHaveBeenCalled();
+      expect(vi.mocked(backfillRecordCurrencyCodes)).not.toHaveBeenCalled();
+    }, RUN_TIMEOUT);
+
+    it('human face, --apply on a terminal: the refusal is printed and no prompt opens', async () => {
+      const wasTTY = process.stdin.isTTY;
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+      try {
+        const err = await MigrateRecordCurrencyCodes.run(
+          ['--apply', '--object', 'opportunity', '--field', 'amount', '--code', 'EURO'],
+          { root: CLI_ROOT },
+        ).catch((e: unknown) => e);
+        expect((err as { oclif?: { exit?: number } }).oclif?.exit).toBe(1);
+      } finally {
+        Object.defineProperty(process.stdin, 'isTTY', { value: wasTTY, configurable: true });
+      }
+      expect(printedLines().join('\n')).toContain(leadingClause((await engineRefusal('EURO')).message));
+      expect(prompt.opened).toBe(0);
+      expect(vi.mocked(bootSchemaStack)).not.toHaveBeenCalled();
+      expect(vi.mocked(probeMigrationTarget)).not.toHaveBeenCalled();
+    }, RUN_TIMEOUT);
+
+    it('a member code still reaches the boot (the control)', async () => {
+      await MigrateRecordCurrencyCodes.run(['--json', ...NAMING], { root: CLI_ROOT });
+      expect(vi.mocked(bootSchemaStack)).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(backfillRecordCurrencyCodes)).toHaveBeenCalledTimes(1);
+    }, RUN_TIMEOUT);
+  });
 
   it('on a SQLite file the dry-run line claims no row or table and names the journal-mode switch', async () => {
     boot(SQLITE_CONFIG);
