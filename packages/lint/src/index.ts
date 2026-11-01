@@ -1071,6 +1071,7 @@ export {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
+  lintSummaryRollups,
   lintDataModel,
   UNIQUE_DOUBLE_DECLARATION,
   UNIQUE_UNSCOPED_DECLARED_INDEX,
@@ -1081,9 +1082,10 @@ export {
   RELATIONSHIP_MASTER_DETAIL_REQUIRED,
   RELATIONSHIP_DELETE_BEHAVIOR,
   ROLLUP_NON_NUMERIC_AGGREGAND,
+  ROLLUP_UNKNOWN_CHILD_OBJECT,
   FIELD_EMBEDDED_SUB_FIELDS,
 } from './data-model-rules.js';
-export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
+export type { LintIssue, LocatedLintIssue, Severity, SummaryRollupOptions } from './data-model-rules.js';
 
 // ─── The registry itself (#4409, relocated #4463) ────────────────────
 //

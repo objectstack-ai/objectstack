@@ -1085,6 +1085,19 @@ function runRules(
 }
 
 /**
+ * Every `name` a live object collection declares — `AuthoringRuleContext.deployedObjectNames`.
+ * A member with no string name contributes nothing.
+ */
+function deployedObjectNamesOf(objects: readonly unknown[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const entry of objects) {
+    const name = entry && typeof entry === 'object' ? (entry as AnyRec).name : undefined;
+    if (typeof name === 'string' && name !== '') names.add(name);
+  }
+  return names;
+}
+
+/**
  * Judge one about-to-be-published metadata item against the shared registry.
  *
  * Returns an empty `errors` array when the item is clean OR when no rule gates
@@ -1198,6 +1211,14 @@ export function runRuntimeAuthoringRules(args: {
     // still owned. The same value in every pass, so it moves no baseline.
     ...(args.rlsMembershipResolverKeys !== undefined
       ? { membershipKeyOwners: membershipKeyOwnersOf(args.context?.objects, args.rlsMembershipResolverKeys) }
+      : {}),
+    // Read off the host's WHOLE object collection too, never the narrowed
+    // snapshot: an object outside this write's closure still exists. Stated
+    // only when the host handed a collection over — absent, nothing is known
+    // to exist, and a rule reading it would refuse every name. The same value
+    // in every pass, so it moves no baseline.
+    ...(Array.isArray(args.context?.objects)
+      ? { deployedObjectNames: deployedObjectNamesOf(args.context.objects) }
       : {}),
   };
   const before = new Set(runRules(rules, snapshots.baseline, ctx).map(fingerprint));

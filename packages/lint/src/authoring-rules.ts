@@ -159,6 +159,7 @@ import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
+  lintSummaryRollups,
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -423,6 +424,22 @@ export interface AuthoringRuleContext {
    * nobody owns).
    */
   membershipKeyOwners?: MembershipKeyOwners;
+  /**
+   * Every object name the deployment has: each `name` the host's WHOLE live
+   * object collection declares (registry, stored rows and the batch's own
+   * pending drafts), read before the package-closure narrowing — the same
+   * pre-narrowing read {@link membershipKeyOwners} takes, for the same reason:
+   * whether an object EXISTS is the deployment's question, not the closure's.
+   *
+   * Set only by the runtime publish gate, and only when its host hands it an
+   * object collection; ABSENT on the three CLI commands, whose stack is one app
+   * and cannot decide that an object exists nowhere. It is what tells "outside
+   * this package's closure" (still exists — a downstream child pointing in)
+   * from "exists nowhere" under a closure, which {@link packageScope} alone
+   * cannot. Read by `lintSummaryRollups` only (a roll-up whose child object
+   * exists nowhere, `rollup/unknown-child-object`).
+   */
+  deployedObjectNames?: ReadonlySet<string>;
 }
 
 export interface AuthoringRule {
@@ -2096,6 +2113,50 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_REFUSED_BY_THE_DOOR_PARSE,
     run: (stack) =>
       lintUnscopedDeclaredIndexes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
+  // R13 — a roll-up's aggregand and child object (`lintSummaryRollups`). A
+  // `sum` / `avg` over a child field the aggregate × field-type table refuses
+  // (a `text`, `select`, `formula` or `percent` field, …) published clean, and
+  // from then on every create, update and delete of the child answered 500
+  // although each write had landed: the recompute's `engine.aggregate` refuses
+  // the pair after the commit, every time. A `min` / `max` whose answer is not
+  // a number computes a value the summary column cannot store. And a roll-up
+  // naming an object the deployment does not have reads nothing for good.
+  // `os lint` alone judged the `min` / `max` arm; no door refused any of it,
+  // and the runtime write door — the only one a Studio, REST or MCP author
+  // has — judged none of it.
+  //
+  // GATING on all three commands, so `lintDataModel` stopped calling it in the
+  // same change and `os lint` reports it here, once. On the runtime publish
+  // gate's `object` writes, where the snapshot carries the child objects
+  // (`stack.objects`, the collection every per-write snapshot holds), so the
+  // aggregand arms have no missing-collection false-positive channel: a child
+  // the snapshot does not hold is not judged. The child-object arm is judged
+  // there alone, against `deployedObjectNames` — the deployment's whole object
+  // collection, read before the closure narrowing — so a downstream package's
+  // child that points in is outside the closure but not refused. The gate's
+  // differential charges a STORED parent's finding to this write only when the
+  // write creates it (a child write that turns a summed field into text).
+  {
+    name: 'lintSummaryRollups',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack, ctx) =>
+      lintSummaryRollups(
+        Array.isArray(stack.objects) ? (stack.objects as unknown[]) : [],
+        ctx?.deployedObjectNames !== undefined ? { deployedObjectNames: ctx.deployedObjectNames } : {},
+      ).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.where,

@@ -3081,24 +3081,56 @@ const RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION: RuleExplanation = {
   ],
 };
 
+/**
+ * Where R13 runs since it became a gate — `lintSummaryRollups`, on all three
+ * commands and the runtime publish gate's `object` writes. The two roll-up ids
+ * share it.
+ */
+const ROLLUP_GATE_REACH =
+  'Reach: `os validate`, `os build`, `os lint` and the metadata write door\'s publish gate (an ' +
+  'object saved active, or a draft published) all refuse it. A draft save is still stored, and its ' +
+  '`_diagnostics` reads `valid: false` with this finding until it is fixed. A stored object already ' +
+  'in violation keeps loading; it is refused at its next publish.';
+
 const ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION: RuleExplanation = {
   rule: 'rollup/non-numeric-aggregand',
-  covers: 'why a min/max roll-up needs a numeric child field',
+  covers: 'which child field a roll-up function can aggregate',
   paragraphs: [
     'A `summary` field persists its roll-up\'s answer, and its value contract is a finite number: ' +
       '`summary` is a member of the spec\'s `NUMERIC_VALUE_TYPES`. `min` and `max` answer with a ' +
       'value of the CHILD field\'s own type, and the engine stores the driver\'s answer verbatim, so ' +
       'an ordinary "latest shipment" roll-up — `max` over a `datetime` child — computes an instant ' +
-      'into a number column.',
-    'Accepted children are the numeric value types and the boolean ones, which aggregate as numbers ' +
-      'on every backend. This is deliberately not the analytics aggregate table, which accepts a ' +
-      'temporal `min` / `max` because a dataset measure RETURNS its answer to the caller instead of ' +
-      'storing it.',
-    'Judged: `min` and `max` only — `count` reads no value off the field, and `sum` / `avg` over a ' +
-      'non-numeric child is a different shape. Silent when the child object or field does not ' +
-      'resolve in this stack (another package, a partial load): a rule that cannot answer does not ' +
-      'block.',
-    DATA_MODEL_SWEEP_REACH,
+      'into a number column. Their accepted children are the numeric value types and the boolean ones, ' +
+      'which aggregate as numbers on every backend. This is deliberately not the analytics aggregate ' +
+      'table, which accepts a temporal `min` / `max` because a dataset measure RETURNS its answer to ' +
+      'the caller instead of storing it.',
+    '`sum` and `avg` always answer a number, but the engine computes every roll-up with an aggregate ' +
+      'query, and its aggregate door refuses each pair the analytics aggregate table refuses — `sum` ' +
+      'or `avg` over a `text`, option, reference, temporal or `formula` child, and `sum` over a ' +
+      '`percent` (a rate does not add). On a roll-up that refusal comes after the child write has ' +
+      'committed, on every create, update and delete of the child, so a client is told a write failed ' +
+      'that succeeded. Their accepted children are exactly that table\'s rows.',
+    'Judged: `min`, `max`, `sum` and `avg` — `count` reads no value off the field. Silent when the ' +
+      'child field does not resolve, or the child object does not resolve in this stack (another ' +
+      'package, a partial load): a rule that cannot answer does not block.',
+    ROLLUP_GATE_REACH,
+  ],
+};
+
+const ROLLUP_UNKNOWN_CHILD_OBJECT_EXPLANATION: RuleExplanation = {
+  rule: 'rollup/unknown-child-object',
+  covers: 'why a roll-up must name a child object that exists',
+  paragraphs: [
+    '`summaryOperations.object` names the child object the roll-up aggregates. A name the deployment ' +
+      'does not have publishes as a field that reads nothing, for good: no child write ever triggers ' +
+      'a recompute, and nothing reports why the value stays empty.',
+    'Judged at the metadata write door\'s publish gate only, against every object the deployment ' +
+      'has — its registered objects, its stored ones and the drafts published in the same batch. A ' +
+      'child that a package outside the written package\'s dependencies declares still exists, so it ' +
+      'is not refused. `os validate`, `os build` and `os lint` judge one app, which may roll up a ' +
+      'dependency package\'s object, so they do not report this.',
+    'Fix: name the child whose `lookup` or `master_detail` field points at the parent. If that child ' +
+      'is still a draft, publish it first, or publish the package\'s drafts together.',
   ],
 };
 
@@ -5397,6 +5429,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [UNIQUE_DOUBLE_DECLARATION_EXPLANATION.rule]: UNIQUE_DOUBLE_DECLARATION_EXPLANATION,
   [RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION.rule]: RELATIONSHIP_MASTER_DETAIL_REQUIRED_EXPLANATION,
   [ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION.rule]: ROLLUP_NON_NUMERIC_AGGREGAND_EXPLANATION,
+  [ROLLUP_UNKNOWN_CHILD_OBJECT_EXPLANATION.rule]: ROLLUP_UNKNOWN_CHILD_OBJECT_EXPLANATION,
   [RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION.rule]: RELATIONSHIP_DELETE_BEHAVIOR_EXPLANATION,
   [FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION.rule]: FIELD_EMBEDDED_SUB_FIELDS_EXPLANATION,
   [DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION.rule]: DEFAULT_AGENT_LEGACY_ALIAS_EXPLANATION,

@@ -16,7 +16,14 @@
  * schema-valid AND lint-clean here.
  */
 
-import { BOOLEAN_VALUE_TYPES, NUMERIC_VALUE_TYPES, referenceCarrierOf } from '@objectstack/spec/data';
+import {
+  AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  BOOLEAN_VALUE_TYPES,
+  NUMERIC_VALUE_TYPES,
+  isAggregateCompatibleWithFieldType,
+  referenceCarrierOf,
+  type AggregationFunction,
+} from '@objectstack/spec/data';
 
 export type Severity = 'error' | 'warning' | 'suggestion';
 
@@ -258,8 +265,20 @@ export const RELATIONSHIP_MASTER_DETAIL_REQUIRED = 'relationship/master-detail-r
 /** The rule id R3 reports under (`master_detail` without `deleteBehavior`). */
 export const RELATIONSHIP_DELETE_BEHAVIOR = 'relationship/delete-behavior';
 
-/** The rule id R13 reports under (a `min`/`max` roll-up over a non-numeric child). */
+/**
+ * The rule id R13 reports under: a roll-up whose child field the function
+ * cannot aggregate into the summary column — a `min`/`max` whose answer is not
+ * a number, or a `sum`/`avg` over a child field type the aggregate × field-type
+ * table refuses (see {@link lintSummaryRollups}).
+ */
 export const ROLLUP_NON_NUMERIC_AGGREGAND = 'rollup/non-numeric-aggregand';
+
+/**
+ * The rule id R13 reports under when a roll-up's `summaryOperations.object`
+ * names an object the deployment does not have — judged at the runtime publish
+ * gate only (see {@link lintSummaryRollups}).
+ */
+export const ROLLUP_UNKNOWN_CHILD_OBJECT = 'rollup/unknown-child-object';
 
 /**
  * The rule id R14 reports under: an object field of type `composite` /
@@ -701,6 +720,177 @@ export function lintLegacyOrganizationComposites(objects: any[]): LocatedLintIss
   return issues;
 }
 
+// ─── R13 — the roll-up's aggregand and child object ─────────────────
+
+/**
+ * What `sum` / `avg` do to a child field, in the refusal's words. `min` / `max`
+ * have their own arm and words below; `count` reads no value.
+ */
+const SUMMARY_TABLE_FUNCTION_VERB: Readonly<Record<'sum' | 'avg', string>> = {
+  sum: 'sum',
+  avg: 'average',
+};
+
+/** `a, b or c` — the aggregate × field-type table's accepted types for `fn`, in the table's order. */
+function acceptedChildTypesOf(fn: AggregationFunction): string {
+  const row: readonly string[] = AGGREGATE_FIELD_TYPE_COMPATIBILITY[fn];
+  return row.length > 1 ? `${row.slice(0, -1).join(', ')} or ${row[row.length - 1]}` : row.join('');
+}
+
+/** What {@link lintSummaryRollups} is told beyond the objects it walks. */
+export interface SummaryRollupOptions {
+  /**
+   * Every object name the deployment has — set by the runtime publish gate
+   * only, read off its WHOLE object collection before the package-closure
+   * narrowing (`AuthoringRuleContext.deployedObjectNames`).
+   *
+   * Present, a `summaryOperations.object` that names an object neither in the
+   * walked `objects` nor in this set exists nowhere in the deployment, and is
+   * refused ({@link ROLLUP_UNKNOWN_CHILD_OBJECT}). Absent — the three CLI
+   * commands — an unresolved child is SILENCE, as it has always been: the CLI's
+   * stack is one app, and the child may be a dependency package's object.
+   */
+  deployedObjectNames?: ReadonlySet<string>;
+}
+
+/**
+ * R13 — a roll-up must aggregate a child field the platform can store or
+ * compute into the summary column, out of a child object that exists.
+ *
+ * `FieldSchema.summaryOperations` is `{ object, function, field }` with each a
+ * bare string, and the object parse cannot see another object's fields, so
+ * nothing between the author and the first recompute correlated the three. Two
+ * questions are asked of a resolved child field, one per function family, and
+ * a third of the child object itself.
+ *
+ * ## `min` / `max` — does the ANSWER fit the column?
+ *
+ * `aggregateSummaryValue` (objectql) returns the driver's answer verbatim — only
+ * an empty-set fallback stands between the backend and the stored value. So an
+ * ordinary "latest shipment" roll-up, `max` over a `datetime` child field,
+ * computes an INSTANT into a field whose value contract says finite number.
+ * Refused unless the child field is numeric or boolean
+ * (`summaryRollupAnswerFitsColumn`). ⛔ Not the aggregate table: that table
+ * ACCEPTS `min` / `max` over the temporal class, because there the answer is
+ * returned to a caller rather than stored.
+ *
+ * ## `sum` / `avg` — does the ENGINE aggregate the pair at all?
+ *
+ * A roll-up's recompute is an `engine.aggregate` call, and the engine's
+ * aggregate door (`aggregate-field-type-door.ts`) refuses every pair the
+ * aggregate × field-type table refuses — `sum` over a `text`, `select`, `date`,
+ * `formula` or `percent` field among them — with `INVALID_FIELD` before any
+ * driver is asked. On a roll-up that refusal arrives AFTER the child write has
+ * committed, on every create, update and delete of the child, for as long as
+ * the summary is published. So this arm asks the table itself
+ * (`isAggregateCompatibleWithFieldType`, the predicate the engine's door
+ * calls): one account of the pair, so the authoring door refuses exactly what
+ * every recompute would. The answer of a pair the table accepts is a number,
+ * which the column stores.
+ *
+ * ## The child object — does it exist?
+ *
+ * Judged only when the caller states the deployment's object names
+ * ({@link SummaryRollupOptions.deployedObjectNames}) — the runtime publish
+ * gate, whose universe is the deployment's registry plus its stored rows (and
+ * the batch's own pending drafts). A name missing from it reads nothing and
+ * stays empty for good. A child outside the written package's closure (a
+ * downstream package whose child points in) still EXISTS, so it is not refused;
+ * its fields are simply not judged.
+ *
+ * ## Silence, never a guess
+ *
+ * A child field that resolves to no declaration, or declares no type, is not
+ * judged — the aggregate table's own tier: "a consumer that cannot resolve a
+ * field's type must NOT call the predicate with a guess". `count` reads no
+ * value, so its field is never judged.
+ *
+ * Wiring: one `AUTHORING_RULES` entry, gating, on all three commands and the
+ * runtime publish gate's `object` writes. `lintDataModel` no longer calls it,
+ * so `os lint` reports each finding exactly once.
+ */
+export function lintSummaryRollups(objects: any[], options: SummaryRollupOptions = {}): LocatedLintIssue[] {
+  const issues: LocatedLintIssue[] = [];
+  if (!Array.isArray(objects) || objects.length === 0) return issues;
+
+  const objectsByName: Record<string, any> = {};
+  for (const o of objects) {
+    if (o?.name && !(o.name in objectsByName)) objectsByName[o.name] = o;
+  }
+
+  for (let i = 0; i < objects.length; i++) {
+    const obj = objects[i];
+    if (!obj?.name) continue;
+    for (const { name: fieldName, def } of fieldEntries(obj.fields)) {
+      if (def?.type !== 'summary') continue;
+      const ops = def.summaryOperations;
+      const fn = ops?.function;
+      const childName = ops?.object;
+      if (typeof childName !== 'string' || childName === '') continue;
+      const fieldPath = `objects[${i}].fields.${fieldName}`;
+      const child = objectsByName[childName];
+
+      if (!child) {
+        const deployed = options.deployedObjectNames;
+        if (deployed !== undefined && !deployed.has(childName)) {
+          issues.push({
+            severity: 'error',
+            rule: ROLLUP_UNKNOWN_CHILD_OBJECT,
+            where: fieldWhere(obj, fieldName),
+            message:
+              `summary field "${obj.name}.${fieldName}" rolls up from "${childName}", which names no object ` +
+              'in this deployment: the roll-up reads nothing',
+            path: `${fieldPath}.summaryOperations.object`,
+            fix:
+              `Name the child object whose lookup or master_detail field points at "${obj.name}", or publish ` +
+              'that object first if it is still a draft.',
+          });
+        }
+        continue;
+      }
+
+      const childFieldName = ops?.field;
+      if (typeof childFieldName !== 'string' || childFieldName === '') continue;
+      const childType = fieldEntries(child.fields).find((f) => f.name === childFieldName)?.def?.type;
+      if (typeof childType !== 'string') continue;
+
+      if (fn === 'min' || fn === 'max') {
+        if (summaryRollupAnswerFitsColumn(childType)) continue;
+        issues.push({
+          severity: 'error',
+          rule: ROLLUP_NON_NUMERIC_AGGREGAND,
+          where: fieldWhere(obj, fieldName),
+          // [#22161] One verdict; the value contract and why the two
+          // aggregate tables differ is `os explain` text.
+          message:
+            `summary field "${obj.name}.${fieldName}" rolls up ` +
+            `${fn}(${childName}.${childFieldName}), a ${childType} field: ${fn} answers in the ` +
+            `child field's own type, but a summary field stores a finite number`,
+          path: `${fieldPath}.summaryOperations.field`,
+          // [#22161] One remedy line; why min/max over those answer with a
+          // number and `count` reads no value is `os explain` text.
+          fix:
+            `Aggregate a numeric or boolean child field, or use function: 'count'; a roll-up cannot ` +
+            `store a ${childType}, so declare a ${childType} field and maintain it from a flow.`,
+        });
+      } else if (fn === 'sum' || fn === 'avg') {
+        if (isAggregateCompatibleWithFieldType(fn, childType)) continue;
+        issues.push({
+          severity: 'error',
+          rule: ROLLUP_NON_NUMERIC_AGGREGAND,
+          where: fieldWhere(obj, fieldName),
+          message:
+            `summary field "${obj.name}.${fieldName}" rolls up ${fn}(${childName}.${childFieldName}), ` +
+            `a ${childType} field the engine does not ${SUMMARY_TABLE_FUNCTION_VERB[fn]}: every recompute is refused`,
+          path: `${fieldPath}.summaryOperations.field`,
+          fix: `Aggregate a child field of type ${acceptedChildTypesOf(fn)}, or use function: 'count'.`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
 // ─── Rule engine ────────────────────────────────────────────────────
 
 /**
@@ -715,17 +905,12 @@ export function lintDataModel(objects: any[]): LintIssue[] {
   // called here since it became an error at protocol 18 (#5082): a gating
   // rule runs on all three commands through its own registry entry, which is
   // what reports it under `os lint`, exactly once.
+  // R13 is not called here either, since it became a gate (`lintSummaryRollups`).
   const issues: LintIssue[] = [
     ...lintUniqueDeclarations(objects),
     ...lintLegacyOrganizationComposites(objects),
   ];
   if (!Array.isArray(objects) || objects.length === 0) return issues;
-
-  // Index: object name → the object, for resolving a roll-up's child object.
-  const objectsByName: Record<string, any> = {};
-  for (const o of objects) {
-    if (o?.name && !(o.name in objectsByName)) objectsByName[o.name] = o;
-  }
 
   // Index: parent object name → child relationships pointing at it.
   const childrenByParent: Record<string, Array<{ child: any; fieldName: string; def: any }>> = {};
@@ -841,69 +1026,10 @@ export function lintDataModel(objects: any[]): LintIssue[] {
         }
       }
 
-      // R13 — a `min`/`max` roll-up must aggregate a child field whose ANSWER
-      // fits the column the roll-up is stored into.
-      //
-      // `FieldSchema.summaryOperations` admits `min`/`max` over ANY child
-      // field, and `aggregateSummaryValue` (objectql) returns the driver's
-      // answer verbatim — only an empty-set fallback stands between the
-      // backend and the stored value. So an ordinary "latest shipment"
-      // roll-up, `max` over a `datetime` child field, computes an INSTANT into
-      // a field whose value contract says finite number. Nothing between
-      // author and driver correlated the two, so it is refused here, at
-      // authoring time, at `error` (Prime Directive #12: reject at authoring,
-      // never tolerate in a consumer).
-      //
-      // Scoped to `min`/`max` deliberately: `count` ignores the field
-      // entirely, and `sum`/`avg` over a non-numeric child is a different
-      // shape, whose accept set the analytics table's own rows already
-      // EXCLUDE. Measured on this tree, nothing consults that table on the
-      // roll-up door (or anywhere else), so that is an open gap, not a
-      // refusal this rule may lean on — and widening here to cover it would
-      // be a second account of a pair the table already rules on.
-      if (type === 'summary') {
-        const ops = def.summaryOperations;
-        const fn = ops?.function;
-        const childName = ops?.object;
-        const childFieldName = ops?.field;
-        if (
-          (fn === 'min' || fn === 'max') &&
-          typeof childName === 'string' && childName !== '' &&
-          typeof childFieldName === 'string' && childFieldName !== ''
-        ) {
-          // SILENCE, never a guess, on anything this pass cannot resolve: a
-          // child object contributed by another package, a partially-loaded
-          // stack, or a field name that resolves to no declaration. The spec's
-          // own aggregate table states the tier — "a consumer that cannot
-          // resolve a field's type … must NOT call the predicate with a guess;
-          // 'cannot answer, do not block' is the consumer's tier". A refusal
-          // fired on an unresolvable model would redden an app for metadata
-          // this pass simply never saw.
-          const child = objectsByName[childName];
-          const childField = child
-            ? fieldEntries(child.fields).find((f) => f.name === childFieldName)
-            : undefined;
-          const childType = childField?.def?.type;
-          if (typeof childType === 'string' && !summaryRollupAnswerFitsColumn(childType)) {
-            issues.push({
-              severity: 'error',
-              rule: ROLLUP_NON_NUMERIC_AGGREGAND,
-              // [#22161] One verdict; the value contract and why the two
-              // aggregate tables differ is `os explain` text.
-              message:
-                `summary field "${obj.name}.${fieldName}" rolls up ` +
-                `${fn}(${childName}.${childFieldName}), a ${childType} field: ${fn} answers in the ` +
-                `child field's own type, but a summary field stores a finite number`,
-              path: `${fieldPath}.summaryOperations.field`,
-              // [#22161] One remedy line; why min/max over those answer with a
-              // number and `count` reads no value is `os explain` text.
-              fix:
-                `Aggregate a numeric or boolean child field, or use function: 'count'; a roll-up cannot ` +
-                `store a ${childType}, so declare a ${childType} field and maintain it from a flow.`,
-            });
-          }
-        }
-      }
+      // R13 (the roll-up's aggregand) is not judged here since it became a
+      // gate on all three commands and the runtime publish door: its registry
+      // entry, `lintSummaryRollups`, reports it under `os lint` too, exactly
+      // once.
 
       if (!RELATIONSHIP_TYPES.has(type)) continue;
       const parent = refOf(def);
