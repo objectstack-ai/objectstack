@@ -1148,9 +1148,9 @@ export class SettingsService {
    *    platform's included: the value is pinned above the rung being written.
    *  - A locked row at the write's OWN rung refuses every writer but the
    *    platform rung ({@link writesAsPlatform}), which writes through it and
-   *    leaves the row locked. Without this an organization's administrator
-   *    could save over its own organization's locked tenant row, while
-   *    {@link get} reported that very row as locked.
+   *    leaves the row locked. This is what makes a tenant row's lock bind the
+   *    organization's own administrators, and what keeps their save agreeing
+   *    with {@link get}, which reports that row as locked.
    *
    * The user rung carries no lock: the cascade never reads a user row's
    * `locked` ({@link resolveKeyFromRows}), so none is judged here either, and
