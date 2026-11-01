@@ -8,9 +8,8 @@
  *   node scripts/pm/record-recognisers.mjs --template   # the record, copyable; no network
  *   node scripts/pm/record-recognisers.mjs --brief-template   # the reviewer's brief, read-only shape built in; no network
  *   node scripts/pm/record-recognisers.mjs --template --paths PATH-ONE PATH-TWO   # face and `Scope:` read off the PR's paths
- *   node scripts/pm/record-recognisers.mjs --mailbox-keys   # the mailbox doorbell keys, full spellings, copyable; no network
  *   node scripts/pm/record-recognisers.mjs --self-test  # offline, no network
- *   node scripts/pm/record-recognisers.mjs --help       # this usage; no network
+ *   node scripts/pm/record-recognisers.mjs --help       # this usage (and `--mailbox-keys`, the doorbell keys); no network
  *
  * ## What lives here, and why it is its own file
  *
