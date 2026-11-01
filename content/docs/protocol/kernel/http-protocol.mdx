@@ -664,8 +664,8 @@ that `id` and the response echoes it. `id` is the one key that is unique across 
 whole deployment — unlike a field's `unique`, which is scoped to the organization —
 so a create whose `id` is already held is refused with HTTP 409, and nothing is
 written, on a store that enforces the primary key (the SQL-family drivers do; the
-in-memory driver, a dev and edge fallback, declares no primary key, and a duplicate
-`id` lands there):
+in-memory driver, the development and test driver, not a production store, declares
+no primary key, and a duplicate `id` lands there):
 
 **Duplicate `id` (HTTP 409):**
 ```json

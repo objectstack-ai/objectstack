@@ -186,8 +186,9 @@ Two properties of this table are the ADR's acceptance criteria:
 >   whose match, run as the caller, finds no row creates), and clone's `overrides.id`.
 > - **A create that collides on `id` answers `409 UNIQUE_VIOLATION` and writes nothing**, on a
 >   store that enforces the primary key — the SQL-family drivers do (`driver-sql`, and
->   `driver-sqlite-wasm` and `driver-turso`, which extend it); `driver-memory`, the dev and
->   edge fallback, declares no primary key, so a duplicate `id` lands there (its docblock in
+>   `driver-sqlite-wasm` and `driver-turso`, which extend it); `driver-memory`, the
+>   development and test driver, not a production store, declares no primary key, so a
+>   duplicate `id` lands there (its docblock in
 >   `packages/drivers/driver-memory/src/memory-driver.ts`). On a per-row door the row's own
 >   error carries the same code. The answer names no organization and no owner.
 > - **The answer is identical whether the row holding the id is visible to the caller, hidden
