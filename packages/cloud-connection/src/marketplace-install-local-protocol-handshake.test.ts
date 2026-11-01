@@ -174,8 +174,8 @@ function expectNothingWritten(h: { installRegistrations: () => unknown[]; instal
     expect(readdirSync(dir).sort()).toEqual(files);
 }
 
-function seedEntry(manifest: { id: string; version: string }) {
-    new LocalManifestSource(dir).write({
+function seedEntry(manifest: { id: string; version: string }, into: string = dir) {
+    new LocalManifestSource(into).write({
         packageId: manifest.id,
         versionId: manifest.version,
         manifestId: manifest.id,
@@ -429,6 +429,59 @@ describe('kernel:ready rehydrate of an already-ledgered incompatible entry', () 
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(h.installRegistrations().map((m) => m.id)).toEqual([OLD_ID]);
         expect(new LocalManifestSource(dir).read(OLD_ID).entry?.version).toBe('2.0.0');
+    });
+});
+
+/**
+ * [#28604] A ledger entry an install wrote BEFORE #28535: the body
+ * `os package install <file>` sends, stored as it arrived (manifest nested,
+ * `id` and `version` lifted beside it). The rehydrate reads it through the
+ * install door's one flatten, so the outcome is the flat entry's, measured on
+ * the same harness: on `origin/main` before this change the `^${OLD_MAJOR}` lifted
+ * entry was registered and synced with no error line.
+ */
+describe('[#28604] kernel:ready rehydrate of an entry ledgered in the CLI\'s lifted shape', () => {
+    const errors = (h: { logger: { error: { mock: { calls: unknown[][] } } } }) =>
+        h.logger.error.mock.calls.map(([m]) => String(m));
+    const lifted = (manifest: Record<string, any>) => cliInstallBody(compiledArtifact(manifest)).manifest;
+
+    it(`an excluded nested range (${OLD_RANGE}) is NOT loaded: the error line a flat entry with that range gets, byte for byte`, async () => {
+        seedEntry(lifted(INCOMPATIBLE));
+        const h = await mount(dir);
+        expect(h.bootRegistrations().map((m) => m.id)).not.toContain(OLD_ID);
+        expect(h.bootSyncs).toBe(0);
+        const said = errors(h);
+        expect(said).toHaveLength(1);
+        expect(said[0]).toContain('OS_PROTOCOL_INCOMPATIBLE');
+
+        // The flat entry with the same range, on a fresh ledger: the same line.
+        const flatDir = mkdtempSync(join(tmpdir(), 'mil-protocol-flat-'));
+        try {
+            seedEntry(INCOMPATIBLE, flatDir);
+            expect(said).toEqual(errors(await mount(flatDir)));
+        } finally {
+            rmSync(flatDir, { recursive: true, force: true });
+        }
+    });
+
+    it('the entry is listed as not loaded, with the nested range', async () => {
+        seedEntry(lifted(INCOMPATIBLE));
+        const h = await mount(dir);
+        const res = await h.routes.get(`GET ${ROUTE}`)!(makeC(undefined));
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        const item = res.payload.data.items.find((i: any) => i.manifestId === OLD_ID);
+        expect(item.notLoaded).toEqual({ code: 'OS_PROTOCOL_INCOMPATIBLE', requiredRange: OLD_RANGE });
+    });
+
+    it(`lit control: a lifted entry with ${CURRENT_RANGE} rehydrates as before, registering the body as ledgered`, async () => {
+        const body = lifted(COMPATIBLE);
+        seedEntry(body);
+        const h = await mount(dir);
+        expect(errors(h)).toEqual([]);
+        const registered = h.bootRegistrations().filter((m) => m.id === COMPATIBLE.id);
+        expect(registered).toHaveLength(1);
+        expect(registered[0]).toEqual(body);
+        expect(h.bootSyncs).toBe(1);
     });
 });
 

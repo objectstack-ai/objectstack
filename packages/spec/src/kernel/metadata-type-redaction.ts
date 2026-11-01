@@ -105,27 +105,42 @@ export interface MetadataRedactionResult {
 export type MetadataTypeRedactor = (item: Record<string, unknown>) => MetadataRedactionResult;
 
 /**
- * The built-in `datasource` redactor: redacts the driver `config` through the
- * one credential-key definition in `data/datasource-credential-redaction.ts`
- * (derived from each driver's `z.never()` contract + the pre-#8078 alias list
- * + turso's retired `encryptionKey`, which a legacy stored row may still
- * carry), and leaves every other key of the item —
- * `_diagnostics` included — byte-for-byte.
+ * The built-in `datasource` redactor, in two halves:
+ *
+ *  - the driver `config`, through the one credential-key definition in
+ *    `data/datasource-credential-redaction.ts` (derived from each driver's
+ *    `z.never()` contract + the pre-#8078 alias list + turso's retired
+ *    `encryptionKey`, which a legacy stored row may still carry);
+ *  - every OTHER position the datasource schema marks as a credential
+ *    (`.meta({ credential: … })`, today `ssl.key`), through the same
+ *    derivation the third resolution uses. The built-in wins the lookup, so
+ *    without this half a marker on `DatasourceSchema` would never be read.
+ *
+ * Every other key of the item — `_diagnostics` included — is left
+ * byte-for-byte, and an item with nothing to withhold is returned by
+ * reference.
  */
 function redactDatasourceItem(item: Record<string, unknown>): MetadataRedactionResult {
+  let served = item;
+  const redactedKeys: string[] = [];
+
   const config = item.config;
-  if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    return { item, redactedKeys: [] };
+  if (config && typeof config === 'object' && !Array.isArray(config)) {
+    const redacted = redactDatasourceConfig(item.driver, config as Record<string, unknown>);
+    if (redacted.redactedKeys.length > 0) {
+      served = { ...served, config: redacted.config };
+      redactedKeys.push(...redacted.redactedKeys.map((key) => `config.${key}`));
+    }
   }
-  const { config: redacted, redactedKeys } = redactDatasourceConfig(
-    item.driver,
-    config as Record<string, unknown>,
-  );
+
+  const marked = derivedCredentialRedactorFor(getMetadataTypeSchema('datasource'))?.(served);
+  if (marked && marked.redactedKeys.length > 0) {
+    served = marked.item;
+    redactedKeys.push(...marked.redactedKeys);
+  }
+
   if (redactedKeys.length === 0) return { item, redactedKeys: [] };
-  return {
-    item: { ...item, config: redacted },
-    redactedKeys: redactedKeys.map((key) => `config.${key}`),
-  };
+  return { item: served, redactedKeys: redactedKeys.sort() };
 }
 
 /**
