@@ -5,7 +5,7 @@
 
 fix(metadata-protocol, service-automation): a declared `.custom` flow override is armed from the first boot pull, and a legacy package-less row of the same name is named in the boot's shadowing warning (#28717)
 
-Clause-②: no
+Clause-②: yes (widening: the new public export shadowedStoredRowsOf from @objectstack/metadata-protocol; no accept-set change)
 Metadata-protocol: none
 
 A shipped flow name can hold two stored rows at once: the shipping package's declared override in `<base>.custom` (#28412) and a legacy package-less row saved before it. The registry keeps one bare slot per flow name, and the boot hydration used to give it to whichever row the store read last. When that was the legacy row, the automation boot pull never saw the override: it armed the base flow, and a record change fired before `kernel:ready` ran the base with no error.
