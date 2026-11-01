@@ -24,7 +24,7 @@ import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
 // [#22110] The flow TEXT slots read ADR-0032 §3's `{{ }}` holes — the one judge
 // of the single-brace tokens they may still carry, and the one list of where
 // those slots are, both shared with `objectstack validate`.
-import { flowNodeTextSlotSources, textSlotTemplateRefusal } from '@objectstack/spec/automation';
+import { flowNodeTextSlotSources, flowTextSlotSources, textSlotTemplateRefusal } from '@objectstack/spec/automation';
 // [#21982] Which node types the spec judges an undeclared config key for — the
 // ONE judge of a builtin's undeclared key, met here through `FlowSchema.parse`.
 // `validateNodeConfigKeys` asks it and stands aside for every type it names,
@@ -565,6 +565,22 @@ export function validateFlowExpressions(
         }
         check(path, where, raw);
     };
+
+    // [#28054] The flow's OWN text slots — `successMessage` / `errorMessage`,
+    // rendered at the run's terminal exit — judged in the same two steps as a
+    // node's text slots below, with the same judge and the same compile, so a
+    // hole the engine would refuse to render stops the flow here.
+    for (const slot of flowTextSlotSources(flow)) {
+        const slotWhere = `${slot.label} at ${slot.path}`;
+        const tokenRefusal = textSlotTemplateRefusal(slot.source);
+        if (tokenRefusal !== undefined) {
+            refuse(slot.path, slotWhere, tokenRefusal, slot.source);
+            continue;
+        }
+        for (const e of validateExpression('template', slot.source).errors) {
+            refuse(slot.path, slotWhere, e.message, slot.source);
+        }
+    }
 
     // #4347 — every graph in the flow, not just the top-level arrays. An
     // ADR-0031 container keeps a whole sub-graph in its `config`, so

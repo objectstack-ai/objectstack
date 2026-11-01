@@ -75,7 +75,7 @@ import { defaultEnvCredentialResolver, type CredentialResolver } from './credent
 // [#22450] The one bundle-locale negotiation rule (exact → case-insensitive →
 // base language → variant expansion), asked about the locales the i18n service
 // holds — the same question objectql's `negotiatedMessageLocale` asks it.
-import { resolveBundleLocale } from '@objectstack/spec/system';
+import { resolveBundleLocale, type FlowTerminalMessageKey } from '@objectstack/spec/system';
 // [#25222] The registration-time checks' bodies, and the declarations only
 // they read. Each `AutomationEngine` method of the same name calls its body.
 import {
@@ -243,6 +243,7 @@ import {
     warnIfNodeTypeVocabularyNeverSealed,
     setNodeError,
     renderRefusalMessage,
+    renderFlowTerminalMessage,
     renderFlowTextSlot,
     translatedFlowTemplate,
 } from './node-text-rendering.js';
@@ -6275,7 +6276,12 @@ export class AutomationEngine implements IAutomationService {
                 // that executed no node, so stamping "Opportunity created!" on
                 // one would be a toast about work nobody did. They carry no
                 // `summary` for exactly the same reason.
-                successMessage: flow.successMessage,
+                //
+                // [#28054] Rendered, not copied: a `{{ }}` template over the
+                // variables the run finished with, in the run's locale.
+                successMessage: this.renderFlowTerminalMessage(
+                    flowName, 'successMessage', flow.successMessage, variables, runContext,
+                ),
                 // The authored flow name for the runner header and the
                 // completion toast — on EVERY evaluation's result, paused and
                 // terminal alike (see `AutomationResult.flowLabel`).
@@ -6548,7 +6554,12 @@ export class AutomationEngine implements IAutomationService {
                 // does not degrade to a plainer toast: the consumer falls back
                 // to the raw node error text, which is what every non-screen
                 // flow showed until now.
-                errorMessage: flow.errorMessage,
+                //
+                // [#28054] Rendered over the variables at the failure point
+                // (`$error` included), in the run's locale.
+                errorMessage: this.renderFlowTerminalMessage(
+                    flowName, 'errorMessage', flow.errorMessage, variables, runContext,
+                ),
                 flowLabel: flow.label,
                 // A failed run's counts matter MORE, not less: they say how far
                 // it got before dying — how many rows it had already written.
@@ -7211,6 +7222,7 @@ export class AutomationEngine implements IAutomationService {
             finishRefusedRun: (...a) => this.finishRefusedRun(...a),
             journalConsumedSuspension: (...a) => this.journalConsumedSuspension(...a),
             failAncestors: (...a) => this.failAncestors(...a),
+            renderFlowTerminalMessage: (...a) => this.renderFlowTerminalMessage(...a),
         };
         return resumeInternal.call(host, runId, signal, skipBubble, childSummary, childRefusal);
     }
@@ -8932,6 +8944,39 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#28054] A flow's terminal text — `successMessage` or `errorMessage` —
+     * rendered in the run's language, the way {@link renderRefusalMessage}
+     * renders a refusing `end` node's message: the translated TEMPLATE at
+     * `flowTerminalMessageKey` (`@objectstack/spec/system`) is picked in the
+     * run's locale, then its `{{ }}` holes are filled over `variables` through
+     * {@link renderFlowTextSlot}, the one text renderer. Every terminal exit
+     * calls it: a success exit over the variables the run finished with, a
+     * failure exit over the variables at the failure point. A hole over a
+     * variable the run never bound renders nothing, as in every text slot, and
+     * a message with no hole renders as written.
+     *
+     * `undefined` when the flow authors none, when the text renders empty, and
+     * when the authored template refuses to render (the doors compile it, so
+     * only a `{{ amount | currency }}` hole meeting no tenant default currency
+     * gets there): the run has already ended, so its verdict stands and the
+     * caller shows its own sentence, never raw holes; the warning names why.
+     */
+    private renderFlowTerminalMessage(
+        flowName: string,
+        key: FlowTerminalMessageKey,
+        authored: string | undefined,
+        variables: Map<string, unknown>,
+        context: AutomationContext,
+    ): string | undefined {
+        // The body lives in ./node-text-rendering.ts.
+        const host: ThisParameterType<typeof renderFlowTerminalMessage> = {
+            renderFlowTextSlot: (...a) => this.renderFlowTextSlot(...a),
+            logger: this.logger,
+        };
+        return renderFlowTerminalMessage.call(host, flowName, key, authored, variables, context);
+    }
+
+    /**
      * [#22450, #22507] Render one user-read flow TEXT slot in the run's
      * language: pick the translated TEMPLATE at `slot.key`, then fill its
      * `{{ }}` holes through `renderTextSlot`, the one text renderer — or render
@@ -9470,6 +9515,15 @@ export class AutomationEngine implements IAutomationService {
      * started under — not whatever a hot-reload re-registered under the same
      * name while the loop slept between attempts (#9414). `flowLabel` is
      * passed for the same reason.
+     *
+     * [#28054] `flowErrorMessage` is a `{{ }}` template, rendered over the
+     * variables at the failure point — and those are the LAST attempt's, which
+     * only that attempt holds. So each attempt is handed this template and
+     * renders it at its own failure exit, and the exhausted exit reports the
+     * last attempt's rendering: still the definition this dispatch started
+     * under, filled from the run that failed last. An attempt that never
+     * dispatched (its flow vanished or was disabled between attempts) bound no
+     * variable, so the template renders over none.
      */
     private async retryExecution(
         flowName: string,
@@ -9500,6 +9554,9 @@ export class AutomationEngine implements IAutomationService {
         // with `lastError` so the exhausted exit never reports one attempt's
         // text beside another attempt's refusal.
         let lastCarried: CarriedRefusal = {};
+        // [#28054] The last attempt's rendering of `flowErrorMessage`, paired
+        // with `lastError` the same way.
+        let lastErrorMessage: string | undefined;
         for (let i = 0; i < maxRetries; i++) {
             // Calculate delay with exponential backoff
             let delay = Math.min(baseDelay * Math.pow(multiplier, i), maxDelay);
@@ -9509,7 +9566,7 @@ export class AutomationEngine implements IAutomationService {
             await new Promise(r => setTimeout(r, delay));
 
             // Execute directly without recursion into retryExecution again
-            const result = await this.executeWithoutRetry(flowName, context);
+            const result = await this.executeWithoutRetry(flowName, context, { errorMessage: flowErrorMessage });
             // [#9510] THE THIRD STATE, read deliberately and BEFORE `success`.
             // Since the ADR-0019 suspend arm was restored to
             // `executeWithoutRetry`, an attempt can end NON-TERMINAL: the run
@@ -9536,6 +9593,9 @@ export class AutomationEngine implements IAutomationService {
             if (result.success) return result;
             lastError = result.error ?? 'Unknown error';
             lastCarried = carriedRefusalOfResult(result);
+            lastErrorMessage = result.status === 'failed'
+                ? result.errorMessage
+                : this.renderFlowTerminalMessage(flowName, 'errorMessage', flowErrorMessage, new Map(), context ?? {});
         }
         // [#9378] Same "ran and was rejected" class as `execute()`'s own failure
         // exit — every attempt above dispatched the flow — so it carries the
@@ -9554,7 +9614,7 @@ export class AutomationEngine implements IAutomationService {
             error: lastError,
             durationMs: Date.now() - startTime,
             status: 'failed',
-            errorMessage: flowErrorMessage,
+            errorMessage: lastErrorMessage,
             flowLabel,
             ...lastCarried,
         };
@@ -9674,10 +9734,16 @@ export class AutomationEngine implements IAutomationService {
      * attempt, because it is the SAME event happening on a later attempt. Two
      * answers for one user-visible situation is what this method's missing
      * suspend arm produced.
+     *
+     * [#28054] `dispatched` carries the `errorMessage` template of the
+     * definition the retried dispatch started under; the failure exit renders
+     * it over this attempt's variables in place of the re-read flow's own (see
+     * {@link retryExecution}).
      */
     private executeWithoutRetry(
         flowName: string,
         context?: AutomationContext,
+        dispatched?: { errorMessage: string | undefined },
     ): Promise<AutomationResult> {
         // The body lives in ./dag-traversal.ts (#25222).
         const host: ThisParameterType<typeof executeWithoutRetry> = {
@@ -9694,7 +9760,8 @@ export class AutomationEngine implements IAutomationService {
             finishRefusedRun: (...a) => this.finishRefusedRun(...a),
             persistSuspendedRun: (...a) => this.persistSuspendedRun(...a),
             flowChecksumOf: (...a) => this.flowChecksumOf(...a),
+            renderFlowTerminalMessage: (...a) => this.renderFlowTerminalMessage(...a),
         };
-        return executeWithoutRetry.call(host, flowName, context);
+        return executeWithoutRetry.call(host, flowName, context, dispatched);
     }
 }
