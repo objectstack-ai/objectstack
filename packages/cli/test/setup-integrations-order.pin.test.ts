@@ -14,6 +14,7 @@
 //   Datasources                  `@objectstack/service-datasource`
 //   Connect an Agent             `@objectstack/mcp`
 //   Connector Credentials        `@objectstack/service-automation`
+//   Connector Connections        `@objectstack/service-automation` (same contribution)
 //   Cloud Connection             `@objectstack/cloud-connection`
 //
 // Each contributor states the group's other priorities in its own header so
@@ -66,7 +67,8 @@ const GROUP = 'group_integrations';
 const EXPECTED_TIERS: readonly (readonly string[])[] = [
     ['nav_webhooks', 'nav_http_deliveries', 'nav_datasources'],
     ['nav_connect_agent'],
-    ['nav_connector_credentials'],
+    // One contribution carries both, in this order (ADR-0143 D5 added the second).
+    ['nav_connector_credentials', 'nav_connector_connections'],
     ['nav_cloud_connection'],
 ];
 
