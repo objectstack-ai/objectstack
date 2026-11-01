@@ -1370,3 +1370,144 @@ describe('#20611 — the runtime authoring gate reads a withheld-and-stored secr
         expect(redactedPathsCarriedForward('view', { name: 'v' }, { name: 'v', secret: 'x' })).toEqual([]);
     });
 });
+
+// ---------------------------------------------------------------------------
+// The `connector` read: a top-level key the authored entry does not declare
+// ---------------------------------------------------------------------------
+//
+// A row stored while the connector entry was open can hold a top-level key the
+// entry does not declare. Seeded directly, never through `saveMetaItem`: the
+// save door now refuses such a key, so only a direct seed reproduces the row.
+
+const ROOT_KEY_VALUE = 'TEST_PLACEHOLDER_ROOT_KEY_VALUE';
+const ROOT_PLAIN_VALUE = 'TEST_PLACEHOLDER_ROOT_PLAIN_VALUE';
+
+function storedConnectorBody() {
+    return {
+        name: 'vendor_api',
+        label: 'Vendor API',
+        type: 'api',
+        provider: 'rest',
+        providerConfig: { baseUrl: 'https://api.vendor.example/v1' },
+        auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' },
+        apiKey: ROOT_KEY_VALUE,
+        region: ROOT_PLAIN_VALUE,
+    };
+}
+
+function seedConnectorRow(rows: Map<string, Row>) {
+    const where = { type: 'connector', name: 'vendor_api', organization_id: null, package_id: null, state: 'active' };
+    const body = storedConnectorBody();
+    rows.set(keyOf(where), {
+        id: 'r_connector',
+        ...where,
+        metadata: JSON.stringify(body),
+        checksum: hashSpec(body),
+        version: 1,
+    } as Row);
+}
+
+const storedConnector = (rows: Map<string, Row>) =>
+    JSON.parse(Array.from(rows.values()).find((r) => r.type === 'connector' && r.state === 'active')!.metadata);
+
+function expectRootKeysWithheld(served: any) {
+    expect(served).not.toHaveProperty('apiKey');
+    expect(served).not.toHaveProperty('region');
+    expect(served.name).toBe('vendor_api');
+    expect(served.providerConfig).toEqual({ baseUrl: 'https://api.vendor.example/v1' });
+}
+
+function expectNoRootKeyValue(payload: unknown) {
+    const strings = allStrings(payload);
+    expect(strings.some((s) => s.includes(ROOT_KEY_VALUE) || s.includes(ROOT_PLAIN_VALUE))).toBe(false);
+}
+
+const BUILTIN_CONNECTOR_REDACTOR = getMetadataTypeRedactor('connector')!;
+
+describe('the connector read withholds root keys the entry shape does not declare', () => {
+    afterEach(() => registerMetadataTypeRedactor('connector', BUILTIN_CONNECTOR_REDACTOR));
+
+    it('withholds undeclared root keys on read: the item read', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' });
+        expectRootKeysWithheld(res.item);
+        expectNoRootKeyValue(res);
+        // The badge is computed on the raw body: the row is still reported invalid.
+        expect(res.item._diagnostics.valid).toBe(false);
+        expect(storedConnector(rows).apiKey).toBe(ROOT_KEY_VALUE);
+    });
+
+    it('withholds undeclared root keys on read: the list read, both spellings', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        for (const type of ['connector', 'connectors']) {
+            const res: any = await protocol.getMetaItems({ type });
+            const item = res.items.find((i: any) => i.name === 'vendor_api');
+            expect(item, type).toBeDefined();
+            expectRootKeysWithheld(item);
+            expectNoRootKeyValue(res);
+        }
+    });
+
+    it('withholds undeclared root keys on read: the layered read', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.getMetaItemLayered({ type: 'connector', name: 'vendor_api' });
+        expect(res.overlay).not.toBeNull();
+        expectRootKeysWithheld(res.overlay);
+        expectRootKeysWithheld(res.effective);
+        expectNoRootKeyValue(res);
+    });
+
+    it('a save of the served form keeps the withheld keys at rest', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        await protocol.saveMetaItem({
+            type: 'connector',
+            name: 'vendor_api',
+            item: { ...served, label: 'Vendor API (edited)' },
+        });
+
+        const atRest = storedConnector(rows);
+        expect(atRest.label).toBe('Vendor API (edited)');
+        expect(atRest.apiKey).toBe(ROOT_KEY_VALUE);
+        expect(atRest.region).toBe(ROOT_PLAIN_VALUE);
+        const reread: any = await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' });
+        expectRootKeysWithheld(reread.item);
+    });
+
+    it('an undeclared root key the author types is refused, and the row is unchanged', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        await expect(protocol.saveMetaItem({
+            type: 'connector',
+            name: 'vendor_api',
+            item: { ...served, apiKey: 'typed-by-hand' },
+        })).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        expect(storedConnector(rows)).toEqual(storedConnectorBody());
+    });
+
+    it('ABLATION — with an identity `connector` redactor the item, list and layered reads carry the keys again', async () => {
+        registerMetadataTypeRedactor('connector', (item) => ({ item, redactedKeys: [] }));
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        expect(((await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })) as any).item.apiKey).toBe(ROOT_KEY_VALUE);
+        expect(((await protocol.getMetaItems({ type: 'connector' })) as any).items[0].apiKey).toBe(ROOT_KEY_VALUE);
+        expect(((await protocol.getMetaItemLayered({ type: 'connector', name: 'vendor_api' })) as any).effective.apiKey).toBe(ROOT_KEY_VALUE);
+    });
+});

@@ -13,8 +13,11 @@ import {
   CONNECTOR_CREDENTIAL_MAP_PATHS,
   CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES,
   declaredConnectorAuthKeys,
+  declaredConnectorEntryKeys,
   redactConnectorItem,
 } from './connector-credential-redaction';
+import { DeclarativeConnectorEntrySchema } from './connector.zod';
+import { METADATA_READ_DECORATIONS } from '../kernel/metadata-read-decorations';
 
 const P = (n: number) => `TEST_PLACEHOLDER_${n}`;
 
@@ -224,14 +227,23 @@ describe('the connector redactor — credentials inside a URL under `providerCon
     expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
   });
 
-  it('arrays and dot-spelled keys are off the walk (the carry-forward cannot address them)', () => {
-    const item = {
-      ...base,
-      providerConfig: {
-        servers: [`https://u:${P(39)}@a.example`],
-        'v1.url': `https://u:${P(40)}@b.example`,
-      },
-    };
+  it('withholds whole an array holding a URL with credential parts, at any depth', () => {
+    const { item: served, redactedKeys } = at({
+      servers: [`https://u:${P(39)}@a.example`, 'https://b.example'],
+      mirrors: ['https://c.example', `https://d.example/v1?token=${P(42)}`],
+      transport: { kind: 'http', fallbacks: [{ url: `https://u:${P(43)}@e.example` }] },
+      include: ['search', 'https://f.example/v1?region=eu'],
+    });
+    expect(redactedKeys).toEqual(['providerConfig.mirrors', 'providerConfig.servers', 'providerConfig.transport.fallbacks']);
+    expect(served.providerConfig).toEqual({
+      transport: { kind: 'http' },
+      include: ['search', 'https://f.example/v1?region=eu'],
+    });
+    expect(holds(served, P(39), P(42), P(43))).toBe(false);
+  });
+
+  it('a dot-spelled key is off the walk (the carry-forward cannot address it)', () => {
+    const item = { ...base, providerConfig: { 'v1.url': `https://u:${P(40)}@b.example` } };
     expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
   });
 
@@ -244,6 +256,55 @@ describe('the connector redactor — credentials inside a URL under `providerCon
     for (const name of ['password', 'authToken', 'api_key', 'apikey', 'access_token', 'token', 'key', 'sig', 'client_secret']) {
       expect(CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES).toContain(name);
     }
+  });
+});
+
+describe('the connector redactor — top-level keys the entry does not declare', () => {
+  it.each([
+    ['a credential-shaped scalar', { apiKey: P(50) }, ['apiKey']],
+    ['several credential-shaped keys', { token: P(51), clientSecret: P(52), password: P(53) }, ['clientSecret', 'password', 'token']],
+    ['a nested container', { credentials: { user: 'svc', secret: P(54) } }, ['credentials']],
+    ['a plain undeclared key', { region: 'eu-west-1' }, ['region']],
+  ] as const)('withholds undeclared root keys on read: %s', (_label, extra, keys) => {
+    const item = { ...base, providerConfig: { baseUrl: 'https://v.example' }, ...extra };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(keys);
+    for (const key of keys) expect(served).not.toHaveProperty(key);
+    expect(holds(served, P(50), P(51), P(52), P(53), P(54), 'eu-west-1')).toBe(false);
+    expect(served.providerConfig).toEqual({ baseUrl: 'https://v.example' });
+    expect(served._diagnostics).toEqual(base._diagnostics);
+  });
+
+  it('the declared set is the closed entry\'s own shape, and every declared key is served as stored', () => {
+    const shape = (DeclarativeConnectorEntrySchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect([...declaredConnectorEntryKeys()].sort()).toEqual(Object.keys(shape).sort());
+    for (const key of ['name', 'label', 'type', 'provider', 'providerConfig', 'auth', 'enabled', '_packageId', '_provenance']) {
+      expect(declaredConnectorEntryKeys().has(key), key).toBe(true);
+    }
+    const item = { ...base, providerConfig: { baseUrl: 'https://v.example' }, retryConfig: { maxAttempts: 3 }, _packageId: 'com.vendor' };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('the read decorations are the response\'s and are left alone', () => {
+    const item = { ...base, _draft: true };
+    for (const key of METADATA_READ_DECORATIONS) expect(item).toHaveProperty(key);
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('a cleared undeclared key is served as written and not reported', () => {
+    const item = { ...base, apiKey: '', token: null };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('withholds an undeclared root key beside the other positions, each named once', () => {
+    const { item: served, redactedKeys } = redactConnectorItem({
+      ...base,
+      apiKey: P(55),
+      auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: P(56) },
+      providerConfig: { baseUrl: `https://u:${P(57)}@v.example`, headers: { Authorization: P(58) } },
+    });
+    expect(redactedKeys).toEqual(['apiKey', 'auth.token', 'providerConfig.baseUrl', 'providerConfig.headers']);
+    expect(holds(served, P(55), P(56), P(57), P(58))).toBe(false);
   });
 });
 
