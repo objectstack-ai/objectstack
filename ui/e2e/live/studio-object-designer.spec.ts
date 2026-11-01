@@ -19,12 +19,12 @@ import { test, expect, type APIRequestContext, type Page } from '@playwright/tes
  * 5/5 run of the enlarged allowlist); the readings are on that card's PR.
  */
 
-// The object designer is reached through the showcase's own app: a stock
-// showcase boot does not serve the Studio app (`com.objectstack.studio`; the
-// served apps are what `GET /api/v1/meta/app` lists), and the metadata routes
-// resolve under any served app.
+// The object designer is reached through Studio's "All metadata" area, on the
+// package's own leg (`/studio/<package>/metadata/...`): Setup carries no
+// metadata editor (objectstack ADR-0146 D1), and its old URLs redirect here.
 const PKG = 'com.example.showcase';
-const NEW_OBJ = `/apps/showcase_app/metadata/object/new?package=${PKG}`;
+const newObjectIn = (pkg: string) => `/studio/${pkg}/metadata/object/new?package=${pkg}`;
+const NEW_OBJ = newObjectIn(PKG);
 const API = process.env.LIVE_API_URL || 'http://localhost:3000';
 
 /**
@@ -75,7 +75,7 @@ test('F4: adding a picklist + an empty option row does not trip spec validation,
   const pkgId = await authorWritablePackage(request, stamp);
   const objName = `e2e_asset${stamp}`;
   try {
-    await page.goto(`/apps/showcase_app/metadata/object/new?package=${pkgId}`);
+    await page.goto(newObjectIn(pkgId));
     await page.getByTestId('object-name-input').fill(objName);
     await addField(page, 'Picklist');
     // Give the picklist its option source first: a select with no options is a

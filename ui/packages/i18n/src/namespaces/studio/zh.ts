@@ -2864,8 +2864,6 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.installedHeading': '已安装(只读 · 可浏览)',
   // objectui#11808 — the routes a read-only package does have.
   'engine.studio.landing.readonlyHint': '源码与已安装的软件包为只读，不能在此编辑或复制。对于接受环境覆盖的元数据类型，可用环境覆盖（overlay）进行定制。',
-  'engine.studio.landing.overlay': '在设置中打开',
-  'engine.studio.landing.overlayTitle': '打开该软件包的元数据：每种类型都会标明是否接受环境覆盖',
   'engine.studio.landing.marketplace': '或从应用市场安装一个模板应用',
   'engine.studio.landing.customizations.customized': '已定制 {customized} 项',
   'engine.studio.landing.customizations.separator': '，',

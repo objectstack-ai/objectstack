@@ -65,11 +65,7 @@ export const zhCN: TranslationData = {
         nav_position_holders: { label: '岗位持有人' },
         nav_permission_set_assignment: { label: '权限集分配' },
 
-        nav_positions: { label: '岗位' },
-        nav_capabilities: { label: '能力' },
-        nav_permission_sets: { label: '权限集' },
         nav_sharing_rules: { label: '共享规则' },
-        nav_declared_sharing_rules: { label: '已声明的共享规则' },
         nav_record_shares: { label: '记录共享' },
         nav_queues: { label: '队列' },
         nav_queue_members: { label: '队列成员' },

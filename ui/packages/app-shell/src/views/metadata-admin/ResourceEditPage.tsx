@@ -161,6 +161,7 @@ import { environmentScopeSuffix, isEnvironmentScope, useWalledCatalogReadOnly } 
 import { PositionHoldersSection } from './PositionHoldersSection.js';
 import { PositionPermissionSetsSection } from './PositionPermissionSetsSection.js';
 import { PositionHoldersSetupLink } from './SetupAssignmentsLink.js';
+import { CatalogItemActiveSwitch } from './CatalogActiveSwitch.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
@@ -185,14 +186,29 @@ const ENVIRONMENT_SECTIONS: Readonly<Record<string, ReadonlyArray<React.Componen
   position: [PositionHoldersSection, PositionPermissionSetsSection],
 };
 
+/** The item's active switch (`CatalogActiveSwitch.tsx`), for a catalog type the area's item page carries it on. */
+function catalogActiveSection(type: string): React.ComponentType<EnvironmentSectionProps> {
+  function CatalogActiveSection({ name, draft }: EnvironmentSectionProps) {
+    const label = typeof draft.label === 'string' ? draft.label : undefined;
+    return <CatalogItemActiveSwitch type={type} name={name} label={label} />;
+  }
+  return CatalogActiveSection;
+}
+
 /**
  * objectstack ADR-0146 D1/D7 (#28561) — the same sections under Studio's "All
  * metadata" area, which draws no assignment: who holds a position is Setup's
  * Position holders page, linked in its place. What each set grants stays, a
  * read of the definition.
+ *
+ * N-28 (M-1 ruling A) — and the item's active switch, first: Setup's catalog
+ * list, which carried it, retired, and the switch moved with the item into
+ * Studio. A position and a declared sharing rule draw this page; a permission
+ * set draws its own editor, which mounts the same switch.
  */
 const AREA_ENVIRONMENT_SECTIONS: Readonly<Record<string, ReadonlyArray<React.ComponentType<EnvironmentSectionProps>>>> = {
-  position: [PositionHoldersSetupLink, PositionPermissionSetsSection],
+  position: [catalogActiveSection('position'), PositionHoldersSetupLink, PositionPermissionSetsSection],
+  sharing_rule: [catalogActiveSection('sharing_rule')],
 };
 
 /**

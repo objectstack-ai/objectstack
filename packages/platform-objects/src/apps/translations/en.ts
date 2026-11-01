@@ -95,11 +95,7 @@ export const en: TranslationData = {
         nav_permission_set_assignment: { label: 'Permission Set Assignment' },
 
         // Access Control
-        nav_positions: { label: 'Positions' },
-        nav_capabilities: { label: 'Capabilities' },
-        nav_permission_sets: { label: 'Permission Sets' },
         nav_sharing_rules: { label: 'Sharing Rules' },
-        nav_declared_sharing_rules: { label: 'Declared Sharing Rules' },
         nav_record_shares: { label: 'Record Shares' },
         nav_queues: { label: 'Queues' },
         nav_queue_members: { label: 'Queue Members' },
