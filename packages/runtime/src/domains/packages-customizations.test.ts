@@ -330,6 +330,21 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
         expect(data.counts.overrides).toBe(0);
     });
 
+    it('a pair row of a type no declaration applies to (a permission set, ADR-0146 D6) is not an override, whatever its body says', async () => {
+        const { dispatcher, protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        // Laid down as the repository's write lays a row down: the publish
+        // door refuses `overrides` on this type, so only a stored row carries it.
+        await engine.insert('sys_metadata', {
+            type: 'permission', name: 'showcase_admin', organization_id: null, package_id: PAIR,
+            metadata: JSON.stringify({ name: 'showcase_admin', label: 'Admin', overrides: { ...DECLARATION } }),
+            state: 'active', version: 1,
+        }, { context: { isSystem: true } });
+        const data = (await customizations(dispatcher, BASE)).response?.body?.data;
+        expect(data.overrides).toEqual([]);
+        expect(data.counts.overrides).toBe(0);
+    });
+
     it('lists the pair\'s validations and indexes beside its fields, and no other package\'s extension or object', async () => {
         const { dispatcher, protocol, engine } = await boot();
         await install(protocol, PAIR);
