@@ -150,10 +150,9 @@ const SSL_PRIVATE_KEY = 'key';
  * This door keeps credentials out of the stored record: a cleartext `secret`
  * transits the request and only the `credentialsRef` the secret store mints is
  * stored. `ssl.key` has no such channel, so storing it would put key material
- * in the datasource row in cleartext, where every metadata read of the row
- * serves it (that read path redacts `config`, not `ssl`). Refused by name,
- * never by value, before anything is read, written or probed. The rest of the
- * block (`enabled`, `rejectUnauthorized`, `ca`, `cert`) is stored.
+ * in the datasource row in cleartext. Refused by name, never by value, before
+ * anything is read, written or probed. The rest of the block (`enabled`,
+ * `rejectUnauthorized`, `ca`, `cert`) is stored.
  */
 function inlineSslKeyRefusal(heading: string, body: object): string | undefined {
   const ssl = (body as { ssl?: unknown }).ssl;
