@@ -31,6 +31,7 @@ export default defineStack({
   objects: [{
     name: 'fpt_account',
     label: 'Account',
+    sharingModel: 'private',
     fields: {
       name: { type: 'text', label: 'Name' },
       industry: { type: 'select', label: 'Industry', options: [{ value: 'tech', label: 'Tech' }, { value: 'retail', label: 'Retail' }] },
