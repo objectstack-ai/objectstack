@@ -22,7 +22,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import { render, screen, waitFor, act, cleanup, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { HighlightFieldsProvider, InlineEditProvider, RecordContextProvider, useInlineEdit } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordDetailsRenderer } from '../record-details';
 import { RecordHighlightsRenderer } from '../record-highlights';
 
@@ -43,11 +43,12 @@ const OBJECT_SCHEMA = {
   },
 };
 
-const PRINCIPAL: MePermissionsResponse = {
+const PRINCIPAL: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u-1',
   tenantId: null,
-  roles: ['finance'],
+  positions: ['finance'],
+  hasAnyQueue: false,
   permissionSets: ['rfa_fixture_member'],
   objects: { [OBJECT]: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false } },
   // As `/auth/me/permissions` serves them: the conditioned entry as its lock.
@@ -55,7 +56,7 @@ const PRINCIPAL: MePermissionsResponse = {
     [`${OBJECT}.summary`]: { readable: true, editable: false },
     [`${OBJECT}.ref_no`]: { readable: true, editable: false },
   },
-} as MePermissionsResponse;
+} as MePermissionsAuthenticatedResponse;
 
 const RECORD = { id: 'c1', name: 'MSA', region: 'EMEA', summary: 'Draft terms', ref_no: 'R-1' };
 

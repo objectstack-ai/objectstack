@@ -20,7 +20,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -160,11 +160,12 @@ vi.mock('../../providers/AdapterProvider', () => ({
 
 import { AppHeader, type AppHeaderVariant } from '../AppHeader';
 
-const MEMBER: MePermissionsResponse = {
+const MEMBER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: [],
   objects: {},

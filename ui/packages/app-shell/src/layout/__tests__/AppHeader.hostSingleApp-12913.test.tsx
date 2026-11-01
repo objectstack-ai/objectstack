@@ -24,7 +24,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const served = vi.hoisted(() => ({ apps: [] as Array<Record<string, unknown>> }));
 
@@ -115,11 +115,12 @@ import { AppHeader } from '../AppHeader';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 import { initRuntimeConfig, resetRuntimeConfigForTesting } from '../../runtime-config';
 
-const MEMBER: MePermissionsResponse = {
+const MEMBER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: [],
   objects: {},

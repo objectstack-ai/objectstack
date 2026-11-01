@@ -22,7 +22,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -48,11 +48,12 @@ const DATASETS = [
   { name: 'ds_salaries', object: 'hr_salary' },
 ];
 
-const ANSWER: MePermissionsResponse = {
+const ANSWER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u_admin',
   tenantId: null,
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: ['admin'],
   systemPermissions: [],
   objects: {

@@ -34,7 +34,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { AdapterCtx } from '@object-ui/react';
 import { createI18n, en, I18nProvider } from '@object-ui/i18n';
 
@@ -115,11 +115,12 @@ const OBJECTS = [
   },
 ];
 
-const PERMISSIONS: MePermissionsResponse = {
+const PERMISSIONS: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u_author',
   tenantId: null,
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: ['studio_user'],
   systemPermissions: ['studio.access'],
   objects: { [OBJECT_NAME]: { allowRead: true, allowEdit: true } },

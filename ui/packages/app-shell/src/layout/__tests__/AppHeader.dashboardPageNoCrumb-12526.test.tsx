@@ -29,7 +29,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const route = vi.hoisted(() => ({ pathname: '/apps/crm/dashboard/ops_board' }));
 const served = vi.hoisted(() => ({
@@ -126,11 +126,12 @@ vi.mock('../../providers/AdapterProvider', () => ({
 
 import { AppHeader } from '../AppHeader';
 
-const MEMBER: MePermissionsResponse = {
+const MEMBER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: [],
   objects: {},

@@ -21,7 +21,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('react-router-dom', () => ({
   useLocation: () => ({ pathname: '/apps/cloud_control/page/welcome', search: '', hash: '', state: null, key: 't' }),
@@ -165,11 +165,12 @@ vi.mock('../../providers/AdapterProvider', () => ({
 import { AppHeader } from '../AppHeader';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 
-const AUTHOR: MePermissionsResponse = {
+const AUTHOR: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
   objects: {},

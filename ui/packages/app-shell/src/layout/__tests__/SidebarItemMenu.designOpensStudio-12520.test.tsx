@@ -32,7 +32,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { NavigationItem } from '@object-ui/types';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
@@ -159,11 +159,12 @@ import { resolveHref } from '@object-ui/layout';
 import { AppHeader } from '../AppHeader';
 import { sidebarItemDesignPath, favoriteDesignPath } from '../SidebarItemMenu';
 
-const AUTHOR: MePermissionsResponse = {
+const AUTHOR: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
   objects: {},

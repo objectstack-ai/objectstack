@@ -31,7 +31,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const route = vi.hoisted(() => ({ pathname: '/apps/crm/system/marketplace', search: '' }));
 
@@ -134,11 +134,12 @@ vi.mock('../../providers/AdapterProvider', () => ({
 import { AppHeader, AppBarCrumbTrail } from '../AppHeader';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 
-const AUTHOR: MePermissionsResponse = {
+const AUTHOR: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
   objects: {},

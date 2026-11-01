@@ -52,7 +52,7 @@ import {
   type RelatedRecordActionsValue,
   type RelatedRowActionDef,
 } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 // Registers `record:related_list`, the block under test.
 import '../index';
 
@@ -114,19 +114,20 @@ const makeDataSource = () => ({
  * The child object is readable, so the list's automatic read gate stays open
  * and every verdict below is the notice's own.
  */
-function me(systemPermissions: string[] | undefined): MePermissionsResponse {
+function me(systemPermissions: string[] | undefined): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 't1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     ...(systemPermissions === undefined ? {} : { systemPermissions }),
     objects: {
       contact: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
     },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 const doc = (actions: string[]) => ({

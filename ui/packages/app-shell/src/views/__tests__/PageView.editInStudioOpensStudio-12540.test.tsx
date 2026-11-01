@@ -29,7 +29,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const navigateSpy = vi.hoisted(() => vi.fn());
 vi.mock('react-router-dom', () => ({
@@ -71,11 +71,12 @@ import { ExpressionProvider } from '../../providers/ExpressionProvider';
 import { appStudioRoutePath } from '../../utils/appRoute';
 
 /** A metadata author: holds `manage_metadata`. */
-const AUTHOR: MePermissionsResponse = {
+const AUTHOR: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
   objects: {},

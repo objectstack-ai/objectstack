@@ -184,7 +184,7 @@ const fakeAdapter = {
 };
 vi.mock('../../providers/AdapterProvider', () => ({ useAdapter: () => fakeAdapter }));
 
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { AppHeader } from '../AppHeader';
 import {
   __resetSharedUserFeeds,
@@ -192,11 +192,12 @@ import {
   __markFirstPainted,
 } from '../../hooks/sharedUserFeeds';
 
-const READER: MePermissionsResponse = {
+const READER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: [],
   objects: {

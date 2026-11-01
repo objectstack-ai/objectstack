@@ -20,7 +20,7 @@
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '../MePermissionsProvider';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
 import { PermissionProvider } from '../PermissionProvider';
 import { usePermissions } from '../usePermissions';
 
@@ -32,12 +32,13 @@ function Probe() {
   return <span data-testid="loaded">{String(perms.isLoaded)}</span>;
 }
 
-function response(objects: MePermissionsResponse['objects']): MePermissionsResponse {
+function response(objects: MePermissionsAuthenticatedResponse['objects']): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: [],
+    hasAnyQueue: false,
+    positions: [],
     permissionSets: ['account_clerk'],
     objects,
     fields: {},

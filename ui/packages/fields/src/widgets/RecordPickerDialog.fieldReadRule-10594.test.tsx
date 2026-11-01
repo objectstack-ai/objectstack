@@ -48,7 +48,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { SchemaRendererContext } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordPickerDialog } from './RecordPickerDialog';
 import { getCellRenderer } from '../index';
 
@@ -78,15 +78,16 @@ function makeBackend(prefix: string) {
  * An authenticated `/me/permissions` payload: `account` is readable, and each
  * named `account` field is not.
  */
-function policyDenying(...fields: string[]): MePermissionsResponse {
+function policyDenying(...fields: string[]): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: ['viewer'],
+    positions: ['viewer'],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: { account: { allowRead: true } },
-    fields: Object.fromEntries(fields.map((f) => [`account.${f}`, { readable: false }])),
+    fields: Object.fromEntries(fields.map((f) => [`account.${f}`, { readable: false, editable: false }])),
   };
 }
 

@@ -55,7 +55,7 @@ import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
 import { MetadataCtx, RecordContextProvider } from '@object-ui/react';
 import type { MetadataContextValue } from '@object-ui/react';
-import { MePermissionsProvider, PermissionProvider, usePermissions, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, PermissionProvider, usePermissions, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordQuickActionsProps } from '@objectstack/spec/ui';
 import { RecordQuickActionsRenderer } from '../record-quick-actions';
 // Registers `record:quick_actions` and its three sibling record blocks, whose
@@ -132,19 +132,20 @@ const METADATA: MetadataContextValue = {
  * name off one bit, or a gate still reading the object action path, lands on a
  * different verdict for at least one of them.
  */
-function me(systemPermissions: string[] | undefined, objectBits?: Record<string, unknown>): MePermissionsResponse {
+function me(systemPermissions: string[] | undefined, objectBits?: Record<string, unknown>): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 't1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     ...(systemPermissions === undefined ? {} : { systemPermissions }),
     objects: {
       crm_account: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, ...objectBits },
     },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 function bar(schema: Record<string, unknown>, objectName = 'crm_account') {

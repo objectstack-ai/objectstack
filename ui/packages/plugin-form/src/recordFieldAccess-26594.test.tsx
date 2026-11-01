@@ -50,7 +50,8 @@ const PRINCIPAL: any = {
   authenticated: true,
   userId: 'u-1',
   tenantId: null,
-  roles: ['finance'],
+  positions: ['finance'],
+  hasAnyQueue: false,
   permissionSets: ['rfa_fixture_member'],
   objects: { rfa_contract: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: false } },
   // As `/auth/me/permissions` serves them: the conditioned entry as its lock.

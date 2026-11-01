@@ -34,7 +34,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, within, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 /** The fake presigned adapter: `upload` resolving means a `sys_file` was committed. */
 const adapterUpload = vi.fn();
@@ -70,12 +70,13 @@ const OWN_ROW = {
 type Grant = { allowCreate?: boolean; allowDelete?: boolean };
 
 /** A `/me/permissions` answer for an authenticated caller with this `sys_attachment` grant. */
-function payload(grant: Grant): MePermissionsResponse {
+function payload(grant: Grant): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: ME,
     tenantId: 'org-1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['member'],
     objects: {
       sys_attachment: {

@@ -40,7 +40,7 @@ import '@object-ui/components';
 import { SidebarProvider } from '@object-ui/components';
 import { NavigationRenderer } from '@object-ui/layout';
 import { SchemaRenderer, SchemaRendererContext, MetadataCtx, type ApiFetch } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
 import type { NavigationItem } from '@object-ui/types';
 import { ExpressionProvider } from '../../providers/ExpressionProvider';
@@ -52,11 +52,12 @@ import '../../views/nav-menu-renderer';
 type Surface = 'sidebar' | 'nav:menu' | 'palette';
 const SURFACES: Surface[] = ['sidebar', 'nav:menu', 'palette'];
 
-const ANSWER: MePermissionsResponse = {
+const ANSWER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u_member',
   tenantId: null,
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: [],
   objects: {},

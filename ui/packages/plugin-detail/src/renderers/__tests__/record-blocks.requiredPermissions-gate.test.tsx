@@ -47,7 +47,7 @@ import {
   MePermissionsProvider,
   PermissionProvider,
   usePermissions,
-  type MePermissionsResponse,
+  type MePermissionsResponse, type MePermissionsAuthenticatedResponse,
 } from '@object-ui/permissions';
 import { RecordDetailsRenderer } from '../record-details';
 import { RecordHighlightsRenderer } from '../record-highlights';
@@ -99,12 +99,13 @@ const ds = { find: vi.fn(async () => []) };
  * lets the discriminators below fail — a gate still reading the object-action
  * path lands on a different verdict for at least one of them.
  */
-function me(systemPermissions: string[] | undefined, objectBits?: Record<string, unknown>): MePermissionsResponse {
+function me(systemPermissions: string[] | undefined, objectBits?: Record<string, unknown>): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 't1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     ...(systemPermissions === undefined ? {} : { systemPermissions }),
     objects: {
@@ -116,7 +117,7 @@ function me(systemPermissions: string[] | undefined, objectBits?: Record<string,
       crm_contact: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false, ...objectBits },
     },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 /** Each sibling block: how to mount it, what it draws when allowed, how it refuses. */

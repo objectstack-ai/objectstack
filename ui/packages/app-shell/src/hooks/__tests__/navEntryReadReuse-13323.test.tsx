@@ -40,17 +40,18 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate, type NavigateFun
 // Module scope, never a `beforeAll` (AGENTS.md §测试纪律, objectui#3010).
 import { ComponentRegistry } from '@object-ui/core';
 import { SchemaRenderer, SchemaRendererContext, MetadataCtx, notifyDataChanged, type ApiFetch } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import type { NavigationItem } from '@object-ui/types';
 import { ExpressionProvider } from '../../providers/ExpressionProvider';
 import { ConsoleElementApiOpen } from '../../console/ConsoleElementApiOpen';
 import { useNavMemberGates, navEntriesShownToMember } from '../useNavMemberGates';
 
-const ANSWER: MePermissionsResponse = {
+const ANSWER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u_member',
   tenantId: null,
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: [],
   objects: {},
