@@ -313,6 +313,31 @@ describe('#7566 — `GET /meta/app?id=` narrows the list instead of being droppe
         expect(plural.body?.code).toBe('VALIDATION_ERROR');
     });
 
+    // [#28548] The same class one step down the chain: `?object=` (EMPTY) on
+    // the view list was read as absent and served every view, unsorted and
+    // including views bound to no object, instead of the switcher's list for
+    // one object. Refused the same way, after the same gate.
+    it('an EMPTY view `object` is refused with 400 naming the parameter — not read as absent (#28548)', async () => {
+        for (const type of ['view', 'views']) {
+            const { rest, protocol } = setup(['manage_users']);
+            protocol.getMetaItems = vi.fn(async ({ type: t }: any) =>
+                String(t ?? '').startsWith('view')
+                    ? [{ name: 'all_leads', viewKind: 'list', object: 'lead' }, { name: 'loose_view' }]
+                    : []);
+            const res = await getList(rest, type, { object: '' });
+
+            expect(res.statusCode, type).toBe(400);
+            expect(res.body?.code).toBe('VALIDATION_ERROR');
+            expect(String(res.body?.error)).toMatch(/^Query parameter 'object' names no object/);
+            expect(res.body?.items).toBeUndefined();
+            expect(Array.isArray(res.body)).toBe(false);
+
+            // Controls: a named object still switches, an absent one lists all.
+            expect(namesFrom((await getList(rest, type, { object: 'lead' })).body)).toEqual(['all_leads']);
+            expect(namesFrom((await getList(rest, type)).body).sort()).toEqual(['all_leads', 'loose_view']);
+        }
+    });
+
     it('a WHITESPACE id keeps its answer — a value no app is named, so an empty list (#28548 control)', async () => {
         const { rest } = setup(['manage_users']);
         const res = await getList(rest, 'app', { id: ' ' });

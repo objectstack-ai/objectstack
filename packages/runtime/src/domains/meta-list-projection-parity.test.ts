@@ -527,6 +527,8 @@ const PARAM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record
     { label: '?id= (empty)', param: 'id', query: { id: '' } },
     { label: '?object=lead', param: 'object', query: { object: 'lead' } },
     { label: '?object=nope', param: 'object', query: { object: 'nope' } },
+    // [#28548] …and so is an EMPTY view object.
+    { label: '?object= (empty)', param: 'object', query: { object: '' } },
     { label: '?include=content', param: 'include', query: { include: 'content' } },
     // [#25333] The position list's opt-in description.
     { label: '?include=grants', param: 'include', query: { include: 'grants' } },
@@ -687,6 +689,8 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         expect({ status: blank.status, code: blank.code, items: blank.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         expect(names((await read('/meta/view', { object: 'lead' })).items)).toEqual(['lead_mine', 'lead_all']);
         expect((await read('/meta/views', { object: 'nope' })).items).toEqual([]);
+        const blankObject = await read('/meta/views', { object: '' });
+        expect({ status: blankObject.status, code: blankObject.code, items: blankObject.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         const docs = await read('/meta/docs');
         expect(text(docs)).not.toContain('Welcome aboard.');
         expect(text(await read('/meta/docs', { include: 'content' }))).toContain(DOC_SECRET);

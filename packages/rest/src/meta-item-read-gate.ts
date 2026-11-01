@@ -3389,27 +3389,28 @@ export type MetaListAnswer =
     | { ok: false; object: string };
 
 /**
- * [#28548] The app list's answer to `?id=` with an EMPTY value. It was read as
- * absent, so a caller whose app name came out blank — who asked for ONE app —
- * was answered every app it may see: the #27484 class (a blank `$searchFields`
- * read as absent), refused the way that fix refuses it — `400
- * VALIDATION_ERROR` naming the parameter, so the caller learns its request
+ * [#28548] The list chain's answer to a narrowing filter sent EMPTY — `?id=`
+ * on the app list, `?object=` on the view list. Each was read as absent, so a
+ * caller whose name came out blank — who asked for ONE app, or for the views
+ * of ONE object — was answered every item it may see: the #27484 class (a
+ * blank `$searchFields` read as absent), refused the way that fix refuses it —
+ * `400 VALIDATION_ERROR` naming the parameter, so the caller learns its request
  * named nothing instead of reading a plausible wrong list.
  *
- * Asked by step 3 of {@link createMetaListAnswer}, AFTER the per-caller gate
- * (step 2), which keeps its place. Only the empty string: a value that names
- * no app (`' '`, `nope`) still narrows to the empty list. THROWS, so each
- * transport's own `catch` shapes it (`RestServer`'s `handleRouteError`, the
- * dispatcher's `errorFromThrown`), as {@link refuseUnknownMetaListType} does.
+ * Asked by steps 3 and 4 of {@link createMetaListAnswer}, AFTER the per-caller
+ * gate (step 2), which keeps its place. Only the empty string: a value that
+ * names nothing real (`' '`, `nope`) still narrows to the empty list. THROWS,
+ * so each transport's own `catch` shapes it (`RestServer`'s `handleRouteError`,
+ * the dispatcher's `errorFromThrown`), as {@link refuseUnknownMetaListType} does.
  */
-function refuseEmptyAppIdFilter(): never {
+function refuseEmptyListFilter(param: 'id' | 'object', names: 'app' | 'object', lists: 'app' | 'view'): never {
     const err: any = new Error(
-        "Query parameter 'id' names no app; got \"\". The list was not served: an empty app name "
-        + 'is not a filter. Name one app, or leave the parameter out to list every app you can see.',
+        `Query parameter '${param}' names no ${names}; got "". The list was not served: an empty ${names} `
+        + `name is not a filter. Name one ${names}, or leave the parameter out to list every ${lists} you can see.`,
     );
     err.status = 400;
     err.code = 'VALIDATION_ERROR';
-    err.param = 'id';
+    err.param = param;
     throw err;
 }
 
@@ -3504,7 +3505,8 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     VALIDATION_ERROR`), never read as absent; no match is an EMPTY list,
  *     never a 404.
  *  4. `view` — `?object=<object>` keeps the independent views bound to that
- *     object, sorted by `order` then `name` (the switcher).
+ *     object, sorted by `order` then `name` (the switcher); [#28548] an EMPTY
+ *     value is refused (`400 VALIDATION_ERROR`), never read as absent.
  *  5. `doc` — the ADR-0046 locale collapse (the request's own preference; the
  *     `translations` map is dropped whatever the locale).
  *  6. `doc` — the ADR-0046 content slim, unless `?include=content`.
@@ -3559,9 +3561,9 @@ export function createMetaListAnswer(
         }
 
         // 3. [#7566] `?id=<app>`. [#28548] An EMPTY one is refused, never
-        // read as absent (see {@link refuseEmptyAppIdFilter}).
+        // read as absent (see {@link refuseEmptyListFilter}).
         const appIdFilter = metaType === 'app' ? query?.id : undefined;
-        if (appIdFilter === '') refuseEmptyAppIdFilter();
+        if (appIdFilter === '') refuseEmptyListFilter('id', 'app', 'app');
         if (typeof appIdFilter === 'string') {
             const list = listItemsOf(visible);
             if (list) {
@@ -3571,7 +3573,9 @@ export function createMetaListAnswer(
             }
         }
 
-        // 4. `?object=<object>` — the view switcher.
+        // 4. `?object=<object>` — the view switcher. [#28548] An EMPTY one is
+        // refused, never read as absent (see {@link refuseEmptyListFilter}).
+        if (metaType === 'view' && query?.object === '') refuseEmptyListFilter('object', 'object', 'view');
         if (metaType === 'view' && query?.object) {
             const obj = String(query.object);
             const list = listItemsOf(visible);
