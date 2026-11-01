@@ -1,0 +1,33 @@
+{
+  "number": 28733,
+  "kind": "issue",
+  "title": "fieldPatches: make the fold, the install door and os validate agree on a patch of a field another extension adds, and fix the stale actions guidance list",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T16:00:44Z",
+  "updated_at": "2026-11-01T19:58:09Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28733",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ③ the three should-fix findings of the `CONTRACT_REVIEW_TIER` review of PR #28728 (#28565), comment 6560336731, filed by the seat before ACCEPT rather than reworked into a reviewed head. ⛔ Not a claim. Graded by this seat: p3 (the key is new, no shipped package patches an extension-added field; the spec sentence stays true), under 「定级你可以自己决定」 (Leehom, 2026-11-01).\nReach: a package author patching a field that another extension (or the same extension's `fields`) adds, and any author reading the `actions` refusal on an object extension.\nReader who acts: a `domain:server` seat (`packages/objectql/src/registry.ts`, `packages/cli/src/utils/field-patch-targets.ts`, `packages/spec/src/data/object.zod.ts`).\n\n## What happens (read in the tree at f82fd682)\n\n1. **Three readers, three answers for a patch of an extension-added field.** The registry fold applies it only when the adding extender has LOWER priority than the patching one (contributor loop order); the `reportFieldPatchMisses` docblock's \"applies on the next read\" is false for a higher-priority adder. The install door judges against the fully resolved registry object, so it admits the patch. `os validate` judges against declared `objects` only (`declaredObjects` in `cli/src/utils/field-patch-targets.ts`), so it refuses it. `registry.ts` and `content/docs/data-modeling/object-extensions.mdx` say a patch \"reaches a field a lower-priority extender added\"; the spec `.describe()` says \"the target object's own fields\".\n2. **Stale guidance.** `ObjectExtensionSchema.guidance.actions` still says the merge carries `fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes` \"only\"; the code comment above it already lists `fieldPatches`.\n3. **Array-spelled fields.** The fold's miss warning uses the metadata-core judge, which reads array-spelled `fields`, while `recordFieldOf` patches record-spelled fields only; an array-spelled body through `foldObjectExtendersOnto` is neither patched nor warned.\n\n## Wanted\n\n- One answer for item 1, the same at all three readers and in the docs: either a field patch reaches only the owner's own fields (fold skips extension-added fields, install door judges the owner's body, docs and docblocks say so), or it reaches extension-added fields regardless of priority (fold applies patches after all additive merges, `os validate` folds in-stack extensions before judging). The seat's lean: owner's own fields only, which is what the published spec sentence already says and keeps D10 \"display of a vendor field\" narrow.\n- Item 2: add `fieldPatches` to that sentence (or drop the \"only\" list).\n- Item 3: judge and patch the same spellings in the fold.\n- `Clause-②` and `Metadata-protocol` lines decided by the choice in item 1.\n\nLinks back: #28565, PR #28728, review comment 6560336731.\n\nBlocked-by: #28565"
+}

@@ -2,8 +2,8 @@
   "number": 28556,
   "kind": "issue",
   "title": "analytics: the dataset draft preview drops a dotted timeDimensions entry the live strategies refuse with INVALID_FIELD",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T05:55:10Z",
-  "updated_at": "2026-11-01T12:25:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T15:15:33Z",
+  "closed_at": "2026-11-01T15:13:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28556",
   "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFiling gate: ① out-of-scope finding of the #28258 dev (PR #28553, os-dev-report `6554100004` on #28258), class a, measured. Filed by `domain:server` seat 1. ⛔ Not a claim. No grade: triage sets the lane and grade.\n\nReach: `queryDataset` with `previewDrafts: true`, measured. A dotted `timeDimensions` entry with no backing include (`account.created_at`): both live faces answer `INVALID_FIELD` / 400; the preview answers one row without the time dimension (total 180).\n\nBusiness reason: a preview that silently drops the time axis shows the author a chart that will refuse after publish.\n\n## Wanted\n\nThe preview refuses the entry as the live strategies do (`INVALID_FIELD` / 400).\n\n## Dedupe\n\nSearched open and closed issues for `dataset preview timeDimensions` (20 hits) and `previewDrafts dotted` (4 hits): none covers the time-dimension face. **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`, the dataset compiler and the draft preview path).\n\nLinks back: #28258, PR #28553, #28201 (the preview undeclared-dimension precedent, closed)"

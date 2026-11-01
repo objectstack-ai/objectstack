@@ -2,8 +2,8 @@
   "number": 28657,
   "kind": "issue",
   "title": "approvals: a non-admin approver's decision from the request page answers 404 RECORD_NOT_FOUND — the action door loads sys_approval_request in the caller's data scope",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:workflow",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T12:19:43Z",
-  "updated_at": "2026-11-01T13:04:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T15:18:30Z",
+  "closed_at": "2026-11-01T15:16:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28657",
   "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiled by the PM seat for the W3-RT runner `session_017xRBcRX4wwwVw5bEckffdp`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\nQA-source: #28656 · approvals.account-app-entry · acceptance[3]\n\n## What happens\n\nOn the request page (`/_console/apps/com.objectstack.account/sys_approval_request/record/ID`), a non-admin pending approver sees the decision panel (the #28546 fix holds: no access-denied screen). But executing any decision from that page fails. Approve → Confirm sends `POST /api/v1/actions/sys_approval_request/approval_approve` and gets **404** `{\"code\":\"RECORD_NOT_FOUND\",\"message\":\"Record areq_… not found in sys_approval_request\"}`. The dialog shows that text, and the request is unchanged.\n\nScope: the request page's actions are all `type:'api'` through the same door. As the non-admin pending approver, `approval_reject`, `approval_comment` and `approval_request_info` each answer the same 404, so the whole decision panel is unusable. The admin, sending the same body shape to the same door, gets 200 `success:true` and the request moves. The submitter's `approval_remind` and `approval_comment` also answer 404, so Recall, Send reminder and Reply on the page do not work for non-admins either. The inbox's inline approve says \"To add a comment or attachment, open the request instead\", so a commented decision is impossible for a non-admin.\n\nMeasured at framework `6e11a929` (main, 2026-11-01), with the Console built in-repo, on a stock showcase boot. Reproduced on two independent boots, with two different personas and flows, and by a second independent verifier (RUNNER rule 7).\n\n## Reproduction\n\n1. Boot the stock showcase: `OS_PORT=PORT pnpm -C examples/app-showcase exec objectstack dev --ui --seed-admin --no-compile -p PORT -d file:/tmp/x/data.db`.\n2. As admin, mint a member X: `POST /api/v1/auth/organization/invite-member` `{\"email\":\"X\",\"role\":\"member\"}`, then X `POST /api/v1/auth/sign-up/email`.\n3. As admin, give X two positions: `POST /api/v1/data/sys_user_position` `{\"user_id\":X_ID,\"position\":\"contributor\",\"organization_id\":ORG}`, and the same with `\"finance\"`.\n4. As X: `POST /api/v1/data/showcase_invoice` `{\"name\":\"INV-1\",\"account\":ACTIVE_ACCOUNT_ID,\"owner\":\"X\"}`, then `PATCH /api/v1/data/showcase_invoice/ID` `{\"status\":\"sent\",\"issued_on\":\"2026-11-01\"}`. This opens request AREQ (Invoice Dual Sign-off) with X in `pending_approvers`.\n5. Sign X in through the console form. Open `/_console/apps/com.objectstack.account/component/approvals/inbox`, click the row, then click Approve → Confirm.\n6. **Expected:** `decision_progress` goes 0/2 → 1/2, X leaves `pending_approvers`, an `approve` row appears in `GET /api/v1/approvals/requests/AREQ/actions`, and X's decision buttons are gone.\n7. **Actual:** `POST /api/v1/actions/sys_approval_request/approval_approve` `{\"recordId\":\"AREQ\",\"params\":{\"comment\":\"…\"}}` → 404 RECORD_NOT_FOUND. `GET /api/v1/approvals/requests/AREQ` still reads pending, 0/2, `viewer.can_act: true`.\n\nHTTP-only form: X `POST /api/v1/actions/sys_approval_request/approval_approve` `{\"recordId\":\"AREQ\",\"params\":{}}` → 404. The contrasts that isolate the door:\n- X `POST /api/v1/approvals/requests/AREQ/approve` → 200;\n- the inbox inline approve (key `a`) → 200;\n- admin through the action door → 200.\n\nSecond boot, second flow: the seeded non-admin persona Ada Auditor on a `showcase_dynamic_approval` stage-2 request page → Approve → Confirm → the same 404.\n\n## Mechanism (read at 6e11a929)\n\n- `ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx` (around L428–480) sends a declared same-origin `type:'api'` action through `sendApiActionThroughDoor` (#27611) to `POST /api/v1/actions/:object/:action`.\n- `packages/runtime/src/domains/actions.ts` loads the subject row in the **caller's** data scope (`loadActionSubjectRecord` → `callData 'get'`, around L749). `refuseDeniedSubjectLoad` (around L882) answers 404 before the api forward (L897+) to `/api/v1/approvals/requests/{id}/approve`, which authorizes the pending approver itself.\n- Members have no data-door read on `sys_approval_request`, by design: #28546's fix deliberately did not widen it. `pending-approver-read-grant.ts` grants the subject record (the invoice), not the request row.\n- This is the same class as #25228 and #28546: an approvals row read through a generic data-scoped door, reached here through a third door. PR #28619's jsdom test \"one approval POSTs the action door\" doubled the fetch answer, so it never observed this HTTP-layer refusal.\n\nFix direction (a suggestion, not a ruling): route the subject load or the forward for approval actions so the approvals service authorizes the caller. Do not widen the member data grant on `sys_approval_request`.\n\nRelated, same door: the action door relays a target's 400 as \"Action 'approval_approve' — its target answered HTTP 400\", dropping the target's prescriptive message (seen on a dynamic-approval decision with a missing required output).\n\n## Pin owed\n\nNo HTTP-layer or live pin covers \"a non-admin approver executes a decision from the request page and the request moves\". The checklist item `approvals.account-app-entry` acceptance[3] is the only coverage.\n\nDoes not reopen #28546, whose scope (the page rendering) holds."

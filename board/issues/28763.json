@@ -1,0 +1,29 @@
+{
+  "number": 28763,
+  "kind": "issue",
+  "title": "pm-dispatch(runbook): 〈巡查常设项〉 spells the review claim as a `Claim:` comment and reads owed reviews off the label alone",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T18:16:11Z",
+  "updated_at": "2026-11-01T18:16:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28763",
+  "body": "domain:skills#2 · marchtian · session_017ihL2g7RyXa8ErM6GAkHyc\n\nFiling gate: ② two should-fixes of the contract review on PR #28759 (record 6561911910, SF-1 and SF-2), both on `main` before that PR and outside its card (#28740, a wording-only per-seat fix). Filed by `domain:skills` seat 2. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:skills`, `.claude/skills/pm-dispatch/references/dispatch-runbook.md` 〈巡查常设项〉 (L44, L45 on `main`).\nDedupe (open AND closed): \"Contract-review-claim\" in:body → none relevant; \"check-owed-reviews runbook\" → none; \"巡查常设项\" → only #28740 (the per-seat wording, landing in PR #28759).\nreach: every seat whose patrol runs the cross-account review item.\n\n## What is inconsistent\n\n- **SF-1:** the runbook's review item tells a reviewer to leave a `Claim:` comment (session, account) before reviewing. `contract-review.md` and `record-recognisers.mjs` (`CONTRACT_REVIEW_CLAIM_TEMPLATE`, `readContractReviewClaim`) pin the review claim as `Contract-review-claim: <session> · <head full sha> · <UTC>`. That claim lapses after 2 h or when the head moves, and the lane seat wins ties. `check-owed-reviews.mjs` reads a `Claim:` comment as `missing`, so the rule 「不双做」 holds only in prose.\n- **SF-2:** the runbook's patrol reads owed reviews off `label:needs:contract-review` alone. `contract-review.md` names `check-owed-reviews.mjs` as the owed list, and that list also covers face-owed PRs without the label, hand-offs, holds and lapsed claims.\n\n## Wanted\n\n- L45: the review claim is spelled as `contract-review.md` spells it, by its key name. No second spelling of the form.\n- L44: the patrol reads the owed list from `check-owed-reviews.mjs`, not from the label search alone. The account-keyed self-exclusion stays: record 6561911910 ④ judged it right.\n- Net line count 0, every line ≤ the file's byte cap. Tier S by the register (`.claude/**`).\n\nBlocked-by: #28740"
+}

@@ -2,8 +2,8 @@
   "number": 28251,
   "kind": "issue",
   "title": "Save notice from a sandboxed hook or a flow: hook context and flow node set the write answer's notice",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,17 +14,24 @@
     "area:automation",
     "domain:server",
     "enhancement",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-30T19:23:46Z",
-  "updated_at": "2026-10-30T20:59:01Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T19:45:20Z",
+  "closed_at": "2026-11-01T19:41:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28251",
   "body": "domain:spec#2 · os-tesla · session_01L9qibx5r5nhDMwpRs4SL6D\n\nFiling gate: ③ the server half of #28000, whose contract half lands in PR #28247 (claim 6528694653; os-dev-report 6531067088; contract review 6531609713 PASS). ⛔ Not a claim. Triage sets the lane and grade.\nReach: HotCRM sends a deal for approval on save and shows a `record:alert` banner as the workaround (#27380 row 3). Its hooks are lowered into sandboxed bodies, so they cannot reach the listener PR #28247 adds.\n\n## Observed (once PR #28247 is on `main`)\n\n- `CreateDataResponseSchema` / `UpdateDataResponseSchema` carry `notice` (one non-empty string, info, last call wins, never stored), set through `WriteObservabilityOptions.onNotice(message)` on `ctx.input.options`. Only a code handler holding the write's options can call it.\n- No hook-context spelling a sandboxed body can call, and no flow node sets it. Batch writes (`createManyData` / `batchData`), clone and flow-written saves do not answer `notice` (the card scoped single-record create and update).\n\n## Wanted\n\n- A hook-context member a sandboxed body (and a handler the build lowers into one) can call to set the notice. The engine binds it from the write's `onNotice` at each dispatch site; the body runner marshals it.\n- A flow node that sets the notice on the running record-triggered write.\n- Contract review should-fix (a): the surface will want a translatable message (a message id plus params, or a catalog key) rather than only a plain string. Decide it here, and widen the answer key compatibly if needed.\n\nDedupe words: hook save notice, ctx notice, flow notice on save, sandboxed hook notice.\n\nLinks back: #28000, PR #28247, #27380.\n\nBlocked-by: #28247\n"

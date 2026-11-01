@@ -2,8 +2,8 @@
   "number": 28665,
   "kind": "issue",
   "title": "Studio OWD: forcing \"Controlled by parent\" on a detail that already holds rows with a null master hides those rows from everyone, admin included, while the confirm only says they \"may fail validation\"",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:access",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T12:23:25Z",
-  "updated_at": "2026-11-01T13:25:23Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T15:21:14Z",
+  "closed_at": "2026-11-01T15:19:45Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28665",
   "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiled by the PM seat for the W3-RT runner `session_017xRBcRX4wwwVw5bEckffdp`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\nQA-source: #28656 · studio-authoring.access-owd-and-suggestions · observed beside the clauses\n\n## What happens\n\nSince #27458, saving \"Controlled by parent\" on a detail whose `master_detail` is not yet required answers 409 `DESTRUCTIVE_CHANGE`. The panel opens a confirm, \"Make the relationship required? … Field 'project' is now required but has no default value…\", and \"Make required and save\" re-sends the draft with `?force=true`. The confirm relays only that \"existing rows with null values may fail validation\".\n\nWhat actually happens to such rows: after publish, a pre-existing detail row with a null master becomes **unreachable through every door, for the admin too**. The list answers `total: 0`, and `GET` and `PATCH /api/v1/data/OBJ/ID` answer 404 `RECORD_NOT_FOUND`, while the row is still stored. That is ADR-0055 fail-closed access derivation (no master, so no access), not a security hole. But the author is told \"may fail validation\" and gets no count of the rows they are about to hide and no way to reach them afterwards.\n\n**Expected:** the confirm states how many existing rows have no master and that they become unreadable once the object is controlled by its parent, and ideally offers to stop or to assign them first. Alternatively, an admin door keeps such rows reachable for repair.\n\nClosest prior card: #24964 (closed), \"a master-detail row whose master is missing can be neither read nor removed through any door\". This is the null-master case, reached through the #27458 force path.\n\nMeasured at framework `6e11a929` (main, 2026-11-01), on a stock showcase boot with a scratch package installed at runtime. Measured through the API with the request shape the panel's confirm sends, not by clicking the panel.\n\n## Reproduction\n\n1. As admin, install a scratch package PKG. Publish `qow_project` (private) and `qow_task` (private), with `project` as a `master_detail` to `qow_project`, **not** required.\n2. `POST /api/v1/data/qow_task {\"name\":\"orphan-task\"}` → 201, `project: null` (id ROW).\n3. `PUT /api/v1/meta/object/qow_task?mode=draft&package=PKG&force=true` with `sharingModel: \"controlled_by_parent\"` and `fields.project.required: true` → 200, which is what \"Make required and save\" sends. Then `POST /api/v1/packages/PKG/publish-drafts`.\n4. As admin: `GET /api/v1/data/qow_task` → `total: 0`. `GET /api/v1/data/qow_task/ROW` → 404 RECORD_NOT_FOUND. `PATCH /api/v1/data/qow_task/ROW {\"project\":\"P\"}` → 404. The row is still in the table.\n\n## Mechanism\n\nThe DESTRUCTIVE_CHANGE refusal for \"field became required, no default\" is generic. It does not know that, under `controlled_by_parent`, a null master also removes every reader (plugin-security derives the detail's access from its master, ADR-0055 §1, and fails closed). The Studio confirm (`PackageOwdOverviewPanel`, the #27458 path) relays that generic message."

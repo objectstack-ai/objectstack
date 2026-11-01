@@ -1,0 +1,29 @@
+{
+  "number": 28787,
+  "kind": "issue",
+  "title": "skills(automation): teach the save notice — the save_notice flow node and ctx.notice in hooks (#28251)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T19:43:34Z",
+  "updated_at": "2026-11-01T19:43:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28787",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① skills-docs remainder of PR #28753 (merged as `a00f3359`, closing #28251), found at the seat's ACCEPT `6562635160`. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: `skills/objectstack-automation` teaches flow node types and hooks. On `main` it says nothing about the save notice that #28251 shipped. An AI writing a HotCRM-style \"sent for approval\" message today would still reach for the `record:alert` banner workaround.\n\n## Wanted\n\nThe published automation skill teaches, with one example each:\n- `ctx.notice(message)` in a hook. Only on insert/update, needs a non-empty string, and an untranslated sentence (ruling A, `6562118323`).\n- The `save_notice` flow node. Only in a flow whose start is a create/update record trigger. Refused at publish elsewhere, and refused by name on a leg resumed after an approval or wait, and in a subflow or map child. The message is translated under `flows.<flow>.notices.<node_id>.message`.\n\nAdd an eval prompt if the skill's eval set covers flow nodes.\n\n## Dedupe\n\nSearched open issues for `save_notice` and `ctx.notice` skill: none. **New.**\n\nReader who acts: `domain:skills` (`skills/objectstack-automation`).\n\nLinks back: #28251, PR #28753"
+}

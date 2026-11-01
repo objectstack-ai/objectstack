@@ -1,0 +1,31 @@
+{
+  "number": 28759,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): runbook patrol names the per-seat patrol and dedupes review claims by seat",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "needs-user-decision",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T18:02:01Z",
+  "updated_at": "2026-11-01T18:18:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28759",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiHXKqxUqDPJKZyNHP7BoqTb)_\nFixes #28740\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:派发手册〈巡查常设项〉三行措辞:标题与跨账户复审行由「每项目巡查」改为「每席巡查」,复核认领去重从「他账户」改为「他席(同账户亦然)」。\n- 为什么改:技能其余处已是「每席一个巡查」;旧去重按账户判,同一账户在同项目坐多席时两席都会放行,可能对同一 PR 重复复核。\n- 风险与回滚:纯文面改动,不动脚本与门禁;「剔除本账户署名的 PR」这条复核独立性规则保持按账户不变。回滚即还原这一个提交。\n- 先看:`.claude/skills/pm-dispatch/references/dispatch-runbook.md` 第 45 行(去重键从账户改为席位)。\n- 两分钟验证:`git grep 每项目巡查 -- .claude` 应零命中;`pnpm check:pm-skill-ratchet` 应通过(净行数 0)。\n- 需要你做的:审阅并批准本 PR(规则文本改动以维护者批准为裁决),之后由席位落地。\n\n## What changes\n\n`.claude/skills/pm-dispatch/references/dispatch-runbook.md`, section 巡查常设项, three lines (3 insertions, 3 deletions, net 0):\n\n- L39 heading: 「每项目巡查与总监席摘要」 becomes 「每席巡查与总监席摘要」.\n- L44 cross-account review line: 「每项目巡查跑」 becomes 「每席巡查跑」. Its exclusion 「剔除本账户署名的 PR」 is the review-independence rule and stays keyed to the account.\n- L45 review-claim dedupe: 「已有他账户的认领即跳过」 becomes 「已有他席认领即跳过(同账户亦然)」, so a PR already claimed by another seat is skipped even when that seat sits on the same account. The `Claim:` form (会话、账户) is unchanged; no new field.\n\n## Tests\n\nProse-only change to a governed skill reference; no code, no package, no test surface. `skip-changeset`: nothing publishes.\n\n## Acceptance notes\n\n- Byte widths after the edit: L39 50 B, L44 108 B, L45 119 B, all within the 120-byte cap (`check-skill-line-ratchet.mjs`). The first L45 spelling measured 122 B and was shortened by dropping one particle.\n- `git grep 每项目巡查` over the whole tree: 0 hits after the edit. The only other mention of the section, `lanes/director.md` L74, cites it as 巡查常设项 and still resolves.\n- Read against `contract-review.md` and `seat-lifecycle.md`: neither keys reviewer independence or the review-claim dedupe differently; `cross-repo-coordination.md` already uses 他席 for another seat's claim.\n\n## Verification\n\nLocal gate subset at head `640da54552`, derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, every exit code captured before any pipe.\n\n<details><summary>17 derived families + 3 named by the order, all exit 0</summary>\n\n```\nnode scripts/check-closing-keyword-parity.mjs :: exit 0\nnode scripts/check-closing-keyword-parity.mjs --self-test :: exit 0\nnode scripts/check-comment-mask-corpus.mjs :: exit 0\nnode scripts/pm/check-harness-current.mjs --self-test :: exit 0\npnpm --filter @objectstack/lint run check:doc-formula-expressions :: exit 0 (first run exit 3, prerequisite not built; rerun after building formula + lint)\npnpm check:agent-test-spelling :: exit 0\npnpm check:cross-package-test-inputs :: exit 0\npnpm check:doc-authoring :: exit 0\npnpm check:driver-memory-census :: exit 0\npnpm check:gitlink-declared :: exit 0\npnpm check:nul-bytes :: exit 0\npnpm check:pm-governed-merges :: exit 0\npnpm check:pm-skill-id-lint :: exit 0\npnpm check:pm-skill-ratchet :: exit 0\npnpm check:refd-timer-probe :: exit 0\npnpm check:skill-frame-sync :: exit 0\npnpm check:watch-hint-literal :: exit 0\npnpm check:pm-governed-prose :: exit 0\npnpm check:pm-settings-deny-roster :: exit 0\nnode scripts/check-skills-token-ratchet.mjs :: exit 0\n```\n\n`--ran` reconciliation: 17 derived, 17 run, 0 NOT-MEASURED, 0 UNRUN (a derived zero: all 17 carry an exit code).\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

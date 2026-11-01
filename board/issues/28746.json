@@ -1,0 +1,36 @@
+{
+  "number": 28746,
+  "kind": "issue",
+  "title": "metadata-protocol: the override write gate judges an email template by (type, name), so a <base>.custom pair can declare and publish an override of a locale the base does not ship",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T16:40:15Z",
+  "updated_at": "2026-11-01T19:50:36Z",
+  "closed_at": "2026-11-01T19:49:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28746",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ① product defect, reproduced and located · found by the #28569 os-dev (out-of-scope finding, class b) while building Studio's email-template editor · filed by `domain:ui#1` · ⛔ Not a claim.\n\n**Business reason.** ADR-0146 D2 says a `<base>.custom` pair may only replace an item its base ships. An email template is one item per `(name, locale)`. Today a pair can declare an \"override\" of a locale the base never shipped, and it goes live as if it replaced something. The next base upgrade then has nothing to compare it against: drift detection and \"Restore package original\" read a base member that does not exist, and the customization is in fact an addition dressed as an override.\n\n**Reach (measured once, `dev --fresh` showcase).** The base `com.example.showcase` ships `showcase_task_done_email` in `en-US` only.\n1. `PUT` the draft of `showcase_task_done_email` in `com.example.showcase.custom` with body `locale: fr-FR` and `overrides: { package: com.example.showcase, basedOn: 0.1.0 }` → `200`.\n2. Publish with `?member=fr-FR` → `200`. The `fr-FR` \"override\" is served.\n\n(`?member=` on the `PUT` itself is `400`; the member is the body's `locale`.)\n\n**Located (`origin/main`).**\n- `packages/metadata-protocol/src/protocol-packaged-base-refusal.ts:459`: the gate asks `shippedArtifactsOf(request.type, request.name)`, which answers for the name across all members, so \"the base ships this item\" holds for any locale.\n- `:339-340`: `declared_package_ships_no_such_item` is the refusal that should fire for an unshipped member.\n- `:202` `OverrideWriteSubject` carries `type`, `name` and package, and no member, so the gate cannot ask per member.\n- The read side is already per member (`findServedOverlayRow` adds the member to its `where` before `isServedOverrideRowOf`; the layered read passes the member), so only the write gate is coarser.\n\n**Wanted.** The override write gate judges a bundle type's subject by `(type, name, member)`: a declared override of a member the base does not ship is refused with `declared_package_ships_no_such_item`. A new member in the pair without `overrides` is unaffected.\n\n**Reader.** The `domain:server` seat that owns `metadata-protocol`, through triage.\n\n**Dedup.** `declared_package_ships_no_such_item` → 1 hit (#28569, the finder); `override unshipped locale` → 7 hits, none about this gate (#28413 closed: `os migrate`; the rest unrelated). Studio's editor (#28569) never writes such a member, so it carries no workaround."
+}

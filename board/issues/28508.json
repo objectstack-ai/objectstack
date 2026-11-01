@@ -2,8 +2,8 @@
   "number": 28508,
   "kind": "issue",
   "title": "Session payload: the console learns once per session whether the caller's organization has at least one ownership queue (declared or `sys_queue`), with no widening of member read on `sys_queue`",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T03:57:29Z",
-  "updated_at": "2026-11-01T12:48:06Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T17:29:42Z",
+  "closed_at": "2026-11-01T17:28:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 9,
+  "comments": 13,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28508",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nThe producer half of #28428, filed by the record-page epic seat on the maintainer's ruling. The #28428 dev thread found that a plain member cannot tell whether the organization has a queue and offered four routes (os-dev-report on #28428). Route **A** was recommended by the dev and the seat, and the maintainer answered 「28428 同意」 (2026-11-01). ⛔ Not a claim. No `domain:*` label: the triage seat routes it, because the carrier payload decides the lane.\n\n## Reading\n\nMeasured by the #28428 dev thread on `main` `5517005d`, through the real HTTP door (`@objectstack/verify`):\n\n- **A plain member (`member_default` only):**\n  - `GET /api/v1/meta/queue` → 200, listing the declared queues;\n  - `GET /api/v1/data/sys_queue` → 403 `PERMISSION_DENIED`;\n  - `GET /api/v1/data/sys_queue_member` → 403.\n- **An admin** reads `sys_queue` → 200.\n- **Why the member is refused.** `member_default` (`plugin-security` `default-permission-sets.ts`) has had no wildcard since #5491, and it names no `sys_queue` entry.\n- **No other source answers for the member.** The injected `queue` column on the object's metadata carries no options, and `/discovery` has no queue slot.\n- **Where queues are resolved today.** The ownership-queue service (`packages/spec/src/contracts/ownership-queue-service.ts`, implemented in `@objectstack/plugin-sharing`) resolves queues per organization: declared queues first, the organization's `sys_queue` rows second (ADR-0131 D4). It has `resolveQueue`, `expandMembers`, `isMember` and `queuesOf`, but no \"any queue at all\" answer.\n\n## Target\n\n1. **One boolean, resolved server-side.** A payload the console already reads once per session answers whether the caller's organization has at least one ownership queue.\n   - It counts declared queues that the activation ledger has not switched off, OR any `sys_queue` row in the caller's organization.\n   - It is resolved under system context through the ownership-queue service. Add one method there, for example `hasAnyQueue(organizationId)`, so the registry-first rule and the activation ledger apply in one place.\n   - The carrier is the claiming seat's choice, with the reason in the PR. The candidate is `GET /api/v1/auth/me/permissions`, which the console already reads once per session (#28085 counts it on every list load). Another session-scoped payload the console already reads is equally fine.\n   - ⛔ No new route.\n2. **Only the boolean.** No queue names and no counts are exposed to the member. Member read on `sys_queue` and `sys_queue_member` stays as it is: the #5491 baseline is not widened (that was route B, which was not chosen).\n3. **When the service is absent.** If the ownership-queue service is not registered, the answer is `false`. With no service, no record can sit in a queue, so the toggle has nothing to find.\n4. **Declared in the response contract.** The field is declared in the spec schema of the carrier's response, strictly. The console reads it from the typed client.\n\nClause-②: yes (a response contract widens). Metadata-protocol: none.\n\n## Why (four axes)\n\n- **Business need:** #28428 hides the list toolbar's 「在队列中」 toggle in organizations with no queue. In HotCRM that is all 18 business lists, where the toggle can never return a row. The console needs this one answer to do that without guessing.\n- **Long-term fit:** it asks the one question the toolbar has (\"any queue?\") in the service that owns queue resolution. It reuses a session payload and adds no new route.\n- **AI-error resistance:** a strict, declared response field. There is no client-side inference from a 403, and no \"read failed, so assume no queues\" tolerance.\n- **Startup focus:** one boolean and one service method. It leaves the permission baseline and the route surface as they are.\n\n## Acceptance\n\n1. A contract test: the carrier's response schema declares the field, and an unknown sibling is still refused.\n2. Through the HTTP door, as a plain member:\n   - an organization with only a `sys_queue` row answers `true`;\n   - an organization with only a declared queue answers `true`;\n   - an organization with a declared queue switched off in the activation ledger, and no row, answers `false`;\n   - an organization with neither answers `false`;\n   - with the service not registered, the answer is `false`.\n\n   The member's `GET /data/sys_queue` stays 403, and the test pins that too.\n3. No extra request on list mount. The answer arrives with the payload the console already reads.\n4. On landing, #28428's `Blocked-by:` line points here. The epic seat returns #28428 to dispatch with the field name."

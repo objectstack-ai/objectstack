@@ -1,0 +1,38 @@
+{
+  "number": 28744,
+  "kind": "issue",
+  "title": "analytics: the ObjectQL strategy refuses two dataset dimensions over one column with INVALID_QUERY (duplicate groupBy), while native and the preview serve both names",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T16:38:27Z",
+  "updated_at": "2026-11-01T18:53:54Z",
+  "closed_at": "2026-11-01T18:53:01Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28744",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding of the #28690 dev (PR #28742, os-dev-report `6560773894` on #28690), class a, measured. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: `queryDataset`, ObjectQL strategy, direct (non-cross-object) path, measured on real SQLite at PR #28742's head `400154ac`. Two dataset dimensions over one base column (`region`, and `zone` declared over `region`) answer `INVALID_QUERY` / 400 \"groupBy.1 names the column region, which groupBy.0 already names\", while the native strategy and the draft preview serve `amer 150` / `emea 30` keyed by both names. Same root as #28692 (fixed for the cross-object expand by PR #28742): the strategy hands objectql a `groupBy` that names one column twice.\n\nBusiness reason: a dataset that exposes one column under two names (a raw and a business label, a common migration shape) works on one strategy and is refused on the other.\n\n## Wanted\n\nThe ObjectQL strategy answers the same groups as native when two dimensions resolve to one column: it groups by the column once and keys the answer by every dimension name over it. ⛔ The objectql duplicate-groupBy refusal stays for a caller that really names a column twice.\n\n## Dedupe\n\nSearched open and closed issues for `duplicate groupBy two dimensions same column`, `zone region INVALID_QUERY` and `objectql groupBy already names`: #28692 only (the cross-object face). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics` ObjectQL strategy).\n\nLinks back: #28692, PR #28742, #28555"
+}

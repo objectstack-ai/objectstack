@@ -1,0 +1,35 @@
+{
+  "number": 28719,
+  "kind": "pull_request",
+  "title": "test(showcase): add the Reports index to the smoke SURFACES",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T15:15:30Z",
+  "updated_at": "2026-11-01T15:43:24Z",
+  "closed_at": "2026-11-01T15:43:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T15:43:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28719",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi9paTx1Lu8ENYwwssthfK3h)_\n\nFixes #28653\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:showcase P0 冒烟套件的 SURFACES 新增一项「All reports」(报表索引页 nav_report_index,路径 …/reports);清单条目 platform-core.nav-surfaces-render 同步改为「SURFACES 覆盖全部 50 个导航叶子」,并去掉对 /reports 的常设手工巡检(revision 9 → 10);RUNNER.md 里「49 个测试全挂即环境问题」的计数同步为 50。\n- 为什么改:showcase 导航有 50 个叶子,冒烟只覆盖 49 个,报表索引页每次 P0 都得靠人手点一遍,忘了点就漏掉回归;现在它和其他页面一样由套件自动检查。\n- 风险与回滚:只动测试与文档,不动产品代码、不发布任何包;现有 49 项检查一字未改。回滚即 revert 本 PR。\n- 先看:examples/app-showcase/e2e/showcase-smoke.spec.ts(新增那一行 SURFACES)→ docs/qa/platform-checklist/areas/platform-core.json(steps[0]/[2] 与 history 第 10 行)→ docs/qa/platform-checklist/RUNNER.md(一个数字)。\n- 两分钟验证:`pnpm console:build` 之后运行 `SMOKE_API_URL=http://localhost:PORT pnpm -C examples/app-showcase test:smoke e2e/showcase-smoke.spec.ts`(PORT 取一个空闲端口),预期「50 passed」,最后一项是「surface renders cleanly: All reports」。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `examples/app-showcase/e2e/showcase-smoke.spec.ts`: one new `SURFACES` entry, `{ name: 'All reports', path: base('reports') }`, for `nav_report_index` (a `report` nav entry with no `reportName`, which the console opens as the app's report index at `…/reports`). It runs under exactly the same per-surface checks as every other entry (no pageerror, no `no actions configured` placeholder, non-empty main content, past the boot splash). It is not a chart surface, so no `chart: true`. No existing entry or check is changed or removed. The name is the console's own label for that page (`sidebar.allReports`, \"All reports\"), since the nav entry carries no `label`.\n- `docs/qa/platform-checklist/areas/platform-core.json`, item `platform-core.nav-surfaces-render`: `steps[0]` now says SURFACES has 50 entries covering all 50 served `showcase_app` nav leaves, the report index included; `steps[2]` drops the standing hand-walk of `/reports` (on a current tree the served-vs-SURFACES diff is empty; a leaf the nav gains without a SURFACES entry is the hand-walk until the suite gains it). `revision` 9 to 10, one history row citing #28653. No clause, negative or oracle changed.\n- `docs/qa/platform-checklist/RUNNER.md`: the whole-run-red discriminator said one test per `SURFACES` entry, \"49 today, so 49 failed means all of them\". This PR makes that 50, so it now says 50. This is the one other place that pinned the count, and the change makes it wrong, so it is fixed here (declared below).\n\n## Tests\n\nCounts read from source at `e630e6434b` (`origin/main` 0be4c8a520 merged in): `examples/app-showcase/src/ui/apps/index.ts` serves 50 non-separator leaves (25 pages, 17 objects, 5 reports, 3 dashboards); `SURFACES` held 49 before this PR and holds 50 after it.\n\nLive run, prepared the way the nightly prepares it (`turbo run build` of the showcase closure, `pnpm console:build`), with `SMOKE_API_URL` on an OS-assigned free port and `OS_TEST_CHROMIUM_EXECUTABLE_PATH=/opt/pw-browsers/chromium`, both runs at the same build:\n\n| Spec | Command | Result |\n|:--|:--|:--|\n| base spec (`e170d42438`) | `pnpm -C examples/app-showcase test:smoke e2e/showcase-smoke.spec.ts` | 49 passed (2.1m) |\n| this PR (`e630e6434b`) | same | 50 passed (2.0m), `All reports` passed in 2.0s |\n\nA separate probe of the same page (signed in as the seeded admin, waiting past the boot splash) read the report index rendering its four named reports under the Tasks section, with no pageerror: \"Reports · All reports · Recent · Tasks 4 · Hours by Status (Chart) · Hours by Status (Summary) · Status × Priority (Matrix) · Task Overview (Joined)\". So the new entry passes on real content, not on an empty or not-found state.\n\n`pnpm --filter @objectstack/example-showcase run typecheck` (its tsconfig includes `e2e/**/*`): exit 0.\n\n## Acceptance notes\n\n- Declared in-place fix outside the claim's named file surface: `docs/qa/platform-checklist/RUNNER.md` line 257, the count `49` to `50`. It is the same defect class (a stale SURFACES count), a mechanical one-number edit, held by no other claim, and inside the same checklist gate family. Left alone, it would make \"49 failed\" read as a whole-run environment red when one surface still passed.\n- Historical counts were left as they are: the `22 of 49 surfaces` in the spec's boot-splash comment, the `49 leaf items` in the #21060 comment, and the history rows of revisions 5 and 9. Each records what was measured at that time.\n- `acceptance[1]` of the item (coverage is current: every served destination is in SURFACES or hand-walked this run) is still the run's job. The suite never reads `meta/app`, so no automation computes that diff. This PR changes the expected result of that diff to empty. It does not automate the diff.\n\n## Verification\n\n<details><summary>Local gates: 42 derived, 42 run, every exit code 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `e630e6434b` derived 42 commands for the 3 changed paths. Every one exited 0, each exit captured before any pipe, including `pnpm check:platform-checklist`, `pnpm check:doc-authoring`, `pnpm check:nul-bytes`, `pnpm check:examples-live-imports` and `pnpm check:published-files`. `--ran` reconciliation: \"42 derived famil(ies) accounted for — 42 run, 0 NOT-MEASURED (a DERIVED zero — all 42 recorded an exit code and none of them is 3)\".\n\n</details>\n\n<details><summary>Changeset</summary>\n\nNo changeset: the diff touches `examples/app-showcase` (`\"private\": true`) and `docs/qa/` only, so no released package publishes anything new. Labelled `skip-changeset`.\n\n</details>\n\nSession: https://claude.ai/code/session_017ihL2gLghEqeDKTbDTC7Zd\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

@@ -11,18 +11,20 @@
     "type": "Bot"
   },
   "labels": [
+    "area:devpath",
     "domain:spec",
-    "finding"
+    "finding",
+    "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T14:10:28Z",
-  "updated_at": "2026-11-01T14:10:28Z",
+  "updated_at": "2026-11-01T17:00:24Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28695",
   "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate: ② should-fixes S1–S4 that a contract review carried out of scope (triage contract review 6559060618 on PR #28685, card #28627, verdict PASS with no must-fix). Filed by `domain:spec` seat 4 · `marchtian`. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec` for S1, S3 and S4; S2 touches `packages/objectql/src/plugin.ts` as well.\nDedupe: these findings were raised by that review today (14:09Z). Open issues titled `owner-stamp` / `_packageId`: #28627 only, which this card follows.\nreach: build-stricter-than-boot on a narrow shape. A `packages[]` artifact whose top level repeats a body's `data`/`picklists` item, or a nameless view container. That is measured on the code by the review, not through a door.\n\n## Wanted (from the review)\n\n- **S1.** Align `applyCollectionItemOwnerStampGate`'s residual walk (`packages/spec/src/stack.zod.ts`) with the boot's `unclaimedTopLevel`:\n  - skip `data` and `picklists` at the top level of a `packages[]` artifact, since no boot door files them as residuals;\n  - derive a nameless container's claim key the way `unclaimedTopLevel` does, or state in the gate's docblock that the residual judgement is by-name and build-stricter on those collections.\n- **S2.** The residual boot door (`registerUnclaimedTopLevelItems`, `RESIDUAL_TYPES_WITH_OWN_PATH` excludes `app`) judges `apps`, while the body seam and the build door do not. Make the three agree: either drop `app` from the residual judgement, or judge apps at all three. Correct the \"not judged at either door\" sentence in the judge's docblock to match. The apps/objects owner-stamp card (being measured at install-local by this seat) may carry this instead.\n- **S3.** Pin the build side key by key, the way the boot side is pinned. For each member of `OWNER_STAMP_JUDGED_COLLECTIONS`, a stack carrying one foreign-stamped item of that collection raises the gate's issue. Then an item schema that stops spreading `MetadataProtectionFields` turns a test red instead of silently opening the build door.\n- **S4.** Add one row for the new refusal to `content/docs/deployment/validating-metadata.mdx`. The connectors failure-mode row in `content/docs/automation/connectors.mdx` names the install door only.\n\nRelated: #28627 / PR #28685, #28534 / PR #28587."

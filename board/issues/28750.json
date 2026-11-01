@@ -1,0 +1,31 @@
+{
+  "number": 28750,
+  "kind": "issue",
+  "title": "docs(qa): four studio-authoring knownGaps still quote the `pnpm --filter @object-ui/PKG exec vitest run` form the ui vitest guard refuses",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "domain:devx",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T17:08:45Z",
+  "updated_at": "2026-11-01T17:59:07Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28750",
+  "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured accuracy gap in the checklist ledger. Found while landing #28701 (W3-RT row 3, QA run #28656), which fixed the same text in `studio-authoring.expression-editors` only.\nReader: any `domain:devx` seat, one PR on `docs/qa/platform-checklist/areas/studio-authoring.json` only.\nDedupe (open AND closed): \"vitest-invocation-guard checklist\" and \"exec vitest run platform-checklist\" → no card covers these four items (#28701 covered row 3's item only).\nreach: measured from source at the #28701 head `4ca7c24988`: `ui/scripts/vitest-invocation-guard.mjs` (called by `ui/vitest.config.mts`) refuses a run whose Vitest root is not `ui/` (its `package-cwd` verdict). `pnpm --filter @object-ui/PKG exec vitest run FILE` runs in the package directory, so it is refused.\nQA-source: #28656 · studio-authoring.expression-editors · fixtures.knownGaps[1] (row 3 of #28701)\nChecklist item priority: as each item\ntype: Bug\n\nBusiness reason: these four knownGaps tell the runner how to run the item's jsdom pin. The command they quote is refused, so the next runner either loses time finding the right one or records the pin as blocked(environment) when it is not.\n\n## Wanted\n\nRewrite the invocation in each item to the form #28701 landed in `expression-editors` knownGaps[1]: `cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE`, with the ⛔ note that the `--filter` form is refused.\n\n| # | item | clause |\n|---|---|---|\n| 1 | `studio-authoring.object-designer-roundtrip` | fixtures.knownGaps[0] |\n| 2 | `studio-authoring.record-page-roundtrip` | fixtures.knownGaps[0] |\n| 3 | `studio-authoring.permission-matrix-editor-ux` | fixtures.knownGaps[0] |\n| 4 | `studio-authoring.packaged-automation-studio-lock` | fixtures.knownGaps[1] |\n\nEach edited item takes `revision` +1 and one history row citing #28656 and this card; main's history stays a prefix. `pnpm check:platform-checklist` is green.\n\nChecked and needing nothing: `records-forms.import-wizard-encoding-and-hints` and `records-forms.form-dirty-guard` already use the `cwd ui/` form. `integration-system.external-schema-browser-ui` quotes `pnpm --filter @object-ui/app-shell test`, whose script passes `--root ../..`, so it is not the refused form.\n\n⛔ No product code. ⛔ No clause weakened."
+}

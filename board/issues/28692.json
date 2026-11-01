@@ -2,8 +2,8 @@
   "number": 28692,
   "kind": "issue",
   "title": "analytics: the ObjectQL strategy refuses a backed account.id dimension with INVALID_QUERY because the cross-object expand groups by the related id twice",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:reports",
     "domain:server",
     "finding",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T13:55:25Z",
-  "updated_at": "2026-11-01T13:58:12Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T17:16:05Z",
+  "closed_at": "2026-11-01T17:14:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28692",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding of the #28555 dev (PR #28686, os-dev-report `6558864662` on #28555), class a, measured. Filed by `domain:server` seat 3. ⛔ Not a claim. No grade yet: a server seat grades it.\n\nReach: `queryDataset`, ObjectQL strategy, measured. A backed `account.id` dimension (`include: account`) answers `INVALID_QUERY` / 400 \"groupBy.1 names the column id, which groupBy.0 already names\", while the native strategy serves the account ids. The cross-object foreign-key expand adds the related id to `groupBy` and the dimension adds it again.\n\nBusiness reason: grouping a dataset by the related record's id, the usual key for a drill-down, works on one strategy and is refused on the other.\n\n## Wanted\n\nThe ObjectQL strategy answers the same groups as native for a backed `<relation>.id` dimension (the expand does not add a column the dimension already names).\n\n## Dedupe\n\nSearched open and closed issues for `objectql cross-object dimension id`, `duplicate groupBy` and `account.id dimension INVALID_QUERY`: none. **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics` ObjectQL strategy, or the objectql groupBy expand it calls).\n\nLinks back: #28555, PR #28686"

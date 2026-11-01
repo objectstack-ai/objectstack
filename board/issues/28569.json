@@ -2,8 +2,8 @@
   "number": 28569,
   "kind": "issue",
   "title": "Studio: email template and translation editors in the All metadata area — a read-only base's template or bundle is customized as an override in <base>.custom",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "domain:ui",
     "enhancement",
-    "pm:blocked",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T06:01:30Z",
-  "updated_at": "2026-11-01T06:01:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T17:16:08Z",
+  "closed_at": "2026-11-01T17:14:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28569",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236 (P2, cut 2026-11-01 on the maintainer's 「四项提速措施全部按推荐执行」, schedule reviewed) · plan of record: ADR-0146 Rollout P2 \"N-25 email template and translation editors into Studio\", and the last paragraph of its Consequences. ⛔ Not a claim.\n\nBlocked-by: #28410, #28407, #28562, #28561\n\nPart of #28236 (P2, child **N-25**) · governs: ADR-0146 Consequences (last paragraph: \"their simplified form editor is offered inside Studio's All-metadata area\"), D1 (no Setup designer), D2 (the override lives in `.custom`) · lane: `domain:ui` · size: M.\n\n**Business reason.** Today an admin who changes one line of HotCRM's welcome email, or one translated label, does it in Setup. That writes a package-less row which never exports, and which N-16b will refuse. With this card they edit it in Studio's All metadata area, and the change is an override in `hotcrm.custom`.\n\n**Measured (`35b178bd0a`).**\n- Setup edits both types on the generic item page `ui/packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx`, which does the overlay save and the `layered.resettable` Reset. It uses:\n  - forms from `default-schemas.ts` (`translation` :118, `email_template` :302);\n  - `previews/EmailTemplatePreview.tsx` (sandboxed HTML with variables) and `previews/TranslationPreview.tsx` (read-only coverage), registered at `previews/index.ts:60–61`.\n- `email_template` is a bundle type keyed by `locale` (`default-schemas.ts:364`). `metadata-protocol/src/served-override.ts#isServedOverrideRowOf` reads no bundle member. Whether N-10's read and N-09's gate key an override by `(name, locale)`: not verified.\n- Studio has no host for either type. The Interfaces off-nav types are page, dashboard, report and view (`studio-design/StudioDesignSurface.tsx:2981`). The All metadata area is N-26a.\n- Both types are `overridable` in `packages/spec/src/kernel/customization-package.ts#OVERRIDE_TYPE_CLASSIFICATION`.\n\n**Wanted.**\n1. In Studio's All metadata area (N-26a), an email template or a translation opens in a simplified form editor. That editor is the fields Setup's form offers today plus the existing preview, reused: one component, not a copy.\n2. On a writable package, the editor writes that package's draft. On a read-only base, Customize takes N-17's path: ensure, a draft in the pair with `overrides: { package, basedOn }`, Publish on the pair, and Restore package original.\n3. An email template is edited per locale, and its override is per `(name, locale)`. If the server serves or gates a per-locale override wrongly, the dev stops and reports a server gap, with no client workaround.\n4. A translation's override is its whole locale bundle (whole replace, D2). The editor says so before the first save.\n5. Setup's pages stay until N-28. This card removes nothing there.\n\n**Tests.**\n- Writable package: an edit writes that package's draft.\n- Read-only base: Customize and an edit write a pair draft carrying the declaration, for one email template locale and one translation bundle.\n- The other locale of the same template is untouched.\n- Restore deletes the pair's item and the base reads back.\n- A walled tenant admin sees Customize disabled.\n\n**Release safety.** Safe on its own: it writes only through N-13 (#28407) and N-09 (#28410), and Setup keeps its form. N-16b (closing the package-less write) waits on this card, so admins always have a door for these two types.\n\n**Not here.** The directory, lists and generic item page (N-26a). Directory marks (N-26b). Setup redirects (N-28). Removing Studio's overlay link (N-16b). View, dashboard and report (N-17).\n\n**Dedupe.** #26649 and #27036 (closed: Setup opens each template locale as its own member). Searched `email template editor studio`, `translation editor studio`: no open card.\n\nLinks back: #28236, #28407, #28410, #26649, ADR-0146 D1, D2, Consequences.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

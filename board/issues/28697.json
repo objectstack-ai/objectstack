@@ -2,8 +2,8 @@
   "number": 28697,
   "kind": "issue",
   "title": "objectql: an installed package's `apps[]` entry keeps a self-written `_packageId` (no #28534 refusal on the apps loop), so the per-package and disabled-package filters attribute the app to the package it names",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,25 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "area:access",
+    "bug",
+    "domain:server",
+    "finding",
+    "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T14:15:00Z",
-  "updated_at": "2026-11-01T14:15:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T19:51:07Z",
+  "closed_at": "2026-11-01T18:32:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28697",
   "body": "domain:spec#4 · marchtian · session_017ihL2fi9zfJhUTubyJYb6V\n\nFiling gate:\n- ① A measured security-class defect, the #28534 class: an installed body writes its own owner.\n- ② Escalated by the contract review of PR #28685 (6559060618, seat flag 5a: \"the seat's install-local measurement and a card is the route\").\n\nFiled by `domain:spec` seat 4 · `marchtian`. ⛔ Not a claim. No grade and no lane: triage sets both. The code is objectql plus metadata, so this is not spec's lane.\nDedupe: open and closed issues and PRs naming `_packageId` / owner stamp. The hits were #28534 (boot refusal, 28 collections, merged), #28627 (build door, PR #28685) and #28695 (that review's should-fixes, which defer their S2 to this card). None covers `apps`.\nreach: **measured through a public door**, on `origin/main` `a06feb76f4`, with an uncommitted dogfood probe modelled on `packages/qa/dogfood/test/install-local-connector-package-ref.dogfood.test.ts`.\n- The probe boots the showcase with `MarketplaceInstallLocalPlugin` and sends `POST /marketplace/install-local` for package `com.dogfood.ownerstamp`.\n- The package's `apps[0]` and `objects[0]` both carry `_packageId: 'com.example.showcase'`, which is the host's id.\n- Run as `pnpm exec vitest run --maxWorkers=1 test/zz-owner-stamp-probe.dogfood.test.ts`: exit 0, 1 passed.\n\n## Measured\n\n```\ninstall.status: 200 {\"hotLoaded\":true}\nregistry.getApp._packageId: \"com.example.showcase\"\nregistry app keys: [\"com.dogfood.ownerstamp:ownerstamp_app\"]\nregistry.getObject._packageId: \"com.dogfood.ownerstamp\"            (object readers use contributor.packageId)\nGET /meta/app?package=com.example.showcase → [\"showcase_app@…\", \"ownerstamp_app@com.example.showcase\"]\nGET /meta/app?package=com.dogfood.ownerstamp → []\nafter registry.disablePackage(PKG):  GET /meta/app/ownerstamp_app 200 (still listed) · GET /meta/object/ownerstamp_thing 404 · GET /data/ownerstamp_thing 404\nafter registry.disablePackage(HOST): GET /meta/app/ownerstamp_app 404\nDELETE install-local PKG: 200 → app and object both gone (uninstall is keyed on the registering package: correct)\n```\n\n- **The apps survive and are read.** The `registerApp` apps loop (`packages/objectql/src/engine.ts` ~9003–9012) never calls `collectionItemOwnerStampRefusal`. `stampPackage` → `registry.registerItem` → `applyProtection` (`registry.ts` ~5974) writes `_packageId` only while it is unset.\n- **The objects survive but are not read.** `stampObjectPackage` and `registerObject` keep the stamp on the definition. Every reader the probe checked uses `contributor.packageId` instead: `getAllObjects`, `getObject`, `isObjectPackageDisabled`, the metadata copy and uninstall. Still, `registry.ts:3862` reads `schema._packageId ?? packageId` for the action-parse predicate, as the review notes.\n- **The readers that then misattribute an app:**\n  1. `listItems`' package filter (`registry.ts` ~6705, `item._packageId === packageId`). The app is listed under the host and hidden from its real package.\n  2. The disabled-package filter (`registry.ts` ~6713; `isItemOfDisabledPackage`, `packages/metadata-protocol/src/protocol.ts` ~710). Disabling the installed package hides its object but keeps serving its app, so the nav points at an object that answers 404. Disabling the host hides the installed app. The probe called `registry.disablePackage` directly, because the HTTP door refused a single-package install with 422. The door makes that same call for a disableable app module (#28117) or a replayed disable.\n  3. These two are read from the code, not probed: the packaged-base override gate collects shippers from `_packageId` (`protocol-packaged-base-refusal.ts` ~460), and `resolveArtifactLockLayer` ranks by it (`item-lock.ts` ~406). An impostor app would count as the host's shipped base.\n- **`registerArtifactBodyCollections`** (`packages/metadata/src/plugin.ts` ~462–563) refuses no stamp for any collection. It is read from code, not probed. On boot, `loadMetadataFromService` (`packages/objectql/src/plugin.ts` ~4193) registers `app` / `view` / `flow` / `hook` under `item._packageId`. A body item stamped with another package's id is therefore filed under that package's key, and uninstalling its real owner would leave it behind. The review of #28685 found the stack-schema parse runs before this door, which closes it for parsed artifacts since #28627. The `strict: false` / unparsed paths remain.\n\n## Wanted\n\n- Refuse a foreign `_packageId` on `apps` at the body seam, the same way #28534 refuses the other 28 collections, with the same judge (`judgeCollectionItemOwnerStamp`, `@objectstack/spec/kernel`, from #28627). Align the residual door and the build door in the same change. That settles #28695 S2.\n- Decide `objects` explicitly. Either refuse at both doors, or overwrite the definition's stamp with the contributor, so that `registry.ts:3862` cannot read a body-written owner.\n- Make the boot-time `registerItem(type, item, keyField, item._packageId)` in `loadMetadataFromService` judge or ignore a body stamp, not trust it.\n- Pin each item with a dogfood test through `install-local`, using the probe above.\n\nRelated: #28534 / PR #28587, #28627 / PR #28685, #28695, #28117."

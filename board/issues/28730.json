@@ -1,0 +1,34 @@
+{
+  "number": 28730,
+  "kind": "issue",
+  "title": "skills(objectstack-data): teach an object extension's fieldPatches in the Object Extension Model section, once #28565 applies them",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T15:41:08Z",
+  "updated_at": "2026-11-01T20:13:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28730",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ③ the `Skills-docs: follow-up owed` line of PR #28728 (#28565), filed by the seat before ACCEPT as the review checklist requires. ⛔ Not a claim. Graded by this seat: p3 (documentation of a live key; the spec `.describe()` and `content/docs/data-modeling/object-extensions.mdx` already teach it), under 「定级你可以自己决定」 (Leehom, 2026-11-01).\nReach: an AI author working from the `objectstack-data` skill who wants a vendor field to read \"Sector\" instead of \"Industry\" learns only `fields` / `priority`, so it redeclares the field in `fields` (taking it over) instead of patching its display.\n\n## Wanted\n\n- `skills/objectstack-data/SKILL.md`, section \"Object Extension Model\": one short paragraph on `fieldPatches` — display keys only (`BASE_FIELD_DISPLAY_WHITELIST`: label, description, inlineHelpText, placeholder, option labels by stored `value`); type, values and rules stay the owner's; tenant edits win, higher `priority` wins between extensions; a patch naming a missing field or option is refused at install and by `os validate`; a picklist-bound field's options are not patchable. One example, the `crm_account.industry` one from the changeset.\n- Lands after PR #28728 merges (the key is `[EXPERIMENTAL — not enforced]` on main until then). Governed path (`skills/**`): Tier H; publishes via `@objectstack/skills`.\n\nLinks back: #28565, PR #28728.\n\nBlocked-by: #28565"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 28760,
+  "kind": "pull_request",
+  "title": "docs(verify): posture-only docblocks say what the stand-in walls and what it does not",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T18:04:32Z",
+  "updated_at": "2026-11-01T18:42:22Z",
+  "closed_at": "2026-11-01T18:42:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T18:42:20Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28760",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi9paTx1Lu8ENYwwssthfK3h)_\n\nFixes #28703\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改 `packages/verify/src/harness.ts` 里的注释（`SimulatedOrgScopingPlugin`、`BootOptions.multiTenant: 'posture-only'`、`orgContext` 一段、一行行内注释），外加一条 `@objectstack/verify` patch changeset；不改任何代码。\n- 为什么改：旧注释说 posture-only 启动\"不打 organization_id、不做隔离，跨组织测试写了也白写\"；ADR-0131 之后引擎按姿态落组织、Layer 0 按姿态拦截，注释与代码正相反，会让写测试的人放弃本可低成本钉住的跨组织隔离。\n- 风险与回滚：零运行时风险（仅注释，`dist/index.d.ts` 里的 JSDoc 随之变化）；回滚即 revert 本 PR。\n- 先看：`packages/verify/src/harness.ts` 的 `multiTenant` 文档块（\"What it walls\" / \"What it does NOT give a fixture\" 两节）；其次文件顶部 `SimulatedOrgScopingPlugin` 文档块。\n- 两分钟验证：`git diff origin/main...HEAD -- packages/verify/src/harness.ts`，预期只见注释行变动、无一行代码变化。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nComments only, in `packages/verify/src/harness.ts`, plus a `patch` changeset for `@objectstack/verify` (the `BootOptions` JSDoc ships in `dist/index.d.ts`, so the published bytes change).\n\n- **`SimulatedOrgScopingPlugin` docblock.** The \"⛔ It stamps no `organization_id` and scopes no query\" sentence is replaced. The stand-in itself still stamps and scopes nothing, but since ADR-0131 (D8, D11) the wall is open-core code that keys on the posture the stand-in makes true. The engine lands an insert in the caller's active organization (`ObjectQL#driverWriteTarget`), the SQL driver fills an absent `organization_id` (`SqlDriver#injectTenantOnInsert`), and reads are scoped by the one Layer 0 verdict (`computeTenantLayer0Verdict`, `postureEnforcesWall`).\n- **`BootOptions.multiTenant` `'posture-only'` section.** \"It performs no tenant isolation whatsoever … would assert nothing and pass\" is removed. Two subsections replace it:\n  - *What it walls*: insert and read, with the code locations behind each.\n  - *What it does NOT give a fixture*: no default-organization bootstrap (the admin resolves org-less), no per-organization seed replay, no walled membership-policy gate, no deployment declarations on the service, and the memory driver refuses a walled posture.\n  The section tells a cross-organization fixture to measure the wall, and points to the precondition case of `packages/qa/dogfood/test/create-caller-id-collision-walled.dogfood.test.ts` as the shape.\n- **`orgContext` docblock.** \"Cross-tenant isolation has exactly one honest proof in this repo: `multiTenant: true`\" is replaced. A cross-tenant fixture needs a walled posture, either `'posture-only'` or `true`. The \"asserts nothing on `single`\" sentence stays, because it is still true. It now names the Layer 0 verdict as well as the RLS strip.\n- **Inline comment** at the `'posture-only'` branch of `bootStack`: \"activates the POSTURE, never the WALL\" now says the open core's wall follows from the posture.\n\n## Tests\n\nNo behaviour changes, so no test was added or changed.\n\n<details><summary>Local runs at head 5b630f038e</summary>\n\n- `pnpm --filter '@objectstack/verify...' build` (under `os-verify-lock`): `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/verify typecheck`: `VERDICT command-exit 0`. `check:test-typecheck: OK`.\n- `pnpm --filter @objectstack/verify exec vitest run --maxWorkers=2`: `Test Files 48 passed (48)`, `Tests 401 passed (401)`, `VERDICT command-exit 0`.\n- Published-surface check after the build: `dist/index.d.ts` contains \"What it does NOT give a fixture\" (1 match) and \"performs no tenant isolation whatsoever\" (0 matches). The positive control `databaseDriver` has 2 matches. `files` is `[\"dist\",\"README.md\",\"CHANGELOG.md\"]`.\n\n</details>\n\n## Acceptance notes\n\n- **Changeset level.** os-dev's fast track lists comments as not published. Here, though, the `BootOptions` JSDoc measurably ships in `dist/index.d.ts`, so this takes a `patch` changeset, not `skip-changeset`.\n- **Left as is (out of scope).** The `SimulatedOrgScopingPlugin` docblock still says \"The proof that the REAL plugin walls tenants lives in cloud's `security-enterprise` multi-org integration test\". The read wall is now open-core code that this repo pins too (see the walled pin above), so that sentence understates where the proof lives. It is not a defect, and this PR does not touch it.\n- **Spec docblock (not edited, out of scope).** `postureStampsOrganization`'s docblock in `packages/spec/src/security/tenancy-posture.ts` says the stamper is the enterprise runtime, \"not the open engine\". The open engine plus the SQL driver now stamp the active organization on insert in every posture (`ObjectQL#driverWriteTarget`, `SqlDriver#injectTenantOnInsert`). This looks like the same class of drift in another package. It is noted here and not filed.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands, head 5b630f038e)</summary>\n\n- 54 derived families. 53 exited 0.\n- 1 is NOT MEASURED: `pnpm check:dual-build-cjs-loads` exited 3 with `PREREQUISITE NOT MET` because it needs a full `pnpm build` and only the verify closure was built. CI runs it.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran FILE` reports `54 derived famil(ies) accounted for — 53 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)` and exits 0.\n- Every family CI runs, the repo-wide ones included, is CI's to report on this PR.\n\n</details>\n\nSession: https://claude.ai/code/session_017ihL2gLghEqeDKTbDTC7Zd\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

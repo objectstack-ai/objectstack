@@ -1,0 +1,35 @@
+{
+  "number": 28725,
+  "kind": "issue",
+  "title": "authoring gate: a page variable whose source names a component the page does not hold, and a visibleWhen reading an undeclared page variable, both pass save and draft diagnostics",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T15:35:45Z",
+  "updated_at": "2026-11-01T19:54:33Z",
+  "closed_at": "2026-11-01T19:53:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28725",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① product defect with reach, two class (a) out-of-scope findings of the #28663 dev (os-dev-report 6560034536), measured on a stock showcase boot. One card for the family (page-variable references the author-time gate does not resolve). Graded by this seat: p2, as its sibling #28663 (same class: the author gets no signal, the page silently misbehaves), under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: an author saving a page through the metadata door or Studio.\nReader who acts: a `domain:server` seat (the page rules in `packages/lint/src/`, as run by the `@objectstack/metadata-protocol` authoring gate; #28663's PR #28723 adds `validate-page-variables.ts`, the natural home).\n\n## What happens\n\nMeasured by the #28663 dev on a stock showcase boot, draft read after `PUT /api/v1/meta/page/NAME?mode=draft`:\n\n1. A page variable whose `source` names a component the page does not hold (`variables[0].source = \"no_such_component\"`): draft `_diagnostics` `valid: true`.\n2. A block `visibleWhen` reading an undeclared page variable (`page.nosuch == 'x'`): draft `_diagnostics` `valid: true`.\n\nNeither binding can ever resolve, so the variable never fills and the predicate never reads what the author meant, with no signal at save, draft diagnostics or publish.\n\n## Wanted\n\n- Both are refused (or at minimum reported in draft `_diagnostics`, with publish refused), at the same surfaces the page rules already run on: save, draft diagnostics, publish and `os validate`. One rule each, beside the page-variable rule #28663 adds; ⛔ no second walk.\n- Count the existing pages in `examples/**`, `packages/*/src` and the platform apps that would now be refused (expected 0) and put the number in the PR as the migration note.\n- `Clause-②: no` (a narrowing; contract review owed), `Metadata-protocol: narrowed`.\n\n## Business reason\n\nA page author (person or AI) who mistypes a component name or a variable name today ships a page whose behaviour quietly differs from what they wrote. Refusing it at save names the mistake where it was made.\n\nBlocked-by: #28663\n\nDedupe: searched `\"page variable\" source component` (23 hits) and `undeclared page variable visibleWhen` (40 hits); on topic only #28663, which ruled both out of its scope."
+}

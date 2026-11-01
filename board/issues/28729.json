@@ -1,0 +1,35 @@
+{
+  "number": 28729,
+  "kind": "pull_request",
+  "title": "fix(service-automation): a stored connector's configuration fault never stops the platform starting",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T15:39:25Z",
+  "updated_at": "2026-11-01T16:16:11Z",
+  "closed_at": "2026-11-01T16:16:09Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T16:16:09Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28729",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XPL1bcTnVyoZPzisVsEVors)_\n\nFixes #28698\n\nClause-②: no — no accepted value and no public surface changes: the same stored definitions are refused as before; a start now carries on past them instead of stopping.\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:环境里保存的连接器(元数据门 / Studio 保存的,环境级或 authored 包内)若配置后来失效,平台启动时只记录并跳过它,与运行中遇到同样问题时的处理完全一致;宿主自己声明的连接器和已安装包的连接器出错仍然阻止启动。\n- 为什么改:一条存储的连接器定义失效(例如提供它 provider 的插件被移除)会让整个环境无法再启动,而运行时同样的问题只跳过该连接器;这是可用性问题,不是数据问题。\n- 风险与回滚:只改 `plugin.ts` 启动连接器协调中的一个判断:错误归属于存储条目时走已有的软路径(同一条日志记录,无新记录形状)。回滚即还原该提交;宿主条目的失败语义未变,有对照测试钉住。\n- 先看:`packages/services/service-automation/src/plugin.ts`(`fail` 的 `stored` 参数及各调用点)、`src/connector-materialization.test.ts` 新的 #28698 一节、`packages/qa/dogfood/test/stored-connector-package-ref-restart.dogfood.test.ts`。\n- 两分钟验证:`pnpm --filter @objectstack/service-automation exec vitest run src/connector-materialization.test.ts`,预期 102/102 通过(含 5 类故障各一对「存储条目跳过 / 宿主条目失败」)。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **Stored connectors no longer stop a start.** A provider-bound connector saved in the environment that later stops being valid is now handled at start exactly as it is while the platform runs: the same log record, that connector not served, the host's own connectors beside it serving. This covers every configuration fault the start meets on a stored connector: a provider no installed plugin offers, a host credential resolver that throws, a retry policy its schema refuses, a name a plugin connector already holds, a configuration its provider refuses, and a duplicate of a name the host declares. PR #28671 made one of these (a refused package-relative ref) behave this way; this PR widens that same path to the rest. There is no second skip path and no new record.\n- **Host-declared and installed entries keep failing loudly.** A connector the host's stack declares, and an installed package's (#28534's `installed` / `unrecorded` readings), still stop the start on a configuration fault. Which entries count as stored is the classifier PR #28671 introduced, unchanged.\n- **Code.** In `reconcileDeclaredConnectors`, the reconcile's `fail` reporter takes a third argument, `stored`; at start it throws only when that is false. Each fault site passes the entry's reading. The per-entry flag PR #28671 used for the ref refusal is removed, because the ref refusal is now one stored fault among the others and reaches the same `fail` call. The package readers are read once at the top of the run (they were read a few lines later before), so the duplicate check can use them.\n- **Out of scope.** A stored row that takes a name a plugin connector registers later in the start is a separate card.\n- Changeset: `patch` for `@objectstack/service-automation`.\n\n## Tests\n\n- **Restart (dogfood).** `stored-connector-package-ref-restart.dogfood.test.ts` now also carries a stored connector whose provider no installed plugin offers, beside the existing refused-ref rows and the inline control. After a restart the platform starts, the row is not listed and the start's record names it, and the inline control and the showcase's own connectors list `ready`. Red on base `0be4c8a5` (6 failed, 1 passed), green at head (7/7).\n- **Unit (`connector-materialization.test.ts`, new `#28698` section).** For each of five faults (unknown provider, invalid `retryConfig`, throwing credential resolver, plugin-held name, provider-refused config): a stored entry lets the start finish, is skipped with its record, and the host's entry beside it serves; and a control where the host's own entry with the same fault still fails the start. Plus a stored duplicate of the host's name (skipped, host serves), two host entries of one name (fails), and an installed package's entry with an unknown provider (fails, #28534 unchanged). The #28594 control \"an unknown provider still fails the boot\" now uses a host entry filed as declared, since a stored one with that fault is exactly what this PR makes soft.\n\n<details><summary>Ablations (each restored, blob equals HEAD, marker absent from dist after restore)</summary>\n\n- One fault site reverted to fatal (the unknown-provider report): unit `1 failed | 101 passed` (the stored unknown-provider case); restart dogfood `6 failed | 1 passed`.\n- The whole widening reverted (`fail` throws at start for every entry): unit `12 failed | 90 passed` (the five stored faults, the stored duplicate, and the six #28594 stored-ref cases); restart dogfood `6 failed | 1 passed`. Every host control stays green under both.\n\n</details>\n\n## Acceptance notes\n\n- Which of these faults a stored row can actually carry was measured on the showcase before the change; the readings are with the seat. A retry policy the schema refuses is refused at save (`422 INVALID_METADATA`), so it is covered by the unit test only. A name saved twice (environment-wide and in an authored package) lists once and does not reach the duplicate check from stored rows; the duplicate case is unit-covered. The showcase has no credential resolver that throws; that case is unit-covered.\n- `check:dual-build-cjs-loads` answered exit 3 (prerequisite: a full build) and is NOT MEASURED locally; CI is the record.\n- Overlap: open PR #28693 touches `plugin.ts` with a comment around the flow contenders, far from this hunk.\n\n## Verification\n\nAt head `f76068ce`:\n\n<details><summary>Package and file runs</summary>\n\n- `@objectstack/service-automation`: `typecheck` exit 0; `test`: Test Files 251 passed (251), Tests 3210 passed (3210).\n- `connector-materialization.test.ts`: Tests 102 passed (102).\n- dogfood `stored-connector-package-ref-restart` + `stored-connector-package-ref`: Test Files 2 passed (2), Tests 14 passed (14), after rebuilding `@objectstack/service-automation`.\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n`dispatch-gates --ran`: 65 derived, 64 run, 1 NOT-MEASURED (`check:dual-build-cjs-loads`, exit 3), 0 unrun. Every other family exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5oQNecNsthbZA1bZTp)_\n"
+}

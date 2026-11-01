@@ -14,21 +14,19 @@
     "area:automation",
     "domain:server",
     "enhancement",
-    "pm:dispatched",
+    "pm:blocked",
     "pm:epic",
     "priority:p2"
   ],
-  "assignees": [
-    "sunhaolin"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-10-31T02:06:31Z",
-  "updated_at": "2026-11-01T14:05:22Z",
+  "updated_at": "2026-11-01T14:24:13Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28277",
   "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nBlocked-by: #26702\n\nFiling gate: ④ coordination child of #27293 (E4), filed by the epic PM on the ruling of #27302. Ruling-ref: 6486157794 (letter A, phased: \"DocuSign for the OAuth path … OAuth after #26702\"). Child of #27293. ⛔ Not a claim.\n\n## Why DocuSign\n\nIt is the one connector with measured demand: an app-authoring agent on HotCLM concluded the platform had to build a DocuSign plugin (the instance #27223 fixed in the skills; #25747 closed as \"a declarative instance once OAuth lands\"). #27223's eval already fixes the expected shape.\n\n## Work\n\n- A metadata package: a declarative `provider: 'openapi'` instance over DocuSign's eSignature document normalized by #27373's script (`--empty-consumes application/json` is required for its 187 operations with an empty `consumes`), an `include` of the three operations the eval names (create envelope, get envelope, list status changes), `auth` of the `oauth2` kind #26702 lands, the contract fields and flows, and the listing file plus a README credentials section.\n- The callback: DocuSign Connect signs its own header, which the `api` door does not verify; poll status until vendor callback schemes are supported, and say so in the README.\n- Validated by this repository's CI at HEAD; one live sandbox round trip run once locally and reported.\n\n## Reader\n\nThe epic PM of #27293 dispatches it when #26702 closes (the server lane holds #26702: blocked on its spec slice, comment 6524351146). Home: the same directory batch 1 (#28276) settles.\n\n## Dedupe\n\nSame read as #28276: 0 hits for `connector app|shelf|docusign|stripe|github mcp|E4` over the 500 most recent issues and PRs; control `connector` 47."

@@ -1,0 +1,32 @@
+{
+  "number": 28788,
+  "kind": "issue",
+  "title": "hotcrm: tell the deal submitter \"sent for approval\" with the save_notice flow node, and retire the record:alert banner workaround (#27380 row 3)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "finding",
+    "pm:on-hold",
+    "priority:p3",
+    "repo:hotcrm"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T19:43:57Z",
+  "updated_at": "2026-11-01T19:55:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28788",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding of the #28251 dev (PR #28753, os-dev-report `6562102476`), for the HotCRM lane. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: HotCRM's deal submission sends the record for approval on save and shows a `record:alert` banner as the workaround for having no save notice (#27380 row 3). Since PR #28753 (`a00f3359`), a record-triggered flow can tell the person who saved with a `save_notice` node placed before the `approval` node. The message is translatable under `flows.<flow>.notices.<node_id>.message` and comes back on the create/update answer's `notice`.\n\n## Wanted\n\n- The deal submission flow gains a `save_notice` node ahead of its `approval` node, for example \"Sent {{record.name}} for approval\". It has translations for HotCRM's declared locales.\n- The banner workaround is retired.\n- Verify on a live boot that the save answer carries the notice in the writer's locale.\n\n⛔ Takes the next `@objectstack/*` release that carries `a00f3359`.\n\n## Dedupe\n\nSearched open issues here and in objectstack-ai/hotcrm for `save_notice`, `sent for approval` and `record:alert` with notice: none. **New.**\n\nReader who acts: the HotCRM lane.\n\nLinks back: #28251, PR #28753, #27380"
+}

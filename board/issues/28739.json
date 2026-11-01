@@ -1,0 +1,34 @@
+{
+  "number": 28739,
+  "kind": "pull_request",
+  "title": "docs(pm-dispatch): one patrol routine per seat, not per project",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T16:16:55Z",
+  "updated_at": "2026-11-01T16:40:17Z",
+  "closed_at": "2026-11-01T16:40:15Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-01T16:40:15Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28739",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSiHXKqxUqDPJKZyNHP7BoqTb)_\n\nFixes #28699\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:pm-dispatch `SKILL.md` 第 72 行把项目席巡查 routine 的单位从「每项目一个」改成「每席一个」,其余一字不动,净行数 0。\n- 为什么改:`SKILL.md` 与 `seat-lifecycle.md`、`project-forms.md` 自相矛盾;一个项目坐多条车道时,实际做法是每个席位线程各绑一个巡查,因为每席是各自的会话。\n- 风险与回滚:只改规则文字,无代码;不改的风险是读者照旧句只给项目建一个巡查,其它席位醒不来。回滚 = revert 本 commit。\n- 先看:`.claude/skills/pm-dispatch/SKILL.md` 第 72 行(唯一改动)。\n- 两分钟验证:`git grep -n 每项目一个 -- .claude/skills` 预期零命中,`pnpm check:pm-skill-ratchet` 预期绿。\n- 需要你做的:用授权账号批准本 PR(受管面上的规则改动),随后由席位落地。\n\n## What changes\n\n`.claude/skills/pm-dispatch/SKILL.md` line 72, the project-seat wake line, now names the seat as the unit of the self-bound patrol routine: 「每项目一个」 becomes 「每席一个」. The director-seat exception and the rest of the line are unchanged. `SKILL.md` stays at 319 lines (net 0).\n\nThis matches the references on `main` after #28687: `references/seat-lifecycle.md` (taking a seat creates the routine and records `Patrol:` on that seat's stub) and `references/project-forms.md` (「坐席即建巡查 routine」, one seat thread per seat).\n\n## Tests\n\nNo code changed, so there are no unit tests. Verification is the gate families derived from the diff (below).\n\n## Acceptance notes\n\n- Wording: the card asks for \"one routine per seat thread\". 「每席位线程一个」 would put the line at 124 bytes, over the 120-byte cap that `pnpm check:pm-skill-ratchet` enforces. 「每席一个」 is 115 bytes and reads unambiguously, because the line before it defines a project seat as a project thread (「会话是车队项目的线程」). It also matches `project-forms.md`'s 「每席开一条席位线程」.\n- No other file restates this unit: `git grep -n 每项目一个` exits 1 on this head (control: `git grep -n 自建自绑巡查` finds line 72).\n- Governed surface (`.claude/**`): this PR stays draft and waits for its tier's record.\n\n## Verification\n\nHead `ba301e3691`. Gate list from `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (20 families, 1 path, +1/-1). Exit codes were captured before any pipe.\n\n<details><summary>Derived gates: 20/20 exit 0</summary>\n\n```\n0  node scripts/check-closing-keyword-parity.mjs\n0  node scripts/check-closing-keyword-parity.mjs --self-test\n0  node scripts/check-comment-mask-corpus.mjs\n0  node scripts/pm/check-governed-queue-guard.mjs --self-test\n0  node scripts/pm/check-harness-current.mjs --self-test\n0  pnpm --filter @objectstack/lint run check:doc-formula-expressions   (first run exit 3 PREREQUISITE NOT MET; rerun after building formula+lint)\n0  pnpm check:agent-test-spelling\n0  pnpm check:cross-package-test-inputs\n0  pnpm check:doc-authoring\n0  pnpm check:driver-memory-census\n0  pnpm check:gitlink-declared\n0  pnpm check:nul-bytes\n0  pnpm check:pm-expected-skips\n0  pnpm check:pm-governed-merges\n0  pnpm check:pm-governed-prose\n0  pnpm check:pm-skill-id-lint\n0  pnpm check:pm-skill-ratchet\n0  pnpm check:refd-timer-probe\n0  pnpm check:skill-frame-sync\n0  pnpm check:watch-hint-literal\n```\n\n`dispatch-gates --ran`: \"20 derived famil(ies) accounted for — 20 run, 0 NOT-MEASURED (a DERIVED zero — all 20 recorded an exit code and none of them is 3)\".\n\n</details>\n\n<details><summary>Named gate verdict lines</summary>\n\n```\n✓ check-governed-prose: 2 instruction surface(s) name all 13 registered governed surfaces that govern objectstack ... and claim no others.\n✓ check-skill-id-lint: 106 file(s) clean (pattern /#[0-9]{3,}/g).\n✓ check-skill-line-ratchet: declared cross-file moves: 3, total ceilings down 494 lines.\n✓ check-skill-frame-sync: the one declared copy of the decision frame is internally coherent (.claude/skills/pm-dispatch/SKILL.md; ...)\n```\n\n</details>\n\nSession: `session_017ihL2g7RyXa8ErM6GAkHyc` (seat `domain:skills#2`).\n\n---\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

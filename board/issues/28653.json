@@ -2,8 +2,8 @@
   "number": 28653,
   "kind": "issue",
   "title": "test(showcase): add the Reports index to the smoke SURFACES, so /reports stops being a standing hand-walk",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:devx",
     "finding",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T11:58:29Z",
-  "updated_at": "2026-11-01T13:01:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T15:44:43Z",
+  "closed_at": "2026-11-01T15:43:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28653",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured coverage gap in a pinned suite. Found while landing #28641 (W3-C1R row 12, QA run #28545).\nReader: `domain:devx` (or the showcase owner), one PR on `examples/app-showcase/e2e/showcase-smoke.spec.ts` (`SURFACES`) plus the checklist item `platform-core.nav-surfaces-render` (steps[0]/[2]).\nDedupe (open AND closed): \"nav_report_index SURFACES\" → 3 hits (#28641, #28545, #27377), none proposes the suite edit.\nreach: measured from source at `f23e051232`: `examples/app-showcase/src/ui/apps/index.ts` serves 50 `showcase_app` nav leaves; `SURFACES` holds 49; the one outside it is `nav_report_index` (`/reports`).\nQA-source: #28545 · platform-core.nav-surfaces-render · steps[0]/[2]\nChecklist item priority: P0\ntype: Bug\n\nBusiness reason: the P0 smoke is the release's standing evidence. Since #27525 (the console stopped injecting its own \"All reports\" row), the report index is a served nav leaf like any other, but the pinned suite does not drive it. Every P0 run therefore hand-walks `/reports`, and a regression there is caught only if the runner remembers to. #28641 names it as the standing hand-walk; this card ends that.\n\n## Wanted\n\n- One `SURFACES` entry for the Reports index (`nav_report_index`, `…/reports`), with the same render checks as every other entry.\n- In the same PR: `platform-core.nav-surfaces-render` steps[0] says SURFACES covers all 50 leaves, steps[2] drops the standing hand-walk, `revision` +1 with one history row.\n- ⛔ The suite's existing checks are unchanged; no entry is removed."

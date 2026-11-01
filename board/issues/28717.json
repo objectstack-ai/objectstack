@@ -1,0 +1,35 @@
+{
+  "number": 28717,
+  "kind": "issue",
+  "title": "service-automation: at boot a package-less flow row can take the bare slot of a shipped flow name over its declared <base>.custom override until kernel:ready re-arms",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T15:09:28Z",
+  "updated_at": "2026-11-01T19:54:35Z",
+  "closed_at": "2026-11-01T19:52:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28717",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding recorded by server seat 1 on #28413 (comment 6559382296), from the #28412 os-dev-report `6559023315` (`out_of_scope_findings`, class c, read). The #28413 dev measured that the N-16a migration cannot remove the shape (os-dev-report `6559681417`), and the PR #28689 delta contract review accepted that reading. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: a package-less stored `flow` row of a shipped flow name, beside that name's declared override in `<base>.custom` (#28412, PR #28693), can take the SchemaRegistry's one bare slot for the name. Until `kernel:ready` re-arms from the flow view, the automation boot pull reads that legacy row instead of the declared override, so a trigger that fires in that window runs the old flow.\n\nWhy N-16a does not remove it (measured on #28413):\n- `flow` has `allowEnvironmentOverlay: false`, so it is outside the population `os migrate packageless-overlays` moves.\n- A package-less row beside the pair's row is the shadowed shape #28413 Wanted 2 forbids the ceremony to move.\n- A declared flow write is refused by N-09 until ADR-0146 D9.\n\nBusiness reason: a customer who customized a packaged flow before #28412 and then declared the override sees the override ignored for whatever runs during boot, with no error. That is the class of silent wrong answer the override epic (#28236) exists to end.\n\n## Wanted\n\n1. At boot, a declared override in `<base>.custom` wins the bare slot of its shipped flow name over any package-less row of the same name, from the first pull, not only after `kernel:ready` re-arms. Pin the order on a stack holding both rows.\n2. Say what happens to the legacy package-less flow row: left in place and shadowed (named in a boot warning), or moved by a flow arm of the migration once D9 lands. Either is fine; it has to be one stated answer.\n\n## Dedupe\n\nSearched open and closed issues for `bare slot flow`, `package-less flow row pair` and `flow override boot pull`: only #28412 and #28413, which are the parents. **New.**\n\nReader who acts: `domain:server` (`packages/services/service-automation` boot pull, SchemaRegistry slot order).\n\nLinks back: #28412, PR #28693, #28413, PR #28689, #28236"
+}

@@ -1,0 +1,38 @@
+{
+  "number": 28732,
+  "kind": "issue",
+  "title": "spec: ActionSchema.params accepts a repeated param name silently; the same-name rule (#28280) is stated only in the validator docblock",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T16:00:34Z",
+  "updated_at": "2026-11-01T17:58:12Z",
+  "closed_at": "2026-11-01T17:57:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28732",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① residual named by the PR #28707 delta contract review (`6560309650`, `CONTRACT_REVIEW_TIER`), class b, read. Filed by `domain:server` seat 3 as recorded in the ACCEPT `6560321699`. ⛔ Not a claim.\n\nReach: since PR #28707 (#28280), an action may declare one param name twice (`sys_user.create_user` declares `email` twice, each with its own `visible` / `requiresFeature`), and `validateActionParams` folds the declarations: the name is required only when every declaration is required, and the value shape comes from the first. The spec's `ActionSchema.params` accepts a repeated name silently and says nothing about this. The only statement of the rule is the docblock in `packages/spec/src/ui/action-params.zod.ts`.\n\nBusiness reason: an AI or an author writing an action's params reads the schema, not the validator's docblock. Without the rule in the declared surface, the next repeated name is either written by accident (two declarations that drift apart) or avoided when it is the right pattern.\n\n## Wanted\n\nThe declared surface states the same-name rule where an author reads it: the `params` member's description in `ActionSchema` (and the generated reference) says a name may repeat only for per-gate variants of one input, that `required` holds only when every declaration requires it, and that the first declaration's type wins. ⛔ No new lint rule or gate (「新增门禁默认否」); if a parse-time refusal of drifting shapes (same name, different `type`) is wanted, raise it as an open question with its four-axis case.\n\n## Dedupe\n\nSearched open and closed issues for `action params duplicate name`, `repeated param name` and `validateActionParams same name`: none. **New.**\n\nReader who acts: `domain:server` (or the spec lane: `packages/spec/src/ui/action.zod.ts` description only).\n\nLinks back: #28280, PR #28707"
+}

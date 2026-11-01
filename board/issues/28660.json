@@ -2,8 +2,8 @@
   "number": 28660,
   "kind": "issue",
   "title": "formula: date() on text it cannot parse yields an invalid Date that a formula field serializes as null, with no warn line",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:formula",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T12:21:27Z",
-  "updated_at": "2026-11-01T13:30:46Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T15:35:55Z",
+  "closed_at": "2026-11-01T15:34:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28660",
   "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiled by the PM seat for the W3-RT runner `session_017xRBcRX4wwwVw5bEckffdp`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\nQA-source: #28656 · api-backend.formula-stdlib-matrix · observed beside the clauses\n\n## What happens\n\nA formula field `f_date = date(record.first)` saves at the active door (200). On a row where `first` is `\"grace\"`, `GET` reads `\"f_date\": null`, and the server log carries **no** line for it. A sibling field in the same row that faults at evaluate time (`int(record.first)+1`) gets the documented one-warn-line-per-field (#22031). With `first = \"2026-03-04\"` the field reads `\"2026-03-04T00:00:00.000Z\"`, as expected.\n\n**Expected:** an unparseable date input in a formula field is either a reported evaluation fault, covered by the #22031 warn line like any other fault, or a documented non-null sentinel. It should not be a silent null indistinguishable from an empty source.\n\nMeasured at framework `6e11a929` (main, 2026-11-01). Low severity.\n\n## Reproduction\n\n1. In a writable scratch package (as in the recipe of `api-backend.formula-stdlib-matrix` fixtures.requires[1]), PUT an object with `first` (text) and `f_date` (formula, `date(record.first)`) → 200.\n2. `POST /api/v1/data/OBJ` `{\"first\":\"grace\"}`, then `GET` → `f_date: null`. Grep the boot log for `f_date`: 0 lines.\n\nHarness view against the built `@objectstack/formula` dist: `date('not a date')` evaluates `ok: true` with an invalid Date. `isoDate(...)` and `daysBetween(...)` over it then refuse cleanly.\n\n## Mechanism\n\n`toDate` in `packages/formula/src/stdlib.ts` (around L77–81) returns `new Date(String(v))`, an invalid Date, and evaluate reports `ok: true`. That graceful degradation is deliberate for predicates (`cel-engine.ts` around L1165). For a formula field, though, the invalid Date serializes to null, and the #22031 warn path never fires because nothing faulted."
