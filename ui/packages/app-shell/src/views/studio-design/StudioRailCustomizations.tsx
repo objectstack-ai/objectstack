@@ -194,6 +194,38 @@ export function useRailCustomizationsOnly(): [boolean, () => void] {
 }
 
 /**
+ * A `?surface=` deep link to an item the base's pair adds, on a rail that is
+ * read before the pair is known: the package list answers after the rail's
+ * first read, so that read cannot list the item, and the rail opens its
+ * default. The rail notes the default it opened for a link it could not
+ * resolve ({@link DeepLinkFallback.note}); a later read that lists the linked
+ * item opens it instead, while the author has not moved off that default
+ * ({@link DeepLinkFallback.take}). Keys are the rail's own (an item's name).
+ */
+export interface DeepLinkFallback {
+  note(key: string | null): void;
+  /** The linked item's key to open now, or `null` to leave the rail as it is. */
+  take(currentKey: string | null, linkedKey: string | null): string | null;
+}
+
+export function useDeepLinkFallback(): DeepLinkFallback {
+  const ref = React.useRef<string | null>(null);
+  return React.useMemo<DeepLinkFallback>(
+    () => ({
+      note(key) {
+        ref.current = key;
+      },
+      take(currentKey, linkedKey) {
+        if (linkedKey === null || ref.current === null || currentKey !== ref.current) return null;
+        ref.current = null;
+        return linkedKey;
+      },
+    }),
+    [],
+  );
+}
+
+/**
  * The package switcher's rows with each base's pair folded under it (ADR-0146
  * D3: "the package switcher folds `hotcrm.custom` under HotCRM instead of
  * giving it a row"): a row whose id is a pair (`customizationBasePackageId`)

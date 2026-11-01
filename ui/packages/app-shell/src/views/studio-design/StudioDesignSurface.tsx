@@ -405,6 +405,7 @@ import {
   customizationPairBaseOf,
   foldCustomizationPairs,
   railCustomizationsOf,
+  useDeepLinkFallback,
   useRailCustomizationsOnly,
   withPairItems,
   type RailCustomizations,
@@ -4586,6 +4587,11 @@ export function InterfacesPillar({
     initialSurface && (OFF_NAV_TYPES as readonly string[]).includes(initialSurface.type) ? 'pending' : 'done',
   );
   const offNavFallbackRef = React.useRef<Surface | null>(null);
+  const offNavUpgrade = useDeepLinkFallback();
+  const currentRef = React.useRef(current);
+  React.useLayoutEffect(() => {
+    currentRef.current = current;
+  });
   // objectui#8219 — lift the open leaf's label to the dock (see the prop doc).
   // Keyed on the primitives, and the callback read through a ref, so neither a
   // re-created Surface object nor a non-memoized callback refires the report.
@@ -4808,17 +4814,28 @@ export function InterfacesPillar({
   // both reads it waits on have answered: the app (or its absence), and this
   // package's off-nav lists.
   React.useEffect(() => {
-    if (offNavDeepLinkRef.current !== 'pending' || !initialSurface) return;
+    if (!initialSurface) return;
     if (appStatus === 'loading' || packageItems?.packageId !== packageId) return;
-    offNavDeepLinkRef.current = 'done';
     const item = (packageItems.byType[initialSurface.type as OffNavType] ?? []).find(
       (i) => i.name === initialSurface.name,
     );
-    const target: Surface | null = item
+    const linked: Surface | null = item
       ? { type: item.type, name: item.name, label: item.label, ...(item.addedIn ? { addedIn: item.addedIn } : {}) }
-      : offNavFallbackRef.current;
+      : null;
+    // objectstack#28572 — an item the pair adds is listed once the pair is
+    // known, after the package list answers: a link the first lists could not
+    // resolve opens it then, while the default it opened is still open.
+    if (offNavDeepLinkRef.current === 'done') {
+      if (linked && offNavUpgrade.take(currentRef.current ? leafKeyOf(currentRef.current) : null, leafKeyOf(linked))) {
+        setCurrent(linked);
+      }
+      return;
+    }
+    offNavDeepLinkRef.current = 'done';
+    const target = linked ?? offNavFallbackRef.current;
+    if (!linked && target && currentRef.current === null) offNavUpgrade.note(leafKeyOf(target));
     setCurrent((cur) => cur ?? target);
-  }, [appStatus, packageItems, packageId, initialSurface]);
+  }, [appStatus, packageItems, packageId, initialSurface, offNavUpgrade]);
 
   // Resolve THIS package's App → load its navigation tree. The query is scoped
   // to the package (`list('app', { packageId })`) so a design surface only ever
@@ -7317,6 +7334,12 @@ export function DataPillar({
   // (ADR-0080, `appStudioObjectPath`) lands here with a specific object;
   // shared plumbing (see useSurfaceDeepLink).
   const initialSurface = useSurfaceDeepLink(current);
+  // objectstack#28572 — see `useDeepLinkFallback`.
+  const deepLinkUpgrade = useDeepLinkFallback();
+  const currentRef = React.useRef(current);
+  React.useLayoutEffect(() => {
+    currentRef.current = current;
+  });
   // The LIVE half of the same plumbing (see surfaceDeepLinkChannel): a
   // producer already inside this mounted pillar — the pending-changes sheet's
   // security block, naming the object the publish door would refuse — asks for
@@ -7741,7 +7764,16 @@ export function DataPillar({
         // Honor a `?surface=object:<name>` deep-link when it names an object we
         // actually have; otherwise open the first object as before.
         const deepLinked = resolveSurfaceDeepLink(items, initialSurface, 'object');
-        setCurrent((c) => c ?? deepLinked ?? items[0] ?? null);
+        // objectstack#28572 — an object the pair adds is listed once the pair
+        // is known (`useDeepLinkFallback`).
+        if (deepLinked && deepLinkUpgrade.take(currentRef.current?.name ?? null, deepLinked.name)) {
+          setCurrent(deepLinked);
+        } else {
+          if (!deepLinked && initialSurface?.type === 'object' && currentRef.current === null) {
+            deepLinkUpgrade.note(items[0]?.name ?? null);
+          }
+          setCurrent((c) => c ?? deepLinked ?? items[0] ?? null);
+        }
         // An empty writable package does NOT auto-open the creator dialog —
         // it used to, which forced an unrequested modal on EVERY visit to an
         // empty package (dogfood #2555). The empty-state panel carries the
@@ -11142,6 +11174,12 @@ export function AccessPillar({
     [owdOpen, current],
   );
   const initialSurface = useSurfaceDeepLink(currentSurface);
+  // objectstack#28572 — see `useDeepLinkFallback`.
+  const deepLinkUpgrade = useDeepLinkFallback();
+  const currentRef = React.useRef(current);
+  React.useLayoutEffect(() => {
+    currentRef.current = current;
+  });
   const [query, setQuery] = React.useState('');
   // inline creator (same rail pattern as the Data pillar's object creator)
   const [creating, setCreating] = React.useState(false);
@@ -11308,7 +11346,16 @@ export function AccessPillar({
         setOwdOpen(true);
       }
       const deepLinked = resolveSurfaceDeepLink(scoped, initialSurface, 'permission');
-      setCurrent((c) => c ?? deepLinked?.name ?? scoped[0]?.name ?? null);
+      // objectstack#28572 — a set the pair adds is listed once the pair is
+      // known (`useDeepLinkFallback`).
+      if (deepLinked && deepLinkUpgrade.take(currentRef.current, deepLinked.name)) {
+        setCurrent(deepLinked.name);
+      } else {
+        if (!deepLinked && initialSurface?.type === 'permission' && currentRef.current === null) {
+          deepLinkUpgrade.note(scoped[0]?.name ?? null);
+        }
+        setCurrent((c) => c ?? deepLinked?.name ?? scoped[0]?.name ?? null);
+      }
     } catch (e) {
       if (seq === loadSeqRef.current) setError(formatMetadataError(e));
     } finally {
