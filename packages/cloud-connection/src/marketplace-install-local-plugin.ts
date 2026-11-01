@@ -246,6 +246,8 @@ import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureT
 // [ADR-0146 D2, #28410] The override write gate's one rule and its item walk,
 // asked at the managed install exactly as the publish doors ask them.
 import { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
+// [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
+import { judgeExtensionFieldSuffix } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 // [#25366] The code the registry's security-catalog refusal carries, compared
 // rather than `instanceof`-tested: the engine keeps the class unexported so a
@@ -1810,6 +1812,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     success: false,
                     error: { code: refusal.code, message: refusal.message, details: refusal.details },
                 }, refusal.status);
+            }
+        }
+
+        // 1c''. [ADR-0146 D10, #28564] ⭐ THE `__c` EXTENSION-FIELD RESERVATION,
+        //     at the dependency check's position and for the same reason: before
+        //     the manifest service sees the artifact, so a refused install
+        //     registers, writes and ledgers nothing, on the managed and the
+        //     unmanaged branch alike. Every package this act delivers (each
+        //     `packages[]` entry under its own id, the body itself otherwise) is
+        //     judged by the save door's judge (`judgeExtensionFieldSuffix`): a
+        //     field spelled `__c` only in a base's paired `.custom`, and every
+        //     `objectExtensions[].fields` key of a `.custom` pair suffixed. The
+        //     answer is this door's own body refusal, `VALIDATION_ERROR` / 422
+        //     (the unrunnable-code refusal's code and status), one row per field
+        //     in `details.refusals`. No code is minted.
+        {
+            const bodies: Array<{ id: unknown; body: Record<string, any> }> = Array.isArray(manifest.packages)
+                ? manifest.packages
+                    .filter((entry: unknown) => isPlainObject(entry) && isPlainObject((entry as any).manifest))
+                    .map((entry: any) => ({ id: manifestIdOf(entry.manifest), body: flattenPackageBody(entry.manifest) }))
+                : [{ id: manifestId, body: flattenPackageBody(manifest) }];
+            const refusals = bodies.flatMap(({ id, body }) => judgeExtensionFieldSuffix({
+                packageId: typeof id === 'string' ? id : undefined,
+                objects: body.objects,
+                objectExtensions: body.objectExtensions,
+            }));
+            if (refusals.length > 0) {
+                const n = refusals.length;
+                return c.json({
+                    success: false,
+                    error: {
+                        code: UNRUNNABLE_REFUSAL_CODE,
+                        message: `Package '${manifestId}' cannot be installed: ${refusals[0].message}`
+                            + (n > 1 ? ` (${n - 1} more in \`details.refusals\`.)` : '')
+                            + ' Nothing was installed or written.',
+                        details: { refusals },
+                    },
+                }, UNRUNNABLE_REFUSAL_STATUS);
             }
         }
 

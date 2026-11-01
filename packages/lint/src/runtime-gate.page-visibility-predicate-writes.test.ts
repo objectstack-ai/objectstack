@@ -134,6 +134,8 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
       'validateComponentProps',
       'validateComponentTypes',
       'validatePrintPageBlocks',
+      // #28663 — the page's `variables` declarations.
+      'validatePageVariables',
       // #28005 — an object-form's thank-you panel naming a field the engine
       // does not generate.
       'validateThankYouRecordFields',

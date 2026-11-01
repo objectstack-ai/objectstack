@@ -134,6 +134,10 @@ const FAMILY: Record<string, string[]> = {
   // stack is shut down. A refused plan writes no plan file, so the fixture
   // directory gains nothing.
   'migrate organization-ownership': [],
+  // A preview is its DEFAULT and the only form driven here: without `--apply`
+  // it boots read-only and moves nothing. No table exists in the fixture, so
+  // the face driven here is its empty listing.
+  'migrate packageless-overlays': [],
   'migrate plan': [],
   // [ADR-0144] `--object`, `--field` and `--code` are all required, so without
   // them the run stops at flag parsing and never boots; the pair named here is

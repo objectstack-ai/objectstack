@@ -185,6 +185,15 @@ import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 import { customizationPackageId } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf } from './served-override.js';
 import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
+// [#28413, ADR-0146 D11] The package-less overlay migration (`os migrate
+// packageless-overlays`), and the save's landing on a migrated row.
+import {
+    listPackagelessOverlays,
+    migratePackagelessOverlays,
+    packagelessPairLanding,
+    type PackagelessOverlayCensus,
+    type PackagelessOverlayMigration,
+} from './protocol-packageless-overlay-migration.js';
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
@@ -393,6 +402,12 @@ import {
     refusePackagedBaseOverride,
 } from './protocol-packaged-base-refusal.js';
 import type { OverrideWriteSubject, OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+// [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge.
+import {
+    extensionFieldSuffixRefusalError,
+    judgeExtensionFieldSuffix,
+    objectBodyExtensionFieldSuffixRefusal,
+} from './protocol-extension-field-suffix.js';
 // [#25467 cut 14] The publish batch's seed apply and its own pending declarations.
 import { applySeedBodies, collectBatchPendingDeclarations } from './protocol-publish-batch.js';
 // [#25467 cut 15] The artifact registry's lookups: an item's artifact, the packages that ship a type, and the lock's artifact layer.
@@ -9770,6 +9785,92 @@ export class ObjectStackProtocolImplementation implements
             rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
         };
         return listServedOverrides.call(host, request);
+    }
+
+    /**
+     * [#28413, ADR-0146 D11] The census `os migrate packageless-overlays`
+     * previews: every environment `sys_metadata` row of one of the five
+     * `allowEnvironmentOverlay` types bound to no package, classified against
+     * the code packages that ship its name — `movable` (exactly one ships it,
+     * and its pair holds no row of the name in that state), `shadowed` (the
+     * pair already does), `multi_shipped`, `foreign_declaration` or `no_pair`
+     * — plus the count of rows of a name no package ships (environment
+     * metadata, left alone), and every pair row declaring an override with no
+     * `basedOn`. Writes nothing; the body and its rules are
+     * `protocol-packageless-overlay-migration.ts`'s.
+     *
+     * @throws the `sys_metadata` read failure, classified by
+     *         {@link rethrowUnlessMetadataStoreUnprovisioned}; an unprovisioned
+     *         table answers an empty census.
+     */
+    async listPackagelessOverlays(): Promise<PackagelessOverlayCensus> {
+        const host: ThisParameterType<typeof listPackagelessOverlays> = {
+            overlayTypes: ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES,
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+            isWritablePackage: (...a) => this.isWritablePackage(...a),
+        };
+        return listPackagelessOverlays.call(host);
+    }
+
+    /**
+     * [#28413, ADR-0146 D11] `os migrate packageless-overlays --apply`: move
+     * each `movable` row of {@link listPackagelessOverlays}'s census into its
+     * base's paired `<base>.custom` as a declared override — the pair ensured
+     * through {@link ensureCustomizationPackage}, the body given
+     * `overrides: { package: <base>, basedOn: <base manifest.version> }` and
+     * saved through {@link saveMetaItem} in the row's own state, read back as
+     * the served override (`isServedOverrideRowOf`), and only then the unbound
+     * row deleted by its own address — and complete every pair declaration
+     * missing `basedOn` the same way. One outcome per row, never thrown for a
+     * row; a second run moves nothing. ⛔ Not a boot step.
+     */
+    async migratePackagelessOverlays(request: { actor: string }): Promise<PackagelessOverlayMigration> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof migratePackagelessOverlays> = {
+            get engine() { return readEngine(); },
+            overlayTypes: ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES,
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            shippedArtifactsOf: (...a) => this.shippedArtifactsOf(...a),
+            isWritablePackage: (...a) => this.isWritablePackage(...a),
+            ensureCustomizationPackage: (...a) => this.ensureCustomizationPackage(...a),
+            saveMetaItem: (...a) => this.saveMetaItem(...a),
+        };
+        return migratePackagelessOverlays.call(host, request);
+    }
+
+    /**
+     * [#28413] Whether a save is a package-less AUTHORING save — the one
+     * {@link packagelessPairLanding} may find a pair row for: it names no
+     * package, is no runtime-source write or package duplicate, and carries a
+     * body object.
+     */
+    private isPackagelessAuthoringSave(request: SaveMetaItemRequest): boolean {
+        return request.packageId == null
+            && request.source === undefined
+            && request.writeFace !== 'package-duplicate'
+            && request.item !== null && typeof request.item === 'object' && !Array.isArray(request.item);
+    }
+
+    /**
+     * [#28413] The declared override a package-less save of an overlay type
+     * lands on, or `undefined` — see `packagelessPairLanding` in
+     * `protocol-packageless-overlay-migration.ts`. Asked by
+     * {@link saveMetaItem} before the override write gate.
+     */
+    private packagelessPairLanding(
+        request: { type: string; name: string; mode?: string },
+        member: string | undefined,
+    ): Promise<{ pair: string; base: string; declaration: Record<string, unknown> } | undefined> {
+        const host: ThisParameterType<typeof packagelessPairLanding> = {
+            overlayTypes: ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES,
+            packagelessAddress: (...a) => this.packagelessAddress(...a),
+            packagelessDraftAddress: (...a) => this.packagelessDraftAddress(...a),
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+        };
+        return packagelessPairLanding.call(host, request, member);
     }
 
     /**
@@ -20967,11 +21068,33 @@ export class ObjectStackProtocolImplementation implements
         // door already answered for that write, so no existing refusal's code
         // or status changes (a view container's name collision keeps its
         // 400, a lock its ITEM_LOCKED).
-        const overrideVerdict = this.overrideWriteVerdict(request);
+        //
+        // [#28413] Until #28576 closes the package-less write: a package-less
+        // authoring save whose address is a pair row declaring the override of
+        // its base (a row `os migrate packageless-overlays` moved there) is the
+        // write into the pair it is — so Setup's save of a migrated item, which
+        // sends the item as it read it, is not refused. Carrying the
+        // declaration, it is judged here as the write into that pair; carrying
+        // none, the late re-judgement below keeps the row's `overrides` block
+        // (see `packagelessPairLanding`). The landing is read ONLY where the
+        // save would otherwise be refused, so no admitted save, and no refusal
+        // ranked before these, reads one row more (#5706's lock gate stays the
+        // first reader).
+        let overrideVerdict = this.overrideWriteVerdict(request);
+        if (
+            overrideVerdict.verdict === 'refuse'
+            && overrideVerdict.rule === 'declared_outside_pair'
+            && this.isPackagelessAuthoringSave(request)
+        ) {
+            const landing = await this.packagelessPairLanding(
+                request, itemDiscriminator(PLURAL_TO_SINGULAR[request.type] ?? request.type, request.item),
+            );
+            if (landing !== undefined) overrideVerdict = this.overrideWriteVerdict({ ...request, packageId: landing.pair });
+        }
         if (overrideVerdict.verdict === 'refuse' && overrideVerdict.rule !== 'undeclared_same_name') {
             throw overrideWriteRefusalError(overrideVerdict);
         }
-        const declaredOverride = overrideVerdict.verdict === 'admit';
+        let declaredOverride = overrideVerdict.verdict === 'admit';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
@@ -21626,6 +21749,18 @@ export class ObjectStackProtocolImplementation implements
                 );
                 if (ownerRefusal) throw ownerRefusal;
             }
+            // [ADR-0146 D10, #28564] …and an object body's fields against the
+            // `__c` reservation, on the same binding and with the same
+            // envelope: `__c` only in a base's paired `.custom`. Asked of every
+            // writer, as the owner judge is. See
+            // {@link objectBodyExtensionFieldSuffixRefusal}.
+            {
+                const suffixRefusal = objectBodyExtensionFieldSuffixRefusal(
+                    singularType, request.item, request.name,
+                    await this.saveWriteBinding(singularType, request, mode),
+                );
+                if (suffixRefusal) throw suffixRefusal;
+            }
             // [harden] …and a permission set whose NAME another owner already
             // holds, with `NAMESPACE_CONFLICT` / 422: a set's name is its
             // identity across the deployment, and a grant resolves it by that
@@ -22165,6 +22300,31 @@ export class ObjectStackProtocolImplementation implements
                 : request.packageId ?? null;
             if (typeof inheritedPackage === 'string' && inheritedPackage.length > 0) {
                 lateOverrideVerdict = this.overrideWriteVerdict({ ...request, packageId: inheritedPackage });
+            }
+        }
+        // [#28413] …and a package-less save carrying no declaration whose
+        // address is a pair row declaring the override (the early gate's
+        // comment above) keeps that row's `overrides` block: the body as
+        // persisted is the declared override it replaces, judged again.
+        if (
+            lateOverrideVerdict.verdict === 'refuse'
+            && lateOverrideVerdict.rule === 'undeclared_same_name'
+            && namedNoPackage
+            // (its address may have named the pair on the request since: `namedNoPackage` is what it named)
+            && this.isPackagelessAuthoringSave({ ...request, packageId: null })
+            && !('overrides' in (request.item as Record<string, unknown>))
+        ) {
+            const landing = await this.packagelessPairLanding(
+                request, itemDiscriminator(PLURAL_TO_SINGULAR[request.type] ?? request.type, request.item),
+            );
+            if (landing !== undefined) {
+                const declared = { ...request, item: { ...(request.item as Record<string, unknown>), overrides: landing.declaration } };
+                const verdict = this.overrideWriteVerdict({ ...declared, packageId: landing.pair });
+                if (verdict.verdict === 'admit') {
+                    request = declared;
+                    lateOverrideVerdict = verdict;
+                    declaredOverride = true;
+                }
             }
         }
         if (lateOverrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(lateOverrideVerdict);
@@ -23717,6 +23877,16 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, promoteInto, 'publish',
             );
             if (ownerRefusal) throw ownerRefusal;
+        }
+        // [ADR-0146 D10, #28564] …and an object draft's fields against the
+        // `__c` reservation, judged against the package promoted into, with the
+        // save door's judge and envelope, before `repo.promoteDraft` writes. See
+        // {@link objectBodyExtensionFieldSuffixRefusal}.
+        if (draftForGate) {
+            const suffixRefusal = objectBodyExtensionFieldSuffixRefusal(
+                singularType, draftForGate.body, request.name, promoteInto,
+            );
+            if (suffixRefusal) throw suffixRefusal;
         }
         // [harden] …and a permission-set draft whose name a DIFFERENT owner
         // already holds by the time it is published: a draft save judged the
@@ -26024,6 +26194,34 @@ export class ObjectStackProtocolImplementation implements
             }
             return { fields: Object.fromEntries(out) };
         };
+
+        // [ADR-0146 D10, #28564] ⭐ THE `__c` RESERVATION, JUDGED AGAINST THE
+        // TARGET, before the copy's first mutation (the package record below):
+        // every object the copy would write is the target's own object, so a
+        // copy of a `.custom` pair's objects into a plain id carries their
+        // `__c` fields into a package that may not declare one. Refused whole,
+        // with the save door's judge and envelope (`VALIDATION_ERROR` / 400),
+        // so no half-copied app is left behind; a copy into a pair id writes
+        // the pair's own objects, which are not judged. An unparseable row is
+        // left to the copy loop, which reports it. See
+        // {@link judgeExtensionFieldSuffix}.
+        {
+            const copiedObjects: Record<string, unknown> = {};
+            for (const row of rows) {
+                if (row?.type !== 'object' || typeof row.name !== 'string') continue;
+                let body: unknown;
+                try {
+                    body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+                } catch {
+                    continue;
+                }
+                if (body && typeof body === 'object' && !Array.isArray(body)) {
+                    copiedObjects[row.name] = { ...(body as Record<string, unknown>), name: renameMap.get(row.name) ?? row.name };
+                }
+            }
+            const suffixRefusals = judgeExtensionFieldSuffix({ packageId: request.targetPackageId, objects: copiedObjects });
+            if (suffixRefusals.length > 0) throw extensionFieldSuffixRefusalError(suffixRefusals);
+        }
 
         if (srcPkg?.manifest && typeof registry?.installPackage === 'function') {
             try {

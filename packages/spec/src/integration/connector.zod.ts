@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ConnectorAuthConfigSchema, ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { acceptRetiredDefaultResidue, retiredKey } from '../shared/retired-key';
+import { strictObject } from '../shared/strict-object';
 
 /**
  * Connector Protocol - LEVEL 3: Enterprise Connector
@@ -420,8 +421,8 @@ const ERROR_MAPPING_RETIRED =
 // ============================================================================
 //
 // A bounded (`min(1000).max(300000)`), defaulted (`30000`), `.describe()`d key
-// on this schema and — because both published carriers wrap the same private
-// `ConnectorBaseSchema` — on
+// on this schema and — because both published carriers are built from the same
+// private connector shape (`connectorBaseShape`) — on
 // `DeclarativeConnectorEntrySchema`, so it was authorable from `stack.connectors[]`,
 // from `PUT /meta/connector/:name`, and served back by `/meta/connector`. Every
 // signal an authoring surface can give said it worked.
@@ -581,7 +582,7 @@ const CONNECTOR_RETIRED_KEY_RESIDUE = {
 // `ConnectorSchema` is NOT `.strict()`, so a plain delete would be a silent
 // strip (ADR-0104): each carrier key is a `retiredKey()` tombstone below,
 // inherited by `DeclarativeConnectorEntrySchema` because both published
-// carriers wrap the same private `ConnectorBaseSchema`. The shapes behind them
+// carriers are built from the same private `connectorBaseShape`. The shapes behind them
 // leave whole — `integration/ConnectorHealth`, `integration/HealthCheckConfig`,
 // `integration/CircuitBreakerConfig`, `integration/ConnectorStatus`,
 // `integration/WebhookConfig`, `integration/WebhookEvent` and
@@ -822,10 +823,20 @@ export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
 // `triggers` key it was the only carrier of — see "REMOVED: `triggers`" above.
 
 /**
- * Base Connector Schema
- * Core connector configuration shared across all connector types
+ * The connector's declared keys — the one declaration both published carriers
+ * are built from: the open {@link ConnectorBaseSchema} behind
+ * {@link ConnectorSchema} and the closed {@link DeclarativeConnectorEntryBaseSchema}
+ * behind {@link DeclarativeConnectorEntrySchema}.
+ *
+ * A FUNCTION, so each carrier gets its own field instances. The strict entry's
+ * `guidance` is a promise about the shape it was declared with, and
+ * `computeGuidanceRoutes()` (`scripts/build-schemas.ts`) pairs an emitted def
+ * with its declaration by the identity of each field: one shared field set would
+ * pair the OPEN `Connector` def with the closed declaration too, and charge it
+ * prescriptions an open shape never delivers (the `shared/` ledger row's
+ * one-declaration, two-doors finding).
  */
-const ConnectorBaseSchema = lazySchema(() => z.object({
+const connectorBaseShape = () => ({
   /**
    * Machine name (snake_case)
    */
@@ -1024,7 +1035,7 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
    * would be a silent strip (ADR-0104); the tombstone makes the removal audible
    * in the two channels an upgrading author actually hits — `tsc` and the
    * parse — and `DeclarativeConnectorEntrySchema` carries it too (both
-   * published carriers wrap the same private `ConnectorBaseSchema`; until the
+   * published carriers are built from the same private `connectorBaseShape`; until the
    * `connectionTimeoutMs` retirement the entry schema was literally
    * `ConnectorSchema.superRefine(...)`), so `stack.connectors[]` and the
    * `/meta/connector` door refuse
@@ -1079,7 +1090,85 @@ const ConnectorBaseSchema = lazySchema(() => z.object({
   // Pure-additive and internal: every key is `_`-prefixed and optional, so no
   // author-facing field changes and nothing that parsed before stops parsing.
   ...MetadataProtectionFields,
-}));
+});
+
+/**
+ * Base Connector Schema — the OPEN carrier: core connector configuration shared
+ * across all connector types, behind {@link ConnectorSchema} (the def a plugin
+ * hands to `registerConnector`, and `defineConnector`). Its posture is unchanged;
+ * the closed carrier for an AUTHORED entry is
+ * {@link DeclarativeConnectorEntryBaseSchema} below.
+ */
+const ConnectorBaseSchema = lazySchema(() => z.object(connectorBaseShape()));
+
+/**
+ * What a credential-shaped key meets on an authored connector entry. A
+ * connector entry holds no secret at any key: a provider-bound instance names
+ * its credential with `auth.credentialRef` and the value lives in the secrets
+ * layer (ADR-0097 §3, ADR-0143 D3).
+ */
+const ENTRY_CREDENTIAL_KEY_GUIDANCE =
+  'Not authorable on a connector entry — connector metadata never holds a credential. A provider-bound '
+  + 'instance names its secret with `auth: { type, credentialRef }`, and the administrator sets the value '
+  + 'under that name (an environment variable in the open tier, or Setup → Connector credentials).';
+
+/**
+ * What a provider setting written at the top level of an entry meets: it
+ * belongs under `providerConfig`, which the provider validates at
+ * materialization (ADR-0097).
+ */
+const ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE =
+  'Not a top-level connector key — provider settings go under `providerConfig` (`{ baseUrl }` for `rest`, '
+  + '`{ spec, baseUrl? }` for `openapi`, `{ transport }` for `mcp`), which the provider validates when the '
+  + 'instance materializes.';
+
+/**
+ * The CLOSED carrier behind {@link DeclarativeConnectorEntrySchema}: the same
+ * declared keys as {@link ConnectorBaseSchema}, refusing every key it does not
+ * declare.
+ *
+ * An authored entry is a stored, served metadata type, not a wire payload: the
+ * `PUT /meta/connector/:name` door keeps the request body it accepts (ADR-0005
+ * appendix (c), ruling B — every type but `view` stores its body, not the
+ * parse), and every read exit serves that body. On an open shape an undeclared
+ * key therefore parsed green and was kept, while `defineStack`, `os validate`
+ * and `os compile` dropped it without a word. Closed, every door that parses
+ * this schema refuses it by name, located at the key: `defineStack({ connectors
+ * })`, `os validate` / `os compile`, the artifact load at boot and reload, and
+ * the save door with `422 INVALID_METADATA`. The ADR-0010 protection envelope
+ * is declared in the shape, so a stamped, package-loaded entry still parses.
+ *
+ * The refusal is terminal ({@link strictObject}): a body with an undeclared key
+ * meets that one refusal, not the ADR-0097 refinements below as well.
+ */
+const DeclarativeConnectorEntryBaseSchema = lazySchema(() => strictObject({
+  surface: 'this connector entry',
+  history: 'Until this shape was closed, an undeclared key here was accepted without effect.',
+  aliases: {
+    config: 'providerConfig',
+    providerOptions: 'providerConfig',
+    timeout: 'requestTimeoutMs',
+    timeoutMs: 'requestTimeoutMs',
+    retry: 'retryConfig',
+  },
+  guidance: {
+    apiKey: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    key: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    token: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    accessToken: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    secret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    clientSecret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    password: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    credentials: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    credentialRef: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    baseUrl: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
+    url: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
+    spec: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
+    transport: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
+    headers: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
+    defaultHeaders: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
+  },
+}, connectorBaseShape()));
 
 /**
  * Core connector configuration — the authorable shape behind the ruled
@@ -1141,9 +1230,13 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * refinement still belongs on the inner object.
  *
  * **Subtype route:** extend `ConnectorBaseSchema` and re-wrap the result with
- * `acceptRetiredDefaultResidue(…, CONNECTOR_RETIRED_KEY_RESIDUE)` — exactly
- * what this schema does below, and the `EffectiveObjectPermissionSchema`
- * precedent.
+ * `acceptRetiredDefaultResidue(…, CONNECTOR_RETIRED_KEY_RESIDUE)` — the
+ * `EffectiveObjectPermissionSchema` precedent. This schema refines the CLOSED
+ * twin, {@link DeclarativeConnectorEntryBaseSchema}, the same way.
+ *
+ * **Closed.** An authored entry refuses every key the shape does not declare,
+ * at every door that parses it; {@link ConnectorSchema} keeps its open posture
+ * for the defs plugins register. See {@link DeclarativeConnectorEntryBaseSchema}.
  *
  * One rule applies to EVERY authored entry (#7990, maintainer-ruled 2026-08-12):
  *  - NO entry may inline secrets via `authentication`. A published connector
@@ -1182,7 +1275,7 @@ function isMcpHttpInstance(entry: { provider?: string; providerConfig?: Record<s
 }
 
 export const DeclarativeConnectorEntrySchema = lazySchema(() =>
-  // [#12840 precedent] The ADR-0097 refusals ride on the BASE, INSIDE the
+  // [#12840 precedent] The ADR-0097 refusals ride on the (closed) BASE, INSIDE the
   // residue stage, for the reason `ObjectPermissionSchema` records: in zod 4
   // `.superRefine()` on a `ZodObject` returns a `ZodObject` that keeps
   // `.shape`, while the same call on the residue PIPE returns a schema with no
@@ -1190,7 +1283,7 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
   // authorable-surface / liveness walkers duck-test. Wrapping second also keeps
   // this door's residue tolerance identical to the base's rather than a second
   // dialect.
-  acceptRetiredDefaultResidue(ConnectorBaseSchema.superRefine((entry, ctx) => {
+  acceptRetiredDefaultResidue(DeclarativeConnectorEntryBaseSchema.superRefine((entry, ctx) => {
     const isInstance = typeof entry.provider === 'string' && entry.provider.length > 0;
     // #7990 — the one rule that binds EVERY authored entry, descriptor and
     // instance alike: `authentication` is the RUNTIME shape (its secret fields

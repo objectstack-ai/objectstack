@@ -22,7 +22,7 @@
  * `Mailbox-of: <seat> · <login>`, opened at seating and subscribed by the
  * seated session, ⛔ never merged, closed at hand-over or account switch (the
  * successor opens its own). A message on it is ONE comment: the line
- * `To: <seat>`, then ONE line opening with one of the seven doorbell keys
+ * `To: <seat>`, then ONE line opening with one of the doorbell keys
  * (`Request:` / `Notify:`), read by `record-recognisers.mjs`. The protocol
  * text — the keys, who sends what to whom — is the pm-dispatch skill's
  * `references/project-forms.md` 〈信箱 PR〉; this file is only the tooling.
@@ -259,7 +259,7 @@ export function mailboxBody({ seat, login, session = null }) {
     `The mailbox of the seat \`${seat}\`, held by \`${login}\` (\`${MAILBOX_LABEL}\`): one per seat, opened at seating, subscribed by the seated session.`,
     '',
     '- ⛔ Never merged, never readied. Closed at hand-over or account switch: `node scripts/pm/mailbox-open.mjs --close N` (N = this number); the successor opens its own.',
-    `- A message is ONE comment: the line \`To: ${seat}\`, then ONE line opening with one of the seven doorbell keys (\`Request:\` / \`Notify:\`; pm-dispatch \`references/project-forms.md\` 〈信箱 PR〉): one event, keys and numbers only. Nothing else is allowed here — no acknowledgements, no re-sends.`,
+    `- A message is ONE comment: the line \`To: ${seat}\`, then ONE line opening with one of the doorbell keys (\`Request:\` / \`Notify:\`; pm-dispatch \`references/project-forms.md\` 〈信箱 PR〉; full spellings: \`node scripts/pm/record-recognisers.mjs --mailbox-keys\`): one event, keys and numbers only. Nothing else is allowed here — no acknowledgements, no re-sends.`,
     `- **CI: owes none.** \`skip-changeset\` exempts Check Changeset; any other check red on this empty diff is RED BY DESIGN — never fix, rerun or report it. \`${STALE_EXEMPT_LABEL}\` keeps the stale sweep off it.`,
     `- Excluded from every landing ledger: queries add \`${LEDGER_EXCLUSION}\`.`,
   ].join('\n') + bodyFooter(session);
@@ -548,7 +548,7 @@ async function selfTest() {
   t('⭐ pinned IS stale.yml\'s exemption, read off the workflow — and pm:mailbox is not one', (() => { const y = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'stale.yml'), 'utf8'); const m = /exempt-pr-labels:\s*'([^']*)'/.exec(y); const names = m ? m[1].split(',').map((s) => s.trim()) : []; return [names.includes(STALE_EXEMPT_LABEL), names.includes(MAILBOX_LABEL)]; })(), [true, false]);
   t('⭐ the body opens with Mailbox-of: <seat> · <login> — the seat is the key, the login only who holds it', p.actions[0].body.split('\n')[0], 'Mailbox-of: domain:ui#4 · os-bill');
   t('the body tells a sender to open with To: <seat>', p.actions[0].body.includes('the line `To: domain:ui#4`, then ONE line'), true);
-  t('the body states the CI posture, the never-merged rule and the closed vocabulary', [/RED BY DESIGN/.test(p.actions[0].body), /Never merged/.test(p.actions[0].body), /seven doorbell keys/.test(p.actions[0].body) && /no acknowledgements/.test(p.actions[0].body)], [true, true, true]);
+  t('the body states the CI posture, the never-merged rule and the closed vocabulary', [/RED BY DESIGN/.test(p.actions[0].body), /Never merged/.test(p.actions[0].body), /one of the doorbell keys/.test(p.actions[0].body) && /--mailbox-keys/.test(p.actions[0].body) && /no acknowledgements/.test(p.actions[0].body)], [true, true, true]);
   t('the relay validator accepts the stroke', p.errors, []);
   const ph = planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/project-thread-x' });
   t('--head names the branch and skips the push; the body still names the seat', [ph.branch, ph.push, ph.actions[0].head, ph.actions[0].body.split('\n')[0]], ['claude/project-thread-x', false, 'claude/project-thread-x', 'Mailbox-of: triage#1 · os-bill']);
