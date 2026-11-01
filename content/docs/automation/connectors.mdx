@@ -152,6 +152,16 @@ Each operation becomes an action keyed by its `operationId` (or a
 `method_path` slug when the document omits one) — so `getInvoice` in the
 document is `actionId: 'getInvoice'` in your flow.
 
+Each path, query and header parameter is sent by the `style` and `explode` its
+Parameter Object declares, or by the OpenAPI 3.x default for its location
+(`form` for query, `simple` for path and header). An object or array input is
+encoded the way the document asks — Stripe's `created: { gte: 1700000000 }`
+(`deepObject`) goes out as `created[gte]=1700000000`, and its
+`expand: ['data.customer']` as `expand[0]=data.customer` (`deepObject` applied
+to an array: each index in its own brackets). A parameter whose `style` OpenAPI
+3.x does not define for its location fails the boot naming the operation and
+parameter; leave the operation out of `include` to bring the rest up.
+
 `include` takes those same action keys and has the same allowlist meaning as
 the `mcp` provider's `include`: list the operations the instance should expose
 and every other operation stays out — the way to bring up a large API (hundreds
@@ -786,6 +796,8 @@ retry):
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |
 | A retry of a degraded instance reaches the upstream and meets a configuration fault (an `include` naming a tool or operation the upstream does not offer; on an `mcp` instance that sends a static credential, the credential row above applies instead) | **Not fatal**: the instance stays **degraded**, now with the configuration reason, and is **not retried** — dispatches fail saying to edit its declaration; an edit of the entry (or a restart) re-attempts it |
 | Wrong spec URL (other 4xx) or unparseable document | Configuration fault — **hard boot error** |
+| An `openapi` operation's parameter declares a `style` OpenAPI 3.x does not define for its location (`deepObject` on a path parameter, `form` on a header) | Configuration fault — **hard boot error** naming the operation and the parameter; correct the document or leave the operation out of `include` |
+| A `connector_action` input value whose shape the parameter's style has no encoding for (an array of objects for `form`, an object for a `content`-typed parameter) | **The step fails before dispatch** naming the parameter, and nothing is sent |
 | A `connector_action` input that, once evaluated, breaks the action's `inputSchema` (a missing `required` parameter, a wrong `type`) | **The step fails before dispatch** with `VALIDATION_ERROR`, naming each parameter path, and nothing is sent; a `fault` edge or `try_catch` can route it. Supply the parameter or send the declared type: text is never converted, so cast it in a CEL envelope (`int()`, `double()`, `bool()`). `GET /api/v1/automation/connectors` lists the schema; `os validate` does not judge the input against the `inputSchema` yet |
 | A bad entry arrives via **runtime reload** (a Studio publish, a direct active save through `PUT /api/v1/meta/connector/:name`, or a delete, made on any replica — peers reconcile on [cluster lane 2](/docs/kernel/cluster#62-the-cluster-invalidation-family); or a dev reload) | Logged and **skipped**, never crashing the live server; a changed instance's old connector keeps serving until its replacement materializes |
 
