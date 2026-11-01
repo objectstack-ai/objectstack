@@ -246,17 +246,21 @@ function isOpenOverrideType(singular: string): boolean {
 
 /**
  * [#28412, ADR-0146 D9 item 1] Whether a removal addressed to `packageId`
- * removes the shipping package's PAIR row of an open-override type — the
- * row the pair's declared override is stored in. Such a removal is admitted
- * past the sealed-removal refusal: it removes no managed definition, and the
- * code package's item is what every read serves (and, for a flow, what the
- * automation engine arms) once the row is gone — the narrowing direction the
- * #6960 ruling names. ⛔ Only the pair, named: a removal naming no package, or
- * any other package, keeps the sealed refusal it had.
+ * removes the shipping package's PAIR row of a type whose D9 conditions are
+ * delivered ({@link CONDITIONS_DELIVERED}: `flow` today) — the row the pair's
+ * declared override is stored in. Such a removal is admitted past the
+ * sealed-removal refusal: it removes no managed definition, and the code
+ * package's flow is what every read serves and what the automation engine
+ * arms once the row is gone — the narrowing direction the #6960 ruling names.
+ * ⛔ Only the pair, named: a removal naming no package, or any other package,
+ * keeps the sealed refusal it had. ⛔ Only a delivered type: every other open
+ * type (`view`, `mapping`, …) keeps main's delete verdict — its own removal
+ * carve-out or its sealed refusal — untouched by this card.
  */
 export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
-    if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return false;
+    if (!CONDITIONS_DELIVERED.has(singular) || !isOpenOverrideType(singular)) return false;
+    if (typeof basePackageId !== 'string') return false;
     if (typeof packageId !== 'string' || packageId.length === 0) return false;
     const pair = customizationPackageId(basePackageId);
     return pair.ok && pair.value === packageId;

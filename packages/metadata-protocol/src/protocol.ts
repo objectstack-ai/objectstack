@@ -28290,7 +28290,8 @@ export class ObjectStackProtocolImplementation implements
         // here, but a stored row under its name is, as repair.
         const originGatedRefusal = this.originGatedRemovalRefusal(request.type, request.name);
         // [#28412, ADR-0146 D9 item 1] A removal naming the shipping package's
-        // pair, of a type whose declared override is open (`flow`): it removes
+        // pair, of a type whose D9 conditions are delivered (`flow` only —
+        // every other open type keeps main's verdict): it removes
         // the row the override is stored in, and the code package's item is
         // served — and armed — again. Admitted past the sealed-removal refusal
         // and told to the store as a runtime-only removal, as the declared

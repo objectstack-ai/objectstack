@@ -21,13 +21,14 @@
  * `@objectstack/metadata-protocol`'s `dist/`, so a change there is read here
  * after that package is rebuilt.
  */
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import {
     ObjectStackProtocolImplementation,
     isServedOverrideRowOf,
     resetEnvWritableMetadataTypes,
     storedRowBindingOf,
+    SysMetadataRepository,
 } from '@objectstack/metadata-protocol';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
@@ -37,6 +38,8 @@ const PAIR = 'com.example.showcase.custom';
 const DEPENDENT = 'com.default.acme-custom';
 const FLOW = 'showcase_task_escalate';
 const DECLARATION = { package: BASE, basedOn: '1.0.0' } as const;
+const MAPPING = 'showcase_import_map';
+const VIEW = 'showcase_task.default';
 
 const sysMetadataObject: ServiceObject = {
     name: 'sys_metadata',
@@ -159,10 +162,15 @@ function baseManifest(): Record<string, unknown> {
             fields: { title: { name: 'title', label: 'title', type: 'text' } },
         }],
         flows: [flowBody('SHIPPED')],
+        mappings: [{ name: MAPPING, label: 'Import', sourceFormat: 'csv', targetObject: 'showcase_task', fieldMapping: [] }],
+        views: [{
+            object: 'showcase_task',
+            list: { label: 'All Tasks', type: 'grid', data: { provider: 'object', object: 'showcase_task' }, columns: [{ field: 'title' }] },
+        }],
     };
 }
 
-async function boot() {
+async function boot(environmentId?: string) {
     const engine = new ObjectQL();
     const { driver, stores } = makeMemoryDriver();
     engine.registerDriver(driver, true);
@@ -172,7 +180,7 @@ async function boot() {
         engine.registry.registerObject(o as any, 'test-package');
     }
     engine.registerApp(baseManifest());
-    const protocol = new ObjectStackProtocolImplementation(engine, () => new Map());
+    const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), environmentId);
     const rows = () => Array.from(stores.get('sys_metadata')?.values() ?? [])
         .filter((r) => r.type === 'flow' && r.name === FLOW);
     return { engine, protocol, rows };
@@ -284,5 +292,53 @@ describe('[#28412] a declared .custom flow override is the packaged flow, at eve
         expect(rows().filter((r) => r.state === 'active')).toEqual([]);
         expect((await read(protocol)).label).toBe('SHIPPED');
         expect(await listed(protocol, 'execution')).toEqual([[BASE, 'SHIPPED']]);
+    });
+});
+
+/**
+ * [#28412, contract review 6559358939] The pair-row removal is admitted for
+ * `flow` alone — the one type whose ADR-0146 D9 conditions this change
+ * delivers. Every other open override type keeps the removal verdict and the
+ * receipt intent it has on main: a `mapping` (no overlay channel, outside the
+ * #6960 carve-out) is still refused, and a `view` (overlay-capable) is still
+ * removed as an `override-artifact` delete.
+ */
+describe('[#28412] the pair-row removal is flow-only: other open types keep main\'s verdict', () => {
+    const storePairRow = (engine: ObjectQL, type: string, name: string, body: Record<string, unknown>) =>
+        engine.insert('sys_metadata', {
+            type, name, organization_id: null, package_id: PAIR,
+            metadata: JSON.stringify({ ...body, overrides: { ...DECLARATION } }), state: 'active', version: 1,
+        }, { context: { isSystem: true } });
+    const rowsOf = async (engine: ObjectQL, type: string, name: string) =>
+        ((await engine.find('sys_metadata', { where: { type, name }, context: { isSystem: true } })) as any[]);
+
+    for (const environmentId of [undefined, 'env_1']) {
+        const kernel = environmentId ? 'environment' : 'host-config';
+        it(`a mapping's pair-row delete naming the pair still answers 403 NOT_OVERRIDABLE, and the row stays (${kernel} kernel)`, async () => {
+            const { protocol, engine } = await boot(environmentId);
+            await install(protocol, PAIR);
+            await storePairRow(engine, 'mapping', MAPPING, { name: MAPPING, label: 'Ours', sourceFormat: 'csv', targetObject: 'showcase_task', fieldMapping: [] });
+            await expect(protocol.deleteMetaItem({ type: 'mapping', name: MAPPING, packageId: PAIR } as any))
+                .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect((await rowsOf(engine, 'mapping', MAPPING)).map((r) => r.package_id)).toEqual([PAIR]);
+        });
+    }
+
+    it('a view\'s pair-row delete naming the pair is removed as an override-artifact delete, as on main', async () => {
+        const { protocol, engine } = await boot();
+        await install(protocol, PAIR);
+        await storePairRow(engine, 'view', VIEW, {
+            name: VIEW, object: 'showcase_task', viewKind: 'list', label: 'Ours',
+            config: { type: 'grid', data: { provider: 'object', object: 'showcase_task' }, columns: [{ field: 'title' }] },
+        });
+        const removal = vi.spyOn(SysMetadataRepository.prototype, 'delete');
+        try {
+            await protocol.deleteMetaItem({ type: 'view', name: VIEW, packageId: PAIR } as any);
+            expect(removal).toHaveBeenCalledTimes(1);
+            expect(removal.mock.calls[0][1]).toMatchObject({ intent: 'override-artifact', packageId: PAIR });
+        } finally {
+            removal.mockRestore();
+        }
+        expect((await rowsOf(engine, 'view', VIEW)).filter((r) => r.state === 'active')).toEqual([]);
     });
 });
