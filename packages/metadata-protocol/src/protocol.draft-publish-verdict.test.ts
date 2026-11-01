@@ -369,6 +369,32 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // [#28725] A page variable whose `source` names no component on the
+        // page (the card's `no_such_component`): nothing ever writes it.
+        rule: 'page-variable-source-unknown',
+        type: 'page',
+        item: {
+            name: 'qa_vars_source', label: 'Vars', type: 'app',
+            variables: [{ name: 'selectedProjectId', type: 'record_id', source: 'no_such_component' }],
+            regions: [{ name: 'main', components: [
+                { id: 'project_picker', type: 'element:record_picker', dataSource: { object: 'deal' }, properties: { label: 'Deal', labelField: 'name' } },
+            ] }],
+        },
+    },
+    {
+        // [#28725] A component `visibleWhen` reading an undeclared variable
+        // (the card's `page.nosuch == 'x'`): the read never resolves.
+        rule: 'visibility-page-variable-undeclared',
+        type: 'page',
+        item: {
+            name: 'qa_vars_read', label: 'Vars', type: 'app',
+            variables: [{ name: 'selectedProjectId', type: 'record_id' }],
+            regions: [{ name: 'main', components: [
+                { type: 'page:header', properties: { title: 'Vars' }, visibleWhen: "page.nosuch == 'x'" },
+            ] }],
+        },
+    },
+    {
         // Reproduction 6: a dataset whose include names no relationship.
         rule: 'dataset-include-unknown',
         type: 'dataset',
@@ -491,6 +517,38 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         );
         expect((await draftDiagnostics(protocol, 'page', 'qa_vars_type')).errors).toContainEqual(
             expect.objectContaining({ path: 'variables.0.defaultValue', code: 'page-variable-default-type' }),
+        );
+    });
+
+    it('[#28725] a `source` naming a component on the page and a declared `page.NAME` read still read valid:true and publish', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const source = structuredClone(CASES.find((c) => c.item.name === 'qa_vars_source')!.item) as any;
+        source.variables[0].source = 'project_picker';
+        const read = structuredClone(CASES.find((c) => c.item.name === 'qa_vars_read')!.item) as any;
+        read.regions[0].components[0].visibleWhen = "page.selectedProjectId != ''";
+        await stageDraft(protocol, 'page', source);
+        await stageDraft(protocol, 'page', read);
+
+        expect(await draftDiagnostics(protocol, 'page', source.name)).toEqual({ valid: true });
+        expect(await draftDiagnostics(protocol, 'page', read.name)).toEqual({ valid: true });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#28725] both verdicts are located at the reference on the draft read', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        for (const name of ['qa_vars_source', 'qa_vars_read']) {
+            const c = CASES.find((x) => x.item.name === name)!;
+            await stageDraft(protocol, c.type, c.item);
+        }
+
+        expect((await draftDiagnostics(protocol, 'page', 'qa_vars_source')).errors).toContainEqual(
+            expect.objectContaining({ path: 'variables.0.source', code: 'page-variable-source-unknown' }),
+        );
+        expect((await draftDiagnostics(protocol, 'page', 'qa_vars_read')).errors).toContainEqual(
+            expect.objectContaining({ path: 'regions.0.components.0', code: 'visibility-page-variable-undeclared' }),
         );
     });
 

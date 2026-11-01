@@ -40,7 +40,7 @@ const page = (variables: unknown[], visibleWhen: unknown = "page.selectedProject
       name: 'main',
       components: [
         { type: 'page:header', properties: { title: 'Vars' } },
-        { id: 'project_picker', type: 'element:record_picker', properties: { object: 'project' } },
+        { id: 'project_picker', type: 'element:record_picker', dataSource: { object: 'project' }, properties: { label: 'Project', labelField: 'name' } },
         { id: 'detail_panel', type: 'page:card', properties: { title: 'Detail' }, visibleWhen },
       ],
     },
@@ -144,7 +144,7 @@ describe('#28725 — references into a page\'s variables are resolved at every d
   it('a `source` naming a component nested in a container\'s `children` resolves', () => {
     const item = page([{ ...PICKED, source: 'nested_picker' }]);
     (item.regions[0]!.components[2] as any).properties.children = [
-      { id: 'nested_picker', type: 'element:record_picker', properties: { object: 'project' } },
+      { id: 'nested_picker', type: 'element:record_picker', dataSource: { object: 'project' }, properties: { label: 'Project', labelField: 'name' } },
     ];
     expect(ours(gatePage(item).errors)).toEqual([]);
   });
