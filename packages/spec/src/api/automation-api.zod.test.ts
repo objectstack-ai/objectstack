@@ -893,10 +893,13 @@ describe('AutomationApiErrorCode', () => {
 // ==========================================
 
 describe('AutomationApiContracts', () => {
-  it('should define all 8 contract endpoints', () => {
+  it('should define all 9 contract endpoints', () => {
     // 9 -> 8: `listFlows` (`GET /api/v1/automation`) retired with its route
     // (#19543) — flows are listed through `GET /api/v1/meta/flow`.
-    expect(Object.keys(AutomationApiContracts)).toHaveLength(8);
+    // 8 -> 9: `cloneFlow` (`POST /api/v1/automation/:name/clone`) gained its
+    // request/response schemas (#28149, ADR-0146 D4 "new similar").
+    expect(Object.keys(AutomationApiContracts)).toHaveLength(9);
+    expect(AutomationApiContracts).toHaveProperty('cloneFlow');
   });
 
   it('declares no flow-list entry and no GET at the bare /api/v1/automation path', () => {

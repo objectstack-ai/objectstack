@@ -518,6 +518,16 @@ export {
   STUDIO_ORG_SCOPE_PILLAR,
   studioOrgScopePath,
 } from './views/studio-design/studioScope.js';
+// Studio's "All metadata" area (objectstack ADR-0146 D1): per package beside
+// the pillars, at `/studio/<package>/metadata/*`, and across packages at the
+// reserved `/studio/~all/metadata/*`. A host that declares the `/studio` routes
+// reads the segments from here, and mounts the cross-package leg's area.
+export {
+  STUDIO_METADATA_AREA,
+  STUDIO_ALL_PACKAGES_SEGMENT,
+  studioMetadataAreaPath,
+} from './views/studio-design/metadataArea.js';
+export { StudioMetadataArea } from './views/studio-design/StudioMetadataArea.js';
 
 // Setup › Packaged automation (ADR-0126 §7.4) — on/off + clone for the flows
 // installed packages ship. Reached through the `automation:packaged` component

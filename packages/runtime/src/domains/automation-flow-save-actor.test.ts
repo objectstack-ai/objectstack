@@ -36,6 +36,12 @@ import type { HttpProtocolContext } from '../http-dispatcher.js';
 /** `registry.registerObject` requires a package id (see the sibling real-stack tests). */
 const TEST_PACKAGE_ID = 'objectstack-test';
 const SOURCE = 'customer_source_flow';
+/**
+ * [#28149] A clone lands in a writable package, never package-less. SOURCE is
+ * authored in the deployment, so no package ships it and it has no paired
+ * `<base>.custom`: its copy names this installed, writable package.
+ */
+const TARGET = { id: 'com.acme.workspace', name: 'Workspace', version: '1.0.0', type: 'app', namespace: 'ws' };
 
 const definitionOf = (name: string, label: string) => ({
     name,
@@ -78,6 +84,7 @@ async function boot() {
     engine.registry.registerObject(SysMetadataHistoryObject as any, TEST_PACKAGE_ID);
     engine.registry.registerObject(SysMetadataAuditObject as any, TEST_PACKAGE_ID);
     await engine.syncSchemas();
+    engine.registry.installPackage(TARGET as any, 'code');
     const protocol = new ObjectStackProtocolImplementation(engine as any);
 
     const flows = new Map<string, unknown>([[SOURCE, definitionOf(SOURCE, 'Source')]]);
@@ -88,7 +95,7 @@ async function boot() {
         getFlow: async (name: string) => flows.get(name) ?? null,
         listFlows: async () => [...flows.keys()],
     };
-    const services: Record<string, unknown> = { protocol, automation };
+    const services: Record<string, unknown> = { protocol, automation, objectql: engine };
     const resolve = (name: string): unknown => services[name];
     const kernel: any = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
 
@@ -123,7 +130,7 @@ describe('[#27414] the /automation definition doors record the user who saved', 
     it('POST /:name/clone records the admin who cloned on the copy', async () => {
         const h = await boot();
         const result = await h.dispatcher.handleAutomation(
-            `/${SOURCE}/clone`, 'POST', { name: 'my_copy', label: 'My Copy' }, author('u_admin'), undefined,
+            `/${SOURCE}/clone`, 'POST', { name: 'my_copy', label: 'My Copy', package: TARGET.id }, author('u_admin'), undefined,
         );
         expect(statusOf(result)).toBe(200);
         expect(await h.recorded('my_copy')).toEqual({ created_by: 'u_admin', updated_by: 'u_admin', recorded_by: ['u_admin'] });
@@ -135,7 +142,7 @@ describe('[#27414] the /automation definition doors record the user who saved', 
         expect(statusOf(await h.dispatcher.handleAutomation('/sys_flow', 'PUT', { definition: definitionOf('sys_flow', 'v2') }, SYSTEM(), undefined))).toBe(200);
         expect(await h.recorded('sys_flow')).toEqual({ created_by: null, updated_by: null, recorded_by: [null, null] });
 
-        expect(statusOf(await h.dispatcher.handleAutomation(`/${SOURCE}/clone`, 'POST', { name: 'sys_copy', label: 'System Copy' }, SYSTEM(), undefined))).toBe(200);
+        expect(statusOf(await h.dispatcher.handleAutomation(`/${SOURCE}/clone`, 'POST', { name: 'sys_copy', label: 'System Copy', package: TARGET.id }, SYSTEM(), undefined))).toBe(200);
         expect(await h.recorded('sys_copy')).toEqual({ created_by: null, updated_by: null, recorded_by: [null] });
     }, 60_000);
 });

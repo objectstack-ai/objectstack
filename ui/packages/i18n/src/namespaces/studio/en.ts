@@ -3118,7 +3118,7 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#26708 — the builder's not-found states: a package id the
   // package list does not hold, and a pillar segment Studio has no pillar for.
   'engine.studio.notFound.package': 'Package not found. No package with the id "{id}" is installed here, so there is nothing to build in.',
-  'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces or Access above.',
+  'engine.studio.notFound.pillar': 'This page does not exist. Studio has no "{pillar}" section; pick Data, Automations, Interfaces, Access or All metadata above.',
   'engine.studio.aiCopilot': 'AI copilot',
   // objectui#12725 — the Studio right slot: properties OR the copilot.
   'engine.studio.slot.label': 'Right panel',
@@ -3133,6 +3133,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pillar.automations': 'Automations',
   'engine.studio.pillar.interfaces': 'Interfaces',
   'engine.studio.pillar.access': 'Access',
+  // objectstack#28561 — the "All metadata" area beside the pillars (ADR-0146 D1).
+  'engine.studio.pillar.metadata': 'All metadata',
   // Header · package-level publish + app bridge
   'engine.studio.changes': 'Changes',
   'engine.studio.publishTitle': 'Review and publish every pending draft in this package together',
@@ -3183,6 +3185,15 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.overlay': 'Open in Setup',
   'engine.studio.landing.overlayTitle': 'Open this package’s metadata: each type shows whether it accepts an environment overlay',
   'engine.studio.landing.marketplace': 'Or install a template app from the marketplace',
+  // ADR-0146 D3 — a read-only base's card says what this deployment changed on
+  // it, from the server's per-package customization read.
+  'engine.studio.landing.customizations.customized': '{customized} customized',
+  'engine.studio.landing.customizations.separator': ', ',
+  'engine.studio.landing.customizations.switchedOff': '{switchedOff} switched off',
+  'engine.studio.landing.customizations.loading': 'Reading customizations…',
+  'engine.studio.landing.customizations.failed': 'Couldn’t read customizations',
+  'engine.studio.landing.customizations.pairTitle': 'Open the customization package {pair} in Studio',
+  'engine.studio.landing.customizations.switchedOffTitle': 'Open this package’s Automations, where its items are switched on and off',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': 'Not in a package',
   'engine.studio.org.name': 'Organization flows',
@@ -3191,6 +3202,15 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
   // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
   'engine.studio.org.openSetup': 'Open in Setup',
+  // objectstack#28561 — the "All metadata" area's cross-package leg: the
+  // environment catalog, entered from the landing.
+  'engine.studio.landing.envCatalog.name': 'Environment catalog',
+  'engine.studio.landing.envCatalog.description': 'Positions, capabilities, permission sets and sharing rules, across every package.',
+  // objectstack#28561 — assignments are Setup's (ADR-0146 D7): the area links
+  // the Setup page in place of the section.
+  'engine.studio.area.assignments.position': 'The people who hold this position are assigned in Setup.',
+  'engine.studio.area.assignments.permission': 'The people this permission set is assigned to are managed in Setup.',
+  'engine.studio.area.assignments.open': 'Open in Setup',
   'engine.studio.publishedAllFlows': 'Published {count} flows',
   'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',

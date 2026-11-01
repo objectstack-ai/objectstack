@@ -46,6 +46,11 @@ vi.mock('./packages-io', async (importOriginal) => {
 
 // The create dialog is closed throughout; its form stack is not under test.
 vi.mock('../metadata-admin/PackageFormDialog', () => ({ PackageFormDialog: () => null }));
+// A read-only base's customization read (ADR-0146 D3) is not under test here:
+// it stays pending, so no request leaves the file.
+vi.mock('./packageCustomizations-io', () => ({
+  fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
+}));
 
 import { BuilderLanding } from './BuilderLanding';
 import { RecentItemsProvider } from '../../context/RecentItemsProvider';
