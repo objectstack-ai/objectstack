@@ -15,8 +15,9 @@
  *
  * The preview evaluates drafted rows in memory and hands no engine anything,
  * so it served both columns. It now judges the strategy's own keys
- * (`ObjectQLStrategy.groupByOf`, so the positions are the engine's) with this
- * function and refuses the same way.
+ * (`aggregateGroupKeys`, the function the strategy's direct path builds them
+ * with, so the positions are the engine's) on the object the strategy names
+ * (`aggregateObjectOf`), and refuses the same way.
  *
  * Why a copy and not the engine's function: `@objectstack/objectql` is a dev
  * dependency of this package, never a runtime one, and its root does not
@@ -29,7 +30,9 @@
  */
 
 import { StandardErrorCode } from '@objectstack/spec/api';
-import type { AggregateGroupKey } from './strategies/objectql-strategy.js';
+import type { AnalyticsQuery } from '@objectstack/spec/contracts';
+import type { Cube } from '@objectstack/spec/data';
+import { aggregateGroupKeys, aggregateObjectOf, type AggregateGroupKey } from './strategies/objectql-strategy.js';
 
 type GroupColumnRefusal = Error & {
   code?: string; status?: number; httpStatus?: number;
@@ -44,11 +47,13 @@ function columnOf(key: AggregateGroupKey, i: number): { column: string; path: st
 }
 
 /**
- * Refuse `groupBy` (the keys the ObjectQL strategy would hand the engine for
- * a query over `object`) when two of them project one column, with the
- * engine's refusal for it.
+ * Refuse `query` when two of the keys the ObjectQL strategy would hand the
+ * engine for it over `cube` project one column, with the engine's refusal for
+ * it.
  */
-export function assertPreviewGroupColumnsDistinct(object: string, groupBy: readonly AggregateGroupKey[]): void {
+export function assertPreviewGroupColumnsDistinct(query: AnalyticsQuery, cube: Cube): void {
+  const object = aggregateObjectOf(cube);
+  const groupBy = aggregateGroupKeys(query, cube);
   const seen = new Map<string, string>();
   for (const [i, key] of groupBy.entries()) {
     const { column, path } = columnOf(key, i);

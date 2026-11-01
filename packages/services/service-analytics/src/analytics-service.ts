@@ -1465,11 +1465,6 @@ interface CubeReads {
  */
 export class AnalyticsService implements IAnalyticsService {
   private readonly strategies: AnalyticsStrategy[];
-  /**
-   * The built-in ObjectQL strategy, held by name as well so the draft preview
-   * judges the `groupBy` it would hand the engine (#28765).
-   */
-  private readonly objectqlStrategy = new ObjectQLStrategy();
   /** Context-independent part of the StrategyContext (no per-request scope). */
   private readonly baseCtx: DatasetScopedStrategyContext;
   /** Context-aware read-scope provider (bound to the request's context per call). */
@@ -1714,7 +1709,7 @@ export class AnalyticsService implements IAnalyticsService {
     // When fallbackService is configured, an internal delegate is added at P3.
     const builtIn: AnalyticsStrategy[] = [
       new NativeSQLStrategy(),
-      this.objectqlStrategy,
+      new ObjectQLStrategy(),
     ];
 
     // Auto-add fallback delegate when fallbackService is provided
@@ -2900,7 +2895,7 @@ export class AnalyticsService implements IAnalyticsService {
             // under one name (raw beside its own bucket, or two buckets of
             // it), with the refusal the engine gives both live faces for the
             // same keys, where the evaluator served both columns.
-            assertPreviewGroupColumnsDistinct(dataset.object, this.objectqlStrategy.groupByOf(q, cube));
+            assertPreviewGroupColumnsDistinct(q, cube);
             return evaluateAnalyticsQueryOverRows(
               q,
               previewEvaluationCube(q, cube),

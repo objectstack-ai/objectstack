@@ -243,6 +243,95 @@ function pushGroupKey(groupBy: AggregateGroupKey[], item: AggregateGroupKey): vo
 }
 
 /**
+ * The member `member` resolves to in `cube`'s `kind` bag: its own key, a
+ * `<cube>.`-qualified or other dotted spelling of a key, the key with its dots
+ * flattened, or (for a dotted dimension) a synthetic relation traversal.
+ * Module-level because it reads only the cube; `ObjectQLStrategy.lookupMember`
+ * is this function.
+ */
+function lookupCubeMember(
+  cube: Cube,
+  member: string,
+  kind: 'dimension' | 'measure',
+): { sql: string; type?: string } | undefined {
+  const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
+  if (bag[member]) return bag[member];
+  if (member.includes('.')) {
+    const [first, ...rest] = member.split('.');
+    const tail = rest.join('.');
+    if (first === cube.name && bag[tail]) return bag[tail];
+    if (bag[tail]) return bag[tail];
+    const flat = member.replace(/\./g, '_');
+    if (bag[flat]) return bag[flat];
+    if (kind === 'dimension') return { sql: member, type: 'string' };
+  } else if (bag[member]) {
+    return bag[member];
+  }
+  return undefined;
+}
+
+/** The column `member` reads on the base object; `ObjectQLStrategy.resolveFieldName` is this function. */
+function resolveCubeFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
+  if (kind === 'dimension' || kind === 'any') {
+    const dim = lookupCubeMember(cube, member, 'dimension');
+    if (dim) return dim.sql.replace(/^\$/, '');
+  }
+  if (kind === 'measure' || kind === 'any') {
+    const measure = lookupCubeMember(cube, member, 'measure');
+    if (measure) return measure.sql.replace(/^\$/, '');
+  }
+  return member.includes('.') ? member.split('.')[1] : member;
+}
+
+/** The object an aggregate over `cube` runs on; `ObjectQLStrategy.extractObjectName` is this function. */
+export function aggregateObjectOf(cube: Cube): string {
+  return cube.sql.trim();
+}
+
+/**
+ * The `engine.aggregate` `groupBy` the strategy's direct path hands the engine
+ * for `query`, in order: one key per `dimensions` entry, then one per bucketed
+ * `timeDimensions` entry not also listed there, each named once
+ * ({@link pushGroupKey}).
+ *
+ * [#28765] Module-level, and not exported from the package root, so the draft
+ * preview, which hands no engine anything, judges the same keys at the same
+ * positions and refuses a selection the engine would refuse with the engine's
+ * own words (`assertPreviewGroupColumnsDistinct`). It reads only the cube.
+ */
+export function aggregateGroupKeys(query: AnalyticsQuery, cube: Cube): AggregateGroupKey[] {
+  // Build groupBy from dimensions, honouring `timeDimensions` granularity.
+  // A date dimension with a granularity becomes a STRUCTURED groupBy item
+  // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (the
+  // driver's own SQL expression, or in memory). Without this the ObjectQL
+  // path grouped raw timestamps (one bucket per row) and date-bucketed
+  // dataset widgets never matched their legacy `categoryGranularity`
+  // counterpart.
+  const granByDim = new Map<string, string>();
+  for (const td of query.timeDimensions ?? []) {
+    if (td.granularity) granByDim.set(td.dimension, td.granularity);
+  }
+  // [#28744] Each group key is named once (see {@link pushGroupKey}): two
+  // dimensions over one column (`region`, and `zone` declared over `region`)
+  // share its group, and the row mapping in `ObjectQLStrategy.execute` keys
+  // the answer by every dimension name over it.
+  const groupBy: AggregateGroupKey[] = [];
+  if (query.dimensions && query.dimensions.length > 0) {
+    for (const dim of query.dimensions) {
+      const field = resolveCubeFieldName(cube, dim, 'dimension');
+      const gran = granByDim.get(dim);
+      pushGroupKey(groupBy, gran ? { field, dateGranularity: gran } : field);
+      granByDim.delete(dim);
+    }
+  }
+  // Time dimensions not also listed in `dimensions` still bucket + group.
+  for (const [dim, gran] of granByDim) {
+    pushGroupKey(groupBy, { field: resolveCubeFieldName(cube, dim, 'dimension'), dateGranularity: gran });
+  }
+  return groupBy;
+}
+
+/**
  * ObjectQLStrategy — Priority 2
  *
  * Translates an analytics query into an ObjectQL `engine.aggregate()` call.
@@ -259,54 +348,11 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     return caps.objectqlAggregate && typeof ctx.executeAggregate === 'function';
   }
 
-  /**
-   * The `engine.aggregate` `groupBy` {@link execute} hands the engine for
-   * `query`, in order: one key per `dimensions` entry, then one per bucketed
-   * `timeDimensions` entry not also listed there, each named once
-   * ({@link pushGroupKey}).
-   *
-   * [#28765] Public so the draft preview, which hands no engine anything,
-   * judges the same keys at the same positions and refuses a selection the
-   * engine would refuse with the engine's own words
-   * ({@link assertPreviewGroupColumnsDistinct}).
-   */
-  groupByOf(query: AnalyticsQuery, cube: Cube): AggregateGroupKey[] {
-    // Build groupBy from dimensions, honouring `timeDimensions` granularity.
-    // A date dimension with a granularity becomes a STRUCTURED groupBy item
-    // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (the
-    // driver's own SQL expression, or in memory). Without this the ObjectQL
-    // path grouped raw timestamps (one bucket per row) and date-bucketed
-    // dataset widgets never matched their legacy `categoryGranularity`
-    // counterpart.
-    const granByDim = new Map<string, string>();
-    for (const td of query.timeDimensions ?? []) {
-      if (td.granularity) granByDim.set(td.dimension, td.granularity);
-    }
-    // [#28744] Each group key is named once (see {@link pushGroupKey}): two
-    // dimensions over one column (`region`, and `zone` declared over
-    // `region`) share its group, and the row mapping in {@link execute} keys
-    // the answer by every dimension name over it.
-    const groupBy: AggregateGroupKey[] = [];
-    if (query.dimensions && query.dimensions.length > 0) {
-      for (const dim of query.dimensions) {
-        const field = this.resolveFieldName(cube, dim, 'dimension');
-        const gran = granByDim.get(dim);
-        pushGroupKey(groupBy, gran ? { field, dateGranularity: gran } : field);
-        granByDim.delete(dim);
-      }
-    }
-    // Time dimensions not also listed in `dimensions` still bucket + group.
-    for (const [dim, gran] of granByDim) {
-      pushGroupKey(groupBy, { field: this.resolveFieldName(cube, dim, 'dimension'), dateGranularity: gran });
-    }
-    return groupBy;
-  }
-
   async execute(query: AnalyticsQuery, ctx: StrategyContext): Promise<AnalyticsResult> {
     const cube = ctx.getCube(query.cube!)!;
     const objectName = this.extractObjectName(cube);
 
-    const groupBy = this.groupByOf(query, cube);
+    const groupBy = aggregateGroupKeys(query, cube);
 
     // The compiled dataset's own scope (#10298 / PR #10758), read ONCE and
     // reused below for both the per-measure aggregation filter (#10413 phase
@@ -1716,21 +1762,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     member: string,
     kind: 'dimension' | 'measure',
   ): { sql: string; type?: string } | undefined {
-    const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
-    if (bag[member]) return bag[member];
-    if (member.includes('.')) {
-      const [first, ...rest] = member.split('.');
-      const tail = rest.join('.');
-      if (first === cube.name && bag[tail]) return bag[tail];
-      if (bag[tail]) return bag[tail];
-      const flat = member.replace(/\./g, '_');
-      if (bag[flat]) return bag[flat];
-      if (kind === 'dimension') return { sql: member, type: 'string' };
-    } else if (bag[member]) {
-      return bag[member];
-    }
-    return undefined;
+    return lookupCubeMember(cube, member, kind);
   }
+
 
   /**
    * [#14079] The (object, field) a filter member binds against — the echo's
@@ -1762,16 +1796,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   private resolveFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
-    if (kind === 'dimension' || kind === 'any') {
-      const dim = this.lookupMember(cube, member, 'dimension');
-      if (dim) return dim.sql.replace(/^\$/, '');
-    }
-    if (kind === 'measure' || kind === 'any') {
-      const measure = this.lookupMember(cube, member, 'measure');
-      if (measure) return measure.sql.replace(/^\$/, '');
-    }
-    return member.includes('.') ? member.split('.')[1] : member;
+    return resolveCubeFieldName(cube, member, kind);
   }
+
 
   private resolveMeasureAggregation(cube: Cube, measureName: string): { field: string; method: AggregationFunction } {
     const direct = this.lookupMember(cube, measureName, 'measure') as
@@ -2322,7 +2349,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   private extractObjectName(cube: Cube): string {
-    return cube.sql.trim();
+    return aggregateObjectOf(cube);
   }
 
   /**
