@@ -271,6 +271,88 @@ describe('validateControlFlow', () => {
   });
 });
 
+// ─── [#28055] A multi-exit region refusal prescribes the join ───────────────
+//
+// Regions stay single-exit (ADR-0031). The refusal used to name the slot and
+// the exits but not the cure, so an author whose guarded region branches found
+// the join node by trial. It now says what to add, for every container kind
+// that owns a region, at the same `where` path as before.
+describe('a multi-exit region refusal prescribes the join', () => {
+  // d → x and d → y: one entry, two exits.
+  const forked = { nodes: [node('d'), node('x'), node('y')], edges: [edge('e1', 'd', 'x'), edge('e2', 'd', 'y')] };
+  const refusalOf = (flow: unknown): string => {
+    try {
+      validateControlFlow(flow as never);
+    } catch (err) {
+      return (err as Error).message;
+    }
+    throw new Error('expected validateControlFlow to refuse the flow');
+  };
+  const expectPrescribed = (message: string, where: string) => {
+    const lead = `${where}: region must be single-exit but has 2: x, y — `;
+    expect(message.slice(0, lead.length)).toBe(lead);
+    expect(message).toMatch(/add one node with an edge from each of x, y to it, so it is the region's only exit/);
+    expect(message).toMatch(/an `assignment` node with no `config` sets nothing/);
+  };
+
+  it('a try_catch try region', () => {
+    expectPrescribed(
+      refusalOf({ nodes: [{ ...node('tc', TRY_CATCH_NODE_TYPE), config: { try: forked } }] }),
+      "try_catch 'tc' try",
+    );
+  });
+
+  it('a loop body', () => {
+    expectPrescribed(
+      refusalOf({
+        nodes: [{
+          ...node('sweep', LOOP_NODE_TYPE),
+          config: { collection: { dialect: 'cel', source: 'items' }, iteratorVariable: 'item', body: forked },
+        }],
+      }),
+      "loop 'sweep' body",
+    );
+  });
+
+  it('a parallel branch', () => {
+    expectPrescribed(
+      refusalOf({ nodes: [{ ...node('fan', PARALLEL_NODE_TYPE), config: { branches: [{ nodes: [node('a')] }, forked] } }] }),
+      "parallel 'fan' branch 1",
+    );
+  });
+
+  it('names every exit when there are more than two', () => {
+    const a = analyzeRegion({
+      nodes: [node('d'), node('x'), node('y'), node('z')],
+      edges: [edge('e1', 'd', 'x'), edge('e2', 'd', 'y'), edge('e3', 'd', 'z')],
+    });
+    expect(a.errors).toHaveLength(1);
+    expect(a.errors[0]).toMatch(/^region must be single-exit but has 3: x, y, z — add one node with an edge from each of x, y, z to it/);
+  });
+
+  it('the join it prescribes is accepted: d → x, d → y, x → j, y → j registers', () => {
+    expect(() =>
+      validateControlFlow({
+        nodes: [{
+          ...node('tc', TRY_CATCH_NODE_TYPE),
+          config: {
+            try: {
+              nodes: [...forked.nodes, node('j')],
+              edges: [...forked.edges, edge('e3', 'x', 'j'), edge('e4', 'y', 'j')],
+            },
+          },
+        }] as never,
+      }),
+    ).not.toThrow();
+  });
+
+  it('a zero-exit region keeps its own refusal, with no join prescription', () => {
+    const a = analyzeRegion({ nodes: [node('a'), node('b')], edges: [edge('e1', 'a', 'b'), edge('e2', 'b', 'a')] });
+    expect(a.errors.join(' ')).toMatch(/region has no exit node/);
+    expect(a.errors.join(' ')).not.toMatch(/add one node/);
+  });
+});
+
 // ─── [#4001 批 10] unknown keys are rejected, not stripped ──────────────────
 
 describe('control-flow strictness — an unknown key is refused, per shape', () => {
