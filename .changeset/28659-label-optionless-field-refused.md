@@ -6,7 +6,7 @@
 
 fix(formula,lint)!: a formula whose `label()` names a field that declares no options is refused at author time
 
-`label(record.FIELD)` answers on a field whose definition carries an `options` list; on any other field the evaluator faults on every row, so the formula read `null` forever with a WARN line as the only trace. The `expression-invalid` gate refused `label(record.nope)` (unknown field) and `sqrt(4)` (unregistered function) but admitted `label(record.first)` on a text field. It now refuses that too, at `os validate`, `os build`, `os lint` and the runtime object save door (one evaluation, `runRuntimeAuthoringRules`), in the evaluator's own words: `label(record.first): `first` declares no options, so it has no option label. label() reads a select field's option label; read any other field directly (record.first).`
+`label(record.FIELD)` answers on a field whose definition carries an `options` list; on any other field the evaluator faults on every row, so the formula read `null` forever with a WARN line as the only trace. The `expression-invalid` gate refused `label(record.nope)` (unknown field) and `sqrt(4)` (unregistered function) but admitted `label(record.first)` on a text field. It now refuses that too, at `os validate`, `os build`, `os lint` and the runtime object save door (one evaluation, `runRuntimeAuthoringRules`), in the evaluator's own words (the same sentence its WARN line carries), naming the field and the remedy.
 
 Clause-②: no (narrowing) — the object save door and the CLI authoring commands refuse a formula whose `label()` argument names a declared field that declares no options, which they stored before. Nothing is widened.
 
