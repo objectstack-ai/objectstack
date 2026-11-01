@@ -50,8 +50,12 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
   let foreignNoteId = '';
   let ownNoteId = '';
 
-  const call = async (token: string, method: string, path: string, body?: unknown): Promise<Answer> => {
-    const res = await stack.apiAs(token, method, path, body);
+  const call = async (token: string, method: string, path: string, body?: unknown, headers: Record<string, string> = {}): Promise<Answer> => {
+    const res = await stack.api(path, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, ...headers },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
     let parsed: unknown;
     try { parsed = await res.json(); } catch { parsed = undefined; }
     return { status: res.status, body: parsed };
@@ -161,10 +165,24 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
     expect(own.status, JSON.stringify(own.body)).toBe(200);
   });
 
+  it('measure: a stale If-Match on PATCH and DELETE, for a row and for no row', async () => {
+    const STALE = { 'If-Match': '2001-01-01T00:00:00.000Z' };
+    for (const object of ['showcase_project_membership', 'sys_user_permission_set']) {
+      const id = existing.get(object)!;
+      const patch = PATCHES[object];
+      const ph = await call(memberTok, 'PATCH', `/data/${object}/${id}`, patch, STALE);
+      const pm = await call(memberTok, 'PATCH', `/data/${object}/${MISSING}`, patch, STALE);
+      const dh = await call(memberTok, 'DELETE', `/data/${object}/${id}`, undefined, STALE);
+      const dm = await call(memberTok, 'DELETE', `/data/${object}/${MISSING}`, undefined, STALE);
+      console.log(`[measure] occ ${object} PATCH existing=${JSON.stringify(ph)} missing=${JSON.stringify(pm)}`);
+      console.log(`[measure] occ ${object} DELETE existing=${JSON.stringify(dh)} missing=${JSON.stringify(dm)}`);
+    }
+  });
+
   it('control: the administrator updates and gets 404 for no row on an ordinary object', async () => {
     const id = existing.get('showcase_project_membership')!;
-    const ok = await call(adminTok, 'PATCH', `/data/showcase_project_membership/${id}`, { engagement: 'lead' });
-    const miss = await call(adminTok, 'PATCH', `/data/showcase_project_membership/${MISSING}`, { engagement: 'lead' });
+    const ok = await call(adminTok, 'PATCH', `/data/showcase_project_membership/${id}`, { engagement: 'owner' });
+    const miss = await call(adminTok, 'PATCH', `/data/showcase_project_membership/${MISSING}`, { engagement: 'owner' });
     const extHit = await call(adminTok, 'PATCH', `/data/showcase_ext_customer/c1`, { region: 'EU' });
     const extMiss = await call(adminTok, 'PATCH', `/data/showcase_ext_customer/${MISSING}`, { region: 'EU' });
     const extDelMiss = await call(adminTok, 'DELETE', `/data/showcase_ext_customer/${MISSING}`);
