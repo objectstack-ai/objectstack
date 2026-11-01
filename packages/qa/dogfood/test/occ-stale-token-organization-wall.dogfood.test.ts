@@ -100,7 +100,7 @@ describe('behind the organization wall, a stale version token on another organiz
     carrier: Carrier,
     version = STALE,
   ): Promise<Answer> => {
-    const headers = carrier === 'If-Match' ? { 'If-Match': version } : {};
+    const headers: Record<string, string> = carrier === 'If-Match' ? { 'If-Match': version } : {};
     if (method === 'PATCH') {
       const body = carrier === 'expectedVersion' ? { ...patch, expectedVersion: version } : patch;
       return call(memberTok, 'PATCH', `/data/${object}/${id}`, body, headers);

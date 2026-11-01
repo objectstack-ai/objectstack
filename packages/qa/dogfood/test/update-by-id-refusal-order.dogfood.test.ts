@@ -137,7 +137,7 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
     carrier: Carrier,
     version = STALE,
   ): Promise<Answer> => {
-    const headers = carrier === 'If-Match' ? { 'If-Match': version } : {};
+    const headers: Record<string, string> = carrier === 'If-Match' ? { 'If-Match': version } : {};
     if (method === 'PATCH') {
       const body = carrier === 'expectedVersion' ? { ...patch, expectedVersion: version } : patch;
       return call(token, 'PATCH', `/data/${object}/${id}`, body, headers);
