@@ -111,9 +111,6 @@ vi.mock('../LocalizedSidebarTrigger', () => ({
 import { SidebarProvider } from '@object-ui/components';
 import { UnifiedSidebar } from '../UnifiedSidebar';
 
-import { SidebarProvider } from '@object-ui/components';
-import { UnifiedSidebar } from '../UnifiedSidebar';
-
 // ---------------------------------------------------------------------------
 // Fixtures — labels are pairwise distinct so a hit is unambiguous.
 // ---------------------------------------------------------------------------
