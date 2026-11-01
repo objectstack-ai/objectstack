@@ -386,7 +386,8 @@ export function StudioBundleItemEditor({
             <DropdownMenuItem
               data-testid="studio-bundle-editor-history"
               onSelect={() => {
-                const qs = new URLSearchParams({ package: packageId, ...memberScope }).toString();
+                const qs = new URLSearchParams({ package: packageId });
+                if (member) qs.set('member', member);
                 navigate(`${basePath}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/history?${qs}`);
               }}
             >
