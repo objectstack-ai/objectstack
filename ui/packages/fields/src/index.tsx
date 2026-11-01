@@ -8,7 +8,7 @@
 
 import React from 'react';
 import type { DateFieldMetadata, DateTimeFieldMetadata, FieldMetadata, SelectOptionMetadata } from '@object-ui/types';
-import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDisplayName, humanizeLabel, isEmptyValue, isMissingForRequired, formatDate, formatDateTime, formatDateTimeCompactParts, formatRelativeDate, toDisplayDate, extractRecords, withoutDeniedFields, type RegistryComponentMeta, type DateDisplayOptions } from '@object-ui/core';
+import { ComponentRegistry, percentDisplayValue, type PercentScale, getRecordDisplayName, humanizeLabel, isEmptyValue, optionDisplayLabel, isMissingForRequired, formatDate, formatDateTime, formatDateTimeCompactParts, formatRelativeDate, toDisplayDate, extractRecords, withoutDeniedFields, type RegistryComponentMeta, type DateDisplayOptions } from '@object-ui/core';
 // The platform's own value-shape contract, asked rather than restated
 // (objectui#6744). See `locationStoredValueSchemaFor` below for why this is a
 // runtime import in the barrel and not a hand-written coordinate range.
@@ -749,16 +749,61 @@ function TruncatedText({
 }
 
 /**
- * Text field cell renderer
+ * The declared option a stored value names, or `undefined`: an exact match
+ * first, then a case-insensitive one, so seed data with mixed case
+ * (`"Referral"` stored, `"referral"` declared) still resolves to the option.
+ *
+ * The one matcher of this package's cells for a field's `options` list —
+ * `SelectCellRenderer` and `TextCellRenderer` both call it, so a stored value
+ * names the same option whichever of the two draws the field.
  */
-export function TextCellRenderer({ value }: CellRendererProps): React.ReactElement {
+function findDeclaredOption(
+  options: readonly SelectOptionMetadata[],
+  val: unknown,
+): SelectOptionMetadata | undefined {
+  const exact = options.find(opt => opt.value === val);
+  if (exact) return exact;
+  const norm = String(val).toLowerCase();
+  return options.find(opt => String(opt.value).toLowerCase() === norm);
+}
+
+/**
+ * Text field cell renderer.
+ *
+ * A field that declares a non-empty `options` list reads the matching
+ * option's label (objectstack#28792). The spec allows `options` on every
+ * field type, and the other faces of the same declaration already honour it
+ * on any type: an analytics dimension (`service-analytics`'s
+ * `dimension-labels.ts`: "the condition is the declared list itself, never the
+ * field's type") and a grid group header (`plugin-grid`'s
+ * `objectGridGrouping.ts`). The test here is that same test,
+ * `Array.isArray(options) && options.length > 0`, so a text field with a list
+ * no longer reads `backlog` in its cell and `Backlog` in a chart.
+ *
+ * Display only: the stored value is untouched, a value that names no option
+ * reads as itself, and a field with no list is drawn exactly as before. The
+ * labels arrive already translated: every host that hands this cell a field
+ * (`generateColumns`, `DetailSection`) runs `translateOptions` over a
+ * non-empty list whatever the field's type, the channel `SelectCellRenderer`
+ * reads too. Only a scalar stored value is matched; an array or an expanded
+ * record keeps the coerced text, since neither is one option's code.
+ */
+export function TextCellRenderer({ value, field }: CellRendererProps): React.ReactElement {
   const safe = coerceToSafeValue(value);
   // THE FLOOR by name and nothing more (objectui#8496), on the coerced text.
   // ⛔ Deliberately NOT `isBlankCellText`: a stored `'   '` is a value of a text
   // cell and keeps its spaces — the trim belongs to the renderers that go on to
   // coerce the text into a number, a date or an `href`.
   if (isEmptyValue(safe)) return <EmptyValue />;
-  return <TruncatedText text={String(safe)} />;
+  // `options` is a spec key on every field (`FieldSchema.options`), but the
+  // per-type metadata of the types this cell draws does not name it, so it is
+  // read structurally, as `LookupCellRenderer` reads its static options.
+  const options = (field as { options?: unknown } | undefined)?.options;
+  const option =
+    Array.isArray(options) && options.length > 0 && (typeof value === 'string' || typeof value === 'number')
+      ? findDeclaredOption(options as SelectOptionMetadata[], value)
+      : undefined;
+  return <TruncatedText text={option ? optionDisplayLabel(option) : String(safe)} />;
 }
 
 /**
@@ -1980,16 +2025,9 @@ export function SelectCellRenderer({ value, field }: CellRendererProps): React.R
   // `UserCellRenderer` (an overlapping avatar stack) ask the floor too.
   if (isEmptyValue(value)) return <EmptyValue />;
 
-  // Match a stored value to a configured option, falling back to a
-  // case-insensitive comparison so seed data with mixed case
-  // (e.g. "Referral" stored, "referral" defined) still resolves to the
-  // localized option label.
-  const findOption = (val: any): SelectOptionMetadata | undefined => {
-    const exact = options.find(opt => opt.value === val);
-    if (exact) return exact;
-    const norm = String(val).toLowerCase();
-    return options.find(opt => String(opt.value).toLowerCase() === norm);
-  };
+  // Match a stored value to a configured option (`findDeclaredOption`: exact,
+  // then case-insensitive), resolving to the localized option label.
+  const findOption = (val: any): SelectOptionMetadata | undefined => findDeclaredOption(options, val);
 
   const renderOne = (val: any, key?: number): React.ReactElement => {
     const option = findOption(val);
