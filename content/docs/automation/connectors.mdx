@@ -640,14 +640,14 @@ a rotating refresh token is never spent twice.
   DELETE /api/v1/automation/connectors/:name/connection   → revoke
   ```
 
-  **In the Console**, the **Connector connections** page drives these calls.
+  **In the Console**, **Setup → Integrations → Connector Connections** drives
+  these calls; the entry is shown to holders of `manage_connector_connections`.
   It lists each `authorization_code` instance with the organization's status,
   the reason the server recorded and, for a `degraded` instance, the server's
   reason beside the connection that caused it. **Connect** and **Reconnect**
   open the vendor's sign-in in its own window, detached from the page, and the
   page shows the new status once the callback has stored it; **Disconnect**
-  revokes after a confirmation. No Setup navigation entry names the page yet:
-  it is reached from the link on **Connector Credentials**.
+  revokes after a confirmation.
 
   `GET …/:name/connection` answers the organization's status
   (`not_connected`, `connected`, `reconnect_required`), never a token. The
