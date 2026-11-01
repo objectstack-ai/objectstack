@@ -1587,6 +1587,9 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 mountPackagesRoute('get', '', () => '');
                 mountPackagesRoute('post', '', () => '');
                 mountPackagesRoute('get', '/:id/export', (req) => `/${req.params.id}/export`);
+                // ADR-0146 D8 item 4 — what this deployment changed on an
+                // installed base (overrides, extensions, switched-off items).
+                mountPackagesRoute('get', '/:id/customizations', (req) => `/${req.params.id}/customizations`);
                 mountPackagesRoute('get', '/:id', (req) => `/${req.params.id}`);
                 mountPackagesRoute('delete', '/:id', (req) => `/${req.params.id}`);
                 // Edit a package's manifest (name / description / version). `/:id`
