@@ -1620,10 +1620,11 @@ export function validateVisibilityPredicates(
 
   // ── Apps: every navigation entry's `visible` (#28663) ────────────────
   //
-  // The syntax verdict only, at the same severity as everywhere else: a nav
-  // `visible` the CEL front end refuses never evaluates, and the console's nav
-  // gate falls CLOSED on a fault, so the entry vanishes for every viewer with
-  // nothing said to its author. The family's other judgments are not run here,
+  // The CEL front end's refusal only — syntax (#28663) and over-budget
+  // (#28726) — at the same severity as everywhere else: a nav `visible` the
+  // front end refuses never evaluates, and the console's nav gate falls CLOSED
+  // on a fault, so the entry vanishes for every viewer with nothing said to its
+  // author. The family's other judgments are not run here,
   // and that is measured, not skipped: they judge references against the roots
   // a view or page binds (`record`, `current_user`, `page`), while a nav entry
   // binds `current_user`, `user`, `ctx.user`, `os.user`, `features` (and `data`
@@ -1659,6 +1660,32 @@ function navPredicateSource(v: unknown): string | undefined {
 }
 
 /**
+ * [#28726] The `visibility-predicate-over-budget` finding on a nav entry. The
+ * verdict sentence is the element one (`checkElement`'s bounds arm) with the
+ * nav consequence; the remedy differs because a nav entry binds no `record`,
+ * so neither a `record.f in [...]` collapse nor a formula field on the object
+ * is a rewrite its author can make. `exists` over the viewer's positions is the
+ * nav-shaped collapse of the usual `'a' in current_user.positions || …` chain.
+ */
+function navOverBudgetFinding(refusal: CelBoundsFault, where: string, path: string): VisibilityFinding {
+  const named = refusal.overrun.limit && refusal.overrun.limitValue !== null;
+  return {
+    severity: 'error',
+    rule: VISIBILITY_PREDICATE_OVER_BUDGET,
+    where,
+    path,
+    message:
+      `visibility predicate is syntactically valid CEL but overruns ${boundName(refusal.overrun)}` +
+      `${named ? '' : ` (${refusal.overrun.summary})`}, ${NAV_SURFACE.consequence}`,
+    // [#22161] One remedy line of at most 200 characters, so one example; the
+    // single-permission-check alternative is `os explain` for this id.
+    hint:
+      'Make the predicate smaller: collapse an `||` chain into one list test, e.g. ' +
+      "`current_user.positions.exists(p, p in ['a', 'b', …])`",
+  };
+}
+
+/**
  * Walk one navigation list — `navigation` or an area's `navigation` — and the
  * `children` of every entry in it (a `group` and an `object` entry both carry
  * them), judging each entry's `visible`. The finding is located at the key
@@ -1679,11 +1706,19 @@ function walkNavPredicates(
     const navPath = `${basePath}[${i}]`;
     const source = navPredicateSource(entry.visible);
     const refusal = source ? celRefusal(source) : null;
-    if (source && refusal?.kind === 'syntax') {
+    if (source && refusal) {
       const label = typeof entry.id === 'string' ? entry.id
         : typeof entry.label === 'string' ? entry.label
           : `#${i}`;
-      findings.push(syntaxFinding(source, refusal, `app "${appName}" · nav "${label}"`, `${navPath}.visible`, NAV_SURFACE));
+      const where = `app "${appName}" · nav "${label}"`;
+      // [#28726] Both arms of the one refusal: a nav `visible` that is valid
+      // CEL but over a `DEFAULT_LIMITS` bound faults in the console exactly as
+      // a syntax error does (measured: `[bounds] Exceeded maxAstNodes (256)`,
+      // the entry withheld), so it gets the id a page predicate of that size
+      // gets, with the nav consequence.
+      findings.push(refusal.kind === 'bounds'
+        ? navOverBudgetFinding(refusal, where, `${navPath}.visible`)
+        : syntaxFinding(source, refusal, where, `${navPath}.visible`, NAV_SURFACE));
     }
     walkNavPredicates(entry.children, `${navPath}.children`, appName, findings);
   }
