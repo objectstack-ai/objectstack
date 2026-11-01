@@ -107,6 +107,8 @@ interface BootOptions {
      * them (#28594). Absent = a registry double with no registered layer.
      */
     registered?: unknown[];
+    /** Collects every `logger.error` record the boot writes (#28594: the soft path's record). */
+    logged?: Array<{ msg: string; meta?: unknown }>;
 }
 
 /** `SchemaRegistry.getArtifactItem('connector', name, packageId)` over `registered` (#28594). */
@@ -141,6 +143,16 @@ async function boot(declared: unknown[], opts: BootOptions = {}): Promise<LiteKe
                 },
                 residualOwnerSource: (id: string) => opts.residualOwners?.[id],
             });
+            if (opts.logged) {
+                // The kernel hands every plugin the same logger, so the
+                // automation plugin's records arrive here.
+                const logged = opts.logged;
+                const original = ctx.logger.error.bind(ctx.logger);
+                ctx.logger.error = (msg: string, err?: unknown, meta?: unknown) => {
+                    logged.push({ msg, meta });
+                    return original(msg, err, meta);
+                };
+            }
             const automation = ctx.getService('automation');
             if (opts.providerFactory) {
                 automation.registerConnectorProvider(opts.providerKey ?? 'fake', opts.providerFactory, opts.providerOptions);
@@ -905,41 +917,76 @@ describe('#28594 — a definition stored in this environment is refused its pack
     const residualEntry = ownedBy(providerConnector('residual', { providerConfig: { spec } }), HOST_RESIDUAL);
     const registered = [hostEntry, residualEntry];
 
+    /**
+     * Boot over `declared` (the registry as a restart leaves it, a stored row
+     * hydrated beside the host's registrations). The boot must START: a stored
+     * entry's refused ref is logged and the entry skipped, never a failed boot.
+     */
+    async function bootOverStored(declared: unknown[], opts: BootOptions) {
+        const logged: Array<{ msg: string; meta?: unknown }> = [];
+        const kernel = await boot(declared, { ...opts, logged });
+        const recordOf = (name: string): string => {
+            const record = logged.find((l) => l.msg.includes(`connector instance '${name}'`));
+            return record === undefined ? '' : `${record.msg} ${JSON.stringify(record.meta)}`;
+        };
+        return { kernel, engine: automationOf(kernel), recordOf };
+    }
+
     it('an environment-wide stored row (no package) naming a file is refused, naming the entry, the ref and the remedy', async () => {
         const { factory, reads } = makeRefProvider();
-        const err = await rejectionOf(
-            boot([providerConnector('stored', { providerConfig: { spec } })], {
-                providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
-            }),
-        );
-        expect(err.message).toContain(`connector instance 'stored' is stored in this environment, not declared by the host's own stack`);
-        expect(err.message).toContain(`file ref '${spec}' is refused`);
-        expect(err.message).toContain('Carry the document inline in the definition, or name it by an http(s) URL.');
-        expect(err.message).not.toContain(path.resolve(fixtureRoot));
+        const { kernel, engine, recordOf } = await bootOverStored([providerConnector('stored', { providerConfig: { spec } })], {
+            providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
+        });
+        expect(engine.getRegisteredConnectors()).not.toContain('stored');
+        const record = recordOf('stored');
+        expect(record).toContain(`failed to materialize connector instance 'stored'`);
+        expect(record).toContain(`connector instance 'stored' is stored in this environment, not declared by the host's own stack`);
+        expect(record).toContain(`file ref '${spec}' is refused`);
+        expect(record).toContain('Carry the document inline in the definition, or name it by an http(s) URL.');
+        expect(record).not.toContain(path.resolve(fixtureRoot));
         expect(reads).toEqual([]);
+        await kernel.shutdown();
     });
 
     it('a row of an `authored` package is refused, naming its package', async () => {
         const { factory, reads } = makeRefProvider();
-        const err = await rejectionOf(
-            boot([ownedBy(providerConnector('authored', { providerConfig: { spec } }), AUTHORED)], {
-                providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
-            }),
+        const { kernel, engine, recordOf } = await bootOverStored(
+            [ownedBy(providerConnector('authored', { providerConfig: { spec } }), AUTHORED)],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, registered },
         );
-        expect(err.message).toContain(`connector instance 'authored' is stored in this environment (package '${AUTHORED}')`);
-        expect(err.message).toContain(`file ref '${spec}' is refused`);
+        expect(engine.getRegisteredConnectors()).not.toContain('authored');
+        expect(recordOf('authored')).toContain(`connector instance 'authored' is stored in this environment (package '${AUTHORED}')`);
+        expect(recordOf('authored')).toContain(`file ref '${spec}' is refused`);
         expect(reads).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('a row of an `authored` package whose package row the boot has not read yet is stored too, not unrecorded', async () => {
+        // On a restart the package's rows reach the boot reconcile before its
+        // package row does: no row, no residual record, nothing filed.
+        const { factory, reads } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored(
+            [ownedBy(providerConnector('authored_early', { providerConfig: { spec } }), 'com.acme.authored.unread')],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, residualOwners, registered },
+        );
+        expect(engine.getRegisteredConnectors()).not.toContain('authored_early');
+        expect(recordOf('authored_early')).toContain(
+            `connector instance 'authored_early' is stored in this environment (package 'com.acme.authored.unread')`,
+        );
+        expect(reads).toEqual([]);
+        await kernel.shutdown();
     });
 
     it('a row claiming the host\'s package that no registration filed is refused', async () => {
         const { factory, reads } = makeRefProvider();
-        const err = await rejectionOf(
-            boot([ownedBy(providerConnector('claims_host', { providerConfig: { spec } }), HOST)], {
-                providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
-            }),
+        const { kernel, engine, recordOf } = await bootOverStored(
+            [ownedBy(providerConnector('claims_host', { providerConfig: { spec } }), HOST)],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, registered },
         );
-        expect(err.message).toContain(`connector instance 'claims_host' is stored in this environment (package '${HOST}')`);
+        expect(engine.getRegisteredConnectors()).not.toContain('claims_host');
+        expect(recordOf('claims_host')).toContain(`connector instance 'claims_host' is stored in this environment (package '${HOST}')`);
         expect(reads).toEqual([]);
+        await kernel.shutdown();
     });
 
     it('a row served under the host\'s registered name with another binding is refused (reload: not materialized)', async () => {
@@ -953,16 +1000,53 @@ describe('#28594 — a definition stored in this environment is refused its pack
 
     it('resolvePackagePath takes the same rule: a stored entry asking for `.` is refused', async () => {
         const { factory, resolved } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored([providerConnector('tools', { providerConfig: { paths: ['.'] } })], {
+            providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
+        });
+        expect(engine.getRegisteredConnectors()).not.toContain('tools');
+        const record = recordOf('tools');
+        expect(record).toContain(`connector instance 'tools' is stored in this environment`);
+        expect(record).toContain(`path ref '.' is refused`);
+        expect(record).toContain('cannot serve a stored entry');
+        expect(record).not.toContain(path.resolve(fixtureRoot));
+        expect(resolved).toEqual([]);
+        await kernel.shutdown();
+    });
+
+    it('a restart over stored rows at rest starts: each refused row is skipped, and the host\'s entries beside them serve', async () => {
+        const { factory, reads, resolved } = makeRefProvider();
+        const { kernel, engine, recordOf } = await bootOverStored(
+            [
+                { ...hostEntry },
+                providerConnector('stored_file', { providerConfig: { spec } }),
+                providerConnector('stored_path', { providerConfig: { paths: ['.'] } }),
+                ownedBy(providerConnector('stored_authored', { providerConfig: { spec } }), AUTHORED),
+                providerConnector('stored_inline', { providerConfig: { spec: { openapi: '3.0.0' } } }),
+            ],
+            { providerFactory: factory, packageRoot: fixtureRoot, packages, registered },
+        );
+        const served = engine.getRegisteredConnectors();
+        expect(served).toEqual(expect.arrayContaining(['host_pkg', 'stored_inline']));
+        for (const name of ['stored_file', 'stored_path', 'stored_authored']) {
+            expect(served).not.toContain(name);
+            expect(recordOf(name)).toContain('is refused');
+        }
+        // Only the host's entry read and resolved its root.
+        expect(reads).toEqual([JSON.stringify({ openapi: '3.0.0' })]);
+        expect(resolved).toEqual([path.resolve(fixtureRoot)]);
+        await kernel.shutdown();
+    });
+
+    it('control: a configuration fault other than a refused ref (an unknown provider) still fails the boot', async () => {
+        // The soft path is the stored entry's refused ref alone; a provider the
+        // runtime does not offer keeps the fail-loud contract.
+        const { factory } = makeRefProvider();
         const err = await rejectionOf(
-            boot([providerConnector('tools', { providerConfig: { paths: ['.'] } })], {
+            boot([{ ...hostEntry, provider: 'no_such_provider' }], {
                 providerFactory: factory, packageRoot: fixtureRoot, packages, registered,
             }),
         );
-        expect(err.message).toContain(`connector instance 'tools' is stored in this environment`);
-        expect(err.message).toContain(`path ref '.' is refused`);
-        expect(err.message).toContain('cannot serve a stored entry');
-        expect(err.message).not.toContain(path.resolve(fixtureRoot));
-        expect(resolved).toEqual([]);
+        expect(err.message).toContain('host_pkg');
     });
 
     it('control: a stored entry carrying its document inline materializes — neither member is reached', async () => {

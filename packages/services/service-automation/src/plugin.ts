@@ -389,8 +389,10 @@ export function createPackagePathResolver(packageRoot?: string): (relativePath: 
  * directory), the same cross-package reach by another road. A refusal thrown
  * from the member is the factory's own failure, handled by the materializer
  * like every other configuration fault (fatal at boot, a skipped entry on
- * reload); a factory that never dereferences a ref (an inline document, an
- * http(s) URL) never meets it.
+ * reload), except a STORED entry's (#28594): that one is logged and skipped
+ * at boot too, so a row at rest never stops the platform starting. A factory
+ * that never dereferences a ref (an inline document, an http(s) URL) never
+ * meets it.
  */
 export function createInstalledPackageRefRefusal(
     connectorName: string,
@@ -552,7 +554,18 @@ export function nonHostDeclaringPackageOf(
         if (row.source !== 'code') return judgesStored ? { packageId: stamp, why: 'stored' } : undefined;
     } else {
         const residual = readers.residualOwnerSource?.(stamp);
-        if (residual !== 'code') return { packageId: stamp, why: residual === 'marketplace' ? 'installed' : 'unrecorded' };
+        if (residual === 'marketplace') return { packageId: stamp, why: 'installed' };
+        if (residual !== 'code') {
+            // [#28594] No row and no residual record, and no registration filed
+            // this entry under the package it names: a stored row. An `authored`
+            // package's rows reach the boot reconcile before its package row
+            // does, so this is where they meet it (measured on a restart).
+            const name = (entry as { name?: unknown }).name;
+            const filed = judgesStored && !carried && typeof name === 'string'
+                ? readers.registeredDeclaration!(name, stamp) !== undefined
+                : true;
+            return { packageId: stamp, why: filed ? 'unrecorded' : 'stored' };
+        }
     }
     // The host's package: only what a registration filed (or the host's own
     // artifact carried) reads its root.
@@ -3134,6 +3147,19 @@ export class AutomationServicePlugin implements Plugin {
             }
 
             const notHost = nonHostDeclaringPackageOf(entry, declaringReaders);
+            // [#28594] Set when this entry's factory met the refusal of a STORED
+            // entry's package ref, so the catch below can tell that fault apart
+            // from one the factory raised itself (a provider wraps the refusal
+            // in its own message, so the thrown value cannot say it).
+            let storedRefRefused = false;
+            const refuseRef = (member: 'reads' | 'paths'): ((relativePath: string) => Promise<never>) => {
+                const refusal = createInstalledPackageRefRefusal(name, notHost!, member);
+                if (notHost?.why !== 'stored') return refusal;
+                return async (relativePath: string) => {
+                    storedRefRefused = true;
+                    return refusal(relativePath);
+                };
+            };
             const providerCtx: ConnectorProviderContext = {
                 name,
                 label: entry.label ?? name,
@@ -3161,12 +3187,12 @@ export class AutomationServicePlugin implements Plugin {
                 // [#28594] So is a definition stored in this environment.
                 loadPackageFile: notHost === undefined
                     ? createPackageFileLoader(this.options.packageRoot)
-                    : createInstalledPackageRefRefusal(name, notHost, 'reads'),
+                    : refuseRef('reads'),
                 // #22434 — the same root as a location (e.g. a launched
                 // process's working directory), under the same confinement.
                 resolvePackagePath: notHost === undefined
                     ? createPackagePathResolver(this.options.packageRoot)
-                    : createInstalledPackageRefRefusal(name, notHost, 'paths'),
+                    : refuseRef('paths'),
             };
 
             let materialization;
@@ -3274,6 +3300,23 @@ export class AutomationServicePlugin implements Plugin {
                 // [#27992] A configuration fault met by an instance that is
                 // degraded — its backoff retry, or a reload — ends the retry:
                 // ADR-0097 does not retry a configuration fault.
+                // [#28594] A stored entry refused its package ref is the
+                // environment's row, not the host's declaration, and a row at
+                // rest is hydrated into the registry before this boot reconcile
+                // reads it. Failing the boot on it would let one stored
+                // definition (one that worked before this refusal existed) stop
+                // the platform starting, with no door left to fix it through.
+                // So it takes the soft path in BOTH modes: logged, the entry
+                // skipped, the boot carrying on. Every other configuration fault
+                // keeps the fail-loud contract.
+                if (storedRefRefused && opts.fatal) {
+                    ctx.logger.error(
+                        `[Automation] failed to materialize connector instance '${name}' via provider '${provider}' (ADR-0097).`,
+                        undefined,
+                        describeThrownForLog(thrown),
+                    );
+                    continue;
+                }
                 if (!opts.fatal && this.degradedInstances.has(name)) {
                     this.failDegradedConnectorInstance(engine, ctx, {
                         name,
