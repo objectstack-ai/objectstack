@@ -298,8 +298,11 @@ describe('ObjectGrid — the mobile card draws a masked field through its cell (
     for (const raw of [RAW.password, RAW.secretValue, RAW.status]) {
       expect(html, `${raw} is nowhere in the card`).not.toContain(raw);
     }
+    // objectstack#28484 — the subtitle SKIPS a masked value rather than
+    // drawing it, so of the three only the title draws the mask.
     const masks = (document.body.textContent ?? '').split(MASK).length - 1;
-    expect(masks, 'the title and both named fields draw the mask').toBe(3);
+    expect(masks, 'the title draws the mask; the masked subtitle values are skipped').toBe(1);
+    expect(screen.queryByText('Secret Value'), 'and no per-column label line is drawn').toBeNull();
   });
 });
 
