@@ -733,7 +733,13 @@ export const DatasourceSchema = lazySchema(() => strictObject(
     rejectUnauthorized: z.boolean().default(true).describe('Reject connections with invalid/self-signed certificates'),
     ca: z.string().optional().describe('CA certificate (PEM format or path to file)'),
     cert: z.string().optional().describe('Client certificate (PEM format or path to file)'),
-    key: z.string().optional().describe('Client private key (PEM format or path to file)'),
+    /**
+     * The client PRIVATE key: a credential VALUE (`.meta({ credential: 'value' })`),
+     * so every metadata read exit withholds it and names `ssl.key` in
+     * `redactedKeys` (`kernel/metadata-type-redaction.ts`). `ca` and `cert`
+     * are public material and stay served.
+     */
+    key: z.string().optional().describe('Client private key (PEM format or path to file)').meta({ credential: 'value' }),
   }).optional().describe('SSL/TLS configuration for secure database connections'),
 
   /** Description */
