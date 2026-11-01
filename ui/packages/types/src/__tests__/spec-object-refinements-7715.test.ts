@@ -41,7 +41,7 @@ import {
   NavigationAreaSchema as SpecNavigationAreaSchema,
   PageSchema as SpecPageSchema,
 } from '@objectstack/spec/ui';
-import { ListViewSchema, PageNodeSchema, safeValidateSchema } from '../zod/index.zod';
+import { AppComponentSchema, ListViewSchema, PageNodeSchema, safeValidateSchema } from '../zod/index.zod';
 import { asPageListView, bagPath } from './list-view-page-node';
 import { DashboardWidgetSchema, GlobalFilterSchema } from '../zod/complex.zod';
 
@@ -318,11 +318,11 @@ const SITES = [
   {
     site: 'SpecAppFields → AppComponentSchema (app.zod.ts)',
     spec: SpecAppSchema,
-    attached: [],
-    // `checkAppLandingItems` joined the spec object with `landing` (objectstack#28022, spec half):
-    // a landing `item` must name an openable entry of the app's own navigation. OWED TO the
-    // follow-up domain:ui landing card, which attaches it here together with the console redirect.
-    notAttachable: ['checkAppLandingItems'],
+    // `checkAppLandingItems` joined the spec object with `landing` (objectstack#28022, spec half)
+    // and was attached by objectstack#28450 with the console's landing redirect: a landing `item`
+    // must name an openable entry of the app's own navigation, and its `visible` reads no `data`.
+    attached: ['checkAppLandingItems'],
+    notAttachable: [],
   },
   {
     site: 'DashboardWidgetSchema (complex.zod.ts)',
@@ -551,3 +551,40 @@ describe('objectui#11073 — the DashboardWidget checks reach objectui\'s door w
   });
 });
 
+describe('objectstack#28450 — the App `landing` refusals reach objectui\'s app node with the spec\'s own issue', () => {
+  const navigation = [
+    { id: 'nav_leads', type: 'object', objectName: 'crm_lead', label: 'Leads' },
+    { id: 'grp_service', type: 'group', label: 'Service', children: [{ id: 'nav_cases', type: 'object', objectName: 'crm_case', label: 'Cases' }] },
+  ];
+  const specApp = (landing: unknown[]) => ({ name: 'crm', label: 'CRM', navigation, landing });
+  const appNode = (landing: unknown[]) => ({ type: 'app', name: 'crm', navigation, landing });
+  const agents = "'service_agent' in current_user.positions";
+
+  it.each([
+    ['an `item` that names no entry of the app', [{ item: 'nav_missing', visible: agents }], 'landing.0.item'],
+    ['an `item` that names a `group`', [{ item: 'grp_service', visible: agents }], 'landing.0.item'],
+    ['a `visible` that reads `data`', [{ item: 'nav_cases', visible: 'data.total > 0' }], 'landing.0.visible'],
+  ])('%s: the spec refuses it, and objectui refuses with the spec\'s own issue, mirror and published door', (_label, landing, at) => {
+    const spec = SpecAppSchema.safeParse(specApp(landing));
+    expect(spec.success).toBe(false);
+    const specIssue = spec.error!.issues.find((i) => i.path.join('.') === at);
+    expect(specIssue?.code).toBe('custom');
+
+    for (const r of [AppComponentSchema.safeParse(appNode(landing)), safeValidateSchema(appNode(landing))]) {
+      expect(r.success).toBe(false);
+      expect(r.error!.issues.map((i) => ({ code: i.code, path: i.path.join('.'), message: i.message })))
+        .toContainEqual({ code: 'custom', path: at, message: specIssue!.message });
+    }
+  });
+
+  it('controls: a landing on an entry inside a group, and an app with no landing, pass on the spec and both doors', () => {
+    for (const landing of [[{ item: 'nav_cases', visible: agents }], undefined]) {
+      const spec = landing ? specApp(landing) : { name: 'crm', label: 'CRM', navigation };
+      const node = landing ? appNode(landing) : { type: 'app', name: 'crm', navigation };
+      expect(SpecAppSchema.safeParse(spec).success).toBe(true);
+      const mirror = AppComponentSchema.safeParse(node);
+      expect(mirror.success, JSON.stringify(mirror.error?.issues)).toBe(true);
+      expect(safeValidateSchema(node).success).toBe(true);
+    }
+  });
+});

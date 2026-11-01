@@ -153,6 +153,23 @@ export const SysAutomationRun = ObjectSchema.create({
 
     flow_version: Field.number({ label: 'Flow Version', required: false, group: 'Identity' }),
 
+    // [#28405, ADR-0146 D9 item 4] The content identity of the flow body the
+    // run is executing — `hashSpec(body, 'flow')`, the checksum
+    // `sys_metadata_history` keys a stored flow's versions by. A resume
+    // continues on the body with this identity, not on the definition
+    // registered under `flow_name` now; `flow_version` stays the author's
+    // display number. Nullable: a row written before this column reads as "no
+    // identity" and resumes on the registered definition, as before. On a
+    // terminal row it is written only beside a consumed suspension (the
+    // snapshot columns below), so a restore re-arms the pause pinned to it.
+    flow_checksum: Field.text({
+      label: 'Flow Checksum',
+      required: false,
+      maxLength: 80,
+      group: 'Identity',
+      description: 'Content checksum of the flow definition the run started on; a waiting run resumes on that definition even after the flow is republished. Empty on runs recorded before checksums were kept.',
+    }),
+
     // [#13937] The stranded-class carve-out in this description mirrors
     // `node_type`'s below, for the same reason: the restore verb re-arms the
     // pause from this column (`ObjectStoreSuspendedRunStore` rebuilds the

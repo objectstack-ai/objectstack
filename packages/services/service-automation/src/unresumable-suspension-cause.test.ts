@@ -14,6 +14,8 @@
  * What these pins hold:
  *  - the probe's cause is byte-for-byte the `error` the resume then answers
  *    `RUN_NOT_FOUND` with, for both causes — one classification, not two;
+ *  - [#28405] a republish that edits the parked node away is no cause for a
+ *    run that recorded the body it started on: it resumes on that body;
  *  - it is a read: the parked row is untouched until the resume settles it;
  *  - a live suspension and a missing one both answer `undefined` (the second
  *    is `hasSuspendedRun`'s answer to give);
@@ -97,10 +99,34 @@ describe('unresumableSuspensionCause: the resume\'s never-dispatched question, a
         expect(resumed.error, 'one classification, not two').toBe(cause);
     });
 
-    it('parked node edited away: the cause is the resume\'s own text too', async () => {
+    // [#28405] Re-judged: a run records the body it started on and resumes on
+    // it, so editing its parked node away in a republish no longer ends it.
+    // The node-gone cause stays the answer for a run with no recorded
+    // identity — a row written before the field — pinned beside the rest of
+    // the card in `flow-version-pinning.test.ts`.
+    it('parked node edited away by a republish: the run is pinned to the body it started on, so there is no cause and it finishes', async () => {
         const store = new InMemorySuspendedRunStore();
         const engine = engineOver(store);
         const runId = await park(engine, 'edited_flow');
+
+        engine.registerFlow('edited_flow', holdFlow('edited_flow', { withHold: false }) as never);
+
+        expect(await engine.unresumableSuspensionCause(runId)).toBeUndefined();
+        expect((await store.load(runId))?.nodeId).toBe('hold');
+
+        const resumed = await engine.resume(runId);
+        expect(resumed.success, JSON.stringify(resumed)).toBe(true);
+        expect(resumed.code, 'no longer RUN_NOT_FOUND').toBeUndefined();
+    });
+
+    it('parked node edited away on a run that recorded no identity: the cause is the resume\'s own text too', async () => {
+        const store = new InMemorySuspendedRunStore();
+        const engine = engineOver(store);
+        const runId = await park(engine, 'edited_flow');
+        const row = (await store.load(runId))!;
+        delete row.flowChecksum;
+        await store.save(row);
+        (engine as unknown as { suspendedRuns: Map<string, unknown> }).suspendedRuns.delete(runId);
 
         engine.registerFlow('edited_flow', holdFlow('edited_flow', { withHold: false }) as never);
 

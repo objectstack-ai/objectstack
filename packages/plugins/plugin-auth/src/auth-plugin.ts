@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 // [#25083] `isCloudManaged`: the ONE accessor the cloud-managed doors below ask.
+import { serveAgentForwardAtIdentityMount } from './agent-forward-identity-view.js';
 import { Plugin, PluginContext, IHttpServer, isCloudManaged, resolveRequestExecutionContext, type RequestAuthService } from '@objectstack/core';
 import type { BetterAuthOptions } from 'better-auth';
 import {
@@ -3082,6 +3083,24 @@ export class AuthPlugin implements Plugin {
       }
       return next();
     });
+
+    // ── ADR-0090 D10 rule 5 (#28367) — the agent forward credential ───────
+    // An AI agent's `api` action forwarded to an identity route reaches this
+    // mount carrying a credential the action door minted for that one forward,
+    // never the agent's token. Resolved HERE, before any route below runs —
+    // the vendor catch-all (`handleRequest`) and the platform's raw mounts
+    // (`/admin/ban-user`, …) alike, which is why the seam is this middleware
+    // and not `handleRequest` alone — into a request-scoped view of the
+    // delegating user: no session of record, nothing that outlives the
+    // request, no credential header back to the agent. Registered after the
+    // D5 allow-list, so a forward is judged by the same network gate. A
+    // credential that does not redeem resolves as nobody. See
+    // `agent-forward-identity-view.ts`.
+    // Inlined so the wildcard fall-through guard (#4116) can read that it
+    // yields: every branch of the seam hands the request on to `next`.
+    if (typeof rawApp.use === 'function') {
+      rawApp.use(`${basePath}/*`, (c: any, next: () => Promise<void>) => serveAgentForwardAtIdentityMount(c, next));
+    }
 
     // Register /config before the wildcard so it takes precedence.
     // better-auth has no /config endpoint, so without this explicit route

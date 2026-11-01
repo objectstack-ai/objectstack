@@ -154,19 +154,17 @@ describe('publish-drafts request body conforms to PublishPackageDraftsRequestSch
         expect(bodyMembersSent(sent)).toEqual({});
     });
 
-    it('today the ADR-0045 app re-save after the publish still forwards a body `actor` (the one undeclared read left)', async () => {
-        // The publish itself records the caller (above); the visibility flip
-        // that re-saves each unpublished app afterwards still passes a body
-        // `actor` to `saveMetaItem`. Removing that read is the sibling-door
-        // card's (the six package doors' actor fix). When it lands this pin
-        // goes red: flip it to `USER`/absent and drop the sentence about it
-        // from the publish-drafts row note in `route-ledger.ts`.
+    it('the ADR-0045 app re-save after the publish records the caller too: a body `actor` reaches no write', async () => {
+        // [#28414] The visibility flip that re-saves each unpublished app
+        // afterwards used to pass a body `actor` to `saveMetaItem`, the one
+        // undeclared read left on this door. It now records the publisher, as
+        // the publish itself does (`resolvePackageWriteActor`).
         const { saveMetaItem } = await publishWith(
             { actor: 'someone_else' },
             [{ name: 'crm', label: 'CRM', _unpublished: true }],
         );
         expect(saveMetaItem).toHaveBeenCalledTimes(1);
-        expect((saveMetaItem.mock.calls[0]![0] as Record<string, unknown>).actor).toBe('someone_else');
+        expect((saveMetaItem.mock.calls[0]![0] as Record<string, unknown>).actor).toBe(USER);
     });
 });
 

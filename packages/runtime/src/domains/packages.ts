@@ -226,6 +226,11 @@ export type PackagesDomainProtocol =
          * are the published `EnsureCustomizationPackage*Schema` pair.
          */
         ensureCustomizationPackage?: ObjectStackProtocolImplementation['ensureCustomizationPackage'];
+        /**
+         * [#28409] The per-package layer the export reads, typed from the
+         * producer's own signature as above.
+         */
+        getMetaItemsPerPackage?: ObjectStackProtocolImplementation['getMetaItemsPerPackage'];
         /** ⚠️ Undeclared request shapes — see "Where the ledger honestly ends". */
         publishPackageDrafts?(request: any): Promise<any>;
         discardPackageDrafts?(request: any): Promise<any>;
@@ -362,9 +367,14 @@ function requireManageMetadata(deps: DomainHandlerDeps, context: HttpProtocolCon
  * Never the request body: a body `actor` let any caller holding
  * `manage_metadata` record any name as the one who changed a package. This is
  * the rule `RestServer.resolveMetaWriteActor` holds for the `/meta` write
- * doors, so attribution cannot drift from authorization. Only
- * `publish-drafts` reads it today; the sibling package doors that still read
- * `body.actor` are carried by their own card.
+ * doors, so attribution cannot drift from authorization. [#28414] Every
+ * package door that stamps history or a commit reads it: `publish-drafts`
+ * (and its app re-save), `discard-drafts`, `commits/:commitId/revert`,
+ * `rollback`, `adopt-orphans` and `duplicate`. A body `actor` is ignored, not
+ * refused, so a client still sending one keeps working and is recorded as
+ * itself. No caller acts on behalf of another identity through these doors
+ * (measured: the console and the SDK send none, the CLI calls none); one that
+ * must is served server-side by calling the protocol with its own `actor`.
  */
 function resolvePackageWriteActor(context: HttpProtocolContext | undefined): string | undefined {
     const userId: unknown = (context?.executionContext as { userId?: unknown } | undefined)?.userId;
@@ -2120,7 +2130,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                                         name: app.name,
                                         item,
                                         packageId: id,
-                                        ...(body?.actor ? { actor: body.actor } : {}),
+                                        ...(actor !== undefined ? { actor } : {}),
                                     });
                                     flipped.push(app.name);
                                 }
@@ -2283,9 +2293,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.discardPackageDrafts === 'function') {
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.discardPackageDrafts({
                         packageId: id,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     // The twin of `publish-drafts`' 404: an empty discard is the
                     // answer for a package that exists — see `packageIsUnknown`.
@@ -2345,9 +2356,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.revertCommit({
                         commitId,
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -2371,9 +2383,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
                 }
                 try {
+                    const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
-                        ...(body?.actor ? { actor: body.actor } : {}),
+                        ...(actor !== undefined ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
                 } catch (e: any) {
@@ -2466,9 +2479,10 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 return { handled: true, response: deps.error('Orphan adoption not supported', 501) };
             }
             try {
+                const actor = resolvePackageWriteActor(_context);
                 const result = await protocol.reassignOrphanedMetadata({
                     targetPackageId: id,
-                    ...(body?.actor ? { actor: body.actor } : {}),
+                    ...(actor !== undefined ? { actor } : {}),
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
@@ -2508,12 +2522,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // loop, so a refusal any later still leaves the empty shell behind.
             const notABase = requireDuplicableSource(deps, qlService, id); if (notABase) return notABase;
             try {
+                const actor = resolvePackageWriteActor(_context);
                 const result = await protocol.duplicatePackage({
                     sourcePackageId: id,
                     targetPackageId,
                     ...(typeof body?.targetName === 'string' ? { targetName: body.targetName } : {}),
                     ...(typeof body?.targetNamespace === 'string' ? { targetNamespace: body.targetNamespace } : {}),
-                    ...(body?.actor ? { actor: body.actor } : {}),
+                    ...(actor !== undefined ? { actor } : {}),
                 });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
@@ -3003,7 +3018,15 @@ context: HttpProtocolContext,
             // getMetaItems applies the packageId filter at the
             // registry/overlay query level, so the returned items are
             // already scoped to this package — no client-side re-filter.
-            const res = await protocol.getMetaItems({ type: singular, packageId });
+            // [#28409, ADR-0146 D8 item 3] A package exports its OWN items:
+            // the per-package layer, where the protocol serves one, never the
+            // effective read that serves a base's name with its pair's
+            // declared override. So the base's export carries the base
+            // unchanged, and its `.custom` pair's export carries the
+            // overriding item with its `overrides` block.
+            const res = typeof protocol.getMetaItemsPerPackage === 'function'
+                ? await protocol.getMetaItemsPerPackage({ type: singular, packageId })
+                : await protocol.getMetaItems({ type: singular, packageId });
             items = Array.isArray(res?.items) ? res.items : [];
         } catch {
             // Unknown/unsupported type for this runtime — skip.

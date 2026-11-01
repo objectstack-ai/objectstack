@@ -412,7 +412,10 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
  * console's sidebar always wires an action dispatcher, so it draws one. A `doc`
  * entry is kept as served: the sidebar's doc-readability answer is defence in
  * depth behind the server, which already drops an unreadable one
- * (objectstack#19790), and no consumer of this function lands on a `doc`.
+ * (objectstack#19790). The console's app-root landing reads these trees and
+ * does land on a `doc` entry an app's `landing` names (objectstack#28450): it
+ * opens the in-app docs portal, under the server's audience gate on the doc,
+ * without the sidebar's doc-readability answer.
  */
 export function navEntriesShownToMember(items: NavigationItem[], gates: NavMemberGates): NavigationItem[] {
   const guards: NavigationVisibilityOptions = {

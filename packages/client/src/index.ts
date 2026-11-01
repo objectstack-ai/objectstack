@@ -3046,7 +3046,7 @@ export class ObjectStackClient {
     },
 
     /** ADR-0033: drop every pending draft bound to the package. */
-    discardDrafts: async (id: string, opts?: { actor?: string }): Promise<DiscardPackageDraftsResponse> => {
+    discardDrafts: async (id: string, opts?: { /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */ actor?: string }): Promise<DiscardPackageDraftsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/discard-drafts`, {
             method: 'POST',
@@ -3067,7 +3067,7 @@ export class ObjectStackClient {
     },
 
     /** ADR-0067: revert ONE commit (the revert is itself a commit). */
-    revertCommit: async (id: string, commitId: string, opts?: { actor?: string }): Promise<RevertPackageCommitResponse> => {
+    revertCommit: async (id: string, commitId: string, opts?: { /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */ actor?: string }): Promise<RevertPackageCommitResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(
             `${this.baseUrl}${route}/${encodeURIComponent(id)}/commits/${encodeURIComponent(commitId)}/revert`,
@@ -3077,7 +3077,7 @@ export class ObjectStackClient {
     },
 
     /** ADR-0067: roll back through all commits newer than `commitId`. */
-    rollback: async (id: string, commitId: string, opts?: { actor?: string }): Promise<RollbackToPackageCommitResponse> => {
+    rollback: async (id: string, commitId: string, opts?: { /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */ actor?: string }): Promise<RollbackToPackageCommitResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/rollback`, {
             method: 'POST',
@@ -3110,7 +3110,7 @@ export class ObjectStackClient {
     },
 
     /** ADR-0070 D5: bulk-rebind package-less (orphaned) metadata into this base. */
-    adoptOrphans: async (id: string, opts?: { actor?: string }): Promise<ReassignOrphanedMetadataResponse> => {
+    adoptOrphans: async (id: string, opts?: { /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */ actor?: string }): Promise<ReassignOrphanedMetadataResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/adopt-orphans`, {
             method: 'POST',
@@ -3127,7 +3127,12 @@ export class ObjectStackClient {
     duplicate: async (
         id: string,
         targetPackageId: string,
-        opts?: { targetName?: string; targetNamespace?: string; actor?: string },
+        opts?: {
+            targetName?: string;
+            targetNamespace?: string;
+            /** @deprecated Ignored: the server records the signed-in caller, never a name the request supplies. */
+            actor?: string;
+        },
     ): Promise<DuplicatePackageResponse> => {
         // ⚠ `success` on the returned payload is the OPERATION's verdict
         // (false for a partial or empty duplicate) — the envelope-level
