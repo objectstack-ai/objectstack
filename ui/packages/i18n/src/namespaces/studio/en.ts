@@ -3183,6 +3183,15 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.landing.overlay': 'Open in Setup',
   'engine.studio.landing.overlayTitle': 'Open this package’s metadata: each type shows whether it accepts an environment overlay',
   'engine.studio.landing.marketplace': 'Or install a template app from the marketplace',
+  // ADR-0146 D3 — a read-only base's card says what this deployment changed on
+  // it, from the server's per-package customization read.
+  'engine.studio.landing.customizations.customized': '{customized} customized',
+  'engine.studio.landing.customizations.separator': ', ',
+  'engine.studio.landing.customizations.switchedOff': '{switchedOff} switched off',
+  'engine.studio.landing.customizations.loading': 'Reading customizations…',
+  'engine.studio.landing.customizations.failed': 'Couldn’t read customizations',
+  'engine.studio.landing.customizations.pairTitle': 'Open the customization package {pair} in Studio',
+  'engine.studio.landing.customizations.switchedOffTitle': 'Open this package’s Automations, where its items are switched on and off',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': 'Not in a package',
   'engine.studio.org.name': 'Organization flows',

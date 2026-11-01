@@ -2825,6 +2825,13 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.overlay': '在设置中打开',
   'engine.studio.landing.overlayTitle': '打开该软件包的元数据：每种类型都会标明是否接受环境覆盖',
   'engine.studio.landing.marketplace': '或从应用市场安装一个模板应用',
+  'engine.studio.landing.customizations.customized': '已定制 {customized} 项',
+  'engine.studio.landing.customizations.separator': '，',
+  'engine.studio.landing.customizations.switchedOff': '已停用 {switchedOff} 项',
+  'engine.studio.landing.customizations.loading': '正在读取定制…',
+  'engine.studio.landing.customizations.failed': '无法读取定制',
+  'engine.studio.landing.customizations.pairTitle': '在 Studio 中打开定制包 {pair}',
+  'engine.studio.landing.customizations.switchedOffTitle': '打开该软件包的自动化，在那里启用或停用其中的项',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': '不属于软件包',
   'engine.studio.org.name': '组织流程',
