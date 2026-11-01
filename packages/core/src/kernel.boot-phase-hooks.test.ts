@@ -124,6 +124,7 @@ describe('ObjectKernel bootPhaseHooks', () => {
             const reader: Plugin = {
                 name: 'test.reader',
                 version: '1.0.0',
+                init: async () => {},
                 start: async (ctx) => { read.push(ctx.getKernel().dispatchesBootPhaseHooks()); },
             };
             const kernel = track(newKernel({ bootPhaseHooks: false }));
@@ -243,6 +244,7 @@ describe('ObjectKernel bootPhaseHooks', () => {
             const reader: Plugin = {
                 name: 'test.reader',
                 version: '1.0.0',
+                init: async () => {},
                 start: async (ctx) => { read.push(ctx.getKernel().dispatchesBootPhaseHooks()); },
             };
             const kernel = track(newKernel(extra));
