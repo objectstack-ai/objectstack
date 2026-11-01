@@ -56,7 +56,7 @@ const CREDENTIAL_WORDS = new Set([
   'secret', 'secrets', 'password', 'passwords', 'passwd', 'token', 'tokens',
   'signing', 'credential', 'credentials',
 ]);
-const DESCRIPTION_RULE = /\b(secrets?|passwords?|passwd|tokens?|signing|credentials?|api[ _-]?keys?)\b/i;
+const DESCRIPTION_RULE = /\b(secrets?|passwords?|passwd|passphrases?|tokens?|signing|credentials?|api[ _-]?keys?|private[ _-]?keys?)\b/i;
 const CAN_HOLD_A_CREDENTIAL = new Set(['string', 'record', 'union', 'unknown', 'any', 'template_literal']);
 
 const wordsOf = (key: string): string[] =>

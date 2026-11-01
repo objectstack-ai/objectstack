@@ -73,6 +73,14 @@ import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js'
 import { buildPackageScopeOptions } from './package-scope.js';
 import { ENVIRONMENT_SCOPE_QUERY, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
+import { customizationPackageId } from '@objectstack/spec/kernel';
+import { CustomizationMark, usePackageCustomizations } from '../studio-design/CustomizationMark.js';
+import {
+  customizationBaseOfRow,
+  customizationMarkOf,
+  customizationTotal,
+  type CustomizationMarkKind,
+} from '../studio-design/customizationMarks.js';
 import {
   audienceAnchorsOf,
   hasCatalogActivation,
@@ -195,6 +203,19 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // package scope is the area's, never picked or repaired here, and a
   // read-only package offers no create.
   const host = useMetadataAreaHost();
+  // objectstack ADR-0146 D3 (#28568) — "On top, one surface": with a base open
+  // in the area, its list holds the base's items and its paired
+  // `<base>.custom` package's items together, each item of the pair marked
+  // from the server's customization read ("customized (base)" for a served
+  // override, "added" for the rest), filterable to those alone. A pending or
+  // failed read draws no mark; Setup (no host) reads nothing.
+  const customizations = usePackageCustomizations(host?.packageId ?? null);
+  const pairId = React.useMemo(() => {
+    if (!host?.packageId) return null;
+    const pair = customizationPackageId(host.packageId);
+    return pair.ok ? pair.value : null;
+  }, [host?.packageId]);
+  const [onlyCustomized, setOnlyCustomized] = React.useState(false);
   // objectstack#27356 — under Setup the header names the page as the sidebar
   // entry that opens it does ("Positions"); the type's label otherwise.
   const { app } = useExpressionContext();
@@ -548,15 +569,45 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         // Only rows tagged with the active writable base match. Untagged /
         // `sys_metadata`-provenance legacy rows have no scope of their own
         // (ADR-0070 D5 — the package-less "Local / Custom" scope is removed).
-        return pkg === activePackage;
+        // Under the area a base's list also holds its pair's items (ADR-0146 D3).
+        return pkg === activePackage || (pairId !== null && pkg === pairId);
       }),
-    [items, activePackage, config, envScope],
+    [items, activePackage, config, envScope, pairId],
   );
+
+  // The customization mark of each row, from the base's served read only.
+  const markPrimaryKey = config.primaryKey ?? 'name';
+  const markMemberField = config.bundleMemberField;
+  const markOf = React.useCallback(
+    (row: ItemRow): CustomizationMarkKind | null => {
+      if (customizations.status !== 'read') return null;
+      return customizationMarkOf(
+        {
+          type,
+          name: String(row.item[markPrimaryKey] ?? ''),
+          member: bundleMemberOf(row.item, markMemberField),
+          packageId: (row.item as { _packageId?: string })._packageId,
+        },
+        customizations.index,
+      );
+    },
+    [customizations, markPrimaryKey, markMemberField, type],
+  );
+  const markedCount = React.useMemo(
+    () => scopedItems.filter((row) => markOf(row) !== null).length,
+    [scopedItems, markOf],
+  );
+  // The filter is offered once the read has answered and the base has a
+  // customization to show; a base with no pair is unchanged.
+  const showCustomizedFilter =
+    customizations.status === 'read' && (markedCount > 0 || customizationTotal(customizations.read) > 0);
+  const filteringCustomized = onlyCustomized && showCustomizedFilter;
 
   // User-driven filters (search query + source provenance) on top of scope.
   const filtered = scopedItems.filter((row) => {
     if (!matchesQuery(row.item, query, searchableFields)) return false;
     if (sourceFilter !== 'all' && row.source !== sourceFilter) return false;
+    if (filteringCustomized && markOf(row) === null) return false;
     if (activation && statusFilter !== 'all') {
       // Only a KNOWN state filters: while the ledger is unread or unreadable,
       // no item is either active or inactive to this filter.
@@ -719,7 +770,24 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
               </SelectContent>
             </Select>
           )}
+          {showCustomizedFilter && (
+            <Button
+              size="sm"
+              variant={filteringCustomized ? 'default' : 'outline'}
+              className={inSetup ? 'h-8 rounded-full px-3 text-xs' : undefined}
+              aria-pressed={filteringCustomized}
+              onClick={() => setOnlyCustomized((v) => !v)}
+              data-testid="metadata-only-customizations"
+            >
+              {tFormat('engine.list.customizations.only', locale, { marked: markedCount })}
+            </Button>
+          )}
         </div>
+        {customizations.status === 'failed' && (
+          <div className="text-xs text-muted-foreground" data-testid="metadata-customizations-failed">
+            {tFormat('engine.customizationMark.readFailed', locale, { message: customizations.message })}
+          </div>
+        )}
 
         {/* objectui#7611 — the environment scope says WHY a caller cannot
             define here, in the posture's own terms (#22621 → A): under
@@ -924,6 +992,22 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                     rowEditSuffix,
                     rowMember ? `${BUNDLE_MEMBER_PARAM}=${encodeURIComponent(rowMember)}` : '',
                   )}`;
+                  // ADR-0146 D3 — the row's customization mark: under a base,
+                  // from its served read; in the cross-package leg, an item of a
+                  // pair names its base.
+                  const mark = markOf(row);
+                  const pairBase = host && host.packageId === null ? customizationBaseOfRow(rowPkg) : null;
+                  const markNode =
+                    mark && customizations.status === 'read' ? (
+                      <CustomizationMark
+                        kind={mark}
+                        baseName={customizations.baseName}
+                        pairId={customizations.index.pairId}
+                        locale={locale}
+                      />
+                    ) : pairBase ? (
+                      <CustomizationMark kind="customizationOf" baseName={pairBase} pairId={rowPkg} locale={locale} />
+                    ) : null;
                   return (
                     <tr
                       key={name + i}
@@ -985,6 +1069,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
                                     {cell}
                                   </Link>
                                 )}
+                                {markNode}
                               </span>
                             ) : inSetup && c.key === 'description' && typeof value === 'string' && value !== '' ? (
                               // objectstack#27356 — two lines at most, so a row

@@ -41,6 +41,8 @@ import { buildPackageScopeOptions } from './package-scope.js';
 import { diagnosticsHeaderTone, type DiagnosticsHeaderTone } from './diagnostics-tone.js';
 import { ENVIRONMENT_AREA_TYPES, SETUP_DATASOURCES_PATH, useMetadataAreaHost } from './metadataAreaHost.js';
 import { ENVIRONMENT_SCOPE_QUERY } from './catalog-scope.js';
+import { usePackageCustomizations } from '../studio-design/CustomizationMark.js';
+import { customizationCountsByType, customizationTotal } from '../studio-design/customizationMarks.js';
 
 /**
  * The "View all issues" link's look per sweep tone (objectui#12768). The
@@ -169,6 +171,15 @@ export function MetadataDirectoryPage() {
   } = useGlobalDiagnostics(client, 'warning', activePackage ?? undefined);
   const diagTone = diagnosticsHeaderTone(diagSummary.entries);
 
+  // objectstack ADR-0146 D3 (#28568) — under the area, a base's directory
+  // counts its customizations: each tile the type's, the header the base's
+  // total, all from the server's customization read. Setup reads nothing.
+  const customizations = usePackageCustomizations(host?.packageId ?? null);
+  const customizedByType = React.useMemo(
+    () => (customizations.status === 'read' ? customizationCountsByType(customizations.read) : null),
+    [customizations],
+  );
+
   // Base set: visible (non-hidden) metadata types contributed by the active
   // project package. Fail closed — show nothing until a concrete project
   // package is active, so system-only types never surface.
@@ -248,6 +259,19 @@ export function MetadataDirectoryPage() {
             }),
           }}
         />
+        {customizations.status === 'read' && customizationTotal(customizations.read) > 0 && (
+          <p className="text-sm text-muted-foreground mt-1" data-testid="directory-customizations-total">
+            {tFormat('engine.directory.customizations.total', locale, {
+              customized: customizationTotal(customizations.read),
+              baseName: customizations.baseName,
+            })}
+          </p>
+        )}
+        {customizations.status === 'failed' && (
+          <p className="text-xs text-muted-foreground mt-1" data-testid="directory-customizations-failed">
+            {tFormat('engine.customizationMark.readFailed', locale, { message: customizations.message })}
+          </p>
+        )}
 
         {/* Filter row */}
         <div className="flex items-center gap-3 mt-4 flex-wrap">
@@ -348,6 +372,7 @@ export function MetadataDirectoryPage() {
                       warnCount={warnByType[e.type] ?? 0}
                       lockedCount={lockedByType[e.type] ?? 0}
                       itemCount={totalCount}
+                      customizedCount={customizedByType?.[e.type]}
                       packageFilter={activePackage ?? undefined}
                       environmentScope={!!host && host.packageId === null}
                       // ADR-0146 D1 — under the area, the datasource tile
@@ -409,6 +434,7 @@ function TypeTile({
   packageFilter,
   environmentScope = false,
   href: hrefOverride,
+  customizedCount,
 }: {
   entry: RichMetadataTypeEntry;
   locale?: string;
@@ -423,6 +449,8 @@ function TypeTile({
   environmentScope?: boolean;
   /** Where the tile leads instead of the type's list (the Studio area's datasource tile). */
   href?: string;
+  /** The type's served customization count (ADR-0146 D3); absent while unread, failed, or none. */
+  customizedCount?: number;
 }) {
   // Prefer the locale-table translation; fall back to server's `label` (typically English).
   const label = translateMetadataType(entry.type, locale, entry.label);
@@ -467,6 +495,16 @@ function TypeTile({
           >
             {itemCount}
           </Badge>
+          {customizedCount !== undefined && customizedCount > 0 && (
+            <Badge
+              variant="outline"
+              className="text-[10px] tabular-nums border-violet-500/40 text-violet-700 dark:text-violet-300 bg-violet-500/[0.06]"
+              title={tFormat('engine.directory.customizations.tileTitle', locale ?? 'en', { customized: customizedCount })}
+              data-testid={`directory-tile-customized-${entry.type}`}
+            >
+              {tFormat('engine.directory.customizations.tile', locale ?? 'en', { customized: customizedCount })}
+            </Badge>
+          )}
           {invalidCount > 0 && (
             <Badge
               variant="outline"
