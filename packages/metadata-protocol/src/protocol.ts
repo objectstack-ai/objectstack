@@ -15222,9 +15222,10 @@ export class ObjectStackProtocolImplementation implements
      * `atomic=false`). It used to change a second — forbidding the upsert
      * fallback insert, whose failure inside an aborted transaction could only
      * mask the real cause — until #5099 removed that fallback from BOTH arms:
-     * the upsert fork is decided by an existence probe before any write, so a
-     * fallback insert could only bury a real update failure under the
-     * duplicate-key error of inserting a row just proven to exist.
+     * the upsert fork is decided before any write (by what the caller can
+     * read, since the fork's own note says why), so a fallback insert could
+     * only bury a real update failure under the duplicate-key error of
+     * inserting a row the caller was just shown to read.
      */
     private runBatchDataLoop(args: {
         object: string;
@@ -15237,10 +15238,11 @@ export class ObjectStackProtocolImplementation implements
     }): Promise<BatchDataLoopOutcome> {
         // [#25467 cut 1] The body moved to `protocol-batch-data.ts` (see `BatchDataHost`).
         const readEngine = () => this.engine;
+        const readGetServicesRegistry = () => this.getServicesRegistry;
         const host: ThisParameterType<typeof runBatchDataLoop> = {
             assertRecordExists: (...a) => this.assertRecordExists(...a),
             get engine() { return readEngine(); },
-            probeRecord: (...a) => this.probeRecord(...a),
+            get getServicesRegistry() { return readGetServicesRegistry(); },
         };
         return runBatchDataLoop.call(host, args);
     }
