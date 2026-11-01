@@ -147,14 +147,46 @@ function makeDispatcher(seed: Record<string, unknown>[] = [packagedExemplar()]) 
             flows.set(name, definition as Record<string, unknown>);
         }),
     };
-    const services: Record<string, unknown> = { automation: spies };
+    const services: Record<string, unknown> = { automation: spies, ...packageLanding() };
     const resolve = (name: string) => services[name];
     const kernel: any = {
         getService: resolve,
         getServiceAsync: async (name: string) => resolve(name),
         context: { getService: resolve },
     };
-    return { dispatcher: new HttpDispatcher(kernel), spies, flows };
+    return { dispatcher: new HttpDispatcher(kernel), spies, flows, protocol: services.protocol as PackageLandingProtocol };
+}
+
+/** The base the exemplar's loader-set owner names, and its paired customization package. */
+const BASE_PACKAGE = 'crm';
+const PAIR_PACKAGE = 'crm.custom';
+
+type PackageLandingProtocol = ReturnType<typeof packageLanding>['protocol'];
+
+/**
+ * [#28149] Where the copy lands. The door now writes every copy into a
+ * package (ADR-0146 D4), so the rig carries the protocol members it asks —
+ * the loader's set naming the exemplar's base, the ensure door answering its
+ * pair, and the save — plus the `objectql` registry the target rule reads.
+ * The real protocol and registry are exercised in
+ * `automation-flow-clone-custom-package.test.ts`; here they are the minimum
+ * that lets each case reach the behaviour it is named after.
+ */
+function packageLanding() {
+    const manifests: Record<string, { id: string; dependencies?: Record<string, string> }> = {
+        [BASE_PACKAGE]: { id: BASE_PACKAGE },
+        [PAIR_PACKAGE]: { id: PAIR_PACKAGE, dependencies: { [BASE_PACKAGE]: '^3' } },
+    };
+    const protocol = {
+        packagedArtifactOwner: vi.fn(() => BASE_PACKAGE),
+        ensureCustomizationPackage: vi.fn(async ({ basePackageId }: { basePackageId: string }) => ({
+            basePackageId, packageId: `${basePackageId}.custom`, namespace: 'crm_custom', dependencyRange: '^3', created: false, writable: true,
+        })),
+        saveMetaItem: vi.fn(async () => ({ success: true })),
+        tenantAuthoredWriteRefusal: vi.fn(async () => undefined),
+    };
+    const objectql = { registry: { getPackage: (id: string) => (manifests[id] ? { manifest: manifests[id] } : undefined) } };
+    return { protocol, objectql };
 }
 
 /** Drop `keys` from a shallow copy — used to state "everything except …". */
@@ -204,9 +236,10 @@ describe('#12156 — whole-definition copy (the #11703 counter-example as a test
 
         expect(clone.name).toBe(NEW.name);
         expect(clone.label).toBe(NEW.label);
-        // `draft`: the schema's own default for something never deployed. It is
-        // NOT an off-switch — see `flow-clone.ts` and the notice assertion below.
+        // [#28149, ADR-0146 D4] `obsolete`: the copy is written switched off,
+        // so it never runs beside its original — see `flow-clone.ts`.
         expect(clone.status).toBe(FLOW_CLONE_STATUS);
+        expect(FLOW_CLONE_STATUS).toBe('obsolete');
         expect(clone.status).not.toBe(source.status);
 
         // The set that differs is exactly the mutated set.
@@ -216,7 +249,7 @@ describe('#12156 — whole-definition copy (the #11703 counter-example as a test
 
     it('registers the clone under the NEW name, with the definition it returned', async () => {
         const source = packagedExemplar();
-        const { dispatcher, spies, flows } = makeDispatcher([source]);
+        const { dispatcher, spies, flows, protocol } = makeDispatcher([source]);
 
         const result = await dispatcher.handleAutomation(clonePath(source.name as string), 'POST', NEW, CTX);
         const clone = (result.response?.body?.data ?? result.response?.body)?.flow;
@@ -224,6 +257,12 @@ describe('#12156 — whole-definition copy (the #11703 counter-example as a test
         expect(spies.registerFlow).toHaveBeenCalledTimes(1);
         expect(spies.registerFlow).toHaveBeenCalledWith(NEW.name, clone);
         expect(flows.get(NEW.name)).toEqual(clone);
+        // [#28149] …and saved into the source's paired customization package,
+        // never package-less, as a first write.
+        expect(protocol.saveMetaItem).toHaveBeenCalledTimes(1);
+        expect(protocol.saveMetaItem).toHaveBeenCalledWith(expect.objectContaining({
+            type: 'flow', name: NEW.name, packageId: PAIR_PACKAGE, parentVersion: null,
+        }));
         // …and the source is still there, untouched. A clone is not a rename.
         expect(flows.get(source.name as string)).toEqual(packagedExemplar());
     });
@@ -442,24 +481,23 @@ describe('#12156 — the source, the notice, and the gate', () => {
         expect(spies.registerFlow).not.toHaveBeenCalled();
     });
 
-    it('states in one line that the clone runs alongside the original, and that references are NOT re-pointed', async () => {
+    it('states in one line that the copy is switched off, and that references are NOT re-pointed', async () => {
         const source = packagedExemplar();
         const { dispatcher } = makeDispatcher([source]);
 
         const result = await dispatcher.handleAutomation(clonePath(source.name as string), 'POST', NEW, CTX);
         const notice: string = ((result.response?.body?.data ?? result.response?.body) as any)?.notice ?? '';
 
-        // The fact an admin is most likely to be caught by: `draft` is a
-        // lifecycle label, not an off-switch — the engine only disables on
-        // `obsolete`/`invalid`, so a cloned record-change flow runs beside the
-        // one it was copied from. Saying so is cheaper than the surprise.
-        expect(notice).toContain('runs alongside the original until you switch one of them off');
+        // [#28149, ADR-0146 D4] "The copy is written inactive … and the
+        // response says so": the copy does not run until someone switches it
+        // on, stated in the server's words so no console restates it.
+        expect(notice).toContain('switched off and does not run until you switch it on');
         // ADR-0126 §9: automatic re-pointing is explicitly not chartered, and
         // the ADR requires the surface to TELL the admin so.
         expect(notice).toContain('still uses the same subflows, actions and objects as the original');
-        // [#27886] One line in business words. The console shows it beside a
-        // "Switch the original off" button, so the engine words and the switch
-        // locations stay in `flow-clone.ts`'s TSDoc.
+        // [#27886] One line in business words. The console shows it verbatim,
+        // so the engine words and the switch locations stay in
+        // `flow-clone.ts`'s TSDoc.
         expect(notice.match(/[.!?](\s|$)/g)).toHaveLength(1);
         expect(notice).not.toMatch(/\b(draft|status|off-switch|lifecycle|Studio)\b/i);
     });

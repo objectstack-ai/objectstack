@@ -36,11 +36,11 @@
  *
  * ## The clone result offers the next steps (objectui#13270)
  *
- * A clone is created `draft`, which is NOT an off-switch: a cloned
- * record-change or schedule flow runs beside the flow it was copied from, and
- * the server's notice says so. So the result keeps that notice verbatim and
- * offers the two doors an admin otherwise has to find alone, as the declared
- * sharing rule's clone does (`SharingRuleCloneDialog`):
+ * [#28149, ADR-0146 D4] A clone is "new similar": the server writes the copy
+ * switched off into a package — the source's paired customization package
+ * `<base>.custom` — and its notice says so. The result keeps that notice
+ * verbatim and offers the two doors an admin otherwise has to find alone, as
+ * the declared sharing rule's clone does (`SharingRuleCloneDialog`):
  *
  *   - **Switch "SOURCE" off** — the SAME packaged-flow toggle the row's switch
  *     calls, for the row the admin cloned from. It is the page's own knowledge
@@ -48,8 +48,10 @@
  *     an offer, not a step: clone and disable stay independent primitives
  *     (ADR-0126). Offered only while that row reads on; a refusal is the
  *     server's sentence, shown beside the button, which stays offered.
- *   - **Open the clone in Studio** — the package-less scope where a clone is
- *     listed and edited (`studioOrgScopePath`, objectui#11553).
+ *   - **Open the clone in Studio** — the Automations pillar of the package
+ *     the copy landed in, read off the answer's `packageId` (never derived
+ *     here), opened on the copy (`artifactStudioPath`). An answer that names
+ *     no package draws no link rather than one that lands nowhere.
  *
  * For the same reason this page shows no `bound` / `status` column even though
  * `_status` carries both: §7.4 scopes it to what the activation ledger knows.
@@ -160,7 +162,7 @@ import {
 } from './packagedFlows.js';
 import { requestFlowToggle, type FlowToggleOutcome } from './packagedFlowLedger.js';
 import { PackagedActionsSection } from './PackagedActionsSection.js';
-import { studioOrgScopePath } from '../studio-design/studioScope.js';
+import { artifactStudioPath } from '../../console/ai/artifactStudioPath.js';
 import { PageHeader } from '../../layout/PageHeader.js';
 
 /* -------------------------------------------------------------------------- */
@@ -235,6 +237,8 @@ interface CloneResult {
   source: string;
   /** That flow's display label, as its row shows it. */
   sourceLabel: string;
+  /** [#28149] The package the copy landed in, as the server named it. */
+  packageId: string | null;
   /** The switch-off offer's request is in flight. */
   switchBusy: boolean;
   /** The toggle's refusal of the switch-off, verbatim. */
@@ -470,17 +474,19 @@ export function PackagedAutomationPage() {
       const data = envelopeData(json);
       const created = (data.flow as { name?: unknown } | undefined)?.name;
       const notice = data.notice;
+      const landedIn = data.packageId;
       setClone(null);
       setCloneResult({
         name: typeof created === 'string' && created ? created : draft.name.trim(),
         notice: typeof notice === 'string' ? notice : '',
         source: draft.source,
         sourceLabel: rows?.find((r) => r.name === draft.source)?.label ?? draft.source,
+        packageId: typeof landedIn === 'string' && landedIn !== '' ? landedIn : null,
         switchBusy: false,
         switchRefusal: null,
       });
-      // The clone is a tenant artifact, so it does NOT join this packaged
-      // list. Refetch anyway: the source flow's own state is re-read, and a
+      // The copy lands in a writable package, so it does NOT join this
+      // packaged list. Refetch anyway: the source flow's own state is re-read, and a
       // stale list is the one thing an operational page must not show.
       setNonce((n) => n + 1);
     } catch (e) {
@@ -499,6 +505,10 @@ export function PackagedAutomationPage() {
   const cloneNameValid = !!clone && clone.name.trim() !== '' && clone.label.trim() !== '';
   /** The cloned-from row as the list shows it NOW, so the offer follows its switch. */
   const cloneSourceRow = cloneResult ? rows?.find((r) => r.name === cloneResult.source) : undefined;
+  /** [#28149] The copy in its package's Automations pillar, where the server said it landed. */
+  const cloneOpenPath = cloneResult?.packageId
+    ? artifactStudioPath(cloneResult.packageId, { type: 'flow', name: cloneResult.name })
+    : null;
 
   return (
     <div>
@@ -570,14 +580,13 @@ export function PackagedAutomationPage() {
               })}
             </Button>
           ) : null}
-          <Button asChild variant="ghost" size="sm">
-            <Link
-              to={studioOrgScopePath({ type: 'flow', name: cloneResult.name })}
-              data-testid="packaged-clone-open"
-            >
-              {t('packagedAutomation.cloneOpen', { defaultValue: 'Open the clone in Studio' })}
-            </Link>
-          </Button>
+          {cloneOpenPath && (
+            <Button asChild variant="ghost" size="sm">
+              <Link to={cloneOpenPath} data-testid="packaged-clone-open">
+                {t('packagedAutomation.cloneOpen', { defaultValue: 'Open the clone in Studio' })}
+              </Link>
+            </Button>
+          )}
           {cloneResult.switchRefusal && (
             // VERBATIM, beside the offer that caused it; the offer stays.
             <p role="alert" className="basis-full text-sm text-destructive">
