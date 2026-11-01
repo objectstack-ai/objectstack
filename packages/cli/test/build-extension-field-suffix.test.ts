@@ -84,6 +84,7 @@ const plainOwnField = (): Record<string, unknown> => ({
     {
       name: 'partner_ticket',
       label: 'Ticket',
+      sharingModel: 'private',
       fields: { title: { type: 'text', label: 'Title' }, x__c: { type: 'text', label: 'X' } },
     },
   ],
