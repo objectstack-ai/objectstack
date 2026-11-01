@@ -197,6 +197,20 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
      * withheld".
      */
     isItemOfDisabledPackage?(item: { type: string; name: string; packageId?: string }): Promise<boolean>;
+    /**
+     * [#28337, ADR-0048] The refusal of a layered read that names NO package,
+     * of a name whose active rows two or more packages hold: the protocol's
+     * `packagelessLayeredReadRefusal`, which answers the refusal the
+     * package-less save and delete answer for the same rows (`409
+     * RESOURCE_CONFLICT`, the holders and the `?package=` prescription), or
+     * `undefined` when one package or none holds the name.
+     *
+     * Read by the layered chain ({@link createMetaLayeredAnswer}) only, and
+     * only for a request with no `?package=`. Absent (a protocol without the
+     * judge) refuses nothing: the answer before #28337. A REJECTION is a fault
+     * and propagates.
+     */
+    packagelessLayeredReadRefusal?(item: { type: string; name: string; member?: string }): Promise<Error | undefined>;
 }
 
 // ── The caller's organization ─────────────────────────────────────────────────
@@ -3804,6 +3818,12 @@ export interface MetaLayeredRequest {
      */
     readonly packageId?: string;
     /**
+     * [#28337] The bundle member selector the transport read the layers at
+     * (`?member=`, `metaMemberSelector`), absent for the canonical member: the
+     * address step 1c asks about is the member the layers are of.
+     */
+    readonly member?: string;
+    /**
      * [ADR-0106 D2/D3] The caller's field-visibility posture for this item,
      * resolved by the transport BEFORE the read, the not-applicable passthrough
      * for every type but `object`. A tier-3 fault is the transport's to answer
@@ -3883,6 +3903,20 @@ export type MetaLayeredAnswer =
  *     protocol's layered read keeps serving every layer, because
  *     its resolution readers (the security catalog echo, the
  *     packaged-permission-set lock gate) need them: the door answers here.
+ *  1c. [#28337, ADR-0048] A name two or more packages hold, read naming no
+ *     package, is refused with the package-less writes' own refusal — `409
+ *     RESOURCE_CONFLICT`, naming the holders, with the `?package=`
+ *     prescription — asked of
+ *     {@link MetaItemReadGateSources.packagelessLayeredReadRefusal} (the
+ *     protocol's judge over the rows the save and the delete read) and THROWN,
+ *     so each transport answers it through the catch its own save door answers
+ *     that refusal through: one envelope per transport for one ambiguity. The
+ *     protocol's layered read named no package picked one holder's stack
+ *     silently. BEFORE the gate, so the answer never depends on which holder
+ *     that pick met; for the same reason the read refuses, exactly where the
+ *     writes refuse, on every type. Same producer rule as 1b: the protocol's
+ *     layered read keeps serving its resolution readers; the door answers
+ *     here.
  *  2. [#20156] THE per-caller gate on EVERY present layer, `effective` first
  *     (it is what the plain read serves, so its refusal is the plain read's
  *     own), under {@link STORED_VERSION_DOOR_POLICY}: per-caller arms only
@@ -3908,7 +3942,7 @@ export function createMetaLayeredAnswer(
     sources: MetaItemReadGateSources,
     request: MetaLayeredRequest,
 ): (layered: unknown) => Promise<MetaLayeredAnswer> {
-    const { metaType, name, packageId, maskPosture } = request;
+    const { metaType, name, packageId, member, maskPosture } = request;
     return async (raw) => {
         const layered = raw as Record<string, unknown> | null | undefined;
         const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
@@ -3922,6 +3956,15 @@ export function createMetaLayeredAnswer(
         if (metaType !== 'object'
             && await sources.isItemOfDisabledPackage?.({ type: metaType, name, ...(packageId ? { packageId } : {}) }) === true) {
             return { kind: 'refuse', refusal: { reason: 'absent' } };
+        }
+
+        // 1c. [#28337] A name several packages hold, naming none: the
+        //     package-less writes' refusal, thrown to the transport's catch.
+        if (!packageId) {
+            const ambiguity = await sources.packagelessLayeredReadRefusal?.({
+                type: metaType, name, ...(member !== undefined ? { member } : {}),
+            });
+            if (ambiguity) throw ambiguity;
         }
 
         // 2. [#20156] THE per-caller gate, on every present layer.
