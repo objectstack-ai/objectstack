@@ -218,7 +218,7 @@
  * own failure prose (`error`) is passed through untouched — it has no key.
  */
 
-import { actionCopySource, actionErrorDetail } from '@object-ui/core';
+import { actionCopySource, actionErrorDetail, refusalFieldErrors } from '@object-ui/core';
 import type { ActionResult } from '@object-ui/core';
 import { getLoadedBuiltInLocales } from '@object-ui/i18n';
 import { declaredUserMessage, delegationScopeMessage, isPermissionError } from '@object-ui/react';
@@ -467,6 +467,29 @@ export function apiActionFailureMessage(
         return flowFailedEnvelopeMessage(json, fallback, undefined, locale);
     }
     return actionErrorDetail(json, fallback);
+}
+
+/**
+ * The failed `ActionResult` a `type: 'api'` action answers for a non-2xx: the
+ * text {@link apiActionFailureMessage} reads, and the refusal's per-field
+ * entries as `fieldErrors` when it named any (core's `refusalFieldErrors`, the
+ * reader `/actions` refusals already go through). The parameter dialog marks
+ * a `required` entry on the param it names (objectstack#28289), so Create
+ * User left without an email reads "required" under the Email input, in the
+ * user's language.
+ */
+export function apiActionRefusalResult(
+    res: { status: number },
+    json: unknown,
+    fallback: string,
+    locale: string | undefined,
+): ActionResult {
+    const fieldErrors = refusalFieldErrors(json);
+    return {
+        success: false,
+        error: apiActionFailureMessage(res, json, fallback, locale),
+        ...(fieldErrors ? { fieldErrors } : {}),
+    };
 }
 
 /**

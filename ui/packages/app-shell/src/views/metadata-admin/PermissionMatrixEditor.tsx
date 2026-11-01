@@ -120,6 +120,8 @@ import { CelPredicateField } from './CelPredicateField.js';
 import type { CelLintIssue } from './celAuthoring.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { AssignedUsersSection } from './AssignedUsersSection.js';
+import { SetupAssignmentsLink } from './SetupAssignmentsLink.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { errorCodeIs } from '@object-ui/types';
@@ -574,7 +576,13 @@ export interface PermissionMatrixEditPageProps {
 /* Component                                                          */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly = false, embedded = false, studio }: PermissionMatrixEditPageProps) {
+export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio }: PermissionMatrixEditPageProps) {
+  // objectstack ADR-0146 D1 (#28561) — Studio's "All metadata" area mounts this
+  // editor through the routed item page, which hands it no `readOnly`: a
+  // read-only package's area is the host gate here, as a pillar's prop is.
+  // Outside the area there is no host and nothing changes.
+  const areaHost = useMetadataAreaHost();
+  const readOnly = readOnlyProp || !!areaHost?.readOnly;
   const navigate = useNavigate();
   const client = useMetadataClient();
   // The editor reads no record: the capability picker lists the capability
@@ -2464,7 +2472,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               objectstack#26885 — in the matrix's own scroll, after the grid: a
               strip pinned beneath it took up to 35vh off the grid's height, so
               a laptop showed about five object rows and a phone none. */}
-          {showAssignments && (
+          {/* objectstack ADR-0146 D1/D7 (#28561) — Studio's "All metadata"
+              area draws no assignment: it links Setup's Permission set
+              assignment page, opened on this set. */}
+          {showAssignments && areaHost && (
+            <div className="mx-4">
+              <SetupAssignmentsLink kind="permission" name={name} />
+            </div>
+          )}
+          {showAssignments && !areaHost && (
             <div className="mx-4 my-4 rounded-md border" data-testid="perm-assignments">
               <AssignedUsersSection permissionSetName={name} onHoldersRead={onHoldersRead} />
             </div>

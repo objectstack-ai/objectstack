@@ -18,7 +18,10 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 
-/** `bin/run-dev.js` — the CLI entrypoint that runs from TS source via tsx. */
+/**
+ * `bin/run-dev.js` — the CLI entrypoint that runs from TS source. `runServe()`
+ * spawns it with `process.execPath`; a caller may still put {@link TSX} in front.
+ */
 export const CLI = resolve(HERE, '../../bin/run-dev.js');
 export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 
@@ -26,7 +29,7 @@ export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 // THE OTHER ENTRYPOINT: `bin/run.js`, and the build state it silently needs
 //
 // `CLI` above is `bin/run-dev.js`, which pins `NODE_ENV=development` and runs
-// the command from `src/` through tsx — so a file using `runServe()` needs no
+// the command from `src/` — so a file using `runServe()` needs no
 // `packages/cli/dist` at all. A handful of e2e files deliberately spawn the
 // OTHER entrypoint instead, because the thing they measure only exists when
 // oclif resolves the command from the BUILT artifact. Those files, and only
@@ -41,7 +44,7 @@ export const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
 // the same defect the refusal exists to prevent, one level up.
 //
 // ⛔ It is NOT a general "is the CLI ready" preflight. `runServe()` must never
-// call it: a tsx child reads `src/`, so `packages/cli/dist` is not that child's
+// call it: a `bin/run-dev.js` child reads `src/`, so `packages/cli/dist` is not that child's
 // prerequisite and a guard that refused there would be a false red on a tree
 // that can run the test perfectly well.
 // ─────────────────────────────────────────────────────────────────────────
@@ -927,6 +930,28 @@ function portOf(args: string[]): string | undefined {
 }
 
 /**
+ * How long `runServe()` lets a child it sent SIGTERM keep running before it
+ * sends SIGKILL.
+ *
+ * The tsx binary used to give this for free: its signal relay forwards the
+ * SIGTERM, waits about 30 ms for the child to acknowledge it, and then
+ * SIGKILLs the child. A node child has no relay in front of it, and a boot that
+ * was refused (`serve-package-declared-capabilities`, the `tiers` case) has
+ * stayed alive after its SIGTERM: one orphaned `os serve` of about 900 MB per
+ * run (#23181). This restores the guarantee the docblock below states.
+ *
+ * ⚠️ The SIGKILL cannot be left to a timer that outlives the call. The vitest
+ * worker is torn down soon after its last case, so a timer there, `unref()`'d
+ * or not, never fires for a file's last boot, and neither does a process
+ * `exit` hook (measured: a child that ignores SIGTERM survived its file every
+ * time with each of the three). So `runServe()` settles only once the child is
+ * gone: SIGTERM first, so a child that drains promptly ends the way it always
+ * did, then SIGKILL at this bound. The output a caller reads is still what the
+ * child had printed when `waitFor` matched.
+ */
+const SIGKILL_GRACE_MS = 1_000;
+
+/**
  * Boot `os serve` in `cwd`, collect its output until `waitFor` matches (or the
  * process exits), then stop it. Never leaves the child running.
  *
@@ -966,6 +991,13 @@ function portOf(args: string[]): string | undefined {
  * matching stdout alone would wait for a stream that stays empty for the whole
  * boot. Both streams are still returned separately, which is what lets
  * `serve-stdio-stdout-purity.e2e.test.ts` assert stdout carries NOTHING else.
+ *
+ * The child is `process.execPath` running `bin/run-dev.js`, not the `tsx` binary
+ * in front of it. That binary is a launcher process of its own that spawns a
+ * second node to run the entry, so it doubled the process start and put a relay
+ * between `child.kill()` and the CLI. One spawn of the entry measured
+ * 9.5–11.8 s through it and 5.3–5.4 s through node, byte-identical stdout
+ * (#23181). The entry, its `src/` reads, argv, cwd and env are the same.
  */
 export function runServe(
   cwd: string,
@@ -979,7 +1011,7 @@ export function runServe(
   const requested = portOf(args);
   const argv = requested === undefined ? [...args, '--port', KERNEL_ASSIGNED_PORT] : args;
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...argv], {
+    const child = spawn(process.execPath, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...argv], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header for the
       // measured reason (commit 1ddda1d00).
@@ -1012,6 +1044,34 @@ export function runServe(
       } catch {
         /* already gone */
       }
+      // The bytes the caller reads are the ones printed up to the match; see
+      // SIGKILL_GRACE_MS for why settling waits until the child is gone.
+      const stdoutAtMatch = stdout;
+      const stderrAtMatch = stderr;
+      void childGone().then(() => settle(err, stdoutAtMatch, stderrAtMatch));
+    };
+
+    const childGone = () =>
+      new Promise<void>((done) => {
+        // No pid: the spawn itself failed (`error`), and no `exit` may follow.
+        if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+          done();
+          return;
+        }
+        const fallback = setTimeout(() => {
+          try {
+            child.kill('SIGKILL');
+          } catch {
+            /* already gone */
+          }
+        }, SIGKILL_GRACE_MS);
+        child.once('exit', () => {
+          clearTimeout(fallback);
+          done();
+        });
+      });
+
+    const settle = (err: Error | undefined, stdout: string, stderr: string) => {
       if (err) {
         rejectRun(err);
         return;

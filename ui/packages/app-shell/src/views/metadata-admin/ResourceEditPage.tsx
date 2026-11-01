@@ -160,6 +160,8 @@ import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useC
 import { environmentScopeSuffix, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { PositionHoldersSection } from './PositionHoldersSection.js';
 import { PositionPermissionSetsSection } from './PositionPermissionSetsSection.js';
+import { PositionHoldersSetupLink } from './SetupAssignmentsLink.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
@@ -181,6 +183,16 @@ interface EnvironmentSectionProps {
  */
 const ENVIRONMENT_SECTIONS: Readonly<Record<string, ReadonlyArray<React.ComponentType<EnvironmentSectionProps>>>> = {
   position: [PositionHoldersSection, PositionPermissionSetsSection],
+};
+
+/**
+ * objectstack ADR-0146 D1/D7 (#28561) — the same sections under Studio's "All
+ * metadata" area, which draws no assignment: who holds a position is Setup's
+ * Position holders page, linked in its place. What each set grants stays, a
+ * read of the definition.
+ */
+const AREA_ENVIRONMENT_SECTIONS: Readonly<Record<string, ReadonlyArray<React.ComponentType<EnvironmentSectionProps>>>> = {
+  position: [PositionHoldersSetupLink, PositionPermissionSetsSection],
 };
 
 /**
@@ -1699,7 +1711,14 @@ function MetadataResourceEditPageImpl({
   const canAuthor = useCanAuthorMetadata();
   const walled = useWalledCatalogReadOnly(type);
   const walledDeciding = walled && itemWritable;
-  const canWrite = itemWritable && canAuthor && !walled;
+  // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area, a
+  // read-only package withholds every write this page offers: save, source
+  // save, publish, discard, reset, delete and rollback all read `canWrite`.
+  // The overlay save included, which the server would accept on a code
+  // package's item of an overlay-allowed type. Outside the area, no change.
+  const areaHost = useMetadataAreaHost();
+  const hostReadOnly = !!areaHost?.readOnly;
+  const canWrite = itemWritable && canAuthor && !walled && !hostReadOnly;
   // Auto-enable design mode for designer-capable types. We do this once
   // per (type,name) navigation so the user lands in the productive
   // state instead of having to click "Edit". An item this caller cannot
@@ -2308,7 +2327,8 @@ function MetadataResourceEditPageImpl({
   const readOnly = !canWrite && !createMode;
   const envScope = isEnvironmentScope(searchParams);
   const scopeSuffix = environmentScopeSuffix(searchParams);
-  const environmentSections = envScope && !createMode && !embedded ? ENVIRONMENT_SECTIONS[type] : undefined;
+  const environmentSections =
+    envScope && !createMode && !embedded ? (areaHost ? AREA_ENVIRONMENT_SECTIONS : ENVIRONMENT_SECTIONS)[type] : undefined;
 
   // #2272 — designer deep-link: `?sel=nav:<id>` selects the nav item with
   // that spec `id` (stable across reorders, unlike the positional selection
@@ -2447,7 +2467,8 @@ function MetadataResourceEditPageImpl({
   const showArtifactLockedBanner =
     // objectui#7611 — and only for a caller who could author the new item
     // (objectui#12183: under a wall, the operator).
-    readOnly && isArtifactItem && !!entry?.allowRuntimeCreate && canAuthor && !walled && !declarationOnly;
+    // Never in a read-only package's area: that package takes no new item.
+    readOnly && isArtifactItem && !!entry?.allowRuntimeCreate && canAuthor && !walled && !declarationOnly && !hostReadOnly;
 
   // Preview tab — opt-in via `registerMetadataPreview()`. Hidden in
   // create mode (nothing to preview yet) and inside the embedded
@@ -2934,7 +2955,18 @@ function MetadataResourceEditPageImpl({
                 <span>{t(`engine.catalog.declaredOnly.hint.${type}`, locale)}</span>
               </div>
             )}
-            {readOnly && !isLocked && !canAuthor && !walledDeciding && !declarationOnly && (
+            {/* objectstack ADR-0146 D1 (#28561) — in a read-only package's
+                area the package is the reason, so it is the one named. */}
+            {hostReadOnly && !createMode && (
+              <div
+                data-testid="package-readonly-banner"
+                className="text-xs text-amber-800 border border-amber-300/70 bg-amber-50/70 rounded-md px-3 py-2.5 dark:text-amber-200 dark:border-amber-700/40 dark:bg-amber-950/20 flex items-start gap-2"
+              >
+                <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>{t('engine.studio.pkg.readonlyHint', locale)}</span>
+              </div>
+            )}
+            {readOnly && !hostReadOnly && !isLocked && !canAuthor && !walledDeciding && !declarationOnly && (
               <div
                 data-testid="capability-readonly-banner"
                 className="text-xs text-amber-800 border border-amber-300/70 bg-amber-50/70 rounded-md px-3 py-2.5 dark:text-amber-200 dark:border-amber-700/40 dark:bg-amber-950/20 flex items-start gap-2"
@@ -2943,7 +2975,7 @@ function MetadataResourceEditPageImpl({
                 <span>{t('engine.edit.capabilityReadOnly', locale)}</span>
               </div>
             )}
-            {readOnly && !isLocked && canAuthor && !walledDeciding && !declarationOnly && (
+            {readOnly && !hostReadOnly && !isLocked && canAuthor && !walledDeciding && !declarationOnly && (
               <div data-testid="readonly-banner" className="text-xs text-amber-800 border border-amber-300/70 bg-amber-50/70 rounded-md px-3 py-2.5 dark:text-amber-200 dark:border-amber-700/40 dark:bg-amber-950/20 flex items-start gap-3">
                 <div className="flex-1">
                   {showArtifactLockedBanner ? (

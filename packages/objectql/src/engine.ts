@@ -157,7 +157,7 @@ import { buildDriverOptions, driverReadScope, driverWriteTarget, engineLayer0Ver
 // methods of the same names below hand each body the members it reads (`MigrationFlagsHost`).
 import { announceOpenMigrationGates, isOrganizationOwnershipCertified, isValueShapesMigrationVerified, noteAdmittedValueShapeViolation, readFileReferencesFlagRow, readMigrationFlagVerified, supplyTenantKeyCertifiedResolver, wasDatastoreCreatedFromEmpty } from './engine-migration-flags.js';
 import { ExecutionContext, ExecutionContextSchema, type InstalledPackageSource } from '@objectstack/spec/kernel';
-import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
+import { isStoredMetadataBodyObject, judgeCollectionItemOwnerStamp } from '@objectstack/spec/kernel';
 // [#27884] The stored-row read gate, registered on the family's tables below.
 import { STORED_METADATA_TYPE_READ_GATE_OBJECTS, storedMetadataTypeReadGate } from './stored-metadata-type-read-gate.js';
 import type { FlowFunctionEffect } from '@objectstack/spec/automation';
@@ -334,7 +334,7 @@ import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '
 import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, isUnparseableDate, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
 import { declaredOptionLabels, readerOptionLabels } from './formula-option-labels.js';
 import type { Expression } from '@objectstack/spec';
 import {
@@ -3084,6 +3084,18 @@ function formulaHopRefusal(field: string, b: RelatedFieldBinding, named: Readonl
   }
 }
 
+/**
+ * What a formula field reports when it evaluated to the invalid Date that
+ * `date()` / `datetime()` answer for text they cannot parse
+ * ({@link isUnparseableDate}). An EMPTY source is not this fault: it reads
+ * `null` and says nothing. The record's text is not quoted — a log line is no
+ * place for row data.
+ */
+const UNPARSEABLE_DATE_FAULT =
+  'date() / datetime() was handed text it cannot parse as a date, so the formula has no value on this record; '
+  + 'they take ISO text (`2026-03-04`, `2026-03-04T09:30:00Z`), a timestamp or epoch milliseconds, and an empty '
+  + 'source reads null without a report.';
+
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
@@ -3126,7 +3138,13 @@ function applyFormulaPlan(
         scope = hop.record;
         empty = hop.empty;
       }
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      const evaluated = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      // An invalid Date minted from text `date()` could not parse evaluates
+      // `ok` (a predicate relies on that) but serializes to the `null` an empty
+      // source gives: for a field it is a fault, said like any other.
+      const r = evaluated.ok && isUnparseableDate(evaluated.value)
+        ? { ok: false as const, error: { kind: 'runtime' as const, message: UNPARSEABLE_DATE_FAULT } }
+        : evaluated;
       if (r.ok) {
         rec[fp.name] = roundFormulaValue(r.value, fp.scale);
         continue;
@@ -4859,6 +4877,15 @@ function noteRegistrationStamp(item: unknown, stampBefore: unknown): void {
  * neither is overwritten by `applyProtection`, so either would survive as an
  * owner no row answers.
  *
+ * The judgement and its words are the one judge both doors of the rule call,
+ * `judgeCollectionItemOwnerStamp` (`@objectstack/spec/kernel`, whose header
+ * holds the verdict table and the collections): the stack schema runs it at
+ * the build door (`defineStack`, `os validate`, `os build`, the artifact door's
+ * parse), so this seam is the door for a body no schema parse judged — an
+ * installed body, a programmatic `registerApp`, a nested plugin, a
+ * `strict: false` stack. ⛔ Never a second comparison here. What stays here is
+ * the exemption below, which is this process's state, not a body rule.
+ *
  * `VALIDATION_ERROR` / 400, `issues[]` at `_packageId`: the envelope of
  * {@link permissionSetOwnerRegistrationRefusal}. Exported for the stack's
  * RESIDUAL registration (`registerUnclaimedTopLevelItems` in `plugin.ts`),
@@ -4884,16 +4911,14 @@ export function collectionItemOwnerStampRefusal(
   name: string,
   ownerId: string | undefined,
 ): (Error & { code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }> }) | undefined {
-  if (!item || typeof item !== 'object') return undefined;
-  const stamped = (item as { _packageId?: unknown })._packageId;
-  if (stamped === undefined || stamped === ownerId) return undefined;
-  if (REGISTRATION_WRITTEN_STAMPS.get(item) === stamped) return undefined;
-  const owner = ownerId === undefined ? 'no package' : `package '${ownerId}'`;
-  const issueMessage = `carries _packageId ${JSON.stringify(stamped)}, but it is registered under ${owner}`;
-  const err = new Error(
-    `Drop \`_packageId\` from ${type} '${name}': it ${issueMessage}. The package an item belongs to is the one `
-    + 'that registers it, stamped by the registration; a body never names its own owner.',
-  ) as Error & {
+  if (item && typeof item === 'object') {
+    const stamped = (item as { _packageId?: unknown })._packageId;
+    if (stamped !== undefined && REGISTRATION_WRITTEN_STAMPS.get(item) === stamped) return undefined;
+  }
+  const refusal = judgeCollectionItemOwnerStamp(item, type, name, ownerId, 'register');
+  if (!refusal) return undefined;
+  const issueMessage = refusal.issueMessage;
+  const err = new Error(refusal.message) as Error & {
     code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }>;
   };
   err.code = 'VALIDATION_ERROR';

@@ -186,16 +186,16 @@ const STUDIO_ZH: Record<string, string> = {
   // objectui#13011 — 见 EN 表同键注释。
   'perm.readOnly.capability': '只读（需要 `manage_metadata` 能力）',
   'perm.readOnly.artifact': '只读（该权限集由代码包提供）',
-  // objectui#5987 — 见 EN 表同键注释：裁定的路径（克隆后自定义）放在最前。
+  // objectui#5987 — 见 EN 表同键注释：裁定的路径（新建类似）放在最前。
   'perm.readOnly.artifact.hint':
-    '该权限集由代码包提供，因此在此处被锁定：在环境作用域下编辑它属于覆盖（overlay）已打包的条目，而元数据类型注册表对 permission 声明 allowEnvironmentOverlay 为 false（ADR-0131 D6 禁止对已打包权限集做环境覆盖：会造成权限静默漂移）。服务端会以 403 not_overridable 拒绝该写入。请「克隆后自定义」：副本以新名称保存为本系统中创作的普通权限集、可在此编辑，升级会继续流向这个基线。其他途径：修改源工件后重新部署，或新建一个运行时权限集。OS_METADATA_WRITABLE 逃生阀不会开放由包提供的权限集（ADR-0131 D6）。',
+    '该权限集由代码包提供，因此在此处被锁定：在环境作用域下编辑它属于覆盖（overlay）已打包的条目，而元数据类型注册表对 permission 声明 allowEnvironmentOverlay 为 false（ADR-0131 D6 禁止对已打包权限集做环境覆盖：会造成权限静默漂移）。服务端会以 403 not_overridable 拒绝该写入。请「新建类似」：服务端以新名称把副本存入存放你的修改的软件包（只读包则为其配对的 .custom 包），并说明存在哪里；你编辑副本，升级会继续流向这个基线。其他途径：修改源工件后重新部署，或新建一个运行时权限集。OS_METADATA_WRITABLE 逃生阀不会开放由包提供的权限集（ADR-0131 D6）。',
   // objectui#5987 — 见 EN 表同键注释。
-  'perm.clone.action': '克隆后自定义',
+  'perm.clone.action': '新建类似',
   'perm.clone.hint':
-    '以你指定的新名称复制该权限集。副本是本系统中创作的普通权限集，可在此编辑，升级会继续流向由包提供的基线。',
+    '以你指定的新名称复制该权限集。服务端把副本存放在这个基线旁、存放你的修改的软件包中，并说明存在哪里；升级会继续流向由包提供的基线。',
   'perm.clone.guidance':
-    '已锁定：该权限集由代码包提供，不能在此处原地编辑（升级会继续流向它）。请「克隆后自定义」—— 副本是本系统中创作的普通权限集，可在此编辑。',
-  'perm.clone.dialogTitle': '克隆权限集',
+    '已锁定：该权限集由代码包提供，不能在此处原地编辑（升级会继续流向它）。请「新建类似」—— 服务端以新名称把副本存入存放你的修改的软件包，你编辑副本即可。',
+  'perm.clone.dialogTitle': '新建类似权限集',
   'perm.clone.dialogBody': '以新的机器名和显示名复制 {name}。副本携带哪些内容由服务端决定，未复制的部分会由服务端说明。',
   'perm.clone.name': '新的机器名',
   'perm.clone.label': '新的显示名',
@@ -205,7 +205,7 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.clone.noName': '克隆已创建，但服务端的响应未给出其名称。请从权限集列表中打开它。',
   'perm.clone.done': '已克隆为 {name}。请从权限集列表中打开它进行编辑。',
   'perm.save.locked':
-    '保存被拒绝（403 not_overridable）：该权限集由代码包提供，服务端不接受原地编辑。请改为「克隆后自定义」—— 副本是本系统中创作的普通权限集，升级会继续流向这个基线。',
+    '保存被拒绝（403 not_overridable）：该权限集由代码包提供，服务端不接受原地编辑。请改用「新建类似」—— 服务端以新名称把副本存入存放你的修改的软件包，升级会继续流向这个基线。',
   // Designer wrapper
   'designer.unsavedChanges': '未保存的修改',
   'designer.editingOverlay': '编辑覆盖层',
@@ -2185,6 +2185,24 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.auto.heading': '自动化',
   'engine.studio.auto.deleteFlow': '删除流程',
   'engine.studio.auto.flowDeleted': '已删除流程「{item}」',
+  // objectstack#28567 (ADR-0146 D4) — 流程的「新建类似」：克隆门以新的机器名与标签复制，
+  // 副本为关闭状态，落在承载改动的软件包中；服务器的回答与拒绝原样显示。
+  'engine.studio.auto.newSimilar.action': '新建类似',
+  'engine.studio.auto.newSimilar.hint': '以新名称复制此流程。副本处于关闭状态，开启后才会运行。',
+  'engine.studio.auto.newSimilar.title': '新建类似流程',
+  'engine.studio.auto.newSimilar.bodyPair':
+    '以新的机器名和标签复制「{item}」。此软件包为只读，服务器会把副本以关闭状态保存到承载你对它所做改动的软件包中，并告诉你副本所在位置。',
+  'engine.studio.auto.newSimilar.bodyHere':
+    '以新的机器名和标签把「{item}」复制到此软件包中，副本为关闭状态。副本取自当前运行的流程：未发布的改动不会被复制。',
+  'engine.studio.auto.newSimilar.copyLabel': '{label}（副本）',
+  'engine.studio.auto.newSimilar.name': '新的机器名',
+  'engine.studio.auto.newSimilar.label': '新的标签',
+  'engine.studio.auto.newSimilar.submit': '创建副本',
+  'engine.studio.auto.newSimilar.failedHttp': '无法创建副本（HTTP {status}）。',
+  'engine.studio.auto.newSimilar.failed': '无法创建副本。',
+  'engine.studio.auto.newSimilar.done': '已在软件包 {package} 中保存副本 {name}。',
+  'engine.studio.auto.newSimilar.noPackage': '服务器已保存副本 {name}，但回答中没有说明它所在的软件包，因此未打开任何内容。',
+  'engine.studio.auto.newSimilar.dismiss': '关闭',
   // ADR-0146 D4 — 只读软件包的流程：启用账本开关（仅本部署，不改定义）。
   'engine.studio.auto.ledger.on': '本部署中已开启',
   'engine.studio.auto.ledger.off': '本部署中已关闭',
@@ -2291,6 +2309,11 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.bulkHint': '批量操作(R · CRUD · All · None)显示在指针所在或获得键盘焦点的行上。',
   // ── 访问解释面板(ADR-0090 D6 —「为什么该用户可以访问?」)────────────
   'engine.studio.access.explain.open': '解释访问权限',
+  // objectstack#28573 — 见 EN 表同键注释。
+  'engine.studio.access.newSimilar.noPackage':
+    '服务端已保存副本 {name}，但其响应未说明副本所在的软件包，因此没有打开任何内容。请到存放你的修改的软件包中查找它。',
+  'engine.studio.access.newSimilar.done': '已将副本 {name} 保存到软件包 {package}。',
+  'engine.studio.access.newSimilar.dismiss': '关闭',
   'engine.studio.access.explain.title': '为什么该用户可以访问?',
   'engine.studio.access.explain.description':
     '与运行时强制执行走同一条评估管线,逐层报告各层的贡献 —— 权限集 → 岗位 → 绑定链,以及 OWD/共享判定。',
@@ -2764,7 +2787,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landingHome': 'Studio 首页',
   'engine.studio.desktopHint': 'Studio 专为桌面屏幕设计。',
   'engine.studio.notFound.package': '未找到包。本部署没有安装 ID 为“{id}”的包，因此无处可构建。',
-  'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面或权限。',
+  'engine.studio.notFound.pillar': '页面不存在。Studio 没有“{pillar}”这一栏，请在上方选择数据、自动化、界面、权限或全部元数据。',
   'engine.studio.aiCopilot': 'AI 副驾',
   // objectui#12725 — Studio 右栏：属性或 AI 副驾二选一。
   'engine.studio.slot.label': '右栏',
@@ -2779,6 +2802,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pillar.automations': '自动化',
   'engine.studio.pillar.interfaces': '界面',
   'engine.studio.pillar.access': '权限',
+  'engine.studio.pillar.metadata': '全部元数据',
   // Header · package-level publish + app bridge
   'engine.studio.changes': '变更',
   'engine.studio.publishTitle': '检查并一并发布本软件包的全部待发布草稿',
@@ -2807,6 +2831,18 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.pkg.readonly': '只读',
   'engine.studio.pkg.readonlyHint': '只读软件包 — 请切换或新建可写软件包后再编辑。',
   'engine.studio.pkg.readonlyLink': '只读 · 用覆盖定制',
+  'engine.studio.customize.action': '自定义',
+  'engine.studio.customize.actionTitle': '为本部署修改此项。第一次编辑会保存为自定义草稿，{package} 本身保持安装时的样子。',
+  'engine.studio.customize.walled': '在此部署中，只有平台运营方可以自定义已安装的软件包。',
+  'engine.studio.customize.noVersion': '软件包列表没有给出已安装的 {package} 版本，因此无法在此自定义它的项。',
+  'engine.studio.customize.overrides': '覆盖 {package}',
+  'engine.studio.customize.overridesTitle': '此项在本部署中替换 {package} 中的同名项，取自 {package} {basedOn}。',
+  'engine.studio.customize.draftFooter': '编辑会保存为本部署自定义的草稿；发布后生效。',
+  'engine.studio.customize.restore': '恢复软件包原版',
+  'engine.studio.customize.restoreConfirm': '恢复 {package} 的「{item}」？',
+  'engine.studio.customize.restoreBody': '本部署对「{item}」的自定义会被删除，重新使用 {package} 的版本。',
+  'engine.studio.customize.restoreDraft': '会先丢弃它未发布的草稿。',
+  'engine.studio.customize.restoreDone': '「{item}」已恢复为 {package} 的版本',
   'engine.studio.app.scaffoldNav': '将本包的对象添加为菜单项',
   'engine.studio.landing.title': '应用构建',
   'engine.studio.landing.description': '在一个可写软件包里设计对象、表单、自动化与界面;编辑存为草稿,整包一次发布。源码与已安装的软件包为只读：可在此浏览，并用环境覆盖进行定制。',
@@ -2825,6 +2861,13 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.landing.overlay': '在设置中打开',
   'engine.studio.landing.overlayTitle': '打开该软件包的元数据：每种类型都会标明是否接受环境覆盖',
   'engine.studio.landing.marketplace': '或从应用市场安装一个模板应用',
+  'engine.studio.landing.customizations.customized': '已定制 {customized} 项',
+  'engine.studio.landing.customizations.separator': '，',
+  'engine.studio.landing.customizations.switchedOff': '已停用 {switchedOff} 项',
+  'engine.studio.landing.customizations.loading': '正在读取定制…',
+  'engine.studio.landing.customizations.failed': '无法读取定制',
+  'engine.studio.landing.customizations.pairTitle': '在 Studio 中打开定制包 {pair}',
+  'engine.studio.landing.customizations.switchedOffTitle': '打开该软件包的自动化，在那里启用或停用其中的项',
   // objectui#11553 — the package-less scope: the organization's own flows.
   'engine.studio.landing.orgHeading': '不属于软件包',
   'engine.studio.org.name': '组织流程',
@@ -2832,6 +2875,14 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.org.description': '本组织自有、不属于任何软件包的流程,例如软件包流程的克隆副本。可直接编辑。',
   'engine.studio.org.none': '还没有不属于软件包的流程。在 设置 › 打包自动化 中克隆一个软件包流程,即可在这里编辑副本。',
   'engine.studio.org.openSetup': '在设置中打开',
+  'engine.studio.landing.envCatalog.name': '环境目录',
+  'engine.studio.landing.envCatalog.description': '岗位、能力、权限集与共享规则，覆盖所有软件包。',
+  'engine.studio.area.assignments.position': '此岗位的任职人员在设置中分配。',
+  'engine.studio.area.assignments.permission': '此权限集分配给哪些人，在设置中管理。',
+  'engine.studio.area.assignments.open': '在设置中打开',
+  'engine.studio.area.formEditor.locale': '语言 {locale}',
+  'engine.studio.area.formEditor.oneLocale': '只自定义此模板的 {locale} 版本，{package} 中它的其他语言版本保持不变。',
+  'engine.studio.area.formEditor.translationWhole': '自定义翻译会替换 {package} 的整个 {locale} 语言包：其中每一条文本都改由你的副本提供，包括未修改的条目。',
   'engine.studio.publishedAllFlows': '已发布 {count} 个流程',
   'engine.studio.publishedAllFlowsOne': '已发布流程「{label}」',
   'engine.studio.designer.search': '搜索…',
@@ -3099,6 +3150,19 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.directory.invalidTooltip': '{count} 个无效项 — 点击修复',
   'engine.directory.warnTooltip': '{count} 个条目带有警告',
   'engine.directory.itemCountTooltip': '此类型共 {count} 项',
+  // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
+  // filter of the All metadata area, from a base's customization read.
+  'engine.customizationMark.customized': '已定制（{baseName}）',
+  'engine.customizationMark.customizedTitle': '定制包 {pair} 覆盖了 {baseName} 的此项',
+  'engine.customizationMark.added': '新增',
+  'engine.customizationMark.addedTitle': '由 {baseName} 的定制包 {pair} 新增',
+  'engine.customizationMark.customizationOf': '{baseName} 的定制',
+  'engine.customizationMark.customizationOfTitle': '{pair} 中的项，即 {baseName} 的定制包',
+  'engine.customizationMark.readFailed': '无法读取定制：{message}',
+  'engine.directory.customizations.total': '{baseName} 已定制 {customized} 项',
+  'engine.directory.customizations.tile': '已定制 {customized}',
+  'engine.directory.customizations.tileTitle': '此类型已定制的项：{customized}',
+  'engine.list.customizations.only': '仅看定制（{marked}）',
   'engine.home.recent': '最近访问',
   'engine.diagnostics.title': '元数据诊断',
   'engine.diagnostics.description':

@@ -25,7 +25,7 @@ import React from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { NavigationArea, NavigationItem } from '@object-ui/types';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -113,12 +113,13 @@ const NAVIGATION: NavigationItem[] = [
   { id: 'nav_help', type: 'url', url: '/help', label: 'Help' },
 ];
 
-function answerFor(opportunityRead: boolean): MePermissionsResponse {
+function answerFor(opportunityRead: boolean): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_agent',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['service_agent'],
     systemPermissions: [],
     objects: {

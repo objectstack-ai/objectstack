@@ -189,6 +189,50 @@ describe('FieldNode — the nested-select object form is REMOVED', () => {
  * (`direction` → `order` is not a typo), which is why the alias table is the
  * load-bearing half.
  */
+describe('AggregationNode — closed: an undeclared entry key is refused by name (#28609)', () => {
+  it('refuses a slip, naming the surface and the key — it used to be stripped and the call answered', () => {
+    const r = AggregationNodeSchema.safeParse({ function: 'sum', field: 'amount', alias: 's', bogusKey: true });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues[0]!.code).toBe('unrecognized_keys');
+    expect(r.error!.issues[0]!.message).toMatch(/^Unrecognized key\(s\) on this aggregation entry: `bogusKey`\./);
+  });
+
+  it('names `filter` for `where` / `filters` / `conditions`, and `alias` for `as`', () => {
+    for (const [key, canonical] of [['where', 'filter'], ['filters', 'filter'], ['conditions', 'filter'], ['as', 'alias']] as const) {
+      const r = AggregationNodeSchema.safeParse({ function: 'count', alias: 'n', [key]: key === 'as' ? 'x' : { a: 1 } });
+      expect(r.success, key).toBe(false);
+      expect(r.error!.issues[0]!.message, key).toContain(`\`${key}\` → \`${canonical}\``);
+    }
+  });
+
+  it('the retired `distinct` answers its tombstone, not the generic refusal, and is never suggested', () => {
+    const tomb = AggregationNodeSchema.safeParse({ function: 'sum', field: 'amount', alias: 's', distinct: true });
+    expect(tomb.error!.issues.map((i) => i.code)).toEqual(['invalid_type']);
+    const typo = AggregationNodeSchema.safeParse({ function: 'sum', field: 'amount', alias: 's', distinc: true });
+    expect(typo.error!.issues[0]!.message).not.toContain('`distinct`');
+  });
+
+  it('closes the entry through `QueryAST.aggregations` and `EngineAggregateOptionsSchema.aggregations`', () => {
+    const entry = { function: 'count', alias: 'n', bogusKey: 1 };
+    for (const r of [
+      QuerySchema.safeParse({ object: 'order', aggregations: [entry] }),
+      EngineAggregateOptionsSchema.safeParse({ aggregations: [entry] }),
+    ]) {
+      expect(r.success).toBe(false);
+      expect(JSON.stringify(r.error!.issues)).toContain('Unrecognized key(s) on this aggregation entry: `bogusKey`');
+    }
+  });
+
+  it('CONTROL — entries with only declared members parse as before', () => {
+    const entries = [
+      { function: 'count', alias: 'n' },
+      { function: 'sum', field: 'amount', alias: 's' },
+      { function: 'count', alias: 'big', filter: { amount: { $gt: 100 } } },
+    ];
+    for (const e of entries) expect(AggregationNodeSchema.parse(e)).toEqual(e);
+  });
+});
+
 describe('SortNode — closed, and `direction` carries its translation', () => {
   it('accepts the canonical two-key node, defaulting `order` to asc', () => {
     expect(SortNodeSchema.parse({ field: 'updated_at', order: 'desc' }))
@@ -240,7 +284,7 @@ describe('SortNode — closed, and `direction` carries its translation', () => {
 
   it('leaves the REST of the query dialect open — the carve-out is this schema only', () => {
     // `query.zod.ts` stays classed `open` in the strictness ledger; only
-    // `SortNodeSchema` was re-classed authorable. Pinned so a later blanket
+    // `SortNodeSchema` and (#28609) `AggregationNodeSchema` were closed. Pinned so a later blanket
     // `.strict()` on the file is a deliberate decision with its own ruling
     // rather than a side effect of this change (#4001 tracks the top level).
     expect(QuerySchema.safeParse({ object: 'sales', nonsenseKey: 1 }).success).toBe(true);
@@ -738,12 +782,13 @@ describe('AggregationNode.distinct — REMOVED (ADR-0049)', () => {
     }
   });
 
-  it('a legal aggregation parses and carries NO `distinct` property (non-strict strip path)', () => {
-    // `AggregationNodeSchema` is `z.object()`, not `.strict()`. A bare
-    // deletion would therefore have made zod SILENTLY STRIP a caller's
-    // `distinct` — replacing a divergent flag with an ignored one, which is
-    // the #3733 / ADR-0104 shape. The tombstone is what makes the removal
-    // audible; this pins that the surviving members are untouched by it.
+  it('a legal aggregation parses and carries NO `distinct` property', () => {
+    // When `distinct` was retired `AggregationNodeSchema` was `z.object()`,
+    // not `.strict()`, so a bare deletion would have made zod SILENTLY STRIP
+    // a caller's `distinct` — the #3733 / ADR-0104 shape. The tombstone made
+    // the removal audible; since #28609 the node is closed too, and the
+    // tombstone still answers first (the block below). This pins that the
+    // surviving members are untouched by it.
     const parsed = AggregationNodeSchema.parse({ function: 'sum', field: 'amount', alias: 'total' });
     expect(parsed).not.toHaveProperty('distinct');
     expect(parsed).toEqual({ function: 'sum', field: 'amount', alias: 'total' });

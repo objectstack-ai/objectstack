@@ -276,6 +276,8 @@ describe('[#15747] the current-user faces assemble through the shared assembler'
             fields: { 'showcase_order.total': { readable: true, editable: true } },
             systemPermissions: ['showcase.export_data'],
             tabPermissions: { exports: 'visible' },
+            // [#28508] No ownership-queue service in this mount: `false`.
+            hasAnyQueue: false,
         });
     });
 

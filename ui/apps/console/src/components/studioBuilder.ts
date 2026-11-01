@@ -1,8 +1,9 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The Studio builder's two screens, as the ONE module the console loads them
- * through (objectui#11798).
+ * The Studio builder's screens, as the ONE module the console loads them
+ * through (objectui#11798): the landing, the pillar builder, and the "All
+ * metadata" area's cross-package leg (objectstack#28561).
  *
  * `StudioRoute.tsx` (the `/studio` subtree) and `registerStudioComponents.tsx`
  * (the `studio:builder` registry entry) both reach these components through
@@ -29,4 +30,4 @@
  * one, and `pnpm check:eager-closure` weighs the bytes that would come back.
  */
 
-export { BuilderLanding, StudioDesignSurface } from '@object-ui/app-shell';
+export { BuilderLanding, StudioDesignSurface, StudioMetadataArea } from '@object-ui/app-shell';

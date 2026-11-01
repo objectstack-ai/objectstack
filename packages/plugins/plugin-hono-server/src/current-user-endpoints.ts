@@ -50,12 +50,15 @@ import {
     type RequestAuthService,
 } from '@objectstack/core';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type { MePermissionsAuthenticatedResponse } from '@objectstack/spec/api';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
-import type {
-    IMetadataService,
-    IObjectQLEngine,
-    ISecurityService,
-    Logger,
+import {
+    OWNERSHIP_QUEUE_SERVICE,
+    type IMetadataService,
+    type IObjectQLEngine,
+    type IOwnershipQueueService,
+    type ISecurityService,
+    type Logger,
 } from '@objectstack/spec/contracts';
 import { allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { ifNoneMatchHits, representationEtag, REVALIDATE_PRIVATE_CACHE_CONTROL } from '@objectstack/types';
@@ -275,7 +278,7 @@ type MePermissionsTabVisibility = 'visible' | 'hidden' | 'default_on' | 'default
 
 /**
  * The grant half of the `/auth/me/permissions` body on a security-wired stack —
- * every key besides the caller's identity. All six are REQUIRED, so a caller of
+ * every key besides the caller's identity. All seven are REQUIRED, so a caller of
  * {@link mePermissionsBody} cannot drop one without tsc refusing it.
  */
 interface MePermissionsGrants {
@@ -285,6 +288,8 @@ interface MePermissionsGrants {
     fields: Record<string, { readable: boolean; editable: boolean }>;
     systemPermissions: string[];
     tabPermissions: Record<string, MePermissionsTabVisibility>;
+    /** [#28508] See {@link organizationHasAnyQueue}. */
+    hasAnyQueue: boolean;
 }
 
 /**
@@ -298,7 +303,59 @@ interface MePermissionsGrants {
  * Fresh values per call, so no response aliases another.
  */
 function closedMePermissionsGrants(): MePermissionsGrants {
-    return { positions: [], permissionSets: [], objects: {}, fields: {}, systemPermissions: [], tabPermissions: {} };
+    return {
+        positions: [], permissionSets: [], objects: {}, fields: {}, systemPermissions: [], tabPermissions: {},
+        hasAnyQueue: false,
+    };
+}
+
+/**
+ * [#28508] The slice of the ownership-queue contract this handler reads: its
+ * one "any queue at all?" answer.
+ */
+type AnyQueueReader = Pick<IOwnershipQueueService, 'hasAnyQueue'>;
+
+/**
+ * [#28508] Does the caller's organization have at least one ownership queue,
+ * declared (and not switched off in the activation ledger) or a `sys_queue`
+ * row? The console's list toolbar reads this once per session to decide
+ * whether its "in a queue" toggle can ever return a row. A member may not read
+ * `sys_queue` (the #5491 baseline stays), so the server answers for them, and
+ * the boolean is all it discloses: no names, no counts.
+ *
+ * The answer is the ownership-queue service's, which resolves under system
+ * context with the registry-first rule and the ledger in one place. This
+ * function only reaches it:
+ *
+ * - no service registered (no plugin-sharing) ⇒ `false`: with no service, no
+ *   record can sit in a queue, so the toggle has nothing to find;
+ * - a service without the method ⇒ `false`, for the same reason;
+ * - the service throws ⇒ `false`, logged. A queue fault hides one toolbar
+ *   toggle; it must not cost the caller the whole permissions body.
+ *
+ * It never throws.
+ */
+async function organizationHasAnyQueue(
+    ctx: CurrentUserEndpointsContext,
+    organizationId: string | null,
+): Promise<boolean> {
+    try {
+        const service = (() => {
+            try { return ctx.getService<Partial<AnyQueueReader>>(OWNERSHIP_QUEUE_SERVICE) ?? null; }
+            catch { return null; }
+        })();
+        // The contract requires the method, but the locator hands back
+        // whatever a host registered under the name, which may be an
+        // implementation older than the contract: that one answers `false`.
+        const hasAnyQueue = service?.hasAnyQueue;
+        if (typeof hasAnyQueue !== 'function') return false;
+        return (await hasAnyQueue.call(service, organizationId)) === true;
+    } catch (err: any) {
+        ctx.logger?.warn?.('[hono] /auth/me/permissions: hasAnyQueue could not be resolved — answering false', {
+            err: err?.message,
+        });
+        return false;
+    }
 }
 
 /**
@@ -316,7 +373,7 @@ function closedMePermissionsGrants(): MePermissionsGrants {
 function mePermissionsBody(
     identity: { userId: string; tenantId: string | null },
     grants: MePermissionsGrants,
-) {
+): MePermissionsAuthenticatedResponse {
     return {
         authenticated: true as const,
         userId: identity.userId,
@@ -327,6 +384,7 @@ function mePermissionsBody(
         fields: grants.fields,
         systemPermissions: grants.systemPermissions,
         tabPermissions: grants.tabPermissions,
+        hasAnyQueue: grants.hasAnyQueue,
     };
 }
 
@@ -871,6 +929,10 @@ export function registerCurrentUserEndpoints(
             // own), but a stack with no metadata service degraded here before
             // and must keep degrading here, or this becomes a second behaviour
             // change riding on the delegation.
+            // [#28508] Asked on every authenticated branch, the degraded one
+            // included: whether the organization has a queue does not depend on
+            // SecurityPlugin. Never throws (see {@link organizationHasAnyQueue}).
+            const hasAnyQueue = await organizationHasAnyQueue(ctx, identity.tenantId);
             if (!resolvePermissionSets || !metadata) {
                 // Auth resolved but security plugin isn't wired — emit
                 // an empty-but-authenticated body so the frontend can
@@ -884,6 +946,7 @@ export function registerCurrentUserEndpoints(
                     permissionSets: execCtx.permissions ?? [],
                     objects: {},
                     fields: {},
+                    hasAnyQueue,
                 });
             }
             // [#7616] The caller's sets, resolved ONCE by the owner of the
@@ -956,6 +1019,7 @@ export function registerCurrentUserEndpoints(
                 fields,
                 systemPermissions: Array.from(systemPermissions),
                 tabPermissions,
+                hasAnyQueue,
             }) });
         } catch (err: any) {
             ctx.logger?.warn?.('[hono] /auth/me/permissions failed', { err: err?.message });

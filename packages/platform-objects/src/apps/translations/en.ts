@@ -161,6 +161,7 @@ export const en: TranslationData = {
         nav_http_deliveries: { label: 'HTTP Deliveries' },
         nav_datasources: { label: 'Datasources' },
         nav_connector_credentials: { label: 'Connector Credentials' },
+        nav_connector_connections: { label: 'Connector Connections' },
 
         // Advanced
         //

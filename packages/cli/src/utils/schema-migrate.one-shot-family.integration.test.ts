@@ -71,6 +71,7 @@ import MigrateFilesToReferences from '../commands/migrate/files-to-references.js
 import MigrateMeta from '../commands/migrate/meta.js';
 import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js';
 import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
+import MigratePackagelessOverlays from '../commands/migrate/packageless-overlays.js';
 import MigratePlan from '../commands/migrate/plan.js';
 import MigrateRecordCurrencyCodes from '../commands/migrate/record-currency-codes.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
@@ -259,6 +260,16 @@ const CALLERS: Record<string, Caller> = {
         '--apply', '--backup-taken', '--plan-file', '@DIR@/organization-ownership-reviewed-plan.json',
         '--out', '@DIR@/organization-ownership-apply.json', '--database-url', '@DB@', '--json',
       ],
+    }],
+  },
+  'commands/migrate/packageless-overlays.ts': {
+    run: invoke(MigratePackagelessOverlays),
+    // The fixture stores no package-less overlay row, so the run lists
+    // nothing and `--apply` moves nothing — the boot is what these cases are about.
+    noWrite: [{ label: 'migrate packageless-overlays', argv: ['--database-url', '@DB@', '--json'] }],
+    write: [{
+      label: 'migrate packageless-overlays --apply',
+      argv: ['--apply', '--yes', '--database-url', '@DB@', '--json'],
     }],
   },
   'commands/migrate/plan.ts': {

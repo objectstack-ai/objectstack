@@ -38,10 +38,13 @@ import { isCodeArtifactBody } from '@objectstack/metadata-core';
 import { FlowSchema } from '@objectstack/spec/automation';
 
 import { HttpDispatcher } from '../http-dispatcher.js';
+import { FLOW_CLONE_STATUS } from '../flow-clone.js';
 import type { HttpProtocolContext } from '../http-dispatcher.js';
 
 const PACKAGED = 'pkg_alert_flow';
 const PACKAGE_ID = 'com.example.pkg';
+/** [#28149] The base's paired customization package — where a clone of its flow lands. */
+const PAIR_PACKAGE_ID = 'com.example.pkg.custom';
 const CUSTOMER = 'customer_flow';
 /** A tenant flow whose stored row predates the save door's `protection` refusal. */
 const LEGACY = 'legacy_locked_flow';
@@ -86,10 +89,23 @@ function boot() {
     );
     const saveMetaItem = vi.spyOn(protocol, 'saveMetaItem').mockResolvedValue({ success: true } as never);
     const rule = vi.spyOn(protocol, 'tenantAuthoredWriteRefusal');
+    // [#28149] A clone lands in a writable package: by default the source's
+    // paired `<base>.custom`, ensured through N-13's door (its own suite pins
+    // it). The installed packages the door's target rule reads: the base
+    // (read-only) and its pair, which depends on it.
+    vi.spyOn(protocol, 'ensureCustomizationPackage').mockResolvedValue(
+        { basePackageId: PACKAGE_ID, packageId: PAIR_PACKAGE_ID } as never,
+    );
+    const manifests: Record<string, { id: string; scope?: string; dependencies?: Record<string, string> }> = {
+        [PACKAGE_ID]: { id: PACKAGE_ID, scope: 'system' },
+        [PAIR_PACKAGE_ID]: { id: PAIR_PACKAGE_ID, dependencies: { [PACKAGE_ID]: '*' } },
+    };
+    const objectql = { registry: { getPackage: (id: string) => (manifests[id] ? { manifest: manifests[id] } : undefined) } };
 
     const services: Record<string, unknown> = {
         automation: { handlerReady: true, registerFlow, unregisterFlow, getFlow },
         protocol,
+        objectql,
     };
     const resolve = (name: string): unknown => services[name];
     const kernel = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
@@ -155,7 +171,7 @@ describe('[#20761] the /automation definition-write doors apply the one authorin
 });
 
 describe('[#20761, ADR-0126 §7.1] the clone door saves its copy as a tenant row', () => {
-    it('a clone of a shipped flow is registered AND saved through the protocol, env-wide, with no provenance', async () => {
+    it('a clone of a shipped flow is registered AND saved through the protocol, env-wide, into its pair, with no provenance', async () => {
         const h = boot();
         const { response } = await h.dispatcher.handleAutomation(
             `/${PACKAGED}/clone`, 'POST', { name: 'my_alert_copy', label: 'My Alert' }, AUTHOR(), undefined,
@@ -167,7 +183,8 @@ describe('[#20761, ADR-0126 §7.1] the clone door saves its copy as a tenant row
         const saved = h.saveMetaItem.mock.calls[0]![0] as { type: string; name: string; item: Record<string, unknown>; organizationId?: unknown; packageId?: unknown };
         expect(saved).toMatchObject({ type: 'flow', name: 'my_alert_copy' });
         expect(saved.organizationId).toBeUndefined();
-        expect(saved.packageId).toBeUndefined();
+        // [#28149] Never package-less: the copy is saved into the base's pair.
+        expect(saved.packageId).toBe(PAIR_PACKAGE_ID);
         expect(isCodeArtifactBody(saved.item)).toBe(false);
         expect(Object.keys(saved.item).filter((k) => k === '_packageId' || k === '_provenance')).toEqual([]);
         // The copy was judged by the one rule, and admitted.
@@ -203,7 +220,9 @@ describe('[#20761, ADR-0126 §7.1] the clone door saves its copy as a tenant row
  * that constant has to turn this red.
  */
 describe('[#23120] a clone does not carry its source\'s stored `protection` block into the save', () => {
-    const COPY = { name: 'legacy_locked_flow_copy', label: 'Legacy copy' };
+    // [#28149] Neither source is shipped by a package, so it has no pair: the
+    // copy names the writable package it lands in.
+    const COPY = { name: 'legacy_locked_flow_copy', label: 'Legacy copy', package: PAIR_PACKAGE_ID };
     const MUTATED = ['name', 'label', 'status'];
     const without = (body: Record<string, unknown>, keys: readonly string[]) => {
         const copy = { ...body };
@@ -239,6 +258,6 @@ describe('[#23120] a clone does not carry its source\'s stored `protection` bloc
         expect(statusOf(response)).toBe(200);
         expect(h.saveMetaItem).toHaveBeenCalledTimes(1);
         const saved = h.saveMetaItem.mock.calls[0]![0] as { item: Record<string, unknown> };
-        expect(saved.item).toEqual({ ...definitionOf(CUSTOMER), name: COPY.name, label: COPY.label, status: 'draft' });
+        expect(saved.item).toEqual({ ...definitionOf(CUSTOMER), name: COPY.name, label: COPY.label, status: FLOW_CLONE_STATUS });
     });
 });
