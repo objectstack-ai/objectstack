@@ -86,14 +86,19 @@
  * run 38517756588 killed the first shard at its 45-minute limit.
  *
  * So the document states the nightly's slicing itself: `sliceAcrossShards`
- * names every tier-owning package, and the partitioner cuts each one into as
- * many slices as the run's own `--shard k/N` has shards, still subject to its
- * per-run slice decision and the vitest file floor. Test Core's map no longer
- * reaches the nightly, and a change to the nightly's matrix re-slices it with
- * no edit here. `partition-test-shards.mjs --self-test` (run on every pull
- * request by lint.yml) pins it on the live tree: this document, at the shard
- * count `test-nightly-tiers.yml` declares, yields that many non-empty shards,
- * each carrying one distinct slice of the CLI.
+ * names the tier-owning packages to cut, and the partitioner cuts each one into
+ * as many slices as the run's own `--shard k/N` has shards left over by
+ * `ownShard`, still subject to its per-run slice decision and the vitest file
+ * floor. `ownShard` names the packages that run whole on a shard of their own
+ * (`OWN_SHARD_PACKAGES` below): placed by weight, the showcase browser smoke
+ * rode beside the first CLI slice, and that shard was killed at its 45-minute
+ * limit on 2 of the 5 nights from 2026-10-28 (runs 40638682260, 41277375892).
+ * Test Core's map no longer reaches the nightly, and a change to the nightly's
+ * matrix re-slices it with no edit here. `partition-test-shards.mjs
+ * --self-test` (run on every pull request by lint.yml) pins it on the live
+ * tree: this document, at the shard count `test-nightly-tiers.yml` declares,
+ * yields that many non-empty shards, each own-shard package alone on one and
+ * one distinct slice of the CLI on each of the others.
  *
  * ## Where `OS_TEST_TIERS` has to be declared to reach vitest at all
  *
@@ -218,20 +223,44 @@ export function tierPackages(repoRoot = REPO_ROOT) {
 }
 
 /**
+ * The tier-owning packages that run whole and alone on a nightly shard of their
+ * own (the document's `ownShard`), rather than beside a slice of the CLI. One
+ * today, the showcase browser smoke, and for a cost the partitioner's weights
+ * cannot see: its shard alone builds the Console SPA and installs Chromium
+ * (test-nightly-tiers.yml, "Prepare the showcase browser smoke"), then builds
+ * the example's closure, before its two `*.live.test.ts` files run. Measured on
+ * run 41277375892 (2026-11-01), shard 1: the preparation took 9m39s, the CLI
+ * slice beside it 33m13s, and the 45-minute limit killed the shard while it was
+ * still building the showcase's closure; on run 41009107101 (2026-10-30) that
+ * closure and the smoke took 8m14s. Its weight in the dataset is 48s.
+ *
+ * ⛔ The workflow's preparation step names the same package, and
+ * `partition-test-shards.mjs --self-test` reds when the two disagree.
+ */
+export const OWN_SHARD_PACKAGES = Object.freeze(['@objectstack/example-showcase']);
+
+/**
  * `tierPackages()` in the `turbo ls --output=json` shape
  * `scripts/partition-test-shards.mjs` reads, so the nightly can shard exactly
  * the tier-owning packages with the same partitioner and the same slice
  * grammar the Test Core matrix uses. `count` is written because the
  * partitioner checks it against `items.length`.
  *
- * `sliceAcrossShards` names every tier-owning package: the nightly states its
- * own slicing rather than inheriting Test Core's `FILE_SHARDED_PACKAGES`, and
- * the partitioner cuts each named package into as many slices as the nightly
- * has shards -- see "The nightly's shards" in this file's header.
+ * Every tier-owning package is named by exactly one of two keys. `ownShard`
+ * names the `OWN_SHARD_PACKAGES` that own tier files (each gets a shard of its
+ * own); `sliceAcrossShards` names the rest: the nightly states its own slicing
+ * rather than inheriting Test Core's `FILE_SHARDED_PACKAGES`, and the
+ * partitioner cuts each named package into as many slices as the shards the
+ * reservations leave -- see "The nightly's shards" in this file's header.
  */
-export function packageListDocument(repoRoot = REPO_ROOT) {
+export function packageListDocument(repoRoot = REPO_ROOT, ownShard = OWN_SHARD_PACKAGES) {
   const items = tierPackages(repoRoot).map(({ name, path: dir }) => ({ name, path: dir }));
-  return { packages: { count: items.length, items }, sliceAcrossShards: items.map(({ name }) => name) };
+  const own = items.filter(({ name }) => ownShard.includes(name)).map(({ name }) => name);
+  return {
+    packages: { count: items.length, items },
+    sliceAcrossShards: items.filter(({ name }) => !own.includes(name)).map(({ name }) => name),
+    ownShard: own,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -497,8 +526,17 @@ export function selfTest() {
     check(() => assert(eq(doc.packages.items[1], { name: '@x/owner', path: 'packages/owner' }), 'items carry name and repo-relative path'));
     check(() =>
       assert(
-        eq(doc.sliceAcrossShards, doc.packages.items.map((i) => i.name)),
-        `the document states its own slicing, naming every tier-owning package -- got ${JSON.stringify(doc.sliceAcrossShards)}`
+        eq(doc.sliceAcrossShards, doc.packages.items.map((i) => i.name)) && eq(doc.ownShard, []),
+        `with no own-shard package in the tree, every tier-owning package is sliced -- got ${JSON.stringify(doc)}`
+      )
+    );
+    // A reservation names only packages that own tier files, and moves each one
+    // out of the slicing: every tier-owning package is named by exactly one key.
+    const reserved = packageListDocument(root, ['@x/inner', '@x/plain', '@x/absent']);
+    check(() =>
+      assert(
+        eq(reserved.ownShard, ['@x/inner']) && eq(reserved.sliceAcrossShards, ['@x/owner']),
+        `ownShard keeps only tier-owning packages and leaves them out of sliceAcrossShards -- got ${JSON.stringify(reserved)}`
       )
     );
 
@@ -536,7 +574,7 @@ export function selfTest() {
   check(() => assert(judgeCollection('p', tier, ['test/c.test.ts'], ['test/a.e2e.test.ts']).some((p) => /does NOT collect 1 nightly-tier/.test(p)), 'a tier file missing from nightly runs nowhere'));
   check(() => assert(judgeCollection('p', tier, [], []).length === 1, 'an empty nightly collection is exactly one problem: the tier files run nowhere'));
 
-  const FLOOR = 47;
+  const FLOOR = 48;
   assert(cases >= FLOOR, `${cases} cases ran, below the pinned floor of ${FLOOR} -- cases stopped running`);
   console.log(`\u2713 nightly-tiers self-test: ${cases} cases pass.`);
   return SELF_TEST_VERDICT;

@@ -101,8 +101,10 @@
 // (shape: {packages:{count,items:[{name,path}]}}; `turbo ls` is marked
 // experimental, so the payload is asserted loudly in readPackageItems() below
 // rather than defaulted around). A document from another writer may also
-// state its own slicing in a `sliceAcrossShards` key that `turbo ls` never
-// writes -- the nightly tiers' does; see readSliceAcrossShards() below.
+// state its own slicing in a `sliceAcrossShards` key, and reserve whole
+// packages a shard each in an `ownShard` key, neither of which `turbo ls`
+// ever writes -- the nightly tiers' does; see readSliceAcrossShards() and
+// readOwnShard() below.
 // Prints the selected shard's package names, one per line -- possibly zero
 // lines, which the caller must treat as "nothing to run", NOT as "no filter":
 // a `turbo run test` with no --filter args runs the entire workspace.
@@ -1591,16 +1593,17 @@ export function readPackageItems(parsed, listPath) {
 //   { "packages": { "count": 1, "items": [...] }, "sliceAcrossShards": ["@objectstack/cli"] }
 //
 // Each named package is cut into as many slices as the run has shards -- the N
-// of the run's own `--shard k/N` -- and FILE_SHARDED_PACKAGES does not apply to
-// that run at all: the document states the run's slicing in full. planShards()
+// of the run's own `--shard k/N`, less the shards `ownShard` reserves (below)
+// -- and FILE_SHARDED_PACKAGES does not apply to that run at all: the document states the run's slicing in full. planShards()
 // still decides every named package per run (NEEDED / SPREADS / WITHIN CAP) and
 // weighItems() still enforces the vitest file floor, so a named package that
 // cannot be cut runs whole or is refused, never cut into slices vitest cannot
 // run.
 //
 // The one writer today is `scripts/nightly-tiers.mjs --packages`, for the
-// nightly tiers (test-nightly-tiers.yml), whose single tier-owning package must
-// land one slice on every shard or the shards past the first run nothing. Why
+// nightly tiers (test-nightly-tiers.yml), whose heavy tier-owning package must
+// land one slice on every shard it shares or the shards past the first run
+// nothing. Why
 // the count is the run's N and never a number carried here or a borrowed map:
 // while the nightly read Test Core's map it lost its second shard twice, with
 // no step red either time. 9ff74285 retired the CLI's entry, and from the next
@@ -1655,6 +1658,67 @@ export function sliceMapForRun(names, shardCount) {
   return Object.freeze(Object.fromEntries(names.map((name) => [name, shardCount])));
 }
 
+// ── A DOCUMENT MAY RESERVE A SHARD: `ownShard` ───────────────────────────────
+//
+//   { ..., "sliceAcrossShards": ["@objectstack/cli"], "ownShard": ["@objectstack/example-showcase"] }
+//
+// Each package `ownShard` names runs whole, ALONE, on a shard of its own -- the
+// last shards of the run, in the document's order -- and every other item is
+// planned over the shards left: N - k of them, so a `sliceAcrossShards` package
+// is cut N - k ways, not N. The reservation is the document's word, never a
+// weight: it is for a package whose shard pays a cost no weight here models.
+// The one writer is `scripts/nightly-tiers.mjs --packages`, for the showcase
+// browser smoke, whose shard also builds the Console SPA and installs Chromium
+// (test-nightly-tiers.yml, "Prepare the showcase browser smoke") and builds the
+// example's own closure. Measured on run 41277375892 shard 1 (2026-11-01): that
+// preparation took 9m39s, and the shard was killed at its 45-minute limit while
+// still building the showcase's closure after its CLI slice's 33m13s leg -- a
+// cost its 48s queue-tier weight puts at nothing. Placed by weight it lands
+// beside the first CLI slice at every shard count (LPT breaks the tie by name).
+//
+// Asserted loudly, as `sliceAcrossShards` is: an array of distinct names, each
+// listed by the document, none also named by `sliceAcrossShards` (a package is
+// cut or kept alone, never both), and fewer than the run's shards, so at least
+// one shard is left for everything else. A reserved package that the run then
+// excludes or drops is refused in planRun(): its shard would run nothing.
+export const OWN_SHARD_KEY = 'ownShard';
+
+export function readOwnShard(parsed, items, listPath, acrossShards, shardCount) {
+  if (parsed === null || typeof parsed !== 'object' || !Object.hasOwn(parsed, OWN_SHARD_KEY)) return [];
+  const names = parsed[OWN_SHARD_KEY];
+  if (!Array.isArray(names) || names.some((n) => typeof n !== 'string' || n === '')) {
+    throw new Error(
+      `${listPath}: ${OWN_SHARD_KEY} must be an array of package names, got ${JSON.stringify(names)}. ` +
+        'Refusing to shard on a reservation nobody can read.'
+    );
+  }
+  const listed = new Set(items.map((it) => it?.name));
+  const seen = new Set();
+  for (const name of names) {
+    if (seen.has(name)) throw new Error(`${listPath}: ${OWN_SHARD_KEY} names ${name} twice. Refusing to shard.`);
+    if (!listed.has(name)) {
+      throw new Error(
+        `${listPath}: ${OWN_SHARD_KEY} names ${name}, which packages.items does not list -- ` +
+          'a shard reserved for no package runs nothing. Refusing to shard.'
+      );
+    }
+    if (acrossShards !== null && acrossShards.includes(name)) {
+      throw new Error(
+        `${listPath}: ${name} is named by both ${OWN_SHARD_KEY} and ${SLICE_ACROSS_SHARDS_KEY} -- ` +
+          'a package is cut across shards or kept alone on one, never both. Refusing to shard.'
+      );
+    }
+    seen.add(name);
+  }
+  if (names.length > 0 && names.length >= shardCount) {
+    throw new Error(
+      `${listPath}: ${OWN_SHARD_KEY} reserves ${names.length} shard(s) of a ${shardCount}-shard run, ` +
+        'leaving none for the other packages. Raise the run\'s shard count. Refusing to shard.'
+    );
+  }
+  return names;
+}
+
 // ── THE `ui/` TREE IS TEST UI'S, NOT TEST CORE'S (#25697) ──────────────────
 //
 // Once objectui's tree sits under `ui/` (objectstack#25677) its packages are
@@ -1696,21 +1760,38 @@ export function withoutUiTree(items) {
 export function planRun(parsed, listPath, shardCount, { excluded = new Set(), timings = null } = {}) {
   const listed = readPackageItems(parsed, listPath);
   const acrossShards = readSliceAcrossShards(parsed, listed, listPath);
+  const ownShard = readOwnShard(parsed, listed, listPath, acrossShards, shardCount);
   const { kept: items, dropped: uiTree } = withoutUiTree(listed);
   const dataset = timings ?? loadTimings();
-  const sliced = acrossShards === null ? FILE_SHARDED_PACKAGES : sliceMapForRun(acrossShards, shardCount);
-  const { weighed, estimated, packages } = weighItems(items, excluded, dataset, listPath, sliced);
+  // Everything but the `ownShard` packages is planned over the shards they
+  // leave; with no reservation that is the whole run, as before.
+  const sharedCount = shardCount - ownShard.length;
+  const own = new Set(ownShard);
+  const sliced = acrossShards === null ? FILE_SHARDED_PACKAGES : sliceMapForRun(acrossShards, sharedCount);
+  const { weighed: all, estimated, packages } = weighItems(items, excluded, dataset, listPath, sliced);
+  const weighed = all.filter((p) => !own.has(p.name));
   // The cap is the whole-package split of the dataset's full list, not of this
   // run's list (densityCap): the density proven green is a fact about the
   // dataset, and the run's own list is what is graded against it.
-  const cap = densityCapOf(dataset, excluded, shardCount);
+  const cap = densityCapOf(dataset, new Set([...excluded, ...own]), sharedCount);
   // A document that states its own slicing is no Test Core run, and its shards
   // skip no declarations (test-nightly-tiers.yml sets no OS_SKIP_DTS), so no
   // slice of it is charged the declaration closure and nothing rides with one.
   const readers = acrossShards === null ? DECLARATION_READERS : NO_DECLARATION_READERS;
-  const { items: weighted, bins: placed, decisions } = planShards(weighed, shardCount, { cap, readers });
-  const bins = assertSlicesSpread(placed);
-  return { bins, weighted, decisions, estimated, packages, cap, acrossShards, uiTree };
+  const { items: shared, bins: placed, decisions } = planShards(weighed, sharedCount, { cap, readers });
+  const reserved = ownShard.map((name) => {
+    const p = all.find((w) => w.name === name);
+    if (!p) {
+      throw new Error(
+        `${listPath}: ${OWN_SHARD_KEY} reserves a shard for ${name}, which this run does not weigh ` +
+          '(excluded, or under ui/) -- that shard would run nothing. Refusing to shard.'
+      );
+    }
+    return { name, weight: p.weight, pkg: name, slice: null, tasks: p.tasks };
+  });
+  const weighted = [...shared, ...reserved];
+  const bins = assertSlicesSpread([...placed, ...reserved.map((it) => ({ total: packedWeight(it), names: [it.name] }))]);
+  return { bins, weighted, decisions, estimated, packages, cap, acrossShards, ownShard, uiTree };
 }
 
 // -- The self-test's own battery roster and floor (#13489) ------------------
@@ -1763,17 +1844,20 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'file-level slices reach vitest through OS_TEST_SHARD (#19278)': 11,
   'density cap and the per-run slice decision (#22075)': 14,
   'the drift step reports on every event, `schedule` included, and refuses a missing event': 8,
-  // The nightly tiers state their own slicing (`sliceAcrossShards`). 5 of these
-  // 16 read the live tree: 2 read test-nightly-tiers.yml back, and 3 drive the
-  // nightly's own document at that workflow's shard count.
-  'a document states its own slicing: the nightly tiers': 16,
+  // The nightly tiers state their own slicing (`sliceAcrossShards`). 6 of these
+  // 17 read the live tree: 3 read test-nightly-tiers.yml back (the matrix, the
+  // invocation, the preparation step), and 3 drive the nightly's own document
+  // at that workflow's shard count.
+  'a document states its own slicing: the nightly tiers': 17,
+  // 1 absent-key identity, 7 refusals, 2 placements, 1 control, 1 exclusion.
+  'a document reserves a shard of its own: ownShard': 12,
   // Members under `ui/` are Test UI's: dropped by path, the rest unperturbed.
   'the `ui/` tree is Test UI\'s, not Test Core\'s (#25697)': 6,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 17;
+const SELF_TEST_BATTERY_FLOOR = 18;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -3430,13 +3514,17 @@ function selfTest() {
   // shard count, through the path main() runs.
   const nightlyDoc = packageListDocument();
   const nightlyPlan = planRun(nightlyDoc, 'the nightly document', nightlyShards, { timings });
+  const nightlyOwn = nightlyDoc[OWN_SHARD_KEY] ?? [];
+  const nightlyShared = nightlyShards - nightlyOwn.length;
   check(() => {
     const listed = nightlyDoc.packages.items.map((i) => i.name);
     const named = nightlyDoc[SLICE_ACROSS_SHARDS_KEY];
-    if (!Array.isArray(named) || named.join('|') !== listed.join('|') || !listed.includes('@objectstack/cli')) {
+    const both = Array.isArray(named) ? [...named, ...nightlyOwn].sort() : null;
+    if (!both || both.join('|') !== [...listed].sort().join('|') || !named.includes('@objectstack/cli')) {
       throw new Error(
-        `nightly document: ${SLICE_ACROSS_SHARDS_KEY} is ${JSON.stringify(named)} for the tier-owning packages ` +
-          `${JSON.stringify(listed)} -- it must name every one of them, the CLI among them`
+        `nightly document: ${SLICE_ACROSS_SHARDS_KEY} is ${JSON.stringify(named)} and ${OWN_SHARD_KEY} ` +
+          `${JSON.stringify(nightlyOwn)} for the tier-owning packages ${JSON.stringify(listed)} -- each must be ` +
+          `named by exactly one of the two, the CLI by ${SLICE_ACROSS_SHARDS_KEY}`
       );
     }
   });
@@ -3454,13 +3542,139 @@ function selfTest() {
     const perShard = nightlyPlan.bins.map((b) =>
       b.names.map(parseShardItem).filter((it) => it.name === '@objectstack/cli' && it.slice)
     );
-    const indexes = perShard.map((s) => (s.length === 1 && s[0].slice.count === nightlyShards ? s[0].slice.index : null));
-    const want = Array.from({ length: nightlyShards }, (_, i) => i + 1);
-    if (nightlyShards >= 2 && [...indexes].sort((a, b) => a - b).join(',') !== want.join(',')) {
+    const shared = perShard.slice(0, nightlyShared);
+    const indexes = shared.map((s) => (s.length === 1 && s[0].slice.count === nightlyShared ? s[0].slice.index : null));
+    const want = Array.from({ length: nightlyShared }, (_, i) => i + 1);
+    const ownAlone = nightlyOwn.every((name, i) => nightlyPlan.bins[nightlyShared + i]?.names.join('|') === name);
+    if (nightlyShared >= 2 && ([...indexes].sort((a, b) => a - b).join(',') !== want.join(',') || !ownAlone)) {
       throw new Error(
-        `nightly: the CLI does not reach the workflow's ${nightlyShards} shards as one distinct slice each ` +
+        `nightly: the CLI does not reach the ${nightlyShared} shard(s) ${OWN_SHARD_KEY} leaves of the workflow's ` +
+          `${nightlyShards} as one distinct slice each, with ${JSON.stringify(nightlyOwn)} alone on the rest ` +
           `([${nightlyPlan.bins.map((b) => b.names.join(',')).join(' | ')}])`
       );
+    }
+  });
+  // The reason a package is reserved a shard is the preparation its shard alone
+  // pays, so the workflow's preparation step must name exactly those packages:
+  // a step preparing a package that rides beside a CLI slice is the cost the
+  // reservation exists to keep off that slice's shard.
+  check(() => {
+    const prepare = /- name: Prepare the showcase browser smoke[\s\S]*?(?=\n {6}- name: )/.exec(nightlyYml)?.[0] ?? '';
+    const prepared = [...prepare.matchAll(/grep -qE '\^(@[^(' ]+)\(/g)].map((m) => m[1]).sort();
+    if (prepared.length === 0 || prepared.join('|') !== [...nightlyOwn].sort().join('|')) {
+      throw new Error(
+        `test-nightly-tiers.yml: the browser-smoke preparation step prepares ${JSON.stringify(prepared)}, but the ` +
+          `nightly document reserves a shard for ${JSON.stringify(nightlyOwn)} -- the two must name the same packages`
+      );
+    }
+  });
+
+  // -- A DOCUMENT RESERVES A SHARD: `ownShard` ------------------------------
+  //
+  // The nightly's showcase smoke pays a shard-level preparation no weight here
+  // models, so the document keeps it alone on a shard and the CLI is cut across
+  // the rest. Fixtures on the two live package paths, through planRun().
+  battery('a document reserves a shard of its own: ownShard');
+
+  const ownItems = [
+    { name: '@objectstack/example-showcase', path: 'examples/app-showcase' },
+    { name: '@objectstack/cli', path: 'packages/cli' },
+  ];
+  const ownDoc = (extra) => ({ packages: { count: 2, items: ownItems }, ...extra });
+  const splitOf = (plan) => plan.bins.map((b) => b.names.join(','));
+
+  // Absent, the key changes nothing: the plan is the one the document without
+  // it always produced, and no shard is reserved.
+  check(() => {
+    const plain = planRun(ownDoc({ [SLICE_ACROSS_SHARDS_KEY]: ['@objectstack/cli'] }), 'no reservation', 3, { timings });
+    const empty = planRun(
+      ownDoc({ [SLICE_ACROSS_SHARDS_KEY]: ['@objectstack/cli'], [OWN_SHARD_KEY]: [] }),
+      'empty reservation',
+      3,
+      { timings }
+    );
+    if (plain.ownShard.length !== 0 || splitOf(plain).join('|') !== splitOf(empty).join('|')) {
+      throw new Error(`own shard: an absent or empty ${OWN_SHARD_KEY} changed the split ([${splitOf(plain).join(' | ')}])`);
+    }
+  });
+
+  // Present, it is asserted: each malformed shape is refused, naming the key.
+  for (const [label, extra, n] of [
+    ['not an array', { [OWN_SHARD_KEY]: '@objectstack/example-showcase' }, 3],
+    ['a non-string entry', { [OWN_SHARD_KEY]: [7] }, 3],
+    ['an empty name', { [OWN_SHARD_KEY]: [''] }, 3],
+    ['a duplicate name', { [OWN_SHARD_KEY]: ['@objectstack/example-showcase', '@objectstack/example-showcase'] }, 3],
+    ['a package the document does not list', { [OWN_SHARD_KEY]: ['@objectstack/spec'] }, 3],
+    [
+      'a package also cut across shards',
+      { [SLICE_ACROSS_SHARDS_KEY]: ['@objectstack/cli'], [OWN_SHARD_KEY]: ['@objectstack/cli'] },
+      3,
+    ],
+    ['as many reservations as shards', { [OWN_SHARD_KEY]: ['@objectstack/example-showcase'] }, 1],
+  ]) {
+    check(() => {
+      let message = null;
+      try {
+        planRun(ownDoc(extra), 'bad doc', n, { timings });
+      } catch (e) {
+        message = e.message;
+      }
+      if (message === null || !message.includes(OWN_SHARD_KEY)) {
+        throw new Error(`own shard: ${label} was not refused by name (${JSON.stringify(message ?? 'no throw')})`);
+      }
+    });
+  }
+
+  // The reserved package is alone on the last shard, and the CLI is cut across
+  // the shards it leaves -- N - 1 ways, one distinct slice on each.
+  for (const n of [3, 4]) {
+    check(() => {
+      const plan = planRun(
+        ownDoc({ [SLICE_ACROSS_SHARDS_KEY]: ['@objectstack/cli'], [OWN_SHARD_KEY]: ['@objectstack/example-showcase'] }),
+        'reserved',
+        n,
+        { timings }
+      );
+      const want = [
+        ...Array.from({ length: n - 1 }, (_, i) => formatShardItem('@objectstack/cli', { index: i + 1, count: n - 1 })),
+        '@objectstack/example-showcase',
+      ];
+      if (splitOf(plan).join('|') !== want.join('|')) {
+        throw new Error(`own shard: at ${n} shards the split is [${splitOf(plan).join(' | ')}], expected [${want.join(' | ')}]`);
+      }
+    });
+  }
+
+  // The control: without the reservation the showcase rides beside the first
+  // CLI slice -- the placement that put its preparation on the heaviest shard.
+  check(() => {
+    const plan = planRun(
+      ownDoc({ [SLICE_ACROSS_SHARDS_KEY]: ['@objectstack/example-showcase', '@objectstack/cli'] }),
+      'control',
+      3,
+      { timings }
+    );
+    const withShowcase = plan.bins.find((b) => b.names.includes('@objectstack/example-showcase'));
+    if (!withShowcase || withShowcase.names.length < 2) {
+      throw new Error(`own shard: the control split [${splitOf(plan).join(' | ')}] does not show the showcase sharing a shard`);
+    }
+  });
+
+  // A reserved package the run excludes would leave its shard running nothing.
+  check(() => {
+    let message = null;
+    try {
+      planRun(
+        ownDoc({ [SLICE_ACROSS_SHARDS_KEY]: ['@objectstack/cli'], [OWN_SHARD_KEY]: ['@objectstack/example-showcase'] }),
+        'excluded',
+        3,
+        { timings, excluded: new Set(['@objectstack/example-showcase']) }
+      );
+    } catch (e) {
+      message = e.message;
+    }
+    if (message === null || !message.includes('would run nothing')) {
+      throw new Error(`own shard: an excluded reserved package was not refused (${JSON.stringify(message ?? 'no throw')})`);
     }
   });
 
@@ -3631,14 +3845,17 @@ function main() {
   if (shardIndex > shardCount) throw new Error(`--shard ${shardSpec}: index exceeds count`);
 
   const parsed = JSON.parse(readFileSync(listPath, 'utf8'));
-  const { bins, weighted, decisions, estimated, packages, cap, acrossShards, uiTree } = planRun(
+  const { bins, weighted, decisions, estimated, packages, cap, acrossShards, ownShard, uiTree } = planRun(
     parsed,
     listPath,
     shardCount,
     { excluded }
   );
   const mine = bins[shardIndex - 1];
-  const { max, mean, ratio } = balanceOf(bins);
+  // The ratio grades what weights placed: the shared shards. A reserved shard is
+  // the document's placement, and its package's weight is not what it costs.
+  const sharedCount = shardCount - ownShard.length;
+  const { max, mean, ratio } = balanceOf(bins.slice(0, sharedCount));
   // Printed on every shard, not just the imbalanced one, and printed as the
   // RATIO the acceptance bound is written in: the per-shard numbers alone never
   // said whether the split was balanced, which is why #10472's imbalance had to
@@ -3648,7 +3865,8 @@ function main() {
     `shard ${shardSpec}: ${mine.names.length}/${weighted.length} items ` +
       `(${weighted.length - packages} of them file-level slices of ${packages} package(s)), ` +
       `${mine.total.toFixed(1)}s predicted (all bins: ${bins.map((b) => b.total.toFixed(0)).join('/')}s; ` +
-      `max/mean ${ratio.toFixed(2)}x of the ${MAX_SHARD_OVER_MEAN}x bound, max ${max.toFixed(0)}s, mean ${mean.toFixed(0)}s; ` +
+      `max/mean ${ratio.toFixed(2)}x of the ${MAX_SHARD_OVER_MEAN}x bound` +
+      `${ownShard.length > 0 ? ` over the ${sharedCount} shared shard(s)` : ''}, max ${max.toFixed(0)}s, mean ${mean.toFixed(0)}s; ` +
       `density cap ${cap.toFixed(2)}s; ` +
       `${packages - estimated} measured, ${estimated} estimated from test-file count)`
   );
@@ -3658,11 +3876,17 @@ function main() {
     let what;
     if (acrossShards.length === 0) what = 'names no package';
     else if (shardCount < 2) what = `${acrossShards.join(', ')}, but a one-shard run cuts nothing`;
+    else if (sharedCount < 2) what = `${acrossShards.join(', ')}, but one shared shard cuts nothing`;
+    else if (ownShard.length > 0) what = `${acrossShards.join(', ')} cut ${sharedCount} ways, one slice per shard ${OWN_SHARD_KEY} leaves`;
     else what = `${acrossShards.join(', ')} cut ${shardCount} ways, one slice per shard of this run`;
     console.error(
       `  slicing map: the document's ${SLICE_ACROSS_SHARDS_KEY} -- ${what}; ` +
         "FILE_SHARDED_PACKAGES (Test Core's map) does not apply to this run"
     );
+  }
+  // Only a document that reserves a shard prints this.
+  for (const [i, name] of ownShard.entries()) {
+    console.error(`  own shard: ${name} runs whole and alone on shard ${sharedCount + i + 1}/${shardCount} (the document's ${OWN_SHARD_KEY})`);
   }
   // Only a document listing `ui/` members prints this, so today's log is unchanged.
   if (uiTree > 0) {
