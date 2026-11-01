@@ -1216,7 +1216,8 @@ export type ConnectorParsed = z.infer<typeof ConnectorSchema>;
  * cross-field rules (no inline `authentication`, `providerConfig` / `auth`
  * need a `provider`, …) bind a connector authored inside a stack, and every
  * stack door still applies them to the value this helper returns. Module
- * private on purpose — the published carriers stay the two exports above.
+ * private on purpose — the published carriers stay {@link ConnectorSchema} and
+ * {@link DeclarativeConnectorEntrySchema}.
  */
 const DefineConnectorSchema = lazySchema(() =>
   acceptRetiredDefaultResidue(DeclarativeConnectorEntryBaseSchema, CONNECTOR_RETIRED_KEY_RESIDUE),
