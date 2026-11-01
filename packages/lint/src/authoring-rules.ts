@@ -161,6 +161,7 @@ import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
+  lintSummaryRollups,
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -2136,6 +2137,44 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_REFUSED_BY_THE_DOOR_PARSE,
     run: (stack) =>
       lintUnscopedDeclaredIndexes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
+  // R13 — a roll-up's aggregand and child object (`lintSummaryRollups`). A
+  // `sum` / `avg` over a child field the aggregate × field-type table refuses
+  // (a `text`, `select`, `formula` or `percent` field, …) published clean, and
+  // from then on every create, update and delete of the child answered 500
+  // although each write had landed: the recompute's `engine.aggregate` refuses
+  // the pair after the commit, every time. A `min` / `max` whose answer is not
+  // a number computes a value the summary column cannot store. `os lint` alone judged the `min` / `max` arm; no door refused any of it,
+  // and the runtime write door — the only one a Studio, REST or MCP author
+  // has — judged none of it.
+  //
+  // GATING on all three commands, so `lintDataModel` stopped calling it in the
+  // same change and `os lint` reports it here, once. On the runtime publish
+  // gate's `object` writes, where the snapshot carries the child objects
+  // (`stack.objects`, the collection every per-write snapshot holds), so the
+  // aggregand arms have no missing-collection false-positive channel: a child
+  // the snapshot does not hold is not judged — nor is a child object nothing
+  // holds, which an unmanaged install legitimately writes after its parent
+  // (see the rule's docblock). The gate's
+  // differential charges a STORED parent's finding to this write only when the
+  // write creates it (a child write that turns a summed field into text).
+  {
+    name: 'lintSummaryRollups',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) =>
+      lintSummaryRollups(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.where,
