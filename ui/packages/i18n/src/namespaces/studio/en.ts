@@ -3209,6 +3209,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.customize.restoreBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s version is served again.',
   'engine.studio.customize.restoreDraft': 'Its unpublished draft is discarded first.',
   'engine.studio.customize.restoreDone': '“{item}” is back to {package}’s version',
+  // objectstack#28572 — one surface for a read-only base and its customization package.
+  'engine.studio.customize.addedIn': 'In {pair}',
+  'engine.studio.customize.addedInTitle': 'This item is added by {pair}, this deployment’s customization package, and is saved there.',
+  'engine.studio.pkg.withPair': 'with {pair}',
+  'engine.studio.if.addInPairTitle': 'New in the customization of {baseName}',
+  'engine.studio.interfaces.create.descriptionInPair':
+    'Saved as a draft in this deployment’s customization of {baseName}, and opened on the canvas. The navigation of {baseName} stays as it was installed.',
   'engine.studio.app.scaffoldNav': "Add this package's objects as menu items",
   'engine.studio.landing.title': 'App Builder',
   'engine.studio.landing.description': 'Design objects, forms, automations and interfaces inside a writable package; edits save as drafts and the whole package publishes in one release. Code and installed packages are read-only: browse them here, and customize them with an environment overlay.',

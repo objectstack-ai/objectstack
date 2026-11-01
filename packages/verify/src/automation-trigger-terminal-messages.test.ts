@@ -31,11 +31,16 @@
  * against the engine's internal result object: a pin that stops at
  * `AutomationResult` cannot fail when the wire mapping is the half that breaks.
  *
- * **Verbatim is contract too.** `flows.mdx` documents both fields as plain
- * author-declared strings with `{var}` explicitly NOT interpolated. Anything this
- * path did to them on the way out — templating, trimming, HTML-escaping — would
- * contradict the shipped contract, so one case drives a deliberately
- * hostile string and asserts byte identity rather than a substring match.
+ * **Rendered, and otherwise byte for byte (#28054).** `flows.mdx` documents both
+ * fields as flow text slots: `{{ }}` holes over the run's variables, filled by the
+ * engine at the terminal exit, and a single-brace `{var}` refused when the flow
+ * registers. Everything else in the string is the author's: this path does no
+ * trimming and no HTML-escaping on the way out. So three cases pin it on the
+ * wire: a brace-free hostile string (padding, quotes, `&`, `>`) arrives byte for
+ * byte; the same string with a `{{ amount }}` hole arrives with the trigger param
+ * filled in and every other byte kept; and the single-brace `{amount}` spelling
+ * never reaches the wire, because `registerFlow` refuses the flow on the trigger
+ * path with its `{{ amount }}` spelling.
  *
  * ⚠️ This suite resolves both packages through their BUILT `dist/`, as every
  * dependent of theirs in this workspace does. Rebuild `@objectstack/service-automation`
@@ -56,11 +61,22 @@ const ERROR_TEXT = 'We could not create the opportunity — check the amount and
 const RAW_FAILURE = 'downstream 503';
 
 /**
- * Braces (a templating probe), padding (a trimming probe), and `&`/quotes/`>`
- * (an escaping probe) in one string. `{amount}` is supplied as a real trigger
- * param below, so an interpolating producer would visibly substitute it.
+ * Padding (a trimming probe) and `&`/quotes/`>` (an escaping probe), with no
+ * hole and no closed single-brace token: a message with nothing to fill reaches
+ * the wire byte for byte.
  */
-const HOSTILE = '  {amount} items — "R&D" & 5 > 3, kept verbatim  ';
+const PLAIN_HOSTILE = '  Items — "R&D" & 5 > 3, kept verbatim  ';
+
+/**
+ * A `{{ amount }}` hole (the render probe), padding (a trimming probe), and
+ * `&`/quotes/`>` (an escaping probe) in one string. `amount` is a declared input
+ * supplied as a real trigger param below, so the engine fills the hole with it.
+ */
+const HOSTILE = '  {{ amount }} items — "R&D" & 5 > 3, kept verbatim  ';
+/** HOSTILE as the engine renders it with `amount = 42`: the hole filled, every other byte kept. */
+const HOSTILE_RENDERED = '  42 items — "R&D" & 5 > 3, kept verbatim  ';
+/** The single-brace spelling the flow text slots refuse at registration (#28054). */
+const SINGLE_BRACE = '  {amount} items — "R&D" & 5 > 3, kept verbatim  ';
 
 const CTX = { request: {}, executionContext: { userId: 'user_1' } } as never;
 
@@ -70,7 +86,7 @@ function createTestLogger(): never {
 }
 
 /** A one-node flow whose single `script` node passes or fails as asked. */
-function bootFlow(opts: { fails: boolean; successMessage?: string; errorMessage?: string }): HttpDispatcher {
+function bootFlow(opts: { fails: boolean; successMessage?: string; errorMessage?: string; amountInput?: boolean }): HttpDispatcher {
     const engine = new AutomationEngine(createTestLogger());
     engine.registerNodeExecutor({
         type: 'script',
@@ -84,6 +100,7 @@ function bootFlow(opts: { fails: boolean; successMessage?: string; errorMessage?
         type: 'autolaunched',
         ...(opts.successMessage !== undefined ? { successMessage: opts.successMessage } : {}),
         ...(opts.errorMessage !== undefined ? { errorMessage: opts.errorMessage } : {}),
+        ...(opts.amountInput ? { variables: [{ name: 'amount', type: 'number', isInput: true }] } : {}),
         nodes: [
             { id: 'start', type: 'start', label: 'Start' },
             { id: 'work', type: 'script', label: 'Work', config: { function: 'noop' } },
@@ -141,23 +158,48 @@ describe('#9414 — a triggered run reaches the wire with the author\'s terminal
         expect(result.response?.body?.data?.successMessage).toBe(SUCCESS_TEXT);
     });
 
-    it('carries both VERBATIM — no templating, no trimming, no escaping', async () => {
-        // `flows.mdx` documents these as plain strings with `{var}` explicitly
-        // NOT interpolated. `amount` is a real trigger param here, so an
-        // interpolating producer would substitute it and this would fail loudly.
-        const failing = bootFlow({ fails: true, errorMessage: HOSTILE });
-        const passing = bootFlow({ fails: false, successMessage: HOSTILE });
+    it('carries a message with no hole byte for byte — no trimming, no escaping', async () => {
+        // A brace-free hostile string: nothing to render, so the engine's render
+        // must hand back every byte the author wrote, padding and `& " >` included.
+        const failing = bootFlow({ fails: true, errorMessage: PLAIN_HOSTILE });
+        const passing = bootFlow({ fails: false, successMessage: PLAIN_HOSTILE });
 
         const failed = await trigger(failing, { amount: 42 });
         const passed = await trigger(passing, { amount: 42 });
 
-        expect(failed.response?.body?.error?.details?.errorMessage).toBe(HOSTILE);
-        expect(passed.response?.body?.data?.successMessage).toBe(HOSTILE);
-        // Spelled out, because `toBe` on a constant can be read as tautological:
-        // the padding survives, and the brace was never a template.
-        expect(failed.response?.body?.error?.details?.errorMessage).not.toContain('42');
-        expect(failed.response?.body?.error?.details?.errorMessage).toMatch(/^ {2}\{amount\}/);
+        expect(failed.response?.body?.error?.details?.errorMessage).toBe(PLAIN_HOSTILE);
+        expect(passed.response?.body?.data?.successMessage).toBe(PLAIN_HOSTILE);
+        expect(failed.response?.body?.error?.details?.errorMessage).toMatch(/^ {2}Items — "R&D" & 5 > 3/);
         expect(failed.response?.body?.error?.details?.errorMessage).toMatch(/verbatim {2}$/);
+    });
+
+    it('fills the `{{ }}` hole with the run\'s variable and keeps every other byte — no trimming, no escaping (#28054)', async () => {
+        // `flows.mdx` documents these as flow text slots. `amount` is a declared
+        // input supplied as a real trigger param, so the engine fills the hole
+        // at the terminal exit; the padding, quotes, `&` and `>` are the author's.
+        const failing = bootFlow({ fails: true, errorMessage: HOSTILE, amountInput: true });
+        const passing = bootFlow({ fails: false, successMessage: HOSTILE, amountInput: true });
+
+        const failed = await trigger(failing, { amount: 42 });
+        const passed = await trigger(passing, { amount: 42 });
+
+        expect(failed.response?.body?.error?.details?.errorMessage).toBe(HOSTILE_RENDERED);
+        expect(passed.response?.body?.data?.successMessage).toBe(HOSTILE_RENDERED);
+        // Spelled out, because `toBe` on a constant can be read as tautological:
+        // the hole is gone, the value is there, and the padding survives.
+        expect(failed.response?.body?.error?.details?.errorMessage).not.toContain('{{');
+        expect(failed.response?.body?.error?.details?.errorMessage).toMatch(/^ {2}42 items/);
+        expect(failed.response?.body?.error?.details?.errorMessage).toMatch(/verbatim {2}$/);
+    });
+
+    it('a single-brace `{amount}` never reaches the wire: registerFlow refuses it with its `{{ }}` spelling (#28054)', () => {
+        for (const key of ['successMessage', 'errorMessage'] as const) {
+            // `toThrow(string)` matches a substring: the door, the key and the judge's own lead.
+            expect(() => bootFlow({ fails: false, [key]: SINGLE_BRACE, amountInput: true })).toThrow(
+                `flow ${key}: A flow text slot reads`,
+            );
+            expect(() => bootFlow({ fails: false, [key]: SINGLE_BRACE, amountInput: true })).toThrow(/\{\{ ?amount ?\}\}/);
+        }
     });
 
     it('a flow declaring NO messages gets no invented key — the doc\'s "when the flow declares one" half', async () => {
