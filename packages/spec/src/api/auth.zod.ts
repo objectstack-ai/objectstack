@@ -162,6 +162,12 @@ export const MePermissionsAnonymousResponseSchema = lazySchema(() => z.object({
  *
  * Strict: an undeclared key is refused, so a key the server starts sending is
  * declared here first (`Clause-②`).
+ *
+ * Not to be confused with `GetEffectivePermissionsResponseSchema`
+ * (`api/protocol.zod.ts`), the older, non-strict answer of the optional
+ * `getEffectivePermissions` protocol method: it declares only `objects` and
+ * `systemPermissions`, and no route serves it. This schema is the body
+ * `/auth/me/permissions` actually answers.
  */
 export const MePermissionsAuthenticatedResponseSchema = lazySchema(() => z.object({
   authenticated: z.literal(true).describe('A session was resolved for the caller.'),

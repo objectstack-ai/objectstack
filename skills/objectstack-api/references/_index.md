@@ -23,37 +23,15 @@ from `node_modules` — there is no local copy in the skill bundle.
 - `node_modules/@objectstack/spec/src/api/error-code-ledger.zod.ts` — Error-Code Ledger (ADR-0112 D3).
 - `node_modules/@objectstack/spec/src/api/realtime-shared.zod.ts` — Realtime Shared Protocol
 - `node_modules/@objectstack/spec/src/data/data-engine.zod.ts` — Data Engine Protocol
-- `node_modules/@objectstack/spec/src/data/date-macros.zod.ts` — Date Macro Tokens — the declarative placeholders the UI substitutes
-- `node_modules/@objectstack/spec/src/data/field-value.zod.ts` — Field runtime VALUE-shape contract (ADR-0104 D1).
-- `node_modules/@objectstack/spec/src/data/field.zod.ts` — Exports: FieldType, SelectOptionSchema, LocationCoordinatesSchema, CurrencyConfigSchema, UniqueScopeSchema
 - `node_modules/@objectstack/spec/src/data/filter.zod.ts` — Unified Query DSL Specification
-- `node_modules/@objectstack/spec/src/data/hook-body.zod.ts` — Exports: HookBodyCapability, ExpressionBodySchema, ScriptBodySchema, HookBodySchema
-- `node_modules/@objectstack/spec/src/data/object.zod.ts` — Exports: ApiMethod, ApiOperationSchema, ObjectCapabilities, IndexSchema, TenancyConfigSchema
 - `node_modules/@objectstack/spec/src/data/query.zod.ts` — QueryAST — Abstract Syntax Tree for data queries.
-- `node_modules/@objectstack/spec/src/data/validation.zod.ts` — ObjectStack Validation Protocol
-- `node_modules/@objectstack/spec/src/identity/eval-user.zod.ts` — EvalUser — the one user-context contract (ADR-0068 D1).
 - `node_modules/@objectstack/spec/src/kernel/execution-context.zod.ts` — Exports: AuthGateCodeSchema, AuthGateScopeSchema, ExecutionContextSchema
 - `node_modules/@objectstack/spec/src/kernel/metadata-protection.zod.ts` — Metadata Protection Model — Phase 1 (ADR-0010)
-- `node_modules/@objectstack/spec/src/kernel/override-declaration.zod.ts` — The override declaration (ADR-0146 D2)
 - `node_modules/@objectstack/spec/src/security/explain.zod.ts` — [ADR-0090 D6] Access-explanation contract — `explain(principal, object,
-- `node_modules/@objectstack/spec/src/security/permission.zod.ts` — Exports: ObjectAccessScopeSchema, ObjectPermissionSchema, EffectiveObjectPermissionSchema, AdminScopeSchema, FieldPermissionSchema
-- `node_modules/@objectstack/spec/src/security/rls.zod.ts` — Row-Level Security (RLS) Protocol
-- `node_modules/@objectstack/spec/src/shared/conditional-formatting.zod.ts` — The **single declaration** of a conditional formatting rule —
 - `node_modules/@objectstack/spec/src/shared/duration.zod.ts` — Exports: DurationMs, DurationSeconds
 - `node_modules/@objectstack/spec/src/shared/epoch.zod.ts` — Exports: EpochMs
-- `node_modules/@objectstack/spec/src/shared/expression.zod.ts` — Expression Protocol
 - `node_modules/@objectstack/spec/src/shared/http.zod.ts` — Shared HTTP Schemas
-- `node_modules/@objectstack/spec/src/shared/identifiers.zod.ts` — Exports: SystemIdentifierSchema, SnakeCaseIdentifierSchema, MetadataItemNameSchema
-- `node_modules/@objectstack/spec/src/shared/protection.zod.ts` — Package-level metadata protection (ADR-0010 §3.7 — Phase 4.3)
 - `node_modules/@objectstack/spec/src/shared/suggestions.zod.ts` — "Did you mean?" Suggestion Utilities
-- `node_modules/@objectstack/spec/src/shared/value-domain.zod.ts` — Standard value domains: one closed vocabulary and one membership predicate for settings and fields.
-- `node_modules/@objectstack/spec/src/ui/action-params.zod.ts` — The action DISPATCH contract: what the platform validates on the way in, and
-- `node_modules/@objectstack/spec/src/ui/action.zod.ts` — Exports: ActionParamSchema, ActionType, ActionLocationSchema, ActionAiSchema, ActionSchema
-- `node_modules/@objectstack/spec/src/ui/bulk-action.zod.ts` — Bulk Action Schemas
-- `node_modules/@objectstack/spec/src/ui/chart.zod.ts` — Unified Chart Type Taxonomy
-- `node_modules/@objectstack/spec/src/ui/i18n.zod.ts` — Display-label and ARIA-label primitives shared by every `ui/` shape.
-- `node_modules/@objectstack/spec/src/ui/sharing.zod.ts` — Sharing & Embedding Protocol
-- `node_modules/@objectstack/spec/src/ui/view.zod.ts` — View protocol schemas — the `view` metadata type and its three persisted body spellings.
 
 ## How to read these
 

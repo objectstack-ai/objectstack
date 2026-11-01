@@ -119,8 +119,12 @@ export interface IOwnershipQueueService {
    * (`MePermissionsAuthenticatedResponseSchema`, `@objectstack/spec/api`), so
    * a member who may not read `sys_queue` can still tell whether a queue
    * filter can ever return a row. It discloses no name and no count.
+   *
+   * Optional, as {@link declaredQueueNamed} is, so an implementation written
+   * before it still satisfies the contract: the route answers `false` when the
+   * registered service does not carry it.
    */
-  hasAnyQueue(organizationId: string | null): Promise<boolean>;
+  hasAnyQueue?(organizationId: string | null): Promise<boolean>;
 
   /**
    * The declared queue named `name`, whether or not the activation ledger
