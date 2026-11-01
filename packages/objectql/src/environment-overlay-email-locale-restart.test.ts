@@ -200,13 +200,17 @@ async function boot(
  * template is closed, so every administrator write in this file is the one
  * that stays open: into the base's pair, `com.acme.mail.custom`, declaring
  * what it overrides. This wrapper names the pair on each save, publish and
- * delete that names no package, and adds the declaration to a saved body —
+ * delete that names no package, and adds the declaration to a saved body of a
+ * member the package ships (one it does not ship is the pair's own item) —
  * the member semantics pinned below are the pair's, row for row, as they were
  * the package-less row's. A write that names a package (the drafts into
  * `PKG` below) is passed through untouched.
  */
 const PAIR = 'com.acme.mail.custom';
 const DECLARATION = { package: PKG, basedOn: '1.0.0' };
+/** Whether the package ships this body's `(name, locale)` member. */
+const shipsMember = (item: any) => ((mailManifest().emailTemplates as any[]) ?? [])
+    .some((shipped) => shipped.name === (item?.name ?? NAME) && shipped.locale === item?.locale);
 function inPair(protocol: ObjectStackProtocolImplementation): ObjectStackProtocolImplementation {
     const named = (request: any) => request?.packageId !== undefined;
     return new Proxy(protocol, {
@@ -214,7 +218,11 @@ function inPair(protocol: ObjectStackProtocolImplementation): ObjectStackProtoco
             const value = Reflect.get(target, key, receiver);
             if (key === 'saveMetaItem') {
                 return (request: any) => (named(request) ? value.call(target, request) : value.call(target, {
-                    ...request, packageId: PAIR, item: { ...request.item, overrides: DECLARATION },
+                    ...request,
+                    packageId: PAIR,
+                    // [#28746] A member the package does not ship is the pair's
+                    // own item, not an override: it declares none.
+                    item: request.type !== 'email_template' || shipsMember(request.item) ? { ...request.item, overrides: DECLARATION } : request.item,
                 }));
             }
             if (key === 'deleteMetaItem' || key === 'publishMetaItem') {
