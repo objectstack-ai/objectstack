@@ -1,30 +1,41 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * Upstream-availability classification for connector provider factories
- * (ADR-0097 follow-up, #3017).
+ * Failure classification for connector provider factories (ADR-0097
+ * follow-ups: #3017, #27237, #27401).
  *
- * A {@link ConnectorProviderFactory} can fail for two very different reasons:
+ * A {@link ConnectorProviderFactory} can fail in four ways, and the
+ * materializer treats each differently:
  *
- * 1. **Configuration faults** — invalid `providerConfig`, an unresolvable
- *    `credentialRef`, a name conflict. These are authoring mistakes; the
- *    materializer keeps them **fatal at boot** (ADR-0097 "fail loudly").
- * 2. **Operational faults** — the upstream the factory must contact to
- *    materialize (an MCP server's `tools/list`, a remote spec endpoint) is
- *    *temporarily unreachable*. Aborting the whole app boot for a transient
- *    network blip turns one degraded integration into a total outage.
+ * 1. **Configuration faults** — invalid `providerConfig`, a name conflict, a
+ *    shape the provider refuses. These are authoring mistakes, thrown with no
+ *    marker; the materializer keeps them **fatal at boot** (ADR-0097 "fail
+ *    loudly"), a skipped entry on reload.
+ * 2. **The upstream is unreachable** — the upstream the factory must contact
+ *    to materialize (an MCP server's `tools/list`, a remote spec endpoint) is
+ *    *temporarily unreachable*: {@link CONNECTOR_UPSTREAM_UNAVAILABLE}, most
+ *    conveniently a {@link ConnectorUpstreamUnavailableError}.
+ * 3. **The upstream refused the credential** — it answered, and refused the
+ *    credential the instance sent (HTTP 401 / 403, or a tool list narrowed to
+ *    what that credential may use): {@link CONNECTOR_CREDENTIAL_REJECTED},
+ *    a {@link ConnectorCredentialRejectedError}.
+ * 4. **The upstream changed** — it answered, and serves a definition that
+ *    differs from a pin the instance declares:
+ *    {@link CONNECTOR_UPSTREAM_CHANGED}, a {@link ConnectorUpstreamChangedError}.
  *
- * A factory signals case 2 by throwing an error whose `code` is
- * {@link CONNECTOR_UPSTREAM_UNAVAILABLE} — most conveniently a
- * {@link ConnectorUpstreamUnavailableError}. The materializer then **degrades**
- * that one instance instead of failing boot: it is registered in a `degraded`
- * state (visible via `GET /connectors`, dispatch fails with a clear error) and
- * re-materialization is retried with backoff and on every reconcile. Errors
- * without the marker keep the fail-loud contract unchanged.
+ * Each of the three markers makes the materializer **degrade** that one
+ * instance instead of failing boot: it is registered in a `degraded` state
+ * (visible via `GET /connectors`, dispatch fails with the factory's message)
+ * with log records worded for its cause. An unreachable or changed upstream is
+ * re-materialized with backoff and on every reconcile; a refused credential is
+ * retried on that backoff only when its value can change where the process
+ * cannot see it (the marker's own TSDoc says when). Errors without a marker
+ * keep the fail-loud contract unchanged.
  *
- * The check is **structural** ({@link isConnectorUpstreamUnavailable} reads
- * `code`, never `instanceof`), so classification survives package-manager
- * module duplication across the plugin/host boundary.
+ * The checks are **structural** ({@link isConnectorUpstreamUnavailable},
+ * {@link isConnectorCredentialRejected} and {@link isConnectorUpstreamChanged}
+ * read `code`, never `instanceof`), so classification survives
+ * package-manager module duplication across the plugin/host boundary.
  */
 
 /** Marker `code` for an operational (retryable) provider-factory failure. */

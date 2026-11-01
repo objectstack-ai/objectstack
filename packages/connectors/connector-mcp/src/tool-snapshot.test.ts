@@ -45,15 +45,23 @@ function server(tools: McpToolDescriptor[]) {
     return { clientFactory, state };
 }
 
-function ctx(providerConfig: Record<string, unknown>): ConnectorProviderContext {
-    return { name: 'vendor', label: 'Vendor', type: 'api', providerConfig };
+function ctx(providerConfig: Record<string, unknown>, auth?: ConnectorProviderContext['auth']): ConnectorProviderContext {
+    return { name: 'vendor', label: 'Vendor', type: 'api', providerConfig, ...(auth ? { auth } : {}) };
 }
 
-/** Materialize against `tools`; resolves to the materialization or the thrown value. */
-async function materialize(tools: McpToolDescriptor[], providerConfig: Record<string, unknown>) {
+/**
+ * Materialize against `tools`; resolves to the materialization or the thrown
+ * value. `auth` is the instance's resolved credential: over http a bearer one
+ * reaches the server, which may then list only the tools it may use.
+ */
+async function materialize(
+    tools: McpToolDescriptor[],
+    providerConfig: Record<string, unknown>,
+    auth?: ConnectorProviderContext['auth'],
+) {
     const { clientFactory, state } = server(tools);
     const factory = createMcpProviderFactory({ clientFactory });
-    const outcome = await Promise.resolve(factory(ctx({ transport: http, ...providerConfig }))).then(
+    const outcome = await Promise.resolve(factory(ctx({ transport: http, ...providerConfig }, auth))).then(
         (mat: ConnectorMaterialization) => ({ mat, err: undefined as unknown }),
         (err: unknown) => ({ mat: undefined, err }),
     );
@@ -206,6 +214,69 @@ describe('mcp provider: providerConfig.toolsSnapshot pins each tool', () => {
         expect(err).toBeUndefined();
         expect(Object.keys(mat?.handlers ?? {})).toEqual(['create_issue']);
         expect(mat?.def.actions?.[0]?.description).toBe('changed');
+    });
+});
+
+// A credentialed instance (a bearer `auth` over http reaches the server): a
+// server may list only the tools that credential may use, so a pinned tool it
+// does not list may be hidden from the credential rather than dropped — it
+// takes the credential path, both causes named, like an `include` entry. A
+// served tool that hashes differently is still the server's change.
+describe('mcp provider: toolsSnapshot on an instance whose credential reaches the server', () => {
+    const PIN = computeMcpToolsSnapshot([CREATE_ISSUE, LIST_ISSUES]);
+    const bearer = { type: 'bearer', token: 'narrow-token-value' } as unknown as ConnectorProviderContext['auth'];
+
+    function expectCredentialPath(err: unknown) {
+        expect(isConnectorCredentialRejected(err)).toBe(true);
+        expect((err as { status?: number }).status).toBe(403);
+        expect(isConnectorUpstreamChanged(err)).toBe(false);
+        expect(isConnectorUpstreamUnavailable(err)).toBe(false);
+    }
+
+    it('an included and pinned tool the server does not list takes the credential path, naming both causes', async () => {
+        const { err, state } = await materialize(
+            [LIST_ISSUES, DELETE_REPO],
+            { include: ['create_issue', 'list_issues'], toolsSnapshot: PIN },
+            bearer,
+        );
+        expectCredentialPath(err);
+        const message = (err as Error).message;
+        expect(message).toContain("providerConfig.include names 'create_issue', which the MCP server does not list for the credential this instance sent");
+        expect(message).toContain('the credential lacks the scopes or permissions these tools need');
+        expect(message).not.toContain('narrow-token-value');
+        expect(state.closed).toBe(true);
+    });
+
+    it('a pinned tool the server does not list, with no include, takes the credential path too', async () => {
+        const { err, state } = await materialize([LIST_ISSUES, DELETE_REPO], { toolsSnapshot: PIN }, bearer);
+        expectCredentialPath(err);
+        const message = (err as Error).message;
+        expect(message).toMatch(
+            /^connector-mcp provider: connector 'vendor' providerConfig\.toolsSnapshot pins 'create_issue', which the MCP server does not list for the credential this instance sent\./,
+        );
+        expect(message).toContain('the credential lacks the scopes or permissions these tools need — fix the credential');
+        expect(message).toContain('the server no longer serves these tools — review the change and update providerConfig.toolsSnapshot');
+        expect(message).toContain("For this credential, the server lists 2 tool(s): 'list_issues', 'delete_repo'.");
+        expect(message).not.toContain('narrow-token-value');
+        expect(state.closed).toBe(true);
+    });
+
+    it('a served pinned tool that hashes differently is still CONNECTOR_UPSTREAM_CHANGED', async () => {
+        const rewritten = { ...CREATE_ISSUE, description: 'changed' };
+        const { err } = await materialize(
+            [rewritten, LIST_ISSUES],
+            { include: ['create_issue', 'list_issues'], toolsSnapshot: PIN },
+            bearer,
+        );
+        expectUpstreamChanged(err);
+        expect((err as Error).message).toContain("tool 'create_issue' changed");
+    });
+
+    it('matching pins materialize, and the credential counts as verified', async () => {
+        const { mat, err } = await materialize(SERVED, { include: ['create_issue', 'list_issues'], toolsSnapshot: PIN }, bearer);
+        expect(err).toBeUndefined();
+        expect(Object.keys(mat?.handlers ?? {})).toEqual(['create_issue', 'list_issues']);
+        expect(mat?.credentialVerified).toBe(true);
     });
 });
 

@@ -319,7 +319,11 @@ On every materialization each pinned tool is hashed and compared on its own:
   change, review it and set the pin to the served digest (the edit
   re-materializes the instance at once). This holds for a pinned tool
   `include` also lists: once pinned, a tool the server stops serving is
-  reported by the pin, not as an `include` typo.
+  reported by the pin, not as an `include` typo. When the instance's own
+  credential reached the server (its `auth` over http), a pinned tool the
+  server does not list may be one hidden from that credential, so it is
+  degraded as a credential the upstream refuses instead, naming both causes —
+  a served tool that hashes differently is still reported by the pin.
 - A tool the pin does not name is not checked. Pin every tool you depend on,
   and keep tools the server adds out with `include`.
 
