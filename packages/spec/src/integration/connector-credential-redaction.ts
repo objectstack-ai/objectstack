@@ -59,10 +59,34 @@
  *     `providerConfig.transport.url` (`mcp` over http) and a URL
  *     `providerConfig.spec` (`openapi`), and any other URL a provider keeps at
  *     an OBJECT depth of `providerConfig`: a string is judged when it starts
- *     with `scheme://`. Arrays are off the walk, as they are for the datasource
- *     scrub, and so is a key spelled with a dot: the carry-forward addresses a
- *     withheld position by its dotted path, so a position it cannot address
- *     would turn a save of the served form into a silent credential deletion.
+ *     with `scheme://`.
+ *  6. **An array under `providerConfig` that holds such a URL, WHOLE**, and
+ *     **a key under `providerConfig` whose own name carries a dot that holds
+ *     such a URL at any depth, WHOLE.** The carry-forward cannot address an
+ *     array element by position, nor a dotted key segment by segment (its
+ *     dotted name is indistinguishable from a nested path once `redactedKeys`
+ *     joins on dots), so neither is rewritten in place; each is withheld whole
+ *     instead, as a non-object `auth` is (item 4), and the carry-forward keeps
+ *     the stored value at rest by the whole-string fallback the protocol's
+ *     carry-forward runs when the dotted split resolves to nothing. This is
+ *     item 5's "avoid silent deletion" yielding to item 7's fail-closed: a
+ *     dotted position that cannot be rewritten part-for-part is withheld
+ *     rather than served as stored. An array or dotted key holding no such URL
+ *     is served as stored.
+ *  7. **Every top-level key the authored entry does not declare, WHOLE —
+ *     whatever its value.** The save door stores the body it accepts (ADR-0005
+ *     appendix (c), ruling B), so a row stored while the entry was open can
+ *     hold a key no declared position names — and a key no position names is
+ *     one this redactor cannot judge. The declared keys are read from
+ *     {@link DeclarativeConnectorEntrySchema} itself (its read-through
+ *     `shape`), so a key the entry declares later is served with nothing to
+ *     edit here. The read decorations ({@link METADATA_READ_DECORATIONS}) are
+ *     the response's, not the entry's, and are left alone. Unlike the
+ *     credential positions above, a CLEARED undeclared key (`null`, `''`, an
+ *     empty map) is withheld too, not served: the closed entry refuses the key
+ *     at the save door, so serving its cleared form back makes a plain read
+ *     then save meet that refusal. The carry-forward keeps the stored value
+ *     (its dotted name included, by the whole-string fallback).
  *
  * ## Cleared forms, and what is never touched
  *
@@ -82,6 +106,8 @@
  */
 
 import { ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
+import { DeclarativeConnectorEntrySchema } from './connector.zod';
+import { METADATA_READ_DECORATIONS } from '../kernel/metadata-read-decorations';
 import { CREDENTIAL_URL_QUERY_PARAM_NAMES } from '../data/driver/common.zod';
 import { redactUrlCredentialQueryParams } from '../data/datasource-credential-redaction';
 import { objectShapeOf, wrapperChainOf, zodDefOf } from '../kernel/metadata-credential-fields';
@@ -236,6 +262,41 @@ function readAt(item: Record<string, unknown>, path: readonly string[]): { prese
   return { present: true, value: parent[leaf] };
 }
 
+/**
+ * Read once, on first use: the top-level keys the authored entry declares
+ * (item 7). The entry is a lazy schema and is not evaluated at module load; its
+ * read-through `shape` is the closed entry's own declaration.
+ */
+let declaredEntryKeys: ReadonlySet<string> | undefined;
+export function declaredConnectorEntryKeys(): ReadonlySet<string> {
+  if (!declaredEntryKeys) {
+    const shape = (DeclarativeConnectorEntrySchema as unknown as { shape?: unknown }).shape;
+    // No readable shape ⇒ nothing is declared, and every key is withheld: fail closed.
+    declaredEntryKeys = new Set(isPlainRecord(shape) ? Object.keys(shape) : []);
+  }
+  return declaredEntryKeys;
+}
+
+const READ_DECORATION_KEYS: ReadonlySet<string> = new Set(METADATA_READ_DECORATIONS);
+
+/**
+ * Item 7: every top-level key the entry does not declare, as item-relative
+ * single-segment paths. The read decorations ({@link METADATA_READ_DECORATIONS})
+ * are the response's, not the entry's, and are never counted. Withheld whole
+ * regardless of value — a cleared one included — unlike the credential
+ * positions below: an undeclared key the entry refuses can never be served, so
+ * serving its cleared form back makes a plain GET then PUT meet the closed save
+ * door. The carry-forward keeps the stored value at rest.
+ */
+function undeclaredRootKeysOf(item: Record<string, unknown>): string[][] {
+  const declared = declaredConnectorEntryKeys();
+  const paths: string[][] = [];
+  for (const key of Object.keys(item)) {
+    if (!declared.has(key) && !READ_DECORATION_KEYS.has(key)) paths.push([key]);
+  }
+  return paths;
+}
+
 /** Every credential position present in `item` that is withheld by removal, as item-relative paths. */
 function credentialPathsOf(item: Record<string, unknown>): string[][] {
   const paths: string[][] = [];
@@ -264,25 +325,50 @@ function withValueAt(item: Record<string, unknown>, path: readonly string[], val
   return { ...item, [head]: withValueAt(item[head] as Record<string, unknown>, rest, value) };
 }
 
+/** Whether `value` is a URL whose credential parts {@link redactConnectorUrl} removes. */
+function isCredentialUrl(value: string, params: readonly string[]): boolean {
+  return URL_SCHEME_RE.test(value) && redactConnectorUrl(value, params) !== value;
+}
+
+/** Whether `value` holds, at any depth, a URL {@link isCredentialUrl} judges (item 6). */
+function holdsCredentialUrl(value: unknown, params: readonly string[]): boolean {
+  if (typeof value === 'string') return isCredentialUrl(value, params);
+  if (Array.isArray(value)) return value.some((element) => holdsCredentialUrl(element, params));
+  if (isPlainRecord(value)) return Object.values(value).some((child) => holdsCredentialUrl(child, params));
+  return false;
+}
+
 /**
- * Item 5: every URL under `providerConfig`, at object depth, whose credential
- * parts {@link redactConnectorUrl} removes — the path and the rewritten value.
+ * Items 5 and 6: every URL under `providerConfig`, at object depth, whose
+ * credential parts {@link redactConnectorUrl} removes — the path and the
+ * rewritten value — and every array there holding such a URL, withheld whole
+ * (`value` absent).
  */
 function credentialUrlRewritesOf(
   item: Record<string, unknown>,
-): Array<{ path: string[]; value: string }> {
-  const rewrites: Array<{ path: string[]; value: string }> = [];
+): Array<{ path: string[]; value?: string }> {
+  const rewrites: Array<{ path: string[]; value?: string }> = [];
   const providerConfig = item.providerConfig;
   if (!isPlainRecord(providerConfig)) return rewrites;
   const params = credentialQueryParamsOf(item);
   const walk = (node: Record<string, unknown>, prefix: readonly string[]): void => {
     for (const [key, value] of Object.entries(node)) {
-      if (key.includes('.')) continue;
       const path = [...prefix, key];
+      // A key whose own name carries a dot cannot be addressed segment by
+      // segment (its dotted name is indistinguishable from a nested path once
+      // `redactedKeys` joins on dots), so it is never rewritten in place or
+      // descended into. Fail closed instead: if it holds a credential URL at
+      // any depth, withhold the key WHOLE — the carry-forward keeps the stored
+      // value at rest by the whole-string fallback. Item 5's "avoid silent
+      // deletion" yields to item 7's fail-closed here.
+      if (key.includes('.')) {
+        if (holdsCredentialUrl(value, params)) rewrites.push({ path });
+        continue;
+      }
       if (typeof value === 'string') {
-        if (!URL_SCHEME_RE.test(value)) continue;
-        const redacted = redactConnectorUrl(value, params);
-        if (redacted !== value) rewrites.push({ path, value: redacted });
+        if (isCredentialUrl(value, params)) rewrites.push({ path, value: redactConnectorUrl(value, params) });
+      } else if (Array.isArray(value)) {
+        if (holdsCredentialUrl(value, params)) rewrites.push({ path });
       } else if (isPlainRecord(value)) {
         walk(value, path);
       }
@@ -300,6 +386,14 @@ function credentialUrlRewritesOf(
 export function redactConnectorItem(item: Record<string, unknown>): MetadataRedactionResult {
   let served = item;
   const redactedKeys: string[] = [];
+  // Item 7, first: an undeclared root key is withheld whatever its value — a
+  // cleared one included — because the entry refuses it at the save door.
+  for (const path of undeclaredRootKeysOf(item)) {
+    const { present } = readAt(served, path);
+    if (!present) continue;
+    served = withoutKeyAt(served, path);
+    redactedKeys.push(path.join('.'));
+  }
   for (const path of credentialPathsOf(item)) {
     const { present, value } = readAt(served, path);
     if (!present || isClearedForm(value)) continue;
@@ -308,7 +402,7 @@ export function redactConnectorItem(item: Record<string, unknown>): MetadataReda
   }
   // After the removals, so a map withheld whole is never walked for URLs.
   for (const { path, value } of credentialUrlRewritesOf(served)) {
-    served = withValueAt(served, path, value);
+    served = value === undefined ? withoutKeyAt(served, path) : withValueAt(served, path, value);
     redactedKeys.push(path.join('.'));
   }
   if (redactedKeys.length === 0) return { item, redactedKeys: [] };

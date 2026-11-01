@@ -1371,6 +1371,259 @@ describe('#20611 — the runtime authoring gate reads a withheld-and-stored secr
     });
 });
 
+// ---------------------------------------------------------------------------
+// The `connector` read: a top-level key the authored entry does not declare
+// ---------------------------------------------------------------------------
+//
+// A row stored while the connector entry was open can hold a top-level key the
+// entry does not declare. Seeded directly, never through `saveMetaItem`: the
+// save door now refuses such a key, so only a direct seed reproduces the row.
+
+const ROOT_KEY_VALUE = 'TEST_PLACEHOLDER_ROOT_KEY_VALUE';
+const ROOT_PLAIN_VALUE = 'TEST_PLACEHOLDER_ROOT_PLAIN_VALUE';
+
+function storedConnectorBody() {
+    return {
+        name: 'vendor_api',
+        label: 'Vendor API',
+        type: 'api',
+        provider: 'rest',
+        providerConfig: { baseUrl: 'https://api.vendor.example/v1' },
+        auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' },
+        apiKey: ROOT_KEY_VALUE,
+        region: ROOT_PLAIN_VALUE,
+    };
+}
+
+function seedConnectorRow(rows: Map<string, Row>) {
+    const where = { type: 'connector', name: 'vendor_api', organization_id: null, package_id: null, state: 'active' };
+    const body = storedConnectorBody();
+    rows.set(keyOf(where), {
+        id: 'r_connector',
+        ...where,
+        metadata: JSON.stringify(body),
+        checksum: hashSpec(body),
+        version: 1,
+    } as Row);
+}
+
+const storedConnector = (rows: Map<string, Row>) =>
+    JSON.parse(Array.from(rows.values()).find((r) => r.type === 'connector' && r.state === 'active')!.metadata);
+
+function expectRootKeysWithheld(served: any) {
+    expect(served).not.toHaveProperty('apiKey');
+    expect(served).not.toHaveProperty('region');
+    expect(served.name).toBe('vendor_api');
+    expect(served.providerConfig).toEqual({ baseUrl: 'https://api.vendor.example/v1' });
+}
+
+function expectNoRootKeyValue(payload: unknown) {
+    const strings = allStrings(payload);
+    expect(strings.some((s) => s.includes(ROOT_KEY_VALUE) || s.includes(ROOT_PLAIN_VALUE))).toBe(false);
+}
+
+const BUILTIN_CONNECTOR_REDACTOR = getMetadataTypeRedactor('connector')!;
+
+describe('the connector read withholds root keys the entry shape does not declare', () => {
+    afterEach(() => registerMetadataTypeRedactor('connector', BUILTIN_CONNECTOR_REDACTOR));
+
+    it('withholds undeclared root keys on read: the item read', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' });
+        expectRootKeysWithheld(res.item);
+        expectNoRootKeyValue(res);
+        // The badge is computed on the raw body: the row is still reported invalid.
+        expect(res.item._diagnostics.valid).toBe(false);
+        expect(storedConnector(rows).apiKey).toBe(ROOT_KEY_VALUE);
+    });
+
+    it('withholds undeclared root keys on read: the list read, both spellings', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        for (const type of ['connector', 'connectors']) {
+            const res: any = await protocol.getMetaItems({ type });
+            const item = res.items.find((i: any) => i.name === 'vendor_api');
+            expect(item, type).toBeDefined();
+            expectRootKeysWithheld(item);
+            expectNoRootKeyValue(res);
+        }
+    });
+
+    it('withholds undeclared root keys on read: the layered read', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const res: any = await protocol.getMetaItemLayered({ type: 'connector', name: 'vendor_api' });
+        expect(res.overlay).not.toBeNull();
+        expectRootKeysWithheld(res.overlay);
+        expectRootKeysWithheld(res.effective);
+        expectNoRootKeyValue(res);
+    });
+
+    it('a save of the served form keeps the withheld keys at rest', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        await protocol.saveMetaItem({
+            type: 'connector',
+            name: 'vendor_api',
+            item: { ...served, label: 'Vendor API (edited)' },
+        });
+
+        const atRest = storedConnector(rows);
+        expect(atRest.label).toBe('Vendor API (edited)');
+        expect(atRest.apiKey).toBe(ROOT_KEY_VALUE);
+        expect(atRest.region).toBe(ROOT_PLAIN_VALUE);
+        const reread: any = await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' });
+        expectRootKeysWithheld(reread.item);
+    });
+
+    it('an undeclared root key the author types is refused, and the row is unchanged', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        await expect(protocol.saveMetaItem({
+            type: 'connector',
+            name: 'vendor_api',
+            item: { ...served, apiKey: 'typed-by-hand' },
+        })).rejects.toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+        expect(storedConnector(rows)).toEqual(storedConnectorBody());
+    });
+
+    it('ABLATION — with an identity `connector` redactor the item, list and layered reads carry the keys again', async () => {
+        registerMetadataTypeRedactor('connector', (item) => ({ item, redactedKeys: [] }));
+        const { engine, rows } = makeStubEngine();
+        seedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        expect(((await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })) as any).item.apiKey).toBe(ROOT_KEY_VALUE);
+        expect(((await protocol.getMetaItems({ type: 'connector' })) as any).items[0].apiKey).toBe(ROOT_KEY_VALUE);
+        expect(((await protocol.getMetaItemLayered({ type: 'connector', name: 'vendor_api' })) as any).effective.apiKey).toBe(ROOT_KEY_VALUE);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// The carry-forward keeps a withheld key whose own name carries a dot
+// ---------------------------------------------------------------------------
+//
+// `redactedKeys` joins each path on dots, so a key spelled `v1.url` reads like
+// a nested path `v1` → `url`. A save of the served form must still keep it at
+// rest: the carry-forward tries the standard split first, then the whole
+// string as a single key.
+
+const DOTTED_ROOT_VALUE = 'TEST_PLACEHOLDER_DOTTED_ROOT_VALUE';
+const DOTTED_PROVIDER_URL = 'https://svc:TEST_PLACEHOLDER_DOTTED_PROVIDER@api.vendor.example/v1';
+
+function storedDottedConnectorBody() {
+    return {
+        name: 'vendor_api',
+        label: 'Vendor API',
+        type: 'api',
+        provider: 'rest',
+        providerConfig: { baseUrl: 'https://api.vendor.example/v1', 'v1.url': DOTTED_PROVIDER_URL },
+        auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' },
+        'x.y': DOTTED_ROOT_VALUE,
+    };
+}
+
+function seedDottedConnectorRow(rows: Map<string, Row>) {
+    const where = { type: 'connector', name: 'vendor_api', organization_id: null, package_id: null, state: 'active' };
+    const body = storedDottedConnectorBody();
+    rows.set(keyOf(where), {
+        id: 'r_connector_dotted', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1,
+    } as Row);
+}
+
+describe('the connector carry-forward keeps a withheld dot-spelled key at rest', () => {
+    const BUILTIN_CONNECTOR_REDACTOR = getMetadataTypeRedactor('connector')!;
+    afterEach(() => registerMetadataTypeRedactor('connector', BUILTIN_CONNECTOR_REDACTOR));
+
+    it('the served read withholds the dot-spelled root key and the dot-spelled providerConfig URL', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedDottedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        expect(served['x.y']).toBeUndefined();
+        expect(served.providerConfig['v1.url']).toBeUndefined();
+        expect(served.providerConfig.baseUrl).toBe('https://api.vendor.example/v1');
+        expect(allStrings(served)).not.toContain(DOTTED_ROOT_VALUE);
+    });
+
+    it('carryForwardRedactedValues restores both dot-spelled positions into a served body', () => {
+        const stored = storedDottedConnectorBody();
+        const served: any = redactMetadataItem('connector', stored);
+        const out: any = carryForwardRedactedValues('connector', served, stored);
+        expect(out['x.y']).toBe(DOTTED_ROOT_VALUE);
+        expect(out.providerConfig['v1.url']).toBe(DOTTED_PROVIDER_URL);
+        // redactedPathsCarriedForward names the same positions it fills.
+        expect(redactedPathsCarriedForward('connector', served, stored).sort())
+            .toEqual(['providerConfig.v1.url', 'x.y']);
+    });
+
+    it('a save of the served form keeps both dot-spelled values at rest', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedDottedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        await protocol.saveMetaItem({ type: 'connector', name: 'vendor_api', item: { ...served, label: 'Vendor API (edited)' } });
+        const atRest = storedConnector(rows);
+        expect(atRest.label).toBe('Vendor API (edited)');
+        expect(atRest['x.y']).toBe(DOTTED_ROOT_VALUE);
+        expect(atRest.providerConfig['v1.url']).toBe(DOTTED_PROVIDER_URL);
+    });
+
+    it('the author`s own value wins — a new dot-spelled providerConfig URL is not refused by the entry (it is not a top-level key) and replaces the stored one', async () => {
+        // A dot-spelled key UNDER providerConfig is a provider setting, not a
+        // top-level entry key, so the closed entry does not refuse it; the
+        // author editing it is the author's word.
+        const { engine, rows } = makeStubEngine();
+        seedDottedConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        const edited = { ...served, providerConfig: { ...served.providerConfig, 'v1.url': 'https://api.vendor.example/v2' } };
+        await protocol.saveMetaItem({ type: 'connector', name: 'vendor_api', item: edited });
+        expect(storedConnector(rows).providerConfig['v1.url']).toBe('https://api.vendor.example/v2');
+    });
+
+    it('the dotted-alias ambiguity is explicit: a nested position and a same-spelled dotted key collide, and neither is carried', () => {
+        // Two stored positions whose `redactedKeys` entry is the IDENTICAL
+        // string `providerConfig.v1.url`: the nested `{ v1: { url } }` (its URL
+        // rewritten in place) and the literal `'v1.url'` (withheld whole). The
+        // two cannot be told apart from one dotted string, so the carry-forward
+        // refuses to guess — its two-onto-one guard carries NEITHER rather than
+        // graft a stored credential onto the wrong position. The read stays
+        // fail-closed (both secrets absent from what is served); a save of the
+        // served form does not restore either, which is the honest outcome of a
+        // genuinely ambiguous spelling.
+        const nestedUrl = 'https://svc:TEST_PLACEHOLDER_NESTED@api.vendor.example/nested';
+        const literalUrl = 'https://svc:TEST_PLACEHOLDER_LITERAL@api.vendor.example/literal';
+        const stored = {
+            name: 'vendor_api', label: 'Vendor API', type: 'api', provider: 'rest',
+            auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' },
+            providerConfig: { v1: { url: nestedUrl }, 'v1.url': literalUrl },
+        };
+        const served: any = redactMetadataItem('connector', stored);
+        expect(allStrings(served)).not.toContain('TEST_PLACEHOLDER_NESTED');
+        expect(allStrings(served)).not.toContain('TEST_PLACEHOLDER_LITERAL');
+        // The same string names both withheld positions.
+        const redactedForStored = (getMetadataTypeRedactor('connector')!)(stored as any).redactedKeys;
+        expect(redactedForStored.filter((p) => p === 'providerConfig.v1.url')).toHaveLength(2);
+        // The collision trips the two-onto-one guard: nothing is carried.
+        expect(redactedPathsCarriedForward('connector', served, stored)).toEqual([]);
+        expect(carryForwardRedactedValues('connector', served, stored)).toBe(served);
+    });
+});
+
 describe('the read exits withhold the declared ssl secret member of a datasource', () => {
     /** The stored client key, which no read exit may serve; the public members it sits beside. */
     const SSL_KEY = 'TEST_PLACEHOLDER_SSL_KEY';
