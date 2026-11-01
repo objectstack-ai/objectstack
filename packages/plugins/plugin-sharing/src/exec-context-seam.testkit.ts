@@ -52,18 +52,24 @@ export interface SeamPrincipal {
   memberships?: SeamMembership[];
 }
 
-/** Minimal in-memory ObjectQL: `find(object, { where })` with `===` + `$in`. */
-function makeSeamQl(tables: Record<string, any[]>) {
+/**
+ * Minimal in-memory ObjectQL: `find(object, { where, limit })` with `===` +
+ * `$in`. Exported only so its own pin can drive it directly.
+ */
+export function makeSeamQl(tables: Record<string, any[]>) {
   return {
     async find(object: string, opts: any) {
       const rows = tables[object] ?? [];
       const where = opts?.where ?? {};
-      return rows.filter((r) =>
+      const matched = rows.filter((r) =>
         Object.entries(where).every(([k, v]) => {
           if (v && typeof v === 'object' && '$in' in (v as any)) return (v as any).$in.includes(r[k]);
           return r[k] === v;
         }),
       );
+      // The caller's bound, applied AFTER the filter and by PRESENCE, as the
+      // real engine does: `resolveAuthzContext` reads with real limits.
+      return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
     },
   };
 }
