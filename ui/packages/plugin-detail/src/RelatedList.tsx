@@ -2726,6 +2726,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // duplicate renderer. Falls back to the data-table on desktop and
     // when explicit `type='list'` is requested (legacy path).
     if (isMobile && (type === 'grid' || type === 'table')) {
+      // objectstack#28484 — the ENLARGED tab's phone cards are the phone
+      // list's card rows (`object-grid`'s card face: the name, one subtitle
+      // line, one status chip) at the body's full width, over the rows this
+      // list already read. Resolved through the registry: `plugin-grid`
+      // depends on this package, so it cannot be imported here.
+      if (enlargedFace) {
+        return {
+          type: 'object-grid',
+          objectName: api,
+          data: { provider: 'value', items: paginatedData },
+          columns: effectiveColumns
+            .map((c: any) => c.accessorKey || columnIdentity(c))
+            .filter(Boolean),
+          onRowClick: handleRowClick,
+        };
+      }
       const titleField = effectiveColumns[0]?.accessorKey || columnIdentity(effectiveColumns[0]);
       const visibleFields = effectiveColumns
         .slice(1, 4)
@@ -2801,7 +2817,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
       default:
         return { type: 'div', children: 'No view configured' };
     }
-  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, api, objectSchema, activeSort, handleTableSort]);
+  }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort]);
 
   const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
