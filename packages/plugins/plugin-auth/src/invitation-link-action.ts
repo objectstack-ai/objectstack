@@ -43,6 +43,13 @@
  *    `membership-reach-table.test.ts`. Before the status gate, so a caller
  *    outside the reach learns nothing about the row.
  * 5. **Pending** — any other status has no link that admits anyone.
+ * 6. **Not expired** — a row can still read `pending` after its `expires_at`
+ *    has passed (nothing moves it to `expired`), and its link admits no one:
+ *    the vendor's accept route refuses an invitation past `expires_at`. Refused
+ *    `409 RESOURCE_CONFLICT`, as a non-pending row is, so the admin is never
+ *    handed a link that fails when the invitee opens it. A missing or
+ *    unreadable `expires_at` is read as expired, the way the vendor reads it.
+ *    `resend_invitation` is not gated on expiry: it is the remedy.
  *
  * The invitation and the membership are re-read from the store under the
  * system context, never taken from the record the door projected for the
@@ -101,6 +108,18 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+/**
+ * Is now still before the invitation's `expires_at`? The stored value may come
+ * back as a `Date`, ISO text or epoch milliseconds, depending on the driver.
+ * Anything that does not read as a date answers `false`, as the vendor's own
+ * `new Date(expiresAt) > new Date()` check does.
+ */
+function isBeforeExpiry(expiresAt: unknown): boolean {
+  if (!(expiresAt instanceof Date) && typeof expiresAt !== 'string' && typeof expiresAt !== 'number') return false;
+  const ms = new Date(expiresAt).getTime();
+  return Number.isFinite(ms) && ms > Date.now();
+}
+
 /** The grades that reach `/organization/invite-member`. */
 const INVITE_REACH_GRADES: readonly string[] = MEMBERSHIP_REACH.invite_member.grades;
 
@@ -128,7 +147,7 @@ export function createCopyInvitationLinkHandler(deps: CopyInvitationLinkDeps) {
 
     const invitation: any = await sys.findOne(INVITATION_OBJECT, {
       where: { id: invitationId },
-      fields: ['id', 'organization_id', 'status'],
+      fields: ['id', 'organization_id', 'status', 'expires_at'],
     });
     if (!invitation) {
       throw refusal(404, 'RECORD_NOT_FOUND', `No invitation '${invitationId}' exists.`);
@@ -157,6 +176,15 @@ export function createCopyInvitationLinkHandler(deps: CopyInvitationLinkDeps) {
         'RESOURCE_CONFLICT',
         `This invitation is ${String(invitation.status)}, so its link no longer lets anyone join. `
           + 'Only a pending invitation has a link to copy; send a new invitation instead.',
+      );
+    }
+
+    if (!isBeforeExpiry(invitation.expires_at)) {
+      throw refusal(
+        409,
+        'RESOURCE_CONFLICT',
+        'This invitation has expired, so its link no longer lets anyone join. '
+          + 'Resend the invitation to give the person a link that works.',
       );
     }
 
