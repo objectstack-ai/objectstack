@@ -152,6 +152,7 @@ function overlayCatalogManifest(): Record<string, unknown> {
         id: PKG,
         name: 'overlay_catalog',
         version: PKG_VERSION,
+        namespace: 'overlaycat',
         // [#24668] The object the view and the dataset bind to, shipped by the
         // package: the overlay save door refuses a list view bound to an object
         // that exists nowhere, and `probe_obj` was declared by nothing.

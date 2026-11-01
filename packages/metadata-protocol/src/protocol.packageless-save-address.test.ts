@@ -35,9 +35,10 @@
  *  - CONTROL: a package-less row minted beside a package's row before the fix
  *    stays as it is, and a server-stated rewrite of that row (the
  *    stored-metadata migration passes `packageId: null`) still writes it;
- *  - an item a code package ships, with no stored row: the package-less save
- *    writes the package-unbound overlay and the read serves it, as before; with
- *    an overlay row already bound to the code package, it writes that row;
+ *  - [#28576, ADR-0146 D11] an item a code package ships: the package-less save
+ *    is refused naming the base's pair and the migration ceremony, with no
+ *    stored row or with an overlay row bound to the code package, and writes
+ *    nothing;
  *  - the draft path: a package-less draft save still inherits the package
  *    (its own suite, `sys-metadata-repository.draft-package-inherit.test.ts`,
  *    holds the rest).
@@ -419,21 +420,26 @@ describe('CONTROL: what the resolution leaves alone', () => {
     });
 });
 
-describe('an item a CODE package ships', () => {
-    it('with no stored row: the package-less save writes the package-unbound overlay, and the read serves it', async () => {
+describe('an item a CODE package ships: the package-less write is closed (ADR-0146 D11)', () => {
+    const PAIR = `${CODE_PACKAGE}.custom`;
+    const closed = (e: unknown) => {
+        expect(resolveThrownHttpError(e)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(String((e as Error).message)).toContain(`'${PAIR}'`);
+        expect(String((e as Error).message)).toContain('os migrate packageless-overlays');
+    };
+
+    it('with no stored row: the package-less save is refused naming the pair, and nothing is written', async () => {
         const name = 'showcase_task_grid';
         const { protocol, rows } = makeProtocol([packagedView(name)]);
 
-        const saved = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Overlaid') });
+        const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Overlaid') }).then(() => undefined, (e) => e);
 
-        expect(saved.message).toBe(
-            `Saved customization overlay (env-wide, state=active) — type=view, name=${name} [seq=${saved.seq}]`,
-        );
-        expect(rows('view', name).map((r) => r.package_id ?? null)).toEqual([null]);
-        expect((await protocol.getMetaItem({ type: 'view', name })).item.label).toBe('Overlaid');
+        closed(refused);
+        expect(rows('view', name)).toEqual([]);
+        expect((await protocol.getMetaItem({ type: 'view', name })).item.label).not.toBe('Overlaid');
     });
 
-    it('with an overlay row bound to the code package: the package-less save writes that row', async () => {
+    it('with an overlay row bound to the code package: the package-less save is refused, and that row is untouched', async () => {
         const name = 'showcase_task_grid';
         // [#26708] The code package ships the object its view binds: a save
         // naming the (installed) package is judged against its closure.
@@ -441,15 +447,14 @@ describe('an item a CODE package ships', () => {
             packagedView(name),
             { type: 'object', item: { name: 'task', _packageId: CODE_PACKAGE, fields: { name: { type: 'text' } } } },
         ]);
-        // The overlay a save naming the package writes (ADR-0005: an overlay of
-        // a code-shipped item names the package it customizes).
+        // A save naming the package names a package: not the write D11 closes.
         await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Named'), packageId: CODE_PACKAGE });
 
-        const saved = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Unnamed') });
+        const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Unnamed') }).then(() => undefined, (e) => e);
 
-        expect(saved.message).toContain(`package=${CODE_PACKAGE}`);
+        closed(refused);
         expect(rows('view', name).map((r) => r.package_id ?? null)).toEqual([CODE_PACKAGE]);
-        expect((await protocol.getMetaItem({ type: 'view', name })).item.label).toBe('Unnamed');
+        expect((await protocol.getMetaItem({ type: 'view', name })).item.label).toBe('Named');
     });
 });
 
