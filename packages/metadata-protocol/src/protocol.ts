@@ -471,7 +471,7 @@ import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
-import { findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage, soleShippingPackage } from './protocol-environment-rows.js';
+import { baseAddressServesMember, findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage, shippingPackageIds, soleShippingPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
@@ -10492,6 +10492,24 @@ export class ObjectStackProtocolImplementation implements
             // MetadataService not available or doesn't support this type
         }
 
+        // [#28802, #28390 ruling A] …except, for a bundle the package ships
+        // (`ITEM_KEY_DISCRIMINATORS`), its pair's row at a member the package
+        // does not ship: the pair's own added member, which the package's
+        // address serves beside the package's members
+        // ({@link baseServesBundleMember}), as the env-wide list below does.
+        if (unseated && servedOverride && packageId && ITEM_KEY_DISCRIMINATORS[request.type] !== undefined) {
+            const pairOfList = customizationPackageId(packageId);
+            const typeShipping = this.shippingPackagesOf(request.type);
+            for (const it of items as any[]) {
+                if (!(it && typeof it === 'object' && unseated.has(it))) continue;
+                if (!pairOfList.ok || boundPackageOf(it._packageId) !== pairOfList.value || typeof it.name !== 'string') continue;
+                if (this.shipsBundleName(request.type, it.name, packageId, typeShipping)
+                    && this.baseServesBundleMember(request.type, it.name, packageId, it, typeShipping)) {
+                    unseated.delete(it);
+                }
+            }
+        }
+
         // [#21817] A stand-in no layer seated is a package-less row of an item
         // the package does not ship: it is not in the package's list.
         if (unseated) {
@@ -10524,8 +10542,16 @@ export class ObjectStackProtocolImplementation implements
         // every item of a name no package or several packages ship (ADR-0048
         // §3.3). The `package` type is never narrowed: its items are the
         // packages themselves.
+        //
+        // [#28802, #28390 ruling A] A bundle's name (`ITEM_KEY_DISCRIMINATORS`)
+        // is narrowed at MEMBER grain: the sole shipper's list also keeps its
+        // pair's own added members, a member the base does not ship
+        // ({@link baseServesBundleMember}), so a locale the customer adds in
+        // `.custom` is listed and executed (the email loader reads this list).
+        // A dependent's member under the name is still dropped here.
         if (servedOverride && !packageId && request.type !== 'package') {
             const typeShipping = this.shippingPackagesOf(request.type);
+            const isBundle = ITEM_KEY_DISCRIMINATORS[request.type] !== undefined;
             const soleShipperOf = new Map<string, string | undefined>();
             items = (items as any[]).filter((it) => {
                 const itemName = it?.name;
@@ -10535,7 +10561,8 @@ export class ObjectStackProtocolImplementation implements
                     soleShipperOf.set(itemName, soleShippingPackage(this.shippedArtifactsOf(request.type, itemName, typeShipping)));
                 }
                 const soleShipper = soleShipperOf.get(itemName);
-                return soleShipper === undefined || soleShipper === bound;
+                if (soleShipper === undefined || soleShipper === bound) return true;
+                return isBundle && this.baseServesBundleMember(request.type, itemName, soleShipper, it, typeShipping);
             });
         }
 
@@ -11486,6 +11513,18 @@ export class ObjectStackProtocolImplementation implements
                 ...(readState === 'active' ? { servedOverride: true } : {}),
             }, activeRows);
             let record = served?.row;
+            // [#28802, #28390 ruling A] A member of a bundle the address's
+            // package ships and does not ship at that member: the pair's own
+            // added member is the address's, served from the pair's row under
+            // the pair's binding (a dependent's member never is).
+            if (!record && readState === 'active' && wantedMember !== undefined && typeof contentPackageId === 'string') {
+                const pairOfAddition = this.pairOfAddedMember(request.type, request.name, contentPackageId, wantedMember);
+                if (pairOfAddition !== undefined) {
+                    record = (await this.findServedOverlayRow({
+                        type: request.type, name: request.name, state: readState, packageId: pairOfAddition, ...memberOption(member),
+                    }, activeRows))?.row;
+                }
+            }
             // [#23715] Two or more packages and no package-unbound draft: the
             // best-effort first match ADR-0048 §3.3 states, as before, served
             // with `version: null` (no row at the address the save naming none
@@ -11710,6 +11749,15 @@ export class ObjectStackProtocolImplementation implements
             // in the registry, and step 2 has already served it.
             if (this.isStoredFlowEntryOfShippedName(request.type, item)) {
                 item = this.lookupArtifactItem(request.type, request.name, request.packageId);
+            }
+            // [#28802, #28390 ruling A] A bundle member on a base's address
+            // (the package named, else the one whose content a read naming
+            // none serves) is one that address serves: the registry's last
+            // tier, the first composite match across packages (ADR-0048 §3.3),
+            // no longer answers a dependent's member under the base's name.
+            const memberAddress = request.packageId || (typeof contentPackageId === 'string' ? contentPackageId : undefined);
+            if (item !== undefined && wantedMember !== undefined && memberAddress !== undefined) {
+                item = this.registryMemberServedAt(request.type, request.name, memberAddress, item, member);
             }
         }
 
@@ -17323,6 +17371,59 @@ export class ObjectStackProtocolImplementation implements
             shippingPackagesOf: (...a) => this.shippingPackagesOf(...a),
         };
         return shippedArtifactsOf.call(host, type, name, shipping, member);
+    }
+
+    /** [#28802] Whether `base` is a code package that ships the bundle's name `name`, any member. */
+    private shipsBundleName(type: string, name: string, base: string, shipping: ShippingPackages): boolean {
+        return shippingPackageIds(this.shippedArtifactsOf(type, name, shipping)).has(base);
+    }
+
+    /**
+     * [#28802, ADR-0146 D2, #28390 ruling A] Whether the address of `base`, a
+     * code package that ships the bundle's name `name` (a type in
+     * `ITEM_KEY_DISCRIMINATORS`), serves `item`, a member of that name: by
+     * {@link baseAddressServesMember}, given whether `base` ships the member
+     * `item` is. The one member-grain answer the env-wide list, the list
+     * scoped to `base` and the by-name reads give.
+     */
+    private baseServesBundleMember(type: string, name: string, base: string, item: unknown, shipping: ShippingPackages): boolean {
+        const member = itemDiscriminator(canonicalMetaType(type), item);
+        const baseShipsMember = shippingPackageIds(this.shippedArtifactsOf(type, name, shipping, member)).has(base);
+        return baseAddressServesMember(base, boundPackageOf((item as { _packageId?: unknown } | null | undefined)?._packageId), baseShipsMember);
+    }
+
+    /**
+     * [#28802, #28390 ruling A] The pair of `base` when the bundle member
+     * `member` (its discriminator value) of the name `name` is one only the
+     * pair can add on `base`'s address: `base` ships the name and not that
+     * member. Else `undefined`, and the by-name read serves as before.
+     */
+    private pairOfAddedMember(type: string, name: string, base: string, member: string): string | undefined {
+        const shipping = this.shippingPackagesOf(type);
+        if (!this.shipsBundleName(type, name, base, shipping)) return undefined;
+        if (shippingPackageIds(this.shippedArtifactsOf(type, name, shipping, member)).has(base)) return undefined;
+        const pair = customizationPackageId(base);
+        return pair.ok ? pair.value : undefined;
+    }
+
+    /**
+     * [#28802] The registry's answer `item` for a bundle member read on the
+     * address of `base`, when that address serves it
+     * ({@link baseServesBundleMember}); else, for a read that named no
+     * member, the base's own member its artifact answers canonical-first,
+     * and otherwise nothing. An address that ships no member of the name is
+     * no base of it: `item` as before.
+     */
+    private registryMemberServedAt(type: string, name: string, base: string, item: unknown, member: string | undefined): unknown {
+        const shipping = this.shippingPackagesOf(type);
+        if (!this.shipsBundleName(type, name, base, shipping)) return item;
+        if (this.baseServesBundleMember(type, name, base, item, shipping)) return item;
+        if (member !== undefined) return undefined;
+        const own = this.shippedArtifactsOf(type, name, shipping)
+            .find((artifact) => (artifact as { _packageId?: unknown } | null)?._packageId === base);
+        if (own === undefined) return undefined;
+        const candidate = this.engine.registry.getItem(type, name, base, itemDiscriminator(canonicalMetaType(type), own));
+        return candidate !== undefined && this.baseServesBundleMember(type, name, base, candidate, shipping) ? candidate : undefined;
     }
 
     /**
