@@ -21,7 +21,10 @@
  * re-indented one level and otherwise unedited: the same reads, made as the
  * same principal, refusing exactly where they did with the same codes and
  * messages. The module-level declarations only these bodies read (the OCC
- * version-token reading) moved with them, also unedited.
+ * version-token reading) moved with them, also unedited. One body has changed
+ * since: `assertVersionOf`'s mismatch branch now hands a row the caller's own
+ * read does not return to the write door instead of answering it (its
+ * docblock in `protocol.ts` says why).
  *
  * ## How the moved bodies reach the class
  *
