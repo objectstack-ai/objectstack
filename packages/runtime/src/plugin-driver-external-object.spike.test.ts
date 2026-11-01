@@ -621,18 +621,16 @@ describe('(g) object permission sets apply to the external object', () => {
     expect(calls.slice(mark)).toEqual([]);
   });
 
-  it('the same caller gets 403 on a PATCH; the remote sees one by-id read and no write', async () => {
+  it('the same caller gets 403 on a PATCH; the remote sees no read and no write', async () => {
     const mark = calls.length;
     const res = await as(outsiderToken, 'PATCH', `/data/${OBJECT}/n_cut`, { name: 'Renamed' });
     const body = await readJson(res);
     expect(res.status, JSON.stringify(body)).toBe(403);
     expect(body?.code).toBe('PERMISSION_DENIED');
-    // The write door loads the record before it refuses — on a plugin driver
-    // that is a round trip to the remote on behalf of a caller who may not read.
-    // [#27277] The floor answers that `findOne` from one capped `find`.
-    expect(calls.slice(mark)).toEqual([
-      { method: 'find', object: OBJECT, query: { where: { id: 'n_cut' }, object: OBJECT, limit: EXTERNAL_ROW_CAP + 1 } },
-    ]);
+    // The write door judges the update before it looks the record up, as it
+    // judges a delete, so a caller who may not update the object costs the
+    // remote no round trip at all.
+    expect(calls.slice(mark)).toEqual([]);
     expect(rows.find((r) => r.id === 'n_cut')?.name).toBe('Cut');
   });
 });

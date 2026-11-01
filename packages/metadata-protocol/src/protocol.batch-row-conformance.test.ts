@@ -28,6 +28,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { BatchOperationResultSchema, BatchUpdateResponseSchema } from '@objectstack/spec/api';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { assertEngineUpdateDispatch, assertEngineDeleteDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { recordNotFoundError } from '@objectstack/core';
 
 const SCHEMA = { name: 'invoice', fields: { title: { name: 'title', type: 'text' } } };
 
@@ -56,11 +57,13 @@ function makeStoreEngine() {
             rows.set(rec.id, rec);
             return rec;
         }),
-        update: vi.fn(async (_object: string, data: any, options?: any) => {
+        update: vi.fn(async (object: string, data: any, options?: any) => {
             assertEngineUpdateDispatch(data, options);
             const id = options?.where?.id;
             const current = rows.get(id);
-            if (!current) throw new Error(`no such record: ${id}`);
+            // ObjectQL's by-id not-found gate: the engine refuses a row that is
+            // not there itself, after the write is judged and before any hook.
+            if (!current) throw recordNotFoundError(object, id);
             if (data?.title === POISON) throw new Error('update exploded');
             const next = { ...current, ...data };
             rows.set(id, next);
@@ -156,10 +159,10 @@ describe('batchData rows conform to BatchOperationResultSchema (#4793)', () => {
         expectConformantResponse(res, 2);
         expect(res.results[0].data).toBeUndefined();
         // [#5088] Was an unclassified engine throw (`no such record`, rendered
-        // INTERNAL_ERROR) because the row reached `engine.update` at all. The
-        // update branch now runs the same existence probe as the single-record
-        // PATCH, so a missing id is refused BEFORE the write with the catalogued
-        // 404 — see `protocol.bulk-record-not-found.test.ts`.
+        // INTERNAL_ERROR). The engine now refuses a missing id itself with the
+        // catalogued 404 — after it has judged the write, which is why the
+        // update branch asks nothing about existence ahead of it — see
+        // `protocol.bulk-record-not-found.test.ts`.
         expect(res.results[1].errors[0]).toMatchObject({ code: 'RECORD_NOT_FOUND', httpStatus: 404 });
         expect(res.results[1].errors[0].message).toMatch(/not found/);
     });
