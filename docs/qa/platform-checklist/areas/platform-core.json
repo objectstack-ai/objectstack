@@ -1023,7 +1023,7 @@
       "title": "Notification center (bell / InboxPopover): badge counts distinct unread topics + pending approvals, repeats coalesce, per-group and global mark-read drop the badge",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -1095,8 +1095,7 @@
       "negative": [
         "a badge showing raw unread ROW count (inflating to 9+ off one recurring topic) is the #2765 regression — FAIL",
         "mark-read firing one POST per row for a coalesced group (instead of one {ids} request) is a FAIL of the coalescing contract",
-        "read-state reverting to unread on the next poll for a keyed row (writing sys_notification_receipt through the generic data API, which rejects it — ADR-0103) is a FAIL",
-        "cross-ref: this is distinct from i18n.notification-localized-and-clears (single-entry localization + clear) and approvals.notification-deep-link (deep-link) — do not double-count their coverage here"
+        "read-state reverting to unread on the next poll for a keyed row (writing sys_notification_receipt through the generic data API, which rejects it — ADR-0103) is a FAIL"
       ],
       "traps": ["hydration-race", "single-datapoint"],
       "source": [
@@ -1105,7 +1104,8 @@
         "objectui packages/app-shell/src/layout/AppHeader.tsx (postMarkRead → POST /api/v1/notifications/read[/all]; poll GET /notifications?view=mine)",
         "packages/runtime/src/route-ledger.ts (GET /notifications, POST /notifications/read, POST /notifications/read/all)",
         "packages/runtime/src/domains/notifications.ts#handleNotificationRequest (markRead upserts sys_notification_receipt; empty/mis-keyed ids → 400 — re-pointed #18104: markRead is a PROVIDER METHOD this file only calls off the inbox capability, a member access; the POST /notifications/read branch that validates the body and issues it is in handleNotificationRequest)",
-        "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)"
+        "ADR-0030 (sys_inbox_message L5 materialization + sys_notification_receipt); ADR-0103 (receipt object api-method lockdown)",
+        "cross-ref: this is distinct from i18n.notification-localized-and-clears (single-entry localization + clear) and approvals.notification-deep-link (deep-link) — do not double-count their coverage here"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "initial — bell/InboxPopover: topic-based badge (#2765), (topic,title) coalescing, per-group + global mark-read on the wire, approvals tab, receipt persistence; cross-referenced with i18n + approvals notification items", "ref": "claude/platform-test-checklist-ocwugl" },
@@ -1121,6 +1121,12 @@
           "date": "2026-10-31",
           "change": "steps[5] and acceptance[3].verify name a group the scheduled digest cannot race. Checklist-accuracy finding of QA run #27441 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): the per-minute showcase_scheduled_digest (examples/app-showcase/src/automation/flows/index.ts, a 60-second interval) can land a new row in the group between the per-group mark-read and the badge read, so the badge does not drop. The clause is unchanged: it is still one POST for the group and a one-topic drop. Re-read at 3fd80337",
           "ref": "#27441"
+        },
+        {
+          "revision": 5,
+          "date": "2026-11-01",
+          "change": "negative[3] moved to source[6]: it was a scope note naming the items that own the neighbouring surfaces, which no run can decide, so it could only score skipped. Its text is unchanged. Ruling 6545938831 item ① on #28345 (scope notes leave negative[], which keeps only decidable entries; the #27651 precedent). No clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },
@@ -3609,7 +3615,7 @@
       "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
       "since": "v18",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3632,7 +3638,7 @@
       "steps": [
         "as platform admin write a global-scope key through PUT /api/settings/NAMESPACE; GET /api/v1/data/sys_platform_setting and /sys_setting?filter scope=global",
         "as the member GET /api/v1/data/sys_platform_setting",
-        "walled: as A's admin save a tenant key (PUT /api/settings/NAMESPACE); lock A's row with the fixture write of fixtures.requires[2] (knownGaps[1]) and re-read the key as A (locked: true); as B's admin read and write the same key",
+        "walled: as A's admin save a tenant key (PUT /api/settings/NAMESPACE); lock A's row with the fixture write of fixtures.requires[2] (knownGaps[1]) and re-read the key as A (locked: true); then as A's admin save the locked key again (negative[0]); as B's admin read and write the same key",
         "walled: write a tenant key with no organization in scope"
       ],
       "acceptance": [
@@ -3660,6 +3666,9 @@
           "verify": "status + code",
           "evidence": "the answer"
         }
+      ],
+      "negative": [
+        "walled: LOCKED means platform-locked — after steps[2]'s lock, A's admin (an organization administrator, not the platform admin) saving the same key again through PUT /api/settings/NAMESPACE must be refused, the way a lock refuses a lower rung's save (409 SETTINGS_LOCKED, packages/services/service-settings/src/settings-routes.ts), with A's value unchanged and the row still locked on re-read; a 2xx, or a re-read showing the new value, is a security FAIL. Unprovisioned walled fixtures make it blocked(fixture), like acceptance[2] and acceptance[3]"
       ],
       "traps": [
         "wrong-persona",
@@ -3704,6 +3713,12 @@
           "date": "2026-10-20",
           "change": "steps[2]'s tenant lock made a named fixture prerequisite (fixtures.requires[2], new knownGaps[1]), and knownGaps[0]'s prerequisite sentence says os dev — QA run #24783 (findings F6 and F2), round 11 of wave anchor #24579. No HTTP door sets a tenant-row lock: sys_setting answers update 405 (apiMethods get/list) and the settings PUT writes values only, so the run stamped the lock with a system write on its scratch DB. A bare production os serve judges none of the walled prerequisites until OS_AUTH_SECRET is set (RUNNER.md), so the refusal sentence now names os dev. No clause changed",
           "ref": "#24801"
+        },
+        {
+          "revision": 6,
+          "date": "2026-11-01",
+          "change": "negative[0] added, with steps[2] driving it: LOCKED means platform-locked, so an organization administrator's save of its own locked tenant row must be refused, and a save that lands is a security FAIL. Ruling 6545938831 item ⑤ on #28345, which settles the semantics; the clause is a walled leg like acceptance[2] and [3]. No existing clause changed. Wave anchor #27377",
+          "ref": "#28345"
         }
       ]
     },

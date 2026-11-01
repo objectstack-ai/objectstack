@@ -301,7 +301,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 114 rows.
+ * CENSUS (generated): this list holds 115 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -550,6 +550,9 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'POST /packages/:id/duplicate', domain: '/packages', disposition: 'sdk', client: 'packages.duplicate',
     responseSchema: 'DuplicatePackageResponseSchema',
     note: 'Enveloped — the named schema is the `data`: `duplicatePackage`\'s declared return, transcribed describe-only. ⚠ `data.success` is the operation\'s verdict; the envelope `success` is transport-level and true even for a partial/empty duplicate (a console that read the envelope `success` reported a partial or empty duplicate as done). The SOURCE must be a writable base: a code-loaded or platform/marketplace source is refused 422 `DUPLICATE_SOURCE_NOT_A_BASE` (`requireDuplicableSource`, `domains/packages.ts`), BEFORE the protocol call and therefore before the target package record is minted — `duplicatePackage` installs that record ahead of its copy loop, so refusing any later still left a real, listed, empty shell package behind. ADR-0070 D4 is declared-and-not-built and its object is a BASE, so cloning a code package\'s items would EXTEND D4 rather than implement it; the unbuilt case refuses loudly instead of answering 200 with `copiedCount: 0`, which no caller could tell from a base that really is empty. An empty WRITABLE base still answers 200 / `copiedCount: 0` — that read happened and found nothing. Pinned in `domains/packages-readonly-gate.test.ts`. Conformance: spec `api/package-lifecycle.test.ts`' },
+  { route: 'POST /packages/:id/ensure-customization', domain: '/packages', disposition: 'sdk', client: 'packages.ensureCustomization',
+    responseSchema: 'EnsureCustomizationPackageResponseSchema',
+    note: 'ADR-0146 D3 — the ONE creation path of a base\'s paired customization package `<id>.custom`. Enveloped — the named schema is the `data`: `ensureCustomizationPackage`\'s declared return; `201` when the call created the pair, `200` when it was already installed (returned unchanged). The route reads NO body (the base is the path\'s `:id`; a body carrying keys is refused 400) and no query parameter, so no `requestSchema` is named here: `EnsureCustomizationPackageRequestSchema` is the PROTOCOL verb\'s request, parsed by its producer. Gated as the install door is — `manage_metadata`, then the walled refusal (a tenant administrator under `group` / `isolated` is refused 403). Conformance: `domains/packages-ensure-customization.test.ts` drives THIS handler over the real protocol and registry and parses each answer through the schema; spec `api/package-lifecycle.test.ts`' },
 
   // ── automation ────────────────────────────────────────────────────────────
   { route: 'POST /automation/trigger/:name', domain: '/automation', disposition: 'sdk', client: 'automation.trigger',

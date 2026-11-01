@@ -73,9 +73,11 @@ wrapped in `dyn(…)`).
 - Read only. The package carries Stripe's GET operations for four resources
   and nothing else; Stripe's write operations take form-encoded bodies, which
   this connector does not send.
-- Query parameters are sent as plain `name=value` pairs. Stripe's bracketed
-  parameters, such as `expand[]` and the `created[gte]` range filters, are
-  not sent in Stripe's form, so leave them out.
+- Query parameters are sent by the `style` the document declares. Stripe's
+  `deepObject` parameters go out bracketed: a `created` range
+  `{ gte: 1700000000 }` as `created[gte]=1700000000`, and an `expand` list as
+  `expand[0]=…&expand[1]=…`, one index per element. Stripe's answer to these
+  encodings is not measured here (the tests run against a fake Stripe).
 - The response schemas in the packaged document are not expanded (see
   Provenance): each response is described as its Stripe object type, without
   its fields. The answer itself is Stripe's full JSON.

@@ -134,6 +134,20 @@ export type {
 export { viewContainerNameRefusal } from './view-container-name-refusal.js';
 export type { ViewContainerNameRefusal } from './view-container-name-refusal.js';
 
+// [ADR-0130 D4] The residual-picklist refusal the `manifest` service throws: a
+// composed stack's top-level picklist that no package body declares and no
+// object field the engine registers names. Re-exported for the same reason as
+// the refusal above: `os validate` / `os build` foretell that boot, and read
+// the lists and the words from the one judgement in
+// `@objectstack/metadata/picklist-references`, never a copy.
+export { unreferencedResidualPicklists } from '@objectstack/metadata/picklist-references';
+export type {
+  ResidualPicklistInput,
+  ResidualPicklistWording,
+  UnreferencedResidualPicklist,
+  UnreferencedResidualPicklists,
+} from '@objectstack/metadata/picklist-references';
+
 // Search-normalization companion column (#2486 — pinyin recall). Shared by
 // the registry's compile-time provisioning seam, the engine's `$search`
 // expansion, and plugin-pinyin-search's populate hooks.

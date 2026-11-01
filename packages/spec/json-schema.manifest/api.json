@@ -136,6 +136,8 @@
     "api/EnablePackageResponse",
     "api/EndpointRegistry",
     "api/EnhancedApiError",
+    "api/EnsureCustomizationPackageRequest",
+    "api/EnsureCustomizationPackageResponse",
     "api/EnvironmentType",
     "api/ErrorCategory",
     "api/ErrorCode",

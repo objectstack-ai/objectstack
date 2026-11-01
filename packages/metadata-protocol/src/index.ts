@@ -242,6 +242,13 @@ export type { ServedOverrideEntry } from './protocol-served-overrides.js';
 // instead of keeping a second copy of the requested-posture rule.
 export { unmanagedInstallPostureRefusal } from './package-unmanaged-install.js';
 
+// [ADR-0146 D3] The pair-shaped-id predicate: an install of `<base>.custom`
+// must carry the explicit pair namespace and the dependency on the base. The
+// install primitive and the duplicate ask it; exported so `POST /packages`
+// (`@objectstack/runtime`) asks the same one ahead of both its install limbs,
+// its no-protocol fallback included, instead of keeping a second copy.
+export { customizationPairManifestRefusal } from './protocol-customization-package.js';
+
 // #4556 — the `sys_metadata_history.recorded_by` sentinel → NULL conversion,
 // as an ADR-0119 D2 migration plan. Run by `os migrate recorded-by`.
 export {
