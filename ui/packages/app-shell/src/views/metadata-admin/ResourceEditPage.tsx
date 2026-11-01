@@ -552,6 +552,11 @@ function MetadataResourceEditPageImpl({
   // the canonical member and for a type with no members.
   const bundleMember = searchParams.get(BUNDLE_MEMBER_PARAM) || undefined;
   const memberScope = bundleMember ? { member: bundleMember } : {};
+  // ADR-0048 — every layered re-read below asks the stack the load read: at
+  // the owning package, when the URL names it. A layered read naming no
+  // package is refused for a name two packages hold, and the refusal is shown
+  // as the step's error.
+  const layeredScope = { ...(ownerPackageId ? { packageId: ownerPackageId } : {}), ...memberScope };
   const client = useMetadataClient();
   const { entries, loading: typesLoading } = useMetadataTypes(client);
   const entry: RichMetadataTypeEntry | undefined = entries.find((t) => t.type === type);
@@ -2165,7 +2170,7 @@ function MetadataResourceEditPageImpl({
       // draft read behind it, so nothing pins its next save.
       forgetDraftVersion();
       if (resetSemantic) {
-        const lay = await client.layered<any>(type, name, memberScope);
+        const lay = await client.layered<any>(type, name, layeredScope);
         setLayered(lay);
         const fresh = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
         setDraft(fresh);
@@ -2208,7 +2213,7 @@ function MetadataResourceEditPageImpl({
       // objectui#11773 — the draft is re-read at the address the next save
       // writes, so its answer pins that save (see the load effect).
       const [lay, draftRead] = await Promise.all([
-        client.layered<any>(type, name, memberScope),
+        client.layered<any>(type, name, layeredScope),
         readDraftForSave<any>(client, type, name, activePackage, bundleMember),
       ]);
       const draftResp = draftRead.answer;
@@ -2273,7 +2278,7 @@ function MetadataResourceEditPageImpl({
       forgetDraftVersion();
       // objectui#11799 — a discard makes no layer: an item this page loaded
       // with no layer still has none, and `/layers` would answer 404.
-      const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name, memberScope);
+      const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name, layeredScope);
       setLayered(lay);
       const fresh = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
       setDraft(fresh);
