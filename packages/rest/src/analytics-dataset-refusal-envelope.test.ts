@@ -235,7 +235,7 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
       // this route any more (it stays for a hand-authored cube's configured
       // hook). The row keeps its audit trail: the input this list entry used to
       // classify answers 400 from a declared envelope, never from a message.
-      name: 'native-sql-strategy: a selection naming a join outside the allowlist',
+      name: 'native-sql-strategy allowlist input (now refused by the service join gate, not the strategy): a selection naming a join outside the allowlist',
       listEntry: 'not backed by a declared relationship',
       analytics: nativeAnalytics,
       body: { dataset, selection: { dimensions: ['stage'], measures: ['revenue'], runtimeFilter: { 'account.region': 'emea' } } },
@@ -261,6 +261,11 @@ describe('[#5367] a dataset refusal answers 400 DATASET_INVALID from its own env
     });
   }
 
+  // The five LIST ENTRIES, not five live producers: since #28557 the
+  // `not backed by a declared relationship` row is answered by the service's
+  // join gate ahead of the native strategy, so its producer (the strategy's
+  // allowlist) is no longer driven through this route. This pin is the
+  // string-level audit that every deleted entry still has a row.
   it('covers exactly the five entries #5367 deleted from the message list', () => {
     expect(CASES.map((c) => c.listEntry).sort()).toEqual([
       'is not a subset of the selected dimensions',

@@ -4198,7 +4198,9 @@ export class AnalyticsService implements IAnalyticsService {
    * allowlist"), and the allowlist judges only the path. So, measured on
    * `0b6a52e8` (real SQLite), `account.bogus` over a dataset that includes
    * `account` reached SQL on the native strategy and answered
-   * `DATABASE_ERROR` / 500, as a dimension and as a `runtimeFilter` member,
+   * `DATABASE_ERROR` / 500, as a dimension, as a `runtimeFilter` member and
+   * as a dataset measure's `field` (`max` of `account.bogus`: the measure
+   * gate and the dataset compile both stand down on a dotted source),
    * while the ObjectQL strategy refused it 400 (the engine's groupBy guard, or
    * its cross-object filter refusal) and the preview served one `null` group.
    *
@@ -4220,7 +4222,7 @@ export class AnalyticsService implements IAnalyticsService {
     if (!probe || !cube || !allowed) return;
     const baseObject = typeof cube.sql === 'string' ? cube.sql.trim() : '';
     if (!baseObject || !BARE_IDENTIFIER.test(baseObject)) return;
-    for (const { member, param, column } of relationshipMembers(query, cube, false)) {
+    for (const { member, param, column } of relationshipMembers(query, cube, true)) {
       if (unbackedRelationshipPath(column, allowed) !== null) continue;
       const segments = column.split('.');
       const field = segments[segments.length - 1];

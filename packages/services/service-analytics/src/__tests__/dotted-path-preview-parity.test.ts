@@ -17,7 +17,8 @@
  *   resolves to a declared dimension (`OBJECT.region`, `CUBE.region`) is
  *   answered by the preview with the live faces' groups.
  * - #28558. A declared path to a column the related object lacks
- *   (`account.bogus`) is refused before SQL on every face, `INVALID_FIELD` /
+ *   (`account.bogus`, as a dimension, a filter member or a dataset measure's
+ *   field) is refused before SQL on every face, `INVALID_FIELD` /
  *   400 naming the member, the column and the object, with one message.
  *   Before, the native strategy answered `DATABASE_ERROR` / 500.
  * - #28556. A `timeDimensions` entry through an undeclared path is refused on
@@ -70,6 +71,14 @@ const DECLARED = DatasetSchema.parse({
   ...shape,
   dimensions: [...shape.dimensions, { name: 'account_name', field: 'account.name', type: 'string' }],
   measures: [...shape.measures, { name: 'score_max', aggregate: 'max', field: 'account.score' }],
+});
+
+/** Declares `account` and a measure over `account.bogus`, a column the account object does not have. */
+const BOGUS_MEASURE = DatasetSchema.parse({
+  name: 'os28555_deals_bogus_measure',
+  include: ['account'],
+  ...shape,
+  measures: [...shape.measures, { name: 'bogus_max', aggregate: 'max', field: 'account.bogus' }],
 });
 
 type Face = 'native' | 'objectql' | 'preview';
@@ -208,9 +217,9 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
       ["a declared measure over 'account.score'", DECLARED, { dimensions: ['region'], measures: ['score_max'] }, 'measures', 'score_max'],
       ["a backed 'runtimeFilter' member", BACKED, { dimensions: ['region'], measures: ['total'], runtimeFilter: { 'account.name': 'Acme' } }, 'where', 'account.name'],
       ['a backed windowed time dimension', BACKED, { measures: ['total'], timeDimensions: [{ dimension: 'account.founded_at', dateRange: ['2026-01-01', '2026-01-31'] }] }, 'timeDimensions', 'account.founded_at'],
-    ] as const) {
+    ] satisfies Array<[string, typeof UNBACKED, Selection, string, string]>) {
       it(`refuses ${label} with the same refusal`, async () => {
-        const err = await refusalOf(ask('preview', dataset, selection as Selection));
+        const err = await refusalOf(ask('preview', dataset, selection));
         expect(err.code, err.message).toBe('INVALID_FIELD');
         expect(err.status).toBe(400);
         expect(err.param).toBe(param);
@@ -247,9 +256,9 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
     for (const [label, selection, param, member] of [
       ['as a dimension', { dimensions: ['account.bogus'], measures: ['total'] }, 'dimensions', 'account.bogus'],
       ['as a runtimeFilter member', { dimensions: ['region'], measures: ['total'], runtimeFilter: { 'account.bogus': 'x' } }, 'where', 'account.bogus'],
-    ] as const) {
+    ] satisfies Array<[string, Selection, string, string]>) {
       it(`is refused before SQL on every face ${label}, with one message`, async () => {
-        const err = await refusedAlike(BACKED, selection as Selection, param, member);
+        const err = await refusedAlike(BACKED, selection, param, member);
         expect(err.field).toBe('bogus');
         expect(err.object).toBe(ACCOUNT);
         expect(err.message).toContain(
@@ -257,6 +266,16 @@ describe('[#28555–#28558] members read through a relationship path, on the nat
         );
       });
     }
+
+    it('is refused before SQL on every face as a dataset measure over the path, with one message', async () => {
+      const err = await refusedAlike(BOGUS_MEASURE, { dimensions: ['region'], measures: ['bogus_max'] }, 'measures', 'bogus_max');
+      expect(err.field).toBe('bogus');
+      expect(err.object).toBe(ACCOUNT);
+      expect(err.message).toContain(
+        `Measure 'bogus_max' on cube '${BOGUS_MEASURE.name}' reads field 'bogus' through relationship path 'account', which object '${ACCOUNT}' does not have.`,
+      );
+    });
+
   });
 
   describe('#28556 — a time dimension through an undeclared path', () => {
