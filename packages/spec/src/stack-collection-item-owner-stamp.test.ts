@@ -73,7 +73,7 @@ describe('[ADR-0010] defineStack refuses a collection item whose body `_packageI
     expect(issue!.message).toBe(
       judgeCollectionItemOwnerStamp({ _packageId: OTHER }, 'connector', 'probe_conn', CRM, 'build')!.message,
     );
-    expect(issue!.message.indexOf("Drop `_packageId` from connector 'probe_conn'")).toBe(0);
+    expect(issue!.message!.indexOf("Drop `_packageId` from connector 'probe_conn'")).toBe(0);
   });
 
   it('CONTROL: the same stack without the stamp, and with a stamp equal to `manifest.id`, is accepted', () => {
