@@ -183,6 +183,10 @@ export function createRegistryModuleMock(
     // `TypeError` at every `registerApp`.
     getPackage: vi.fn(() => undefined),
     getObjectContributors: vi.fn(() => []),
+    // [#28697] …and an upgrade (a `getPackage` hit) runs its body through this
+    // member, so a refused upgrade is put back. The double runs the body as
+    // given: it records nothing, so it has nothing to put back.
+    restoringOnRefusal: vi.fn((register: () => unknown) => register()),
     reset: vi.fn(),
     metadata: { get: vi.fn(() => new Map()) },
     ...instanceOverrides,

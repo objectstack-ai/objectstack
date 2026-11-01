@@ -4897,7 +4897,9 @@ export function InterfacesPillar({
         // objectui#11773 — the draft is read at the address the nav save writes
         // (`?package=` this package), so the version it serves pins that save.
         const [layRaw, appDraftRead] = await Promise.all([
-          saved ? client.layered<Record<string, unknown>>('app', name) : null,
+          // ADR-0048 — read at this package, the app's owner: a layered read
+          // naming no package is refused for a name two packages hold.
+          saved ? client.layered<Record<string, unknown>>('app', name, { packageId }) : null,
           readDraftForSave<Record<string, unknown>>(client, 'app', name, packageId),
         ]);
         if (cancelled) return;
@@ -5176,7 +5178,15 @@ export function InterfacesPillar({
         // objectui#11799 — the baseline is read only when it is used, for a
         // leaf with no pending draft. An unsaved leaf always has one, so it
         // never asks `/layers`, which answers 404 for a name with no layer.
-        const lay = body ? null : await client.layered<Record<string, unknown>>(current.type, current.name);
+        // ADR-0048 — read at the leaf's owner: a layered read naming no
+        // package is refused for a name two packages hold. That is the pair
+        // for an item the pair adds; else this package, whose read on a
+        // read-only base serves its declared override (ADR-0146 D8).
+        const lay = body
+          ? null
+          : await client.layered<Record<string, unknown>>(current.type, current.name, {
+              packageId: current.addedIn ?? packageId,
+            });
         if (cancelled) return;
         const baseline = ((lay as { effective?: unknown; code?: unknown } | null)?.effective ??
           (lay as { code?: unknown } | null)?.code ??
@@ -5235,7 +5245,8 @@ export function InterfacesPillar({
     if (!publishedPending || !currentType || !currentName) return;
     const key = leafKey;
     let cancelled = false;
-    client.layered<Record<string, unknown>>(currentType, currentName).then(
+    // ADR-0048 — at the leaf's owner, as the leaf's load reads its baseline.
+    client.layered<Record<string, unknown>>(currentType, currentName, { packageId: leafPackageId }).then(
       (lay) => {
         if (cancelled) return;
         const doc = ((lay as { effective?: unknown; code?: unknown } | null)?.effective ??
@@ -5251,7 +5262,7 @@ export function InterfacesPillar({
     return () => {
       cancelled = true;
     };
-  }, [publishedPending, client, currentType, currentName, leafKey]);
+  }, [publishedPending, client, currentType, currentName, leafKey, leafPackageId]);
   const servedWidgets = React.useMemo(
     () =>
       currentType === 'dashboard' && leafPublished.key === leafKey && leafPublished.read
@@ -7825,7 +7836,9 @@ export function DataPillar({
       try {
         // objectui#11773 — the draft is read at the address the object saves
         // write, so the version it serves pins the first of them.
-        const readLayers = () => client.layered<Record<string, unknown>>('object', current.name);
+        // ADR-0048 — and the layers at this package, the object's owner: a
+        // layered read naming no package is refused for a name two packages hold.
+        const readLayers = () => client.layered<Record<string, unknown>>('object', current.name, { packageId });
         const readDraft = () => readDraftForSave<Record<string, unknown>>(client, 'object', current.name, packageId);
         // objectui#12508 — a draft-only object (a pending draft, and no row in
         // the package's published list) has no layer, and `/layers` answers
@@ -9598,6 +9611,74 @@ export function AutomationsPillar({
   // package-less scope, so the draft row stays as package-less as the flow it
   // edits. The client sends no `package=` for an absent id.
   const draftPackageId = packageId ?? undefined;
+  // objectstack#28570 (ADR-0146 D9 items 1–3, D2) — Customize a flow. On a
+  // read-only base its flow is edited in the base's paired customization
+  // package under the flow's own name, as a declared override of the base's
+  // flow, with N-17's control and ensure door. Its editors stay read-only
+  // until Customize is pressed, or while the server serves no override of
+  // it; nothing is written until an edit is saved. ⛔ The pair a write names
+  // is the door's answer; the pair a READ names is the surface's, read
+  // through this ref, so a pair the first save creates never reloads the
+  // buffer it saved. Whether the flow is overridden is the declared
+  // override's own row as served (`useServedOverride`: the pair's draft, else
+  // the layered read's `overlay`), ⛔ never the served envelope's
+  // `deletable`, which follows the base's seal.
+  const customizationRef = React.useRef(customization);
+  React.useLayoutEffect(() => {
+    customizationRef.current = customization;
+  });
+  const flowCustomizing = packageReadOnly && railPackageId !== null && customization !== null;
+  const customizeBase = flowCustomizing && customization ? customization.base : null;
+  const customizePair = flowCustomizing && customization ? customization.pairId : null;
+  const customizeBaseLabel = customization?.baseLabel ?? railPackageId ?? '';
+  const customizeWalled = flowCustomizing && customization?.walled === true;
+  const customizeBlock: CustomizeBlock = customizeWalled
+    ? 'walled'
+    : flowCustomizing && !customization?.basedOn
+      ? 'noVersion'
+      : null;
+  const flowCustomizable = flowCustomizing && !!current && !current.addedIn;
+  // The flows Customize was pressed on, by name: unlocked, nothing saved yet.
+  const [customizeAsked, setCustomizeAsked] = React.useState<ReadonlySet<string>>(() => new Set());
+  // The ensure door's answer for each flow's first saved edit: asked once per
+  // flow, and again only after a refusal.
+  const pairsByFlowRef = React.useRef(new Map<string, Promise<string>>());
+  const pairForFlow = React.useCallback((custom: StudioBaseCustomization, name: string): Promise<string> => {
+    const held = pairsByFlowRef.current.get(name);
+    if (held) return held;
+    const asked = custom.ensure();
+    pairsByFlowRef.current.set(name, asked);
+    asked.catch(() => {
+      if (pairsByFlowRef.current.get(name) === asked) pairsByFlowRef.current.delete(name);
+    });
+    return asked;
+  }, []);
+  // Re-reads the served declaration: a flow's first save into the pair, a restore.
+  const [servedNonce, setServedNonce] = React.useState(0);
+  const flowServed = useServedOverride(
+    client,
+    flowCustomizable && current ? { type: 'flow', name: current.name } : null,
+    customizeBase,
+    customizePair,
+    `${publishNonce}:${servedNonce}`,
+  );
+  const flowInPair = flowCustomizable && flowServed.declaration !== null;
+  const flowUnlocked =
+    flowCustomizable &&
+    !customizeWalled &&
+    (flowInPair || (customizeBlock === null && !!current && customizeAsked.has(current.name)));
+  // The open flow's editors: locked on a read-only package's flow unless it is customized.
+  const editLocked = readOnly && !flowUnlocked;
+  const flowInPairRef = React.useRef(flowInPair);
+  React.useLayoutEffect(() => {
+    flowInPairRef.current = flowInPair;
+  });
+  // A restore in flight: no save is sent beside it.
+  const [restoring, setRestoring] = React.useState(false);
+  const [restoreOpen, setRestoreOpen] = React.useState(false);
+  // The package the open flow's draft read was asked at (`flow:NAME`): the
+  // address the pin it recorded describes.
+  const flowReadAtRef = React.useRef<{ key: string; at: string | undefined } | null>(null);
   // `?surface=flow:<name>` capture + mirror — shared plumbing (see
   // useSurfaceDeepLink). No producer emits this link yet; honoring it keeps
   // the pillars uniform so a future "design this flow" bridge just works.
@@ -9638,14 +9719,15 @@ export function AutomationsPillar({
     [flowVerdict, locale],
   );
   const flowVerdictSeq = React.useRef(0);
+  // objectstack#28570 — read at the package the draft was saved at (a customized flow's pair).
   const rereadFlowVerdict = React.useCallback(
-    (flowName: string) => {
+    (flowName: string, at: string | undefined) => {
       const seq = ++flowVerdictSeq.current;
-      void readDraftForSave(client, 'flow', flowName, draftPackageId).then((read) => {
+      void readDraftForSave(client, 'flow', flowName, at).then((read) => {
         if (seq === flowVerdictSeq.current) setFlowVerdict(draftEnvelopeDiagnostics(read.answer));
       });
     },
-    [client, draftPackageId],
+    [client],
   );
   // objectui#11785 — a load failure as it was (`plainRefusal`), a refused save
   // as an author sentence naming the step and its input, raw text behind Details.
@@ -9923,14 +10005,26 @@ export function AutomationsPillar({
     (async () => {
       try {
         // objectui#11773 — read at the address the flow saves write, so the
-        // version it serves pins the first of them.
-        const draftRead = await readDraftForSave<Record<string, unknown>>(client, 'flow', current.name, draftPackageId);
+        // version it serves pins the first of them. objectstack#28570 — a
+        // read-only base's flow: its pair, when one is listed.
+        const pair = flowCustomizing && !current.addedIn ? (customizationRef.current?.pairId ?? null) : null;
+        const readAt = pair ?? draftPackageId;
+        const draftRead = await readDraftForSave<Record<string, unknown>>(client, 'flow', current.name, readAt);
         if (cancelled) return;
         const draftBody = extractDraftBody(draftRead.answer);
         // objectui#11799 — the baseline is read only for a flow with no
         // pending draft, the one case it is used. An unsaved flow always has
         // one, so it never asks `/layers`, which answers 404 for it.
-        const layRaw = draftBody ? null : await client.layered<Record<string, unknown>>('flow', current.name);
+        // ADR-0048 — at the package the flow saves write, its owner here; with
+        // none, the read names none, and a name two packages hold is refused
+        // with the server's own sentence, shown as the load's error.
+        const layRaw = draftBody
+          ? null
+          : await client.layered<Record<string, unknown>>(
+              'flow',
+              current.name,
+              draftPackageId ? { packageId: draftPackageId } : {},
+            );
         if (cancelled) return;
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> } | null;
         const baseline = (lay?.effective ?? lay?.code ?? {}) as Record<string, unknown>;
@@ -9946,7 +10040,8 @@ export function AutomationsPillar({
           }),
         );
         // objectui#11773 — the next save is pinned to what the draft read served.
-        recordFlowRead('flow', current.name, draftPackageId, draftRead.pin);
+        recordFlowRead('flow', current.name, readAt, draftRead.pin);
+        flowReadAtRef.current = { key: `flow:${current.name}`, at: readAt };
         setHasDraft(!!draftBody);
       } catch (e) {
         if (!cancelled) setError(plainRefusal(e));
@@ -9964,7 +10059,7 @@ export function AutomationsPillar({
       // `loading` it raised, as in InterfacesPillar's draft load.
       if (!settled) setLoading(false);
     };
-  }, [client, current, draftPackageId, publishNonce, flowReloadNonce, recordFlowRead]);
+  }, [client, current, draftPackageId, publishNonce, flowReloadNonce, recordFlowRead, flowCustomizing]);
 
   // objectui#5813 — local dirty flag: auto-save arms only after a real edit.
   const [autoDirty, setAutoDirty] = React.useState(false);
@@ -9980,12 +10075,49 @@ export function AutomationsPillar({
     setSaving('draft');
     setError(null);
     try {
-      const outcome = await saveFlowDraft('flow', current.name, draft, { mode: 'draft', packageId: draftPackageId, surface: 'studio' });
+      // objectstack#28570 — a read-only base's flow is saved into the pair the
+      // ensure door answers, under its own name, declaring the override. A
+      // refused door is shown as it was sent, and nothing is saved.
+      const custom = readOnly ? customizationRef.current : null;
+      let target: { packageId: string | undefined; body: Record<string, unknown> } = { packageId: draftPackageId, body: draft };
+      let entering = false;
+      if (custom) {
+        let pair: string;
+        try {
+          pair = await pairForFlow(custom, current.name);
+        } catch (e) {
+          setError(plainRefusal(e));
+          return;
+        }
+        const declared = overrideDraftBody(draft, custom.base, custom.basedOn);
+        if (declared === null) {
+          setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          return;
+        }
+        // The buffer was read at another package (the base, before its pair
+        // was listed): the pair is taken to hold no draft of the flow, so a
+        // draft there is a conflict the author is asked about, never one this
+        // save overwrites. Its receipt pins the saves after it.
+        const key = `flow:${current.name}`;
+        if (!(flowReadAtRef.current?.key === key && flowReadAtRef.current.at === pair)) {
+          recordFlowRead('flow', current.name, pair, { ifNoneMatch: '*' });
+          flowReadAtRef.current = { key, at: pair };
+        }
+        entering = !flowInPairRef.current;
+        target = { packageId: pair, body: declared };
+      }
+      const outcome = await saveFlowDraft('flow', current.name, target.body, {
+        mode: 'draft',
+        packageId: target.packageId,
+        surface: 'studio',
+      });
       // objectui#11773 — the author chose the saved version; the load replaces the buffer.
       if (outcome === 'reloaded') return;
+      // The badge reads the declaration the server now serves.
+      if (entering) setServedNonce((n) => n + 1);
       setHasDraft(true);
       // objectstack#26858 — the stored draft carries its own verdict now.
-      rereadFlowVerdict(current.name);
+      rereadFlowVerdict(current.name, target.packageId);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setAutoDirty(false);
       onDraftSaved?.({ type: 'flow', name: current.name });
@@ -9995,7 +10127,7 @@ export function AutomationsPillar({
     } finally {
       setSaving(false);
     }
-  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, rereadFlowVerdict]);
+  }, [saveFlowDraft, current, draft, draftPackageId, onDraftSaved, locale, rereadFlowVerdict, readOnly, pairForFlow, recordFlowRead]);
   // objectui#11786 — an edit that leaves a step's required input out (a step
   // just added, before it is filled in) is held, not sent: the server would
   // refuse the flow with a 422 naming that input. The step's inspector hints the
@@ -10010,7 +10142,7 @@ export function AutomationsPillar({
     target: `flow:${current?.name ?? ''}`,
     loadedFor: draftFor,
     dirty: autoDirty,
-    blocked: !current || !isEditable || !!saving || readOnly || flowIncomplete !== null,
+    blocked: !current || !isEditable || !!saving || editLocked || restoring || flowIncomplete !== null,
     snapshot: draft,
     save: doSave,
   });
@@ -10055,7 +10187,7 @@ export function AutomationsPillar({
       // objectui#11773 — a reload replaced the buffer the flip was taken on.
       if ((await saveFlowDraft('flow', flowName, nextDraft, { mode: 'draft', packageId: draftPackageId, surface: 'studio' })) === 'reloaded') return;
       setHasDraft(true);
-      rereadFlowVerdict(flowName);
+      rereadFlowVerdict(flowName, draftPackageId);
       onDraftSaved?.({ type: 'flow', name: flowName });
       toast.success(next ? t('engine.studio.auto.enabledToast', locale) : t('engine.studio.auto.disabledToast', locale));
     } catch (e) {
@@ -10121,6 +10253,48 @@ export function AutomationsPillar({
     onDraftSaved?.({ type: 'flow', name: flow.name });
     toast.success(tFormat('engine.studio.auto.flowDeleted', locale, { item: flow.label || flow.name }));
   }, [client, current, packageId, hasDraft, onDraftSaved, locale]);
+  // objectstack#28570 (ADR-0146 D2) — "Restore package original" on a flow
+  // the pair overrides: the pair's draft of the flow, then its row, deleted
+  // at the pair. The pair is the door's answer this flow's saves named, else
+  // the surface's; never asked of the door again. The base's flow reads back
+  // and runs again under the same ledger row, and the server's refusal is
+  // shown as it is sent.
+  const restoreFlow = React.useCallback(async () => {
+    const custom = customizationRef.current;
+    if (!current || !custom) return;
+    const flow = current;
+    const held = pairsByFlowRef.current.get(flow.name);
+    const pair = (held ? await held.catch(() => null) : null) ?? custom.pairId;
+    if (!pair) return;
+    setRestoring(true);
+    setAutoDirty(false);
+    setError(null);
+    try {
+      await client.reset('flow', flow.name, { state: 'draft', packageId: pair });
+      await client.reset('flow', flow.name, { packageId: pair });
+    } catch (e) {
+      setError(plainRefusal(e));
+      return;
+    } finally {
+      setRestoring(false);
+    }
+    pairsByFlowRef.current.delete(flow.name);
+    setCustomizeAsked((prev) => {
+      if (!prev.has(flow.name)) return prev;
+      const next = new Set(prev);
+      next.delete(flow.name);
+      return next;
+    });
+    reloadFlowDraft();
+    setServedNonce((n) => n + 1);
+    // The base's flow is armed again: the engine's rows are read again.
+    setStatusNonce((n) => n + 1);
+    emitMetadataRefresh();
+    onDraftSaved?.({ type: 'flow', name: flow.name });
+    toast.success(
+      tFormat('engine.studio.customize.restoreDone', locale, { item: flow.label || flow.name, package: custom.baseLabel }),
+    );
+  }, [client, current, reloadFlowDraft, onDraftSaved, locale]);
   // objectstack#28567 (ADR-0146 D4) — "New similar" saved a copy. It opens
   // only where the door's answer says it landed: in this pillar after a
   // re-read when that is this package, else that package's Automations pillar
@@ -10252,8 +10426,9 @@ export function AutomationsPillar({
           onClearSelection: () => setSelection(null),
           onSelectionChange: setSelection,
           // objectui#11124 — the pillar's real flag, threaded exactly as
-          // the Data pillar threads it (objectui#2259).
-          readOnly,
+          // the Data pillar threads it (objectui#2259). objectstack#28570 —
+          // a customized flow's editors are open.
+          readOnly: editLocked,
           locale,
         })}
       </div>
@@ -10292,7 +10467,12 @@ export function AutomationsPillar({
         locale={locale}
         onToggle={() => void toggleLedger()}
       />
-    ) : current && flowLoaded
+    ) : current && flowLoaded && flowCustomizable && (flowInPair || flowUnlocked)
+      ? // objectstack#28570 (ADR-0146 D9 item 3) — a customized flow is
+        // switched by the ledger row alone; no definition switch is drawn for
+        // it, and Studio never writes its `status` to mean on or off.
+        null
+      : current && flowLoaded
       ? (() => {
           const defaultOff = t('engine.studio.auto.defaultOff', locale);
           // objectstack#27356 — a read-only package's switch cannot be flipped,
@@ -10452,7 +10632,7 @@ export function AutomationsPillar({
   // link there truncated the flow's label; it sits at the tab row's right
   // end, the slot objectui#12456 gave the Access note for the same reason.
   const autoReadOnlyLinkEl =
-    readOnly && packageId !== null ? (
+    editLocked && packageId !== null ? (
       <StudioReadOnlyLink item={current} title={t('engine.studio.pkg.readonlyHint', locale)} locale={locale} />
     ) : null;
   const flowTabsEl =
@@ -10489,6 +10669,17 @@ export function AutomationsPillar({
   return (
     <div className="flex h-full flex-col">
       {flowConflictDialog}
+      {/* objectstack#28570 — Restore's confirmation, outside the menu that opens it. */}
+      <StudioRestoreOriginalDialog
+        open={restoreOpen && flowInPair}
+        onOpenChange={setRestoreOpen}
+        kind="flow"
+        label={current ? current.label || current.name : ''}
+        baseLabel={customizeBaseLabel}
+        hasDraft={hasDraft && flowLoaded}
+        locale={locale}
+        onConfirm={() => void restoreFlow()}
+      />
       <div ref={layoutRowRef} data-testid="auto-layout-row" className="relative flex min-h-0 flex-1">
         {isMobile && railOpen && (
           <div
@@ -10645,7 +10836,18 @@ export function AutomationsPillar({
                 <span className="hidden 2xl:inline">{t('engine.studio.auto.designersMissing', locale)}</span>
               )
             }
-            chips={current?.addedIn ? <StudioPairItemChip pairId={current.addedIn} locale={locale} /> : undefined}
+            chips={
+              current?.addedIn ? (
+                <StudioPairItemChip pairId={current.addedIn} locale={locale} />
+              ) : flowCustomizable && flowServed.declaration ? (
+                // objectstack#28570 — the override the server serves, never a computation.
+                <StudioOverrideChip
+                  baseLabel={customizeBaseLabel}
+                  basedOn={flowServed.declaration.basedOn}
+                  locale={locale}
+                />
+              ) : undefined
+            }
             status={flowDraftStatus}
             actions={
               <>
@@ -10655,6 +10857,17 @@ export function AutomationsPillar({
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t('engine.studio.autoSaving', locale)}
                   </span>
+                )}
+                {/* objectstack#28570 — Customize unlocks the flow's editors; nothing is saved until an edit. */}
+                {current && flowLoaded && flowCustomizable && !flowUnlocked && !flowInPair && (
+                  <StudioCustomizeButton
+                    block={customizeBlock}
+                    baseLabel={customizeBaseLabel}
+                    locale={locale}
+                    onCustomize={() =>
+                      setCustomizeAsked((prev) => (prev.has(current.name) ? prev : new Set(prev).add(current.name)))
+                    }
+                  />
                 )}
                 {flowSwitchEl}
                 {/* objectstack#28239 — the item tools Setup's item page opens. */}
@@ -10690,6 +10903,15 @@ export function AutomationsPillar({
                     locale={locale}
                     disabled={!!saving}
                     onDelete={readOnly ? undefined : () => void deleteOpenFlow()}
+                    // objectstack#28570 — for a flow the pair overrides, read from the served declaration.
+                    restore={
+                      flowInPair
+                        ? {
+                            disabled: restoring,
+                            onSelect: () => setRestoreOpen(true),
+                          }
+                        : undefined
+                    }
                     newSimilar={{
                       target: readOnly ? undefined : packageId,
                       blocked: canAuthorFlows ? null : t('engine.edit.capabilityReadOnly', locale),
@@ -10837,7 +11059,7 @@ export function AutomationsPillar({
                         // the preview contract the canvas is then read-only (no add,
                         // insert, drag or delete — each a doomed write), while node and
                         // edge selection still open the inspector read-only below.
-                        onPatch: readOnly ? undefined : onPatch,
+                        onPatch: editLocked ? undefined : onPatch,
                         locale,
                         // objectstack#27799 — the Problems list reads the verdict the inspectors read.
                         diagnostics: flowPreviewDiagnostics,
@@ -10895,7 +11117,14 @@ export function AutomationsPillar({
               onClose={selection ? () => setSelection(null) : undefined}
               closeLabel={t('engine.studio.deselect', locale)}
               // objectui#12453 — a read-only package saves no draft: no footer.
-              footer={readOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
+              // objectstack#28570 — a customized flow saves into the pair.
+              footer={
+                editLocked
+                  ? null
+                  : readOnly
+                    ? t('engine.studio.customize.draftFooter', locale)
+                    : t('engine.studio.inspector.draftFooter', locale)
+              }
               // objectui#12454 — a selection's inspector brings its own padding
               // (the metadata inspector shell); only the empty sentence takes the aside's.
               bodyClassName={heading ? 'p-0' : undefined}
