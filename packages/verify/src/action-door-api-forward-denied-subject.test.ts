@@ -42,9 +42,15 @@ import { ApprovalsServicePlugin } from '@objectstack/plugin-approvals';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
 
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 // Booting the full in-process stack runs well past vitest's 5s default.
 const BOOT_TIMEOUT = 120_000;
+
+// The boot's first load, paid during collection rather than in the
+// `beforeAll` below (see `boot-warm-up.testkit.ts`): the same options and the
+// same `requires` as this file's own boot.
+await warmUpBoot({ automation: true }, { requires: ['automation', 'triggers'] });
 
 const OBJECT = 'afd_invoice';
 const SYS = { isSystem: true } as const;
@@ -163,14 +169,19 @@ afterAll(async () => {
 describe('a pending approver decides through the action door — the forward authorizes, not the data door', () => {
   it('the control: the approver cannot read the request row through the data door', async () => {
     const requestId = await openRequest('INV-control');
-    expect(pendingOf(await requestRow(requestId))).toContain(firstId);
+    // The slate holds the addresses the flow named.
+    expect(pendingOf(await requestRow(requestId))).toEqual([FIRST, SECOND]);
+    // A member holds no object grant on the request table, so the data door
+    // refuses the read outright.
     const read = await call(first, 'GET', `/data/sys_approval_request/${requestId}`);
-    expect(read.status, read.text).toBe(404);
+    expect(read.status, read.text).toBe(403);
+    expect(read.json?.code).toBe('PERMISSION_DENIED');
   });
 
   it('Approve answers 200 and the request moves: 1 of 2, the approver off the slate, an approve row', async () => {
     const requestId = await openRequest('INV-1');
     expect(await approveRows(requestId)).toEqual([]);
+    expect(pendingOf(await requestRow(requestId))).toEqual([FIRST, SECOND]);
 
     const answer = await call(first, 'POST', '/actions/sys_approval_request/approval_approve', {
       recordId: requestId, params: { comment: 'Looks right.' },
@@ -179,8 +190,7 @@ describe('a pending approver decides through the action door — the forward aut
     expect(answer.status, answer.text).toBe(200);
     const row = await requestRow(requestId);
     expect(row.status).toBe('pending');
-    expect(pendingOf(row)).not.toContain(firstId);
-    expect(pendingOf(row)).toHaveLength(1);
+    expect(pendingOf(row)).toEqual([SECOND]);
     const approvals = await approveRows(requestId);
     expect(approvals).toHaveLength(1);
     expect(approvals[0].actor_id).toBe(firstId);
@@ -210,6 +220,6 @@ describe('a pending approver decides through the action door — the forward aut
     expect(viaDoor.text).not.toContain('INV-2');
     // Nothing moved.
     expect(await approveRows(requestId)).toEqual([]);
-    expect(pendingOf(await requestRow(requestId))).toHaveLength(2);
+    expect(pendingOf(await requestRow(requestId))).toEqual([FIRST, SECOND]);
   });
 });
