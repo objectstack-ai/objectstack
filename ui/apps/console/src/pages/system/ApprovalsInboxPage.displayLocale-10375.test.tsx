@@ -32,7 +32,7 @@ import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { I18nProvider, LocalizationProvider } from '@object-ui/i18n';
 import { isMachineLocale, recordLocaleArgumentsAsync } from '@object-ui/test-support';
 
@@ -99,12 +99,13 @@ import { ApprovalsInboxPage } from './ApprovalsInboxPage';
 
 afterEach(() => cleanup());
 
-function permissions(): MePermissionsResponse {
+function permissions(): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_1',
     tenantId: 't_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: {},
     fields: {},

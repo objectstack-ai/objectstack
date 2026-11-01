@@ -10,7 +10,7 @@ import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import React from 'react';
 import { InlineEditProvider, useInlineEdit } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { SystemFieldName } from '@objectstack/spec/system';
 import type { DetailViewSection } from '@object-ui/types';
 import { DetailSection } from '../DetailSection';
@@ -39,12 +39,13 @@ const OBJECT = 'crm_account';
 const OWNER = SystemFieldName.OWNER_ID;
 
 /** The measured envelope: may edit the object, may not edit annual revenue, may not transfer. */
-function envelope(objectBits: Record<string, boolean> = {}): MePermissionsResponse {
+function envelope(objectBits: Record<string, boolean> = {}): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u-rep',
     tenantId: null,
-    roles: [],
+    hasAnyQueue: false,
+    positions: [],
     permissionSets: ['rep'],
     objects: {
       [OBJECT]: {

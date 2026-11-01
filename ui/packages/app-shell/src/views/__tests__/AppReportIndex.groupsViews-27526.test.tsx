@@ -35,7 +35,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { createI18n, I18nProvider } from '@object-ui/i18n';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -103,11 +103,12 @@ const OBJECTS = [
   { name: 'crm_case', label: 'Case', pluralLabel: 'Cases', _packageId: PKG },
 ];
 
-const ANSWER: MePermissionsResponse = {
+const ANSWER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u_agent',
   tenantId: null,
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: ['sales'],
   systemPermissions: [],
   objects: {
