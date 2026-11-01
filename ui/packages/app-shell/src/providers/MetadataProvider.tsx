@@ -1,4 +1,6 @@
 import {
+  createContext,
+  useContext,
   useState,
   useEffect,
   useCallback,
@@ -8,7 +10,14 @@ import {
 } from 'react';
 import { expandViewContainer } from '@objectstack/spec/ui';
 import { ActiveOrganizationStorage, TokenStorage, useAuth } from '@object-ui/auth';
-import { isMetaItemAbsentError, MetadataNotFoundError, type ObjectStackAdapter } from '@object-ui/data-objectstack';
+import {
+  isMetaItemAbsentError,
+  MetadataNotFoundError,
+  type AppBundleEntry,
+  type AppBundleItems,
+  type AppBundlePeek,
+  type ObjectStackAdapter,
+} from '@object-ui/data-objectstack';
 import { isActionSwitchedOff, markSwitchedOffActions, markSwitchedOffActionsByObject, normalizeSchemaReferenceKeys } from '@object-ui/core';
 import { errorCodeIs } from '@object-ui/types';
 import { resolveInlineMode } from '@object-ui/plugin-form';
@@ -130,7 +139,14 @@ interface MetadataProviderProps {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000;
-const EAGER_TYPES = ['app', 'view'] as const;
+/**
+ * The types read at mount. `view` is not one of them (objectstack#28645): the
+ * views an app page composes come from the app bundle when it holds every
+ * object composed (`BundledReads.viewsFor`), and the `/meta/view` list is read
+ * only where it does not — beside the whole object registry (`ensureType`),
+ * or for a scope holding an object outside the bundle.
+ */
+const EAGER_TYPES = ['app'] as const;
 
 /**
  * How long a FAILED type stays un-retried (objectui#4042).
@@ -702,6 +718,105 @@ export function attachInlineSubforms(objects: any[]): any[] {
  */
 const COMPOSED_OBJECTS = new WeakMap<unknown[], { views: unknown[]; composed: unknown[] }>();
 
+// ---------------------------------------------------------------------------
+// objectstack#28645 — bundle-first reads, answered in render
+// ---------------------------------------------------------------------------
+
+/**
+ * One bundle-first read: `pending` while the app bundle that may hold it has
+ * not answered yet; `hit` with what the bundle holds; `miss` when no bundle
+ * can answer it — none was entered, draft preview, a host adapter without the
+ * bundle, or an item outside it. On a miss the reader reads its list exactly
+ * as it did before the bundle, so an item the bundle lacks is answered by the
+ * same read, prefer-local resolution (ADR-0048) included.
+ */
+export type BundledRead<T = unknown> =
+  | { readonly state: 'pending' }
+  | { readonly state: 'hit'; readonly value: T }
+  | { readonly state: 'miss' };
+
+const BUNDLE_PENDING: BundledRead<never> = Object.freeze({ state: 'pending' as const });
+const BUNDLE_MISS: BundledRead<never> = Object.freeze({ state: 'miss' as const });
+
+/** What this provider answers from the app bundle, for readers that must answer in render. */
+export interface BundledReads {
+  /**
+   * The `type` / `name` item the active app bundle holds. With
+   * `ownerPackageId`, an item another package owns is a miss: the list's
+   * prefer-local pick (`preferLocal`) decides between same-named items.
+   */
+  item(type: string, name: string, ownerPackageId?: unknown): BundledRead<any>;
+  /**
+   * The view documents to compose `objectNames` with: the bundle's, when it
+   * holds every one of those objects (it holds every view bound to an object
+   * it holds); a miss otherwise, and the `/meta/view` list composes them.
+   */
+  viewsFor(objectNames: readonly string[]): BundledRead<unknown[]>;
+}
+
+const BundledReadsCtx = createContext<BundledReads | null>(null);
+
+/** The provider's {@link BundledReads}, or `null` outside a `MetadataProvider` (every read then reads its list). */
+export function useBundledReads(): BundledReads | null {
+  return useContext(BundledReadsCtx);
+}
+
+/** {@link BundledReads.item} as a hook; a miss outside a `MetadataProvider` or with no name. */
+export function useBundledItem(type: string, name: string | undefined | null, ownerPackageId?: unknown): BundledRead<any> {
+  const reads = useBundledReads();
+  return reads && name ? reads.item(type, name, ownerPackageId) : BUNDLE_MISS;
+}
+
+/**
+ * A by-name read in a reader that answers in render (a label resolver): the
+ * item the bundle holds; nothing while the bundle is on the wire; else the
+ * first item named `name` in `list()`, which is read only then — exactly the
+ * lookup the reader made before the bundle.
+ */
+export function bundledFirst(
+  reads: BundledReads | null,
+  type: string,
+  name: string,
+  list: () => readonly unknown[] | undefined,
+): any {
+  const bundled = reads ? reads.item(type, name) : BUNDLE_MISS;
+  if (bundled.state === 'hit') return bundled.value;
+  if (bundled.state === 'pending') return undefined;
+  return (list() ?? []).find(
+    (item) => !!item && typeof item === 'object' && (item as { name?: unknown }).name === name,
+  );
+}
+
+/**
+ * One copy of each bundled document, handed out read after read so a reader's
+ * memo on it holds: the bundle's own entry is never handed out, as the
+ * adapter's by-name read never hands it out either.
+ */
+const BUNDLED_HITS = new WeakMap<AppBundleEntry, BundledRead<unknown>>();
+function bundledHit(entry: AppBundleEntry): BundledRead<unknown> {
+  let hit = BUNDLED_HITS.get(entry);
+  if (!hit) {
+    hit = Object.freeze({ state: 'hit' as const, value: structuredClone(entry.item) });
+    BUNDLED_HITS.set(entry, hit);
+  }
+  return hit;
+}
+
+/** The bundle's view documents, one array per held answer (`composeObjects` keys on its identity). */
+const BUNDLED_VIEWS = new WeakMap<AppBundleItems, BundledRead<unknown[]>>();
+function bundledViews(items: AppBundleItems): BundledRead<unknown[]> {
+  let hit = BUNDLED_VIEWS.get(items);
+  if (!hit) {
+    const views = Array.from(items.get('view')?.values() ?? [], (entry) => structuredClone(entry.item));
+    hit = Object.freeze({ state: 'hit' as const, value: views });
+    BUNDLED_VIEWS.set(items, hit);
+  }
+  return hit;
+}
+
+/** What a reader that has no views to compose with yet holds. */
+const NO_VIEWS: unknown[] = [];
+
 function composeObjects(objs: unknown[], views: unknown[]): unknown[] {
   const cached = COMPOSED_OBJECTS.get(objs);
   if (cached && cached.views === views) return cached.composed;
@@ -854,6 +969,77 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
     }
   }, []);
 
+  // ── objectstack#28645 — the app bundle, read in render ───────────────────
+  //
+  // `AppContent` enters the app the URL names from an effect, and a parent's
+  // effects run after its children's, so a reader rendering in the same
+  // commit can find no app entered yet. That is not an answer: the read stays
+  // pending, and this provider's own effect (below, after every descendant's)
+  // looks again — an app entered by then is waited for, none means no bundle
+  // will answer, and the readers read their lists.
+  const bundleNoneAskedRef = useRef(false);
+  const bundleNoneFinalRef = useRef(false);
+  const watchedBundleLoadsRef = useRef(new WeakSet<Promise<unknown>>());
+  const peekBundle = useCallback((): AppBundlePeek | null => {
+    // Draft preview reads its own world; the bundle is the published one.
+    if (previewClientRef.current) return null;
+    const host = adapterRef.current as Partial<Pick<ObjectStackAdapter, 'peekAppBundle'>> | undefined;
+    if (typeof host?.peekAppBundle !== 'function') return null;
+    let peek: AppBundlePeek;
+    try {
+      peek = host.peekAppBundle();
+    } catch {
+      return null;
+    }
+    if (peek.status === 'none') {
+      if (bundleNoneFinalRef.current) return null;
+      bundleNoneAskedRef.current = true;
+      return peek;
+    }
+    // A load on the wire re-renders the readers when it lands, once per load.
+    if (peek.settled && !watchedBundleLoadsRef.current.has(peek.settled)) {
+      watchedBundleLoadsRef.current.add(peek.settled);
+      void peek.settled.then(bump, bump);
+    }
+    return peek;
+  }, [bump]);
+  useEffect(() => {
+    if (!bundleNoneAskedRef.current) return;
+    bundleNoneAskedRef.current = false;
+    const peek = peekBundle();
+    if (peek && peek.status !== 'none') return;
+    // `peekBundle` re-marked the ask; none is now the answer.
+    bundleNoneAskedRef.current = false;
+    bundleNoneFinalRef.current = true;
+    bump();
+  });
+  const readBundledItem = useCallback(
+    (type: string, name: string, ownerPackageId?: unknown): BundledRead<any> => {
+      const peek = peekBundle();
+      if (!peek) return BUNDLE_MISS;
+      if (peek.status !== 'ready') return BUNDLE_PENDING;
+      const entry = peek.items.get(type)?.get(name);
+      if (!entry) return BUNDLE_MISS;
+      const hit = bundledHit(entry);
+      if (ownerPackageId && (hit as { value?: { _packageId?: unknown } }).value?._packageId !== ownerPackageId) {
+        return BUNDLE_MISS;
+      }
+      return hit;
+    },
+    [peekBundle],
+  );
+  const readBundledViews = useCallback(
+    (objectNames: readonly string[]): BundledRead<unknown[]> => {
+      const peek = peekBundle();
+      if (!peek) return BUNDLE_MISS;
+      if (peek.status !== 'ready') return BUNDLE_PENDING;
+      const bundledObjects = peek.items.get('object');
+      for (const name of objectNames) if (!bundledObjects?.has(name)) return BUNDLE_MISS;
+      return bundledViews(peek.items);
+    },
+    [peekBundle],
+  );
+
   // Entering/leaving preview swaps the entire metadata source — the published
   // and draft-overlaid worlds must never mix in one cache. Drop everything and
   // let consumers refetch through the new source.
@@ -892,7 +1078,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
     return entry;
   }, []);
 
-  const ensureType = useCallback(
+  const ensureOwnType = useCallback(
     (type: string): Promise<any[]> => {
       const entry = getEntry(type);
 
@@ -984,6 +1170,18 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       return promise;
     },
     [bump, getEntry, ttlMs],
+  );
+
+  // The whole object registry is composed with the whole `/meta/view` list, so
+  // the two are read together and the registry answers once both have: with
+  // `view` no longer read at mount (objectstack#28645), a reader of `objects`
+  // never sees a registry whose views are still on the wire.
+  const ensureType = useCallback(
+    (type: string): Promise<any[]> => {
+      if (type !== 'object') return ensureOwnType(type);
+      return Promise.all([ensureOwnType('object'), ensureOwnType('view')]).then(([items]) => items);
+    },
+    [ensureOwnType],
   );
 
   const readItem = useCallback(
@@ -1414,6 +1612,21 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
     [ensureType, getEntry],
   );
 
+  /** The views to compose `objects` with (objectstack#28645), and whether they are in hand. */
+  const viewsForObjects = useCallback(
+    (objects: readonly unknown[]): { views: unknown[]; settled: boolean } => {
+      const names: string[] = [];
+      for (const it of objects) if (isNamedItem(it)) names.push(it.name);
+      const bundled = readBundledViews(names);
+      if (bundled.state === 'hit') return { views: bundled.value, settled: true };
+      if (bundled.state === 'pending') return { views: NO_VIEWS, settled: false };
+      const views = readType('view');
+      const status = getEntry('view').status;
+      return { views, settled: status === 'ready' || status === 'error' };
+    },
+    [getEntry, readBundledViews, readType],
+  );
+
   // objectui#12811 — see `MetadataContextValue.readObjectScope`. Reading it
   // starts what it needs and nothing more: the package list once, and a name
   // by name only after that list has answered without it. When the whole
@@ -1427,11 +1640,13 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       if (packageId === undefined) {
         const status = getEntry('object').status;
         const served = readType('object');
+        const views = readType('view');
         return {
-          objects: composeObjects(served, readType('view')) as any[],
+          objects: composeObjects(served, views) as any[],
           served,
           missing: NO_NAMES,
-          settled: status === 'ready' || status === 'error',
+          settled: (status === 'ready' || status === 'error') && getEntry('view').status !== 'loading',
+          views,
         };
       }
       let entry = scopesRef.current.get(packageId);
@@ -1495,16 +1710,23 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       // code. Both ride beside the published shape: this package's own
       // readers read them (`appObjectScope.ts`), other readers never see them.
       const atRest = entry.answered && namesSettled;
+      // objectstack#28645 — the scope's views: the app bundle's when it holds
+      // every object in the scope, else the `/meta/view` list. The scope is not
+      // settled until they are in hand, so a route never draws its objects
+      // without the views they carry. `views` rides beside the published shape
+      // for this package's own readers (`useServedViewItems`).
+      const scopeViews = viewsForObjects(entry.items);
       return {
-        objects: composeObjects(entry.items, readType('view')) as any[],
+        objects: composeObjects(entry.items, scopeViews.views) as any[],
         served: entry.items,
         missing: entry.missing as readonly string[],
-        settled: atRest && failedNames.length === 0,
+        settled: atRest && failedNames.length === 0 && scopeViews.settled,
         failed: atRest && failedNames.length > 0 ? (failedNames as readonly string[]) : NO_NAMES,
         refused: entry.refused,
+        views: scopeViews.views,
       };
     },
-    [fetchScopeList, fetchScopeName, getEntry, readType],
+    [fetchScopeList, fetchScopeName, getEntry, readType, viewsForObjects],
   );
 
   const value = useMemo<MetadataContextValue>(() => {
@@ -1537,13 +1759,31 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
       readObjectScope,
       // Pure read — must NOT kick a fetch, so render-phase status checks
       // can't recurse into ensureType.
-      getTypeStatus: (type: string) => getEntry(type).status,
+      // objectstack#28645 — the registry answers once its views have too
+      // (`ensureType` reads them together).
+      getTypeStatus: (type: string) => {
+        const status = getEntry(type).status;
+        if (type === 'object' && (status === 'ready' || status === 'error') && getEntry('view').status === 'loading') {
+          return 'loading';
+        }
+        return status;
+      },
     };
 
     return base;
   }, [version, initialLoading, initialError, ensureType, getItem, getEntry, refresh, invalidate, readType, readObjectScope]);
 
-  return <MetadataCtx.Provider value={value}>{children}</MetadataCtx.Provider>;
+  // A new identity per version, so a reader re-renders when the bundle lands.
+  const bundledReads = useMemo<BundledReads>(() => {
+    void version;
+    return { item: readBundledItem, viewsFor: readBundledViews };
+  }, [version, readBundledItem, readBundledViews]);
+
+  return (
+    <MetadataCtx.Provider value={value}>
+      <BundledReadsCtx.Provider value={bundledReads}>{children}</BundledReadsCtx.Provider>
+    </MetadataCtx.Provider>
+  );
 }
 
 export function useMetadataType(type: string): { items: any[]; loading: boolean; error: Error | null } {

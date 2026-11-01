@@ -19,7 +19,7 @@ import { useRecordApprovals, openApprovalOf } from '../hooks/useRecordApprovals.
 import { useObjectTranslation, useObjectLabel, recordSaveMessage as buildRecordSaveMessage } from '@object-ui/i18n';
 import type { AppAccessVerdict, ConnectionState } from '@object-ui/data-objectstack';
 import { useAuth, useWorkspaceAdminStatus } from '@object-ui/auth';
-import { useMetadata } from '../providers/MetadataProvider.js';
+import { useBundledReads, useMetadata } from '../providers/MetadataProvider.js';
 import { useAdapter } from '../providers/AdapterProvider.js';
 import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { PreviewDraftEmptyState } from '../preview/PreviewDraftEmptyState.js';
@@ -318,6 +318,9 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // (objectui#12811). It is read below only on a route that needs all of it.
   const metadata = useMetadata();
   const { apps, loading: metadataLoading, ensureType, getTypeStatus, error: metadataError, refresh: refreshMetadata, readObjectScope } = metadata;
+  // objectstack#28645 — what the app bundle answers in render (null outside a
+  // `MetadataProvider`): the page a page route opens is read there first.
+  const bundledReads = useBundledReads();
   // objectui#7373 — where this file's two "you cannot be here" exits land. Both
   // sit BELOW the readiness gate further down (`metadataLoading` &c), so the
   // list they resolve against has settled; an app list that failed to load is
@@ -456,6 +459,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
     location.search,
     hostRoutePaths,
     (pageName) => {
+      // objectstack#28645 — the bundle's page when it holds this package's;
+      // the `/meta/page` list, prefer-local, for a page it does not hold.
+      const bundled = bundledReads?.item('page', pageName, (activeApp as any)?._packageId);
+      if (bundled?.state === 'hit') return { page: bundled.value, settled: true };
+      if (bundled?.state === 'pending') return { page: undefined, settled: false };
       const status = getTypeStatus?.('page');
       return {
         page: preferLocal(metadata.pages as any[], pageName, (activeApp as any)?._packageId),
@@ -493,8 +501,15 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   const allObjects: any[] = objectScope
     ? scopeWithRegistry ?? objectScope.objects
     : readsWholeRegistry ? metadata.objects : NO_OBJECTS;
+  // objectstack#28645 — a page route reads its page bundle-first (`PageView`,
+  // the page scope above), so it does not wait for the `/meta/page` list: a
+  // page outside the bundle is read from the list by those readers, which
+  // wait for it themselves.
+  const pageRouteReadsBundle = !!bundledReads && /^page\/[^/]+$/.test(appSubPath);
   const routeReadsKey = [
-    ...routeReads.filter((type) => type !== 'object' || readsWholeRegistry),
+    ...routeReads.filter(
+      (type) => (type !== 'object' || readsWholeRegistry) && !(type === 'page' && pageRouteReadsBundle),
+    ),
     ...(searchParamsHasRecordForm(location.search) && !routeReads.includes('object') ? ['object'] : []),
   ].join(',');
   const bucketsSettled = useLazyMetadataSettled(routeReadsKey, ensureType, getTypeStatus);

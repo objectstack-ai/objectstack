@@ -33,7 +33,7 @@ import { Button, DataErrorState, Empty, EmptyTitle, EmptyDescription, Spinner } 
 import { FileText, Pencil, RotateCw } from 'lucide-react';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { MetadataPanel, useMetadataInspector } from './MetadataInspector.js';
-import { useMetadata } from '../providers/MetadataProvider.js';
+import { useBundledItem, useMetadata } from '../providers/MetadataProvider.js';
 import { PageRecordScope, useExpressionContext } from '../providers/ExpressionProvider.js';
 import { preferLocal } from '../utils/preferLocal.js';
 import { appStudioRoutePath } from '../utils/appRoute.js';
@@ -306,7 +306,9 @@ export function PageView() {
   // ⛔ `objects` is not destructured: reading it loads the whole registry. A
   // page reads the objects it binds (objectui#12980), below.
   const metadata = useMetadata();
-  const { pages, getTypeStatus, readObjectScope } = metadata;
+  // ⛔ `pages` is not destructured either: reading it loads the `/meta/page`
+  // list, which the app bundle spares (below).
+  const { getTypeStatus, readObjectScope } = metadata;
   // The objects a block asked for by name that the page does not bind. One
   // set for the page's life, added to while a block renders: never state that
   // re-renders, since the answer landing is what re-renders the page.
@@ -316,7 +318,16 @@ export function PageView() {
   // container instead of by load order.
   const { app: activeApp } = useExpressionContext();
   const dataSource = useAdapter();
-  const page = preferLocal(pages as any[], pageName, (activeApp as any)?._packageId);
+  // objectstack#28645 — the page the app bundle holds, when it holds the one
+  // this app's package owns; else the `/meta/page` list, prefer-local, as
+  // before. While the bundle is on the wire the page is not yet known.
+  const bundledPage = useBundledItem('page', pageName, (activeApp as any)?._packageId);
+  const page =
+    bundledPage.state === 'hit'
+      ? bundledPage.value
+      : bundledPage.state === 'miss'
+        ? preferLocal(metadata.pages as any[], pageName, (activeApp as any)?._packageId)
+        : undefined;
 
   // Where "Edit in studio" goes: the page's surface in Studio's Interfaces
   // pillar, through the one derivation the app bar's pencil, the app
@@ -343,7 +354,7 @@ export function PageView() {
     // race where the app's home page is the first thing rendered. Show a
     // loading state until the `page` type is actually resolved, then trust the
     // not-found. (getTypeStatus absent = hand-rolled context = always ready.)
-    const pageStatus = getTypeStatus?.('page');
+    const pageStatus = bundledPage.state === 'pending' ? 'loading' : getTypeStatus?.('page');
     if (pageStatus === 'idle' || pageStatus === 'loading') {
       return (
         <div className="h-full flex items-center justify-center p-8" data-testid="page-loading">
