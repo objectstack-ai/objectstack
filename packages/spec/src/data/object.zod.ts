@@ -4813,7 +4813,7 @@ type FieldDisplayPatchShape = {
  * option's stored `value` to that option's patch.
  *
  * Both key sets are DERIVED from the constant — widening the whitelist widens
- * this shape, and `field-patches.test.ts` proves it — and every other
+ * this shape, and `field-patches-derived.test.ts` proves it — and every other
  * `FieldSchema` key is refused by name with the D6 prescription.
  */
 const FieldDisplayPatchSchema = lazySchema(() => {
