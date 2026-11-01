@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — whole-package import: the beforeAll imports the apply and plan commands' module graph, and the first command run pays oclif's config load (every command module of the package, where no manifest is on disk); after that each of the 16 runs over a stubbed stack takes well under a second; slowest CI reading 25.7 s (run 41217827347, while each run still waited out the 2 s stderr drain this file no longer leaves unanswered) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * #23848 — `os migrate plan` and `os migrate apply` on a primary whose
