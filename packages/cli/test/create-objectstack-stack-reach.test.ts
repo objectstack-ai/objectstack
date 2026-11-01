@@ -63,14 +63,19 @@ import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * Spawned by this process's own `node`, not through the `tsx` binary: the entry, its
+ * `src/` and its pinned `NODE_ENV=development` are the same either way, and the
+ * `.bin/tsx` launcher only adds a second node process in front of the CLI, about half
+ * of every spawn's wall (#23181).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 // One `resolve(HERE, …)` call per line: `check:cross-package-test-inputs`
 // reconstructs this read by SOURCE SCAN.
 const ON_RAMP_BIN = resolve(HERE, '../../..', 'packages/create-objectstack/bin/create-objectstack.js');
 
-/** One plain-node scaffold, then three oclif + tsx cold starts, sequential. */
+/** One plain-node scaffold, then three oclif cold starts of the source CLI, sequential. */
 const RUN_TIMEOUT_MS = 240_000;
 
 const PROJECT = 'my-app';
@@ -106,7 +111,7 @@ function run(file: string, args: string[], cwd: string): Promise<Run> {
   });
 }
 
-const os = (args: string[], cwd: string) => run(TSX, [CLI, ...args], cwd);
+const os = (args: string[], cwd: string) => run(process.execPath, [CLI, ...args], cwd);
 const out = (r: Run) => r.stdout + r.stderr;
 
 const target = (type: string) => {

@@ -80,8 +80,13 @@ import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
+/**
+ * Spawned by this process's own `node`, not through the `tsx` binary: the entry, its
+ * `src/` and its pinned `NODE_ENV=development` are the same either way, and the
+ * `.bin/tsx` launcher only adds a second node process in front of the CLI, about half
+ * of every spawn's wall (#23181).
+ */
 const CLI = resolve(HERE, '../bin/run-dev.js');
-const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 const CLI_PACKAGE_ROOT = resolve(HERE, '..');
 
 /** One object (2 leaves) + one app (1 leaf); the registry baseline rides along. */
@@ -146,7 +151,7 @@ function runExtract(
 ): { stdout: string; dir: string; files: string[] } {
   const dir = join(outRoot, name);
   const stdout = execFileSync(
-    TSX,
+    process.execPath,
     [CLI, 'i18n', 'extract', config, '--locales=ja-JP', '--source-hashes', '--fill=default', ...flags, `--out=${dir}`],
     { encoding: 'utf8', env: childEnv(), timeout: 180_000 },
   );
@@ -210,7 +215,7 @@ describe('os i18n extract — the provenance companion accompanies a module (#16
 
     const stdout = plain(
       execFileSync(
-        TSX,
+        process.execPath,
         [
           CLI, 'i18n', 'extract', APPS_ONLY, '--locales=ja-JP', '--source-hashes',
           '--fill=default', '--no-metadata-forms', '--check', `--out=${dir}`,
