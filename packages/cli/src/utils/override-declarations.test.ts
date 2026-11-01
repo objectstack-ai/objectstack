@@ -160,4 +160,19 @@ describe('#28410 — findOverrideDeclarationRefusals walks the artifact under th
       })],
     })).toEqual([]);
   });
+
+  it('[#28746] a dependent\'s template of the base\'s name collides only at a locale the base ships', () => {
+    const rows = findOverrideDeclarationRefusals({
+      manifest: manifest('com.acme.bundle'),
+      packages: [templateBase, pkg(PARTNER, [BASE], {
+        emailTemplates: [
+          { name: 'crm_welcome', locale: 'en-US', subject: 'Partner' },
+          { name: 'crm_welcome', locale: 'fr-FR', subject: 'Partenaire' },
+        ],
+      })],
+    });
+    expect(rows.map((r) => [r.path, r.rule])).toEqual([
+      ['packages[1].manifest.emailTemplates[0]', 'undeclared_same_name'],
+    ]);
+  });
 });
