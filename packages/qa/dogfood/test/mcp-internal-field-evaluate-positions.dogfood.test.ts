@@ -56,12 +56,15 @@ import { type VerifyStack } from '@objectstack/verify';
 import { MCPServerPlugin, MCPServerRuntime } from '@objectstack/mcp';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
+import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const OBJECT = 'mcpif_vault';
 const FLAGGED = 'pin';
 const ORDINARY = 'tier';
 const SYS = { context: { isSystem: true } } as const;
 const MEMBER_EMAIL = 'mcp-internal-field@verify.test';
+/** Object-level read on the runtime object, the member's only grant on it. */
+const READER_SET = 'mcpif_vault_reader';
 
 /** The runtime object: one ordinary column to control with, one flagged `internal: true`. */
 const DEFINITION = {
@@ -251,9 +254,14 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
     return String(key);
   }
 
+  /**
+   * `POST /data/:object/query` as `persona`. The data door's refusal envelope is
+   * flat: the code beside the sentence, which rides under `error`.
+   */
   async function rest(persona: string, body: Record<string, unknown>) {
     const res = await stack.apiAs(sessionTokens[persona]!, 'POST', `/data/${OBJECT}/query`, body);
-    return { status: res.status, body: (await res.json()) as any };
+    const json: any = await res.json();
+    return { status: res.status, code: json?.code, message: json?.error, json };
   }
 
   beforeAll(async () => {
@@ -268,6 +276,20 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
     expect(saved.status, `runtime object authored: ${await saved.clone().text()}`).toBe(200);
     const ql: any = await stack.kernel.getServiceAsync('objectql');
     for (const row of ROWS) await ql.insert(OBJECT, row, SYS);
+
+    // The member reads the object through one authored set and nothing else.
+    const authored = await stack.apiAs(sessionTokens.admin, 'PUT', `/meta/permission/${READER_SET}`, {
+      name: READER_SET,
+      label: 'Scratch: object read on the MCP internal-field fixture',
+      objects: { [OBJECT]: { allowRead: true } },
+      fields: {},
+    });
+    expect(authored.status, `reader set authored: ${await authored.clone().text()}`).toBeLessThan(300);
+    const set = await catalogPermissionSet(ql, READER_SET);
+    expect(set, 'reader set served by the catalog').toBeTruthy();
+    const memberId = (await ql.findOne('sys_user', { where: { email: MEMBER_EMAIL }, ...SYS }))?.id;
+    expect(memberId, 'member provisioned').toBeTruthy();
+    await ql.insert('sys_user_permission_set', { user_id: memberId, permission_set: set.name }, SYS);
 
     for (const persona of ['admin', 'member'] as const) {
       stdio[persona] = await stdioSession(await mintKey(sessionTokens[persona]!, `mcp-internal-field-${persona}`));
@@ -292,8 +314,8 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
       for (const [transport, callFor] of Object.entries(transports)) {
         it(`${position.tool} ${position.label} — ${transport}, ${persona}: the door's 400 INVALID_FIELD, word for word`, async () => {
           const door = await rest(persona, position.rest);
-          expect(door.status, `REST: ${JSON.stringify(door.body)}`).toBe(400);
-          expect(door.body?.error?.code).toBe('INVALID_FIELD');
+          expect({ status: door.status, code: door.code }, `REST: ${JSON.stringify(door.json)}`).toEqual({ status: 400, code: 'INVALID_FIELD' });
+          expect(typeof door.message, `REST: ${JSON.stringify(door.json)}`).toBe('string');
 
           const answer = await callFor(persona)(position.tool, position.args);
           expect(answer.isError, `${transport} served the position: ${answer.text}`).toBe(true);
@@ -301,7 +323,7 @@ describe('MCP data tools refuse an internal field in every evaluate position, as
             code: answer.payload?.error?.code,
             status: answer.payload?.error?.status,
             message: answer.payload?.error?.message,
-          }).toEqual({ code: 'INVALID_FIELD', status: 400, message: door.body.error.message });
+          }).toEqual({ code: 'INVALID_FIELD', status: 400, message: door.message });
         });
       }
     }
