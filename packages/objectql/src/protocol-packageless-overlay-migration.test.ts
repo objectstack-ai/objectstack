@@ -304,6 +304,18 @@ describe('[#28413] the census and the move', () => {
         expect(columnsOf(await read(protocol))).toEqual(EDITED_COLUMNS);
     });
 
+    it('READ BACK FIRST: a save that leaves no declared row in the pair keeps the unbound row, and the row is reported failed', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        // A save door that answers and writes nothing.
+        (protocol as any).saveMetaItem = async () => ({ success: true });
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['failed']);
+        expect(result.outcomes[0].error).toContain('does not read back as the declared override');
+        expect(rows(VIEW)).toEqual([[null, 'active']]);
+        expect(result.bases[0]).toMatchObject({ moved: 0, failed: 1 });
+    });
+
     it('a stored pair declaration with no basedOn gains the base\'s version', async () => {
         const { engine, protocol, rowOf } = await boot();
         await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
