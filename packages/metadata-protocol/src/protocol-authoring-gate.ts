@@ -48,6 +48,7 @@
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from './protocol.js';
+import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
@@ -108,6 +109,9 @@ export function restoredBodyWriter(
         if (nameRefusal) throw nameRefusal;
         const ownerRefusal = permissionSetOwnerBindingRefusal(type, historyBody, name, binding, 'restore');
         if (ownerRefusal) throw ownerRefusal;
+        // [ADR-0146 D10, #28564] The `__c` reservation, on the same binding.
+        const suffixRefusal = objectBodyExtensionFieldSuffixRefusal(type, historyBody, name, binding);
+        if (suffixRefusal) throw suffixRefusal;
         await this.refuseRestoredBodyTheSaveDoorRefuses(type, name, historyBody, binding, source);
         return derive ? derive(historyBody) : historyBody;
     };

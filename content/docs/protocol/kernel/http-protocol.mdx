@@ -658,6 +658,38 @@ the created record (including server-generated fields) under `record`.
 }
 ```
 
+**Caller-supplied `id`:**
+A create may carry its own `id`; when no record holds it, the record is stored under
+that `id` and the response echoes it. `id` is the one key that is unique across the
+whole deployment — unlike a field's `unique`, which is scoped to the organization —
+so a create whose `id` is already held is refused with HTTP 409, and nothing is
+written, on a store that enforces the primary key (the SQL-family drivers do; the
+in-memory driver, the development and test driver, not a production store, declares
+no primary key, and a duplicate `id` lands there):
+
+**Duplicate `id` (HTTP 409):**
+```json
+{
+  "error": "A record with this value already exists",
+  "code": "UNIQUE_VIOLATION",
+  "field": "id",
+  "object": "account"
+}
+```
+
+The refusal is the same whichever record holds the `id`: one you can read, one that
+row-level access or the org-wide default hides from you inside your own organization,
+or one in another organization. It names neither that record's organization nor its
+owner. Every create door answers it the same way: `POST /{base_path}/{object_name}/batch`
+with `operation: "create"` (the row's error carries `UNIQUE_VIOLATION` with
+`httpStatus: 409`), `createMany`, the cross-object
+[`POST /api/v1/batch`](#batch-operations) (the whole batch rolls back), import, and
+clone's `overrides.id`. Key on `code`: `field` is best-effort, as the Constraint
+Violations note under [Delete Record](#delete-record) describes. A create never
+overwrites — change an existing record with [Update Record](#update-record). Why a
+global key answers this way is recorded in ADR-0120 (the 2026-11-01 amendment under
+its business-requirement matrix).
+
 ### Update Record
 
 Update an existing record (partial update).

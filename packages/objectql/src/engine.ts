@@ -334,7 +334,7 @@ import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '
 import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
-import { ExpressionEngine, analyzeRelationshipTraversals, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
+import { ExpressionEngine, analyzeRelationshipTraversals, isUnparseableDate, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
 import { declaredOptionLabels, readerOptionLabels } from './formula-option-labels.js';
 import type { Expression } from '@objectstack/spec';
 import {
@@ -3084,6 +3084,18 @@ function formulaHopRefusal(field: string, b: RelatedFieldBinding, named: Readonl
   }
 }
 
+/**
+ * What a formula field reports when it evaluated to the invalid Date that
+ * `date()` / `datetime()` answer for text they cannot parse
+ * ({@link isUnparseableDate}). An EMPTY source is not this fault: it reads
+ * `null` and says nothing. The record's text is not quoted — a log line is no
+ * place for row data.
+ */
+const UNPARSEABLE_DATE_FAULT =
+  'date() / datetime() was handed text it cannot parse as a date, so the formula has no value on this record; '
+  + 'they take ISO text (`2026-03-04`, `2026-03-04T09:30:00Z`), a timestamp or epoch milliseconds, and an empty '
+  + 'source reads null without a report.';
+
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
@@ -3126,7 +3138,13 @@ function applyFormulaPlan(
         scope = hop.record;
         empty = hop.empty;
       }
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      const evaluated = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, optionLabels, record: scope });
+      // An invalid Date minted from text `date()` could not parse evaluates
+      // `ok` (a predicate relies on that) but serializes to the `null` an empty
+      // source gives: for a field it is a fault, said like any other.
+      const r = evaluated.ok && isUnparseableDate(evaluated.value)
+        ? { ok: false as const, error: { kind: 'runtime' as const, message: UNPARSEABLE_DATE_FAULT } }
+        : evaluated;
       if (r.ok) {
         rec[fp.name] = roundFormulaValue(r.value, fp.scale);
         continue;
