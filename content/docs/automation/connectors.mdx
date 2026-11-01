@@ -302,7 +302,9 @@ On every materialization each pinned tool is hashed and compared on its own:
 - A pinned tool served with a different description or `inputSchema`, or no
   longer served at all — the instance registers **degraded** and exposes none
   of its tools. Its reason names each such tool, with the digest the server
-  now serves. The instance is re-checked on the retry backoff, so a server that
+  now serves, and the logs say the pin did not match (the provider throws
+  `CONNECTOR_UPSTREAM_CHANGED`, not the unreachable-server marker). The
+  instance is re-checked on the retry backoff, so a server that
   serves the pinned definitions again recovers it on its own; to accept the
   change, review it and set the pin to the served digest (the edit
   re-materializes the instance at once). This holds for a pinned tool
@@ -834,7 +836,7 @@ retry):
 | Instance `name` collides with a plugin-registered connector | **Hard boot error** — there is no silent precedence between the two worlds |
 | stdio transport without host opt-in | **Hard boot error** with the `declarativeStdio` fix inline — a security rejection is never retried |
 | MCP server unreachable / `tools/list` fails; remote spec URL unreachable or transiently failing (408/429/5xx) | **Not fatal**: the instance registers **degraded** (visible on `GET /api/v1/automation/connectors` with the reason), dispatches fail with that reason, and the platform retries on a 5s→5min backoff — recovery is automatic |
-| An `mcp` instance's `toolsSnapshot` does not match what the server serves (a pinned tool's description or `inputSchema` changed, or a pinned tool is no longer listed) | **Not fatal**: the instance registers **degraded** with no actions, its reason naming each tool and the digest it now serves; it is re-checked on the same backoff and recovers once the server serves the pinned definitions again — or set the pin to the reviewed digest |
+| An `mcp` instance's `toolsSnapshot` does not match what the server serves (a pinned tool's description or `inputSchema` changed, or a pinned tool is no longer listed) | **Not fatal**: the instance registers **degraded** with no actions, its reason naming each tool and the digest it now serves, and the logs say "serves a tool definition that differs from its toolsSnapshot" (`CONNECTOR_UPSTREAM_CHANGED`); it is re-checked on the same backoff and recovers once the server serves the pinned definitions again — or set the pin to the reviewed digest |
 | A retry of a degraded instance reaches the upstream and meets a configuration fault (an `include` naming a tool or operation the upstream does not offer) | **Not fatal**: the instance stays **degraded**, now with the configuration reason, and is **not retried** — dispatches fail saying to edit its declaration; an edit of the entry (or a restart) re-attempts it |
 | Wrong spec URL (other 4xx) or unparseable document | Configuration fault — **hard boot error** |
 | A `connector_action` input that, once evaluated, breaks the action's `inputSchema` (a missing `required` parameter, a wrong `type`) | **The step fails before dispatch** with `VALIDATION_ERROR`, naming each parameter path, and nothing is sent; a `fault` edge or `try_catch` can route it. Supply the parameter or send the declared type: text is never converted, so cast it in a CEL envelope (`int()`, `double()`, `bool()`). `GET /api/v1/automation/connectors` lists the schema; `os validate` does not judge the input against the `inputSchema` yet |
