@@ -1,6 +1,6 @@
 # ADR-0120: Uniqueness scope is an explicit vocabulary — declared-index organization scoping and NULL-safe per-organization uniqueness
 
-**Status**: Accepted (2026-08-04, maintainer decision on #4986 / #5030; proposed same day) — implementation not started; the 17.x wave (D7) is the first work package, the protocol-18 items (D2 conversion, bare-`true` rejection) are deliberately deferred to the 18 train
+**Status**: Accepted (2026-08-04, maintainer decision on #4986 / #5030; proposed same day) — implementation not started; the 17.x wave (D7) is the first work package, the protocol-18 items (D2 conversion, bare-`true` rejection) are deliberately deferred to the 18 train · **Amended** (2026-11-01, extending ruling record [`5934879010`](https://github.com/objectstack-ai/objectstack/issues/21185#issuecomment-5934879010) rule 2, maintainer 「同意」) — S10's no-oracle promise is scoped to `'organization'` uniqueness; the record `id` is the one deployment-global key, and a create that collides on it is a recorded, accepted existence signal; see the note under the business-requirement matrix
 **Deciders**: ObjectStack Protocol Architects (maintainer decision requested on #4986)
 **Amends**: the #3696 decision *"a declared index is materialized verbatim — no tenant column is injected"* as recorded in `packages/spec/src/data/object.zod.ts` (`IndexSchema`), `content/docs/data-modeling/indexing.mdx` §*Two ways to say "unique"*, `content/docs/references/data/object.mdx`, the `syncDeclaredIndexes` doc block in `packages/drivers/driver-sql/src/sql-driver.ts`, and lint R10 `unique/double-declaration` (`packages/lint/src/data-model-rules.ts`). Per Prime Directive #13 this reversal is itself a decision and is recorded here — **the verbatim contract is not abolished; it becomes the `'global'` arm of an explicit vocabulary, and every stored declaration keeps its exact current physical shape.**
 **Builds on**: [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) (D2 conversion layer — this ADR adds one entry), [ADR-0078](./0078-no-silently-inert-metadata.md) (no declarable-but-inert keys — `unique: 'global'` on a declared index is today documented as "changes nothing"; this ADR makes it load-bearing), [ADR-0049](./0049-no-unenforced-security-properties.md) (enforce-or-remove — #5030 is a declared-but-unenforced unique constraint), [ADR-0048](./0048-cross-package-metadata-collision.md) (the `COALESCE(col, '')` canonical index key part this ADR reuses), [ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md) (tenancy posture), [ADR-0113](./0113-required-write-contract-vs-column-constraint.md) (precedent: two look-alike spellings split into explicit, separately-owned contracts)
@@ -156,7 +156,7 @@ review gap to be raised on the PR.)
 | S7 | Single-org deployment (incl. each db-per-customer database), any per-organization unique | any organization-scoped spelling | **all void** (#5030 headline) | same spellings | **all real** — NULL bucket constrained (D3) |
 | S8 | Mixed population — platform template rows (org NULL) + per-org override rows in one object | field `unique: true` | per-org rows: yes · template rows: unconstrained **among themselves** | unchanged | NULL rows form one platform bucket, unique among themselves (D3) — matches the "NULL = the platform tenant" reading the write path already uses (`GLOBAL_TENANT`) |
 | S9 | Autonumber + uniqueness — per-organization sequences (`PROD-00001` per org) | declared composite with org column (docs warn against global) | as S3/S6 | `'organization'` scope pairs with the per-organization sequence by construction | always; optional follow-up lint: `'global'` unique over an autonumber field is flagged |
-| S10 | Cross-tenant existence-oracle avoidance (#3696 security rationale) | field `true` only | leaks via S3/S6 NULL-void edge? No — leak was global-index rejections; fixed for fields | `'organization'` extends the no-oracle property to declared composites | a tenant's insert can no longer be rejected by (or reveal) another tenant's values on any `'organization'` index |
+| S10 | Cross-tenant existence-oracle avoidance (#3696 security rationale) | field `true` only | leaks via S3/S6 NULL-void edge? No — leak was global-index rejections; fixed for fields | `'organization'` extends the no-oracle property to declared composites | a tenant's insert can no longer be rejected by (or reveal) another tenant's values on any `'organization'` index — not the record `id`, which is deployment-global (2026-11-01 amendment below) |
 | S11 | Tenancy-less objects — `tenancy` disabled or `managedBy: 'better-auth'` (no tenant column) | all spellings | single-column / listed columns | unchanged; `'organization'` degrades to listed columns alone, exactly as field-level `true` already does | unchanged |
 | S12 | Non-unique indexes (`unique: false` / omitted), `partial`, index `type` | verbatim | n/a | untouched — this ADR governs *unique scope* only; `'organization'` composes with `partial` (both key-part forms already parse, #4884) | n/a |
 | S13 | **Posture-portable app package** — one metadata app, deployed under `single`, `group`, and `isolated` postures (and db-per-customer environments) | field `true` (void on single-org, #5030) or hand-written org composite (author must know the convention *and* the posture trap) | varies by posture; `single`: **void** | `'organization'` for per-org rules — states the business boundary, not the posture | **correct under every posture** — per-org under `group`/`isolated`, deployment-wide under `single` (§Posture portability) |
@@ -169,6 +169,77 @@ Two properties of this table are the ADR's acceptance criteria:
 2. **Every Before→After transition in S4/S5/S6 is byte-identical on disk** unless the
    author edits metadata (S6 opt-in) — the conversion is semantic bookkeeping, not a
    migration.
+
+> **Amendment (2026-11-01, extending ruling record [`5934879010`](https://github.com/objectstack-ai/objectstack/issues/21185#issuecomment-5934879010) rule 2) — S10's no-oracle promise covers `'organization'` uniqueness only. The record `id` is the one deployment-global key, and a create that collides on it is a recorded, accepted existence signal: one refusal, the same for every visibility of the row that holds the id.**
+>
+> S10 promises that a tenant's insert is no longer rejected by, and no longer reveals, another
+> tenant's values on an `'organization'` index (and on field-level `unique: true`, its
+> synonym). It does not reach the primary key, and it cannot: `id` is not a scoped `unique`
+> declaration, it is the row's address — one id space per object across the whole deployment,
+> under every posture. A create that names an `id` already held collides on a key that is
+> global by construction, the same oracle §*Posture portability* records for a `'global'`
+> unique. The facts recorded:
+>
+> - **Every create door accepts a caller-supplied `id`, and a fresh one lands as given:**
+>   `POST /data/:object`, `POST /data/:object/batch` with `operation: 'create'`, `createMany`,
+>   the cross-object `POST /batch`, import in `insert` mode and in `upsert` mode (an upsert
+>   whose match, run as the caller, finds no row creates), and clone's `overrides.id`.
+> - **A create that collides on `id` answers `409 UNIQUE_VIOLATION` and writes nothing.** On a
+>   per-row door the row's own error carries the same code. The answer names no organization
+>   and no owner.
+> - **The answer is identical whether the row holding the id is visible to the caller, hidden
+>   from the caller inside the caller's own organization (row-level security, the org-wide
+>   default), or held by another organization.** The holder never shapes the refusal.
+> - **What leaves is one fact — "this id exists in the deployment" — and it is bounded by the
+>   unguessability of ids, not by the refusal's shape.** The SQL driver mints a 16-character
+>   nanoid (96 bits) and the importer a UUID, so the signal needs an id the caller already
+>   holds; ids do travel (URLs, exports, share links, notifications, webhook payloads). No
+>   refusal shape can bound it, because an id nobody holds answers `201`.
+>
+> **Ruled.** Ruling record `5934879010` (2026-10-01, rule 2, on the upsert door) answers an
+> upsert whose conflict lands on another organization's row with the `UNIQUE_VIOLATION` that
+> `create()` answers for the same collision — "ADR-0120 records that oracle as the accepted
+> cost of a 'global' key" — and binds "⛔ No new code, and ⛔ no message, field or detail that
+> says the row belongs to another organization". On 2026-11-01 the maintainer extended that
+> rule (「同意」 to the analysis and option table below, given in the PM seat's session; this
+> note is its record) from upsert to **every create door** listed above, and to the
+> **same-organization half**: a row hidden in the caller's own organization answers like a
+> visible one. Ruling record
+> [`5985885287`](https://github.com/objectstack-ai/objectstack/issues/21771#issuecomment-5985885287)
+> (a by-id update or delete answers a row the caller cannot read exactly as a nonexistent id)
+> is untouched: a create naming a held id has no "nonexistent" answer to give, because the key
+> it names is taken.
+>
+> Options considered and rejected:
+>
+> - **a — refuse a caller-supplied `id` from a non-system caller (`400`), b — strip it
+>   silently** (reported in `droppedFields`): both break id-preserving import round-trips and
+>   every client keyed by the ids it was handed, and the importer's own pre-minted ids would
+>   need an exemption that re-opens the same door.
+> - **c — allow it only by capability** (Modify All, or a new "preserve record id"
+>   permission): leaves the cross-organization half open to every holder and adds a permanent
+>   permission key.
+> - **d — per-organization primary keys:** every driver's key and every by-id address
+>   changes — a migration of the whole data layer to close one fact.
+> - **e — answer a hidden-row collision as an authorization refusal:** cannot close it; an id
+>   nobody holds answers `201`, so any refusal stays distinguishable from a fresh id.
+>
+> Peer platforms carry the same shape: Microsoft Dataverse and ServiceNow both accept a
+> caller-supplied record id on create and refuse a duplicate.
+>
+> **What this binds.** ⛔ No create door answers a collision on `id` differently by the
+> visibility of the row that holds it, and ⛔ none adds a message, field or detail naming the
+> holder's organization or owner. Closing the signal is a new decision — a superseding ADR or
+> a further amendment here — and the bar it must clear is the one a–e failed: import
+> round-trips keep working without an exemption that re-opens the door. Callers read the
+> contract in
+> [`http-protocol.mdx` §*Create Record*](../../content/docs/protocol/kernel/http-protocol.mdx);
+> it is pinned at the HTTP door, on `POST /data/:object`, batch create and the cross-object
+> `POST /batch`, by
+> [`create-caller-id-collision.dogfood.test.ts`](../../packages/qa/dogfood/test/create-caller-id-collision.dogfood.test.ts)
+> (same organization, the stock showcase) and
+> [`create-caller-id-collision-walled.dogfood.test.ts`](../../packages/qa/dogfood/test/create-caller-id-collision-walled.dogfood.test.ts)
+> (another organization, `isolated` and `group`).
 
 ## Posture portability: one app package, every tenancy posture
 
