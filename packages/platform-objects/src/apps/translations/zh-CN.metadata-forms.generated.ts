@@ -1815,6 +1815,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "提交按钮文字",
         helpText: "此动作参数对话框中提交按钮的文字，即按钮执行的动作（例如“发送”“记录通话”）。仅用于需要收集参数的动作。留空则显示“确认”。"
       },
+      cancelText: {
+        label: "取消按钮文字",
+        helpText: "此动作执行前弹出的对话框（确认框或参数对话框）中取消按钮的文字。动作本身就是“取消……”时，写明取消后保留的是什么（例如“保留邀请”）。仅用于需要确认或收集参数的动作。留空则显示“取消”。"
+      },
       confirmText: {
         label: "确认文本",
         helpText: "执行前的确认提示（如 \"确定要执行吗？\"）"

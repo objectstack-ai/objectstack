@@ -32,6 +32,17 @@ export interface MetadataHostEngine extends IDataEngine {
    * cannot lose atomicity silently fails closed (see `batchData`, ADR-0119 D4).
    */
   transaction?: IObjectQLEngine['transaction'];
+  /**
+   * The engine's `internal: true` evaluate refusal (`QueryEvaluationGate` on the
+   * `objectql` slot contract), which the data door asks before the engine reads
+   * anything (`assertNoInternalFieldEvaluated` on the protocol). Typed off the
+   * slot contract for the reason `transaction` is; optional HERE for the same
+   * reason too. Degrading means judging no field at the door: the flag is the
+   * engine's to honour, and an engine without the gate does not withhold the
+   * column from its rows either. The door's relation-target exposure question
+   * does not degrade: it is asked at every hop either way.
+   */
+  assertNoInternalFieldEvaluated?: IObjectQLEngine['assertNoInternalFieldEvaluated'];
   // Protocol accesses additional engine members structurally; keep it permissive
   // for this relocation (behavior unchanged — the concrete engine is injected).
   [key: string]: any;

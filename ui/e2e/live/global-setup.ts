@@ -69,26 +69,32 @@ export default async function globalSetup(config: FullConfig) {
 }
 
 /**
- * Answer the console's one-time workspace-timezone prompt before any spec runs
- * (objectui#11758).
+ * Answer the console's one-time workspace prompt before any spec runs
+ * (objectui#11758; its currency arm, objectstack#28872).
  *
- * On a `--fresh` backend `localization.timezone` is still the manifest default
- * and the seeded admin may write settings, so the console opens a modal prompt
- * on the first app it renders, and every spec would meet it in front of the
- * control it means to click. The run answers it ONCE, in a real browser,
+ * On a `--fresh` backend `localization.timezone` is still the manifest default,
+ * or `localization.currency` has no value, and the seeded admin may write
+ * settings, so the console opens ONE modal prompt (both fields when both are
+ * unset) on the first app it renders, and every spec would meet it in front of
+ * the control it means to click. The run answers it ONCE, in a real browser,
  * through the prompt's own buttons, and keeps the outcome in the storageState
  * the specs reuse:
  *
- *   LIVE_TIMEZONE_PROMPT=decline  (the default) "Keep the default": nothing is
+ *   LIVE_TIMEZONE_PROMPT=decline  (the default) the prompt's decline button
+ *                                 ("Keep the default" / "Not now"): nothing is
  *                                 written; the prompt records that it was
  *                                 shown in the app origin's localStorage, and
  *                                 the storageState carries that record.
- *   LIVE_TIMEZONE_PROMPT=confirm  "Set timezone": the browser's zone is written
- *                                 to the workspace through the Settings write
- *                                 path, so no later page is asked either.
+ *   LIVE_TIMEZONE_PROMPT=confirm  the prompt's confirm button: what it offers
+ *                                 (the browser's zone, the browser region's
+ *                                 currency) is written to the workspace
+ *                                 through the Settings write path, so no later
+ *                                 page is asked either.
  *
- * Skipped when the backend says the prompt would not ask (a zone already
- * chosen, or a locked one). A prompt that was expected but never shown is
+ * Skipped when the backend says the prompt would not ask: the console's own
+ * condition per key (`workspaceTimezonePromptLogic.ts`), a zone still the
+ * default and unlocked, or a currency resolving from the default with no
+ * value and unlocked. A prompt that was expected but never shown is
  * reported, not failed: the specs then show whether anything stands in their
  * way.
  */
@@ -100,15 +106,22 @@ async function answerTimezonePrompt(token: string, launchOptions: LaunchOptions 
     const res = await api.get(`${API}/api/settings/localization`);
     if (res.ok()) {
       const body = await res.json();
-      const timezone = (body?.data ?? body)?.values?.timezone;
-      wouldAsk = timezone?.source === 'default' && !timezone?.locked;
+      const values = (body?.data ?? body)?.values;
+      const timezone = values?.timezone;
+      const currency = values?.currency;
+      const timezoneUnset = timezone?.source === 'default' && !timezone?.locked;
+      const currencyUnset =
+        currency?.source === 'default' &&
+        !currency?.locked &&
+        (currency?.value === null || currency?.value === undefined || currency?.value === '');
+      wouldAsk = timezoneUnset || currencyUnset;
     }
   } finally {
     await api.dispose();
   }
   if (!wouldAsk) {
     // eslint-disable-next-line no-console
-    console.log('[live-e2e] workspace timezone already chosen; no prompt to answer');
+    console.log('[live-e2e] workspace timezone and currency already chosen; no prompt to answer');
     return;
   }
 
@@ -123,14 +136,14 @@ async function answerTimezonePrompt(token: string, launchOptions: LaunchOptions 
     try {
       await prompt.waitFor({ state: 'visible', timeout: 60_000 });
     } catch {
-      console.warn('[live-e2e] the workspace timezone is the default, but the console showed no prompt');
+      console.warn('[live-e2e] the workspace timezone or currency is unset, but the console showed no prompt');
       return;
     }
     await page.getByTestId(`workspace-timezone-prompt-${mode}`).click();
     await prompt.waitFor({ state: 'hidden' });
     await context.storageState({ path: STATE_PATH });
     // eslint-disable-next-line no-console
-    console.log(`[live-e2e] workspace timezone prompt answered: ${mode}`);
+    console.log(`[live-e2e] workspace prompt answered: ${mode}`);
   } finally {
     await browser.close();
   }

@@ -292,6 +292,8 @@ const ActionMenuRenderer = forwardRef<HTMLButtonElement, { schema: ActionMenuSch
             description: (action as any).description,
             // The param dialog's submit-button verb, read by the same dialog.
             submitText: action.submitText,
+            // The dismiss-button label of the confirm and param dialogs.
+            cancelText: action.cancelText,
             target: action.target,
             openIn: (action as any).openIn,
             endpoint: action.endpoint,

@@ -429,21 +429,42 @@ export interface ListViewProps {
    */
   recordLinkAdornment?: (record: Record<string, unknown>) => React.ReactNode;
   /**
-   * The VIEW'S OWN hidden fields and row height, for a host that lays the
-   * user's own preference over them in `schema` (objectui#12949). The Display
-   * control's trigger count and its "Reset to view default" compare these two
-   * settings against this value rather than against `schema`, and the reset
-   * hands it back through the same doors the controls write through
-   * (`onHiddenFieldsChange`, `schema.onDensityChange`), so the user's
-   * preference follows.
+   * The VIEW'S OWN hidden fields, row height and sort, for a host that lays
+   * the user's own preference over them in `schema` (objectui#12949). The
+   * Display control's trigger count and its "Reset to view default" compare
+   * hidden fields and density against this value rather than against
+   * `schema`, and the sort popover's "Reset to view default" compares and
+   * restores the sort against it. Without `onRestoreViewDefaults` a reset
+   * hands the value back through the same doors the controls write through
+   * (`onHiddenFieldsChange`, `schema.onDensityChange`, `onSortChange`).
    *
    * When it is passed, its members are the whole baseline: an absent
    * `hiddenFields` means the view hides nothing, an absent `rowHeight` means
-   * the view's default density. Absent ⇒ `schema` is the view's own, exactly
-   * as before. A HOST prop, never a schema key: it is the host's split of one
-   * composed value into its two sources, nothing an author writes.
+   * the view's default density, an absent `sort` means the view declares no
+   * sort. Absent ⇒ `schema` is the view's own, exactly as before. A HOST prop,
+   * never a schema key: it is the host's split of one composed value into its
+   * two sources, nothing an author writes.
    */
-  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight'>;
+  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort'>;
+  /**
+   * A reset to the view's own, told apart from a choice (objectstack#28948).
+   * For a host that stores the user's preference and passes `viewDefaults`:
+   * when it is wired, the Display control's "Reset to view default" and the
+   * sort popover's "Reset to view default" do NOT write the view's values
+   * through the controls' doors, which a host would store as the user's own
+   * choice. They call this instead, naming the parts the reset returned to the
+   * view's own, and the host CLEARS those parts of the stored preference, so
+   * the user follows later changes to the view.
+   *
+   * `sort` and `hiddenFields` are put back in the list at once; the density
+   * follows `schema.rowHeight` once the host's clear lays the view's own back
+   * there. A deliberate choice is unchanged: removing every sort level or
+   * showing every column still goes through `onSortChange` /
+   * `onHiddenFieldsChange` as an empty list. Settings outside the three parts
+   * (layout, grouping, row color, row numbers, inline edit, gallery card size)
+   * reset exactly as without it. A HOST prop, never a schema key.
+   */
+  onRestoreViewDefaults?: (parts: ReadonlyArray<'sort' | 'hiddenFields' | 'rowHeight'>) => void;
   /**
    * Draw the COMPACT posture (objectui#12703): a header with the list's title
    * and record count over two-line rows (the view's first visible column, its
@@ -1659,6 +1680,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onTotalChange,
   onRowsChange,
   viewDefaults,
+  onRestoreViewDefaults,
   recordOpen,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
@@ -1902,12 +1924,18 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * "what did this view declare" must have exactly one answer, or the reset
    * button and the first render could disagree about it.
    */
+  //
+  // objectstack#28948 — a host that lays the user's own sort over the view's
+  // in `schema` hands the view's in `viewDefaults`, and that is the default a
+  // reset returns to: the label says "view default", and the host clears the
+  // stored sort on it, so the list must show what a reload would.
+  const viewDefaultSortKey = JSON.stringify((viewDefaults ? viewDefaults.sort : schema.sort) || []);
   const declaredSort = React.useMemo(
-    () => parseSortConfig(schema.sort),
-    // Keyed on the same stringified payload as the effect above; `schema.sort`
-    // is a fresh array identity on every parent render.
+    () => parseSortConfig(viewDefaults ? viewDefaults.sort : schema.sort),
+    // Keyed on the stringified payload; `schema.sort` and `viewDefaults.sort`
+    // are fresh array identities on every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [schemaSortKey],
+    [viewDefaultSortKey],
   );
 
   // Compared by (field, order) IN ORDER — never by `id`, which `parseSortConfig`
@@ -5165,14 +5193,19 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    *
    * The header click's own semantics are untouched by this: it still replaces
    * the whole array. The ruling adds a way back; it does not change the click.
+   *
+   * objectstack#28948 — under `onRestoreViewDefaults` the host is told it was
+   * a reset instead, and clears the user's stored sort rather than storing the
+   * view's as their choice. `declaredSort` is the view's own there.
    */
   const handleResetSort = React.useCallback(() => {
-    const restored = parseSortConfig(schema.sort);
+    const restored = parseSortConfig(viewDefaults ? viewDefaults.sort : schema.sort);
     setCurrentSort(restored);
     setServerPage(1);
-    emitSortChange(restored);
+    if (onRestoreViewDefaults) onRestoreViewDefaults(['sort']);
+    else emitSortChange(restored);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [schemaSortKey, emitSortChange]);
+  }, [viewDefaultSortKey, emitSortChange, onRestoreViewDefaults]);
 
   // Export handler
   const handleExport = React.useCallback((format: 'csv' | 'xlsx' | 'json' | 'pdf') => {
@@ -5428,9 +5461,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
    * `schema`, so `schema` there is the user's own choice, and a comparison
    * against it reads "nothing to reset" straight after a reload. Such a host
    * hands the view's own value in `viewDefaults`, and these two settings
-   * compare against that; the reset writes it through the controls' doors, so
-   * the user's preference follows. Without `viewDefaults`, `schema` is the
-   * view's own. Plain per-render values, never memo identities (AGENTS.md #10).
+   * compare against that; the reset clears them through
+   * `onRestoreViewDefaults` where the host wires it (objectstack#28948), else
+   * writes them through the controls' doors. Without `viewDefaults`, `schema`
+   * is the view's own. Plain per-render values, never memo identities
+   * (AGENTS.md #10).
    */
   const authoredGalleryCardSize: GalleryCardSize = (schema.gallery?.cardSize as GalleryCardSize | undefined) ?? 'medium';
   const viewDefaultHiddenFields = viewDefaults ? viewDefaults.hiddenFields : schema.hiddenFields;
@@ -5452,22 +5487,39 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     inlineEdit: currentView === 'grid' && inlineEditOffered && inlineEdit !== !!schema.inlineEdit,
   };
   const displayChangedCount = Object.values(displayDeviation).filter(Boolean).length;
-  /** Every setting back to the view's own, each through the door its control writes through. */
+  /**
+   * Every setting back to the view's own, each through the door its control
+   * writes through. objectstack#28948 — except, under `onRestoreViewDefaults`,
+   * the two the host stores as the user's preference: hidden fields and the
+   * table density. Those are named to the host as a reset in one call, which
+   * clears them, so the user follows the view afterwards.
+   */
   const resetDisplayToViewDefault = () => {
+    const restoredParts: Array<'hiddenFields' | 'rowHeight'> = [];
     if (displayDeviation.layout) handleViewChange(schema.viewType as ListViewVisualization);
     if (displayDeviation.group) changeGrouping(initialGroupingConfig);
     if (displayDeviation.color) setRowColorConfig(schema.rowColor);
-    if (displayDeviation.hiddenFields) updateHiddenFields(new Set(viewDefaultHiddenFields || []));
+    if (displayDeviation.hiddenFields) {
+      if (onRestoreViewDefaults) {
+        setHiddenFields(new Set(viewDefaultHiddenFields || []));
+        restoredParts.push('hiddenFields');
+      } else {
+        updateHiddenFields(new Set(viewDefaultHiddenFields || []));
+      }
+    }
     if (displayDeviation.density) {
       if (currentView === 'gallery') {
         setGalleryCardSize(authoredGalleryCardSize);
         try { window.localStorage.setItem(galleryDensityKey, authoredGalleryCardSize); } catch { /* private mode */ }
+      } else if (onRestoreViewDefaults) {
+        restoredParts.push('rowHeight');
       } else {
         density.setMode(viewDefaultDensity);
       }
     }
     if (displayDeviation.rowNumbers) setRowNumbers(defaultRowNumbers);
     if (displayDeviation.inlineEdit) updateInlineEdit(!!schema.inlineEdit);
+    if (onRestoreViewDefaults && restoredParts.length > 0) onRestoreViewDefaults(restoredParts);
   };
 
   /**

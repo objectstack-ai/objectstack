@@ -12,8 +12,9 @@
  * With selection and row numbers on, ONE leading cell holds both: the number
  * by default, the checkbox on row hover / focus-within / a coarse pointer, and
  * on every row while any row is selected. The header's select-all is always
- * there. The row-actions trigger is in the DOM for every row and hidden by
- * opacity only.
+ * there. The row-actions trigger is in the DOM for every row; since
+ * objectstack#28923 it is drawn at rest in a muted tone
+ * (`data-table-row-actions-atRest-28923.test.tsx` pins that).
  *
  * jsdom applies no stylesheet, so "visible" is read off the classes that
  * decide it: `opacity-0` on the checkbox's wrapper hides it until a reveal
@@ -123,17 +124,17 @@ describe('data-table leading cell (objectui#12423)', () => {
 });
 
 describe('data-table row-actions trigger (objectui#12423)', () => {
-  it('is in the DOM for every row, revealed by opacity on hover, focus-within, a selected row and an open menu', () => {
+  it('is in the DOM for every row, lifted to full strength on hover, focus-within, a selected row and an open menu', () => {
     renderTable();
     const triggers = screen.getAllByTestId('data-table-row-actions');
     expect(triggers).toHaveLength(ROWS.length);
     for (const trigger of triggers) {
       expect(trigger).toHaveClass(
-        'opacity-0',
-        'group-hover/row:opacity-100',
-        'group-focus-within/row:opacity-100',
-        'group-data-[state=selected]/row:opacity-100',
-        'data-[state=open]:opacity-100',
+        'text-muted-foreground',
+        'group-hover/row:text-foreground',
+        'group-focus-within/row:text-foreground',
+        'group-data-[state=selected]/row:text-foreground',
+        'data-[state=open]:text-foreground',
       );
       // Never display:none — it keeps its Tab stop and its name.
       expect(trigger).not.toHaveClass('hidden');

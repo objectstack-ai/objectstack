@@ -361,13 +361,22 @@ describe('[#7848] the three non-record action types are unchanged', () => {
     expect(calls[0].url).toBe(`${BASE_URL}/api/2026-01/data/crm_account`);
   });
 
-  it('[#7983] an api_call failure is not decorated with a mount it never used', async () => {
+  it('[#7983] an api_call failure is not decorated with a mount it never used — it names the URL it addressed', async () => {
     fetchMock.mockImplementation(async () => jsonResponse({ error: 'Not found' }, 404));
     const adapter = new HttpTestAdapter(BASE_URL);
     const err = await adapter
       .execute(action('api_call', '/nope', { method: 'GET' }), {})
       .then(() => undefined, (e: Error) => e);
-    expect(err?.message).toBe('HTTP Error 404: {"error":"Not found"}');
+    expect(err?.message).toBe(`HTTP Error 404: {"error":"Not found"} — api_call addressed GET ${BASE_URL}/nope`);
+    expect(err?.message).not.toContain('record actions addressed');
+  });
+
+  it('an api_call 422 stays undecorated — it reached a route and the server\'s message stands alone', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ error: 'name is required' }, 422));
+    const err = await new HttpTestAdapter(BASE_URL)
+      .execute(action('api_call', '/api/v1/data/crm_account', { method: 'POST', body: {} }), {})
+      .then(() => undefined, (e: Error) => e);
+    expect(err?.message).toBe('HTTP Error 422: {"error":"name is required"}');
   });
 
   it('wait resolves without touching the network', async () => {
@@ -451,4 +460,65 @@ describe('[#20289] readTargetServices hands the runner the SAME probe\'s `servic
     await new HttpTestAdapter(BASE_URL).readTargetServices();
     expect(warnings).toEqual([]);
   });
+});
+
+/**
+ * PIN — the base URL is normalised once, so a trailing slash on `--url` does
+ * not double the slash in front of every path the adapter builds.
+ *
+ * Each URL builder appends a path that starts with `/`; `os test --url
+ * http://host:PORT/` kept the slash and addressed `//api/v1/...`, which a stock
+ * server answers `404 ENDPOINT_NOT_FOUND` — every HTTP scenario failed while the
+ * same URL without the slash passed. Pinned per builder (discovery probe, record
+ * collection URL, `api_call` relative target, the provenance clause) against a
+ * captured `fetch`, for one slash, several, and a base that carries a path.
+ */
+describe('a trailing slash on the base URL addresses the same endpoints', () => {
+  const rows: Array<[label: string, given: string, normalised: string]> = [
+    ['one trailing slash', `${BASE_URL}/`, BASE_URL],
+    ['two trailing slashes', `${BASE_URL}//`, BASE_URL],
+    ['a path prefix with a trailing slash', 'http://localhost:3000/prefix/', 'http://localhost:3000/prefix'],
+  ];
+
+  for (const [label, given, normalised] of rows) {
+    describe(label, () => {
+      const discoveryUrl = `${normalised}${EXPECTED_API_BASE}/discovery`;
+
+      beforeEach(() => {
+        fetchMock.mockImplementation(async (input: unknown, init?: RequestInit) => {
+          calls.push({ url: String(input), method: init?.method ?? 'GET', body: undefined, headers: {} });
+          if (String(input) === discoveryUrl) return discoveryDocument({ data: ADVERTISED_DATA_PATH });
+          return jsonResponse({ ok: true });
+        });
+      });
+
+      it('the discovery probe and the record collection URL carry one slash', async () => {
+        await new HttpTestAdapter(given).execute(action('create_record', 'crm_account', { name: 'Acme' }), {});
+        expect(calls.map((c) => c.url)).toEqual([discoveryUrl, `${normalised}${ADVERTISED_DATA_PATH}/crm_account`]);
+        expect(warnings).toEqual([]);
+      });
+
+      it('an api_call relative target carries one slash', async () => {
+        await new HttpTestAdapter(given).execute(action('api_call', '/api/v1/health', { method: 'GET' }), {});
+        expect(calls.map((c) => c.url)).toEqual([`${normalised}/api/v1/health`]);
+      });
+
+      it('the record-action provenance clause names the normalised base', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse({ error: 'Not found' }, 404));
+        const err = await new HttpTestAdapter(given)
+          .execute(action('read_record', 'crm_account', { id: 'rec_1' }), {})
+          .then(() => undefined, (e: Error) => e);
+        expect(err?.message).toContain(`record actions addressed ${normalised}${EXPECTED_DATA_PATH} (`);
+        expect(err?.message).toContain(`GET ${discoveryUrl} answered 404`);
+      });
+
+      it('an api_call 404 names the normalised URL it addressed', async () => {
+        fetchMock.mockImplementation(async () => jsonResponse({ error: 'Not found' }, 404));
+        const err = await new HttpTestAdapter(given)
+          .execute(action('api_call', '/api/v1/health', { method: 'GET' }), {})
+          .then(() => undefined, (e: Error) => e);
+        expect(err?.message).toBe(`HTTP Error 404: {"error":"Not found"} — api_call addressed GET ${normalised}/api/v1/health`);
+      });
+    });
+  }
 });

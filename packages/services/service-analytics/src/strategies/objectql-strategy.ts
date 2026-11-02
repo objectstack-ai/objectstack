@@ -778,6 +778,16 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       'as-written',
     );
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
+    // The time-dimension windows, read here and rendered below (see the
+    // read-scope note). [#28852] Read before the door below, as `execute()`
+    // reads them before its own call, so a selection carrying both an
+    // unrecognised `dateRange` and one column asked twice is refused about
+    // the `dateRange` on both faces.
+    const echoDateColumn = declaredDateColumn(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
+    );
+    const windows = this.dateRangeBounds(cube, query, echoDateColumn);
     // [#28841] The query's refusal for one column asked twice, on the keys
     // `execute()` would hand the engine (its cross-object path's when `plan`
     // routes it there), before any bucket renders: the echo used to print one
@@ -945,11 +955,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the inclusive `<=` the engine runs there. This echo kept its own
     // type-blind copy of the rule, which rendered `< day+1` on every column,
     // until #5930 step 4.
-    const echoDateColumn = declaredDateColumn(
-      ctx,
-      (member) => this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
-    );
-    for (const { member, bounds } of this.dateRangeBounds(cube, query, echoDateColumn)) {
+    for (const { member, bounds } of windows) {
       const windowSql = this.renderFilterNodeSql(normalizeDateRangeWindow(member, bounds, echoLowering), cube, params, ctx);
       if (windowSql) whereParts.push(windowSql);
     }

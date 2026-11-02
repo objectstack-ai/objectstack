@@ -19,6 +19,9 @@
  * - Never re-fetches data on its own; relies on the caller to resolve
  *   `user_name` / `user_avatar` from `user_id` and to provide a pre-computed
  *   `changes` diff so this component stays presentation-only and SSR-safe.
+ * - The action badge shows the declared option label of the field the entries'
+ *   `action` values come from, when the caller names that field
+ *   (`actionField`). It holds no list of action labels of its own.
  */
 import * as React from 'react';
 import {
@@ -34,6 +37,7 @@ import {
   cn,
 } from '@object-ui/components';
 import { useDisplayLocale, useSafeTranslate } from '@object-ui/i18n';
+import { useSafeFieldLabel } from '@object-ui/react';
 import { Cog } from 'lucide-react';
 import { hasCellValue } from './emptiness';
 
@@ -59,6 +63,16 @@ export interface HistoryEntry {
   [extra: string]: unknown;
 }
 
+/**
+ * The select field an entry's `action` value is stored in, named by object and
+ * field (`{ object: 'sys_activity', field: 'type' }` for `record:history`'s
+ * self-fetch).
+ */
+export interface HistoryActionField {
+  object: string;
+  field: string;
+}
+
 export interface HistoryTimelineProps {
   entries: HistoryEntry[];
   loading?: boolean;
@@ -79,6 +93,17 @@ export interface HistoryTimelineProps {
    * (objectui#9786). Pass this only to OVERRIDE that composition.
    */
   locale?: string;
+  /**
+   * The select field the entries' `action` values come from. Each badge then
+   * shows that field's option label in the active language, read from the
+   * served translations through `useSafeFieldLabel().fieldOptionLabel`, the
+   * read the record page uses for any select option label.
+   *
+   * A value with no label there, and every value when this is not given, shows
+   * as stored. Only a value shown as stored is drawn upper-case: a translated
+   * label is drawn as the translation spells it.
+   */
+  actionField?: HistoryActionField;
 }
 
 // Kept keys mirror the server-declared `sys_audit_log.action` enum
@@ -179,6 +204,7 @@ export function HistoryTimeline({
   unknownUserText,
   className,
   locale,
+  actionField,
 }: HistoryTimelineProps) {
   // The composed tag this timeline formats with when the caller states none.
   // Read before the early returns below so the hook order never varies.
@@ -186,6 +212,7 @@ export function HistoryTimeline({
   const resolvedLocale = locale ?? displayLocale;
   const tt = useSafeTranslate();
   const systemActorText = tt('detail.systemActor', 'System');
+  const { fieldOptionLabel } = useSafeFieldLabel();
   if (loading) {
     return (
       <div className={cn('space-y-3', className)}>
@@ -221,6 +248,10 @@ export function HistoryTimeline({
         {entries.map((entry, idx) => {
           const action = (entry.action ?? '').toLowerCase();
           const variant = ACTION_VARIANT[action] ?? 'outline';
+          const actionLabel =
+            entry.action && actionField
+              ? fieldOptionLabel(actionField.object, actionField.field, entry.action, entry.action)
+              : entry.action;
           const resolvedName =
             (typeof entry.user_name === 'string' && entry.user_name.trim()) || '';
           // No name AND no id: nobody acted, so this is a system write, not
@@ -253,8 +284,11 @@ export function HistoryTimeline({
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                   <span className="text-sm font-medium text-foreground">{displayName}</span>
                   {entry.action && (
-                    <Badge variant={variant} className="text-[10px] uppercase tracking-wide">
-                      {entry.action}
+                    <Badge
+                      variant={variant}
+                      className={cn('text-[10px] tracking-wide', actionLabel === entry.action && 'uppercase')}
+                    >
+                      {actionLabel}
                     </Badge>
                   )}
                   {absoluteWhen && (

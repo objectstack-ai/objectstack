@@ -81,6 +81,9 @@ import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffi
 // [ADR-0146 D10, second rule] The field-patch target check's walk; the verdict
 // is the marketplace install door's own judge.
 import { findFieldPatchTargetRefusals } from '../utils/field-patch-targets.js';
+// [#28893] The ADR-0031 region-shape check: the automation engine's own
+// registration verdict (`FlowSchema` then the spec's `validateControlFlow`).
+import { findFlowRegionRefusals } from '../utils/flow-region-shape.js';
 // A field `picklist` that names no picklist the stack declares — refused, or
 // reported when the declaring package depends on packages outside the stack.
 // Walked the way the load path registers, like the refusal above.
@@ -747,6 +750,36 @@ export default class Validate extends Command {
         printBulletList(
           patchTargetRefusals.map((r) => `${r.path} ${r.message}`),
           { noun: 'field-patch refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3a-vi. [#28893] Flow region shape (ADR-0031): every `loop` body,
+      //     `parallel` branch and `try_catch` region, at every depth, must be
+      //     single-entry/single-exit and acyclic, and a `parallel` needs two
+      //     branches. The verdict is the engine's registration call
+      //     (`FlowSchema`, then the spec's `validateControlFlow`), so a flow
+      //     green here is one boot registers instead of logging
+      //     `[Automation] failed to register flow` and running without it; see
+      //     `utils/flow-region-shape.ts`.
+      const regionRefusals = findFlowRegionRefusals(result.data as Record<string, unknown>);
+      if (regionRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({
+            valid: false,
+            errors: regionRefusals,
+            warnings: warningsSoFar(),
+            conversions: conversionNotices,
+            duration: timer.elapsed(),
+          });
+          this.exit(1);
+        }
+        const n = regionRefusals.length;
+        console.log('');
+        printError(`The automation engine would refuse to register ${n} flow${n > 1 ? 's' : ''} for a malformed region (ADR-0031)`);
+        printBulletList(
+          regionRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'flow region refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

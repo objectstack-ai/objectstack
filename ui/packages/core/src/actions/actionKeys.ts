@@ -128,6 +128,10 @@ export const ACTION_DEF_KEYS = [
   // from the spec and drawn by the console's param dialog. Display only: the
   // runner never reads it.
   'submitText',
+  // The dismiss-button label of the confirm and param dialogs
+  // (`ActionSchema.cancelText`), derived from the spec: the runner hands it to
+  // the confirm dialog, and the console's param dialog draws it.
+  'cancelText',
   'confirmText',
   'confirm',
   'condition',
@@ -243,9 +247,8 @@ export const SPEC_ACTION_KEYS = [
   'bodyExtra',
   'bodyShape',
   // Added to `ActionSchema` by objectstack#28519: the dismiss button label of
-  // the action's confirm or param dialog. Listed for this array's contract
-  // alone, like `description` below: `ActionDef` does not declare it yet, and
-  // the dialogs reading it are the console's own follow-up.
+  // the action's confirm or param dialog. `ActionDef` declares it (derived),
+  // and both dialogs draw it.
   'cancelText',
   'component',
   'confirmText',
