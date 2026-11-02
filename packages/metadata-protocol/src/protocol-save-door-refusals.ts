@@ -541,6 +541,7 @@ export async function unknownGrantObjectSaveRefusal(
     name: string,
     pending?: 'drafts' | ReadonlySet<string>,
     writeFace?: MetadataWriteFace,
+    door: 'save' | 'publish' = 'save',
 ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
     if (singularType !== 'permission') return undefined;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
@@ -587,10 +588,15 @@ export async function unknownGrantObjectSaveRefusal(
         : new Set<string>();
     unknown = unknown.filter((key) => !held.has(key));
     if (unknown.length === 0) return undefined;
+    // [#29279] What was looked for, as this door looked: a save also counts an
+    // object saved here; a draft's publish counts only what goes live with it.
+    const looked = door === 'publish'
+        ? 'no package registers an object of that name, and no published object, or object draft of this batch, carries it'
+        : 'no package registers an object of that name and none is saved here';
     const issues: MetadataIssueEntry[] = unknown.map((key) => ({
         path: `objects.${key}`,
-        message: `Permission '${name}' grants on object '${key}' which is not defined in objects: no package registers `
-            + 'an object of that name and none is saved here, so the grant applies to nothing. Correct the name to the '
+        message: `Permission '${name}' grants on object '${key}' which is not defined in objects: ${looked}, `
+            + 'so the grant applies to nothing. Correct the name to the '
             + `object's full name (e.g. 'crm_lead', not 'lead'), create the object first, or remove the grant.`,
         code: 'custom',
     }));
