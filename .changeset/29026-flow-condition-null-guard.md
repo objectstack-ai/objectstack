@@ -4,7 +4,7 @@
 
 feat(lint): the publish-time null-guard gate judges a record-triggered flow's start, edge and decision-branch conditions
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 
 <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package's public surface is retired: the publish-time null-guard gate now judges three predicate slots of a record-triggered flow that it already judges on validation rules and hook conditions. A flow it now refuses is fixed in the flow's own expression (add the `!= null` test the message names), so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
