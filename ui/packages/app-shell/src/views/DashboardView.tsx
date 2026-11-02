@@ -337,6 +337,8 @@ export function DashboardView({ dataSource }: { dataSource?: any }) {
           <Button
             variant="outline"
             size="sm"
+            // 44 px tall below `sm`, a phone's touch-target floor (objectstack#29078).
+            className="min-h-11 sm:min-h-0"
             onClick={refreshState.handleRefresh}
             disabled={refreshState.refreshing}
             aria-label={tt('dashboard.refreshDashboard', 'Refresh dashboard')}
