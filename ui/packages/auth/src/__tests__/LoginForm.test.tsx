@@ -118,10 +118,10 @@ describe('LoginForm — SSO-only (enforced) mode', () => {
       registerUrl: '/register',
     });
 
-    // The break-glass link appears (federated buttons are the path)…
+    // The break-glass link appears beside the SSO path itself…
     await screen.findByRole('button', BREAK_GLASS);
-    // …the local password form is hidden…
-    expect(screen.queryByLabelText('Email')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Sign in with SSO' })).toBeTruthy();
+    // …the local password field is hidden…
     expect(screen.queryByLabelText('Password')).toBeNull();
     // …and the sign-up link is hidden (no self-registration under enforced).
     expect(screen.queryByText('Sign up')).toBeNull();
