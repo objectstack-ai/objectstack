@@ -44,7 +44,9 @@ model: opus
    - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
    - 三类同欠 `reach:`:公开入口(HTTP/界面/`os validate`/保存)一次实测错误,或具名真实生产者。
-   - 例外三种照报,`reach:` 写明哪种:可能泄露数据;发版即固化的错误文字;维护者直派。
+   - 例外两种照报,`reach:` 写明哪种:发版即固化的错误文字;维护者直派。
+   - 安全发现(含可能泄露数据)⛔ 不进本字段、不立卡:只进终报私有字段 `security_findings`。
+   - 定义与席位处置照 pm-dispatch `security-findings.md`;报告评论里该字段只写 `withheld`/`none`。
    - (c) 元数据 = 他人存储并再作者化的键,须具名生产者:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
@@ -374,7 +376,8 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["class: a|b|c · reach: <public door + wrong answer | named producer | exception: security|release-text|maintainer> · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
+  "security_findings": "PRIVATE — final report only, never the GitHub comment (there: withheld | none); each: area · rule broken · repro, in prose",
+  "out_of_scope_findings": ["class: a|b|c · reach: <public door + wrong answer | named producer | exception: release-text|maintainer> · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
 }
 ```
 
