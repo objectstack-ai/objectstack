@@ -3034,8 +3034,12 @@ const TITLE_FORMAT_RETIRED_EXPLANATION: RuleExplanation = {
       'write; point `nameField` at it. A formula with `returnType: \'text\'` is title-eligible too and ' +
       'stays legal for a title shown for display only: its value is computed on read and stored nowhere, ' +
       'so a sort by it is refused, search never reaches it, and an import cannot match a lookup cell ' +
-      'against it. Then drop `titleFormat`, which this warning reports for as long as it is declared.',
-    'A warning, not an error: the schema still parses the key, so existing metadata keeps loading.',
+      'against it. Then drop `titleFormat`: an object definition that declares it is refused at the ' +
+      'metadata save gate (an active save, a draft promotion, a restore) and by `os validate`, ' +
+      '`os build` and `os lint`.',
+    'An error, not a warning, though the schema still parses the key: a stored object that carries it ' +
+      'keeps loading and reading, and is refused only when it is next saved or validated. A draft ' +
+      'save passes; its publish is refused.',
   ],
 };
 
