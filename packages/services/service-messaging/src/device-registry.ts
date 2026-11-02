@@ -32,13 +32,24 @@
  *  2. Across processes, `sys_user_device.token` carries a unique index, so a
  *     second holder can never be stored: a racing writer's insert or update is
  *     refused by the database.
- *  3. That refusal is not the caller's error. The registration runs once more
+ *  3. That refusal is not the caller's error. The registration runs again
  *     ({@link REGISTER_ATTEMPTS}): the re-read now sees the winner's row and
  *     moves the token from it, which is what the losing request asked for.
+ *
+ * ## One registration is one unit
+ *
+ * A registration that moves a token deletes the previous holder's row and then
+ * writes its own. Where the engine offers a transaction (`IObjectQLEngine.
+ * transaction`, the ObjectQL engine always does) the reads, the delete and the
+ * write run in ONE, so a write the database refuses rolls the delete back with
+ * it and the previous holder keeps its row. On an engine without one the steps
+ * run in order with no rollback: a refused write after the delete leaves the
+ * token held by nobody until the device registers again (the next attempt, or
+ * the app's next start), which loses a push target but never misdirects a push.
  */
 
 import { randomUUID } from 'node:crypto';
-import type { IDataEngine } from '@objectstack/spec/contracts';
+import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type {
     RegisterDeviceRequest,
     RegisterDeviceResponse,
@@ -58,10 +69,13 @@ export const DEVICE_SYSTEM_CONTEXT = { isSystem: true } as const;
 
 /**
  * How many times a registration runs before a unique-index refusal is let
- * through. Two: the first attempt, and the one that re-reads after a racing
- * writer won.
+ * through. Three: the first attempt, the one that re-reads after a racing
+ * writer on another node won, and one more for a second such race in the same
+ * window. Past that the refusal surfaces (the dispatcher answers it `409
+ * UNIQUE_VIOLATION`) and the client's next registration settles it; the
+ * in-process lock means only writers on OTHER nodes can race at all.
  */
-const REGISTER_ATTEMPTS = 2;
+const REGISTER_ATTEMPTS = 3;
 
 type Vendor = 'apns' | 'fcm';
 
@@ -73,8 +87,11 @@ const DEFAULT_VENDOR: Readonly<Record<string, Vendor | undefined>> = {
 
 type DeviceRow = Record<string, unknown> & { id?: unknown };
 
+/** The engine surface the registry uses: every engine's reads and writes, plus its transaction where it offers one. */
+export type DeviceRegistryEngine = IDataEngine & Partial<Pick<IObjectQLEngine, 'transaction'>>;
+
 export interface DeviceRegistryOptions {
-    getData: () => IDataEngine | undefined;
+    getData: () => DeviceRegistryEngine | undefined;
     now?: () => string;
 }
 
@@ -101,7 +118,7 @@ export class DeviceRegistry {
         this.now = opts.now ?? (() => new Date().toISOString());
     }
 
-    private engine(): IDataEngine {
+    private engine(): DeviceRegistryEngine {
         const data = this.opts.getData();
         if (!data) throw new Error('[messaging] the device registry has no data engine');
         return data;
@@ -119,7 +136,7 @@ export class DeviceRegistry {
         return this.withTokenLock(request.token, async () => {
             for (let attempt = 1; ; attempt += 1) {
                 try {
-                    return await this.registerOnce(userId, request, vendor);
+                    return await this.inOneUnit((context) => this.registerOnce(userId, request, vendor, context));
                 } catch (err) {
                     if (attempt >= REGISTER_ATTEMPTS || !isUniqueViolationError(err)) throw err;
                 }
@@ -127,19 +144,31 @@ export class DeviceRegistry {
         });
     }
 
+    /**
+     * Run `work` in one engine transaction when the engine offers one, with the
+     * system context the transaction hands back; else directly, with the
+     * system context (see the module docblock's "One registration is one unit").
+     */
+    private async inOneUnit<T>(work: (context: Record<string, unknown>) => Promise<T>): Promise<T> {
+        const data = this.engine();
+        if (typeof data.transaction !== 'function') return work({ ...DEVICE_SYSTEM_CONTEXT });
+        return data.transaction((trxCtx) => work(trxCtx as Record<string, unknown>), { ...DEVICE_SYSTEM_CONTEXT });
+    }
+
     private async registerOnce(
         userId: string,
         request: RegisterDeviceRequest,
         vendor: Vendor,
+        context: Record<string, unknown>,
     ): Promise<RegisterDeviceResponse> {
         const data = this.engine();
-        const holder = await this.findOne(data, { token: request.token });
+        const holder = await this.findOne(data, { token: request.token }, context);
 
         // The row this registration refreshes: the named device, else (no
         // deviceId) the caller's own row that already holds this token.
         let target: DeviceRow | null = null;
         if (request.deviceId) {
-            target = await this.findOne(data, { user_id: userId, device_id: request.deviceId });
+            target = await this.findOne(data, { user_id: userId, device_id: request.deviceId }, context);
         } else if (holder && String(holder.user_id) === userId) {
             target = holder;
         }
@@ -147,7 +176,7 @@ export class DeviceRegistry {
         // The token moves: whoever else holds it — another user's device, or
         // this user's stale row under another deviceId — gives it up, by row.
         if (holder && (!target || String(holder.id) !== String(target.id))) {
-            await data.delete(USER_DEVICE_OBJECT, { where: { id: holder.id }, context: DEVICE_SYSTEM_CONTEXT } as never);
+            await data.delete(USER_DEVICE_OBJECT, { where: { id: holder.id }, context } as never);
         }
 
         const at = this.now();
@@ -167,7 +196,7 @@ export class DeviceRegistry {
             await data.update(
                 USER_DEVICE_OBJECT,
                 values,
-                { where: { id: target.id }, context: DEVICE_SYSTEM_CONTEXT } as never,
+                { where: { id: target.id }, context } as never,
             );
             return { deviceId: String(target.device_id), success: true };
         }
@@ -176,7 +205,7 @@ export class DeviceRegistry {
         await data.insert(
             USER_DEVICE_OBJECT,
             { id: randomUUID(), user_id: userId, device_id: deviceId, ...values },
-            { context: DEVICE_SYSTEM_CONTEXT },
+            { context },
         );
         return { deviceId, success: true };
     }
@@ -220,8 +249,12 @@ export class DeviceRegistry {
         );
     }
 
-    private async findOne(data: IDataEngine, where: Record<string, unknown>): Promise<DeviceRow | null> {
-        const row = await data.findOne(USER_DEVICE_OBJECT, { where }, { context: DEVICE_SYSTEM_CONTEXT });
+    private async findOne(
+        data: IDataEngine,
+        where: Record<string, unknown>,
+        context: Record<string, unknown> = DEVICE_SYSTEM_CONTEXT,
+    ): Promise<DeviceRow | null> {
+        const row = await data.findOne(USER_DEVICE_OBJECT, { where }, { context });
         return (row as DeviceRow | null) ?? null;
     }
 

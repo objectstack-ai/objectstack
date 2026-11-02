@@ -22,6 +22,8 @@
  *  - the vendor derives from the platform, and a `web` registration without
  *    one is refused `VALIDATION_FAILED` at `vendor`, storing nothing;
  *  - `listDevices` answers only the caller's devices, newest first;
+ *  - a takeover whose write is refused leaves the previous holder's row in
+ *    place: the delete and the write are one engine transaction;
  *  - the database refuses a second holder of a token (the unique index), and
  *    two concurrent registrations of one token end with one row.
  *
@@ -208,6 +210,36 @@ describe('push device registry: INotificationService device members over sys_use
         expect(mine.map((d) => d.deviceId)).toEqual(['newer', 'older']);
         expect(mine[0]).toMatchObject({ userId: alice, vendor: 'fcm', token: 't2', platform: 'android', appId: 'ai.objectos.app', enabled: true });
         expect(mine.every((d) => d.userId === alice)).toBe(true);
+    });
+
+    it('a takeover whose write is refused rolls the previous holder\'s delete back: one unit, not two steps', async () => {
+        const { ql, time, alice, bob, rows } = await boot();
+        // The real engine, but the registry's insert is refused once armed, as a
+        // database refusal of the write would be (after the delete has run).
+        let refuseInsert = false;
+        const refusing = new Proxy(ql as any, {
+            get(target, prop, receiver) {
+                if (prop === 'insert') {
+                    return async (object: string, ...rest: unknown[]) => {
+                        if (refuseInsert && object === USER_DEVICE_OBJECT) throw new Error('write refused by the database');
+                        return (target.insert as (...a: unknown[]) => unknown).call(target, object, ...rest);
+                    };
+                }
+                const value = Reflect.get(target, prop, receiver);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+        });
+        const service = new MessagingService({ logger: silent, getData: () => refusing, now: time.now });
+        await service.registerDevice(alice, { token: 'tok-unit', platform: 'ios', deviceId: 'alice-phone' });
+
+        refuseInsert = true;
+        const refused = await thrown(service.registerDevice(bob, { token: 'tok-unit', platform: 'ios', deviceId: 'bob-phone' }));
+        expect(String(refused?.message)).toBe('write refused by the database');
+
+        const holders = await rows({ token: 'tok-unit' });
+        expect(holders).toHaveLength(1);
+        expect(String(holders[0].user_id)).toBe(alice);
+        expect(await rows({ user_id: bob })).toHaveLength(0);
     });
 
     it('the database refuses a second holder of a token, and concurrent registrations end with one row', async () => {
