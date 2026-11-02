@@ -21,9 +21,14 @@
 //     with no row landing; republishing restores both doors;
 //   - an edit that leaves the sharing alone lands environment-wide too;
 //   - the same with no active organization (unchanged).
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the admin's save goes into the fixture's `.custom` pair, declaring the form it
+// overrides; the anonymous doors serve the pair's override.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { defineStack, defineView } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
@@ -31,6 +36,7 @@ import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plug
 const LEAD = 'walled_lead';
 const SLUG = 'walled-lead-intake';
 const VIEW = `/meta/view/${LEAD}.intake`;
+const BASE = 'com.dogfood.walled-public-form';
 
 const WalledLead = ObjectSchema.create({
   name: LEAD,
@@ -108,7 +114,7 @@ describe('walled posture: withdrawing a public form from anonymous intake', () =
 
   /** PUT the form at the admin's current session scope. */
   const put = async (body: Record<string, any>) => {
-    const res = await stack.apiAs(admin, 'PUT', VIEW, body);
+    const res = await stack.apiAs(admin, 'PUT', inPair(VIEW, BASE), declaredOverride(body, BASE, '0.0.0'));
     const json = (await res.json()) as Record<string, any>;
     return { status: res.status, json };
   };
@@ -133,6 +139,7 @@ describe('walled posture: withdrawing a public form from anonymous intake', () =
       security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }),
     });
     admin = await stack.signIn();
+    await ensurePair(stack, admin, BASE);
     ql = await stack.kernel.getServiceAsync('objectql');
     const item = await read();
     // The editor's PUT body: the effective item without its read decorations.
