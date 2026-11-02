@@ -2,21 +2,24 @@
 
 import path from 'path';
 
-import preset from '../../../vitest.preset.mts';
-
-// The shared preset, plus source aliases for the two workspace packages this
-// package's tests read by VALUE. `src/kernel-cache.ts` reads a service's
-// self-description from `@objectstack/spec/api`, and the daily-quota cache pin
-// boots a real `ObjectKernel` from `@objectstack/core`. Unaliased, both would
-// follow the workspace link to the package's last build, so a pin about the
-// source next to it would report on build state instead
-// (`check:test-source-alias` is the gate; aliasing is its intended repair).
+// Source aliases for the two workspace packages this package's tests read by
+// VALUE. `src/kernel-cache.ts` reads a service's self-description from
+// `@objectstack/spec/api`, and the daily-quota cache pin boots a real
+// `ObjectKernel` from `@objectstack/core`. Unaliased, both would follow the
+// workspace link to the package's last build, so a pin about the source next
+// to it would report on build state instead (`check:test-source-alias` is the
+// gate; aliasing is its intended repair).
 //
 // Array form with anchored patterns, deliberately: the object form matches by
 // PREFIX, so a bare `@objectstack/spec` key would swallow `@objectstack/spec/api`
 // and resolve it to `spec/src/index.ts/api` (ENOTDIR).
 export default {
-  ...preset,
+  test: {
+    // Late console writes must not redden a green suite (#10374) — see the
+    // mechanism docblock in examples/app-showcase/vitest.config.ts. Enforced
+    // by scripts/check-console-intercept-disarm.mjs.
+    disableConsoleIntercept: true,
+  },
   resolve: {
     alias: [
       { find: /^@objectstack\/core$/, replacement: path.resolve(__dirname, '../../core/src/index.ts') },
