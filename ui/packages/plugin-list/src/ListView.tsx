@@ -6769,12 +6769,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               />
             ))}
           </div>
-        ) : !loading && data.length === 0 && (currentView === 'grid' || currentView === 'gallery') ? (
+        ) : !loading && data.length === 0 && (currentView === 'grid' || currentView === 'gallery' || currentView === 'tree') ? (
           // objectui#12217 — the gallery draws the grid's empty state, through
           // the one shared component: the authored `emptyState`, resolved
           // against the display locale, otherwise the localized `list.*` copy.
           // It used to hand the empty list to `ObjectGallery`, which drew a
           // hard-coded English line and never read the view's `emptyState`.
+          // The tree takes the same branch: `ObjectTree` reads no `emptyState`
+          // and drew the generic `common.noData`. This component's fetch runs
+          // with the very filter the tree's own query is handed
+          // (`selfQueryFilter`) and no search term (`searchlessViewOnScreen`),
+          // so an empty `data` is the tree's empty answer too.
           <ListEmptyState
             title={schema.emptyState?.title}
             message={schema.emptyState?.message}
