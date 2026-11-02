@@ -38,6 +38,26 @@
  *     gate, which answers first (`actionPermissionError`), so a caller at that
  *     door needs both lists.
  *
+ * ## The third question: the row a start addresses
+ *
+ * The two rules above judge the caller against the FLOW. A start that names a
+ * record also hands the run a row, and a `runAs: 'system'` run reads and
+ * writes that row past the caller's own access. So every door asks a third
+ * question after them, through ONE function,
+ * `refuseUnreadableFlowStartRecords` (`action-execution.ts`): every record key
+ * the door hands the run in a row slot it defines (`recordId`, the
+ * `<object>Id` alias, an action's declared `recordIdParam`) is first loaded in
+ * the CALLER's own scope, and a key that scope does not deliver is refused
+ * with the action door's own `404 RECORD_NOT_FOUND`, before `execute()`, so a
+ * refused start persists no run. It is the action door's subject load
+ * (`loadActionSubjectRecord`) and its refusal (`refuseDeniedSubjectLoad`),
+ * asked of the keys the action door did not load itself, and asked at the
+ * trigger routes and a declared endpoint too: a door that hands a run a row
+ * the caller has not shown it can read is the gap this module exists to close.
+ * It lives beside the load it reuses, so this module imports nothing from
+ * `action-execution.ts` and the two stay a one-way edge; the declaration it
+ * reads is this module's ({@link flowRunsElevated}).
+ *
  * ## Why a module, and why every door asks it
  *
  * The same reason `flow-dispatch-status.ts` is one: a rule each door spells
@@ -133,6 +153,25 @@ export interface FlowStartRefusal {
  */
 export function isElevatedSelfTriggered(flow: { type?: FlowParsed['type']; runAs?: unknown }): boolean {
     return flow.runAs === 'system' && flow.type !== undefined && SELF_TRIGGERED_FLOW_TYPES.has(flow.type);
+}
+
+/**
+ * Whether `flowName` is declared `runAs: 'system'`, read through the
+ * automation service's own `getFlow`, the probe {@link flowStartRefusal} reads.
+ * `false` when the service cannot be asked (no `getFlow`) or serves no such
+ * flow: an undeclared run is the parsed default, `user`, and a door that
+ * cannot read the declaration dispatches as before.
+ *
+ * The third question's one reading of the declaration
+ * (`refuseUnreadableFlowStartRecords`): a start that names a record key but
+ * no object to load it from cannot be judged, which is refused for an
+ * elevated run only. A user run reads in the caller's own scope.
+ */
+export async function flowRunsElevated(automation: unknown, flowName: string): Promise<boolean> {
+    const svc = automation as { getFlow?: (name: string) => Promise<unknown> } | null | undefined;
+    if (typeof svc?.getFlow !== 'function') return false;
+    const flow = (await svc.getFlow(flowName)) as { runAs?: unknown } | null | undefined;
+    return flow?.runAs === 'system';
 }
 
 /**
