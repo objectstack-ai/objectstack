@@ -498,7 +498,7 @@ export function InboxPopover({
               <button
                 type="button"
                 onClick={() => setNotifFilter('unread')}
-                className={`text-xs px-2 py-1 rounded-md transition-colors ${PHONE_TAP} max-md:px-3 ${
+                className={`text-xs px-2 py-1 rounded-md transition-colors ${PHONE_TAP} max-md:min-w-11 max-md:px-3 ${
                   notifFilter === 'unread'
                     ? 'bg-accent text-foreground font-medium'
                     : 'text-muted-foreground hover:text-foreground'
@@ -512,7 +512,7 @@ export function InboxPopover({
               <button
                 type="button"
                 onClick={() => setNotifFilter('all')}
-                className={`text-xs px-2 py-1 rounded-md transition-colors ${PHONE_TAP} max-md:px-3 ${
+                className={`text-xs px-2 py-1 rounded-md transition-colors ${PHONE_TAP} max-md:min-w-11 max-md:px-3 ${
                   notifFilter === 'all'
                     ? 'bg-accent text-foreground font-medium'
                     : 'text-muted-foreground hover:text-foreground'

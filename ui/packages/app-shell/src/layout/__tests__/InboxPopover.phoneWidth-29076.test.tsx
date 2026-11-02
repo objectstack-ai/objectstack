@@ -85,6 +85,8 @@ describe('InboxPopover at phone width (objectstack#29076)', () => {
     for (const name of [/^Mark all read$/, /^Unread/, /^All$/, /^View all notifications$/]) {
       expect(within(dialog).getByRole('button', { name }).className, String(name)).toContain(PHONE_TAP);
     }
+    // "All" is one short word: it is 44 px wide only because of its own floor
+    expect(within(dialog).getByRole('button', { name: /^All$/ }).className).toContain('max-md:min-w-11');
   });
 
   it('gives all three tabs the floor and drops their icons below md so they share the strip', () => {
