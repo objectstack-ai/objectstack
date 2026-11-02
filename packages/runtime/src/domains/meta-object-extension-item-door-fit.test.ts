@@ -29,7 +29,7 @@
  * sentence and that no row was left.
  */
 
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -197,5 +197,43 @@ describe('an object_extension item names its target by the key it is registered 
             .toEqual([[BASE, 'own'], [PAIR, 'extend']]);
         expect(Object.keys((engine.registry.getObject(LEGACY_KEY) as any)?.fields ?? {})).toEqual(expect.arrayContaining(['region__c', 'subject']));
         expect(engine.registry.getObjectContributors(LEGACY_SHORT)).toEqual([]);
+    });
+});
+
+describe('a stored object_extension row whose extend folds to a legacy key lands on that object at the boot hydration (#28858)', () => {
+    it('the field is on the legacy-keyed object, no second entry opens, and the spelling is named once', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        try {
+            const { engine, p } = await boot();
+            // A row stored under the short spelling: the item door refuses
+            // that spelling now (#28834), so it is a row written before it.
+            // Stored as the registered key, then respelled at rest.
+            await p.saveMetaItem({ type: 'object_extension', name: LEGACY_KEY, packageId: PAIR, item: region(LEGACY_KEY), mode: 'draft' });
+            await p.publishMetaItem({ type: 'object_extension', name: LEGACY_KEY, packageId: PAIR });
+            const stored: any[] = ((await engine.find('sys_metadata', { where: { type: 'object_extension' }, context: { isSystem: true } })) ?? [])
+                .filter((r: any) => r.package_id === PAIR);
+            expect(stored).toHaveLength(1);
+            const body = typeof stored[0].metadata === 'string' ? JSON.parse(stored[0].metadata) : stored[0].metadata;
+            await engine.update('sys_metadata', {
+                id: stored[0].id,
+                name: LEGACY_SHORT,
+                metadata: JSON.stringify({ ...body, name: LEGACY_SHORT, extend: LEGACY_SHORT }),
+            }, { context: { isSystem: true } });
+            // A fresh process: the registry holds no contribution of the pair.
+            engine.registry.withdrawObjectExtension(LEGACY_KEY, PAIR);
+            expect(engine.registry.getObjectContributors(LEGACY_KEY).map((c: any) => c.packageId)).toEqual([BASE]);
+
+            const result = await p.loadMetaFromDb();
+            expect(result.errors).toBe(0);
+            expect(engine.registry.getObjectContributors(LEGACY_SHORT)).toEqual([]);
+            expect(engine.registry.getObjectContributors(LEGACY_KEY).map((c: any) => [c.packageId, c.ownership]))
+                .toEqual([[BASE, 'own'], [PAIR, 'extend']]);
+            expect(Object.keys((engine.registry.getObject(LEGACY_KEY) as any)?.fields ?? {})).toEqual(expect.arrayContaining(['region__c', 'subject']));
+            const lines = warn.mock.calls.map((c) => String(c[0]))
+                .filter((l) => l.includes(`'${LEGACY_SHORT}'`) && l.includes(`'${LEGACY_KEY}'`) && l.includes(PAIR));
+            expect(lines).toHaveLength(1);
+        } finally {
+            warn.mockRestore();
+        }
     });
 });
