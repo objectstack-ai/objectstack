@@ -2337,12 +2337,16 @@ async function registerAndSaveFlow(
     definition: unknown,
     door: 'definition' | 'clone',
     /**
-     * [#28149] The package the clone door resolved for its copy
+     * [#28149, #29016] Where the clone door's copy lands
      * ({@link resolveCloneTarget}) — the one caller here that holds a package
      * of its own choosing rather than a stamp. The definition doors pass none.
+     * Asked AFTER the engine has accepted the definition and before the save:
+     * landing may install the source's paired customization package, and a
+     * definition the engine refuses must leave nothing installed. A landing
+     * that refuses (or throws) undoes the registration like a refused save.
      */
-    packageId?: string,
-): Promise<{ registered: unknown } | { refused: HttpDispatcherResult }> {
+    land?: () => Promise<CloneLanding>,
+): Promise<{ registered: unknown; packageId?: string } | { refused: HttpDispatcherResult }> {
     const store: (Partial<Pick<ObjectStackProtocolImplementation, 'saveMetaItem'>>
         & Partial<Pick<MetadataProtocol, 'getMetaItems'>>) | undefined =
         await deps.resolveServiceOrLoud(context, 'protocol');
@@ -2354,6 +2358,21 @@ async function registerAndSaveFlow(
         return {
             refused: { handled: true, response: deps.errorFromThrown(flowDefinitionRefusal(e), VALIDATION_FAILED_STATUS) },
         };
+    }
+    let packageId: string | undefined;
+    if (land) {
+        let landing: CloneLanding;
+        try {
+            landing = await land();
+        } catch (e) {
+            restoreFlowRegistration(automationService, name, held);
+            throw e;
+        }
+        if ('refused' in landing) {
+            restoreFlowRegistration(automationService, name, held);
+            return landing;
+        }
+        packageId = landing.packageId;
     }
     if (typeof store?.saveMetaItem === 'function') {
         // [#27414, ADR-0073 D3] The save names who asked: the caller's user id
@@ -2387,8 +2406,11 @@ async function registerAndSaveFlow(
             };
         }
     }
-    return { registered };
+    return { registered, ...(packageId !== undefined ? { packageId } : {}) };
 }
+
+/** [#28149] The package a clone's copy lands in, or the refusal that stops it. */
+type CloneLanding = { packageId: string } | { refused: HttpDispatcherResult };
 
 /**
  * [#28149, ADR-0146 D3/D4] WHERE the clone door's copy lands — "new similar":
@@ -2423,17 +2445,25 @@ async function registerAndSaveFlow(
  * has nowhere to land a copy: `501`, never the package-less write it used to
  * make.
  *
- * Ordering: the pair is ensured before the copy is registered and saved, so a
- * save the store then refuses leaves the pair in place. That is the pair's
- * ordinary state — ensure is idempotent and an empty pair is a valid one —
- * and the next clone reuses it.
+ * Ordering [#29016] — a refused clone installs nothing it can avoid. Every
+ * judgement that needs no pair (the 501 above, the omitted-`package` 400 for a
+ * source no package ships, the explicit target's rule) is made HERE, before
+ * anything is registered. The pair itself is ensured only by the returned
+ * `land`, which {@link registerAndSaveFlow} calls after the engine has
+ * accepted the copy: the engine's registration is the one validation of a
+ * flow definition (strict parse — the name pattern among it — cycles, node
+ * config keys, expressions), so a copy it refuses is refused before any pair
+ * exists, with no second copy of that check here. A refusal that can only
+ * come later — the ensured pair judged not writable, or the save refused —
+ * leaves the pair in place: that is the pair's ordinary state (ensure is
+ * idempotent and an empty pair is a valid one) and the next clone reuses it.
  */
 async function resolveCloneTarget(
     deps: DomainHandlerDeps,
     context: HttpProtocolContext,
     sourceName: string,
     requested: string | undefined,
-): Promise<{ packageId: string } | { refused: HttpDispatcherResult }> {
+): Promise<{ land: () => Promise<CloneLanding> } | { refused: HttpDispatcherResult }> {
     const protocol: Partial<Pick<ObjectStackProtocolImplementation,
         'ensureCustomizationPackage' | 'packagedArtifactOwner' | 'saveMetaItem'>> | undefined =
         await deps.resolveServiceOrLoud(context, 'protocol');
@@ -2453,30 +2483,38 @@ async function resolveCloneTarget(
     }
     const subject = `flow '${sourceName}'`;
     const owner = protocol.packagedArtifactOwner({ type: FLOW_METADATA_TYPE, name: sourceName });
-    let target: string;
+    const ensure = protocol.ensureCustomizationPackage;
+    const judge = async (target: string): Promise<CloneLanding> => {
+        const refusal = newSimilarTargetRefusal(await deps.getObjectQL(context), {
+            target,
+            subject,
+            ...(owner !== undefined ? { sourcePackageId: owner } : {}),
+        });
+        return refusal ? { refused: newSimilarTargetRefusalAnswer(deps, refusal) } : { packageId: target };
+    };
     if (requested !== undefined) {
-        target = requested;
-    } else {
-        if (owner === undefined) {
-            throw validationFailure(
-                `Flow '${sourceName}' is not shipped by a package, so it has no paired customization package to `
-                + 'land a copy in (ADR-0146 D3): name the package the copy lands in with `package`.',
-                [{ field: 'package', code: 'required', message: 'the source has no paired customization package' }],
-            );
-        }
-        try {
-            target = (await protocol.ensureCustomizationPackage({ basePackageId: owner })).packageId;
-        } catch (e) {
-            return { refused: { handled: true, response: deps.errorFromThrown(e) } };
-        }
+        const landing = await judge(requested);
+        if ('refused' in landing) return landing;
+        return { land: async () => landing };
     }
-    const refusal = newSimilarTargetRefusal(await deps.getObjectQL(context), {
-        target,
-        subject,
-        ...(owner !== undefined ? { sourcePackageId: owner } : {}),
-    });
-    if (refusal) return { refused: newSimilarTargetRefusalAnswer(deps, refusal) };
-    return { packageId: target };
+    if (owner === undefined) {
+        throw validationFailure(
+            `Flow '${sourceName}' is not shipped by a package, so it has no paired customization package to `
+            + 'land a copy in (ADR-0146 D3): name the package the copy lands in with `package`.',
+            [{ field: 'package', code: 'required', message: 'the source has no paired customization package' }],
+        );
+    }
+    return {
+        land: async () => {
+            let pair: string;
+            try {
+                pair = (await ensure.call(protocol, { basePackageId: owner })).packageId;
+            } catch (e) {
+                return { refused: { handled: true, response: deps.errorFromThrown(e) } };
+            }
+            return judge(pair);
+        },
+    };
 }
 
 /** The engine methods {@link unregisterAndDeleteFlow} drives. */
@@ -3761,9 +3799,13 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 }
 
                 // [#28149, ADR-0146 D3/D4] WHERE the copy lands — never without
-                // a package (ADR-0070 D5/D6). Resolved after every refusal above
+                // a package (ADR-0070 D5/D6). Judged after every refusal above
                 // and before anything is registered, so a refused target leaves
-                // no copy behind (see `resolveCloneTarget`).
+                // no copy behind; the default pair is ENSURED only once the
+                // engine has accepted the copy (`target.land`, asked by
+                // `registerAndSaveFlow`), so a copy the engine refuses — an
+                // illegal name among it — installs no pair [#29016] (see
+                // `resolveCloneTarget`).
                 const target = await resolveCloneTarget(deps, context, name, requestedPackage);
                 if ('refused' in target) return target.refused;
 
@@ -3793,7 +3835,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // deployment can no longer register. The target name is new (the
                 // collision probe above), so a save that fails withdraws it.
                 const written = await registerAndSaveFlow(
-                    deps, context, automationService as FlowRegistrationService, targetName, clone, 'clone', target.packageId,
+                    deps, context, automationService as FlowRegistrationService, targetName, clone, 'clone', target.land,
                 );
                 if ('refused' in written) return written.refused;
                 // ⛔ NO ANCESTRY on the way out either (ADR-0126 amendment
@@ -3812,7 +3854,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                 // came from, so it records no lineage.
                 return {
                     handled: true,
-                    response: deps.success({ flow: servedFlowDefinition(clone), packageId: target.packageId, notice: FLOW_CLONE_NOTICE }),
+                    response: deps.success({ flow: servedFlowDefinition(clone), packageId: written.packageId, notice: FLOW_CLONE_NOTICE }),
                 };
             }
         }

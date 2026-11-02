@@ -2997,7 +2997,9 @@ export class ActionRunner {
    * fragment.
    *
    * `ctx.origin`, `ctx.user.*`, `ctx.org.*`, `ctx.recordId` are surfaced
-   * implicitly from the runner's ActionContext + window, and
+   * implicitly from the runner's ActionContext + window; a dispatch that
+   * carries a row binds `ctx.record` / `ctx.recordId` to that row (see
+   * `buildInterpolationContext`), and
    * `ctx.selection.ids` / `ctx.selection.count` reflect the grid's current
    * checkbox selection (`context.selectedRecords`) — `${ctx.selection.ids}`
    * comma-joins the ids via the standard `String(array)` behaviour, so a
@@ -3059,7 +3061,7 @@ export class ActionRunner {
     // (`composeSuccessMessage`, until objectstack#27948's step 2 retires it):
     // `result` only, because that is the one scope the contract declares for the
     // copy, and no encoding, because a toast is text.
-    const scopes: Record<string, unknown> = { param: params, ctx: this.buildInterpolationContext() };
+    const scopes: Record<string, unknown> = { param: params, ctx: this.buildInterpolationContext(action) };
     if (resultScope !== undefined) scopes.result = resultScope;
     return substituteScopeTokens(target, scopes, encodeURIComponent);
   }
@@ -3068,8 +3070,19 @@ export class ActionRunner {
    * Assemble the `ctx` namespace exposed to target interpolation.
    * Built-in keys: origin, user, org, recordId. Anything the consumer
    * placed under context.ctx is merged on top.
+   *
+   * The record is the one the dispatch runs against, the rule
+   * `templateEvaluatorFor` applies to copy templates (objectui#12967). A row
+   * surface (a list view's row menu, a related list's rows) stashes the clicked
+   * row under `params._rowRecord` and fires through a runner whose context
+   * names the page, not the row. So when the dispatch carries a row,
+   * `ctx.record` is that row and `ctx.recordId` its `id`, over both the
+   * runner's own record and the `ctx` mirror: a related-list row on a record
+   * page is the child, not the page's record. `ctx.selection` is untouched:
+   * it stays the grid's checkbox selection, which a row dispatch does not
+   * change.
    */
-  private buildInterpolationContext(): Record<string, unknown> {
+  private buildInterpolationContext(action: ActionDef): Record<string, unknown> {
     const ctx: Record<string, unknown> = {
       origin: typeof window !== 'undefined' ? window.location.origin : '',
       // Backend API origin (typically `import.meta.env.VITE_SERVER_URL`
@@ -3101,6 +3114,11 @@ export class ActionRunner {
     };
     if (this.context.ctx && typeof this.context.ctx === 'object') {
       Object.assign(ctx, this.context.ctx);
+    }
+    const row = dispatchRow(action);
+    if (row) {
+      ctx.record = row;
+      ctx.recordId = row.id;
     }
     return ctx;
   }

@@ -5,6 +5,15 @@
  * settings registry as this user may read it, so no entry is hand-kept here.
  * The bare `/system` URL also lands here: the console host forwards it onto
  * this route (`SystemLandingRedirect`, objectui#3743).
+ *
+ * An empty list has two readers. The server lists only the manifests the
+ * caller may read, and a manifest that declares no `readPermission` reads at
+ * {@link SETTINGS_DEFAULT_READ_CAPABILITY}, so a caller without it is shown
+ * none of them: that reader is told an administrator manages the settings. A
+ * caller who holds it and still gets none is told none are installed. The
+ * capability answer is the one `MePermissionsProvider` already holds
+ * (`/auth/me/permissions`), so no request is added; an unreported answer
+ * fails open, as every `hasCapabilities` gate does, onto the second message.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -18,13 +27,26 @@ import {
   CardDescription,
   Badge,
   Skeleton,
+  Empty,
+  EmptyTitle,
+  EmptyDescription,
   getLazyIcon,
 } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { usePermissions } from '@object-ui/permissions';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { listSettingsManifests } from './api';
 import { resolveLabel, type SettingsManifest } from './types';
 import { useSettingsLabel } from './useSettingsLabel';
+
+/**
+ * The capability a settings manifest is read at when it declares no
+ * `readPermission`: the `SettingsManifestSchema` default in
+ * `@objectstack/spec/system`, which the settings service applies when it
+ * filters `GET /api/settings`. Its test parses a manifest through that schema,
+ * so the two cannot drift apart unseen.
+ */
+export const SETTINGS_DEFAULT_READ_CAPABILITY = 'setup.access';
 
 /**
  * One manifest card. Extracted so it can resolve the manifest's own
@@ -69,6 +91,8 @@ function SettingCard({ m, onOpen }: { m: SettingsManifest; onOpen: () => void })
 export function SettingsHub() {
   const navigate = useNavigate();
   const { t } = useObjectTranslation();
+  const { hasCapabilities } = usePermissions();
+  const mayReadSettings = hasCapabilities([SETTINGS_DEFAULT_READ_CAPABILITY]);
   const [manifests, setManifests] = useState<SettingsManifest[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,8 +143,13 @@ export function SettingsHub() {
             ))}
           </div>
         </div>
+      ) : manifests.length === 0 && !mayReadSettings ? (
+        <Empty data-testid="settings-hub-admin-managed">
+          <EmptyTitle>{t('console.settingsHub.adminManaged')}</EmptyTitle>
+          <EmptyDescription>{t('console.settingsHub.adminManagedDescription')}</EmptyDescription>
+        </Empty>
       ) : manifests.length === 0 ? (
-        <Card>
+        <Card data-testid="settings-hub-empty">
           <CardContent className="py-12 text-center text-sm text-muted-foreground">
             {t('console.settingsHub.empty')}
           </CardContent>

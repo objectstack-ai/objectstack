@@ -1,0 +1,218 @@
+/**
+ * ObjectUI
+ * Copyright (c) 2024-present ObjectStack Inc.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+/**
+ * The native shell bridge: `window.ObjectStackNative`.
+ *
+ * The ObjectStack mobile app (objectstack-ai/mobile 2.x) is a native shell that
+ * hosts this Console in a WebView and injects the global below. Its presence is
+ * the one signal that the Console runs inside the shell. The contract is owned
+ * by the mobile repository (`docs/HYBRID-SHELL.md`, "Native bridge"); the type
+ * here mirrors exactly the members that section declares, nothing more.
+ *
+ * Everything in this module reads the global at call time, never once at
+ * module load: on Android the shell can inject it after the page's first
+ * scripts have run.
+ */
+
+/** The global name the shell injects. */
+export const NATIVE_HOST_GLOBAL = 'ObjectStackNative';
+
+/**
+ * The window event the shell dispatches when it opens a Console route without
+ * reloading the page (a notification tap, an app link, a bridge `navigate`).
+ * It is cancelable; `detail.route` is a Console route. The shell falls back to
+ * a full page load when no listener calls `preventDefault()`.
+ */
+export const NATIVE_NAVIGATE_EVENT = 'objectstack-native:navigate';
+
+/** Haptic feedback kinds the shell accepts. */
+export type NativeHapticKind =
+  | 'light'
+  | 'medium'
+  | 'heavy'
+  | 'selection'
+  | 'success'
+  | 'warning'
+  | 'error';
+
+/** The push token `getPushToken()` resolves to. */
+export interface NativePushToken {
+  token: string;
+  vendor: 'apns' | 'fcm';
+}
+
+/** Safe-area insets in CSS pixels. Also published as `--os-native-safe-top|bottom|left|right`. */
+export interface NativeSafeArea {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+}
+
+/** The callable bridge methods. Each is announced as a capability of the same name. */
+export type NativeHostMethod = 'getPushToken' | 'haptic' | 'openExternal' | 'navigate' | 'resetServer';
+
+/** `window.ObjectStackNative`, as the shell's bridge contract declares it. */
+export interface ObjectStackNative {
+  /** Bridge protocol version; bumps only on a breaking change. */
+  readonly version: number;
+  readonly platform: 'ios' | 'android';
+  readonly appVersion: string;
+  /** Feature-detect with `has()`. */
+  readonly capabilities: readonly string[];
+  readonly safeArea: NativeSafeArea;
+  has(capability: string): boolean;
+
+  getPushToken(): Promise<NativePushToken | null>;
+  haptic(kind: NativeHapticKind): Promise<null>;
+  /** http(s), mailto, tel, sms. */
+  openExternal(url: string): Promise<null>;
+  /** A Console route; the shell's route ownership applies. */
+  navigate(route: string): Promise<null>;
+  /** Forget the configured server and return to the shell's server picker. */
+  resetServer(): Promise<null>;
+
+  /** Event: the page is interactive (the shell lifts its loading cover). */
+  ready(): void;
+  /** Event: the SPA route changed. */
+  routeChanged(route: string): void;
+}
+
+/**
+ * What every typed call wrapper resolves to. A wrapper never throws and never
+ * rejects:
+ *
+ * - `unavailable` — no shell, or the shell does not announce the capability,
+ *   or the bridge has no such method. The caller takes its web path.
+ * - `ok` — the shell answered; `value` is the method's result.
+ * - `failed` — the shell refused or failed the call. `code` is the shell's
+ *   error code (`unknown_method`, `bad_args`, `failed`) when it sent one.
+ */
+export type NativeCallResult<T> =
+  | { status: 'unavailable' }
+  | { status: 'ok'; value: T }
+  | { status: 'failed'; code: string | undefined; message: string };
+
+type NativeWindow = Window & { [NATIVE_HOST_GLOBAL]?: unknown };
+
+/**
+ * The bridge when the shell has injected it, otherwise `null`. Reads the
+ * global on every call, so a bridge injected after the first render is seen
+ * the next time anyone asks.
+ */
+export function getNativeHost(): ObjectStackNative | null {
+  if (typeof window === 'undefined') return null;
+  const host = (window as NativeWindow)[NATIVE_HOST_GLOBAL];
+  return host !== null && typeof host === 'object' ? (host as ObjectStackNative) : null;
+}
+
+/** Whether the shell announces `capability` and the bridge carries the method. */
+function callable(host: ObjectStackNative | null, method: NativeHostMethod): host is ObjectStackNative {
+  if (!host || typeof host.has !== 'function' || typeof host[method] !== 'function') return false;
+  try {
+    return host.has(method) === true;
+  } catch {
+    return false;
+  }
+}
+
+async function callNative<T>(
+  method: NativeHostMethod,
+  invoke: (host: ObjectStackNative) => Promise<T>,
+): Promise<NativeCallResult<T>> {
+  const host = getNativeHost();
+  if (!callable(host, method)) return { status: 'unavailable' };
+  try {
+    return { status: 'ok', value: await invoke(host) };
+  } catch (error) {
+    const code = (error as { code?: unknown } | null)?.code;
+    return {
+      status: 'failed',
+      code: typeof code === 'string' ? code : undefined,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/** The device's push token, or `ok` with `null` when the user has not granted push. */
+export function nativeGetPushToken(): Promise<NativeCallResult<NativePushToken | null>> {
+  return callNative('getPushToken', (host) => host.getPushToken());
+}
+
+/** Haptic feedback. */
+export function nativeHaptic(kind: NativeHapticKind): Promise<NativeCallResult<null>> {
+  return callNative('haptic', (host) => host.haptic(kind));
+}
+
+/** Open a URL outside the Console (in-app browser or the OS). */
+export function nativeOpenExternal(url: string): Promise<NativeCallResult<null>> {
+  return callNative('openExternal', (host) => host.openExternal(url));
+}
+
+/** Ask the shell to open a Console route; the shell decides whether a native screen owns it. */
+export function nativeNavigate(route: string): Promise<NativeCallResult<null>> {
+  return callNative('navigate', (host) => host.navigate(route));
+}
+
+/** Forget the configured server and return to the shell's server picker. */
+export function nativeResetServer(): Promise<NativeCallResult<null>> {
+  return callNative('resetServer', (host) => host.resetServer());
+}
+
+// ── Events ──────────────────────────────────────────────────────────────────
+
+let readyPosted = false;
+let lastPostedRoute: string | null = null;
+
+/**
+ * Post `ready()` to the shell. Posts at most once per page load; later calls
+ * are no-ops. Returns whether this call posted it.
+ */
+export function postNativeReady(host: ObjectStackNative | null = getNativeHost()): boolean {
+  if (readyPosted || !host || typeof host.ready !== 'function') return false;
+  readyPosted = true;
+  host.ready();
+  return true;
+}
+
+/**
+ * Post `routeChanged(route)` to the shell. A route equal to the one posted last
+ * is not posted again, so one navigation reaches the shell once. Returns
+ * whether this call posted it.
+ */
+export function postNativeRouteChanged(
+  route: string,
+  host: ObjectStackNative | null = getNativeHost(),
+): boolean {
+  if (!host || typeof host.routeChanged !== 'function' || route === lastPostedRoute) return false;
+  lastPostedRoute = route;
+  host.routeChanged(route);
+  return true;
+}
+
+/**
+ * Whether `route` is a path inside this app: a string that starts with exactly
+ * one `/`, with no backslash and no control character. A scheme (`https:`), a
+ * protocol-relative `//host` and `/\host` (which URL parsing turns into
+ * `//host`) are refused.
+ */
+export function isInAppRoute(route: unknown): route is string {
+  if (typeof route !== 'string' || !route.startsWith('/') || route.startsWith('//')) return false;
+  for (let i = 0; i < route.length; i += 1) {
+    const c = route.charCodeAt(i);
+    if (c < 0x20 || c === 0x7f || c === 0x5c) return false;
+  }
+  return true;
+}
+
+/** Test seam: forget the once-per-page-load event state. Not exported from the package entry. */
+export function resetNativeHostEventsForTests(): void {
+  readyPosted = false;
+  lastPostedRoute = null;
+}
