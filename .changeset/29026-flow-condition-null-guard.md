@@ -7,6 +7,8 @@ feat(lint): the publish-time null-guard gate judges a record-triggered flow's st
 Clause-②: no
 Metadata-protocol: narrowed
 
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type of the package's public surface is retired: the publish-time null-guard gate now judges three predicate slots of a record-triggered flow that it already judges on validation rules and hook conditions. A flow it now refuses is fixed in the flow's own expression (add the `!= null` test the message names), so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+
 `os build`, `os validate`, `os lint` and the runtime publish gate now refuse a record-triggered flow (start `triggerType: 'record-…'`) whose start condition, edge `condition` or `decision` branch `expression` applies an ordering (`< <= > >=`) or arithmetic (`+ - * / %`) operator to a nullable declared field of the trigger object with no `!= null` / `== null` / `!isBlank()` test in front of it. The run's `record` and `previous` carry every declared field, nulls included, so such a comparison faults with `no such overload` on the first record where the field is empty, and the run fails there (the write that fired it still lands).
 
 - **Who moves.** A flow condition such as `budget > 200000` on an optional `budget`. Fix: `budget != null && budget > 200000`, or put the `!= null` test in the flow's start condition, which gates every run, so every edge and branch after it may compare freely. `has(record.budget)` is not a guard: the key is always present.
