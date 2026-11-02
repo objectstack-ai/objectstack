@@ -197,6 +197,18 @@ describe('an organization administrator gets no back door (no admin management i
     },
   );
 
+  it('RECORDED BOUNDARY: the platform administrator\'s bare wildcard still reads a member\'s view', async () => {
+    // `admin_full_access` keeps its bare `'*'` super-user wildcard by design
+    // (the admin rescue path; its objects are spec's
+    // ADMIN_FULL_ACCESS_CAPABILITIES, which this card does not touch), as it
+    // does on `sys_user_preference`. Closing it is an open question on the
+    // card; this pin makes the answer visible when it moves.
+    const engine = await rig();
+    const alices = await save(engine, ALICE, 'Alice only');
+    const row = await engine.findOne(OBJ, { where: { id: alices.id }, ...as(CAROL, ['admin_full_access']) });
+    expect(row?.label).toBe('Alice only');
+  });
+
   it('CONTROL: the organization administrator keeps their own views', async () => {
     const engine = await rig();
     await save(engine, CAROL, 'Carol own');
