@@ -285,6 +285,11 @@ const CASE_SETS = [
     marker: 'READABLE_IDS_CASES',
     what: 'the composed ReadableIds leaf: compiled as a tenant-walled semi-join, or refused loudly — ADR-0139 D3',
   },
+  {
+    file: 'unique-null-distinct-conformance.ts',
+    marker: 'UNIQUE_NULL_DISTINCT_CASES',
+    what: 'NULL-distinct `unique`: a NULL in any key part exempts the row, `\'\'` and equal values collide — #29377',
+  },
 ];
 
 // ── The ledger ──────────────────────────────────────────────────────────────
@@ -580,12 +585,80 @@ const CASE_SETS = [
 // tracked). A ledger row would have been the wrong instrument — the case-set
 // simply does not ask that question yet, and the case-set file says so by name.
 
-// The intended steady state, reached on 2026-08-11: every (driver x case-set)
-// cell is covered by an imported case-set, and nothing is deferred. Keep it
-// that way by writing the suite, not by adding a row — a DEBT entry is a
-// MEASURED, tracked exception the maintainer has agreed to, never the cheaper
-// half of "enroll the driver".
-const LEDGER = [];
+// ## UNIQUE_NULL_DISTINCT: a twelfth column that arrived with SIX rows (#29377)
+//
+// The FILTER_TEXT shape again, on purpose: the case-set is the CONTRACT half,
+// landed ahead of every driver's suite, because the card that asked for it
+// (#29377, filed from #29278's contract review) puts each driver's adoption in
+// the drivers' lane, one PR per driver. So every cell of the column opens as a
+// DEBT row, and one row per driver is what makes "ahead of" a counted fact.
+//
+// ⛔ These rows are not a prediction that the drivers fail. Measured for the
+// case-set on `origin/main` @ `f95d0dba`: `driver-memory` and `driver-sql`
+// (better-sqlite3) answered all ten cases as the table says; `driver-mongodb`
+// answered the six it was run on against a real mongod in PR #29339 the same
+// way. What is missing in every row is the SUITE — nothing under the driver's
+// `src/` drives the shared table, so nothing would notice a regression. A row
+// clears the way every row before it did: the driver's PR adds a suite that
+// imports UNIQUE_NULL_DISTINCT_CASES and deletes its row here, in one change
+// (RECONCILED reds a row kept beside a suite).
+//
+// The intended steady state is still the empty ledger reached on 2026-08-11:
+// every (driver x case-set) cell covered by an imported case-set. Keep it that
+// way by writing the suite, not by adding a row — a DEBT entry is a MEASURED,
+// tracked exception the maintainer has agreed to, never the cheaper half of
+// "enroll the driver".
+const UNIQUE_NULL_DISTINCT_DEBT_WHY = 'the case-set landed ahead of its suites (#29377); adoption is this '
+  + "driver's own lane PR, which adds the suite and deletes this row";
+const LEDGER = [
+  {
+    driver: 'driver-memory',
+    marker: 'UNIQUE_NULL_DISTINCT_CASES',
+    kind: 'DEBT',
+    why: `${UNIQUE_NULL_DISTINCT_DEBT_WHY}. Measured: 10 of 10 cases agree.`,
+    issue: '#29377',
+  },
+  {
+    driver: 'driver-mongodb',
+    marker: 'UNIQUE_NULL_DISTINCT_CASES',
+    kind: 'DEBT',
+    why: `${UNIQUE_NULL_DISTINCT_DEBT_WHY}. Six cases agree on a real mongod (PR #29339); `
+      + 'its suite needs a server-free half, as its other conformance suites have (#5517).',
+    issue: '#29377',
+  },
+  {
+    driver: 'driver-odata',
+    marker: 'UNIQUE_NULL_DISTINCT_CASES',
+    kind: 'DEBT',
+    why: `${UNIQUE_NULL_DISTINCT_DEBT_WHY}. Not measured: \`syncSchema\` is a no-op here, so the `
+      + 'remote service owns the constraint and the suite decides what this driver is held to.',
+    issue: '#29377',
+  },
+  {
+    driver: 'driver-sql',
+    marker: 'UNIQUE_NULL_DISTINCT_CASES',
+    kind: 'DEBT',
+    why: `${UNIQUE_NULL_DISTINCT_DEBT_WHY}. Measured on better-sqlite3: 10 of 10 cases agree; `
+      + 'the suite owes the dialect matrix (MATRIXED).',
+    issue: '#29377',
+  },
+  {
+    driver: 'driver-sqlite-wasm',
+    marker: 'UNIQUE_NULL_DISTINCT_CASES',
+    kind: 'DEBT',
+    why: `${UNIQUE_NULL_DISTINCT_DEBT_WHY}. Not measured: it inherits SqlDriver's DDL, the assumption `
+      + 'its own suite exists to test.',
+    issue: '#29377',
+  },
+  {
+    driver: 'driver-turso',
+    marker: 'UNIQUE_NULL_DISTINCT_CASES',
+    kind: 'DEBT',
+    why: `${UNIQUE_NULL_DISTINCT_DEBT_WHY}. Not measured: two transports, so two suites, as its `
+      + 'other cells have.',
+    issue: '#29377',
+  },
+];
 
 
 // ── The DIALECT axis (ADR-0053 D-A3) ────────────────────────────────────────
