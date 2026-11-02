@@ -66,8 +66,8 @@
  *     `./connector-url-credentials.ts`, which the write door's refinement
  *     runs too: an authored URL holding one is refused, so only a row stored
  *     before that refusal can carry one to this read.
- *  6. **An array under `providerConfig` that holds such a URL, WHOLE**, and
- *     **a key under `providerConfig` whose own name carries a dot that holds
+ *  6. **An array under `providerConfig` or `auth` that holds such a URL,
+ *     WHOLE**, and **a key under them whose own name carries a dot that holds
  *     such a URL at any depth, WHOLE.** The carry-forward cannot address an
  *     array element by position, nor a dotted key segment by segment (its
  *     dotted name is indistinguishable from a nested path once `redactedKeys`
