@@ -90,6 +90,7 @@ export interface AuthoringGateHost {
     runAuthoringGate: ObjectStackProtocolImplementation['runAuthoringGate'];
     tenancyPostureInForce: ObjectStackProtocolImplementation['tenancyPostureInForce'];
     unknownDatasourceSaveRefusal: ObjectStackProtocolImplementation['unknownDatasourceSaveRefusal'];
+    unknownGrantObjectSaveRefusal: ObjectStackProtocolImplementation['unknownGrantObjectSaveRefusal'];
     seedExternalIdSaveRefusal: ObjectStackProtocolImplementation['seedExternalIdSaveRefusal'];
 }
 
@@ -124,7 +125,7 @@ export function restoredBodyWriter(
 
 /** The body of `ObjectStackProtocolImplementation#refuseRestoredBodyTheSaveDoorRefuses`; the method's docblock there is its contract. */
 export async function refuseRestoredBodyTheSaveDoorRefuses(
-    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'seedExternalIdSaveRefusal' | 'unknownDatasourceSaveRefusal'>,
+    this: Pick<AuthoringGateHost, 'anonymousElevatedFlowRefusal' | 'assertRuntimeAuthoringRules' | 'authoringChannel' | 'credentialChannelFor' | 'defaultRecordPageSaveRefusal' | 'externalBindingSaveRefusal' | 'getOverlayRepo' | 'permissionSetNameCollisionRefusal' | 'runAuthoringGate' | 'seedExternalIdSaveRefusal' | 'unknownDatasourceSaveRefusal' | 'unknownGrantObjectSaveRefusal'>,
     type: string,
     name: string,
     body: unknown,
@@ -141,6 +142,8 @@ export async function refuseRestoredBodyTheSaveDoorRefuses(
     if (bindingRefusal) throw bindingRefusal;
     const datasourceRefusal = await this.unknownDatasourceSaveRefusal(type, body, name);
     if (datasourceRefusal) throw datasourceRefusal;
+    const grantRefusal = await this.unknownGrantObjectSaveRefusal(type, body, name);
+    if (grantRefusal) throw grantRefusal;
     const seedKeyRefusal = await this.seedExternalIdSaveRefusal(type, body, name);
     if (seedKeyRefusal) throw seedKeyRefusal;
     const repo = this.getOverlayRepo();
