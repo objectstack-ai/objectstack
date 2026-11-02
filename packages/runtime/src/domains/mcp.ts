@@ -888,6 +888,9 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
                 // an API key) is LISTED, marked with the refusal `run_action`
                 // would answer — the same table, the same sentence — so an
                 // agent can explain the gap instead of discovering it.
+                // [#28943] …and one the target's per-object gate refuses for
+                // that credential (a `sys_api_key` write under an API key),
+                // marked with that gate's own code and sentence.
                 const refusal = actionExec.apiForwardCredentialRefusal(context, action);
                 out.push({
                     ...actionExec.summarizeAction(deps, action, obj, objectName, flow ?? undefined),
