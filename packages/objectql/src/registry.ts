@@ -7529,6 +7529,8 @@ export class SchemaRegistry {
    * the launch could only fail (#28117 ruling A: disabled = hidden, and refused
    * on the data plane):
    *
+   *  - an action bound by `objectName` to an object of a disabled package: the
+   *    object's own read is refused, so the action is not listed beside it;
    *  - a `type: 'flow'` action whose `target` is a flow only disabled packages
    *    ship ({@link isFlowOfDisabledPackage}): its launch answers "Flow not
    *    found";
@@ -7543,9 +7545,10 @@ export class SchemaRegistry {
    */
   isActionWithheldByDisabledPackage(action: unknown): boolean {
     if (!action || typeof action !== 'object') return false;
-    const a = action as { _packageId?: string; type?: unknown; target?: unknown; params?: unknown };
+    const a = action as { _packageId?: string; objectName?: unknown; type?: unknown; target?: unknown; params?: unknown };
     if (this.isPackageDisabled(a._packageId)) return true;
     if (!this.hasDisabledPackage()) return false;
+    if (typeof a.objectName === 'string' && a.objectName !== '' && this.isObjectPackageDisabled(a.objectName)) return true;
     if (a.type === 'flow' && typeof a.target === 'string' && this.isFlowOfDisabledPackage(a.target)) return true;
     if (Array.isArray(a.params)) {
       for (const param of a.params) {

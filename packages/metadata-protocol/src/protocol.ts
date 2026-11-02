@@ -746,9 +746,9 @@ export function isItemOfDisabledPackage(registry: any, item: unknown): boolean {
  * [#28877] Whether a disable withholds the `action` item `item` from the SERVED
  * reads: the registry's `isActionWithheldByDisabledPackage`, the ONE predicate
  * its served object fold (#24400's bound-action attach) asks — its own package
- * disabled, or it launches into one (a `type: 'flow'` target only disabled
- * packages ship, or a param whose `objectOverride` object belongs to a disabled
- * package). Asked by the effective served list ({@link
+ * disabled, its `objectName` object in a disabled package, or it launches into
+ * one (a `type: 'flow'` target only disabled packages ship, or a param whose
+ * `objectOverride` object belongs to a disabled package). Asked by the effective served list ({@link
  * ObjectStackProtocolImplementation.getMetaItems}) and the served by-name read
  * of an `action`, so `GET /meta/action` and the console's object read withhold
  * the same actions. The execution face and the per-package layer (the package

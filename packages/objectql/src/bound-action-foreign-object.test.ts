@@ -529,7 +529,9 @@ describe('a bound action saved at runtime through the metadata door reaches its 
  * `GET /meta/action`, list and by name): a `type: 'flow'` action whose flow only
  * the disabled package ships (its launch answers "Flow not found"), and an
  * action whose param backs onto an `objectOverride` object of the disabled
- * package (its dialog cannot draw the param). #28117 ruling A: disabled is
+ * package (its dialog cannot draw the param). `GET /meta/action` also leaves
+ * out an enabled package's action bound by `objectName` to the disabled
+ * package's object, whose own read is refused. #28117 ruling A: disabled is
  * hidden, and refused on the data plane.
  */
 const MODULE = {
@@ -571,12 +573,14 @@ const LAUNCHER = {
         },
         // Control: a URL action that names the module's object only in its text.
         { name: 'bound_url_mention', label: 'Docs', objectName: 'mk_lead', type: 'url', target: 'https://example.com/mk_member', locations: ['record_header'] },
+        // Withheld from GET /meta/action: bound to the module's object, whose own read is refused.
+        { name: 'bound_to_member', label: 'Member', objectName: 'mk_member', type: 'url', target: 'https://example.com/m', locations: ['record_header'] },
     ],
 };
 
 const SERVED_BEFORE = ['bound_app_flow', 'bound_enroll', 'bound_field_param', 'bound_override', 'bound_url_mention', 'inline_enroll'];
 const SERVED_DISABLED = ['bound_app_flow', 'bound_field_param', 'bound_url_mention'];
-const LISTED_BEFORE = ['bound_app_flow', 'bound_enroll', 'bound_field_param', 'bound_override', 'bound_url_mention'];
+const LISTED_BEFORE = ['bound_app_flow', 'bound_enroll', 'bound_field_param', 'bound_override', 'bound_to_member', 'bound_url_mention'];
 
 const sorted = (names: string[]) => [...names].sort();
 const listedActionNames = async (protocol: any, read: 'getMetaItems' | 'getMetaItemsForExecution' = 'getMetaItems'): Promise<string[]> => {
@@ -604,6 +608,7 @@ describe('[#28877] an action that launches into a disabled package is withheld w
         // By name, as the list: absent, the answer a name with nothing behind it gets.
         expect(((await protocol.getMetaItem({ type: 'action', name: 'bound_enroll' } as any)) as any)?.item).toBeUndefined();
         expect(((await protocol.getMetaItem({ type: 'action', name: 'bound_override' } as any)) as any)?.item).toBeUndefined();
+        expect(((await protocol.getMetaItem({ type: 'action', name: 'bound_to_member' } as any)) as any)?.item).toBeUndefined();
         expect(((await protocol.getMetaItem({ type: 'action', name: 'bound_app_flow' } as any)) as any)?.item).toBeDefined();
     });
 
