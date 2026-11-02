@@ -245,12 +245,12 @@ export function packagelessOverlayWriteRefusal(
     const shipped = `ships in '${closed.base}'`;
     const pair = `'${closed.pair}' (?package=${closed.pair})`;
     const declared = `overrides: { package: '${closed.base}', basedOn }`;
-    const rule = 'A write naming no package onto a packaged item is closed (ADR-0146 D11); '
-        + 'a package-less customization stored before it is still served until '
-        + `\`os migrate packageless-overlays\` moves it into '${closed.pair}'.`;
+    const rule = 'A write naming no package is closed where `os migrate packageless-overlays` can move its row '
+        + `(ADR-0146 D11); a package-less row stored before it is served until that command moves it into '${closed.pair}'.`;
     const message = operation === 'rollback'
         ? `${item} ${shipped}, and a rollback of its package-less row is closed (ADR-0146 D11): run `
-            + `\`os migrate packageless-overlays\` to move the row into ${pair}, then roll it back there.`
+            + `\`os migrate packageless-overlays\` to move the row into ${pair}; to restore a version from before `
+            + `the move, save that version's body there, declaring ${declared}.`
         : operation === 'delete'
             ? `${item} ${shipped}: remove its customization from ${pair}. ${rule}`
             : `${item} ${shipped}: ${operation === 'publish' ? 'publish' : 'save'} it into ${pair}, declaring ${declared}. ${rule}`;

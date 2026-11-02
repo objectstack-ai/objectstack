@@ -480,6 +480,28 @@ describe('[#28576] after the close: a package-less write onto a packaged item is
         expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
     });
 
+    it('the rollback refusal\'s remedy holds: after the move, a version from before it is restored by saving its body into the pair, declaring the override', async () => {
+        const { protocol, rows, rowOf } = await boot();
+        await legacyRowWithHistory(protocol);
+        const refused = await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }));
+        expectClosed(refused);
+        expect(refused!.message).toContain("save that version's body there");
+        expect((await migrate(protocol)).outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+        // A rollback to that version in the pair restores an undeclared body,
+        // which the override write gate refuses (D2), not the close…
+        const inPair = await refusalOf((protocol as any).rollbackMetaItem({ type: 'view', name: VIEW, toVersion: 1 }));
+        expect(inPair?.message).toContain('declares no override');
+        expect(inPair?.message).not.toContain('os migrate packageless-overlays');
+        // …so the sentence prescribes the save into the pair, which succeeds.
+        await protocol.saveMetaItem({
+            type: 'view', name: VIEW, packageId: PAIR,
+            item: { ...listBody(VIEW, 'showcase_task', UNBOUND_COLUMNS), overrides: { package: BASE, basedOn: '1.2.0' } },
+        } as any);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+        expect(isServedOverrideRowOf(rowOf(VIEW, PAIR) as any, BASE)).toBe(true);
+        expect(columnsOf(await read(protocol))).toEqual(UNBOUND_COLUMNS);
+    });
+
     it('a rollback of the pair\'s own declared row is the pair\'s declared override, never an artifact override (a page)', async () => {
         const { engine, protocol, stores } = await boot();
         engine.registerApp({ id: BASE, name: 'showcase', version: '1.2.0', namespace: 'showcase', pages: [pageBody(PAGE, 'Home')] } as any);

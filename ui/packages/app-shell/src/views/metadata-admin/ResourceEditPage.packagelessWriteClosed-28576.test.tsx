@@ -42,8 +42,8 @@ const doc = (content: string) => ({ name: NAME, label: NAME, content, group: 're
 
 /** The server's sentences, worded as the framework words them; read back verbatim below. */
 const CLOSED =
-  'A write naming no package onto a packaged item is closed (ADR-0146 D11); a package-less customization stored ' +
-  `before it is still served until \`os migrate packageless-overlays\` moves it into '${PAIR}'.`;
+  'A write naming no package is closed where `os migrate packageless-overlays` can move its row (ADR-0146 D11); ' +
+  `a package-less row stored before it is served until that command moves it into '${PAIR}'.`;
 const SAVE_CLOSED =
   `'doc/${NAME}' ships in '${BASE}': save it into '${PAIR}' (?package=${PAIR}), declaring ` +
   `overrides: { package: '${BASE}', basedOn }. ${CLOSED}`;

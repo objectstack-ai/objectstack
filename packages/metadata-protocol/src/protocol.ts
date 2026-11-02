@@ -21575,14 +21575,18 @@ export class ObjectStackProtocolImplementation implements
         //
         // [ADR-0146 D11] …and AHEAD of it, the package-less write onto a
         // packaged item, closed: an authoring save naming no package, of an
-        // item a code package ships, on one of the five overlay types, is
-        // refused naming the base's paired `.custom` and `os migrate
-        // packageless-overlays` ({@link packagelessOverlayWriteRefusal}). Ahead
-        // of the gate so the writer reads that fix, not the gate's "a row
-        // bound to no package carries `overrides`… rename" for the body Setup
-        // sends as it read it. Every other type's packaged item is sealed
-        // further down ({@link refusePackagedBaseOverride}). Registry reads
-        // only: #5706's lock gate stays the first store reader. The
+        // item a code package ships, on one of the five overlay types, whose
+        // row `os migrate packageless-overlays` would move (#28576 ruling 2:
+        // every row it leaves keeps this write), is refused naming the base's
+        // paired `.custom` and the ceremony
+        // ({@link packagelessOverlayWriteRefusal}). Ahead of the gate so the
+        // writer reads that fix, not the gate's "a row bound to no package
+        // carries `overrides`… rename" for the body Setup sends as it read
+        // it. Every other type's packaged item is sealed further down
+        // ({@link refusePackagedBaseOverride}). Registry reads first: the
+        // close's one store read (the item's rows) happens only for a name
+        // one read-only package ships with an ensurable pair, so #5706's lock
+        // gate stays the first store reader of every other name. The
         // server-stated rewrites (`source` set, `package-duplicate`) name the
         // row they rewrite and are not asked.
         //
@@ -29188,11 +29192,11 @@ export class ObjectStackProtocolImplementation implements
         // [ADR-0146 D11] The package-less removal of a packaged item's active
         // row, closed with the package-less write
         // ({@link packagelessOverlayWriteRefusal}): a delete naming no package,
-        // of an item a code package ships, on one of the five overlay types
-        // (Setup's "Reset overlay"). Its customization lives in the base's
-        // paired `.custom`, and `?package=<base>.custom` removes it there. On
-        // every topology, as the save door's is, and ahead of the `_lock`
-        // gate's store read.
+        // of an item a code package ships, on one of the five overlay types,
+        // whose row the ceremony would move (Setup's "Reset overlay"). Its
+        // customization lives in the base's paired `.custom` once moved, and
+        // `?package=<base>.custom` removes it there. On every topology, as
+        // the save door's is, and ahead of the `_lock` gate's store read.
         //
         // ⛔ Not a draft discard: it changes nothing any read serves, and it is
         // how a package-less draft stored before the close is cleared (the
