@@ -135,6 +135,7 @@ function makeDS(opts: {
     getCachedSync: () => undefined,
     // objectstack#29550: no whole view list is ever on the wire here.
     peekInflight: () => undefined,
+    droppedAt: () => 0,
     getStats: () => ({}),
   };
 
@@ -183,7 +184,8 @@ describe('view metadata cache — invalidation names only keys with readers (#37
       fetchImpl.mock.calls.filter(([u]: any[]) => String(u).includes('/meta/view?object=account')).length;
 
     // Nothing held: each call goes to the transport, the one-object read
-    // (objectstack#29550), never the whole list. The answer is not stored.
+    // (objectstack#29550), never the whole list. (This stand-in's `get` always
+    // misses, so the one-object answer is asked each time.)
     await ds.listViews('account');
     await ds.listViews('account');
     expect(objectReads()).toBe(2);
@@ -196,8 +198,10 @@ describe('view metadata cache — invalidation names only keys with readers (#37
     expect(objectReads()).toBe(2);
     expect(getItems).not.toHaveBeenCalled();
 
-    // The one key it consults is the list; no per-object key is read.
-    expect(cacheReads).toEqual([]);
+    // The keys it consults are the list and, while none is held, the
+    // one-object answer's key, which names the list's last invalidation: every
+    // path that drops `list:view` retires it (objectstack#29550).
+    expect(cacheReads).toEqual(['list:view@0?object=account', 'list:view@0?object=account']);
     expect(probed).toEqual(['list:view', 'list:view', 'list:view']);
   });
 
@@ -210,7 +214,9 @@ describe('view metadata cache — invalidation names only keys with readers (#37
 
     await ds.listViewOverrides('account');
 
-    expect(cacheReads).toEqual(['view-overrides:account']);
+    // objectstack#29550: under it, the one-object answer's key, which every
+    // invalidation of `list:view` retires.
+    expect(cacheReads).toEqual(['view-overrides:account', 'list:view@0?object=account']);
   });
 
   it('createView invalidates the per-view key and the override map (#4363)', async () => {

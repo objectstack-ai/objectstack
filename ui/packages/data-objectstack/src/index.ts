@@ -3401,10 +3401,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   // (`loadAppBundle`); a by-name metadata read of an item the active one holds
   // is answered from it (`fetchObjectSchemaFresh`, `installBundledItemReads`).
   private appBundles: AppBundleStore;
-  // objectstack#29550 — the one-object view reads on the wire
-  // (`readObjectViewRows`), by object name: `listViews` and
-  // `listViewOverrides` open one object's route together and share one request.
-  private readonly objectViewReads = new Map<string, { since: number; read: Promise<any[]> }>();
+  // objectstack#29550 — the metadata-cache key each object's one-object view
+  // read was last stored under (`readObjectViewRows`), so a key a later
+  // invalidation retired is dropped rather than left to the LRU.
+  private readonly objectViewKeys = new Map<string, string>();
   private connectionState: ConnectionState = 'disconnected';
   private connectionStateListeners: ConnectionStateListener[] = [];
   private batchProgressListeners: BatchProgressListener[] = [];
@@ -6234,19 +6234,19 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *   (objectstack#29551); a one-object read beside it would be one request
    *   more, not one fewer.
    * - Otherwise the one-object read, which both readers share while it is on
-   *   the wire. Its answer goes through the same rule too: a server that does
-   *   not read `?object=` answers its whole list, and the rule keeps one
-   *   object's rows of it.
+   *   the wire, and whose answer is stored as the whole list's is. Its answer
+   *   goes through the same rule too: a server that does not read `?object=`
+   *   answers its whole list, and the rule keeps one object's rows of it.
    *
    * Neither client spells `?object=` (`client.meta.getItems` takes a package,
    * `MetadataClient`'s list a package and an include), so the request is built
    * here, the way {@link downloadImportTemplate}'s is: this adapter's origin
    * and auth, and the client's locale, because the server translates the list
-   * it serves. The answer is not stored, so the paths that drop the stored list
-   * (listed in {@link VIEW_LIST_KEY}'s doc) need no second key; and each of
-   * them detaches the one-object request in flight, as it detaches the list
-   * request in flight ({@link MetadataCache.invalidatedAt}): a reader asking
-   * after a view write or a switch never joins a request sent before it. A failure
+   * it serves. Its key names the last invalidation of {@link VIEW_LIST_KEY}
+   * ({@link MetadataCache.droppedAt}), so every path that drops the stored
+   * list (listed in {@link VIEW_LIST_KEY}'s doc) drops the stored one-object
+   * answers and detaches the one-object request in flight too: a reader asking
+   * after a view write or a switch asks again. A failure
    * rejects, as the client's read does, carrying the server's `status` and
    * ADR-0112 `code`, so each reader keeps its own failure contract.
    *
@@ -6264,23 +6264,18 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     if (listing) {
       return listing.then((answer) => ObjectStackAdapter.objectBoundViewRows(structuredClone(answer), objectName));
     }
-    // A request sent before the view list was last invalidated (a view
-    // write, an organization, session or locale switch) is detached, as the
-    // whole-list read in flight is: a reader asking after it asks again.
-    const since = this.metadataCache.invalidatedAt(VIEW_LIST_KEY);
-    const joined = this.objectViewReads.get(objectName);
-    let read: Promise<any[]>;
-    if (joined && joined.since === since) {
-      read = joined.read;
-    } else {
-      const entry = { since, read: undefined as unknown as Promise<any[]> };
-      entry.read = this.requestObjectViewRows(objectName).finally(() => {
-        if (this.objectViewReads.get(objectName) === entry) this.objectViewReads.delete(objectName);
-      });
-      this.objectViewReads.set(objectName, entry);
-      read = entry.read;
-    }
-    return read.then((rows) => structuredClone(rows));
+    // The one-object answer is stored, and shared while on the wire, under a
+    // key that names the last invalidation of the view list: every path that
+    // drops the stored list (a view write, an organization, session or locale
+    // switch) moves the key, so neither the stored answer nor a request sent
+    // before it answers a reader asking after it.
+    const key = `${VIEW_LIST_KEY}@${this.metadataCache.droppedAt(VIEW_LIST_KEY)}?object=${objectName}`;
+    const previous = this.objectViewKeys.get(objectName);
+    if (previous !== undefined && previous !== key) this.metadataCache.invalidate(previous);
+    this.objectViewKeys.set(objectName, key);
+    return this.metadataCache
+      .get(key, () => this.requestObjectViewRows(objectName))
+      .then((rows) => structuredClone(rows));
   }
 
   /** The one round trip behind {@link readObjectViewRows}. */

@@ -164,6 +164,25 @@ describe('objectstack#29550 — an object route reads one object\'s views', () =
     ]);
   });
 
+  it.each([
+    ['a view write (invalidateViewKeys)', (ds: any) => ds.invalidateViewKeys('crm_lead', 'crm_lead.all')],
+    ['an organization, session or locale switch (clearCache)', (ds: any) => ds.clearCache()],
+  ])('the one-object answer is stored for the next read, and %s drops it', async (_name, drop) => {
+    const { fetchImpl, requests } = makeServer();
+    const ds = makeAdapter(fetchImpl);
+
+    await ds.listViews('crm_lead');
+    await ds.listViewOverrides('crm_lead');
+    expect(viewReads(requests)).toHaveLength(1);
+
+    drop(ds);
+    await ds.listViews('crm_lead');
+    expect(viewReads(requests).map((r) => r.url)).toEqual([
+      '/api/v1/meta/view?object=crm_lead',
+      '/api/v1/meta/view?object=crm_lead',
+    ]);
+  });
+
   it('CONTROL: with nothing dropped, a read in flight is joined', async () => {
     const { fetchImpl, requests } = makeServer();
     const ds = makeAdapter(fetchImpl);

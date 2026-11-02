@@ -77,7 +77,7 @@ export class MetadataCache {
   /**
    * objectstack#29550 — the last invalidation that reached each key, and the
    * last that reached every key ({@link invalidate} with no key, {@link clear}),
-   * on one counter. See {@link invalidatedAt}.
+   * on one counter. See {@link droppedAt}.
    */
   private invalidations = new Map<string, number>();
   private invalidatedAll = 0;
@@ -319,7 +319,7 @@ export class MetadataCache {
    * and lets no caller join the request once it has changed, so the request
    * is detached exactly when one under `key` would be.
    */
-  invalidatedAt(key: string): number {
+  droppedAt(key: string): number {
     return Math.max(this.invalidations.get(key) ?? 0, this.invalidatedAll);
   }
 
