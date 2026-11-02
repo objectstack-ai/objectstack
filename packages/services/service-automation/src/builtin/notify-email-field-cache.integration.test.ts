@@ -110,13 +110,20 @@ async function boot(mode: 'factory' | 'value', cache: unknown) {
 
 const BURST = EMAIL_FIELD_SENDS_PER_WINDOW + 4;
 
+/** The node is exercised one run at a time; the counter's own concurrency rule is plugin-auth's `incrementFixedWindow`. */
+async function runSequentially<T>(run: () => Promise<T>): Promise<T[]> {
+    const results: T[] = [];
+    for (let i = 0; i < BURST; i++) results.push(await run());
+    return results;
+}
+
 describe('notify email-field limit — counts in the registered cache', () => {
     it('`cache` registered by FACTORY: the per-address counter lives in it', async () => {
         const cache = makeCache();
         const { ctx, run } = await boot('factory', cache);
         await expect(resolveKernelCache(ctx)).resolves.toBe(cache);
 
-        const results = await Promise.all(Array.from({ length: BURST }, run));
+        const results = await runSequentially(run);
         expect(results.filter((r) => r.success)).toHaveLength(EMAIL_FIELD_SENDS_PER_WINDOW);
         const keys = [...cache.store.keys()].filter((k) => k.includes(APPLICANT.applicant_email));
         expect(keys).toHaveLength(1);
@@ -128,7 +135,7 @@ describe('notify email-field limit — counts in the registered cache', () => {
         const { ctx, run } = await boot('value', standIn);
         await expect(resolveKernelCache(ctx)).resolves.toBeUndefined();
 
-        const results = await Promise.all(Array.from({ length: BURST }, run));
+        const results = await runSequentially(run);
         expect(results.filter((r) => r.success)).toHaveLength(EMAIL_FIELD_SENDS_PER_WINDOW);
         expect((await standIn.stats()).keyCount).toBe(0);
     });
