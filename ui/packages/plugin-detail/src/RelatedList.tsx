@@ -31,7 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useAction, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -80,6 +80,9 @@ import {
   resolveAffordance,
   isDeadlineSettled,
   isActionSwitchedOff,
+  ActionRunner,
+  type ActionDef,
+  type ActionResult,
   type FilterNode,
 } from '@object-ui/core';
 import { useSafeFieldLabel } from '@object-ui/react';
@@ -408,6 +411,26 @@ type FieldReadPolicy = ReturnType<typeof usePermissions>;
  * so the field the card reads and the field the request carries cannot drift
  * apart. The value is `ObjectGallery`'s own default, so the cover is unchanged.
  */
+/**
+ * The action context a component reading `useAction()` gets when no
+ * `ActionProvider` is above it: a local runner, in the shape `useAction()`'s
+ * own fallback returns. The enlarged grid's routed context
+ * (`enlargedGridActions`) hands every dispatch that is not this list's row
+ * action to it, so the grid behaves under the routed context exactly as it
+ * would have without one.
+ */
+function localActionContext(runner: ActionRunner): React.ContextType<typeof ActionCtxReact> & object {
+  return {
+    execute: (action) => runner.execute(action),
+    executeChain: (actions, mode) => runner.executeChain(actions, mode),
+    loading: false,
+    error: null,
+    result: null,
+    runner,
+    updateContext: (ctx) => runner.updateContext(ctx),
+  };
+}
+
 const MOBILE_GALLERY_COVER_FIELD = 'image';
 
 /**
@@ -2898,27 +2921,25 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * row menu of the table this face drew before took. So a dispatch carrying
    * one of THIS list's action defs and a row goes there; every other dispatch
    * (a bulk action, anything the grid runs without a row) reaches the
-   * surrounding runner unchanged.
+   * surrounding runner unchanged — or, with no `ActionProvider` above, the
+   * local runner the grid's own `useAction()` would have made.
    */
-  const outerActions = useAction();
-  const outerActionsRef = React.useRef(outerActions);
-  outerActionsRef.current = outerActions;
+  const outerActions = React.useContext(ActionCtxReact);
   const enlargedGridActions = React.useMemo(() => {
     if (!enlargedGrid || !hasCustomRowActions || !onRowAction) return null;
-    const execute = async (action: any): Promise<any> => {
-      const row = action?.params?._rowRecord;
+    const surrounding = outerActions ?? localActionContext(new ActionRunner());
+    const execute = async (action: ActionDef): Promise<ActionResult> => {
+      const params = action?.params as Record<string, unknown> | undefined;
+      const row = params?._rowRecord;
       const def = row && typeof action?.name === 'string'
         ? rowActions!.find((candidate) => candidate.name === action.name)
         : undefined;
-      if (!def) return outerActionsRef.current.execute(action);
+      if (!def) return surrounding.execute(action);
       await onRowAction(def, row);
       return { success: true };
     };
-    return { ...outerActions, execute };
-    // `outerActions` is read through the ref for dispatch; the spread only
-    // carries the runner's state fields, which the grid does not read.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enlargedGrid, hasCustomRowActions, rowActions, onRowAction]);
+    return { ...surrounding, execute };
+  }, [enlargedGrid, hasCustomRowActions, rowActions, onRowAction, outerActions]);
 
   const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
