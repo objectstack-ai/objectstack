@@ -1883,10 +1883,19 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
  * fold (`SHOW_FLAG_TO_USER_ACTION` in normalize-list-view.ts; ruled Option A on
  * objectui#5435): the ListView toolbar already honoured all three, but no
  * spec-valid document could declare them, so the fold's own output failed the
- * save gate. The defaults asymmetry is LOAD-BEARING, copied from the renderer's
- * reads, not chosen here: `group` defaults ON (`ua?.group !== false`) like the
- * other core toolbar controls, while `hideFields` / `rowColor` default OFF
- * (`=== true`) — column hiding and row colouring are opt-in affordances.
+ * save gate. `group` defaults ON (`ua?.group !== false`) like the other core
+ * toolbar controls, and `rowColor` defaults OFF (`=== true`): row colouring is
+ * an opt-in affordance.
+ *
+ * `hideFields` defaults ON by maintainer ruling on #28912
+ * (「Fable 评估（核对后） 同意立卡」, confirmed on the card:
+ * 「#28911 和 #28912 都保留，按卡上写的做。」): a reader
+ * can hide and show the view's columns without the author declaring it, and
+ * `hideFields: false` is the opt-out. The old OFF default was copied from the
+ * renderer's legacy `=== true` read, not chosen as product; the renderer now
+ * reads `ua?.hideFields !== false`. The choice stays the reader's own: stored
+ * on their list state on a view that declares `columns` or a saved view,
+ * session-only on a system view with no `columns` (objectui#10694).
  *
  * `editInline` defaults ON by maintainer ruling (2026-10-10, the v18 line:
  * 「乙 v18 把 spec 默认翻成 true,editInline: false 变成关法。」): a list view
@@ -1918,7 +1927,7 @@ export const UserActionsConfigSchema = lazySchema(() => strictObject({
   group: z.boolean().default(true).describe('Allow users to change record grouping from the toolbar. Toggle only — the grouping itself is configured in the view-level `grouping` block.'),
   addRecordForm: z.boolean().default(false).describe('Add records through a form instead of inline'),
   editInline: z.boolean().default(true).describe('Allow users to edit records inline. On by default: a user who may update the object edits a cell in place with the field\'s type-aware widget (the same control the form uses), under the permission gate that already decides whether the object is editable at all. Declare `editInline: false` to make the list read-only in place.'),
-  hideFields: z.boolean().default(false).describe('Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component\'s `hideFields`, which is an array of field names to omit. Off by default: column hiding is opt-in.'),
+  hideFields: z.boolean().default(true).describe('Allow users to hide/show fields from the toolbar (the affordance behind the view-level `hiddenFields` list). Boolean toggle — distinct from the record-details component\'s `hideFields`, which is an array of field names to omit. On by default: a reader hides and shows columns for themselves; declare `hideFields: false` to withhold the control.'),
   rowColor: z.boolean().default(false).describe('Allow users to configure row colouring from the toolbar. Boolean toggle — the colour rules themselves live in the view-level `rowColor` block. Off by default: row colouring is opt-in.'),
   buttons: z.array(z.string()).optional().describe('Custom action button IDs to show in the toolbar'),
 }).describe('User action toggles for the view toolbar'));

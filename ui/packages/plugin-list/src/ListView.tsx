@@ -1813,12 +1813,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     // `show*` flags are folded into it by `normalizeListViewSchema` above, so
     // there is no dual-read here — one vocabulary, one place.
     //
-    // The DEFAULTS are per-toggle and deliberately asymmetric, matching what
-    // these flags have always done: the four view-shaping affordances plus
-    // grouping are on unless turned off; column visibility and row coloring are
-    // off unless turned on. (`hideFields`/`rowColor` default OFF is objectui's
-    // historical behavior, kept deliberately — flipping it would grow two
-    // buttons on every existing view.)
+    // The DEFAULTS are per-toggle and read the spec's own defaults
+    // (`UserActionsConfigSchema`): the four view-shaping affordances, grouping
+    // and column visibility are on unless turned off; row coloring is off
+    // unless turned on. `hideFields` defaults ON by maintainer ruling on #28912
+    // — a reader hides and shows columns for themselves, and an app withholds
+    // the control with `hideFields: false`. Where the choice is stored (the
+    // reader's own list state, or session-only on a system view with no
+    // `columns`) is the host's call, not this read's.
     //
     // This is the VIEW half of a NAME COLLISION, and the right half here:
     // `userActions` on a VIEW is toolbar policy (`UserActionsConfigSchema`),
@@ -1844,7 +1846,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
       showRefresh: ua?.refresh !== false,
       showDensity: ua?.rowHeight !== false,
       showGroup: ua?.group !== false,
-      showHideFields: ua?.hideFields === true,
+      showHideFields: ua?.hideFields !== false,
       showColor: ua?.rowColor === true,
       // The bundled "Display" form is the default (objectui#12423): the bar
       // keeps Filter, Sort, Display and Search. `compactToolbar: false` is the
