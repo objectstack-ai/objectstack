@@ -45,8 +45,10 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
+// [#25467 E1] Comments blanked (offsets and line numbers kept), so a docblock that
+// names the callee is not read as a call.
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./protocol.ts', import.meta.url)), 'utf8');
 /** [#25467 cut 15] The seam module the lookup's body moved to; scanned with its own header shape. */
@@ -73,34 +75,13 @@ const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override
 /** A module function's header in a split module: optional `export` and `async`, `function`, its name, its parameter list. */
 const FUNCTION_HEADER = /^(?:export )?(?:async )?function ([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 
-/**
- * [#25467 E1] The source with every comment blanked to spaces (newlines kept), so
- * offsets and line numbers are the file's own and a docblock that names the
- * callee is not read as a call. Comment ranges come from the TypeScript parser,
- * so a `//` inside a string or a template is not a comment.
- */
-function withoutComments(source: string): string {
-    const sf = ts.createSourceFile('x.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-    const chars = source.split('');
-    const blank = (ranges: ts.CommentRange[] | undefined) => {
-        for (const r of ranges ?? []) for (let i = r.pos; i < r.end; i++) if (chars[i] !== '\n') chars[i] = ' ';
-    };
-    const visit = (node: ts.Node) => {
-        blank(ts.getLeadingCommentRanges(source, node.getFullStart()));
-        blank(ts.getTrailingCommentRanges(source, node.getEnd()));
-        for (const child of node.getChildren(sf)) visit(child);
-    };
-    visit(sf);
-    return chars.join('');
-}
-
 interface Site { readonly file?: string; readonly member: string; readonly args: string }
 
 /** Every `lookupArtifactItem(` in `protocol.ts` and every split module: the file, the member it sits in and its argument text, whitespace-normalised. */
 function sitesIn(): Site[] {
     return [
-        ...sitesOf(withoutComments(SOURCE), MEMBER_HEADER),
-        ...SPLIT_MODULES.flatMap((file) => sitesOf(withoutComments(MODULE_SOURCES.get(file)!), FUNCTION_HEADER).map((site) => ({ ...site, file }))),
+        ...sitesOf(maskComments(SOURCE), MEMBER_HEADER),
+        ...SPLIT_MODULES.flatMap((file) => sitesOf(maskComments(MODULE_SOURCES.get(file)!), FUNCTION_HEADER).map((site) => ({ ...site, file }))),
     ];
 }
 

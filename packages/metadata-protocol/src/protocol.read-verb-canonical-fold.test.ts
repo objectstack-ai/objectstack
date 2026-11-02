@@ -60,6 +60,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { META_URL_TO_SINGULAR, PLURAL_TO_SINGULAR, metaUrlSpellingRefusal } from '@objectstack/spec/shared';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -274,9 +275,9 @@ describe('#9157 — the population, re-derived from the code rather than from th
         // read from the module protocol.ts imports `fn` from: every module, by
         // this one rule.
         const moduleImports = new Map<string, string>();
-        for (const m of src.matchAll(/\nimport \{([^}]*)\} from '\.\/(protocol-[a-z0-9-]+)\.js';/g)) {
+        for (const m of maskComments(src).matchAll(/\nimport \{([^}]*)\} from '\.\/(protocol-[a-z0-9-]+)\.js';/g)) {
             for (const spec of m[1]!.split(',')) {
-                const local = /^\s*(?:\/\/[^\n]*\n\s*)*(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)\s*$/.exec(spec)?.[1];
+                const local = /^\s*(?:[A-Za-z_$][\w$]*\s+as\s+)?([A-Za-z_$][\w$]*)\s*$/.exec(spec)?.[1];
                 if (local !== undefined) moduleImports.set(local, `${m[2]}.ts`);
             }
         }
