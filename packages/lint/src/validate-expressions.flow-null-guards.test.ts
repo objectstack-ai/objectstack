@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { validateStackExpressions } from './validate-expressions.js';
+import { runStackExpressionPasses, validateStackExpressions } from './validate-expressions.js';
 
 // `budget` and `owner` are optional, as on `showcase_project`; `name` is
 // required and `spent` has a default, so neither may ever be flagged.
@@ -89,6 +89,33 @@ describe('flow conditions under the null-guard gate (#29026)', () => {
     expect(nullGuardIssues([flow({
       nodes: [start({ condition: 'budget != null && budget > 100000' }), { id: 'triage', type: 'decision' }, { id: 'alert', type: 'end' }, { id: 'calm', type: 'end' }],
     })])).toEqual([]);
+  });
+
+  it('records the two doors disagreeing on a BARE start guard: the runtime publish gate refuses what `os validate` accepts (#29491)', () => {
+    const guardedBy = (condition: string) => flow({
+      nodes: [start({ condition }), { id: 'triage', type: 'decision' }, { id: 'alert', type: 'end' }, { id: 'calm', type: 'end' }],
+      edges: [
+        { id: 'e1', source: 'start', target: 'triage' },
+        { id: 'e2', source: 'triage', target: 'alert', condition: 'record.budget > 200000' },
+        { id: 'e3', source: 'triage', target: 'calm', isDefault: true },
+      ],
+    });
+    const atRuntimeGate = (f: Rec) =>
+      runStackExpressionPasses({ objects: [project], flows: [f] }, { runtimeWriteType: 'flow' })
+        .filter((i) => i.message.includes('declares as nullable'));
+
+    // A bare guard: the build door proves `record.budget` from it, the runtime
+    // door cannot (its bound set is not provable), so only the runtime refuses.
+    const bare = guardedBy('budget != null');
+    expect(nullGuardIssues([bare])).toEqual([]);
+    const refused = atRuntimeGate(bare);
+    expect(refused).toHaveLength(1);
+    expect(refused[0]!.where).toContain("edge 'e2'");
+
+    // The `record.` spelling of the same guard is accepted at both doors.
+    const spelled = guardedBy('record.budget != null');
+    expect(nullGuardIssues([spelled])).toEqual([]);
+    expect(atRuntimeGate(spelled)).toEqual([]);
   });
 
   it('judges a `decision` branch expression', () => {
