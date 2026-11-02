@@ -2,19 +2,17 @@
 
 /**
  * [#25495] The derivation and composition halves of a new organization's
- * default currency, in isolation: the CLDR table, the locale → currency
- * mapping, the host-locale reading, the never-overwrite rule and the wrapping
- * of a host's `onOrganizationCreated`. The composed behaviour, through a real
+ * default currency, in isolation: the host-locale reading, the never-overwrite
+ * rule and the wrapping of a host's `onOrganizationCreated`. The CLDR table and
+ * the locale → currency mapping live in `@objectstack/spec/shared`, and
+ * `region-currency.test.ts` there pins them. The composed behaviour, through a real
  * `POST /organization/create` and the real settings service, is
  * `organization-created-default-currency.test.ts`.
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { isValueDomainMember } from '@objectstack/spec/shared';
 import {
-  REGION_CURRENCY,
   creatorLocaleForNewOrganization,
-  currencyForLocale,
   hostLocaleFromEnv,
   seedOrganizationCurrency,
   withOrganizationDefaultCurrency,
@@ -35,47 +33,6 @@ function door(source: string) {
 }
 
 const silent = { info: () => {}, warn: () => {}, debug: () => {} };
-
-describe('REGION_CURRENCY — the checked-in CLDR snapshot', () => {
-  it('holds only codes the settings key accepts (the iso_4217_currency value domain)', () => {
-    const outside = Object.entries(REGION_CURRENCY).filter(([, code]) => !isValueDomainMember('iso_4217_currency', code));
-    expect(outside).toEqual([]);
-  });
-
-  it('carries the regions the card names, and none of the CLDR regions with no current tender', () => {
-    expect(REGION_CURRENCY).toMatchObject({ CN: 'CNY', JP: 'JPY', GB: 'GBP', DE: 'EUR', FR: 'EUR', US: 'USD' });
-    for (const region of ['AQ', 'ZZ', 'SU', 'YU']) expect(REGION_CURRENCY).not.toHaveProperty(region);
-    expect(Object.keys(REGION_CURRENCY)).toHaveLength(255);
-  });
-});
-
-describe('currencyForLocale', () => {
-  it.each([
-    ['zh-CN', 'CNY'],
-    ['zh', 'CNY'],
-    ['ja', 'JPY'],
-    ['ja-JP', 'JPY'],
-    ['en-GB', 'GBP'],
-    ['de', 'EUR'],
-    ['fr-FR', 'EUR'],
-    ['en', 'USD'],
-    ['zh-Hant', 'TWD'],
-    ['  zh-CN  ', 'CNY'],
-  ])('%s → %s', (tag, currency) => {
-    expect(currencyForLocale(tag)).toBe(currency);
-  });
-
-  it.each([
-    ['a region that is not a country', 'es-419'],
-    ['another region that is not a country', 'en-150'],
-    ['a malformed tag', 'not a tag!'],
-    ['an empty string', ''],
-    ['undefined', undefined],
-    ['a non-string', 42],
-  ])('%s maps to nothing', (_label, tag) => {
-    expect(currencyForLocale(tag)).toBeUndefined();
-  });
-});
 
 describe('hostLocaleFromEnv', () => {
   it('reads LANG the POSIX way, dropping the codeset and modifier', () => {
