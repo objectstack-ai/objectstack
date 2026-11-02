@@ -1401,7 +1401,8 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       throw new Error(
         `Datasource name 'default' is reserved for the host's primary datasource. Pick another name.`,
       );
-    }    // Route-shadowed names (#29164): a literal the admin registrar mounts beside
+    }
+    // Route-shadowed names (#29164): a literal the admin registrar mounts beside
     // a same-method `/datasources/:name` route captures that path first, so a
     // datasource of that name could never be read through its by-name door
     // (`GET /datasources/drivers` is the driver catalog, not the edit form's
