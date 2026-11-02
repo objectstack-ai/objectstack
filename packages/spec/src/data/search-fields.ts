@@ -283,11 +283,23 @@ function autoDefaultFields(fields: Record<string, SearchFieldMeta>, displayField
  *
  * Filter 2 is deliberately NOT a type allow-list on the declared branch. The
  * declaration remains the author's explicit choice and still bypasses the
- * auto-default's exclusions: a `json` or `lookup` column declared here is
- * executed by the engine as a `$contains` over the stored JSON text / stored
- * foreign key — narrow, rarely useful, but a scan that CAN match. Only "there
- * is no column at all" is refused, which is why the vocabulary is a storage
- * fact rather than a search-quality one.
+ * auto-default's exclusions, so a `lookup` or `json` column declared here is
+ * ADMITTED to the set. What an admitted column then contributes to a search is
+ * the expansion's call (`expandSearchToFilter`, `@objectstack/objectql`), not
+ * this function's:
+ *
+ * - a single-valued `lookup` column becomes an `$icontains` over the stored
+ *   foreign key — narrow, rarely useful, but a scan that can match;
+ * - [#29394] a column whose DECLARED type can never hold a string — the
+ *   text-operator door's `door-refusal` verdict (`textOperatorDoorVerdict`,
+ *   `./filter-text-operator-declared-type`: numeric, boolean, calendar-date,
+ *   instant, clock-time and structured-JSON types such as `json`, plus a
+ *   `formula` whose readable `returnType` names one) — contributes NO clause.
+ *   A set made only of such columns answers no rows: never an error, never
+ *   every row.
+ *
+ * Only "there is no column at all" is refused, which is why the vocabulary is
+ * a storage fact rather than a search-quality one.
  *
  * Why the drop is not the whole fix. Dropping alone would only make the
  * declaration silently NARROWER — the failure mode #4254 exists to close on
