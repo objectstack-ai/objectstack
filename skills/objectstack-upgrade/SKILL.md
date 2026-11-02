@@ -171,18 +171,17 @@ other with the reason it was not written, never writes a semantic change, and
 if re-running the chain over the written files disagrees, restores every file
 and exits 1.
 
-### Stored rows: rehydration replays the same conversions
+### Stored rows: rehydration replays what the release carries
 
-A deployment's `sys_metadata` rows are the other subject. They are handled for
-you at read time — the metadata loader and the ObjectQL plugin both pass each
-stored row through `applyConversionsToStoredItem`, which replays the conversion
-chain over a single item **including entries retired from the load path**. A row
-written under protocol 16 therefore rehydrates in its protocol-17 shape without
-anybody editing it.
+A deployment's `sys_metadata` rows are the other subject. At read time the
+metadata loader and the ObjectQL plugin pass each stored row through
+`applyConversionsToStoredItem`, which replays every conversion the release still
+carries, **including entries retired from the load path**. 18.3 drops those
+retired at or below 16.x, so a row still in such a shape is no longer rewritten.
 
 Rehydration is a read-time projection: the rows on disk keep their old shape,
-and you never hand-edit `sys_metadata`. To make it durable, run the stored pass
-— read-only by default:
+and you never hand-edit `sys_metadata`. ⛔ Run the stored pass before you move
+(on 18.2 or earlier for such a row) — read-only by default:
 
   ```bash
   os migrate meta --stored                     # preview, writes nothing
@@ -447,9 +446,9 @@ code:
 os migrate meta --stored --json    # 0 = every row canonical, 1 = work left
 ```
 
-That is what makes "this deployment is on protocol N" a CI check rather than a
-belief. Nothing gates on it having run; the read-time rehydration is still the
-guarantee.
+That is what makes "this deployment is on protocol N" a CI check — valid only
+on the release you are leaving: one that dropped a row's conversions no longer
+recognises it and answers `0`. Nothing gates on it having run.
 
 ---
 

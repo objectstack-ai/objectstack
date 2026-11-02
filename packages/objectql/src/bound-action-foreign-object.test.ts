@@ -519,3 +519,122 @@ describe('a bound action saved at runtime through the metadata door reaches its 
         expect(restored?.target).toBe('https://example.com/rename');
     });
 });
+
+// ── [#28877] An action that LAUNCHES into a disabled package is withheld ─────
+
+/**
+ * [#28877] #24400 withdraws a disabled package's OWN bound actions. An enabled
+ * package's action whose launch target belongs to a disabled package is
+ * withheld from the same served faces (the served object's `actions` and
+ * `GET /meta/action`, list and by name): a `type: 'flow'` action whose flow only
+ * the disabled package ships (its launch answers "Flow not found"), and an
+ * action whose param backs onto an `objectOverride` object of the disabled
+ * package (its dialog cannot draw the param). `GET /meta/action` also leaves
+ * out an enabled package's action bound by `objectName` to the disabled
+ * package's object, whose own read is refused. #28117 ruling A: disabled is
+ * hidden, and refused on the data plane.
+ */
+const MODULE = {
+    id: 'com.test.module', name: 'module',
+    objects: [{
+        name: 'mk_member', label: 'Member',
+        fields: {
+            name: { name: 'name', type: 'text', label: 'Name' },
+            mk_campaign: { name: 'mk_campaign', type: 'text', label: 'Campaign' },
+        },
+    }],
+    flows: [{ name: 'mk_enroll', label: 'Enroll', type: 'autolaunched', nodes: [], edges: [] }],
+};
+
+const LAUNCHER = {
+    id: 'com.test.launcher', name: 'launcher',
+    objects: [{
+        name: 'mk_lead', label: 'Lead',
+        fields: { name: { name: 'name', type: 'text', label: 'Name' } },
+        // An inline action, as the same-stack merge leaves a bound one: in the
+        // object's own `actions`, not in the standalone collection.
+        actions: [{ name: 'inline_enroll', label: 'Enroll', type: 'flow', target: 'mk_enroll', locations: ['record_header'] }],
+    }],
+    flows: [{ name: 'app_flow', label: 'App flow', type: 'autolaunched', nodes: [], edges: [] }],
+    actions: [
+        // Withheld once the module is disabled: the flow only the module ships.
+        { name: 'bound_enroll', label: 'Enroll', objectName: 'mk_lead', type: 'flow', target: 'mk_enroll', locations: ['record_header'] },
+        // Withheld: a param backed by the module's object.
+        {
+            name: 'bound_override', label: 'Add to campaign', objectName: 'mk_lead', type: 'flow', target: 'app_flow',
+            locations: ['record_header'],
+            params: [{ name: 'campaignId', field: 'mk_campaign', objectOverride: 'mk_member', label: 'Campaign', required: true }],
+        },
+        // Controls: an enabled flow, and a field param on the action's own object.
+        { name: 'bound_app_flow', label: 'Run', objectName: 'mk_lead', type: 'flow', target: 'app_flow', locations: ['record_header'] },
+        {
+            name: 'bound_field_param', label: 'Note', objectName: 'mk_lead', type: 'flow', target: 'app_flow',
+            locations: ['record_header'], params: [{ name: 'note', field: 'name', label: 'Note' }],
+        },
+        // Control: a URL action that names the module's object only in its text.
+        { name: 'bound_url_mention', label: 'Docs', objectName: 'mk_lead', type: 'url', target: 'https://example.com/mk_member', locations: ['record_header'] },
+        // Withheld from GET /meta/action: bound to the module's object, whose own read is refused.
+        { name: 'bound_to_member', label: 'Member', objectName: 'mk_member', type: 'url', target: 'https://example.com/m', locations: ['record_header'] },
+    ],
+};
+
+const SERVED_BEFORE = ['bound_app_flow', 'bound_enroll', 'bound_field_param', 'bound_override', 'bound_url_mention', 'inline_enroll'];
+const SERVED_DISABLED = ['bound_app_flow', 'bound_field_param', 'bound_url_mention'];
+const LISTED_BEFORE = ['bound_app_flow', 'bound_enroll', 'bound_field_param', 'bound_override', 'bound_to_member', 'bound_url_mention'];
+
+const sorted = (names: string[]) => [...names].sort();
+const listedActionNames = async (protocol: any, read: 'getMetaItems' | 'getMetaItemsForExecution' = 'getMetaItems'): Promise<string[]> => {
+    const res: any = await protocol[read]({ type: 'action' });
+    const items: any[] = Array.isArray(res) ? res : res?.items ?? [];
+    return sorted(items.map((a) => a?.name).filter((n) => LISTED_BEFORE.includes(n)));
+};
+const servedActionNames = async (engine: any, protocol: any) => {
+    const served: any = await protocol.getMetaItem({ type: 'object', name: 'mk_lead' } as any);
+    return { byRead: sorted(actionNames(served.item)), byRegistry: sorted(actionNames(engine.registry.getObject('mk_lead'))) };
+};
+
+describe('[#28877] an action that launches into a disabled package is withheld where #24400 withholds its bound actions', () => {
+    it('control: before the disable every action is served and listed', async () => {
+        const { engine, protocol } = await hostWith([MODULE, LAUNCHER]);
+        expect(await servedActionNames(engine, protocol)).toEqual({ byRead: SERVED_BEFORE, byRegistry: SERVED_BEFORE });
+        expect(await listedActionNames(protocol)).toEqual(LISTED_BEFORE);
+    });
+
+    it('disabled: the flow-target and objectOverride actions leave the served object and GET /meta/action', async () => {
+        const { engine, protocol } = await hostWith([MODULE, LAUNCHER]);
+        engine.registry.disablePackage('com.test.module');
+        expect(await servedActionNames(engine, protocol)).toEqual({ byRead: SERVED_DISABLED, byRegistry: SERVED_DISABLED });
+        expect(await listedActionNames(protocol)).toEqual(SERVED_DISABLED);
+        // By name, as the list: absent, the answer a name with nothing behind it gets.
+        expect(((await protocol.getMetaItem({ type: 'action', name: 'bound_enroll' } as any)) as any)?.item).toBeUndefined();
+        expect(((await protocol.getMetaItem({ type: 'action', name: 'bound_override' } as any)) as any)?.item).toBeUndefined();
+        expect(((await protocol.getMetaItem({ type: 'action', name: 'bound_to_member' } as any)) as any)?.item).toBeUndefined();
+        expect(((await protocol.getMetaItem({ type: 'action', name: 'bound_app_flow' } as any)) as any)?.item).toBeDefined();
+    });
+
+    it('re-enabling the package serves them again, with no restart', async () => {
+        const { engine, protocol } = await hostWith([MODULE, LAUNCHER]);
+        engine.registry.disablePackage('com.test.module');
+        engine.registry.enablePackage('com.test.module');
+        expect(await servedActionNames(engine, protocol)).toEqual({ byRead: SERVED_BEFORE, byRegistry: SERVED_BEFORE });
+        expect(await listedActionNames(protocol)).toEqual(LISTED_BEFORE);
+    });
+
+    it('a flow an enabled package also ships keeps the action, even when it registers after the disable', async () => {
+        const { engine, protocol } = await hostWith([MODULE, LAUNCHER]);
+        engine.registry.disablePackage('com.test.module');
+        expect(sorted(actionNames(engine.registry.getObject('mk_lead')))).not.toContain('bound_enroll');
+        engine.registerApp({ id: 'com.test.twin_flow', name: 'twin_flow', flows: [{ name: 'mk_enroll', label: 'Twin', type: 'autolaunched', nodes: [], edges: [] }] } as any);
+        const served = await servedActionNames(engine, protocol);
+        expect(served.byRegistry).toContain('bound_enroll');
+        expect(served.byRegistry).toContain('inline_enroll');
+        expect(await listedActionNames(protocol)).toContain('bound_enroll');
+    });
+
+    it('the execution list and the code layer keep what each package ships', async () => {
+        const { engine, protocol } = await hostWith([MODULE, LAUNCHER]);
+        engine.registry.disablePackage('com.test.module');
+        expect(await listedActionNames(protocol, 'getMetaItemsForExecution')).toEqual(LISTED_BEFORE);
+        expect(actionNames(engine.registry.getArtifactItem('object', 'mk_lead'))).toContain('inline_enroll');
+    });
+});

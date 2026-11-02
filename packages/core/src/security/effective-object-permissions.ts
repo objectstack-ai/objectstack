@@ -526,8 +526,56 @@ export interface EffectiveObjectPermissionsSchemaSource {
   allSchemas?: () => readonly (ApiExposureSchemaLike & ObjectAccessPostureLike)[] | null | undefined;
   /** One object's schema — read by the managed-write clamp and the `apiOperations` annotation. */
   schemaOf?: (objectName: string) => (ManagedSchemaLike & ApiExposureSchemaLike) | null | undefined;
+  /**
+   * [#28877] Whether `objectName` is an object whose OWNING package is
+   * disabled — the engine registry's `isObjectPackageDisabled`, the predicate
+   * the data plane asks before it answers `404 OBJECT_PACKAGE_DISABLED`. Hand
+   * over that predicate itself, never a second reading of the package state:
+   * the map must leave out exactly the objects the data plane refuses.
+   */
+  isObjectPackageDisabled?: (objectName: string) => boolean;
   /** Where a failed seed / annotation pass is reported. */
   logger?: { warn?: (message: string, meta?: Record<string, unknown>) => void };
+}
+
+/**
+ * [#28877] The {@link EffectiveObjectPermissionsSchemaSource.isObjectPackageDisabled}
+ * accessor over an engine registry: its `isObjectPackageDisabled`, the predicate
+ * `SchemaRegistry` answers and the data plane asks before it refuses an object
+ * `404 OBJECT_PACKAGE_DISABLED`. That member is not on the contract's registry
+ * view, so it is asked when present; a registry without it disables nothing.
+ * Both builders of the map (`/auth/me/permissions` and
+ * `ISecurityService.getEffectiveObjectPermissions`) hand over this one reading.
+ */
+export function registryObjectPackageDisabled(registry: unknown): (objectName: string) => boolean {
+  return (objectName) => {
+    const predicate = (registry as { isObjectPackageDisabled?: unknown } | null | undefined)?.isObjectPackageDisabled;
+    return typeof predicate === 'function' && predicate.call(registry, objectName) === true;
+  };
+}
+
+/**
+ * [#28877] Leave out of the map every object whose owning package is disabled
+ * (#28117 ruling A: a disabled package is hidden, and refused on the data
+ * plane). The data plane answers such an object `404 OBJECT_PACKAGE_DISABLED`
+ * for every verb, so an entry granting it would tell the console, and
+ * `current_user.can(object, verb)`, a grant no request can use; an object the
+ * map does not mention answers `can()` false. Re-enabling the package brings
+ * the entries back on the next build: nothing is cached here.
+ *
+ * Runs LAST, over the entries every earlier step placed: an explicit grant, a
+ * super-user seed, a plain wildcard's coverage. The `'*'` entry itself is not
+ * an object and is kept.
+ */
+function omitDisabledPackageObjects(
+  objects: Record<string, any>,
+  isObjectPackageDisabled: ((objectName: string) => boolean) | undefined,
+): void {
+  if (typeof isObjectPackageDisabled !== 'function') return;
+  // Judged in full before anything is removed, so a predicate that throws
+  // midway leaves the map whole rather than half-pruned.
+  const disabled = Object.keys(objects).filter((name) => name !== '*' && isObjectPackageDisabled(name) === true);
+  for (const name of disabled) delete objects[name];
 }
 
 /** One resolved permission set, as far as this merge reads it. */
@@ -556,7 +604,10 @@ export interface EffectiveObjectPermissionsInputSet {
  *     not a step, so an entry a super-user set names itself keeps that set's
  *     explicit answer, and `modifyAllRecords` alone grants no create;
  *  5. {@link clampManagedObjectWrites};
- *  6. {@link annotateEffectiveApiOperations} — guarded like (2).
+ *  6. {@link annotateEffectiveApiOperations} — guarded like (2);
+ *  7. {@link omitDisabledPackageObjects} — [#28877] an object whose owning
+ *     package is disabled is left out, as the data plane refuses it; guarded
+ *     like (2).
  *
  * Every entry is a FRESH object: nothing in the returned map aliases a
  * permission set, so a caller may freeze or serialise it freely.
@@ -623,6 +674,13 @@ export function buildEffectiveObjectPermissions(
     annotateEffectiveApiOperations(objects, schemaOf);
   } catch (e: any) {
     source.logger?.warn?.('[effective-permissions] apiOperations annotate failed', { err: e?.message });
+  }
+  // [#28877] Last: a disabled package's objects leave the map. Guarded like the
+  // seed: a predicate that throws leaves the map as the earlier steps built it.
+  try {
+    omitDisabledPackageObjects(objects, source.isObjectPackageDisabled);
+  } catch (e: any) {
+    source.logger?.warn?.('[effective-permissions] disabled-package omission failed', { err: e?.message });
   }
   return objects as Record<string, EffectiveObjectPermission>;
 }

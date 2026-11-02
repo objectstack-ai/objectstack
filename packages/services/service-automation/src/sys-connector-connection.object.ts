@@ -95,7 +95,7 @@ export const SysConnectorConnection = ObjectSchema.create({
       required: true,
       defaultValue: 'connected',
       description:
-        "`connected` while the grant works; `reconnect_required` once the authorization server refused it (revoked, or expired with no usable refresh). Only a new connect returns it to `connected`.",
+        "`connected` while the grant works; `reconnect_required` once the grant stopped working: the authorization server refused it on refresh, the connection keeps nothing to renew an access token it has to renew with (no refresh token was issued, or no client to refresh with), or the upstream refused the connection's token while an `mcp` instance discovered its tools. `status_reason` says which. Only a new connect returns it to `connected`.",
     }),
 
     status_reason: Field.textarea({

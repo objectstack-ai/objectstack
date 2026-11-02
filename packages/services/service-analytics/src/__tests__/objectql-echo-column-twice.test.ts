@@ -28,6 +28,11 @@
  * (the cross-object path's keys when the selection routes there), so it
  * answers the query's refusal field for field. Every echo the query serves
  * still renders byte for byte (pinned below).
+ *
+ * [#28852] The echo reads the time-dimension windows before that door, as
+ * `execute()` does, so a selection that also carries an unrecognised
+ * `dateRange` is refused about the `dateRange` on both faces
+ * (`ANALYTICS_DATE_RANGE_UNRECOGNIZED`); it answered the column refusal.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -133,6 +138,16 @@ describe('[#28841] the /analytics/sql dry run refuses one column asked twice, as
     const asQuery = await refusalOf('query', analytics.query({ ...query } as never));
     const asSql = await refusalOf('sql', analytics.generateSql({ ...query } as never));
     expect(asQuery).toMatchObject({ code: 'INVALID_QUERY', status: 400, httpStatus: 400, object: DEAL, param: 'groupBy', path, fields: ['closed_at'] });
+    expect(asSql, 'the dry run vs the query').toEqual(asQuery);
+  });
+
+  it.each<[string, Query]>([
+    ['a dateRange outside the preset vocabulary', onCube({ timeDimensions: [{ ...td('closed_at', 'month'), dateRange: 'not a range' }, td('closed_at', 'year')] })],
+    ['a one-entry dateRange', onCube({ timeDimensions: [{ ...td('closed_at', 'month'), dateRange: ['2026-01-01'] }, td('closed_at', 'year')] })],
+  ])('[#28852] refuses %s beside one column asked twice about the dateRange first, as the query does', async (_label, query) => {
+    const asQuery = await refusalOf('query', analytics.query({ ...query } as never));
+    const asSql = await refusalOf('sql', analytics.generateSql({ ...query } as never));
+    expect(asQuery).toMatchObject({ code: 'ANALYTICS_DATE_RANGE_UNRECOGNIZED', status: 400 });
     expect(asSql, 'the dry run vs the query').toEqual(asQuery);
   });
 

@@ -73,7 +73,7 @@ import {
 import { LookupField, getLazyFieldWidget, objectRefOptionLabel } from '@object-ui/fields';
 import { ConsolePageHeader, useAdapter, useMetadata } from '@object-ui/app-shell';
 import { Search, X, AlertCircle, ScrollText, ExternalLink } from 'lucide-react';
-import { actionBadgeVariant, actionFilterOptionsOf } from './auditLogActions';
+import { actionBadgeVariant, actionFilterOptionsOf, actionLabelOf } from './auditLogActions';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 const API_BASE = `${SERVER_URL}/api/v1`;
@@ -321,7 +321,9 @@ export function AuditLogPage() {
   const { objects, getTypeStatus } = useMetadata();
   const presets = useMemo(() => auditPresetsOf(auditObjectOf(objects)), [objects]);
   // The Action filter offers what the same document declares for
-  // `sys_audit_log.action` (objectui#13175), never a list kept here.
+  // `sys_audit_log.action` (objectui#13175), never a list kept here. The
+  // Action column and the detail drawer label a row's action from the same
+  // choices (`actionLabelOf`), so the badge reads as the filter does.
   const actionOptions = useMemo(() => actionFilterOptionsOf(auditObjectOf(objects)), [objects]);
   // The Object filter picks from the same served objects (objectui#13165).
   const objectOptions = useMemo(() => objectFilterOptionsOf(objects, displayLocale), [objects, displayLocale]);
@@ -657,7 +659,7 @@ export function AuditLogPage() {
                       onClick={() => setSelected(r)}
                     >
                       <TableCell className="font-mono text-xs">{formatDate(r.created_at, displayLocale)}</TableCell>
-                      <TableCell><Badge variant={variant}>{r.action || '—'}</Badge></TableCell>
+                      <TableCell><Badge variant={variant}>{actionLabelOf(actionOptions, r.action) ?? '—'}</Badge></TableCell>
                       <TableCell>{r.object_name || '—'}</TableCell>
                       <TableCell className="font-mono text-xs">{truncate(r.record_id, 18)}</TableCell>
                       <TableCell><ActorCell face={actorOf(r)} /></TableCell>
@@ -696,7 +698,7 @@ export function AuditLogPage() {
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <Badge variant={actionBadgeVariant(selected?.action)}>
-                {selected?.action || '—'}
+                {actionLabelOf(actionOptions, selected?.action) ?? '—'}
               </Badge>
               {selected?.object_name || t('console.system.auditLog.eventFallback', { defaultValue: 'Audit Event' })}
             </SheetTitle>
