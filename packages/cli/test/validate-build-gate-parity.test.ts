@@ -213,6 +213,14 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // (#28727), so the row moved here — deleted there rather than reworded, for
   // the reason the `runPerPackageAuthoringRules` row above gives.
   'findExtensionFieldSuffixRefusals',
+  // [#29051] An undeclared cycle in a flow's top-level graph (ADR-0044),
+  // judged by the automation engine's own registration judge
+  // (`findUndeclaredFlowCycle`, `@objectstack/metadata-core`), which the
+  // publish doors run too. Not a registry rule: `@objectstack/lint` does not
+  // depend on metadata-core, so the rule table cannot reach the judge without
+  // a new package edge, and a copy of the walk is what the ruling forbids. So
+  // `os lint` does not give this verdict; validate and build do.
+  'findFlowCycleRefusals',
 ];
 
 /**

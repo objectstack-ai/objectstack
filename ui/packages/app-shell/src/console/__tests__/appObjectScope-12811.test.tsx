@@ -16,14 +16,20 @@
  * id asks the route's object and its lookup targets by name, never the whole
  * registry (objectstack#29416). A record drawer (`?recordId=`) asks the scope of the list under it,
  * as `AppContent` does (objectstack#27626).
+ *
+ * objectstack#29551 — inside a packaged app whose bundle is in hand, the route
+ * object's lookup targets are asked without views: a target outside the bundle
+ * (`sys_user`) joins the scope as a served definition and reads no
+ * `/meta/view` list, while the route's object keeps the bundle's views.
+ * CONTROL: a target the bundle holds reads nothing more and keeps its views.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { cleanup, render, waitFor } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { AdapterCtx } from '@object-ui/react';
-import { MetadataProvider } from '../../providers/MetadataProvider';
-import { enterAppBundle, useAppObjectScopePrefetch } from '../appObjectScope';
+import { MetadataProvider, useMetadata } from '../../providers/MetadataProvider';
+import { enterAppBundle, readAppObjectScope, useAppObjectScopePrefetch } from '../appObjectScope';
 
 const CRM = 'app.crm';
 const OBJECTS = [
@@ -141,5 +147,107 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
     expect(objectCalls(outside)).toEqual([]);
     expect(objectCalls(overlay)).toEqual([]);
     expect([...objectCalls(noPackage)].sort()).toEqual(['object/crm_account', 'object/sys_user']);
+  });
+});
+
+describe('objectstack#29551 — a packaged app asks its lookup targets without views', () => {
+  type Doc = { name: string; [key: string]: unknown };
+  const BUNDLED: Doc[] = [
+    { name: 'crm_account', _packageId: CRM, fields: { owner: { type: 'lookup', reference: 'sys_user' } } },
+    { name: 'crm_contact', _packageId: CRM, fields: { account: { type: 'lookup', reference: 'crm_account' } } },
+  ];
+  const ALL: Doc[] = [...BUNDLED, { name: 'sys_user', _packageId: 'plugin.auth', fields: {} }];
+  const VIEWS: Doc[] = [
+    { name: 'crm_account.all', object: 'crm_account', viewKind: 'list', label: 'All accounts', isDefault: true, config: { type: 'grid', columns: [] } },
+    { name: 'crm_contact.all', object: 'crm_contact', viewKind: 'list', label: 'All contacts', isDefault: true, config: { type: 'grid', columns: [] } },
+    { name: 'sys_user.all', object: 'sys_user', viewKind: 'list', label: 'All users', isDefault: true, config: { type: 'grid', columns: [] } },
+  ];
+
+  /** The crm app's bundle, as the adapter's `peekAppBundle` answers once the app was entered: its two objects and their views. */
+  function bundle() {
+    const items = new Map<string, Map<string, { item: unknown; envelope: Record<string, unknown> }>>();
+    const put = (type: string, docs: Doc[]) => {
+      const byName = new Map();
+      for (const doc of docs) byName.set(doc.name, { item: structuredClone(doc), envelope: { type, name: doc.name, item: doc } });
+      items.set(type, byName);
+    };
+    put('object', BUNDLED);
+    put('view', VIEWS.slice(0, 2));
+    return { status: 'ready', items };
+  }
+
+  function makeBundledAdapter(calls: string[]) {
+    const held = bundle();
+    return {
+      clearCache: vi.fn(),
+      invalidateCache: vi.fn(),
+      peekAppBundle: () => held,
+      getObjectSchema(this: { getClient(): any }, name: string) {
+        return this.getClient()
+          .meta.getItem('object', name)
+          .then((res: any) => (res && typeof res === 'object' && 'item' in res ? res.item : res));
+      },
+      getClient: () => ({
+        meta: {
+          getItems: (type: string, options?: { packageId?: string }) => {
+            calls.push(options?.packageId ? `${type}?package=${options.packageId}` : type);
+            const all = type === 'object' ? ALL : type === 'view' ? VIEWS : type === 'app' ? APPS : [];
+            const items = options?.packageId ? all.filter((o: any) => o._packageId === options.packageId) : all;
+            return Promise.resolve({ type, items: structuredClone(items) });
+          },
+          getItem: (type: string, name: string) => {
+            calls.push(`${type}/${name}`);
+            const item = (type === 'object' ? ALL : []).find((o) => o.name === name);
+            return item ? Promise.resolve({ item: structuredClone(item) }) : Promise.reject(new Error('404'));
+          },
+        },
+      }),
+    } as unknown as Parameters<typeof MetadataProvider>[0]['adapter'];
+  }
+
+  /** What `AppContent` reads on the route: each scope object with the list views it composed. */
+  function ScopeProbe() {
+    useAppObjectScopePrefetch();
+    const { apps, readObjectScope } = useMetadata();
+    const { pathname, search } = useLocation();
+    const app = apps.find((a: any) => a?.name === 'crm');
+    const read = app && readObjectScope ? readAppObjectScope(readObjectScope, app, pathname.split('/').slice(3).join('/'), search) : undefined;
+    const objects: any[] = read?.scope?.objects ?? [];
+    const text = objects
+      .map((o) => `${o.name}[${Object.keys(o.listViews ?? {}).join('+')}]`)
+      .sort()
+      .join(',');
+    return <div data-testid="scope">{text}</div>;
+  }
+
+  function mountBundled(url: string) {
+    sessionStorage.clear();
+    const calls: string[] = [];
+    const view = render(
+      <MetadataProvider adapter={makeBundledAdapter(calls)}>
+        <MemoryRouter initialEntries={[url]}>
+          <ScopeProbe />
+        </MemoryRouter>
+      </MetadataProvider>,
+    );
+    return { calls, scope: () => view.getByTestId('scope').textContent };
+  }
+
+  const reads = (calls: string[]) => calls.filter((c) => c !== 'app');
+
+  it('a lookup target outside the bundle is asked by name without views: no /meta/view list, and the route object keeps its views', async () => {
+    const { calls, scope } = mountBundled('/apps/crm/crm_account');
+    await waitFor(() => expect(scope()).toContain('sys_user['));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reads(calls)).toEqual([`object?package=${CRM}`, 'object/sys_user']);
+    expect(scope()).toBe('crm_account[crm_account.all],crm_contact[crm_contact.all],sys_user[]');
+  });
+
+  it('CONTROL: a lookup target the bundle holds asks nothing more and keeps its views', async () => {
+    const { calls, scope } = mountBundled('/apps/crm/crm_contact');
+    await waitFor(() => expect(scope()).toContain('crm_contact['));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(reads(calls)).toEqual([`object?package=${CRM}`]);
+    expect(scope()).toBe('crm_account[crm_account.all],crm_contact[crm_contact.all]');
   });
 });
