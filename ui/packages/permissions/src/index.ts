@@ -22,6 +22,9 @@
 export { PermissionProvider, type PermissionProviderProps } from './PermissionProvider.js';
 export {
   MePermissionsProvider,
+  startMePermissionsRequest,
+  releaseMePermissionsRequest,
+  type StartMePermissionsRequestOptions,
   type MePermissionsProviderProps,
   type MePermissionsResponse,
   type MePermissionsAuthenticatedResponse,

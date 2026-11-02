@@ -159,11 +159,13 @@ export interface CalendarViewProps {
    * drag-to-move, drag-to-resize, and drag-to-create. Defaults to 30. */
   slotMinutes?: number
   /**
-   * Whether a gesture may move an event's END on its own: the month view's
-   * right-edge "Resize event end" handle and the week/day views' bottom resize
-   * handle. Defaults to `true`. A host whose events have no stored end passes
-   * `false` (`ObjectCalendar` does when the view declares no `endDateField`):
-   * an end-only edit has nothing to write there, so neither handle is drawn.
+   * Whether the events have a stored end, so that a gesture may change one
+   * edge and keep the other: the month view's right-edge "Resize event end"
+   * handle and the week/day views' top and bottom resize handles. Defaults to
+   * `true`. A host whose events have no stored end passes `false`
+   * (`ObjectCalendar` does when the view declares no `endDateField`): an event
+   * is then a point in time, which a resize has nothing to change on, so no
+   * resize handle is drawn in any view. Moving an event is unaffected.
    */
   endEditable?: boolean
   className?: string
@@ -886,7 +888,7 @@ interface TimeGridViewProps {
   onEventClick?: (event: CalendarViewEvent) => void
   onEventDrop?: (event: CalendarViewEvent, newStart: Date, newEnd?: Date) => void
   onTimeRangeSelect?: (start: Date, end: Date) => void
-  /** {@link CalendarViewProps.endEditable}: `false` draws no bottom resize handle. */
+  /** {@link CalendarViewProps.endEditable}: `false` draws no resize handle, top or bottom. */
   endEditable: boolean
 }
 
@@ -1320,6 +1322,8 @@ function TimeGridView({
   ) => {
     if (!onEventDrop) return
     if (e.button !== 0) return
+    // An event with no stored end has no edge to resize; only its body moves.
+    if (zone !== "body" && !endEditable) return
     e.stopPropagation()
     e.preventDefault()
     const minutes = yToMinutes(e.clientY, dayIndex)
@@ -1598,8 +1602,9 @@ function TimeGridView({
                       <div className="text-[10px] opacity-80 truncate">
                         {formatTimeRange(day, entry.startMin, entry.endMin, locale)}
                       </div>
-                      {/* Resize handles — only on the original days */}
-                      {onEventDrop && entry.isStart && (
+                      {/* Resize handles: only on the original days, and only
+                          where the events have a stored end. */}
+                      {onEventDrop && endEditable && entry.isStart && (
                         <div
                           onPointerDown={(e) => handleEventPointerDown(e, entry, dayIndex, "top")}
                           className="absolute top-0 left-0 right-0 h-1.5 cursor-ns-resize"

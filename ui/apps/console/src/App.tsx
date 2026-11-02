@@ -40,7 +40,7 @@ import {
   RedirectWithSplash,
 } from '@object-ui/app-shell';
 
-import { AppContent, ConsolePermissionsScope } from './AppContent';
+import { AppContent, ConsolePermissionsRequest, ConsolePermissionsScope } from './AppContent';
 import { publishAuthState } from './i18nSession';
 import { FaviconSync } from './components/FaviconSync';
 import { RootLandingRedirect } from './components/RootLandingRedirect';
@@ -338,13 +338,19 @@ export function App() {
               * `/apps/…`, so the answer is fetched once per session load and
               * Home's navigation gates (the bell's and the activity card's
               * roster) answer `current_user.can(...)` from it.
-              * ⛔ `/studio/*` stays outside it (`components/studioEntry.ts`). */}
+              * ⛔ `/studio/*` stays outside it (`components/studioEntry.ts`).
+              * `ConsolePermissionsRequest` asks for that answer as soon as the
+              * session names the organization, in the `organization/list`
+              * wave; the scope takes it (objectstack#29114). */}
             <Route element={
-              <ProtectedRoute>
-                <ConsolePermissionsScope>
-                  <Outlet />
-                </ConsolePermissionsScope>
-              </ProtectedRoute>
+              <>
+                <ConsolePermissionsRequest />
+                <ProtectedRoute>
+                  <ConsolePermissionsScope>
+                    <Outlet />
+                  </ConsolePermissionsScope>
+                </ProtectedRoute>
+              </>
             }>
               <Route path="/home" element={<HomeRoute />} />
               <Route path="/apps/:appName/*" element={<AppContent />} />
