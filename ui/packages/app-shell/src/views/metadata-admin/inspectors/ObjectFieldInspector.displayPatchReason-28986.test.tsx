@@ -114,10 +114,10 @@ function description(el: Element): string {
 
 /** The whitelisted inputs: label, description, help text, placeholder, and each option's label. */
 function editableControls(root: HTMLElement): HTMLElement[] {
-  const named = ['designer.field.label', 'designer.field.description', 'designer.field.helpText', 'designer.field.placeholder'].map(
+  const named = ['designer.field.description', 'designer.field.helpText', 'designer.field.placeholder'].map(
     (key) => within(root).getByLabelText(t(key, LOCALE)),
   );
-  return [...named, ...within(root).queryAllByTestId('option-label')];
+  return [within(root).getByTestId('field-label-input'), ...named, ...within(root).queryAllByTestId('option-label')];
 }
 
 describe('ObjectFieldInspector — display-patch mode explains every locked control (objectstack#28986)', () => {
@@ -157,7 +157,8 @@ describe('ObjectFieldInspector — display-patch mode explains every locked cont
       within(rail).getByRole('checkbox', { name: t('designer.field.required', LOCALE) }),
       within(rail).getByRole('checkbox', { name: t('designer.field.trackHistory', LOCALE) }),
       within(rail).getByLabelText(t('designer.field.visibleWhen', LOCALE)),
-      within(rail).getByRole('button', { name: t('engine.inspector.reorder.up', LOCALE) }),
+      // The header's pair and each option row's.
+      ...within(rail).getAllByRole('button', { name: t('engine.inspector.reorder.up', LOCALE) }),
       within(rail).getByRole('button', { name: tFormat('designer.field.remove', LOCALE, { label: 'Industry' }) }),
       within(rail).getAllByTestId('option-value')[0]!,
     ];
