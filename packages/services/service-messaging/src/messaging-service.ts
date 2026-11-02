@@ -26,6 +26,13 @@ import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
 import { INBOX_SYSTEM_CONTEXT } from './inbox-system-context.js';
 import { assertActorReferenceResolves } from './actor-reference.js';
 import { USER_OBJECT } from './recipient-locale.js';
+import { DeviceRegistry } from './device-registry.js';
+import type {
+    RegisterDeviceRequest,
+    RegisterDeviceResponse,
+    UnregisterDeviceResponse,
+} from '@objectstack/spec/api';
+import type { UserDevice } from '@objectstack/spec/system';
 import {
     assertNotificationTextKeys,
     type NotificationTextKeys,
@@ -264,6 +271,8 @@ export class MessagingService {
     private readonly redeliverGuards = new Map<string, RedeliverGuard>();
     /** [#24978] Whether keyed text met a composition with no renderer — said once. */
     private keyedTextWithoutRendererAnnounced = false;
+    /** The push device registry behind the four device members. */
+    private readonly devices: DeviceRegistry;
 
     constructor(private readonly ctx: MessagingServiceContext) {
         this.now = ctx.now ?? (() => new Date().toISOString());
@@ -278,6 +287,44 @@ export class MessagingService {
                 mandatoryTopics: ctx.mandatoryTopics,
             });
         this.outbox = ctx.outbox;
+        this.devices = new DeviceRegistry({ getData: () => ctx.getData?.(), now: this.now });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Push devices — `INotificationService`'s device members (ADR-0012  */
+    /*  §6), over `sys_user_device`. See `./device-registry.ts`.          */
+    /* ------------------------------------------------------------------ */
+
+    /**
+     * Register or refresh a push device for this user (the REST door's
+     * method: `POST /api/v1/notifications/devices`, whose `userId` is the
+     * session's). Semantics: `INotificationService.registerDevice`.
+     */
+    registerDevice(userId: string, request: RegisterDeviceRequest): Promise<RegisterDeviceResponse> {
+        return this.devices.register(userId, request);
+    }
+
+    /**
+     * Unregister one of this user's devices; a device id this user does not
+     * hold throws `NOT_FOUND` (404). Semantics:
+     * `INotificationService.unregisterDevice`.
+     */
+    unregisterDevice(userId: string, deviceId: string): Promise<UnregisterDeviceResponse> {
+        return this.devices.unregister(userId, deviceId);
+    }
+
+    /** This user's devices, newest first. Semantics: `INotificationService.listDevices`. */
+    listDevices(userId: string): Promise<UserDevice[]> {
+        return this.devices.list(userId);
+    }
+
+    /**
+     * Retire a token the vendor reported dead: the row is kept, disabled, with
+     * the time. Called by the push channel. Semantics:
+     * `INotificationService.invalidateDeviceToken`.
+     */
+    invalidateDeviceToken(token: string): Promise<void> {
+        return this.devices.invalidate(token);
     }
 
     /**

@@ -6,3 +6,4 @@ export { NotificationDelivery } from './notification-delivery.object.js';
 export { NotificationPreference } from './notification-preference.object.js';
 export { NotificationTemplate } from './notification-template.object.js';
 export { HttpDelivery, SYS_HTTP_DELIVERY } from './http-delivery.object.js';
+export { UserDevice } from './user-device.object.js';

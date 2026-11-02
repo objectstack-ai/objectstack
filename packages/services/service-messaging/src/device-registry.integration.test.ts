@@ -84,7 +84,7 @@ async function thrown(p: Promise<unknown>): Promise<any> {
 
 describe('push device registry: INotificationService device members over sys_user_device', () => {
     it('register, then refresh the same deviceId: one row, token and last_seen_at updated', async () => {
-        const { service, time, alice, rows } = await boot();
+        const { ql, service, time, alice, rows } = await boot();
         const first = await service.registerDevice(alice, { token: 'tok-1', platform: 'ios', deviceId: 'dev-a', name: 'iPhone' });
         expect(first).toEqual({ deviceId: 'dev-a', success: true });
         const [before] = await rows({ user_id: alice });
@@ -95,6 +95,8 @@ describe('push device registry: INotificationService device members over sys_use
 
         const after = await rows({ user_id: alice });
         expect(after).toHaveLength(1);
+        // Rule (a): the registered schema carries no organization column.
+        expect(Object.keys((ql.registry.getObject(USER_DEVICE_OBJECT) as any).fields)).not.toContain('organization_id');
         expect(after[0].id).toBe(before.id);
         expect(after[0].token).toBe('tok-2');
         expect(after[0].locale).toBe('zh-CN');
