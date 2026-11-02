@@ -1,6 +1,6 @@
 ---
 '@object-ui/app-shell': minor
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 fix(app-shell): an interface page's list toolbar reads the published `userActions` defaults — Filter, Row height, Group and Hide Fields are on unless the page writes `false`
