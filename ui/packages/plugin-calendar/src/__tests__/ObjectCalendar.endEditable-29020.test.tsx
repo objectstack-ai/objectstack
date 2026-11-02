@@ -14,9 +14,11 @@
  * ── The rule ────────────────────────────────────────────────────────────────
  * With no end field the end is not stored, so an end-only edit has nothing to
  * write: the month view's "Resize event end" handle and the week and day
- * views' bottom "Resize end" handle are not drawn (`CalendarView`'s
- * `endEditable`, which `ObjectCalendar` sets from `endDateField`). A view that
- * declares an end field keeps both handles and keeps writing the end.
+ * views' resize handles are not drawn (`CalendarView`'s `endEditable`, which
+ * `ObjectCalendar` sets from `endDateField`). The time grid's top "Resize
+ * start" handle goes too (objectstack#29197): against an unstored end it only
+ * moved the event. A view that declares an end field keeps every handle and
+ * keeps writing the end.
  *
  * `ObjectCalendar`'s default drop handler writes nothing when every date it
  * would write is where the record already has it: a write of unchanged values
@@ -212,11 +214,11 @@ describe('ObjectCalendar month view: the resize-end handle follows endDateField 
   });
 });
 
-describe('ObjectCalendar week view: the bottom resize handle follows endDateField (objectstack#29020)', () => {
-  it('a view with no end field draws the top handle and no bottom handle', async () => {
+describe('ObjectCalendar week view: the resize handles follow endDateField (objectstack#29020, objectstack#29197)', () => {
+  it('a view with no end field draws neither the top nor the bottom handle', async () => {
     mount(TIMED_NO_END, { starts_at: '2026-01-12T09:00:00.000Z', all_day: false }, 'week');
     const piece = await screen.findByTitle(TITLE);
-    expect(within(piece).queryByLabelText(GRID_HANDLE.top)).not.toBeNull();
+    expect(within(piece).queryByLabelText(GRID_HANDLE.top)).toBeNull();
     expect(within(piece).queryByLabelText(GRID_HANDLE.bottom)).toBeNull();
   });
 
@@ -317,7 +319,7 @@ describe('CalendarView endEditable (objectstack#29020)', () => {
     expect(onEventDrop).not.toHaveBeenCalled();
   });
 
-  it('false: the week view draws the top handle and no bottom handle', () => {
+  it('false: the week view draws neither the top nor the bottom handle (objectstack#29197)', () => {
     const timed: CalendarViewEvent = {
       id: 'e2',
       title: TITLE,
@@ -334,7 +336,7 @@ describe('CalendarView endEditable (objectstack#29020)', () => {
       />,
     );
     const piece = screen.getByTitle(TITLE);
-    expect(within(piece).queryByLabelText(GRID_HANDLE.top)).not.toBeNull();
+    expect(within(piece).queryByLabelText(GRID_HANDLE.top)).toBeNull();
     expect(within(piece).queryByLabelText(GRID_HANDLE.bottom)).toBeNull();
   });
 });
