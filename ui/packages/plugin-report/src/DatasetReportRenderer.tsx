@@ -1022,7 +1022,7 @@ function DatasetReportTable({
   // A grouped detail row leaves its outer dimensions blank: the group header
   // above it names them once.
   const detailDimension = (c: string, i: number) =>
-    grouped && rows.indexOf(c) < rows.length - 1 ? '' : formatDimensionValue(displayRows[i][c], displayLocale);
+    grouped && rows.indexOf(c) < rows.length - 1 ? '' : dimensionText(state.fields, c, displayRows[i][c], displayLocale);
   // The cells below, as the export writes them (`ReportExport.tsx`).
   const snapshot: ReportTableSnapshot = {
     object: state.object,
@@ -1033,7 +1033,7 @@ function DatasetReportTable({
         if (line.kind === 'header') {
           return columns.map((_, p) =>
             p === line.level
-              ? exportDimensionCell(formatDimensionValue(displayRows[i][rows[line.level]], displayLocale))
+              ? exportDimensionCell(dimensionText(state.fields, rows[line.level], displayRows[i][rows[line.level]], displayLocale))
               : { text: '' },
           );
         }
@@ -1076,7 +1076,7 @@ function DatasetReportTable({
                 <tr key={`h-${line.level}-${i}`} className="border-t bg-muted/10 font-medium" data-testid="dataset-report-group-header">
                   {line.level > 0 && <td colSpan={line.level} />}
                   <td colSpan={columns.length - line.level} className="px-2 py-1 whitespace-nowrap">
-                    {formatDimensionValue(displayRows[i][rows[line.level]], displayLocale)}
+                    {dimensionText(state.fields, rows[line.level], displayRows[i][rows[line.level]], displayLocale)}
                   </td>
                 </tr>
               );
@@ -1620,7 +1620,11 @@ function DatasetReportChart({
     categoryRank ? { [xAxis]: categoryRank } : null,
   );
   const plotRows = plotLayout ? plotLayout.map((i) => displayRows[i]) : displayRows;
-  const nullCategoryLabel = tt('chart.nullCategory', '(None)');
+  // The null bucket's name: the dataset's declared `nullLabel` when the answer
+  // carries one the chart can use (`declaredNullCategoryLabel`), else the
+  // chart's own default — as the dashboard widget names it.
+  const nullCategoryLabel =
+    declaredNullCategoryLabel(state.fields, queryDimensions, [yAxis]) ?? tt('chart.nullCategory', '(None)');
   const { data: chartData, xAxisKey, series: pivotOrDerivedSeries } = buildChartSeries(
     plotRows,
     queryDimensions,
@@ -1738,6 +1742,59 @@ function DatasetReportChart({
 }
 
 /**
+ * The text a report draws for one dimension value: on screen, in a group
+ * header, in a cross-tab header and in the export cell beside it.
+ *
+ * A null value reads as the dimension's declared `nullLabel` when the query
+ * answer carries one on that column's descriptor (`fields[].nullLabel`, already
+ * resolved to the request locale by the server, objectstack#25391); the spec
+ * says "a renderer draws the column's null values under it instead of its own
+ * default". It is read off the answer the way the dashboard widget reads it
+ * (`DatasetWidget.tsx`, `nullLabelOf`), never resolved from metadata a second
+ * time. A column that declares none keeps `formatDimensionValue`'s default, and
+ * every non-null value (an empty string included) formats exactly as before.
+ * Display copy only: bucket ids, drill keys and grouping read the raw value.
+ */
+function dimensionText(
+  fields: readonly DatasetResultField[] | undefined,
+  dimension: string,
+  value: unknown,
+  locale?: string,
+): string {
+  if (value == null) {
+    const declared = fields?.find((f) => f.name === dimension)?.nullLabel;
+    if (typeof declared === 'string') return declared;
+  }
+  return formatDimensionValue(value, locale);
+}
+
+/**
+ * The name the dataset DECLARES for a report chart's null bucket, or
+ * `undefined` when it declares none — the dashboard widget's rule
+ * (`DatasetWidget.tsx`, `declaredNullCategoryLabel`), read off the same
+ * answer as {@link dimensionText}.
+ *
+ * `buildChartSeries` draws every null bucket of one chart under ONE label: the
+ * x-axis dimension's, and on a `seriesBy` pivot (two dimensions, one measure)
+ * the series dimension's too. So a pivot takes a declared name only when both
+ * of its dimensions declare the same one; any other pivot keeps the default
+ * rather than naming one dimension's null group with the other's label.
+ */
+function declaredNullCategoryLabel(
+  fields: readonly DatasetResultField[] | undefined,
+  dimensions: readonly string[],
+  measures: readonly string[],
+): string | undefined {
+  const nullLabelOf = (dimension: string | undefined) =>
+    dimension === undefined ? undefined : fields?.find((f) => f.name === dimension)?.nullLabel;
+  const xLabel = nullLabelOf(dimensions[0]);
+  if (dimensions.length >= 2 && measures.length === 1) {
+    return xLabel !== undefined && xLabel === nullLabelOf(dimensions[1]) ? xLabel : undefined;
+  }
+  return xLabel;
+}
+
+/**
  * Stable bucket id for a dimension-value tuple — the id every lookup in the
  * cross-tab below is keyed by (row headers, column headers, and both subtotal
  * maps), so they all agree by construction.
@@ -1766,9 +1823,17 @@ function bucketId(dims: string[], row: Row): string {
  * {@link bucketId}, which is built from the RAW values and is deliberately
  * untouched by the locale, so a locale change can never re-key a cell (which
  * would break the `cells` lookup and drill-through with it).
+ *
+ * `fields` is the query answer's column descriptors: a null value reads as its
+ * dimension's declared `nullLabel` ({@link dimensionText}).
  */
-function bucketLabel(dims: string[], row: Row, locale?: string): string {
-  return dims.map((d) => formatDimensionValue(row[d], locale)).join(' / ');
+function bucketLabel(
+  dims: string[],
+  row: Row,
+  fields: readonly DatasetResultField[] | undefined,
+  locale?: string,
+): string {
+  return dims.map((d) => dimensionText(fields, d, row[d], locale)).join(' / ');
 }
 
 /**
@@ -1866,14 +1931,14 @@ function DatasetMatrixTable({
         const key: Row = {};
         const display: Row = {};
         for (const d of rows) { key[d] = raw[d]; display[d] = r[d]; }
-        rowHeaders.push({ id: rid, label: bucketLabel(rows, r, displayLocale), key, display });
+        rowHeaders.push({ id: rid, label: bucketLabel(rows, r, state.fields, displayLocale), key, display });
       }
       if (!seenCol.has(cid)) {
         seenCol.add(cid);
         const key: Row = {};
         const display: Row = {};
         for (const d of columnsAcross) { key[d] = raw[d]; display[d] = r[d]; }
-        colHeaders.push({ id: cid, label: bucketLabel(columnsAcross, r, displayLocale), key, display });
+        colHeaders.push({ id: cid, label: bucketLabel(columnsAcross, r, state.fields, displayLocale), key, display });
       }
       // Keyed by pivotCellKey, not `${rid} ${cid}`: a plain space is a boundary
       // only while no dimension value contains one, and they do constantly
@@ -1987,7 +2052,7 @@ function DatasetMatrixTable({
     ],
     rows: [
       ...pivot.rowHeaders.map((rh) => [
-        ...rows.map((d) => exportDimensionCell(formatDimensionValue(rh.display[d], displayLocale))),
+        ...rows.map((d) => exportDimensionCell(dimensionText(state.fields, d, rh.display[d], displayLocale))),
         ...cellCols.map((cc) => {
           const value = pivot.cells.get(pivotCellKey(rh.id, cc.col.id))?.row[cc.measure];
           return exportMeasureCell(fmt(cc.measure, value), value);
@@ -2041,7 +2106,7 @@ function DatasetMatrixTable({
             <tr key={rh.id} className="border-t">
               {rows.map((d) => (
                 <td key={d} className="px-2 py-1 whitespace-nowrap font-medium">
-                  {formatDimensionValue(rh.display[d], displayLocale)}
+                  {dimensionText(state.fields, d, rh.display[d], displayLocale)}
                 </td>
               ))}
               {cellCols.map((cc) => {
