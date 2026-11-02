@@ -359,6 +359,10 @@ export const FIXTURES: Fixture[] = [
     // limit, 1005 peers against the 1000 limit. Truncation is OBSERVABLE here
     // (the double slices like a driver), so a batch that changed either limit —
     // or merged the two reads under one of them — moves these arrays.
+    // [#29281] …except the peers': a fellow-org read that comes back AT its
+    // bound is now a first page, and the membership is read to completion, so
+    // `org_user_ids` holds all 1,006 members; the 1000 bound is still pinned
+    // by the recorded `queries`, and the 200 one by `accessible_org_ids`.
     name: 'read-limits-truncate',
     userId: 'u_lim',
     opts: { tenantId: 'org_0000', seedEmail: 'lim@x.com', nowMs: T0 },

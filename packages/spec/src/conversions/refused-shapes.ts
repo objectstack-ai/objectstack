@@ -43,7 +43,9 @@
  *   `external` binding judge
  *   the object refinement and `defineStack` share
  *   ({@link externalBindingDatasourceRefusal}), and the one-name-per-action
- *   judge of the object refinement ({@link duplicateActionNames}). A site is listed here exactly
+ *   judge of the object refinement ({@link duplicateActionNames}), and the
+ *   one-key-per-global-filter judge of the dashboard refinement
+ *   ({@link duplicateGlobalFilterNames}). A site is listed here exactly
  *   when that door refuses it. One door lives outside this package: the
  *   page/view `visibleWhen` rule in `@objectstack/lint` judges a `has()`
  *   argument on the engine's AST, which this package cannot parse, so its
@@ -68,6 +70,7 @@ import {
 import { duplicateActionNames } from '../data/duplicate-action-names.js';
 import { externalBindingDatasourceRefusal } from '../data/external-binding-datasource.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
+import { duplicateGlobalFilterNames } from '../ui/duplicate-global-filter-names.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
 import { refusedHasArguments } from './cel-has-argument.js';
 import type { ConversionTodoDetail } from './types.js';
@@ -555,6 +558,32 @@ const objectDuplicateActionName: RefusedStoredShape = {
   },
 };
 
+// ── #29212: a dashboard that declares one global filter key twice (the #29023 refusal) ──
+
+const dashboardDuplicateGlobalFilterName: RefusedStoredShape = {
+  id: 'ui-dashboard-global-filter-duplicate-name-refused',
+  toMajor: 18,
+  surface: 'dashboard.globalFilters — two or more entries of one dashboard under the same filter key '
+    + '(the entry\'s `name`, or its `field` when it has no `name`)',
+  detect(stack, report) {
+    mapCollection(stack, 'dashboards', (dashboard, path) => {
+      for (const duplicate of duplicateGlobalFilterNames(dashboard.globalFilters)) {
+        report({
+          // The site the dashboard parse refuses: the second declaration's `name`, or its `field`.
+          path: `${path}.globalFilters[${duplicate.indexes[1]}].${duplicate.secondKey}`,
+          from: JSON.stringify({ name: duplicate.name, indexes: duplicate.indexes }),
+          reason: 'No lossless rewrite: which definition keeps the key, and what the others are renamed to '
+            + '(with every widget `filterBindings` key that means a renamed one), only the author knows. Left as '
+            + 'stored, the dashboard still loads with `_diagnostics` reading `valid: false`, and its next save, '
+            + 'draft or publish, is refused with 422 INVALID_METADATA. '
+            + duplicate.message,
+        });
+      }
+      return dashboard;
+    });
+  },
+};
+
 /**
  * Every refused stored shape, in report order. A new entry is a reviewed edit:
  * `refused-shapes.test.ts` pins each one.
@@ -567,6 +596,7 @@ export const REFUSED_STORED_SHAPES: readonly RefusedStoredShape[] = [
   externalBindingOnManagedDatasource,
   visibilityHasArgument,
   objectDuplicateActionName,
+  dashboardDuplicateGlobalFilterName,
 ];
 
 /**

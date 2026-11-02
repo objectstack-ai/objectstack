@@ -7,6 +7,7 @@ import { flowNodeValueTemplateRefusals } from '../automation/flow-value-slot-tem
 import { ObjectSchema } from '../data/object.zod.js';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry.js';
 import { ComponentPropsMap } from '../ui/component.zod.js';
+import { DashboardSchema } from '../ui/dashboard.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
 import { ViewDataSchema } from '../ui/view.zod.js';
 import { applyConversions, applyConversionsToFlow } from './apply.js';
@@ -71,6 +72,7 @@ describe('the refused-shape list — registered against the migration chain', ()
       'object-external-binding-managed-datasource-refused',
       'visibility-predicate-has-argument-refused',
       'object-duplicate-action-name-refused',
+      'ui-dashboard-global-filter-duplicate-name-refused',
     ]);
   });
 
@@ -790,5 +792,64 @@ describe('#26725 — a stored object that declares one action name twice is list
     const row = dupRow([dupAct('approve', 'Approve'), dupAct('reject', 'Reject')]);
     expect(storedTodos('object', row).todos).toEqual([]);
     expect(dupActionIssue(row)).toBeUndefined();
+  });
+});
+
+// ── #29212 (the #29023 refusal) ───────────────────────────────────────────
+
+const dupBoard = (globalFilters: unknown[]) => ({ name: 'crm_kpi', label: 'KPI', widgets: [], globalFilters });
+/** The dashboard parse's duplicate-key issue, or undefined. */
+const dupFilterIssue = (row: unknown) => {
+  const parsed = DashboardSchema.safeParse(row);
+  return parsed.success
+    ? undefined
+    : parsed.error.issues.find((i) => i.path[0] === 'globalFilters' && /declares the global filter/.test(i.message));
+};
+
+describe('#29212 — a stored dashboard that declares one global filter key twice is listed by dashboard', () => {
+  it('one TODO at the second declaration\'s name, naming the key and both indexes; the row is not rewritten', () => {
+    const row = dupBoard([
+      { name: 'r', field: 'region', type: 'text' },
+      { name: 'r', field: 'status', type: 'text' },
+    ]);
+    const { item, todos } = storedTodos('dashboard', row);
+    expect(item).toEqual(row);
+    expect(todos).toHaveLength(1);
+    const todo = todos[0]!;
+    expect(todo.conversionId).toBe('ui-dashboard-global-filter-duplicate-name-refused');
+    expect(todo.path).toBe('dashboards[0].globalFilters[1].name');
+    expect(todo.reason).toMatch(/^No lossless rewrite: which definition keeps the key/);
+    expect(todo.reason).toContain(
+      "This dashboard declares the global filter 'r' twice in globalFilters: globalFilters[0] and globalFilters[1].",
+    );
+    expect(todo.reason).not.toMatch(/#\d{3,}/);
+    expect(JSON.parse(todo.from)).toEqual({ name: 'r', indexes: [0, 1] });
+    // The listing and the parse refuse ONE set: the stored row still fails the parse, at the same site.
+    expect(dupFilterIssue(item)?.path).toEqual(['globalFilters', 1, 'name']);
+  });
+
+  it('a key that falls back to `field` is listed at that field, as the parse locates it', () => {
+    const row = dupBoard([
+      { field: 'region', type: 'text' },
+      { field: 'region', type: 'select', options: [{ value: 'north', label: 'North' }] },
+      { name: 'region', field: 'sales_region', type: 'text' },
+    ]);
+    const { todos } = storedTodos('dashboard', row);
+    expect(todos).toHaveLength(1);
+    expect(todos[0]!.path).toBe('dashboards[0].globalFilters[1].field');
+    expect(JSON.parse(todos[0]!.from)).toEqual({ name: 'region', indexes: [0, 1, 2] });
+    expect(todos[0]!.reason).toContain("the global filter 'region' 3 times");
+    expect(dupFilterIssue(row)?.path).toEqual(['globalFilters', 1, 'field']);
+  });
+
+  it('distinct keys, and distinct names over one field, are not listed — and the parse accepts them', () => {
+    for (const filters of [
+      [{ name: 'r', field: 'region', type: 'text' }, { name: 's', field: 'status', type: 'text' }],
+      [{ name: 'region_a', field: 'region', type: 'text' }, { name: 'region_b', field: 'region', type: 'text' }],
+    ]) {
+      const row = dupBoard(filters);
+      expect(storedTodos('dashboard', row).todos).toEqual([]);
+      expect(DashboardSchema.safeParse(row).success).toBe(true);
+    }
   });
 });
