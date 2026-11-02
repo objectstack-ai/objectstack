@@ -1,10 +1,10 @@
 ---
-'@objectstack/connector-mcp': patch
+'@objectstack/connector-mcp': minor
 '@objectstack/lint': patch
 ---
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 `provider: 'mcp'`: a stdio MCP server can now take its credential from the secrets layer instead of a literal in `transport.env`. Declare the instance's `auth` with a `credentialRef` as for an http server, and name the environment variable the server reads in the new `providerConfig.transport.credentialEnv` key: the host resolves the reference (environment, Setup → Connector credentials, the host's resolver) and the provider hands the resolved secret (the `bearer` token, the `api-key` key, or the `basic` password) to the child in that variable. The value is never stored, logged, served on a metadata read or put in a message; a reference that resolves to nothing degrades the instance naming the reference and the server is not started.
 
