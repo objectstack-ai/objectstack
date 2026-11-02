@@ -465,6 +465,15 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // [#23214] The list lives beside the shared decision, so the
                     // runtime dispatcher's twin refuses the same names.
                     if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.drafts)) return;
+                    // [#29180] A `type` that names no metadata type narrowed the
+                    // list to nothing and answered `200 {"drafts":[]}`, a
+                    // confident "nothing pending". Refused by the list door's own
+                    // verdict ({@link refuseUnknownMetaListType}: the static
+                    // spelling contract, then the live type set), so the two
+                    // doors cannot disagree about which names are types. The
+                    // package half is `listDrafts`' own (the diagnostics rule).
+                    const draftsType = (req.query?.type as string | undefined) || undefined;
+                    if (draftsType !== undefined) await this.refuseUnknownMetaListType(p, draftsType);
                     // [ADR-0131 D6] No organization: a draft is saved
                     // environment-wide, so the list reads the environment
                     // partition, symmetric with the save door. A legacy
@@ -472,7 +481,7 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // promotion is ADR-0131 C7's.
                     const result = await (p as any).listDrafts({
                         packageId: (req.query?.packageId as string | undefined) || undefined,
-                        type: (req.query?.type as string | undefined) || undefined,
+                        type: draftsType,
                     });
                     res.json(result);
                 } catch (error: any) {

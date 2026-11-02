@@ -24941,6 +24941,13 @@ export class ObjectStackProtocolImplementation implements
      * the `_drafts` doors only. The package batch doors (publish, discard, the
      * batch closure) read the repository's `listDrafts` directly, so a
      * disabled package's drafts still publish and discard.
+     *
+     * [#29180] A `packageId` naming a package that is not installed and that
+     * no pending draft is bound to is refused `400 INVALID_REQUEST`, the
+     * diagnostics sweep's rule for its own package filter, rather than
+     * answered an empty list a caller reads as "nothing pending". An unknown
+     * `type` is refused by the transports before this is called, with the
+     * list door's verdict.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -24964,6 +24971,7 @@ export class ObjectStackProtocolImplementation implements
             get engine() { return readEngine(); },
             ensureOverlayIndex: (...a) => this.ensureOverlayIndex(...a),
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            getMetaItems: (...a) => this.getMetaItems(...a),
         };
         return listDrafts.call(host, request);
     }
