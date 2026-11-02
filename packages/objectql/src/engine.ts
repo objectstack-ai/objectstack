@@ -201,7 +201,7 @@ import {
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
-import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rollbackFailedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -21927,18 +21927,22 @@ export class ObjectQL implements IObjectQLEngine {
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
     } catch (err) {
+      let rollbackFailed = false;
       try {
         if (drv.rollback) await drv.rollback(trx);
         else if (drv.rollbackTransaction) await drv.rollbackTransaction(trx);
       } catch {
         // swallow rollback failures so the original error surfaces
+        rollbackFailed = true;
       }
       // [#21274] A boundary outside the middleware seam: a commit failure, or
       // a callback that reached the driver through the transaction handle.
       // An error that already crossed an engine boundary inside the callback
       // comes back as the same reference. A stale-roll-up refusal ("stored")
       // is no longer true once this rollback has run: `rolledBackRefusal`.
-      throw redactPropagatedDriverFault(rolledBackRefusal(err));
+      // [#29421] Nor is "rolled back" once the rollback threw:
+      // `rollbackFailedRefusal`.
+      throw redactPropagatedDriverFault(rollbackFailed ? rollbackFailedRefusal(err) : rolledBackRefusal(err));
     }
   }
 

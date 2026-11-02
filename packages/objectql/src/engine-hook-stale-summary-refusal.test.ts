@@ -18,9 +18,9 @@
  * Pinned here, at the one seam a handler's error leaves through
  * (`triggerHooks`):
  *  - an aborting `afterInsert` / `afterUpdate` / `afterDelete` hook: the outer
- *    write refuses with an error that is NOT the stale-roll-up refusal (no
- *    `code`, no `written`, the refusal kept as `cause`), leading with the outer
- *    write, and its unit rolls both rows back;
+ *    write refuses with an error that is NOT the stale-roll-up refusal (a
+ *    declared `500 INTERNAL_ERROR`, no `written`, the refusal kept as `cause`),
+ *    leading with the outer write, and its unit rolls both rows back;
  *  - a code-registered hook (no unit opens): the same refusal, whose text says
  *    what stays written, and both rows are stored;
  *  - a `before*` hook: the same refusal, and the outer row was never written.
@@ -132,7 +132,8 @@ const names = (rows: Row[]) => rows.map((r) => r.name).sort();
 /** The converted refusal: an internal error naming the OUTER write, the hook write's refusal kept as `cause`. */
 function expectHookStopped(err: any, lead: string) {
   expect(err).toBeInstanceOf(Error);
-  expect(err.code).toBeUndefined();
+  expect(err.code).toBe('INTERNAL_ERROR');
+  expect(err.status).toBe(500);
   expect(err.written).toBeUndefined();
   expect(err.failures).toBeUndefined();
   expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
