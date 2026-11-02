@@ -240,10 +240,13 @@ export interface INotificationService {
      *   holds refreshes that device (token, vendor, app, locale, last seen)
      *   and re-enables it; an absent `deviceId` is minted here and answered
      *   in the response, which the client keeps.
-     * - **One live owner per token.** A token is delivered to one user only:
-     *   registering a token another user's device holds moves it to this
-     *   user, and the other user's device stops receiving it. A push meant
-     *   for the previous owner never reaches the phone's new user.
+     * - **One live row per token.** A token this user already holds under
+     *   another `deviceId` (the app's storage was cleared, so the request
+     *   carries no `deviceId`) refreshes that row and answers its `deviceId`,
+     *   never a second live row. Registering a token another user's device
+     *   holds moves it to this user, and the other user's device stops
+     *   receiving it. A push meant for the previous owner never reaches the
+     *   phone's new user.
      * - An absent `request.vendor` is derived from `request.platform`
      *   (`ios` → `apns`, `android` → `fcm`). `web` has no default vendor: a
      *   `web` registration names `apns` or `fcm`, and one without `vendor` is

@@ -26,9 +26,12 @@ Three rules the registry owes, stated here because they decide the shape:
   person's notifications whichever organization they come from; the
   organization travels on the notification, never on the device. The
   identity of a row is (`userId`, `deviceId`).
-- **(b) One live owner per token.** A vendor token is delivered to one user
-  only. When a second user registers a token another user's device holds,
-  the token moves to the second user and the first user's row for it is
+- **(b) One live row per token.** A vendor token is delivered to one row
+  only. A token this user already holds under another `deviceId` (the app's
+  storage was cleared, so the registration carries no `deviceId`) refreshes
+  that row and answers its `deviceId`; it never makes a second live row.
+  When a second user registers a token another user's device holds, the
+  token moves to the second user and the first user's row for it is
   removed, so a push meant for the phone's previous user never reaches its
   new one.
 - **(c) A dead token keeps its row.** When the vendor reports a token dead
