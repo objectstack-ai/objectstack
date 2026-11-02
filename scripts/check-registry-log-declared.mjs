@@ -157,7 +157,7 @@ const REPO_ROOT = resolve(HERE, '..');
  * single-segment literal builds no hint at all (`hintCovers`). */
 export const WORKSPACE_FILE = 'pnpm-workspace.yaml';
 export const LEVELS_SOURCE = 'packages/objectql/src/registry.ts';
-export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**'];
+export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'apps/**', 'examples/**', 'ui/**'];
 
 const VITEST_CONFIG_NAMES = [
   'vitest.config.ts',

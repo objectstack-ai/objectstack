@@ -3218,6 +3218,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.list.col.label': '标签',
   'engine.list.col.source': '来源',
   'engine.list.col.object': '对象',
+  // objectstack#29569 — an object_extension lists by the object it extends.
+  'engine.list.col.extend': '对象',
   'engine.list.col.type': '类型',
   'engine.list.col.description': '描述',
   'engine.list.col.sharedWith': '共享给',

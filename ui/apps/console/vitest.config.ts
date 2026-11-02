@@ -30,6 +30,9 @@ export default mergeConfig(
       // per-project `unit`/`dom` split). Console tests render components, so
       // they need the DOM setup explicitly.
       setupFiles: [path.resolve(import.meta.dirname, '../../vitest.setup.dom.tsx')],
+      // This file is a project of ../../vitest.config.mts, and a project carries
+      // the console-intercept disarm in its own test block (see `unit` there).
+      disableConsoleIntercept: true,
     },
   })
 );

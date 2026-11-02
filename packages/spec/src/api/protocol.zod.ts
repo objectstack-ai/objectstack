@@ -1229,7 +1229,14 @@ export const SaveMetaItemResponseSchema = lazySchema(() => z.object({
     + 'CLI at all, which is the gap this key exists to close. The gate runs on '
     + 'both write doors (D1), and both report: '
     + '`POST /meta/:type/:name/publish` carries the same key on '
-    + '`PublishMetaItemResponseSchema`.',
+    + '`PublishMetaItemResponseSchema`. '
+    + 'The save also reports here what it did to the row at rest that the '
+    + 'author did not write, on a draft save too: one `warning` with rule '
+    + '`withheld-key-dropped` for each stored position it dropped because the '
+    + 'type\'s read redactor withholds it and marks it not carried forward '
+    + '(a connector\'s undeclared `auth` keys, which no door accepts and nothing '
+    + 'reads). Its `path` names where the value sat at rest, in the same '
+    + 'spelling (`connectors[0].auth.token`).',
   ),
   message: z.string().optional(),
 }));

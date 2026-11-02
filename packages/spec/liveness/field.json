@@ -310,6 +310,11 @@
         }
       }
     },
+    "referenceNameVisible": {
+      "status": "live",
+      "verifiedAt": "2026-11-02",
+      "evidence": "packages/objectql/src/engine-reference-name-visible.ts#serveReferenceNames (run from `ObjectQL#expandRelatedRecords` for a field declaring the key: the ids the caller's own expansion left bare are asked, as the caller, whether the caller is refused them; a refused target of the caller's organization is served `{ id, name, readRefused: true }` from an engine-owned read of exactly its id and ADR-0079 name field, the `Record #` floor when a field-level rule keeps that field from the caller); packages/rest/src/data-reference-name-visible.test.ts (the real-driver pins through the REST record and list reads: row scope and object gate refusals named, the field without the key, a readable target, a nested projection, expand and filter, `displayField`, `multiple: true`, `user` and `sys_user` lookups, the field-level floors, another organization's record, the unexpanded read); packages/spec/src/data/field.zod.ts#referenceNameVisible (the parse-time door: the FieldSchema superRefine refuses the key off `lookup` and `user`)"
+    },
     "mailAssociation": {
       "status": "live",
       "verifiedAt": "2026-10-13",
