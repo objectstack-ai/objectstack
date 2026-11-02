@@ -4,7 +4,7 @@
 
 fix(objectql)!: a nested write's stale-roll-up refusal (`ERR_SUMMARY_RECOMPUTE`) never answers for a delete or a transaction that did not land
 
-Clause-②: yes (narrowing) — a delete whose cascade a dependent's failing roll-up stopped, and a transaction that refusal rolled back, answered the success of a write that never landed; both now refuse.
+Clause-②: yes (narrowing) — a delete that answered success after rolling back now refuses (`!` in the title, full dogfood, seat contract review)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed. What narrows is one engine answer: a stale-roll-up refusal that used to leave a delete or a transaction which did not land now leaves it as a code-less error, and the remedy is the summary field's `summaryOperations` or a retry, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
