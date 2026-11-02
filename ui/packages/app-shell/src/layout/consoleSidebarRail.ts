@@ -4,9 +4,10 @@
  * consoleSidebarRail — when the console sidebar folds to its icon rail on its
  * own, and the reader's override (objectstack#27593).
  *
- * On a window too narrow for the record split beside an expanded sidebar the
- * sidebar mounts as the icon rail, and a click on the rail (or the app bar's
- * trigger, or ⌘B) expands it OVER the content instead of beside it. A reader
+ * On a window too narrow for the record drawer and the list beside it next to
+ * an expanded sidebar, the sidebar mounts as the icon rail, and a click on the
+ * rail (or the app bar's trigger, or ⌘B) expands it OVER the content instead
+ * of beside it. A reader
  * who keeps it open ({@link CONSOLE_SIDEBAR_KEEP_OPEN_PREFERENCE}) gets the
  * wide-window behaviour at every width above the phone breakpoint, where the
  * primitive's drawer takes over.
@@ -36,23 +37,42 @@ import {
 export const CONSOLE_EXPANDED_SIDEBAR_WIDTH = 256;
 
 /**
- * The content width the record split needs to draw its list's columns: the
- * narrowest list that still draws them (440) beside the record pane at its
- * default width (720), objectstack#27545.
+ * The record drawer's width in CSS pixels: a list record opens in the drawer
+ * at plugin-view's `md` overlay bucket, `overlayWidthFor('md', …)` =
+ * `min(92vw, 720px)` (objectstack#27545). `consoleSidebarRail.width-27593.test.tsx`
+ * reads that value and holds this equal to it, so the derived threshold below
+ * follows the drawer.
  */
-export const RECORD_SPLIT_MIN_CONTENT_WIDTH = 440 + 720;
+export const RECORD_DRAWER_WIDTH = 720;
+
+/**
+ * The narrowest list that still draws its columns, in CSS pixels: the 440 px
+ * measured on objectstack#27545. The drawer is non-modal over a list and draws
+ * no dimming there, so the list beside it stays readable and a click on
+ * another row swaps the record (`NavigationOverlay` in `@object-ui/components`).
+ */
+export const LIST_MIN_COLUMNS_WIDTH = 440;
+
+/**
+ * The content width the record drawer needs over the full-width list: the
+ * drawer (720) and, beside it, the narrowest list that still draws its
+ * columns (440).
+ */
+export const RECORD_DRAWER_MIN_CONTENT_WIDTH = LIST_MIN_COLUMNS_WIDTH + RECORD_DRAWER_WIDTH;
 
 /**
  * Below this window width the sidebar folds to the icon rail on its own.
  *
- * Derived, not picked: a window narrower than the split's content plus the
- * expanded sidebar cannot fit the split beside the expanded sidebar, so the
- * sidebar gives the content its width. 1160 + 256 = 1416: a 1280 px window
- * folds (1280 − the 48 px rail leaves 1232 for the split), a 1440 px window
- * keeps the sidebar expanded (1184 left). The record page's own column tiers
- * are measured on the container it gets, so they follow either way.
+ * Derived, not picked: a window narrower than the drawer's content plus the
+ * expanded sidebar cannot keep the list's columns beside the open drawer with
+ * the sidebar expanded, so the sidebar gives the content its width.
+ * 1160 + 256 = 1416: a 1280 px window folds (1280 − the 48 px rail − the
+ * drawer leaves 512 px of list beside it, where the expanded sidebar would
+ * leave 304), a 1440 px window keeps the sidebar expanded (464 left). The
+ * record page's own column tiers are measured on the container it gets, so
+ * they follow either way.
  */
-export const CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH = RECORD_SPLIT_MIN_CONTENT_WIDTH + CONSOLE_EXPANDED_SIDEBAR_WIDTH;
+export const CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH = RECORD_DRAWER_MIN_CONTENT_WIDTH + CONSOLE_EXPANDED_SIDEBAR_WIDTH;
 
 /**
  * The reader's "keep the sidebar open": `on` turns the fold off, so a narrow
