@@ -218,10 +218,18 @@ export const fieldForm = defineForm({
         // their translation exactly as they are today. The two branches are
         // mutually exclusive, so no author ever sees both spellings at once.
         //
+        // `user` shares the `lookup` branch (#29415): since #29253 a declared
+        // `deleteBehavior` on a `user` field takes effect when the user is
+        // deleted, with all three outcomes legal, so the designer offers the
+        // key it honours. A `user` field has NO default — declaring nothing
+        // keeps it out of the delete walk — so the control writes a value only
+        // when the author picks one; the enum's advertised `default` is a
+        // `lookup` fact the select does not prefill.
+        //
         // `helpText` is identical on both — they share one i18n key
         // (`metadataForms.field.fields.deleteBehavior`), so divergent text would
         // collide silently.
-        { field: 'deleteBehavior', visibleWhen: "data.type == 'lookup'", helpText: 'What happens when referenced record is deleted' },
+        { field: 'deleteBehavior', visibleWhen: "data.type in ['lookup','user']", helpText: 'What happens when referenced record is deleted' },
         { field: 'deleteBehavior', type: 'select', visibleWhen: "data.type == 'master_detail'", helpText: 'What happens when referenced record is deleted', options: [
           { label: 'Cascade (delete children)', value: 'cascade' },
           { label: 'Restrict (block the delete)', value: 'restrict' },

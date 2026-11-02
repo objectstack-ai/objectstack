@@ -205,6 +205,22 @@ describe('`deleteBehavior` is never offered a value the schema refuses', () => {
         expect(visible.map((d) => d.path)).toHaveLength(1);
       });
 
+      // #29415: since #29253 a declared `deleteBehavior` on a `user` field takes
+      // effect when the user is deleted, so the designer must offer it there —
+      // all three outcomes, from the same single control a `lookup` author gets.
+      it('offers exactly one control to a user author, with all three values', () => {
+        const visible = decls.filter((d) => isVisibleForType(d.spec, 'user'));
+        expect(visible.map((d) => d.path)).toHaveLength(1);
+        const offered = declaredOptionValues(visible[0].spec) ?? (derivedDeleteBehaviorNode().enum as string[]);
+        expect(offered).toEqual(['set_null', 'cascade', 'restrict']);
+      });
+
+      // The control stays confined to the types whose `deleteBehavior` states
+      // delete semantics a Studio author can set; a `text` field is the control.
+      it('offers no control to a text author', () => {
+        expect(decls.filter((d) => isVisibleForType(d.spec, 'text'))).toHaveLength(0);
+      });
+
       // THE DEFECT. A master_detail author must never see "Set null".
       it('does not offer set_null to a master_detail author', () => {
         const visible = decls.filter((d) => isVisibleForType(d.spec, 'master_detail'));

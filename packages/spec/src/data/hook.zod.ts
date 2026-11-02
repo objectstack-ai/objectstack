@@ -1401,11 +1401,12 @@ export const HookContextSchema = lazySchema(() => z.object({
   /**
    * Referential-Cleanup Marker
    * `true` exactly when THIS write is the engine's own reference cleanup — the
-   * UPDATE `cascadeDeleteRelations` issues against a row that HOLDS a lookup
-   * whose `deleteBehavior` resolves to `set_null`, while the record it
-   * references is being deleted (clearing the slot, or on a `multiple: true`
-   * lookup removing the deleted member). Absent on every other dispatch; read
-   * it as `ctx.referentialFieldClear === true`.
+   * UPDATE `cascadeDeleteRelations` issues against a row that HOLDS a
+   * reference field whose `deleteBehavior` resolves to `set_null` (a `lookup`
+   * or `tree` by default, or a `user` field that declares it, #29253), while
+   * the record it references is being deleted (clearing the slot, or on a
+   * `multiple: true` field removing the deleted member). Absent on every other
+   * dispatch; read it as `ctx.referentialFieldClear === true`.
    *
    * ## Why a declared key (commit 34ce8e7db)
    *
@@ -1458,8 +1459,9 @@ export const HookContextSchema = lazySchema(() => z.object({
   referentialFieldClear: z.boolean().optional().describe(
     "Engine-produced marker: true exactly when this write is the engine's own referential cleanup "
     + "(the set_null cascade UPDATE clearing — or, for multiple: true, removing the deleted member "
-    + 'from — a lookup that references a record being deleted). Absent on every other write, '
-    + 'including a user hand-clearing the same lookup; read as `ctx.referentialFieldClear === true`. '
+    + 'from — a lookup, tree or user field that references a record being deleted, where a user field '
+    + 'takes part only when it declares its deleteBehavior). Absent on every other write, including a '
+    + 'user hand-clearing the same field; read as `ctx.referentialFieldClear === true`. '
     + 'The declared projection of the operation-private `__referentialFieldClear`, carried across '
     + 'the sandbox boundary by contract; server-derived and never client-supplied.',
   ),
@@ -1470,10 +1472,11 @@ export const HookContextSchema = lazySchema(() => z.object({
    * child DELETE `cascadeDeleteRelations` performs for each row that
    * references a record being deleted through a relation whose
    * `deleteBehavior` resolves to `cascade` (a `master_detail` unless it
-   * declares `restrict`; a `lookup` or `tree` that declares `cascade`), at any
-   * depth: a grandchild the child's own cascade removes is marked too. Present
-   * in both phases of that delete (`beforeDelete`, `afterDelete`). Absent on
-   * every other dispatch; read it as `ctx.referentialCascadeDelete === true`.
+   * declares `restrict`; a `lookup`, `tree` or `user` field that declares
+   * `cascade`, the `user` one since #29253), at any depth: a grandchild the
+   * child's own cascade removes is marked too. Present in both phases of that
+   * delete (`beforeDelete`, `afterDelete`). Absent on every other dispatch;
+   * read it as `ctx.referentialCascadeDelete === true`.
    *
    * The delete twin of {@link referentialFieldClear}. That key marks the
    * `set_null` cleanup UPDATE; this one marks the `cascade` child DELETE. A
