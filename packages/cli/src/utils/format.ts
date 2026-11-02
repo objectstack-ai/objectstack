@@ -1011,6 +1011,15 @@ export interface AutomationReadySummary {
   enabled: boolean;
   /** Flows declared in the stack config (used when the engine is absent). */
   declaredFlowCount: number;
+  /**
+   * [#29059] Declared flows the engine REFUSED at registration, from its own
+   * record (`getFlowRegistration(name).state === 'refused'`), counted by
+   * distinct declared name. A refused flow is absent from `flowCount` and from
+   * every list below, so without this the banner counts only what armed and
+   * the refusal shows only as a per-flow line under Boot diagnostics.
+   * 0 when the engine is absent or does not answer the read.
+   */
+  refusedCount: number;
   /** Flows registered in the engine (0 when `enabled` is false). */
   flowCount: number;
   /** Flows bound to a trigger. */
@@ -1712,6 +1721,18 @@ function printAutomationSummary(a: AutomationReadySummary): string[] {
       );
     }
     return restated;
+  }
+  // [#29059] Printed BEFORE the `flowCount === 0` return: a boot whose every
+  // declared flow was refused registers none, and would otherwise print no
+  // Flows line at all. Boot continued either way; this only says so. The
+  // engine's per-flow reason stays where it is, under Boot diagnostics.
+  if (a.refusedCount > 0) {
+    console.error(
+      chalk.yellow(
+        `  ⚠ Flows:   ${a.declaredFlowCount} flow(s) declared, ${a.refusedCount} refused at registration — ` +
+        `refused flows never run; each one's reason is under Boot diagnostics ('failed to register flow')`,
+      ),
+    );
   }
   if (a.flowCount === 0) return restated;
 
