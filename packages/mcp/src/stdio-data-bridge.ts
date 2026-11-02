@@ -1105,7 +1105,16 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // `Error`, so a stdio caller sees the same `RECORD_NOT_FOUND` / 404 the
       // HTTP bridge's `callData` path throws for the identical miss.
       if (!existing) throw recordNotFoundError(object, id);
-      await engine.update(object, data, { where: { id }, context });
+      // [#28844] An update the engine applied but whose parent roll-up it could
+      // not recompute (`ERR_SUMMARY_RECOMPUTE`) answers the update it is,
+      // attached to the refusal by #28781's carrier as `create` does; every
+      // other throw, a refusal before the write among them, propagates as is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      try {
+        await engine.update(object, data, { where: { id }, context });
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+      }
       const record = { ...(existing as Record<string, unknown>), ...data };
       // [#8497] The engine's update RESULT is deliberately discarded here (this
       // arm echoes the read-path row plus the caller's own patch), so no STORED
@@ -1117,7 +1126,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // property literally true on every verb of this bridge rather than true-
       // by-argument on one.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      return { object, id, record };
+      const answer = { object, id, record };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
 
     async remove(object, id) {
@@ -1128,9 +1139,18 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const existing = await findById(engine, object, id, context);
       // Same shared envelope as `update`, above.
       if (!existing) throw recordNotFoundError(object, id);
-      await engine.delete(object, { where: { id }, context });
+      // [#28844] As `update`, above: a delete applied under a failing roll-up
+      // answers the delete it is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      try {
+        await engine.delete(object, { where: { id }, context });
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+      }
       // `success`, not `deleted` — the spec's `DeleteDataResponse` key (#5581).
-      return { object, id, success: true };
+      const answer = { object, id, success: true };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
   };
 
