@@ -918,8 +918,8 @@ shape is an [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) entry.
 > says that, if pulled, it "returns as a user-owned D3 object, not as this table". The maintainer pulled
 > it: a reader's named personal view is a row of a user-owned data object, as this paragraph anticipated.
 > It is not a view item (ADR-0017's `ViewItem`), and it does not reuse `scope: 'personal'`;
-> `sys_view_definition` stays retired. The first version follows #28949, #28948, #28950 and #28912 and is
-> filed as its own execution card. Retiring the inert `scope: 'personal'` and `sharing.type: 'personal'`
+> `sys_view_definition` stays retired. The first version follows #28949, #28948, #28950 and #28912 and
+> gets its own execution card once the four cards above have landed. Retiring the inert `scope: 'personal'` and `sharing.type: 'personal'`
 > declarations is #29037's, not this note's. The paragraph stays as written, and this note governs how its
 > "parked" clause is read; ADR-0017 carries the matching note beside its `personal` layer.
 
