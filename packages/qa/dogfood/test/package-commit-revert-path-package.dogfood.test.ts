@@ -203,8 +203,9 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
 
   it('[#29390] the showcase\'s commits recorded before the close: an edited item\'s revert is refused naming the pair, a created one\'s still removes it', async () => {
     const protocol = (stack.kernel as any).getService('protocol');
-    const served = async () => (await call('GET', `/meta/view/${OVERLAY}`)).json?.data?.item?.label;
+    const served = async () => (await call('GET', `/meta/view/${OVERLAY}`)).json?.item?.label;
     const shipped = await served();
+    expect(typeof shipped).toBe('string');
     const view = (label: string) => ({
       name: OVERLAY, object: 'showcase_task', viewKind: 'list', label,
       config: { type: 'grid', columns: [{ field: 'title' }] },
