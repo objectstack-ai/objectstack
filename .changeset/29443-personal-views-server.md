@@ -23,7 +23,8 @@ It is registered beside `sys_user_preference`, on the same template, and the gen
 - **Owner only.**
   - The object declares the owner-only default row scope `user_id == current_user.id` for every operation. The table carries the organization column, so the organization wall bounds it too.
   - Another member gets nothing: no read by id (`404`), nothing listed, and no update (`404 RECORD_NOT_FOUND`).
-  - A create naming another owner is refused `403 PERMISSION_DENIED`, and so is an update that hands a view to another user.
+  - A create naming another owner is refused `403 PERMISSION_DENIED`.
+  - A view's owner is fixed when it is saved: an update that changes `user_id` is refused `403 PERMISSION_DENIED` for every caller but the system, platform administrators included. A save rule holds this, because for an organization member the `member_default` update floor (`created_by == current_user.id`) applies to an update in place of the object's own row scope.
 - **No back door for organization administrators.** `organization_admin`, and the derived `organization_admin_no_bypass`, name the object without the wildcard's super-user bits. An organization administrator reads, writes and deletes only their own views.
 - **Platform administrators are not limited.** The bare `admin_full_access` wildcard carries `viewAllRecords` and `modifyAllRecords`, so through the generic data API a platform administrator reads, edits and deletes any member's view. This is the same as `sys_user_preference` today. Whether that should change is an open question.
 - **The body is a `ListView` for the row's own object, judged on every save.**
