@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 248,
-    "droppedRefinementSites": 983,
+    "droppedRefinementSites": 988,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -81,6 +81,7 @@
         "manifest.assignmentRules.element.entries.element",
         "manifest.assignmentRules.element.entries.element.assignTo",
         "manifest.connectors.element.out",
+        "manifest.dashboards.element.globalFilters",
         "manifest.dashboards.element.globalFilters.element",
         "manifest.dashboards.element.header.actions.element",
         "manifest.dashboards.element.widgets.element",
@@ -227,6 +228,7 @@
         "data.options[1].manifest.assignmentRules.element.entries.element",
         "data.options[1].manifest.assignmentRules.element.entries.element.assignTo",
         "data.options[1].manifest.connectors.element.out",
+        "data.options[1].manifest.dashboards.element.globalFilters",
         "data.options[1].manifest.dashboards.element.globalFilters.element",
         "data.options[1].manifest.dashboards.element.header.actions.element",
         "data.options[1].manifest.dashboards.element.widgets.element",
@@ -365,6 +367,7 @@
         "options[1].manifest.assignmentRules.element.entries.element",
         "options[1].manifest.assignmentRules.element.entries.element.assignTo",
         "options[1].manifest.connectors.element.out",
+        "options[1].manifest.dashboards.element.globalFilters",
         "options[1].manifest.dashboards.element.globalFilters.element",
         "options[1].manifest.dashboards.element.header.actions.element",
         "options[1].manifest.dashboards.element.widgets.element",
@@ -443,6 +446,7 @@
         "data.packages.element.options[1].manifest.assignmentRules.element.entries.element",
         "data.packages.element.options[1].manifest.assignmentRules.element.entries.element.assignTo",
         "data.packages.element.options[1].manifest.connectors.element.out",
+        "data.packages.element.options[1].manifest.dashboards.element.globalFilters",
         "data.packages.element.options[1].manifest.dashboards.element.globalFilters.element",
         "data.packages.element.options[1].manifest.dashboards.element.header.actions.element",
         "data.packages.element.options[1].manifest.dashboards.element.widgets.element",
@@ -1588,6 +1592,7 @@
     },
     "ui/Dashboard": {
       "sites": [
+        "globalFilters",
         "globalFilters.element",
         "header.actions.element",
         "widgets.element",

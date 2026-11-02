@@ -47,6 +47,7 @@
 - ✓ 请审 `POST .../pulls/{n}/requested_reviewers`(Tier H 归中继 op)· 开 PR `POST .../pulls` 带 `draft=true`。
 - ✓ `origin/main` 合进 PR head:中继 op `pr_update_branch`(`pull` + 40 位 `expected_head_sha`),真合并提交。
 - 挂子卡走中继 op `sub_issue_add`/`sub_issue_remove`(`issue` 父号,`sub_issue` 子号),回读父列表。
+- ✓ 安全通报经中继 `advisory_report`·`advisory_collaborators_add`·`advisory_state`;发布归维护者。
 - ✓ 落地经中继 `node scripts/pm/fleet-write/dispatch.mjs --repo O/N --actions-file F`;`--via dispatch` 同载。
 - ✓ 启动 run 走 op `workflow_dispatch`:解锁物是白名单 run 才启;入表只经 workflow 自己的 PR。
 - F = `[{"op":"workflow_dispatch","workflow":"release.yml","ref":"main","inputs":{"refresh_version_pr":true}}]`。

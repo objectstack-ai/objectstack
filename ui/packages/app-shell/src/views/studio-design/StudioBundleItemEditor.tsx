@@ -43,7 +43,7 @@ import {
   DropdownMenuTrigger,
   cn,
 } from '@object-ui/components';
-import { extractDraftBody } from '@object-ui/data-objectstack';
+import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
 import { History, Lock, MoreHorizontal } from 'lucide-react';
 import { SchemaForm } from '../metadata-admin/SchemaForm.js';
 import { resolveResourceConfig } from '../metadata-admin/registry.js';
@@ -141,6 +141,11 @@ export function StudioBundleItemEditor({
   const [restoring, setRestoring] = React.useState(false);
   const [error, setError] = React.useState<StudioRefusal | null>(null);
   const [loadError, setLoadError] = React.useState<StudioRefusal | null>(null);
+  // The server's refusal of this item's draft read (`403`): a pending draft is
+  // there that this author may not read, so no buffer is installed over it.
+  // Held as thrown and worded at render, so a language switch rewords it
+  // without a reload.
+  const [draftRefused, setDraftRefused] = React.useState<{ error: unknown } | null>(null);
   const [reloadNonce, setReloadNonce] = React.useState(0);
   const reload = React.useCallback(() => setReloadNonce((n) => n + 1), []);
   const guard = useDraftSaveGuard(client, reload);
@@ -152,6 +157,7 @@ export function StudioBundleItemEditor({
   React.useEffect(() => {
     let cancelled = false;
     setLoadError(null);
+    setDraftRefused(null);
     (async () => {
       const custom = readOnly ? customizationRef.current : null;
       // A read-only base's draft lives in its pair, when one is listed.
@@ -160,6 +166,19 @@ export function StudioBundleItemEditor({
         ? await readDraftForSave<Record<string, unknown>>(client, type, name, readAt, member)
         : { answer: null, pin: null };
       if (cancelled) return;
+      // objectstack#29148 — a pending draft the server refused to read is no
+      // absence: a buffer seeded from the published layer would be saved over
+      // it, dropping its keys and its audience gate. Nothing is installed, so
+      // nothing is shown to edit and the autosave has nothing to send.
+      if ('refused' in draftRead) {
+        setDraft({});
+        setLoadedFor('');
+        setHasDraft(true);
+        setDirty(false);
+        forget();
+        setDraftRefused({ error: draftRead.refused });
+        return;
+      }
       const body = extractDraftBody(draftRead.answer) as Record<string, unknown> | null;
       // The served document only when there is no pending draft: a spread
       // over it would bring back every key the draft deleted.
@@ -219,7 +238,7 @@ export function StudioBundleItemEditor({
       ? 'noVersion'
       : null;
   const unlocked = !!customization && !customization.walled && (inPair || (block === null && asked));
-  const editable = loadedFor === target && !loadError && (readOnly ? unlocked : true);
+  const editable = loadedFor === target && !loadError && !draftRefused && (readOnly ? unlocked : true);
 
   // The ensure door, asked once for this item's first saved edit, and again only after a refusal.
   const pairRef = React.useRef<Promise<string> | null>(null);
@@ -327,6 +346,11 @@ export function StudioBundleItemEditor({
   // The member the URL names, else the one the canonical read served.
   const shownLocale = member ?? (typeof draft.locale === 'string' ? draft.locale : '');
   const customizing = readOnly && customization !== null;
+  // objectstack#29148 — a refused draft read is the load's answer: the
+  // draftUnreadable sentence, with the server's own behind Details.
+  const shownError: StudioRefusal | null = draftRefused
+    ? { message: t('engine.studio.refusal.draftUnreadable', locale), detail: formatMetadataError(draftRefused.error) }
+    : (loadError ?? error);
   const status = saving
     ? t('engine.studio.autoSaving', locale)
     : hasDraft
@@ -424,13 +448,21 @@ export function StudioBundleItemEditor({
       {customizing && unlocked && (
         <p className="border-b px-4 py-1.5 text-[11px] text-muted-foreground">{t('engine.studio.customize.draftFooter', locale)}</p>
       )}
-      {(loadError ?? error) && (
-        <p role="alert" data-testid="studio-bundle-editor-error" className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
-          {(loadError ?? error)?.message}
-        </p>
+      {shownError && (
+        <div data-testid="studio-bundle-editor-error" className="border-b bg-destructive/10 px-4 py-2 text-xs text-destructive">
+          <p role="alert" className="whitespace-pre-line">
+            {shownError.message}
+          </p>
+          {shownError.detail && (
+            <details data-testid="studio-bundle-editor-error-detail" className="mt-1">
+              <summary className="cursor-pointer select-none opacity-80">{t('engine.studio.refusal.details', locale)}</summary>
+              <pre className="mt-1 whitespace-pre-wrap break-words font-mono opacity-90">{shownError.detail}</pre>
+            </details>
+          )}
+        </div>
       )}
 
-      {loadedFor !== target && !loadError ? (
+      {draftRefused ? null : loadedFor !== target && !loadError ? (
         <div role="status" className="p-6 text-sm text-muted-foreground">
           {t('engine.studio.loading', locale)}
         </div>
