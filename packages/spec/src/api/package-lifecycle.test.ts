@@ -16,13 +16,16 @@ import {
   RevertPackageCommitResponseSchema,
   RollbackToPackageCommitResponseSchema,
   PackageExportManifestSchema,
+  PackageExportBundleSchema,
   ReassignOrphanedMetadataResponseSchema,
   DuplicatePackageResponseSchema,
   PackagePublishResultSchema,
   EnsureCustomizationPackageRequestSchema,
   EnsureCustomizationPackageResponseSchema,
+  GetPackageCustomizationsResponseSchema,
 } from './package-lifecycle.zod';
 import { PackagePublishResultSchema as SystemPackagePublishResultSchema } from '../system/metadata-persistence.zod';
+import { InstalledPackageSourceSchema } from '../kernel/package-registry.zod';
 
 describe('the ruled re-export of PackagePublishResultSchema into the `/api` namespace', () => {
   it('is the SAME declaration as the `/system` original — a re-export, never a second copy', () => {
@@ -221,6 +224,129 @@ describe('PackageExportManifestSchema declares the four fixed keys and stays ope
   });
 });
 
+describe('PackageExportBundleSchema declares the whole-deployment export as composed per-package exports (#28914)', () => {
+  /**
+   * The bundle the card's done criteria name: a base, its `.custom` pair and a
+   * third package that extends the base, dependencies first. Each entry is
+   * shaped as `GET /packages/:id/export` answers it — the pair carries its
+   * overriding item with the `overrides` block (ADR-0146 D8 item 3), and the
+   * connector keeps its `credentialRef` as the reference it is.
+   */
+  const bundle = {
+    packages: [
+      {
+        id: 'com.example.crm',
+        name: 'example-crm',
+        version: '2.1.0',
+        label: 'Example CRM',
+        objects: [{ name: 'crm_customer', label: 'Customer', fields: { name: { type: 'text' } } }],
+        views: [{ name: 'crm_customer_list', object: 'crm_customer', type: 'grid' }],
+        connectors: [{
+          name: 'crm_vendor',
+          label: 'Vendor',
+          type: 'api',
+          provider: 'openapi',
+          providerConfig: { spec: 'https://vendor.example.com/openapi.json' },
+          auth: {
+            type: 'oauth2',
+            grant: 'client_credentials',
+            tokenUrl: 'https://vendor.example.com/oauth/token',
+            clientId: 'client-123',
+            credentialRef: 'VENDOR_CLIENT_SECRET',
+          },
+        }],
+      },
+      {
+        id: 'com.example.crm.custom',
+        name: 'com.example.crm.custom',
+        version: '1.0.0',
+        views: [{
+          name: 'crm_customer_list',
+          object: 'crm_customer',
+          type: 'grid',
+          overrides: { package: 'com.example.crm', basedOn: '2.1.0' },
+        }],
+      },
+      {
+        id: 'com.example.revenue',
+        name: 'example-revenue',
+        version: '1.0.0',
+        objectExtensions: [{ extend: 'crm_customer', fields: { revenue_tier: { type: 'text' } } }],
+      },
+    ],
+  };
+
+  it('parses the bundle and PRESERVES every entry, in the order listed', () => {
+    const result = PackageExportBundleSchema.safeParse(bundle);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data).toEqual(bundle);
+    expect(result.data.packages.map((entry) => entry.id)).toEqual([
+      'com.example.crm',
+      'com.example.crm.custom',
+      'com.example.revenue',
+    ]);
+  });
+
+  it('judges each entry by THE per-package export schema — composed, never a second copy', () => {
+    expect(PackageExportBundleSchema.shape.packages.element).toBe(PackageExportManifestSchema);
+    const nameless = { packages: [bundle.packages[0], { objects: [] }] };
+    const result = PackageExportBundleSchema.safeParse(nameless);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path.join('.'))).toEqual(
+      expect.arrayContaining(['packages.1.id', 'packages.1.name', 'packages.1.version']),
+    );
+  });
+
+  it('parses an empty bundle — a deployment that holds only platform packages', () => {
+    expect(PackageExportBundleSchema.safeParse({ packages: [] }).success).toBe(true);
+  });
+
+  it('requires `packages` — an answer with no list is not a bundle', () => {
+    const result = PackageExportBundleSchema.safeParse({});
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.path).toEqual(['packages']);
+  });
+
+  it('is strict at the top level — a member the door starts serving is a change here first', () => {
+    const result = PackageExportBundleSchema.safeParse({ ...bundle, cycles: [] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.code).toBe('unrecognized_keys');
+    expect((result.error.issues[0] as { keys?: string[] }).keys).toEqual(['cycles']);
+  });
+
+  // Declared before it is served (ADR-0049): no runtime mounts
+  // `GET /packages/export` until the server slice of #28914 lands. That
+  // change drops the marker, adds the route's ledger row and flips this test.
+  it('is PLANNED until a runtime serves the route: the describe says so, naming no tracker id', () => {
+    const description = PackageExportBundleSchema.description ?? '';
+    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(description).toContain('ADR-0049');
+    expect(description).toContain('no runtime serves `GET /packages/export` yet');
+    // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the comments.
+    expect(description).not.toMatch(/#\d{3,}/);
+  });
+
+  // Which packages the door selects is read off the registry row's `source`
+  // (InstalledPackageSourceSchema), never derived from `manifest.scope`: the
+  // registry's own rule, and the runtime's #14375 correction of the same
+  // derivation. Both describes state the selection and the missing enabled state.
+  it('selects by the registry row\'s `source`, never by `manifest.scope`, and says it carries no enabled state', () => {
+    const packagesDescription = PackageExportBundleSchema.shape.packages.description ?? '';
+    const description = PackageExportBundleSchema.description ?? '';
+    for (const text of [packagesDescription, description]) {
+      expect(text).toContain('`source`');
+      expect(text).toContain('`code`');
+      expect(text).not.toMatch(/scope/);
+      expect(text).toContain('enabled');
+    }
+    expect(InstalledPackageSourceSchema.options).toContain('code');
+  });
+});
+
 describe('ReassignOrphanedMetadataResponseSchema declares the adopt-orphans body', () => {
   /** A verbatim-shaped capture of a real `reassignOrphanedMetadata` return. */
   const realResponse = {
@@ -312,5 +438,118 @@ describe('EnsureCustomizationPackageResponseSchema declares the ensure door\'s a
       delete partial[key];
       expect(EnsureCustomizationPackageResponseSchema.safeParse(partial).success, key).toBe(false);
     }
+  });
+});
+
+describe('GetPackageCustomizationsResponseSchema.contributions: the entry shape is per kind (ADR-0029 D7, ADR-0146 D3)', () => {
+  const CONTRIBUTOR = 'com.example.acme-sync';
+  const FIELD = { kind: 'field', object: 'crm_account', name: 'acme_sync_id', packageId: CONTRIBUTOR };
+  const FLOW = { kind: 'flow', object: 'crm_account', name: 'acme_account_sync', packageId: CONTRIBUTOR };
+  const NAV_IN_GROUP = { kind: 'nav', app: 'crm', group: 'group_service', name: 'nav_acme_sync', packageId: CONTRIBUTOR };
+  const NAV_TOP_LEVEL = { kind: 'nav', app: 'crm', name: 'nav_acme_console', packageId: CONTRIBUTOR };
+
+  /** A whole answer around `contributions`, its count derived the way the producer derives it. */
+  const answer = (contributions: unknown[]) => ({
+    packageId: 'com.acme.crm',
+    overrides: [],
+    extensions: [],
+    switchedOff: [],
+    contributions,
+    counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: contributions.length },
+  });
+
+  /** The single issue a refused answer carries, by code and path. */
+  const refusalOf = (contributions: unknown[]) => {
+    const result = GetPackageCustomizationsResponseSchema.safeParse(answer(contributions));
+    expect(result.success).toBe(false);
+    return result.success ? [] : result.error.issues.map((issue) => ({
+      code: issue.code,
+      path: issue.path,
+      keys: (issue as { keys?: string[] }).keys,
+    }));
+  };
+
+  it('CONTROL: a field and a flow entry parse and are PRESERVED, exactly as before the nav kind', () => {
+    const served = answer([FIELD, FLOW]);
+    const result = GetPackageCustomizationsResponseSchema.safeParse(served);
+    expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
+    if (result.success) expect(result.data).toEqual(served);
+  });
+
+  it('CONTROL: a field entry still requires its `object`', () => {
+    const { object: _dropped, ...noObject } = FIELD;
+    expect(refusalOf([noObject])).toEqual([{ code: 'invalid_type', path: ['contributions', 0, 'object'], keys: undefined }]);
+  });
+
+  it('a nav entry naming the group its contribution targets parses and is PRESERVED', () => {
+    const served = answer([FIELD, NAV_IN_GROUP]);
+    const result = GetPackageCustomizationsResponseSchema.safeParse(served);
+    expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
+    if (result.success) expect(result.data).toEqual(served);
+  });
+
+  it('a nav entry contributed to the app\'s top level has no group, and none is invented', () => {
+    const result = GetPackageCustomizationsResponseSchema.safeParse(answer([NAV_TOP_LEVEL]));
+    expect(result.success, JSON.stringify(result.success ? null : result.error.issues)).toBe(true);
+    if (result.success) {
+      expect(result.data.contributions).toEqual([NAV_TOP_LEVEL]);
+      expect('group' in result.data.contributions[0]).toBe(false);
+    }
+  });
+
+  it('a nav entry carrying `object` is refused: the nav shape is on an app, never an object', () => {
+    expect(refusalOf([{ ...NAV_IN_GROUP, object: 'crm_account' }]))
+      .toEqual([{ code: 'unrecognized_keys', path: ['contributions', 0], keys: ['object'] }]);
+  });
+
+  it('a field or flow entry carrying `app` or `group` is refused: those shapes are on an object', () => {
+    expect(refusalOf([{ ...FIELD, app: 'crm' }]))
+      .toEqual([{ code: 'unrecognized_keys', path: ['contributions', 0], keys: ['app'] }]);
+    expect(refusalOf([{ ...FLOW, group: 'group_service' }]))
+      .toEqual([{ code: 'unrecognized_keys', path: ['contributions', 0], keys: ['group'] }]);
+  });
+
+  it('a nav entry requires its app, its item id and its package', () => {
+    for (const key of ['app', 'name', 'packageId'] as const) {
+      const partial: Record<string, unknown> = { ...NAV_IN_GROUP };
+      delete partial[key];
+      expect(refusalOf([partial]), key).toEqual([{ code: 'invalid_type', path: ['contributions', 0, key], keys: undefined }]);
+    }
+  });
+
+  it('a kind outside field, flow and nav is still refused', () => {
+    const issues = refusalOf([{ ...FIELD, kind: 'action' }]);
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ code: 'invalid_union', path: ['contributions', 0, 'kind'] });
+  });
+});
+
+describe('the `nav` kind of `contributions` is declared ahead of its producer (ADR-0049)', () => {
+  type Described = { description?: string };
+  const member = (GetPackageCustomizationsResponseSchema as unknown as {
+    shape: { contributions: Described & { element: { options: Described[] } } };
+  }).shape.contributions;
+  const [objectArm, navArm] = member.element.options;
+
+  it('the nav arm\'s describe opens with the planned marker and names the ADR, never a tracker id', () => {
+    expect(navArm.description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(navArm.description).toContain('ADR-0049');
+    expect(navArm.description).not.toMatch(/#\d{3,}/);
+  });
+
+  it('the member and the field / flow arm say the nav kind is not yet served, and the field / flow arm carries no marker', () => {
+    expect(member.description).toContain('not yet served');
+    expect(objectArm.description).not.toMatch(/PLANNED/);
+    expect(member.description).not.toMatch(/#\d{3,}/);
+  });
+
+  it('the schema-level describe says the navigation items are not yet served, so serving them drops that too', () => {
+    expect(GetPackageCustomizationsResponseSchema.description).toContain('not yet served');
+  });
+
+  it('the nav arm says an item with no id (a separator may omit it) is not an entry: `name` is required', () => {
+    expect(navArm.description).toContain('An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry.');
+    const { name: _dropped, ...noName } = { kind: 'nav', app: 'crm', name: 'nav_sep', packageId: 'com.example.acme-sync' };
+    expect(GetPackageCustomizationsResponseSchema.shape.contributions.element.safeParse(noName).success).toBe(false);
   });
 });

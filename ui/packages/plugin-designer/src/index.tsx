@@ -11,7 +11,6 @@ import { PageDesigner } from './PageDesigner';
 import { DataModelDesigner } from './DataModelDesigner';
 import { ProcessDesigner } from './ProcessDesigner';
 import { ReportDesigner } from './ReportDesigner';
-import { CollaborationProvider, ConnectionStatusIndicator } from './CollaborationProvider';
 import { AppCreationWizard } from './AppCreationWizard';
 import { NavigationDesigner } from './NavigationDesigner';
 import { EditorModeToggle } from './EditorModeToggle';
@@ -25,8 +24,6 @@ export {
   DataModelDesigner,
   ProcessDesigner,
   ReportDesigner,
-  CollaborationProvider,
-  ConnectionStatusIndicator,
   AppCreationWizard,
   NavigationDesigner,
   EditorModeToggle,
@@ -44,13 +41,11 @@ export type { BrandingEditorProps } from './BrandingEditor';
 export type { ObjectManagerProps } from './ObjectManager';
 export type { FieldDesignerProps } from './FieldDesigner';
 
-// Shared hooks
+// Shared hooks. The clipboard, multi-select, pan/zoom and confirm-dialog hooks
+// and the `PropertyEditor` panel are the designers' internals: nothing outside
+// this package read them, so they stay module-local.
 export { useUndoRedo } from './hooks/useUndoRedo';
 export { useDesignerHistory } from './hooks/useDesignerHistory';
-export { useConfirmDialog } from './hooks/useConfirmDialog';
-export { useClipboard } from './hooks/useClipboard';
-export { useMultiSelect } from './hooks/useMultiSelect';
-export { useCanvasPanZoom } from './hooks/useCanvasPanZoom';
 // The provider-less fallback table, exported so objectui#4401's mirror gate can
 // compare it against the `en` pack from a package that depends on both.
 export { DESIGNER_DEFAULT_TRANSLATIONS } from './hooks/useDesignerTranslation';
@@ -58,8 +53,6 @@ export { DESIGNER_DEFAULT_TRANSLATIONS } from './hooks/useDesignerTranslation';
 // Shared components
 export { ConfirmDialog } from './components/ConfirmDialog';
 export { Minimap } from './components/Minimap';
-export { PropertyEditor } from './components/PropertyEditor';
-export { VersionHistory } from './components/VersionHistory';
 
 // Route-ready app authoring pages — host apps mount these at their
 // preferred routes. Each page expects an active app/adapter context from

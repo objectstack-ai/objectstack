@@ -354,6 +354,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'record',
     why: "planned, not yet rendered — the binding's one-row query is validated at parse and refused on every page that is not `type: 'app'`, but no renderer mounts it as the page's `record` until the console's page-root binding lands. A form control offered today would let an author bind a row no predicate can read yet",
   },
+  // #28979 — a record page's app scope lands spec-first the same way:
+  // `planned` in the liveness ledger, read by no console until the ui card
+  // that makes the page assignment read the route's app.
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'apps',
+    why: "planned, not yet rendered — the app scope is validated at parse, refused off a record page bound to an object, and a second page for one object in one app is refused at every door, but no console opens the scoped page in its app until the page assignment reads the route's app. A form control offered today would let an author scope a page no route opens yet",
+  },
   // #28022 — an app's per-audience landing list lands spec-first the same way:
   // `planned` in the liveness ledger, read by no console until the landing
   // redirect card. Offering it in the app form first would be the UI half of
@@ -406,6 +416,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'lookupAutofill',
     why: "planned, not yet read — a lookup's pick autofill pairs (`[{ target, source, overwrite? }]`) are validated at parse (a single-value relationship; each target a writable field of the same object, named once) and their sources at `os validate` / `os build`, but no form or grid fills a field from them until the ui card's lookup widget writes the declared targets on pick. A form control offered today would let an author declare a fill nothing performs",
+  },
+  // #29171 (ruling 6574398310, letter B) — a lookup's declared name exposure
+  // lands spec-first the same way: `[PLANNED — not yet served]` on its
+  // describe, served by no read or `$expand` until the server lane's card,
+  // drawn by no renderer until the ui lane's card, which adds the form row.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'referenceNameVisible',
+    why: "planned, not yet served — a lookup's declared name exposure (`true` lets a reader of the record see the target's `nameField` value and id when it cannot read the target) is refused at parse off `lookup` / `user`, but no read or `$expand` serves the name and no renderer draws it until the server and ui follow-up cards land. A form control offered today would let an author declare an exposure nothing serves",
   },
   {
     kind: 'omit',

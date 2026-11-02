@@ -25,7 +25,11 @@
  *    unmigrated row is served, and its package-less write is refused; a
  *    rollback of the pair's declared row is the declared override (a page);
  *  - ADOPT-ORPHANS (Wanted 5): adopting into a writable package skips the
- *    shipped-name row and rebinds an environment one.
+ *    shipped-name row and rebinds an environment one;
+ *  - [#29392] A ROW BOUND TO THE BASE (a save naming it, before #28905's
+ *    close): listed and moved the same way, never merged over another row of
+ *    its item; rows bound to a writable package or to a package that does not
+ *    ship the name are not listed.
  *
  * Test-path resolution: the protocol is `@objectstack/metadata-protocol`'s
  * `dist/`, so a change there is read here after that package is rebuilt.
@@ -632,6 +636,139 @@ describe('[#28576] the close reaches only what the ceremony moves: every row it 
         expectClosed(await refusalOf(protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(VIEW, 'showcase_task', EDITED_COLUMNS) } as any)));
         expectClosed(await refusalOf(protocol.deleteMetaItem({ type: 'view', name: VIEW } as any)));
         expect(rows(VIEW)).toEqual([[null, 'active']]);
+    });
+});
+
+/**
+ * [#29392, ADR-0146 D1, D11] A row bound to the read-only base itself, as a
+ * save naming the base stored it before #28905 closed that write (laid down
+ * through the engine, as `storeRow` lays down every older release's row), is
+ * in the census beside the package-less rows: listed `movable` with
+ * `boundToBase`, its binding as its base, and moved into the pair by
+ * `--apply` with the declaration — the same outcome a package-less row's move
+ * answers. Before, the census read package-less rows only, so the dry run
+ * listed nothing and the row's one exit was a delete, which drops it.
+ */
+describe('[#29392] the census and the move reach a row bound to the read-only base, stored before the #28905 close', () => {
+    const listedRows = (c: any) => (c.rows as any[]).map((r) => `${r.name}@${r.state} ${r.disposition} ${r.base} → ${r.pair}${r.boundToBase ? ' bound' : ''}`);
+
+    it('the dry run lists it with its target pair; --apply moves it with its `overrides` declaration; the base\'s address serves the customization over the base\'s document after; a re-run moves 0', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, BASE);
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, BASE, 'draft');
+        const servedBefore = columnsOf(await read(protocol, BASE));
+        expect(servedBefore).toEqual(UNBOUND_COLUMNS);
+
+        const dry = await census(protocol);
+        expect(listedRows(dry)).toEqual([
+            `${VIEW}@active movable ${BASE} → ${PAIR} bound`,
+            `${VIEW}@draft movable ${BASE} → ${PAIR} bound`,
+        ]);
+        expect(dry.environmentRows).toBe(0);
+        // The dry run writes nothing.
+        expect(rows(VIEW).slice().sort()).toEqual([[BASE, 'active'], [BASE, 'draft']]);
+        expect((engine.registry as any).getPackage(PAIR)).toBeUndefined();
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.packageId, o.basedOn])).toEqual([
+            ['moved', PAIR, '1.2.0'], ['moved', PAIR, '1.2.0'],
+        ]);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: true, moved: 2, declarationsCompleted: 0, failed: 0, shadowed: 0 }]);
+        expect(rows(VIEW).slice().sort()).toEqual([[PAIR, 'active'], [PAIR, 'draft']]);
+        for (const state of ['active', 'draft']) {
+            const moved = rowOf(VIEW, PAIR, state)!;
+            expect(isServedOverrideRowOf(moved as any, BASE), state).toBe(true);
+            expect(JSON.parse(String(moved.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+        }
+        expect(columnsOf(JSON.parse(String(rowOf(VIEW, PAIR, 'draft')!.metadata)))).toEqual(EDITED_COLUMNS);
+        // The base's document is the code layer; the customization, now the
+        // pair's declared override, is served over it at every read.
+        const view = await layered(protocol, BASE);
+        expect(columnsOf(view.code)).toEqual(BASE_COLUMNS);
+        expect(columnsOf(view.effective)).toEqual(UNBOUND_COLUMNS);
+        expect(await fiveReads(protocol)).toEqual([UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS, UNBOUND_COLUMNS]);
+
+        const again = await migrate(protocol);
+        expect(again.rows).toEqual([]);
+        expect(again.outcomes).toEqual([]);
+    });
+
+    it('a name two read-only packages ship, bound to one of them: the binding names its base, so it is movable into that base\'s pair, never `multi_shipped`', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await storeRow(engine, SHARED_VIEW, 'shared_task', UNBOUND_COLUMNS, BASE);
+        const dry = await census(protocol);
+        expect(listedRows(dry)).toEqual([`${SHARED_VIEW}@active movable ${BASE} → ${PAIR} bound`]);
+        expect(dry.rows[0].shippers).toEqual([OTHER, BASE]);
+        expect((await migrate(protocol)).outcomes.map((o: any) => o.outcome)).toEqual(['moved']);
+        expect(rows(SHARED_VIEW)).toEqual([[PAIR, 'active']]);
+        expect(JSON.parse(String(rowOf(SHARED_VIEW, PAIR)!.metadata)).overrides).toEqual({ package: BASE, basedOn: '1.2.0' });
+    });
+
+    it('a body declaring another package: listed `foreign_declaration`, bound, and left as it is', async () => {
+        const { engine, protocol, rows } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, BASE, 'active', { overrides: { package: OTHER } });
+        expect(listedRows(await census(protocol))).toEqual([`${VIEW}@active foreign_declaration ${BASE} → ${PAIR} bound`]);
+        expect((await migrate(protocol)).outcomes).toEqual([]);
+        expect(rows(VIEW)).toEqual([[BASE, 'active']]);
+    });
+
+    it('beside the pair\'s declared row: listed `shadowed`, and left as it is', async () => {
+        const { engine, protocol, rows } = await boot();
+        await (protocol as any).ensureCustomizationPackage({ basePackageId: BASE });
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, PAIR, 'active', { overrides: { package: BASE, basedOn: '1.2.0' } });
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS, BASE);
+        const dry = await census(protocol);
+        expect(listedRows(dry)).toEqual([`${VIEW}@active shadowed ${BASE} → ${PAIR} bound`]);
+        expect(dry.rows[0].shadowDeclares).toBe(true);
+        const result = await migrate(protocol);
+        expect(result.outcomes).toEqual([]);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: false, moved: 0, declarationsCompleted: 0, failed: 0, shadowed: 1 }]);
+        expect(rows(VIEW).slice().sort()).toEqual([[BASE, 'active'], [PAIR, 'active']]);
+    });
+
+    it('a package-less row and a row bound to the base of one item: the package-less row moves, the bound row is kept (never merged over it), and the next run lists it `shadowed`', async () => {
+        const { engine, protocol, rows, rowOf } = await boot();
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        await storeRow(engine, VIEW, 'showcase_task', EDITED_COLUMNS, BASE);
+        const dry = await census(protocol);
+        expect(listedRows(dry).slice().sort()).toEqual([
+            `${VIEW}@active movable ${BASE} → ${PAIR}`,
+            `${VIEW}@active movable ${BASE} → ${PAIR} bound`,
+        ]);
+        const bound = dry.rows.find((r: any) => r.boundToBase);
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.id === bound.id ? 'bound' : 'package-less', o.outcome])).toEqual([
+            ['package-less', 'moved'], ['bound', 'failed'],
+        ]);
+        expect(result.outcomes[1].error).toContain(`'${PAIR}' now holds this item`);
+        expect(result.bases).toEqual([{ base: BASE, pair: PAIR, pairCreated: true, moved: 1, declarationsCompleted: 0, failed: 1, shadowed: 0 }]);
+        // Nothing overwritten: the pair holds the package-less row's content, the bound row is untouched.
+        expect(rows(VIEW).slice().sort()).toEqual([[BASE, 'active'], [PAIR, 'active']]);
+        expect(columnsOf(JSON.parse(String(rowOf(VIEW, PAIR)!.metadata)))).toEqual(UNBOUND_COLUMNS);
+        expect(columnsOf(JSON.parse(String(rowOf(VIEW, BASE)!.metadata)))).toEqual(EDITED_COLUMNS);
+        expect(listedRows(await census(protocol))).toEqual([`${VIEW}@active shadowed ${BASE} → ${PAIR} bound`]);
+    });
+
+    it('CONTROL: a package-less row still moves as before, beside a row bound to a writable package (not listed) and a row bound to a read-only package that does not ship the name (not listed)', async () => {
+        const { engine, protocol, rows } = await boot();
+        await (protocol as any).installPackage({ manifest: { id: WORKSPACE, name: 'workspace', version: '0.1.0', type: 'app' } });
+        await storeRow(engine, VIEW, 'showcase_task', UNBOUND_COLUMNS);
+        await storeRow(engine, ENV_VIEW, 'showcase_task', UNBOUND_COLUMNS, WORKSPACE);
+        await storeRow(engine, SHARED_VIEW, 'shared_task', UNBOUND_COLUMNS, WORKSPACE);
+        // OTHER is read-only and does not ship `env_only.default`.
+        await storeRow(engine, ENV_VIEW, 'showcase_task', EDITED_COLUMNS, OTHER);
+
+        const dry = await census(protocol);
+        expect(listedRows(dry)).toEqual([`${VIEW}@active movable ${BASE} → ${PAIR}`]);
+        expect(dry.rows[0]).not.toHaveProperty('boundToBase');
+        expect(dry.environmentRows).toBe(0);
+
+        const result = await migrate(protocol);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.basedOn])).toEqual([['moved', '1.2.0']]);
+        expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
+        expect(rows(ENV_VIEW).slice().sort()).toEqual([[WORKSPACE, 'active'], [OTHER, 'active']]);
+        expect(rows(SHARED_VIEW)).toEqual([[WORKSPACE, 'active']]);
     });
 });
 

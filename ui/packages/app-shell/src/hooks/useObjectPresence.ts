@@ -53,8 +53,10 @@
  * type is still `idle` (`MetadataProvider`'s `readType`). No consumer of this
  * hook adds a request; the point is to remove one.
  */
+import { useCallback, useRef, useState } from 'react';
 import { useMetadata, type MetadataContextValue, type MetadataTypeStatus } from '@object-ui/react';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
+import { preferLocal } from '../utils/preferLocal.js';
 
 type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
 
@@ -96,6 +98,116 @@ export function readObjectsByName(
     return (readObjectScope as ReadNamesWithoutViews)({ names: asked, views: false }).objects;
   }
   return metadata.objects ?? NO_OBJECTS;
+}
+
+/**
+ * {@link readObjectsByName} for a type the cache keeps no names-only scope for
+ * (a dashboard, a page, a report): `read(type, names, list)`.
+ */
+export type ReadItemsByName = (
+  type: string,
+  names: readonly string[],
+  list: () => readonly unknown[] | undefined,
+  /** Called with each asked name whose by-name read has not answered yet (objectstack#29416). */
+  pending?: (name: string) => void,
+) => readonly unknown[];
+
+const NO_ANSWERS: ReadonlyMap<string, unknown> = new Map();
+
+/**
+ * The definitions of `names` of one metadata type, without that type's whole
+ * list (objectstack#29235): what {@link readObjectsByName} is to objects, for
+ * a reader that labels a few rows (a recent dashboard, page or report). While
+ * nothing has asked for the type's list, each name is asked once through the
+ * provider's by-name read (`getItem`, which the app bundle answers for an item
+ * it holds), and the answer is the names that have landed so far; the reader
+ * re-renders as each lands. Once the list is loaded, or on its way, it is
+ * `list()`, and nothing more is asked. A provider without a status or a
+ * by-name read (a hand-rolled context) answers with `list()`, as before.
+ *
+ * A name that answered an item is asked again once the provider's metadata
+ * changes (a refresh, an invalidation): the provider's by-name cache answers it
+ * at once, without a request, unless that change dropped it, so a renamed item
+ * shows its new label. A name that answered none (absent, or a failed read) is
+ * not asked again while the reader is mounted.
+ *
+ * Asking for no name asks for nothing.
+ */
+export function useReadItemsByName(
+  metadata: Pick<MetadataContextValue, 'getItem' | 'getTypeStatus'>,
+): ReadItemsByName {
+  const { getItem, getTypeStatus } = metadata;
+  const [answers, setAnswers] = useState(NO_ANSWERS);
+  // What this reader asked of which provider value: a new value (its
+  // `getTypeStatus` is rebuilt with it) starts a new set.
+  const askedRef = useRef<{ of: unknown; keys: Set<string> }>({ of: undefined, keys: new Set() });
+  return useCallback<ReadItemsByName>(
+    (type, names, list, pending) => {
+      if (typeof getItem !== 'function' || getTypeStatus?.(type) !== 'idle') return list() ?? NO_OBJECTS;
+      if (askedRef.current.of !== getTypeStatus) askedRef.current = { of: getTypeStatus, keys: new Set() };
+      const asked = askedRef.current.keys;
+      const found: unknown[] = [];
+      for (const name of names) {
+        if (typeof name !== 'string' || name === '') continue;
+        const key = `${type}/${name}`;
+        if (!asked.has(key) && answers.get(key) !== null) {
+          asked.add(key);
+          const settle = (item: unknown) =>
+            setAnswers((prev) => (prev.has(key) && prev.get(key) === item ? prev : new Map(prev).set(key, item)));
+          void getItem(type, name).then((item) => settle(item ?? null), () => settle(null));
+        }
+        const item = answers.get(key);
+        if (item) found.push(item);
+        else if (!answers.has(key)) pending?.(name);
+      }
+      return found;
+    },
+    [getItem, getTypeStatus, answers],
+  );
+}
+
+/** One item a route resolves by name, and whether its read has settled. */
+export interface ItemByNameRead {
+  item: any;
+  settled: boolean;
+}
+
+/**
+ * The `type` item named `name` as the prefer-local pick over the type's list
+ * resolves it (`preferLocal`, ADR-0048), without reading that list while the
+ * by-name read can answer it (objectstack#29416): a route that names one item
+ * (a page the app bundle does not hold) asked the whole `/meta/<type>` list.
+ *
+ * The by-name read (`GET /meta/<type>/<name>`) takes no package and answers
+ * the first match (ADR-0048 §3.3), so its answer is the pick only when it
+ * cannot differ from it: in an app with no package (`ownerPackageId` unset,
+ * where the pick is the first match too), or when it is the app's own
+ * package's item, which the pick prefers. Otherwise, another package's item
+ * while the app's own may exist, or no item at all (absent, or a failed read),
+ * the list is read and picked from, as before. Once the list is loaded, or on
+ * its way, the pick reads it and nothing is asked by name.
+ */
+export function readItemPreferLocal(
+  readItemsByName: ReadItemsByName,
+  type: string,
+  name: string,
+  ownerPackageId: unknown,
+  list: () => readonly unknown[] | undefined,
+  status: MetadataTypeStatus | undefined,
+): ItemByNameRead {
+  const fromList = (): ItemByNameRead => {
+    const listed = list();
+    const now = status === 'idle' ? 'loading' : status;
+    return { item: preferLocal(listed as any[] | undefined, name, ownerPackageId), settled: metadataTypeSettled(now) };
+  };
+  if (status !== 'idle') return fromList();
+  let waiting = false;
+  const [answer] = readItemsByName(type, [name], () => undefined, () => {
+    waiting = true;
+  }) as Array<{ _packageId?: unknown } | undefined>;
+  if (waiting) return { item: undefined, settled: false };
+  if (answer && (!ownerPackageId || answer._packageId === ownerPackageId)) return { item: answer, settled: true };
+  return fromList();
 }
 
 /** What the metadata registry can say about one object name. */

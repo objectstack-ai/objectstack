@@ -16,7 +16,7 @@
  * compatibility arm cannot rot unnoticed.
  */
 import { describe, expect, it } from 'vitest';
-import { parsePackages } from './packages-io';
+import { listedPackageEntry, parseListedPackageManifests, parsePackages } from './packages-io';
 
 function wrap(packages: Array<Record<string, unknown>>) {
   return { data: { packages } };
@@ -88,6 +88,25 @@ describe('parsePackages — the server owns the writable verdict', () => {
       ]),
     );
     expect(out.map((p) => p.id)).toEqual(['com.example.leave']);
+  });
+
+  it('objectstack#29567 — an open kernel package is still judged: its listed entry carries the verdict', () => {
+    const payload = wrap([
+      row({ id: 'com.objectstack.plugin-auth', name: 'Auth', scope: 'system', namespace: 'sys' }, { writable: false }),
+      row({ id: 'com.example.leave', name: 'Leave' }, { writable: true }),
+    ]);
+    // The switcher still leaves it out …
+    expect(parsePackages(payload).map((p) => p.id)).toEqual(['com.example.leave']);
+    // … while the open package reads as the server judged it.
+    const manifests = parseListedPackageManifests(payload);
+    expect(listedPackageEntry(manifests, 'com.objectstack.plugin-auth')).toEqual({
+      id: 'com.objectstack.plugin-auth',
+      name: 'Auth',
+      writable: false,
+      namespace: 'sys',
+    });
+    expect(listedPackageEntry(manifests, 'com.example.leave')).toMatchObject({ writable: true, namespace: 'leave' });
+    expect(listedPackageEntry(manifests, 'com.example.absent')).toBeNull();
   });
 });
 

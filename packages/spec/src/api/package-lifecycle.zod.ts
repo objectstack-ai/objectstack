@@ -192,6 +192,104 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
 )));
 
 /**
+ * `GET /packages/export` — the deployment's whole ontology as installable
+ * packages, in one read (#28914): the exit right that
+ * {@link PackageExportManifestSchema}'s route grants one package at a time.
+ *
+ * ⚠️ DECLARED AHEAD OF ITS PRODUCER (ADR-0049). No runtime serves
+ * `GET /packages/export` yet: no handler mounts it, so a call today is not
+ * answered with this shape. This declaration is the contract the server slice
+ * of #28914 must meet (Clause-②, widening): it mounts the route on the runtime
+ * dispatcher, enveloped like its lifecycle siblings (`{ success, data }`), and
+ * answers this schema as the `data`. Until it does, the describe carries
+ * `[PLANNED — not yet served]`. The house has no other planned channel for an
+ * API response: the liveness ledgers are per metadata type, and the runtime
+ * route ledger records only what the dispatcher serves. So the change that
+ * mounts the route drops the marker, adds the route's ledger row and flips the
+ * test that pins the marker.
+ *
+ * Everything below is what that door MUST do. None of it is served today.
+ *
+ * ## One producer
+ *
+ * Each entry must be exactly what `GET /packages/:id/export` (served today)
+ * answers for that package. The bundle composes the per-package export and
+ * must never assemble, clean or redact an item a second way, so the two reads
+ * cannot disagree about a package. Two consequences follow on purpose:
+ *
+ * - **A `.custom` pair is its own entry**, carrying its overriding items with
+ *   their `overrides` blocks (ADR-0146 D8 item 3), and its base's entry carries
+ *   the base unchanged. Environment-scope customizations stay where the
+ *   per-package export already places them: under the package that owns them.
+ * - **No credential value leaves.** The per-package export already withholds
+ *   credential positions, as every served metadata read does. The bundle must
+ *   add no rule of its own: a `credentialRef` stays the reference it is.
+ *
+ * ## Which packages, in which order
+ *
+ * Every package whose registry row's `source` (`InstalledPackageSourceSchema`,
+ * kernel/package-registry.zod.ts) is not `code`, each once: the marketplace
+ * and authored packages, a `.custom` pair among them. A `code` package is
+ * registered by the running deployment's own code (a `defineStack()` host's
+ * packages, a plugin's bundled manifest, a platform package), so it travels
+ * with that code and not with the bundle: an install of the bundle never
+ * re-installs it. The row's `source` is the one key that says so: the
+ * registry's own ⛔ forbids deriving it from `manifest.scope` or `writable`,
+ * and the per-package export already reads the row that carries it. A pair of
+ * a `code` base is still exported. A metadata item bound to no package is in
+ * no entry; ADR-0146 D11's migration binds it to one first.
+ *
+ * Enabled or not, every such package is exported, and the bundle carries no
+ * enabled state: the per-package export has no `enabled` or `status` key, so an
+ * install of the bundle installs every entry enabled. A package the tenant
+ * switched off comes back on, and the consumer disables it again if it wants it
+ * off.
+ *
+ * The order must be ADR-0141 D5's, the order a boot hydrates installed
+ * packages in: dependencies first. An entry comes after every entry its
+ * package's `manifest.dependencies` names, so a pair comes after its base.
+ * Installing the entries in the order listed is the whole consumption rule: a
+ * consumer never re-sorts. Members of a dependency cycle keep the read's
+ * listing order among themselves, as a boot hydrates them.
+ *
+ * ## The door
+ *
+ * The read gate must be the per-package export's: `studio.access` or
+ * `setup.access`, or a system context, asked before anything is read. The
+ * query set must be CLOSED and empty: the door refuses a query parameter
+ * `400 VALIDATION_ERROR`, naming it. No request schema is declared, because
+ * the door reads no path id, no body and no parameter. `export` can never be a
+ * package id (one has at least two dot-separated segments,
+ * `MANIFEST_ID_PATTERN`), so the path never shadows `GET /packages/:id`.
+ *
+ * The answer must be whole or absent: a package whose export cannot be
+ * assembled fails the read, naming that package. ⛔ Never a bundle that
+ * silently lacks a package. Strict at the top level: a member the door starts
+ * serving is a change to this declaration first. Each entry stays open, as
+ * ruled for {@link PackageExportManifestSchema}.
+ */
+export const PackageExportBundleSchema = lazySchema(() => z.object({
+  packages: z.array(PackageExportManifestSchema).describe(
+    'Every package whose registry row\'s `source` is not `code` (the marketplace and authored packages, a `.custom` '
+    + 'pair among them), enabled or not, each once and each as `GET /packages/:id/export` answers it, dependencies '
+    + 'first: an entry comes after every entry its package\'s `manifest.dependencies` names, so a `.custom` pair '
+    + 'comes after its base. Install the entries in this order; never re-sort them. No entry carries an enabled '
+    + 'state, so every entry installs enabled. Empty when every package of the deployment is registered by its '
+    + 'own code.',
+  ),
+  // Declared before it is served (ADR-0049): the marker comes off when the
+  // server slice of #28914 mounts `GET /packages/export`, in the same change
+  // as the route's ledger row.
+}).strict().describe(
+  '[PLANNED — not yet served] Whole-deployment export: every installed package the deployment\'s own code does '
+  + 'not register (registry `source` other than `code`), as installable packages in dependency order. Carries no '
+  + 'credential value and no enabled state. Declared ahead of its producer '
+  + '(ADR-0049): no runtime serves `GET /packages/export` yet. The server half of the whole-deployment package '
+  + 'export mounts it, together with a future CLI command that calls it; until then this is the contract that '
+  + 'door must answer, not a read a client can make.',
+));
+
+/**
  * `POST /packages/:id/adopt-orphans` — bulk-rebind package-less (orphaned)
  * metadata into this base (ADR-0070 D5); the client method is
  * `packages.adoptOrphans`.
@@ -351,14 +449,29 @@ export const GetPackageCustomizationsRequestSchema = lazySchema(() => z.object({
  * the same read names what OTHER installed packages bring to X's surface, so
  * Studio can draw those items greyed with their source: `contributions`, one
  * entry per item, each stamped with the package that contributes it. What is
- * listed is exactly two kinds: the fields another package's object extension
- * adds to an object X owns, and the flows another package ships whose trigger
- * object X owns. The stamp is on the item, so two packages adding a field of
- * the same name are two entries and nothing is joined by name on the client.
- * Neither X's own items nor its pair's are contributions: a pair item that
- * overrides one of X's (a flow included) is in `overrides`, the pair's
- * extension members are in `extensions`, and any other pair flow is in no
- * list of this answer.
+ * listed is exactly three kinds: the fields another package's object extension
+ * adds to an object X owns, the flows another package ships whose trigger
+ * object X owns, and the navigation items another package's
+ * `navigationContributions` add to an app X owns. The entry shape is per kind:
+ * a `field` or `flow` entry names the base-owned `object` it is on; a `nav`
+ * entry names the base-owned `app` and, when the contribution targets one,
+ * its `group`, and never an `object`. The stamp is on the item, so two
+ * packages adding a field of the same name are two entries and nothing is
+ * joined by name on the client. Neither X's own items nor its pair's are
+ * contributions: a pair item that overrides one of X's (a flow included) is in
+ * `overrides`, the pair's extension members are in `extensions`, and any other
+ * pair flow is in no list of this answer.
+ *
+ * [#27928, ruling 6566915346 letter E] DECLARED AHEAD OF ITS PRODUCER
+ * (ADR-0049): the `nav` kind is declared before the runtime serves it. Until
+ * the server slice of #28722 (Wanted 3) reads the navigation-contribution
+ * registry, this read lists no `nav` entry; the `nav` arm's describe opens
+ * `[PLANNED — not yet served]`, and that slice drops the marker in the change
+ * that serves the kind. When served, a `nav` entry MUST be read from the same
+ * `appNavContributions` registry the served app's navigation fold reads
+ * (ADR-0029 D7), never joined by name; a disabled package's contributions
+ * MUST NOT be listed, as the fold drops them; and the served app's
+ * `navigation` stays as declared: no nav item carries a contributor key.
  */
 export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object({
   packageId: z.string().describe('The base package the customizations are of (the request\'s id).'),
@@ -403,23 +516,60 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
     'Every activation-ledger row (`sys_metadata_activation`) that records the base as its package and '
     + '`active: false`: the base\'s items this deployment switched off. Ordered by type and name.',
   ),
-  contributions: z.array(z.object({
-    kind: z.enum(['field', 'flow']).describe(
-      'What is contributed: `field`, a field another package\'s object extension (`objectExtensions`) adds to '
-      + 'one of the base\'s objects; `flow`, a flow another package ships whose trigger object (its `start` '
-      + 'node\'s `config.objectName`) is one of the base\'s objects.',
+  // The entry shape is per kind (#27928, ruling 6566915346 letter E): a
+  // `field` / `flow` entry is on an `object`, a `nav` entry on an `app`. The
+  // `field` / `flow` arm accepts exactly what the member's one entry shape
+  // accepted before the `nav` kind (the CONTROL pins in the test).
+  contributions: z.array(z.discriminatedUnion('kind', [
+    z.object({
+      kind: z.enum(['field', 'flow']).describe(
+        'What is contributed: `field`, a field another package\'s object extension (`objectExtensions`) adds to '
+        + 'one of the base\'s objects; `flow`, a flow another package ships whose trigger object (its `start` '
+        + 'node\'s `config.objectName`) is one of the base\'s objects.',
+      ),
+      object: z.string().describe('The base-owned object the item is on: the extended object, or the flow\'s trigger object.'),
+      name: z.string().describe('The item\'s name: the field name as the extension declares it, or the flow\'s name.'),
+      packageId: z.string().describe(
+        'The package that contributes the item: the extension\'s package, or the package the flow is registered '
+        + 'under. Never the base and never its `<base>.custom` pair.',
+      ),
+    }).strict().describe('A field or flow another package contributes to one of the base\'s objects.'),
+    // Declared ahead of its producer: the server slice of #28722 (Wanted 3)
+    // serves this arm and drops the `[PLANNED — not yet served]` marker in the
+    // same change (the pin is in `package-lifecycle.test.ts`).
+    z.object({
+      kind: z.literal('nav').describe(
+        'What is contributed: `nav`, a navigation item another package\'s `navigationContributions` entry adds '
+        + 'to the navigation of an app the base owns.',
+      ),
+      app: z.string().describe('The base-owned app the item is contributed to: the contribution\'s `app`.'),
+      group: z.string().optional().describe(
+        'The group nav item the contribution targets: its `group`, as the contribution declares it. Absent when '
+        + 'the contribution targets the app\'s top level. A group the app does not declare is still named here, '
+        + 'though the served navigation appends those items at the app\'s top level.',
+      ),
+      name: z.string().describe('The nav item\'s id, as the contribution\'s `items` declare it.'),
+      packageId: z.string().describe(
+        'The package that contributes the item: the package whose `navigationContributions` declares it. Never '
+        + 'the base and never its `<base>.custom` pair.',
+      ),
+    }).strict().describe(
+      '[PLANNED — not yet served] Declared ahead of its producer (ADR-0049): the read lists no `nav` entry yet. '
+      + 'A navigation item another installed package contributes to an app the base owns, one entry per item of '
+      + 'the contribution\'s `items` (a contributed group\'s children ride inside it and are not entries of their '
+      + 'own), read from the same contribution registry the served app\'s navigation fold reads (ADR-0029 D7). '
+      + 'An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry. '
+      + 'A disabled package\'s contributions are not listed, as the fold drops them.',
     ),
-    object: z.string().describe('The base-owned object the item is on: the extended object, or the flow\'s trigger object.'),
-    name: z.string().describe('The item\'s name: the field name as the extension declares it, or the flow\'s name.'),
-    packageId: z.string().describe(
-      'The package that contributes the item: the extension\'s package, or the package the flow is registered '
-      + 'under. Never the base and never its `<base>.custom` pair.',
-    ),
-  }).strict()).describe(
-    'Every field and flow another installed package contributes to the base\'s objects, one entry per item and '
-    + 'contributing package: the fields of every object extension of an object the base owns, from any package '
-    + 'but the base and its pair, and every flow registered under such a package whose trigger object the base '
-    + 'owns (a flow of a disabled package is not served, so not listed). Ordered by object, kind, name and package.',
+  ])).describe(
+    'Every field, flow and navigation item another installed package contributes to the base, one entry per '
+    + 'item and contributing package: the fields of every object extension of an object the base owns, from any '
+    + 'package but the base and its pair; every flow registered under such a package whose trigger object the '
+    + 'base owns (a flow of a disabled package is not served, so not listed); and, declared ahead of its producer '
+    + 'and not yet served, every navigation item such a package contributes to an app the base owns. The entry '
+    + 'shape is per `kind`: `object` for `field` and `flow`, `app` and an optional `group` for `nav`. Ordered: '
+    + 'the `field` and `flow` entries first, by object, kind, name and package; then the `nav` entries, by app, '
+    + 'group (an entry with no group first), name and package.',
   ),
   counts: z.object({
     overrides: z.number().int().nonnegative().describe('`overrides.length`.'),
@@ -429,7 +579,7 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
   }).strict().describe('Each list\'s length, derived from the lists in this same answer.'),
 }).strict().describe(
   'Per-package customization read: overrides, extensions and switched-off items of one installed base, and the '
-  + 'fields and flows other packages contribute to it.',
+  + 'fields, flows and (not yet served) navigation items other packages contribute to it.',
 ));
 
 /**
@@ -508,6 +658,9 @@ export type RollbackToPackageCommitResponseParsed = z.infer<typeof RollbackToPac
 export type PackageExportManifest = z.input<typeof PackageExportManifestSchema>;
 /** Post-parse shape of {@link PackageExportManifest} — defaults applied, transforms run (ADR-0122). */
 export type PackageExportManifestParsed = z.infer<typeof PackageExportManifestSchema>;
+export type PackageExportBundle = z.input<typeof PackageExportBundleSchema>;
+/** Post-parse shape of {@link PackageExportBundle} — defaults applied, transforms run (ADR-0122). */
+export type PackageExportBundleParsed = z.infer<typeof PackageExportBundleSchema>;
 export type ReassignOrphanedMetadataResponse = z.input<typeof ReassignOrphanedMetadataResponseSchema>;
 /** Post-parse shape of {@link ReassignOrphanedMetadataResponse} — defaults applied, transforms run (ADR-0122). */
 export type ReassignOrphanedMetadataResponseParsed = z.infer<typeof ReassignOrphanedMetadataResponseSchema>;

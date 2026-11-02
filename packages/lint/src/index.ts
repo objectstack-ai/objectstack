@@ -235,6 +235,7 @@ export type { SourceStyleFinding, SourceStyleSeverity } from './validate-page-so
 
 export {
   validateRecordTitle,
+  validateTitleFormatRetired,
   TITLE_FORMAT_RETIRED,
   TITLE_UNRESOLVABLE,
 } from './validate-record-title.js';
@@ -725,6 +726,14 @@ export {
 } from './validate-customization-namespace.js';
 export type { CustomizationNamespaceFinding } from './validate-customization-namespace.js';
 
+// [#29049] ADR-0031 region shape: a flow the automation engine refuses to
+// register, judged with the spec's `validateControlFlow` itself.
+export {
+  validateFlowRegionShape,
+  FLOW_REGION_SHAPE_INVALID,
+} from './validate-flow-region-shape.js';
+export type { FlowRegionShapeFinding } from './validate-flow-region-shape.js';
+
 // [#14105] The layer BELOW the chart/widget binding rules above: a dataset's
 // own `include[]`, `dimensions[].field`, `measures[].field` and filter KEYS,
 // resolved against the object graph. Its base-object half is
@@ -1011,6 +1020,9 @@ export {
 export { lintFlowCredentialLiterals, FLOW_CREDENTIAL_LITERAL } from './lint-flow-credential-literals.js';
 export type { FlowCredentialLiteralFinding } from './lint-flow-credential-literals.js';
 export { isCredentialShapedLiteral } from './credential-literal.js';
+// The same predicate over a declarative connector's four header/env maps.
+export { lintConnectorCredentialLiterals, CONNECTOR_CREDENTIAL_LITERAL } from './lint-connector-credential-literals.js';
+export type { ConnectorCredentialLiteralFinding } from './lint-connector-credential-literals.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
 // #11624 — the ledger's warn set, as a decision procedure. `os lint` runs the

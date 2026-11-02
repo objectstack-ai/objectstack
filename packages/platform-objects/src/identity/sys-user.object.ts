@@ -86,7 +86,6 @@ export const SysUser = ObjectSchema.create({
   description: 'User accounts for authentication',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{name}',
   highlightFields: ['name', 'email', 'email_verified'],
 
   // Custom actions — generic CRUD is suppressed because user accounts are
@@ -575,6 +574,40 @@ export const SysUser = ObjectSchema.create({
         description:
           'Set the manager a user (the record) reports to (param: managerId, a user in the same organization). The reporting chain drives approval routing and the own_and_reports record scope. Ask the human to confirm before calling.',
         requiresConfirmation: true,
+      },
+    },
+    {
+      // ADR-0095 D3 — who holds platform-admin standing. Standing is derived
+      // per user, never stored on this object, so the Users list carries no
+      // column for it: a list column would have to evaluate the predicate for
+      // every row of every page. This one entry asks the population question
+      // instead. The plugin-auth route enumerates the candidates with the
+      // last-admin guard's own enumerator and confirms each through
+      // `hasPlatformAdminStanding`, and it answers only a caller who holds
+      // that standing (an organization owner or admin is refused 403), so the
+      // `visible` term below, the same as every action in the platform-admin
+      // block above, is display only.
+      // No `ai` block: this action postdates the ADR-0011 identity-actions
+      // assessment, and an unassessed action stays human-only.
+      name: 'list_platform_admins',
+      label: 'Platform Administrators',
+      icon: 'shield-check',
+      variant: 'secondary',
+      locations: ['list_toolbar'],
+      type: 'api',
+      target: '/api/v1/auth/admin/list-platform-admins',
+      visible: 'current_user.isPlatformAdmin == true',
+      // A read: the Users list behind the dialog is not reloaded.
+      refreshAfter: false,
+      resultDialog: {
+        title: 'Platform Administrators',
+        description:
+          'Everyone who holds platform-admin standing now: an in-window admin_full_access grant owned by the '
+          + 'Default Organization, or a verified address on the deployment\'s owner list.',
+        acknowledge: 'Close',
+        fields: [
+          { path: 'entries', label: 'Platform administrators', format: 'code-list' },
+        ],
       },
     },
 

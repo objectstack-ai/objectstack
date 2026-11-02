@@ -132,17 +132,20 @@ const READERS: Record<string, Row> = {
     disposition: 'skips',
     why: 'the dependents probe never filters a federated object on a column it does not provision (both phases of the cascade read relations here)',
   },
-  'engine.ts#cascadeRelationBehavior :: referenceCarrierOf()': {
-    disposition: 'skips',
-    why: 'finds the relations a delete probes; the skip above follows the reference match',
-  },
   'engine.ts#planCascadeAtomicity :: isFederatedUnprovisionedInjectedColumn()': {
     disposition: 'skips',
     why: "the participant test is the scan's own, so the plan and the scan agree",
   },
-  'engine.ts#planCascadeAtomicity :: referenceCarrierOf()': {
-    disposition: 'skips',
-    why: 'finds the participants the scan would probe; the same skip follows the reference match',
+  // [#29253] Both readers above find a relation's target through this one
+  // helper; each asks the skip itself, after the reference match (the two
+  // `isFederatedUnprovisionedInjectedColumn()` rows above).
+  'engine.ts#deleteWalkTargetOf :: referenceCarrierOf()': {
+    disposition: 'not-a-read',
+    why: 'answers the object a delete-walk relation names, from the field declaration; its callers cascadeRelationBehavior and planCascadeAtomicity skip after the reference match; it reads no row',
+  },
+  'engine.ts#deleteWalkTargetOf :: referenceTargetOf()': {
+    disposition: 'not-a-read',
+    why: "answers sys_user, the target a user field's type fixes, for the same two callers; it reads no row",
   },
   // [#24948] The organization-delete refusal reads the tenant column of every
   // relation the cascade follows into `sys_organization`.
@@ -339,10 +342,6 @@ const READERS: Record<string, Row> = {
   'having-filter.ts#declaredReferenceNames :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
   'no-operator-object-door.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
   'no-operator-object-door.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
-  'validation/record-validator.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
-  'validation/record-validator.ts#<module> :: created_by': { disposition: 'not-a-read', why: VOCABULARY },
-  'validation/record-validator.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
-  'validation/record-validator.ts#<module> :: updated_by': { disposition: 'not-a-read', why: VOCABULARY },
   'util.ts#convertIntrospectedSchemaToObjects :: created_at': {
     disposition: 'not-a-read',
     why: "drafts objects from a datasource's introspected tables, skipping the platform's own columns",

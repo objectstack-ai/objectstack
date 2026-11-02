@@ -148,6 +148,10 @@ import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredRef
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
+// [#29460] A `referenceNameVisible` reference's refused targets served by name
+// and id on the expanded read; the method of the same name below hands the body
+// the members it reads (`ReferenceNameVisibleHost`).
+import { serveReferenceNames } from './engine-reference-name-visible.js';
 // [#25522 cut 12] The driver options every driver call receives, and the tenancy
 // posture and Layer 0 verdict they are scoped by; the methods of the same names
 // below hand each body the members it reads (`DriverOptionsHost`).
@@ -201,7 +205,7 @@ import {
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
-import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rollbackFailedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -1806,23 +1810,69 @@ export function declaredMultiValued(field: { type?: unknown; multiple?: unknown 
  * materialized default included, was inert: a parent delete left its children
  * holding the deleted id.
  *
- * ⛔ `user` stays out. It stores like a `lookup`, but the spec's parse puts it
- * on the other side of the line and materializes no `deleteBehavior` on it, so
- * no `user` field declares a delete outcome by default. Moving it is a change
- * to the declaration, made in the spec, never here.
+ * `user` is not a member of this set: see {@link USER_REFERENCE_TYPE}, which
+ * takes part only when it declares a delete outcome of its own.
  */
 const DELETE_SEMANTICS_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'tree']);
 
 /**
- * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}? This
+ * [#29253] A `user` field takes part in the referential delete walk when, and
+ * only when, it DECLARES a `deleteBehavior` (one of the enum's three values).
+ *
+ * It stores like a `lookup` (the target is fixed to `sys_user` by the type,
+ * {@link referenceTargetOf}), but the spec's parse materializes no
+ * `deleteBehavior` on it: a `user` field that authors nothing declares no
+ * delete outcome, so deleting the user leaves it as it was, exactly as before.
+ * A `user` field that authors one is a declaration the spec accepts and
+ * round-trips, and the walk used to read it never, so an authored `restrict`
+ * refused nothing and an authored `cascade` deleted nothing. It now reads like
+ * a `lookup`'s authored value: `cascade` deletes the rows holding the deleted
+ * user, `set_null` clears them (on a multi-valued field, removes the member),
+ * and `restrict` refuses the delete with the walk's own `DELETE_RESTRICTED`;
+ * a `set_null` on a REQUIRED `user` field escalates to that refusal as a
+ * required `lookup`'s does.
+ *
+ * Every door that deletes a user reaches this walk: better-auth deletes the
+ * user row (admin remove-user, self delete-user) through the plugin-auth
+ * adapter's `engine.delete` by id, and the generic data doors refuse a
+ * caller-context `sys_user` delete before it (ADR-0092 D2).
+ *
+ * ⛔ No default is invented here. "Absent" stays outside the walk, because the
+ * spec's parse decides what a bare `user` field declares, not this file.
+ */
+const USER_REFERENCE_TYPE = 'user';
+const DECLARED_DELETE_BEHAVIORS: ReadonlySet<string> = new Set(['set_null', 'cascade', 'restrict']);
+
+/**
+ * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}, or
+ * [#29253] is it a `user` field that declares a `deleteBehavior`
+ * ({@link USER_REFERENCE_TYPE})? This
  * is the ONE family test every reader of the referential delete walk asks:
  * {@link ObjectQL.cascadeRelationBehavior}, through it the collection walk and
  * the dependents walk, and {@link ObjectQL.planCascadeAtomicity}. So the walk
  * that runs and the verdict on whether it runs as one unit of work cannot
  * disagree about which relations take part. ⛔ Never a type literal at a site.
  */
-function statesDeleteSemantics(fdef: { type?: unknown } | null | undefined): boolean {
-  return typeof fdef?.type === 'string' && DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+function statesDeleteSemantics(fdef: { type?: unknown; deleteBehavior?: unknown } | null | undefined): boolean {
+  if (typeof fdef?.type !== 'string') return false;
+  if (fdef.type === USER_REFERENCE_TYPE) {
+    return typeof fdef.deleteBehavior === 'string' && DECLARED_DELETE_BEHAVIORS.has(fdef.deleteBehavior);
+  }
+  return DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+}
+
+/**
+ * [#29253] The object a delete-walk relation points at. The `reference`
+ * carrier is read through the one arbiter ({@link referenceCarrierOf}), so an
+ * unreadable carrier still throws and an absent one still answers `undefined`.
+ * A `user` field's target is fixed by its type, so it answers `sys_user`
+ * ({@link referenceTargetOf}) whether or not the carrier spells it: a raw
+ * `{ type: 'user' }` registration names no `reference` and still references a
+ * user.
+ */
+function deleteWalkTargetOf(fdef: { type?: unknown } | null | undefined, reader: string): string | undefined {
+  const carrier = referenceCarrierOf(fdef, reader);
+  return fdef?.type === USER_REFERENCE_TYPE ? referenceTargetOf(fdef) : carrier;
 }
 
 /**
@@ -5962,7 +6012,13 @@ export class ObjectQL implements IObjectQLEngine {
         this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
         continue;
       }
-      await entry.handler(context);
+      // [#29422] A stale-roll-up refusal a hook's own `ctx.api` write raised
+      // describes THAT write, not this one: `hookStoppedRefusal`.
+      try {
+        await entry.handler(context);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, context.object, entry.hookName);
+      }
     }
   }
 
@@ -6010,7 +6066,9 @@ export class ObjectQL implements IObjectQLEngine {
    * (`transaction()` covers that one alone and would refuse the write), or when
    * that driver has no transactions (ADR-0119 D1; asking would only warn).
    * `SummaryRecomputeError` means "the records WERE written": it is rethrown
-   * after the commit, never through the rollback.
+   * after the commit, never through the rollback. Only the write's OWN refusal
+   * arrives here: one a hook's `ctx.api` write raised was already converted
+   * where it left the handler (#29422, `hookStoppedRefusal`), so it rolls back.
    */
   private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
     const threaded = context?.transaction;
@@ -6276,7 +6334,12 @@ export class ObjectQL implements IObjectQLEngine {
     } as unknown as HookContext;
     for (const entry of flagged) {
       if (skipAutomations && entry.meta) continue;
-      await entry.handler(wholeOpCtx);
+      // [#29422] As in `triggerHooks`.
+      try {
+        await entry.handler(wholeOpCtx);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, object, entry.hookName);
+      }
     }
     // `input` is identity-shared with the batch context, so the observation
     // covers everything the handlers touched.
@@ -13769,9 +13832,69 @@ export class ObjectQL implements IObjectQLEngine {
           error: (e as Error).message,
         });
       }
+
+      // [#29460] `referenceNameVisible` (ruling 6574398310, letter B): the ids
+      // the caller's own expansion above left bare are asked whether the
+      // caller was REFUSED them, and a refused target is served by its name
+      // and id only. Every other value keeps the answer the loop gave it. See
+      // {@link serveReferenceNames}.
+      if ((fieldDef as { referenceNameVisible?: unknown }).referenceNameVisible === true) {
+        await this.serveReferenceNames(objectName, records, fieldName, referenceObject, execCtx);
+      }
     }
 
     return records;
+  }
+
+  /**
+   * [#29460] Serve `FieldSchema.referenceNameVisible` on an expanded read
+   * (director ruling 6574398310, letter B). Runs from
+   * {@link expandRelatedRecords} for a field declaring the key, after the
+   * caller's own expansion of it, and rewrites only the ids that expansion
+   * left bare.
+   *
+   * For each such id it asks, as the caller and with none of the caller's
+   * `$expand` nesting, whether the caller may read it (the security service's
+   * object-level admission, then an id-only read for the row scope). A refused
+   * id whose record exists in the caller's tenant becomes
+   * `{ id, name, readRefused: true }`: `name` is ADR-0079's display name,
+   * read by the engine under the tenant-kept elevation from exactly `id` and
+   * the resolved name field, with the floor `Record #<id>` when field-level
+   * security keeps that field from the caller. A readable target keeps its
+   * expansion, an id the caller's own nested filter left bare stays bare, an
+   * id no record has stays bare. `multiple: true` is judged per element.
+   *
+   * ⛔ Never served on an unexpanded read: ADR-0104 D1's stored form is the
+   * bare id for every caller. ⛔ The caller's projection, filter, order and
+   * nested expand never reach the elevated read, and the field's
+   * `displayField` does not choose its column.
+   */
+  private async serveReferenceNames(
+    objectName: string,
+    records: any[],
+    fieldName: string,
+    referenceObject: string,
+    execCtx?: ExecutionContext,
+  ): Promise<void> {
+    // The body lives in `engine-reference-name-visible.ts` (see `ReferenceNameVisibleHost`).
+    const readRegistry = () => this._registry;
+    const readLogger = () => this.logger;
+    const host: ThisParameterType<typeof serveReferenceNames> = {
+      get _registry() { return readRegistry(); },
+      get logger() { return readLogger(); },
+      find: (...a) => this.find(...a),
+      resolveReadableIdsSecurity: (...a) => this.resolveReadableIdsSecurity(...a),
+      formulaReadsReference: (name, def, fields) => {
+        try {
+          const entry = formulaPlanEntry(name, def, fields);
+          return entry.hops !== undefined || entry.hopConflict !== undefined;
+        } catch {
+          // An expression the planner cannot compile is not served by name.
+          return true;
+        }
+      },
+    };
+    return serveReferenceNames.call(host, objectName, records, fieldName, referenceObject, execCtx);
   }
 
   /**
@@ -14153,6 +14276,12 @@ export class ObjectQL implements IObjectQLEngine {
    * auto-default); the optional `searchFields` override is intersected with the
    * allowed set, never widened. All drivers already execute `$or`/`$icontains`,
    * so this needs no driver changes.
+   *
+   * [#29394] A resolved field whose declared type can never hold a string (the
+   * #15661 door's verdict) gets no clause — `expandSearchToFilter` skips it —
+   * because that door judges only the caller's `where`, above, and never this
+   * expansion. The set itself is not narrowed, so the refusals below judge it
+   * as before, and a set of only such fields answers no rows.
    *
    * The keys are deleted whether or not anything expanded — leaving them on
    * would hand the driver a key it does not read, which is the same silent drop
@@ -18938,7 +19067,7 @@ export class ObjectQL implements IObjectQLEngine {
           //    verdict that asserts something POSITIVE about the schema
           //    ("nothing references this object"). An unreadable carrier can
           //    no more support that claim than an unreadable registry can.
-          const ref = referenceCarrierOf(fdef, 'ObjectQL.planCascadeAtomicity');
+          const ref = deleteWalkTargetOf(fdef, 'ObjectQL.planCascadeAtomicity');
           if (!ref) continue;
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
@@ -19321,7 +19450,8 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`,
-   * `lookup` or `tree` field ({@link statesDeleteSemantics}) referencing
+   * `lookup` or `tree` field, or a `user` field that declares a
+   * `deleteBehavior` ({@link statesDeleteSemantics}), referencing
    * `object`, honor the field's `deleteBehavior`:
    *   - `cascade`  → delete the dependent rows (recursively, so grandchildren
    *                  are handled by each child's own delete),
@@ -19516,7 +19646,7 @@ export class ObjectQL implements IObjectQLEngine {
     // removed the parent, left a `master_detail` child behind, and
     // reported success. No `restrict` refusal, no `set_null`, nothing
     // logged. Absence still skips the field here exactly as before.
-    const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
+    const ref = deleteWalkTargetOf(fdef, 'ObjectQL.cascadeDeleteRelations');
     if (!ref) return undefined;
     // Match the target object by raw or resolved name.
     let resolvedRef: string | undefined;
@@ -19558,6 +19688,10 @@ export class ObjectQL implements IObjectQLEngine {
     // honoured as written. Its `cascade` is a subtree delete, and a cycle in
     // the data (a corrupt row pointing at its own descendant) terminates on
     // the cascade set, the same membership test any self-reference has.
+    //
+    // [#29253] A `user` field reaches here only with an authored value
+    // ({@link statesDeleteSemantics}), and reads it as a `lookup` reads its
+    // own: the `|| 'set_null'` fallback below is never what a `user` gets.
     //
     // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
     // every other value a master_detail can declare — including an
@@ -20917,8 +21051,13 @@ export class ObjectQL implements IObjectQLEngine {
               // wrapping its cascade. `buildDriverOptions` only fills keys that
               // are still `undefined`, so re-running it adds the handle and
               // changes nothing else.
+              //
+              // A dependent's stale-roll-up refusal stops the walk before this
+              // row is removed, so it is not this delete's answer:
+              // `cascadeStoppedRefusal` says what it is instead.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext);
+                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext)
+                  .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 return await driver.delete(
                   object,
                   hookContext.input.id as string,
@@ -21010,8 +21149,11 @@ export class ObjectQL implements IObjectQLEngine {
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
                    deletedSecrets = deletedSecretSlots(deleteSchema, matched);
-                   // [#27004] One walk, rooted at the whole matched set.
-                   await this.cascadeDeleteRelations(object, matchedIds, writeContext);
+                   // [#27004] One walk, rooted at the whole matched set. A
+                   // dependent's stale-roll-up refusal is not this delete's
+                   // answer, as in the by-id branch.
+                   await this.cascadeDeleteRelations(object, matchedIds, writeContext)
+                     .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                    // The id set rides an `$in`; batched so one statement never
                    // outgrows a driver's bind-parameter limit.
                    const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
@@ -21855,17 +21997,22 @@ export class ObjectQL implements IObjectQLEngine {
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
     } catch (err) {
+      let rollbackFailed = false;
       try {
         if (drv.rollback) await drv.rollback(trx);
         else if (drv.rollbackTransaction) await drv.rollbackTransaction(trx);
       } catch {
         // swallow rollback failures so the original error surfaces
+        rollbackFailed = true;
       }
       // [#21274] A boundary outside the middleware seam: a commit failure, or
       // a callback that reached the driver through the transaction handle.
       // An error that already crossed an engine boundary inside the callback
-      // comes back as the same reference.
-      throw redactPropagatedDriverFault(err);
+      // comes back as the same reference. A stale-roll-up refusal ("stored")
+      // is no longer true once this rollback has run: `rolledBackRefusal`.
+      // [#29421] Nor is "rolled back" once the rollback threw:
+      // `rollbackFailedRefusal`.
+      throw redactPropagatedDriverFault(rollbackFailed ? rollbackFailedRefusal(err) : rolledBackRefusal(err));
     }
   }
 
@@ -22855,8 +23002,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     } catch (error) {
       if (driver.rollback) await driver.rollback(trx);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
-      // [#21274] The engine surface's twin (`ObjectQL.transaction`).
-      throw redactPropagatedDriverFault(error);
+      // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
+      // stale-roll-up conversion included.
+      throw redactPropagatedDriverFault(rolledBackRefusal(error));
     }
   }
 

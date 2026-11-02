@@ -35,7 +35,6 @@ export const SysOauthApplication = ObjectSchema.create({
   description: 'Registered OAuth/OIDC client applications',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{name}',
   highlightFields: ['name', 'client_id', 'type', 'disabled'],
 
   // Custom actions — all OAuth-application mutations are routed through

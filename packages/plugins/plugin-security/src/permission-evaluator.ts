@@ -8,7 +8,12 @@ import type {
   FieldPermissionParsed,
 } from '@objectstack/spec/security';
 import { objectPermissionGrants } from '@objectstack/spec/security';
-import { fieldPermissionVote, type FieldConditionVerdict } from '@objectstack/core';
+import {
+  fieldPermissionVote,
+  holdsSuperuserBypass,
+  superuserFieldVote,
+  type FieldConditionVerdict,
+} from '@objectstack/core';
 
 /**
  * [#25866] How a caller judges a row-conditioned field permission entry's
@@ -396,6 +401,14 @@ export class PermissionEvaluator {
    * honest: the layer's `contributors` attribution and the enforcement decision
    * are the same list, so a report that names a granting set cannot coexist
    * with a gate that found none.
+   *
+   * [ADR-0066 ⑧, ruling of record 6573563853] Each set is read by
+   * `holdsSuperuserBypass` (`@objectstack/core`), the same function the field
+   * merge's super-user vote reads ({@link getFieldPermissions}, and the
+   * row-blind `/auth/me/permissions` merge), so the row bypass and the field
+   * vote name the same sets. `opts.isPrivate` is accepted and never changes
+   * the answer: the private posture withholds only a `'*'` wildcard that
+   * carries neither bit (see {@link resolveObjectPermission}).
    */
   superuserBypassSets(
     objectName: string,
@@ -404,12 +417,7 @@ export class PermissionEvaluator {
   ): string[] {
     const out: string[] = [];
     for (const ps of permissionSets) {
-      const op = resolveObjectPermission(ps, objectName, opts.isPrivate ?? false);
-      if (!op) continue;
-      const held = opts.bit === 'modify'
-        ? Boolean(op.modifyAllRecords)
-        : Boolean(op.viewAllRecords || op.modifyAllRecords);
-      if (held) out.push(String((ps as { name?: unknown }).name ?? '?'));
+      if (holdsSuperuserBypass(ps, objectName, opts.bit)) out.push(String((ps as { name?: unknown }).name ?? '?'));
     }
     return out;
   }
@@ -460,6 +468,16 @@ export class PermissionEvaluator {
    * wider than the write gate's. An `unmatched` entry is ABSENT, as if the
    * set had not declared the field: the merge below is unchanged for every
    * entry without a `when`, and only DECLARING entries vote, as before.
+   *
+   * [ADR-0066 D2 ⑧ as amended — ruling of record 6573563853, letter A] A set
+   * that holds the super-user bypass on the object (the sets
+   * {@link superuserBypassSets} names) then votes on EVERY field of it:
+   * `viewAllRecords` votes `readable: true`, `modifyAllRecords` votes
+   * `readable: true` and `editable: true` (`superuserFieldVote`,
+   * `@objectstack/core`). Before, a set that granted the object through its
+   * super-user bits but named no field cast no vote, so an app set's
+   * `readable: false` hid the field from a platform admin who also held it.
+   * Union without deny is otherwise unchanged.
    */
   getFieldPermissions(
     objectName: string,
@@ -487,6 +505,16 @@ export class PermissionEvaluator {
         // Most permissive merge
         if (vote.readable) result[fieldName].readable = true;
         if (vote.editable) result[fieldName].editable = true;
+      }
+    }
+
+    // [Ruling of record 6573563853] The super-user vote — the same function the
+    // row-blind `/auth/me/permissions` merge applies.
+    const superVote = superuserFieldVote(permissionSets, objectName);
+    if (superVote) {
+      for (const perm of Object.values(result)) {
+        perm.readable = true;
+        if (superVote.editable) perm.editable = true;
       }
     }
 
