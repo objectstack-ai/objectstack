@@ -126,7 +126,7 @@ import { CatalogItemActiveSwitch } from './CatalogActiveSwitch.js';
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { errorCodeIs } from '@object-ui/types';
-import type { MetadataError } from '@object-ui/data-objectstack';
+import { formatMetadataError, type MetadataError } from '@object-ui/data-objectstack';
 import { PermissionSetCloneDialog } from './PermissionSetCloneDialog.js';
 import { isStudioHiddenSystemField } from '../studio-design/studioHiddenSystemField.js';
 import type { PermissionSetCloned } from './permission-set-clone.js';
@@ -846,6 +846,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const [savedAt, setSavedAt] = React.useState<Date | null>(null);
   const displayLocale = useDisplayLocale();
   const [error, setError] = React.useState<string | null>(null);
+  // objectstack#29148 — the server refused to read this set's pending package
+  // draft (`403`: the row is there and withheld from this author). No matrix
+  // is installed over it, so nothing is shown to edit and the autosave has
+  // nothing to send: one seeded from the published set would be saved over
+  // the draft, dropping every change it holds. Held as thrown, worded at render.
+  const [draftRefused, setDraftRefused] = React.useState<{ error: unknown } | null>(null);
   // objectui#9484 — the ENVIRONMENT door's post-save baseline re-read REJECTED.
   // The write itself has already landed when that read runs, so this is an
   // advisory notice about the DISPLAY being un-refreshed, and it deliberately
@@ -921,6 +927,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     setSaveRefusedAsLocked(null);
     setCloned((c) => (c && c.name === name ? c : null));
     setServedLabel(null);
+    setDraftRefused(null);
     (async () => {
       try {
         // ADR-0086 P2 (D6): under the package door a set is draft/published
@@ -978,6 +985,12 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           draftReadForSave,
         ]);
         if (cancelled) return;
+        // objectstack#29148 — a refused draft read is no absence: see `draftRefused`.
+        if (pendingRead && 'refused' in pendingRead) {
+          forgetSetVersion();
+          setDraftRefused({ error: pendingRead.refused });
+          return;
+        }
         const pendingDraft = pendingRead?.answer ?? null;
         verdictReadSeq.current += 1;
         setServedVerdict(
@@ -1634,9 +1647,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   const autosaveTarget = `${type}:${name}`;
   useDraftAutoSave({
     target: autosaveTarget,
-    loadedFor: loading ? '' : autosaveTarget,
+    loadedFor: loading || draftRefused ? '' : autosaveTarget,
     dirty: isDirty,
-    blocked: !packageId || !writable || saving || saveHeld || destructive !== null,
+    blocked: !packageId || !writable || saving || saveHeld || destructive !== null || draftRefused !== null,
     snapshot: draft,
     save: (sent) => doSave(false, undefined, sent),
   });
@@ -1805,6 +1818,22 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         ) : null
       )}
     </>
+  );
+  // objectstack#29148 — in place of the matrix: why no set is open, the
+  // server's own sentence behind Details (the Studio refusal strip's look).
+  const draftRefusedEl = draftRefused && (
+    <div
+      data-testid="perm-draft-unreadable"
+      className="m-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+    >
+      <p role="alert" className="whitespace-pre-line">
+        {t('engine.studio.refusal.draftUnreadable')}
+      </p>
+      <details className="mt-1">
+        <summary className="cursor-pointer select-none opacity-80">{t('engine.studio.refusal.details')}</summary>
+        <pre className="mt-1 whitespace-pre-wrap break-words font-mono opacity-90">{formatMetadataError(draftRefused.error)}</pre>
+      </details>
+    </div>
   );
   const noticesEl = (
     <>
@@ -2240,6 +2269,8 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           <div className="flex items-center gap-2 p-6 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" /> {t('perm.loading').replace('{name}', name)}
           </div>
+        ) : draftRefusedEl ? (
+          draftRefusedEl
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {noticesEl}
@@ -2333,6 +2364,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin" /> {t('perm.loading').replace('{name}', name)}
         </div>
+      </PageShell>
+    );
+  }
+
+  if (draftRefusedEl) {
+    return (
+      <PageShell entry={entry} itemName={name} embedded={embedded} readOnly={readOnly}>
+        {draftRefusedEl}
       </PageShell>
     );
   }
