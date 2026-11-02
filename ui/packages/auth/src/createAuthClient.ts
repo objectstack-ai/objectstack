@@ -11,7 +11,7 @@ import { organizationClient, twoFactorClient } from 'better-auth/client/plugins'
 import type {
   AuthClient, AuthClientConfig, AuthUser, AuthClientSession, SignInCredentials, SignUpData,
   AuthOrganization, AuthOrganizationMember, AuthInvitation, AuthInvitationPreview, AuthPublicConfig,
-  SignInWithProviderOptions,
+  SignInWithProviderOptions, SignInTwoFactorCodeKind, TwoFactorMethod,
 } from './types.js';
 import { AUTH_INVITATION_STATUSES, isAuthInvitationStatus } from './invitation-status.js';
 
@@ -498,12 +498,55 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       if (error) {
         throw toAuthError(error);
       }
+      // objectstack#29105 — an account with two-factor sign-in on: the server
+      // accepted the password, deleted the session it had just made, and holds
+      // the pending sign-in in a signed `two_factor` cookie. No token exists
+      // yet, so nothing is stored; the caller asks for the code.
+      const challenge = data as unknown as { twoFactorRedirect?: boolean; twoFactorMethods?: unknown };
+      if (challenge?.twoFactorRedirect === true) {
+        const methods = Array.isArray(challenge.twoFactorMethods)
+          ? challenge.twoFactorMethods.filter(
+              (m): m is TwoFactorMethod => m === 'totp' || m === 'otp',
+            )
+          : [];
+        return { twoFactor: { methods } };
+      }
       const payload = data as unknown as { user: AuthUser; session: AuthClientSession };
       // Persist token for cross-origin session persistence
       if (payload.session?.token) {
         TokenStorage.set(payload.session.token);
       }
       return { user: payload.user, session: payload.session };
+    },
+
+    async verifySignInTwoFactor(code: string, kind: SignInTwoFactorCodeKind) {
+      // The sign-in lane of better-auth's `/two-factor/verify-totp` and
+      // `/two-factor/verify-backup-code`: with no session on the request, the
+      // server finds the pending sign-in through its `two_factor` cookie,
+      // creates the session and answers `{ token, user }`. A wrong code keeps
+      // the challenge (INVALID_CODE / INVALID_BACKUP_CODE); a spent or expired
+      // one does not (TOO_MANY_ATTEMPTS_REQUEST_NEW_CODE /
+      // INVALID_TWO_FACTOR_COOKIE). `toAuthError` keeps that `code`.
+      type VerifyFn = (opts: { code: string }) =>
+        Promise<{ data?: { token?: string; user?: AuthUser } | null; error?: BetterAuthErrorLike | null }>;
+      const tf = (betterAuth as unknown as {
+        twoFactor?: { verifyTotp?: VerifyFn; verifyBackupCode?: VerifyFn };
+      }).twoFactor;
+      const verify = kind === 'backup-code' ? tf?.verifyBackupCode : tf?.verifyTotp;
+      if (typeof verify !== 'function') {
+        throw new Error('two-factor sign-in is not available on this auth backend');
+      }
+      const { data, error } = await verify({ code });
+      if (error) throw toAuthError(error);
+      const token = typeof data?.token === 'string' ? data.token : undefined;
+      const user = data?.user;
+      if (!token || !user) {
+        throw new Error('The server did not complete the two-factor sign-in.');
+      }
+      // `set-auth-token` already stored it through `bearerFetch`; storing the
+      // body's token too keeps this path independent of header exposure.
+      TokenStorage.set(token);
+      return { user, session: { token } as AuthClientSession };
     },
 
     async signUp(signUpData: SignUpData) {
