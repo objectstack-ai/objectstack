@@ -92,7 +92,7 @@ import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { TursoConfigSchema } from '../data/driver/turso.zod';
 import { InterfacePageConfigSchema, PageComponentSchema, PageSchema } from '../ui/page.zod';
-import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema, VIEW_METADATA_MEMBERS } from '../ui/view.zod';
+import { AddRecordConfigSchema, FormFieldSchema, FormSectionSchema, FormViewSchema, ListViewSchema, NavigationModeSchema, ObjectListViewSchema, VIEW_METADATA_MEMBERS, ViewScopeSchema, ViewSharingSchema } from '../ui/view.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import { JobSchema } from '../system/job.zod';
 import { TranslationItemSchema } from '../system/translation.zod';
@@ -419,6 +419,13 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'form-view-drawer-keys-removed': [
     tombstone(FormViewSchema, 'view.form', 'drawerSide'),
     tombstone(FormViewSchema, 'view.form', 'drawerWidth'),
+  ],
+  // #29037: `scope: 'personal'`, refused by the enum's own error map, and
+  // `sharing.type`, tombstoned on the sharing block (read through the residue
+  // pipe's `shape`).
+  'view-personal-declarations-removed': [
+    refusal("view.scope 'personal'", () => ViewScopeSchema.safeParse('personal')),
+    tombstone(ViewSharingSchema, 'view.list.sharing', 'type'),
   ],
   // #27155: the form view `type` narrowed to the form's layout — each retired
   // member refused by the enum's own error map, plus the three split-only keys

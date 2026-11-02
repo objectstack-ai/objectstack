@@ -1383,7 +1383,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
   '@objectstack/metadata-protocol': {
     // src/sys-metadata-repository.draft-drain.test.ts reads the durability
     // log-level gate's own source to pin that the repository stays inside it.
-    globs: ['scripts/check-durability-degradation-log-level.mjs'],
+    // [#25467 E1] The two by-path pins (protocol.read-verb-canonical-fold,
+    // protocol.lookup-artifact-item-call-sites) blank comments through the
+    // shared mask before they read the split's modules.
+    globs: [
+      'scripts/check-durability-degradation-log-level.mjs',
+      'scripts/js-comment-mask.mjs',
+    ],
   },
   '@objectstack/downstream-contract': {
     // test/source-resolution.pin.test.ts resolves every spec specifier a
