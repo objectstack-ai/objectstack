@@ -79,9 +79,12 @@ import {
  *   counts, which is why this is an error and not the warning tier
  *   `chart-field-unknown` took for its ignored keys (#15463): those re-dress
  *   the same numbers, this one changes them. The declared names are the ones
- *   {@link dashboardFilterDefs} builds, so the reserved `dateRange` key is
- *   valid only on a dashboard that declares `dateRange` — the runtime, this
- *   file and `@objectstack/verify`'s window proof all build that def only then.
+ *   {@link dashboardFilterDefs} builds: every `globalFilters` entry's name,
+ *   and the reserved `dateRange` when the dashboard declares `dateRange` (the
+ *   runtime, this file and `@objectstack/verify`'s window proof all build that
+ *   built-in def only then). A `globalFilters` entry named `dateRange` is a
+ *   declared filter by that name too, so a `dateRange` key binds it on a
+ *   dashboard that declares no `dateRange`.
  *
  * Advisory rules — severity `warning`, build stays green:
  *
@@ -450,7 +453,8 @@ export const DASHBOARD_FILTER_FIELD_UNPROVISIONED = 'dashboard-filter-field-unpr
 export const DASHBOARD_FILTER_FIELD_NOT_INCLUDED = 'dashboard-filter-field-not-included';
 /**
  * [#27445] A widget `filterBindings` key that names no filter the dashboard
- * declares (`dateRange` counts only when the dashboard declares one).
+ * declares (`dateRange` counts when the dashboard declares `dateRange` or a
+ * `globalFilters` entry named `dateRange`).
  */
 export const DASHBOARD_FILTER_BINDING_UNKNOWN = 'dashboard-filter-binding-unknown';
 /** [#14148] A key of the widget's OWN `filter` that resolves to no column. */
