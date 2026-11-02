@@ -2067,11 +2067,17 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             const arity = metaQueryArityRefusal('drafts', query);
             if (arity) return queryRefusalAnswer(deps, arity);
             try {
+                // [#29180] A `type` naming no metadata type is refused by the
+                // list branch's verdict, as `RestServer`'s `_drafts` asks it,
+                // rather than answered an empty list; the package half is
+                // `listDrafts`' own.
+                const draftsType = query?.type || undefined;
+                if (draftsType) await refuseUnknownMetaListType(protocol, draftsType);
                 // [ADR-0131 D6] No organization, as `RestServer`'s `_drafts`:
                 // every draft is saved environment-wide.
                 const data = await protocol.listDrafts({
                     packageId: query?.packageId || undefined,
-                    type: query?.type || undefined,
+                    type: draftsType,
                 });
                 return { handled: true, response: deps.success(data) };
             } catch (e: any) {

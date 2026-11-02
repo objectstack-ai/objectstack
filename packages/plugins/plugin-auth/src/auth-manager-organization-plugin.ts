@@ -81,6 +81,7 @@ import { buildOrganizationPluginSchema } from './auth-schema-config.js';
 import { CLOUD_MANAGED_REFUSAL_CODE, CLOUD_MANAGED_REFUSAL_MESSAGES } from './cloud-managed.js';
 import { invitationAcceptPath } from './invitation-link-action.js';
 import { invitationRoleCapFailure, isPlainMemberInvitation } from './invitation-role-cap.js';
+import { blankInvitationRoleRefusal } from './invite-role-not-found-code.js';
 import { invitationRoleLabel } from './invitation-role-label.js';
 import { applyDeclaredInvitationVerificationToListing } from './list-user-invitations-verification.js';
 import { resolveMembershipLimitOption } from './membership-limit.js';
@@ -339,6 +340,19 @@ export async function buildOrganizationPlugin(this: OrganizationPluginHost) {
             code: CLOUD_MANAGED_REFUSAL_CODE,
           });
         }
+        // [#29158] A blank role — `""`, whitespace, or an empty entry in a
+        // role list — names no role, so it is refused like an unknown one:
+        // 400 `ROLE_NOT_FOUND`, before the role cap and before any row is
+        // written. better-auth's own check drops empty entries, so without
+        // this the invitation is stored with `role: ''` and, under a wall, its
+        // acceptance writes a membership with no organization role. Refused,
+        // never defaulted to `member`.
+        const blankRole = blankInvitationRoleRefusal(invitation?.role);
+        if (blankRole) {
+          const { APIError } = await import('better-auth/api');
+          throw new APIError('BAD_REQUEST', { message: blankRole.message, code: blankRole.code });
+        }
+
         const inviterUserId = inviter?.id ?? inviter?.userId ?? null;
         const organizationId = organization?.id ?? invitation?.organizationId;
 

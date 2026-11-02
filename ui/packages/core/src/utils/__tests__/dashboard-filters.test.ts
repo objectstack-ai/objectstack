@@ -100,8 +100,8 @@ describe('resolveDashboardFilterDefs', () => {
     });
     // The filter it seeds is a real bound, not an empty value.
     expect(buildFilterCondition(defs[0], defs[0].defaultValue)).toEqual({
-      $gte: '{current_month_start}',
-      $lte: '{current_month_end}',
+      $gte: '{month_start}',
+      $lte: '{month_end}',
     });
   });
 
@@ -233,8 +233,8 @@ describe('buildFilterCondition', () => {
       $lte: '{today}',
     });
     expect(buildFilterCondition(dateDef, { preset: 'this_month' })).toEqual({
-      $gte: '{current_month_start}',
-      $lte: '{current_month_end}',
+      $gte: '{month_start}',
+      $lte: '{month_end}',
     });
   });
 
@@ -311,7 +311,7 @@ describe('buildFilterCondition', () => {
 
     it('keeps a date-macro token as an equality, with no warning', () => {
       // Macro tokens stay symbolic in the condition and are resolved at query
-      // time by resolveDateMacros — the same vocabulary PRESET_RANGES emits.
+      // time by resolveDateMacros — the same vocabulary preset bounds emit.
       withWarn((warn) => {
         expect(buildFilterCondition(dateDef, '{today}')).toBe('{today}');
         expect(buildFilterCondition(dateDef, '{7_days_ago}')).toBe('{7_days_ago}');
@@ -493,13 +493,11 @@ describe('mergeFilters', () => {
  * list cannot make. So the first test asks `toBe`, deliberately.
  *
  * The second is the other half of the burn-down and the one with teeth at
- * runtime: the spec owns which presets EXIST, this module owns what each one
- * RESOLVES TO, and nothing but the `satisfies` in `dashboard-filters.ts` ties
- * them together. That is a compile-time pin, so it is erased here — this test
- * is what makes the same claim visible in a suite run, and what would catch a
- * future edit that re-annotated the table as `Record<string, …>` (a string index
- * signature satisfies every literal key, so the `satisfies` would go vacuously
- * green while the bounds table quietly went missing entries).
+ * runtime: the spec owns which presets EXIST and, since the local bounds table
+ * retired, what each one RESOLVES TO (`DATE_RANGE_PRESET_MACRO_WINDOWS`). The
+ * spec types that table `Record<DateRangePreset, …>`, a compile-time pin that
+ * is erased here — this test is what makes the same claim visible in a suite
+ * run: every offered preset lowers to a condition.
  */
 describe('DATE_RANGE_PRESETS is the spec\'s list, not a copy of it', () => {
   it('is the spec\'s own array by REFERENCE, not an equal one', async () => {
