@@ -55,6 +55,8 @@ import { useTheme } from './ThemeProvider.js';
 import { navEntriesShownToMember, useNavMemberGates, type NavMemberGates } from '../hooks/useNavMemberGates.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveKeyedI18nLabel, getRecordDisplayName, appRouteSegment } from '../utils/index.js';
+import { appAddressSegment, filterActiveApps } from '../utils/appRoute.js';
+import { navigationNames } from '../console/appObjectScope.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useRecentItems } from '../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../hooks/useRecentItemLabel.js';
@@ -114,6 +116,53 @@ const NO_APP: Omit<AppCommandPaletteProps, 'scope'> = {
   onAppChange: () => {},
   dataSource: undefined,
 };
+
+/** The keys of an app the record-hit resolution reads: its route keys and navigation trees. */
+type PaletteApp = { navigation?: unknown; areas?: unknown } & Record<string, unknown>;
+
+/**
+ * Whether `app` lists `objectName` (objectstack#28890): a `type: 'object'`
+ * entry naming it, at any depth of its `navigation` or of any
+ * `areas[].navigation`, among the entries the member is shown there
+ * (`navEntriesShownToMember` under the palette's gates, as
+ * `activityObjectRoster` reads every app's navigation). `gates` is `null`
+ * only in the `studio` scope, which searches no record.
+ */
+function appListsObject(app: PaletteApp | null | undefined, objectName: string, gates: NavMemberGates | null): boolean {
+  if (!app) return false;
+  const areas: unknown[] = Array.isArray(app.areas) ? app.areas : [];
+  const trees = [app.navigation, ...areas.map((area) => (area as { navigation?: unknown } | null)?.navigation)];
+  const pick = (item: Record<string, unknown>) => (item.type === 'object' ? item.objectName : undefined);
+  return trees.some(
+    (tree) =>
+      Array.isArray(tree) &&
+      navigationNames(gates ? navEntriesShownToMember(tree as NavigationItem[], gates) : tree, pick).includes(objectName),
+  );
+}
+
+/**
+ * The app a record hit opens under (objectstack#28890), as the segment of its
+ * `/apps/APP` link: the palette's own app when it lists the hit's object;
+ * otherwise the first app the user can open (`filterActiveApps`, metadata
+ * order) that lists it, addressed by `appAddressSegment`; and the palette's
+ * own app again when none does, so `undefined` means "stay here".
+ *
+ * An app with no object navigation searches every object (the scope below),
+ * so its hits named objects it does not list, and each opened under it: the
+ * record page drew that app's sidebar and switcher, neither of which reaches
+ * the object (cloud's Account app, a component-only app, opened an
+ * environment there instead of under the Cloud app that lists it).
+ */
+function recordHitAppSegment(
+  apps: readonly PaletteApp[],
+  activeApp: PaletteApp | null | undefined,
+  objectName: string,
+  gates: NavMemberGates | null,
+): string | undefined {
+  if (appListsObject(activeApp, objectName, gates)) return undefined;
+  const host = filterActiveApps(apps).find((app) => appListsObject(app, objectName, gates));
+  return host ? appAddressSegment(apps, host) : undefined;
+}
 
 /**
  * The palette, behind its own error boundary (objectui#13387). It is mounted in
@@ -196,6 +245,11 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   }, [open]);
 
   const baseUrl = `/apps/${appName || appRouteSegment(activeApp)}`;
+  // A record hit's own base: the app that lists its object (objectstack#28890).
+  const recordHitBaseUrl = (objectName: string): string => {
+    const segment = recordHitAppSegment(apps, activeApp, objectName, gates);
+    return segment ? `/apps/${segment}` : baseUrl;
+  };
   const { user, activeOrganization } = useAuth();
   const templateContext = useMemo(
     () => ({ currentUserId: user?.id ?? null, currentOrgId: activeOrganization?.id ?? null }),
@@ -483,7 +537,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                   // Stable across queries: cmdk filters nothing here
                   // (`shouldFilter` false), it only selects by the value.
                   value={`record ${hit.display} ${hit.objectLabel} ${hit.objectName} ${hit.recordId}`}
-                  onSelect={() => leaveTo(`${baseUrl}/${hit.objectName}/record/${hit.recordId}`)}
+                  onSelect={() => leaveTo(`${recordHitBaseUrl(hit.objectName)}/${hit.objectName}/record/${hit.recordId}`)}
                 >
                   <Icon className="mr-2 h-4 w-4" />
                   <span className="truncate">{hit.display}</span>
