@@ -5,7 +5,7 @@
 
 fix(console): `/auth/me/permissions` is asked in the same wave as `organization/list` when the session already names the active organization
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 Opening `/home` or an app used to wait a whole round trip before the permissions request left: the Console's one permissions source renders under the route's organization gate (`organization/list`) and the metadata shell (the adapter's `discovery`), and both of those leave when the session answer lands. The server answers `/auth/me/permissions` for the session's active organization, which the `get-session` answer already names.
