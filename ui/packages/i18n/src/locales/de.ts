@@ -2678,6 +2678,11 @@ const de = {
       signUpText: "Registrieren",
       errors: {
         oauthCallbackFailed: "Die Single-Sign-on-Anmeldung konnte nicht abgeschlossen werden — der Anmeldelink ist abgelaufen oder wurde bereits verwendet. Bitte versuchen Sie es erneut.",
+        twoFactorInvalidCode: "Dieser Code ist ungültig. Prüfen Sie Ihre Authenticator-App und versuchen Sie es erneut.",
+        twoFactorInvalidBackupCode: "Dieser Backup-Code ist ungültig oder wurde bereits verwendet.",
+        twoFactorTooManyAttempts: "Zu viele falsche Codes. Melden Sie sich erneut mit Ihrem Passwort an.",
+        twoFactorExpired: "Diese Anmeldung ist abgelaufen. Melden Sie sich erneut mit Ihrem Passwort an.",
+        twoFactorLocked: "Zu viele fehlgeschlagene Versuche. Ihr Konto ist vorübergehend gesperrt. Versuchen Sie es später erneut.",
         invalidCredentials: "Ungültige E-Mail oder Passwort. Bitte erneut versuchen.",
         emailNotVerified: "Bitte bestätigen Sie Ihre E-Mail-Adresse, bevor Sie sich anmelden.",
       },
@@ -2700,6 +2705,16 @@ const de = {
       noSignInMethodText: "Es ist keine Anmeldemethode verfügbar. Wenden Sie sich an Ihren Administrator.",
       usePasswordText: "Stattdessen ein Passwort verwenden",
       backToSsoText: "Zurück zum Single Sign-on",
+      twoFactorTitle: "Zwei-Faktor-Authentifizierung",
+      twoFactorDescription: "Geben Sie den 6-stelligen Code aus Ihrer Authenticator-App ein.",
+      twoFactorBackupDescription: "Geben Sie einen der Backup-Codes ein, die Sie beim Einrichten der Zwei-Faktor-Authentifizierung gespeichert haben.",
+      twoFactorCodeLabel: "Authentifizierungscode",
+      twoFactorBackupCodeLabel: "Backup-Code",
+      twoFactorVerifyButton: "Bestätigen",
+      twoFactorVerifyingButton: "Wird überprüft…",
+      twoFactorUseBackupCodeText: "Stattdessen einen Backup-Code verwenden",
+      twoFactorUseAuthenticatorText: "Stattdessen die Authenticator-App verwenden",
+      twoFactorBackText: "Zurück zur Anmeldung",
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "Willkommen zurück",

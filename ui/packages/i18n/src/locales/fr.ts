@@ -2737,6 +2737,11 @@ const fr = {
       signUpText: "S'inscrire",
       errors: {
         oauthCallbackFailed: "L'authentification unique n'a pas pu aboutir — le lien de connexion a expiré ou a déjà été utilisé. Veuillez réessayer.",
+        twoFactorInvalidCode: "Ce code n'est pas valide. Vérifiez votre application d'authentification et réessayez.",
+        twoFactorInvalidBackupCode: "Ce code de secours n'est pas valide ou a déjà été utilisé.",
+        twoFactorTooManyAttempts: "Trop de codes incorrects. Reconnectez-vous avec votre mot de passe.",
+        twoFactorExpired: "Cette connexion a expiré. Reconnectez-vous avec votre mot de passe.",
+        twoFactorLocked: "Trop de tentatives échouées. Votre compte est temporairement verrouillé. Réessayez plus tard.",
         invalidCredentials: "E-mail ou mot de passe invalide. Veuillez réessayer.",
         emailNotVerified: "Veuillez vérifier votre adresse e-mail avant de vous connecter.",
       },
@@ -2759,6 +2764,16 @@ const fr = {
       noSignInMethodText: "Aucune méthode de connexion n'est disponible. Contactez votre administrateur.",
       usePasswordText: "Utiliser un mot de passe à la place",
       backToSsoText: "Revenir à l'authentification unique",
+      twoFactorTitle: "Authentification à deux facteurs",
+      twoFactorDescription: "Saisissez le code à 6 chiffres de votre application d'authentification.",
+      twoFactorBackupDescription: "Saisissez l'un des codes de secours enregistrés lors de la configuration de l'authentification à deux facteurs.",
+      twoFactorCodeLabel: "Code d'authentification",
+      twoFactorBackupCodeLabel: "Code de secours",
+      twoFactorVerifyButton: "Vérifier",
+      twoFactorVerifyingButton: "Vérification…",
+      twoFactorUseBackupCodeText: "Utiliser plutôt un code de secours",
+      twoFactorUseAuthenticatorText: "Utiliser plutôt l'application d'authentification",
+      twoFactorBackText: "Retour à la connexion",
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "Bon retour",
