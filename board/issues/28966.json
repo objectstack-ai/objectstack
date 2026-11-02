@@ -1,0 +1,34 @@
+{
+  "number": 28966,
+  "kind": "issue",
+  "title": "List view: a tree layout ignores the view's authored emptyState, and the object tree's load-error line is still English",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "i18n",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T05:00:07Z",
+  "updated_at": "2026-11-02T08:13:18Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28966",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class b, from the #28892 os-dev-report (PR #28957) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** An administrator who authors an empty state on a list view (`emptyState.title` / `message`) sees it on the grid and the gallery, but not when the same view is a tree, as Setup › Business units is by default. The tree draws the generic `common.noData` instead, so the authored guidance is lost on that layout. On the same tree, a failed load prints an English sentence on a Chinese page.\n\n**Measured (`origin/main` `ff88105061`, source reading; NOT MEASURED at a public door).**\n- `ui/packages/plugin-list/src/ListView.tsx:6621`: `ListEmptyState` (the authored `schema.emptyState`, else the localized `list.*` copy) is drawn only when `currentView === 'grid' || currentView === 'gallery'`. A tree view hands the empty set to `ObjectTree`.\n- `ObjectTree` reads no `emptyState` key. After PR #28957 it draws `common.noData`, and before that it drew `No records`. So a tree view's authored `emptyState` was never honored.\n- `ui/packages/plugin-tree/src/ObjectTree.tsx:1167`: `<p>Failed to load tree: {error.message}</p>` is an English literal.\n\n**Wanted.**\n1. A tree layout draws the view's empty state through the same `ListEmptyState` path as grid and gallery: the authored `emptyState` first, otherwise the localized copy. Either widen the `ListView` condition, or hand the resolved empty state to `ObjectTree`; the dev measures which keeps the tree's own toolbar.\n2. The tree's load-error line reads a translated key with the error's message, the way `DataErrorState` does for the grid.\n3. No new metadata key, no new option.\n\n**Tests.** A tree view with an authored `emptyState` and no records shows the authored title and message. Without one, it shows the localized copy. A failed tree load under zh shows the translated line.\n\n**Reader.** `domain:ui`. Size S.\n\n**Dedupe.** Searched `ListView emptyState tree`, `tree view empty state ignored`, `Failed to load tree`: only #28892 and PR #28957. objectui#12217 fixed the same gap for the gallery.\n\nLinks back: #28892, PR #28957."
+}

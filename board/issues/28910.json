@@ -1,0 +1,37 @@
+{
+  "number": 28910,
+  "kind": "issue",
+  "title": "List bulk bar: the built-in bulk Delete label is English under zh-CN — string actions read the grid translation key",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:ui",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T03:59:44Z",
+  "updated_at": "2026-11-02T06:44:06Z",
+  "closed_at": "2026-11-02T06:42:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28910",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat from a second console review under epic #26676. An independent reviewer walked the console on `main` `bdb19ca6d9`, with `examples/app-crm` as the backend, at 1440 and 390 px. The seat then re-read the evidence. The maintainer approved the seat's checked list: 「Fable 评估（核对后） 同意立卡」 (2026-11-02). Code readings below are on `main` `5e1b9b0a77`. No `domain:*` label is set: triage routes this card.\n\n## Observed\n\nOn a zh-CN list, select a row. The bulk bar shows 「已选择 1 项」, a red `Delete`, and 「清除」.\n\n## Reading\n\n- `ui/packages/plugin-grid/src/components/BulkActionBar.tsx:317` draws a string action with `formatActionLabel(action)`, which formats the English name.\n- `ui/packages/plugin-grid/src/ObjectGrid.tsx:1323-1328`: an object with no declared bulk actions gets `['delete']`.\n- `ui/packages/i18n/src/locales/zh.ts` already holds 删除 for the grid's delete key, so the translation exists and this path does not read it.\n\n## Target\n\nA built-in string bulk action reads its grid translation key across the ten packs. Only the label changes.\n\nThe default action set and the button's position and color are out of scope. The review also suggested moving delete to a secondary position, and the seat found no evidence for that.\n\n## Acceptance\n\n- Under zh-CN the button reads 删除; under en it reads Delete.\n- A declared custom bulk action keeps its own label.\n- A test pins the zh-CN label."
+}

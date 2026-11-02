@@ -1,0 +1,31 @@
+{
+  "number": 29013,
+  "kind": "issue",
+  "title": "checklist: re-point studio-authoring.draft-publish-lifecycle acceptance[10] — a 422 INVALID_METADATA refusal now writes a denied audit row by design (#28355)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:09:23Z",
+  "updated_at": "2026-11-02T07:25:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29013",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbX9avDwM2goWd7zimE\n\nFiling gate: ① a stale clause, a QA run clause fail (studio-authoring.draft-publish-lifecycle acceptance[10]) whose red line needs an owner (checklist-test §5, \"过期规格\").\nBusiness reason: the release checklist reads this item FAIL on every run until the clause is re-pointed, although the product does what #28355 decided. A red that is not a regression trains testers to ignore red.\nReader who acts: the `domain:devx` lane, the `checklist-author` procedure on `docs/qa/platform-checklist/areas/studio-authoring.json` (revise the clause, bump `revision`, add a `history` row, keep `pnpm check:platform-checklist` green). QA suggestion only: p3.\nDuplicate search: `draft-publish-lifecycle` → 527 hits, none a re-point card for acceptance[10]; `protocol-refusal-audit` → no card about the clause.\nBatch-of: release-18.3.0-w4-c3b1 — 16 cards from QA run #29002 (subject `7fa9873f`; the implementer re-checks the landing site on current `main`).\n\n## What the clause says and what the product does\n- Clause (r10): \"A 422 INVALID_METADATA spec refusal and a 404 NO_DRAFT write no row\"; verify \"no row is expected for a 422 spec refusal\".\n- Product at `7fa9873f`: `packages/metadata-protocol/src/protocol-refusal-audit.ts` (#28355) stamps one `denied` audit row per catalogued refusal at each single-item door (save, publish, rollback, delete). `REFUSAL_AUDIT_CODES` = NOT_OVERRIDABLE, NOT_CREATABLE, INVALID_METADATA, DESTRUCTIVE_CHANGE. NO_DRAFT, INVALID_REQUEST and 5xx still write none.\n\n## Measured\n1. As admin: `PUT /api/v1/meta/dashboard/qa_lifecycle_probe?mode=draft&package=PKG` with a widget carrying a stray key → 422 INVALID_METADATA `widgets.0 [unrecognized_keys]`.\n2. `GET /api/v1/meta/dashboard/qa_lifecycle_probe/audit` → a row `{\"source\":\"protocol.saveMetaItem\",\"operation\":\"save\",\"outcome\":\"denied\",\"code\":\"invalid_metadata\",\"actor\":\"ADMIN_ID\",…}`. 2 of 2, two different bodies. A NO_DRAFT 404 writes none, and every row carries the authenticated actor (the rest of the clause holds).\n\n## Wanted\nRe-point acceptance[10]: a catalogued refusal (the four codes above) writes one `denied` row carrying the actor and the lower-case code; NO_DRAFT, INVALID_REQUEST and 5xx write none. While there, the item's acceptance[3] could spell the wire code `METADATA_CONFLICT` (the audit row's code is lower-case `metadata_conflict`) and say that a stale If-Match must be sent while a draft row exists (with no draft, the published version answers 409 \"current is null\").\n\nQA-source: #29002 · studio-authoring.draft-publish-lifecycle · acceptance[10]"
+}

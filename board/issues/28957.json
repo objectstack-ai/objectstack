@@ -1,0 +1,34 @@
+{
+  "number": 28957,
+  "kind": "pull_request",
+  "title": "fix(plugin-tree): the object tree reads its loading and empty text from the bundle",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:57:39Z",
+  "updated_at": "2026-11-02T05:20:39Z",
+  "closed_at": "2026-11-02T05:20:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T05:20:36Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28957",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbNSK5n9VEENdLx47urr6NTn)_\n\nFixes #28892\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:对象树(`object-tree`,例如 Setup › 业务单元的默认树视图)的加载态和空态不再写死英文，改读语言包的 `common.loading` / `common.noData`。中文界面显示「加载中…」和「暂无数据」;英文空态从 `No records` 变为 `No data`。\n- **为什么改**:中文界面打开业务单元时，加载中和无数据都显示英文，和整页中文不一致。repeater / record-picker 已在 objectui#12910 改读同一对键，树渲染器漏了。\n- **风险与回滚**:低。只改两行文案和 4 个测试里的英文字面，没有新键、没有元数据变化。回滚即还原本 PR。\n- **先看**:`ui/packages/plugin-tree/src/ObjectTree.tsx`(`TREE_DEFAULT_TRANSLATIONS` 和两处占位)、`ui/packages/plugin-tree/src/ObjectTree.placeholderI18n.test.tsx`。\n- **两分钟验证**:`pnpm --dir ui exec vitest run packages/plugin-tree/src/ObjectTree.placeholderI18n.test.tsx`,预期 1 个文件、4 个测试全绿。\n- **需要你做的**:无，席位落地。\n\n## What changes\n\n- `ObjectTree` draws its loading line with `t('common.loading')` and its empty line with `t('common.noData')`, through the `useTreeTranslation` hook it already calls for the overlay heading. Before, both were the English literals `Loading…` and `No records`.\n- The two keys join `TREE_DEFAULT_TRANSLATIONS`, so a provider-less host still reads English (`Loading…`, `No data`).\n- The English empty line changes from `No records` to `No data`, the `en` pack's value for `common.noData`. That is the same move objectui#12910 made for the record picker.\n- `ui/packages/i18n` is untouched. Both keys already exist in all ten packs.\n\n## Tests\n\n- **New: `ObjectTree.placeholderI18n.test.tsx`, 4 cases.** Under a zh provider, a pending read draws 加载中… and an empty result draws 暂无数据, with no English beside them. Under en, the same states draw `Loading…` and `No data`.\n- **Four existing files read `No data` instead of `No records`:** `ObjectTree.contractEnvelope-6839`, `ObjectTree.dataArmSpecRow-8348`, `ObjectTree.expandedDerived-8666` and `__tests__/objectTreeInputs-11168`. They render without a provider, so they read the defaults table.\n\n## Acceptance notes\n\n- **Acceptance 1:** done; see What changes.\n- **Acceptance 2 (a declared emptyText still wins): holds, because there is no declared key on the tree path.** `ComponentPropsMap['object-tree']` (`ObjectTreePropsSchema`) declares no `emptyText` or `emptyState`, and plugin-tree reads none. This PR takes no authored text away.\n- **The view-level `emptyState` is not drawn for tree views, before or after this PR.** `ListView` draws `ListEmptyState` from the view's `emptyState` only for the grid and gallery layouts, and hands a tree view's empty set to `ObjectTree`. That is a separate gap in `ListView.tsx`, outside this card's surface. The seat files it.\n- **Acceptance 3:** done; see Tests.\n- The error line (`Failed to load tree: …`) is still English. It is outside this card.\n\n## Verification\n\nAll readings are at head `636a312d` (base `origin/main` `9a9823d9`), under `scripts/pm/os-verify-lock.sh`.\n\n<details><summary>plugin-tree · 26 of 26 files · type-check</summary>\n\n- `pnpm --dir ui exec vitest run --maxWorkers=2 packages/plugin-tree/`: Test Files 26 passed (26), Tests 172 passed (172). The lock printed `VERDICT command-exit 0`.\n- `pnpm --filter @object-ui/plugin-tree run type-check` (`tsc --noEmit && tsc -p tsconfig.test.json`): exit 0.\n- The prerequisite build was `turbo run build` for the plugin-tree dependency closure plus formula, sdui-parser, lint and client: 48 of 48 tasks.\n</details>\n\n<details><summary>Ablations · both red, both restored</summary>\n\nEach leg ran through `scripts/ablation-replace.mjs`, which reported the anchor count 1 to 0 and a blob change, then restored the file to the HEAD blob with an empty `git diff HEAD`.\n\n- Loading line put back to the literal `Loading…`: `draws the zh loading line while its read is pending` red, 1 failed and 3 passed.\n- Empty line put back to the literal `No records`: `draws the zh empty line for an empty result` and `draws the en empty line for an empty result` red, 2 failed and 2 passed.\n</details>\n\n<details><summary>Derived gates · 34 of 34</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 34 commands from this branch. All 34 exited 0, including `node scripts/check-sdui-manifest.mjs` and `pnpm --dir ui exec vitest run scripts/`. `dispatch-gates --ran` reconciled 34 run, 0 not measured, 0 unrun. On this exact body, `check-changeset-no-major` and `check-adr-0087-registration` exited 0, `check-partof-closing-keyword` exited 0, and `check-closing-keyword-parity --body` lists one closing declaration, for this card alone.\n</details>\n\nDiff: 7 files, 154 changed lines.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jThkd3ikeV2qYP7jeF)_\n"
+}

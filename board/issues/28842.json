@@ -2,7 +2,7 @@
   "number": 28842,
   "kind": "pull_request",
   "title": "docs(north-star): write docs/NORTH-STAR.md in English as the governing original",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/m",
     "skip-changeset",
     "tests"
@@ -21,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T23:36:12Z",
-  "updated_at": "2026-11-02T01:39:24Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-02T04:05:40Z",
+  "closed_at": "2026-11-02T04:05:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-02T04:05:39Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28842",

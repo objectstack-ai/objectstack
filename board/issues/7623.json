@@ -1,7 +1,7 @@
 {
   "number": 7623,
   "kind": "issue",
-  "title": "[PM seat] domain:skills — 🟢 os-tesla · 由 os-tesla 账户的项目负责",
+  "title": "[PM seat] domain:skills — 🟢 huangyiirene · 由 huangyiirene 账户的项目负责",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-tesla"
+    "huangyiirene"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-08-11T09:13:50Z",
-  "updated_at": "2026-10-31T22:53:37Z",
+  "updated_at": "2026-11-02T03:44:27Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 164,
+  "comments": 165,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/7623",
-  "body": "domain:skills#1 · os-tesla · session_01L9qibzCtJt8Q2Z63fyRNix\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 1**. Seat 2 is #19287.\n\n## Current PM\n\n🟢 **`os-tesla`** · `session_01L9qibzCtJt8Q2Z63fyRNix` (project \"Objectstack spec server\", thread \"Open skills lane seat\") · seated 2026-10-31T22:51Z on the maintainer's 「开 skills 和 ui 车道」. In-flight budget: 5 card threads (the maintainer's 「每个座位并发可以5」). Mailbox PR #28481.\n\n## Ledger carried from the previous term\n\nThe previous holder's sign-off brief (6509273513) is the handover; nothing was in flight and nothing stayed behind. Seat 2's sign-off brief (6539796498 on #19287) carries the newer queue snapshot; the cards and labels hold the state.\n\n## Hot-file serial queue\n\n⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch; read #19287 too.\n\n- `skills/objectstack-data/references/_index.md`, `skills/objectstack-ui/references/_index.md` (and the ai / automation indexes): open PR #28467 (another lane) touches them.\n- Every other lane file is FREE.\n\n## Notes\n\n- Posture ledger lives in the project. Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Merges reach customers through `@objectstack/skills` (`skills/**`) only on a release the maintainer runs.\n"
+  "body": "domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\n⚠️ **Seat stub.** Job description: `.claude/skills/pm-dispatch/references/lanes/skills.md` (⛔ not copied here). This is **`domain:skills` seat 1**. Seat 2 is #19287.\n\n<sub>Refreshed 2026-11-02T03:43Z (seated by forced takeover).</sub>\n\n## Current PM — 🟢 huangyiirene\n\n- **Holder:** `huangyiirene` (`GET /user`) · `session_01J8VVAnMUWA9rufXzFaEh4J` (the huangyiirene account's project \"objectstack\", seat thread \"Run the skills lane PM seat\") · seated by the maintainer's forced-takeover order, opening mark 6568497832.\n- **Previous holder:** `os-tesla` · `session_01L9qibzCtJt8Q2Z63fyRNix` (seated by 6550230777), taken over with nothing in flight; its mailbox #28481 is closed.\n- **Mailbox:** PR #28900 (`Mailbox-of: domain:skills#1 · huangyiirene`), subscribed by the seated session.\n- **Patrol:** `trig_01Xb4VD7CKNEWzVYKbtxPxGn` · hourly at :43, bound to the seated session.\n- **Pointer:** posture, ledger and round reports live in the project. Lane ledger = labels + assignee + `Claim:` comments carrying `Seat: domain:skills#1` + `head:claude/` PRs.\n\n## Handover ledger\n\nNothing carried: seat 1 held no in-flight card, no unstarted claim and no pending-landing PR at takeover. The cards and labels hold the lane's state; seat 2's post #19287 carries its own.\n\n## Hot-file serial queue\n\n⛔ Re-derive from live `Claim:` comments and each open PR's file list before every dispatch; read #19287 too.\n\n- None held by this seat.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- A `skills/**` PR owes an `'@objectstack/skills': patch` changeset, never `skip-changeset`.\n- Merges reach customers through `@objectstack/skills` (`skills/**`) only on a release the maintainer runs.\n"
 }

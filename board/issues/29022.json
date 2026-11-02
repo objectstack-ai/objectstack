@@ -1,0 +1,33 @@
+{
+  "number": 29022,
+  "kind": "issue",
+  "title": "Studio report Properties: switching Report type to Joined autosaves a report with no blocks (422), and later edits are refused and lost on reload with no prompt",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:12:45Z",
+  "updated_at": "2026-11-02T08:12:34Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29022",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbX9avDwM2goWd7zimE\n\nFiling gate: ① a product defect, found beside the clauses (studio-authoring.report-authoring-options), reach: the Studio autosave, measured 3 times.\nBusiness reason: a report author who switches a report to Joined and touches anything before adding the first block sees \"Changes not saved\", and every edit is then refused and lost on reload without a prompt. #27785 holds an added Order or Blocks item and a chart type picked before its axes; the type switch itself is the remaining door into the same loss.\nReader who acts: the triage seat, then a `domain:ui` implementer in `ui/packages/app-shell/src/views/studio-design/metadataError.ts`. QA suggestion only: `area:studio`, p2.\nDuplicate search: `joined report Studio blocks` → 65 hits; #27785 (closed) is the sibling for list items and chart axes, #21702 (closed) the spec side of a joined report with no dataset; none is the type switch.\nBatch-of: release-18.3.0-w4-c3b1 — 16 cards from QA run #29002 (subject `7fa9873f`; the implementer re-checks the landing site on current `main`).\n\n## Reproduction\n1. `/_console/studio/PKG/interfaces` → nav \"+\" → Report → a name, a dataset and a measure → Save as draft (PUT 200, `type: summary`).\n2. In Properties set Report type = Joined. Studio autosaves `{\"type\":\"joined\",\"drilldown\":true,…}` with dataset and values dropped and no blocks → 422 at `blocks`, \"a `joined` report needs `blocks`\".\n3. Edit Description → the PUT carries the same body plus the description → 422.\n4. Reload: no beforeunload guard (`defaultPrevented` false) and no prompt; the report is back to Summary and the description is gone.\n\nExpected: the switch is held until a block is complete, or the refused edits are guarded on leave. Actual: as above. Reproduced 3 times on fresh loads.\n\n## Mechanism (suspected)\n`reportHeldEdit` in `metadataError.ts` does not treat a joined report with no `blocks` as held.\n\nQA-source: #29002 · studio-authoring.report-authoring-options · observed beside the clauses"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 28904,
+  "kind": "issue",
+  "title": "migrate: os migrate packageless-overlays fails on an email template row of a locale the base does not ship, so after #28576 that row can be neither written nor migrated",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T03:51:45Z",
+  "updated_at": "2026-11-02T03:54:29Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28904",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① open question of the #28576 dev (os-dev-report 6568585266, `open_questions` 1), filed by `domain:server` seat 5 as a follow-up card. Graded by this seat: p2. After #28576 lands, a customer's existing translated email has no write path and no migration path, though it keeps sending. Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: deployments with a Setup-made (package-less, pre-D11) `email_template` row at a locale the shipping package does not ship (for example a `zh-CN` translation of a template shipped `en-US` only).\nReader who acts: a `domain:server` seat (`packages/metadata-protocol`, the ceremony).\n\n## What happens\n\nMeasured by the #28576 dev on `f2e1f8b5` (showcase):\n\n- `os migrate packageless-overlays --apply` tries to move such a row by saving it into the base's `.custom` pair declaring `overrides`. #28746 / #28777 refuse a pair override of a locale the base does not ship, so the outcome is `failed` and the row is kept.\n- The row stays served and keeps sending.\n- After #28576 its package-less save, reset, publish and rollback are refused, and the refusal says the ceremony moves it. It cannot.\n\nMain's #28828 now lists and sends the pair's OWN member at an unshipped locale (no `overrides`), so a target exists.\n\n## Wanted\n\n- The ceremony moves such a row as the pair's own member at that locale, with no `overrides` declaration, and reports it as moved (a distinct outcome word if the preview needs one).\n- The move keeps what the row sends: subject, body and envelope columns, and its version history where the ceremony already carries it.\n- Tests: an unshipped-locale pre-D11 row moves and still sends after the move; a shipped-locale row moves as today; red first, with ablations.\n- ⛔ No change to #28777's refusal of a declared override at an unshipped locale.\n\nBlocked-by: #28576 (PR #28850 closes the package-less write this card's row needs a path around).\n\nDedupe: searched `packageless-overlays unshipped locale`; only #28576 and #28779. **New.**\n\nLinks back: #28576, PR #28850, #28828, #28777, #28746, #28779, #28413."
+}

@@ -1,0 +1,37 @@
+{
+  "number": 28908,
+  "kind": "issue",
+  "title": "List empty state: when the reader's own filter or search leaves no rows, offer 「清除筛选」 — today the copy says to clear them and the only button is 「添加记录」",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T03:59:17Z",
+  "updated_at": "2026-11-02T08:05:07Z",
+  "closed_at": "2026-11-02T08:02:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28908",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat from a second console review under epic #26676. An independent reviewer walked the console on `main` `bdb19ca6d9`, with `examples/app-crm` as the backend, at 1440 and 390 px. The seat then re-read the evidence. The maintainer approved the seat's checked list: 「Fable 评估（核对后） 同意立卡」 (2026-11-02). Code readings below are on `main` `5e1b9b0a77`. No `domain:*` label is set: triage routes this card.\n\n## Observed\n\nLeads → filter 状态 等于 Contacted → 0 rows. The copy reads 「没有符合当前筛选或搜索条件的记录，试试调整或清除它们」, and the only button is 「添加记录」. The reader has to go back to the toolbar's small filter badge. A click on the button creates a record while the list is filtered.\n\n## Reading\n\n- `ui/packages/plugin-list/src/ListView.tsx:6666`: `onClearSearch` is passed only when `searchTerm` is non-empty, so a filter alone never offers a clear action.\n- `ui/packages/plugin-list/src/ListEmptyState.tsx:209-237` already draws a clear action and already groups it beside the add action.\n\n## Target\n\n1. When the reader's own query (search term, or filters the reader added) is what empties the list, the empty state offers one clear action that removes that query. 「添加记录」 stays as the secondary action.\n2. A filter declared by the view is not the reader's query, so this action does not remove it.\n3. No new key and no new option.\n\n## Acceptance\n\n- Filter to zero rows: 「清除筛选」 is the primary button, a click restores the rows, and the filter badge clears.\n- Search to zero rows behaves as today.\n- A view that is empty with no reader query shows no clear action.\n- Tests pin the three cases."
+}

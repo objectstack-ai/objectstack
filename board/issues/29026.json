@@ -1,0 +1,31 @@
+{
+  "number": 29026,
+  "kind": "issue",
+  "title": "lint: the publish-time null-guard gate still excludes flow and edge conditions, so an unguarded ordering comparison on a nullable field ships and faults at run time",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:14:32Z",
+  "updated_at": "2026-11-02T07:58:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29026",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① class (c) out-of-scope finding of the #28951 dev (os-dev-report 6570437242), filed by `domain:server` seat 5 for the `domain:devx` lane (`packages/lint`). Graded by this seat: p3, a gate gap with a named producer. Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: any author or AI writing a flow `condition` (an edge or a start condition) that orders a nullable field (`budget > 200000` on an optional currency field).\nReader who acts: the `domain:devx` seat (`packages/lint/src/validate-null-guards.ts`).\n\n## What happens\n\nThe showcase's `showcase_project_escalation` e2 (`budget > 200000` on the optional `showcase_project.budget`) passed `os validate` on `main` and faulted at run time: `no such overload: dyn‹null› > int`, a terminal run failure (#28951, fixed in the flow by PR #29018). `validate-null-guards.ts` still lists flow / edge `condition` as an excluded surface in its ledger. Its totality blocker is gone since #4953, and the widening card #4811 is closed.\n\nMeasured beside it: `has(record.X)` is true on a declared-but-null key, because the run's `record` is total over declared fields. So the `has()` guard authors reach for does not guard; `record.X != null` does, and the gate already accepts it as dominating.\n\n## Wanted\n\n- Bring flow `condition` surfaces (edges, start conditions, decision conditions) under the null-guard gate with the same rule and remedy text as its other surfaces. Or answer why they stay excluded.\n- Consider whether the remedy should name `!= null` over `has()` for this reason.\n- Fixture fallout in examples and dogfood flows is part of the card. Measure it first.\n\nDedupe: searched `null-guard flow condition`; none open. **New.**\n\nLinks back: #28951, PR #29018, #4953, #4811."
+}

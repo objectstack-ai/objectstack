@@ -1,0 +1,36 @@
+{
+  "number": 28923,
+  "kind": "issue",
+  "title": "components data-table: the row ⋯ actions trigger is still hidden at rest on a fine pointer, as the list grid's was before #28871",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:23:01Z",
+  "updated_at": "2026-11-02T07:26:18Z",
+  "closed_at": "2026-11-02T07:19:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28923",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class b, from the #28871 os-dev-report (6568984166, PR #28922) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** #28871 makes the list grid's row ⋯ visible at rest, so a reader no longer takes the Actions column for \"no actions available\". The `data-table` renderer in `@object-ui/components` draws the same trigger with the old hover-reveal. So any surface drawn by that renderer still shows an Actions header over a column that looks empty until the pointer is over a row.\n\n**Measured (`origin/main` `9a9823d921`).**\n- `ui/packages/components/src/renderers/complex/data-table.tsx:849`: the `data-table-row-actions` trigger is `opacity-0 … group-hover/row:opacity-100 … pointer-coarse:opacity-100`. This is the class string #28871 retires in `RowActionMenu.tsx`.\n- Sibling, a judgment call: `ui/packages/app-shell/src/views/objectViewOpenAsPage.tsx:40` (the per-row \"open as page\" link) hides at rest the same way. Its docblock says it hides \"as the row's ⋮ menu is (`RowActionMenu`)\", and after PR #28922 lands that sentence is false. It is an extra link, not the Actions column, so it can stay hover-revealed if its docblock is corrected.\n\n**Wanted.**\n1. `data-table.tsx`'s row-actions trigger follows #28871: muted at rest, full strength on row hover, focus-within, selection, an open menu, focus-visible, and a coarse pointer.\n2. `objectViewOpenAsPage.tsx`: either the same treatment, or a docblock that no longer claims it matches the row menu. Triage's call.\n3. No new key, no new option. The menu's set, gates and order are unchanged (#28434).\n\n**Tests.** A pin on the at-rest class of `data-table-row-actions`, the way `RowActionMenu.atRest-28871.test.tsx` pins the grid's. `data-table-leadingCell-12423` pins the selection checkbox's own hover-reveal and is not this card.\n\n**Reader.** `domain:ui`. Size S.\n\n**Dedupe.** Searched `data-table-row-actions opacity`, `row actions hidden at rest`, `hover reveal actions column`: only #28871 and PR #28922.\n\nLinks back: #28871, PR #28922, epic #26676."
+}

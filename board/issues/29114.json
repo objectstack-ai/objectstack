@@ -1,0 +1,32 @@
+{
+  "number": 29114,
+  "kind": "issue",
+  "title": "/auth/me/permissions 要等 organization/list 答完才发：ConsolePermissionsScope 挂在 RequireOrganization 之下，而活动组织已在 get-session 的答案里（cloud#2914 子卡 OU-3）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "performance",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T07:58:59Z",
+  "updated_at": "2026-11-02T08:18:16Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29114",
+  "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\n立卡门类别：①（父单 cloud#2914 是 ④ 协调节点；本卡是它 round 10 报告里已测、当时因 objectui 不在席位写范围而未立的杠杆 OU-3）\n\nReader: `domain:ui` 车道。`ui/apps/console/src/AppContent.tsx:393`（`ConsolePermissionsScope` 的挂点）、`ui/packages/app-shell/src/console/ConsoleShell.tsx:423`（`RequireOrganization`）、`ui/packages/permissions/src/MePermissionsProvider.tsx`。不需要新组件或 spec 契约变化。建议档 p2，由分诊定。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue permissions wait organization list` total=314（无同题，最近 #28508 closed 是 permissions 载荷加字段）；`\"me/permissions\" \"organization\" wave` total=31（全是 QA 汇总）；`\"cloud#2914\"` total=12，只有 FW 卡（#25783 #25785 #24060 #24061 #24371 #25956），**没有任何 OU 卡**。\n\n业务理由：每个打开控制台的用户。权限答复决定导航和按钮能不能画出来，现在它白等一整波（组织列表），租户首页和应用页因此晚一层（round 10：约 0.3 s @290 ms 网络底；staging 更多）。不修，cloud#2914 Target 2「启动关键路径只留 session + me + 当前应用元数据」做不到。\n\n## 来源\n2026-11-02 staging 页面性能评估（cloud main `cd4e2e1f`，objectstack pin `6cbdef1e`；控制面 cloud.objectos.app，租户 os-2ph4c1.objectos.app / HotCRM 6.0.0；内置浏览器面板 zh-CN，读 resource timing 与 v2.7.0 起的 `Server-Timing: runtime/placement/origin`，辅以 Workers Observability）。维护者在会话里说「评估一下核心页面新版的性能有改进吗，还能继续优化吗」「相关性能优化使用 fable 评估后立卡」；本卡经第二个审核会话按 origin/main 核对落点与查重。\n⚠️ 本机链路当天很差（CF 边缘静态文件 65 KB/s），卡里的秒数只引用 Server-Timing 或请求的先后关系，不引用页面总耗时。\n\n## 已实测\n- 控制面首页瀑布：`organization/list` 4181→5673 ms，`auth/me/permissions` 5685 ms 才发出（紧跟其后）→ 7137；之后整层（`meta/page`、`me/localization`、`me/apps`、应用 bundle）在 7144 ms 才发出，等的就是 permissions。\n- 租户客户列表页同样形状：`organization/list` 1322→1931，`auth/me/permissions` 1939 发出。\n- 与 round 10（cloud#2914 评论 6396581531）的测量一致；main 与 pin 的挂点相同。\n\n## 验收\n1. 整页打开的 resource timing 里，`auth/me/permissions` 的 startTime 与 `organization/list` 在同一波（差 ≤ 50 ms）。\n2. 请求数不增加、没有重复 URL（cloud `verify-console-pin.mjs` 的 Target 4 预算读数）。\n3. 请求计数测试 + 消融（挪回原挂点时测试变红）。\n\n## 相关\ncloud#2914（父单，round 10 报告 6396581531 的 OU-3）\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

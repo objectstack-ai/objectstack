@@ -1,0 +1,34 @@
+{
+  "number": 28956,
+  "kind": "issue",
+  "title": "os validate prints a raw ZodError JSON array with no file or view name when a define* helper refuses at config load (e.g. defineView with mixed string/object columns)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:57:18Z",
+  "updated_at": "2026-11-02T08:13:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28956",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbYVchZUzHRyGz9MiQM\n\n立卡门: ① 用户可见的体验缺陷，具名落点 + 复现（reach: 公开入口 `os validate` 实测一次：输出 88 行 zod JSON，没有文件名、没有视图名、没有改法）\n业务理由: AGENTS.md 和官网都把 `npm run validate` 说成「失败时给出定位的、可纠正的信息」的唯一关卡，新手和 coding agent 都靠它自我纠错。`defineView` / `defineAction` 等 helper 在 config 加载时 `Schema.parse` 抛出的 ZodError 被 validate 原样打印成 JSON 数组，只剩 `\"path\": [\"list\",\"columns\"]`，不说哪个文件、哪个对象的视图，也不说该怎么写。新手第一次写视图就会撞上（skill 里同时给了字符串列和对象列两种写法，混用很自然）。不修，validate 在最常见的首个错误上不可读，agent 只能猜。\n动手的读者: domain:devx 席（cli），`packages/cli/src/commands/validate.ts` 的 catch-all（main ff881050 约第 1240 行 `printError(error.message)`）：ZodError 走 `formatZodError`（`utils/config.ts` 的 authored-source shim 已有同样的 `__refusal` 渲染，只给 `os migrate meta` 用），并带上抛出它的 helper 名和文件；`os build` / `os dev` 同一路径一起看。\n查重: `is:issue validate ZodError raw JSON` 18 命中、`is:issue defineView ZodError` 3、`is:issue validate \"Loading configuration\" ZodError` 1（均含已关）。最近邻 #20696（`os migrate meta` 在 ObjectSchema.create 的旧键上加载即崩、打印原始 ZodError，已关，修在 migrate 的 shim 里），#19581（zod treeifyError 抛错，已关），都不是 validate 的普通加载路径。\n\nQA-source: 18.3.0 wave 4 newcomer first-visit walkthrough (W4-NEWCOMER), path 2 \"Build with Claude Code\", anchor #27377\n\n## Reproduction (published 18.2.0, npm 10.9.9, Node 22.23.4)\n1. `npm create objectstack@latest support-desk && cd support-desk`\n2. Add an object `support_desk_ticket` with `subject`/`status`/`priority`, and `src/views/ticket.view.ts`:\n   ```ts\n   export const TicketViews = defineView({\n     list: { label: 'All Tickets', type: 'grid', data, columns: [{ field: 'subject', link: true }, 'status', 'priority'] },\n   });\n   ```\n   exported from `src/views/index.ts`.\n3. `npm run validate`\n\nExpected: one located line, e.g. \"ticket.view.ts · defineView · list.columns: mix of strings and column objects; use one form (all `{ field }` objects when any column needs `link`)\", exit 1.\nActual: exit 1 after \"→ Loading configuration...\" with `✗ [` followed by 88 lines of JSON (`\"code\": \"invalid_union\"`, nested `errors` arrays, `\"path\": [\"list\",\"columns\"]`, `\"message\": \"Invalid input\"`). No file, no object, no hint.\n\n## Why it is still on main\n`defineView` (`packages/spec/src/ui/view.zod.ts`) and `defineAction` (`packages/spec/src/ui/action.zod.ts`) call `Schema.parse` and throw the ZodError as is. `loadConfig` on the normal path (no `authoredSource`) does not wrap them, and the validate catch-all prints `error.message`, which for a ZodError is the JSON array. Read on `main` ff881050; the live run was on 18.2.0."
+}

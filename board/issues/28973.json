@@ -1,0 +1,33 @@
+{
+  "number": 28973,
+  "kind": "issue",
+  "title": "objectstack.ai: add Docs as the first link in the top navigation",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T05:18:26Z",
+  "updated_at": "2026-11-02T06:06:15Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28973",
+  "body": "立卡门 ③: a task the maintainer assigned directly.\n\nMaintainer, verbatim (2026-11-02, project chat): 「https://objectstack.ai/ 首页顶部导航没有 docs 是否合理」. After the analysis: 「同意」, then 「交给 docs 车道经理」.\n\n**Business reason.** objectstack.ai is the developer docs and protocol site, but its top navigation has only Why, Blog (both redirect to the www.objectos.ai blog) and Product (www.objectos.ai). No nav link leads to this site's own `/docs`. A developer who lands on a blog post, or scrolls past the home hero's Get started button, has no steady way into the docs. Developer sites put Docs first.\n\n**Change.** In `apps/docs/lib/layout.shared.tsx`, add `{ text: 'Docs', url: '/docs', active: 'nested-url' }` as the first entry of `baseOptions().links`. Every layout spreads that array (DocsLayout, and HomeLayout on home and `/blog`), so one entry adds it site-wide, and it highlights on docs pages. Target `/docs` on this site, not docs.objectos.ai, which is the ObjectOS end-user docs. Not in scope: merging Why and Blog (the maintainer left it out).\n\n**Who does it.** The repo:docs.objectos.ai seat (#9831), which the maintainer named \"docs 车道经理\". This is a one-file cross-lane exception by maintainer order: `apps/docs` is otherwise `domain:devx`.\n\n**Duplicate check.** Open PRs touching `apps/docs/lib/layout.shared.tsx`: 0. Searched issues for \"Docs nav\" and \"layout.shared\": 0 matching cards, open or closed.\n\n## Acceptance\n\n- The nav reads Docs, Why, Blog, Product on the home page, `/blog` and `/docs/*`. Docs is active under `/docs`.\n- `apps/docs` type-check and build pass. The deployed objectstack.ai shows the link."
+}

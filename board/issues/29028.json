@@ -1,0 +1,34 @@
+{
+  "number": 29028,
+  "kind": "issue",
+  "title": "showcase: ten notify recipient slots guard an optional user field with has(FIELD) ? FIELD : null, which answers null on a null column and fails the run with no recipient",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:14:58Z",
+  "updated_at": "2026-11-02T08:12:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29028",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① out-of-scope finding of the #28951 dev (os-dev-report 6570437242), filed by `domain:server` seat 5. Graded by this seat: p3, the same class as #28951 (the reference app teaches a guard that does not guard). Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: showcase flows other than `showcase_project_escalation` whose notify recipients read an optional user field (assignee, owner, task.owner, task.watcher), on a record where that field is empty.\nReader who acts: a `domain:server` seat (`examples/app-showcase/src/automation/flows/index.ts`).\n\n## What happens\n\nPR #29018 (#28951) measured that `has(record.X)` is true on a declared-but-null key, because the run's `record` is total over declared fields. So `has(FIELD) ? FIELD : null` answers `null`, and a notify whose every recipient evaluates to nothing fails the run. The same recipient guard sits in ten other notify slots of the showcase flows file. The dev did not measure the reach per slot.\n\nAlso noted, unmeasured:\n\n- `showcase_committee_quorum`'s start condition `… && total_amount >= 5000` on a sum summary: does it read null on a report with no lines?\n- `showcase_budget_approval`'s start condition `budget > 100000 …` faults on no budget. In the live run it logged nothing and did not fire.\n\n## Wanted\n\n- Measure each slot on a record with the field empty. Fix each one that fails the run the way PR #29018 did: guard with `isBlank()` / `!= null`, and route around the notify or fall back to `role:owner`. Name any slot that is fine.\n- Guard the two start conditions if they fault.\n- One test per fixed flow, red first, with an ablation.\n\nBlocked-by: none (PR #29018's pattern is the reference).\n\nDedupe: searched `showcase has() recipient null notify`; only #28951. **New.**\n\nLinks back: #28951, PR #29018."
+}

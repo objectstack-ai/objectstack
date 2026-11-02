@@ -1,0 +1,33 @@
+{
+  "number": 29112,
+  "kind": "issue",
+  "title": "security/explain 批量形态对每个 recordId 串行重跑一次完整 explain：50 行列表页的两次调用服务端各 3 s，排在页面最后一层并占住内核事件循环",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "performance",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T07:54:53Z",
+  "updated_at": "2026-11-02T08:21:35Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29112",
+  "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\n立卡门类别：① 已复现缺陷（reach: 公开入口实测，staging 客户列表页，见「已实测」）\n\nReader: `domain:server` 车道。`packages/rest/src/security-routes.ts`（批量循环）与 `packages/plugins/plugin-security/src/security-plugin-explain-access.ts` / `explain-engine.ts`（对象级判定只算一次、记录级按 id；或用一次带 `id in (...)` 的写过滤查询回答每条记录）。`ui/packages/plugin-grid/src/hooks/useRecordCrudVerdicts.ts` 只作备选（菜单打开时再问）。建议档 p2，由分诊定。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue security/explain slow` total=23（无同题，最近 #26754 closed 是测试时长）；`explain batch recordIds per id loop` total=6（#22571、#22792 closed，语义卡）；`explain latency record visible` total=40（无同题）。最相关的已关卡：#8326（批量形态的来源）、#27626（客户端去重；其正文说明 explain ×2 是 update / delete 两个问题）。\n\n业务理由：每个打开 HotCRM 列表页的用户，行级「编辑 / 删除」菜单要等这两次判定（约 3–4 s）才有结论；托管运行时一个容器同时跑多个环境的内核，这 2×3 s 的 CPU 让同容器其他租户的请求排在后面。不修，列表页永远以 explain 收尾，环境越多越慢。\n\n## 来源\n2026-11-02 staging 页面性能评估（cloud main `cd4e2e1f`，objectstack pin `6cbdef1e`；控制面 cloud.objectos.app，租户 os-2ph4c1.objectos.app / HotCRM 6.0.0；内置浏览器面板 zh-CN，读 resource timing 与 v2.7.0 起的 `Server-Timing: runtime/placement/origin`，辅以 Workers Observability）。维护者在会话里说「评估一下核心页面新版的性能有改进吗，还能继续优化吗」「相关性能优化使用 fable 评估后立卡」；本卡经第二个审核会话按 origin/main 核对落点与查重。\n⚠️ 本机链路当天很差（CF 边缘静态文件 65 KB/s），卡里的秒数只引用 Server-Timing 或请求的先后关系，不引用页面总耗时。\n\n## 已实测\n- 客户列表页（`/apps/app.objectstack.hotcrm/crm_account`，31 行）resource timing：两个 `POST /api/v1/security/explain` 在 6246 ms 才发出（前一层结束之后），各自 `Server-Timing` 为 `runtime=3396 origin=3473` 与 `runtime=2986 origin=3062`；同页其他接口 runtime 在 50–920 ms。\n- Workers：新版窗口 `/api/v1/security/explain` p50 3257 / p90 3661 ms（n=12，每页 2 次）。旧版（v2.6.0）窗口 p90 3568，说明批量在旧 pin 就是这个代价，不是两 pin 间的回退（旧窗口的 p50 较低，是因为当时记录页还单独发便宜的单条 explain，样本构成不同）。\n\n## 落点\n- 调用方：`ui/packages/plugin-grid/src/hooks/useRecordCrudVerdicts.ts:364-440`，每页按 (object, operation) 各发一个批量请求，请求体 `{ object, operation: 'update'|'delete', recordIds: [整页行 id] }`（上限 200）。两次 = update + delete。\n- 服务端：`packages/rest/src/security-routes.ts:256-281` 先做一次对象级 `svc.explain(singularRequest)`，再 `for (const id of new Set(recordIds)) { await svc.explain({ ...singularRequest, recordId: id }) }`：逐 id 串行跑完整的单条判定（每次重新解析权限集、对象安全元数据、RLS、共享规则、写探针、两次按 id 读行）。注释写明这是「单条判定的传输合并，不是新语义」，批量 ≡ N 次单条由测试钉住。\n- 记录页已经不单独发 explain：#27713 把 update / delete / transfer 判定装进 `POST /data/:object/:id/page`；但服务端 `record-page-routes.ts:393-405` 对这几个判定也是串行 await、各自重算对象级部分，修批量时顺手让它们共享对象级判定并并行，不另开卡。\n\n## 验收\n1. 50 个 id 的批量请求：本地隔离 CPU ≤ 单条的 3 倍（或每 id 边际 ≤ 10 ms）；staging `Server-Timing runtime` ≤ 500 ms。\n2. 既有「批量 ≡ N 次单条」一致性测试保持通过。\n3. staging 客户列表页瀑布里 explain 不再是最后一层的长尾。\n\n## 相关\ncloud#2914（控制台打开的串行瀑布，父单）、objectstack#8326、objectstack#27626、objectstack#27713\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 29053,
+  "kind": "issue",
+  "title": "plugin-auth rate limits over-admit a concurrent burst in ONE process (incrementFixedWindow reads then writes across an await: 20 of 20 admitted), and the shared cache store is never reached because PluginContext has no getServiceAsync",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:identity",
+    "bug",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2",
+    "security"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:27:07Z",
+  "updated_at": "2026-11-02T08:16:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29053",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: a measured defect, found by cloud#3478 (environment sign-in burst on staging, cloud#3417 S2) and reproduced in one process. Cloud worked around it at its own auth door (PR cloud#3481, a per-environment, per-address serializer). The framework counter is still wrong for every other caller, the control plane included.\n\n## What happens\n\n1. **One process over-admits.** `packages/plugins/plugin-auth/src/rate-limit-storage.ts` `incrementFixedWindow()` does `get` → compute → `set` across awaits. Its docblock accepts a slight over-admit *between nodes*, but the same race happens inside one process: with a 3 per 10 s sign-in rule, 6 concurrent requests were all admitted (6 × 401, no 429), and 20 concurrent requests were all admitted too. Readers: the sign-in/sign-up limiter (line ~270), `invitation-preview.ts`, and the OTP / SMS budget (`auth-manager-email-sms-delivery.ts`).\n2. **The shared store is never used.** `auth-plugin.ts` (around 674–684) resolves the cache through `ctx.getServiceAsync?.('cache')`, but the `PluginContext` handed to plugins has no `getServiceAsync`. The optional call returns `undefined`, so every counter falls back to the per-process map, and every environment kernel logs \"no cache service\". The ADR-0069 D2 promise (one count across nodes, the SMS budget not multiplied by N) does not hold.\n\n## Ask\n\n- Make the per-process store's increment atomic per key (for example a per-key promise chain or a synchronous in-memory increment), and plumb an atomic INCR through `ICacheService` where the adapter has one, as the docblock already plans.\n- Resolve `cache` through the context API plugins actually get, or add `getServiceAsync` to `PluginContext` deliberately, with a test that a registered async cache is the store the limiter writes to.\n- Tests: a concurrent burst of N > limit against one key admits exactly `limit`, with an ablation.\n\n## Business reason\n\nThe sign-in limiter is the first defence against password guessing on every public sign-in page, and the OTP budget is paid SMS. Today a concurrent burst gets unlimited guesses within a window, and the budget is per process.\n\n## Reader\n\nThe plugin-auth owner, through objectstack triage. After this lands and cloud's pin carries it, cloud can decide whether to keep its door-level serializer (cloud#3478).\n\n## Dedup\n\nSearched open objectstack issues for \"incrementFixedWindow\", \"rate limit atomic\" and \"getServiceAsync cache plugin-auth\": none open."
+}

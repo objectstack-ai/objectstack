@@ -1,0 +1,32 @@
+{
+  "number": 29115,
+  "kind": "issue",
+  "title": "List filter panel: offer relative dates on date rows — 本周 and 今天 today store a fixed date, so a saved filter silently goes wrong",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T07:59:34Z",
+  "updated_at": "2026-11-02T08:22:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29115",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat under epic #26676. An independent reviewer assessed this and the seat re-read the evidence. The maintainer: 「三点都按 A：相对日期立独立卡，在 #28971 第一版立卡前合入，包含早于/晚于的相对点；仪表盘拼法另立低优先级卡；两只钟另立 finding。」 (2026-11-02). Code readings below are on `main` `a4015ab47b`. No `domain:*` label is set: triage routes this card.\n\n**Ordering.** This merges before the first-version execution card of #28971 is filed. It is not a `Blocked-by` of that card; the epic seat checks it at filing time.\n\n## Business reason\n\nA salesperson filters tasks to \"due before today\" to see what's overdue. The calendar's 「今天」 stores `2026-11-02`, and the stored preference brings that date back on the next open. Tomorrow the list is one day out, with no hint. \"This week\" goes wrong the same way next Monday. A named personal view would make this worse.\n\n## Measured\n\nPreview `bdb19ca6d9`, `examples/app-crm`:\n\n| Step | Result |\n|---|---|\n| REST `close_date < {today}` / `>= {today}` | 8 and 5 of 13 rows, correct |\n| REST `close_date between {month_start}, {month_end}` | 1 row, correct; the `{current_month_*}` spelling gives the same |\n| REST `created_at between {week_start}, {week_end}` (a datetime column) | 13 rows, all created today |\n| REST `close_date = this_week` (a preset name) | 400, refused |\n| Console link, `uf__filter` with `between` and `{month_start}`, `{month_end}` | The list shows 1 row |\n| Filter panel on a date row | 等于, 不等于, 为空, 不为空, 早于, 晚于, 介于; no relative option |\n| Calendar 「今天」 | Stores an absolute date, restored from the stored preference |\n| Typing `{today}` in the date input | Not applied |\n\nSo only the panel's choice is missing.\n\n## Reading\n\n- `packages/spec/src/data/date-range-presets.ts:42-49, 120-136`: 13 presets, each mapped to a macro window.\n- `packages/spec/src/ui/view.zod.ts:311-313`: relative dates are not filter-rule operators. `:1183` shows `value: '{7_days_ago}'` in a rule.\n- `ui/packages/components/src/custom/filter-builder.tsx:325-330`: the operator set is pinned to the spec. `:2289`: the date value editor.\n- `ui/packages/plugin-dashboard/src/DashboardFilterBar.tsx`: the dashboard already offers all 13 presets, with labels in the i18n packs.\n- `ui/packages/plugin-list/src/ListView.tsx:1033`: panel conditions go to the server, which resolves macros in the workspace timezone.\n\n## Target\n\n1. On a `date` or `datetime` row of the list filter panel, `between` offers the spec's `DATE_RANGE_PRESETS` (all 13, in spec order) beside a custom option that keeps today's two date inputs.\n2. `before` and `after` offer today, yesterday and tomorrow beside a fixed date.\n3. A chosen preset is stored as the spec's macro window, for example `value: ['{week_start}', '{week_end}']`. A relative point is stored as the wrapped token, for example `'{today}'`. A preset name is never stored. The stored rule stays an ordinary spec `ViewFilterRule`.\n4. The panel shows the preset's label when a stored pair matches a window, folding the `{current_*}` aliases first. A pair that matches no preset is shown as text, kept, and still filters.\n5. The value survives unchanged through `uf__filter`, the stored preference and 「保存为视图」.\n6. No new operator, metadata key, configuration or gate. The panel reads the spec's table and keeps no copy of it. A small reverse-lookup helper beside that table is fine.\n\n**Not in this card:**\n\n- A \"last N days\" input.\n- Relative values on `equals`.\n- Future-facing presets such as next week: the spec has none, and adding them is a spec change for later.\n- A week-start setting: weeks start on Monday.\n- The record form's 今天 / 明天 shortcuts, which correctly write a fixed date.\n- Migrating stored absolute dates: they stay valid and mean that day.\n- The author `date-range` chip.\n- The dashboard's bounds table (#29116) and the browser-versus-server clock difference (#29117).\n\n## Acceptance\n\n- Choosing 本周 on a `date` `between` row sends `['{week_start}', '{week_end}']`, and the rows match the same REST query. On a `datetime` column, the last day is covered to its end.\n- Choosing 今天 on `before` sends `'{today}'`, and the rows match REST `< {today}`.\n- After a reload, a second browser opening the link, and 「保存为视图」, the label shows again and the stored value is still the macro pair. 「重置视图」 removes it.\n- A URL with `['{current_week_start}', '{current_week_end}']` shows 本周. One with `['{7_days_ago}', '{tomorrow}']` shows as text and still filters.\n- Text and number rows are unchanged, and a preset name in `value` is still refused by lint and by the engine.\n- Measure and state in the PR whether the panel behaves the same on the kanban and calendar hosts, which share it.\n"
+}

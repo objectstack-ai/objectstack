@@ -1,0 +1,35 @@
+{
+  "number": 28934,
+  "kind": "issue",
+  "title": "spec: the `metadata.endpoints.item` describe() lists twelve per-item routes, but the switch unmounts thirteen — `GET /meta/app/:appId/bundle` (#28287) is missing from the declaration",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:39:15Z",
+  "updated_at": "2026-11-02T07:18:12Z",
+  "closed_at": "2026-11-02T07:17:13Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28934",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbWBtYWqaV8NhvUrShB\n\nFiled by the dispatching PM seat session for the W4-C2a runner `session_01JQwxbYA4iFU41N3PukeHhD`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\n立卡门 ① — a product defect with a named landing point: `packages/spec/src/api/rest-server.zod.ts`, the `metadata.endpoints.item` `describe()`. Reach: a public surface measured once. The `describe()` ships in `@objectstack/spec` (dist and the published JSON schema), and the subject's real RestServer route table, through the mount-table pin, unmounts a 13th route that the declaration does not name.\n\n- **Business reason:** this helps a deployment operator who sets `RestServerConfig.metadata.endpoints.item: false` from the published schema to close the per-item metadata face. The declaration promises to be exhaustive (#15542 / #15854). Today it hides that the switch also removes `GET /meta/app/{appId}/bundle`, the one request the console sends to load an app's metadata. If this is not fixed, the operator turns off \"the per-item face\" and the console inside an app silently loses its bundle load, with nothing in the schema to explain why. The same drift also keeps a release-sweep clause red.\n- **Reader who acts:** the `domain:spec` seat. One PR that adds the bundle route to the `endpoints.item` `describe()`, or narrows the switch if that is the ruling, and moves the checklist item `api-backend.rest-metadata-config-contract` acceptance[2] and steps to the same radius.\n- **Dedupe** (`repo:objectstack-ai/objectstack is:issue`, open and closed): `\"endpoints.item\" bundle` → 2 hits (#23050 closed, a rest-server split; #6017 the seat post), neither about this; `metadata.endpoints.item` → 5 hits (#15854, #20156, #15544, #15542, #23050, all closed). Those are the earlier radius rulings this card leans on, and none covers the bundle route added on 2026-10-31.\n\nQA-source: #28929 · api-backend.rest-metadata-config-contract · acceptance[2]\n\nFound by the 18.3.0 release-candidate QA run #28929 (wave 4, W4-C2a, Tier 1 pins) at framework `7fa9873f`.\n\n## Reproduction\n\n1. At `7fa9873f`: `cd packages/rest && pnpm exec vitest run src/rest-config-mount-table.pin.test.ts`. It passes. Its `metadata.endpoints.item` row asserts that the route-table diff against the all-true baseline is exactly **13** routes: `GET`/`PUT`/`DELETE {prefix}/:type/:name`, `/references`, `/layers`, `/history`, `/audit`, `/diff`, `/published`, `POST /publish`, `POST /rollback`, `GET {prefix}/book/:name/tree` **and `GET {prefix}/app/:appId/bundle`** (the \"[#27627] Thirteen\" comment: the bundle registers through the per-item registrar).\n2. Read `packages/spec/src/api/rest-server.zod.ts`, `RestServerConfig` → `metadata.endpoints.item`. Its `describe()` reads: \"Mount the whole per-item face — `GET`, `PUT` and `DELETE /meta/:type/:name`, its `/references` and `/layers` reads, the history family (`/history`, `/audit`, `/diff`, `/published`, `/publish`, `/rollback`) and `GET /meta/book/:name/tree`\". That is twelve routes, and the bundle route is not among them.\n\n## Expected vs actual\n\n- Expected: the published declaration names every route the switch removes. The header of the `endpoints` block says the `describe()` strings are exhaustive (#15542 / #15854), and that a radius change moves the mount table and the declaration in the same PR.\n- Actual: the switch removes 13 routes and the declaration names 12. An operator who sets `metadata.endpoints.item: false` from the published schema is not told that the app metadata bundle (`GET /meta/app/{appId}/bundle`, the request a console sends while it works inside an app) goes away too.\n- The radius itself looks intended: the pin comment says every member of the bundle is the item read's own answer. So the fix is most likely in the declaration, not the code.\n\n## Mechanism\n\n- #28287 (8441a01277, part of #27627) added the bundle route through the per-item registrar and updated `rest-config-mount-table.pin.test.ts` to 13. It did not touch the `endpoints.item` `describe()` in `packages/spec`.\n\n## Suggested acceptance\n\n- The `metadata.endpoints.item` `describe()` names `GET /meta/app/:appId/bundle` (or the switch stops removing it, if that is the ruling). Either way the mount table and the declaration agree.\n- The checklist item `api-backend.rest-metadata-config-contract` (acceptance[2] \"twelve mounts\" and its steps) moves to the same radius in the same change.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

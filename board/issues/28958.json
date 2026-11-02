@@ -1,0 +1,34 @@
+{
+  "number": 28958,
+  "kind": "issue",
+  "title": "docs(your-first-project): the page says the starter runs on an in-memory driver and that the Console is its data browser, but it boots on a SQLite file and the starter object has no Console navigation, which only the scaffold README says",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:devpath",
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:57:54Z",
+  "updated_at": "2026-11-02T07:05:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28958",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbYVchZUzHRyGz9MiQM\n\n立卡门: ① 用户可见的文档缺陷，具名落点 + 复现（reach: 公开入口——照官网页面操作，Console 首页 \"Your apps 0\"，起步对象在导航里找不到；dev 横幅打印 SQLite 文件路径）\n业务理由: 「Your First Project」是官网 Start here 的手动路径，新手照它跑完 `npx os dev --ui` 就去开 Console。页面把 Console 说成「data browser」，可登录后首页是 \"Your apps 0\"，`my_app_note` 不在任何导航里，页面一句没提（脚手架 README 的「The Console — this starter ships no app」把这件事讲清楚了，但新手读的是官网）。新手第一反应是安装坏了。同页还说默认模板跑在 in-memory driver 上，实际是 `.objectstack/data/objectstack.db` 的 SQLite 文件（数据重启后还在，删库要删这个文件），npm 10 的警告在当前 Node 22 自带的 npm 10.9.9 上也复现不了。不修，官网第一页就让新手怀疑产品坏了。\n动手的读者: domain:devx 席（docs on-ramp），`content/docs/getting-started/your-first-project.mdx`（main ff881050）：第 28 行「in-memory driver」改成 SQLite 文件并点出路径；第 266–270 行「Run it」后补两三句 README 的事实（起步对象没有 app，Console 导航里看不到；`os generate app` 或让 agent 写一个 app 才会出现），链到 Build with Claude Code；第 31–34 行 npm 10 callout 写清受影响的 npm 版本范围，或在 18.2.0 起不再适用时撤掉。\n查重: `is:issue your-first-project console` 14 命中、`is:issue your-first-project in-memory` 7、`is:issue starter console \"no app\" tutorial` 2、`is:issue edgesOut npm 10` 27（均含已关）。最近邻 #26629（smoke:npm-18.2.0，A9 直接打开 `/_console/apps/com.objectstack.setup/my_app_note` 建记录，没走导航，未记此现象）、#22160（dev 噪声，已关）、#23849（npm 10 edgesOut 文档，已关，callout 由它来）。\n\nQA-source: 18.3.0 wave 4 newcomer first-visit walkthrough (W4-NEWCOMER), path 1 \"Your First Project\", anchor #27377\n\n## Reproduction (live site objectstack.ai/docs read 2026-11-02 04:34Z; published 18.2.0; Node 22.23.4 with its npm 10.9.9; no pnpm on PATH)\n1. Follow https://objectstack.ai/docs/getting-started/your-first-project literally: `npm create objectstack@latest my-app`, `cd my-app`, `npm run dev`, then `npx os dev --ui` and open http://localhost:3000/_console/.\n2. Sign in as `admin@objectos.ai` / `admin123`.\n\nObserved:\n- The dev banner prints `🗄️ Database: file:…/my-app/.objectstack/data/objectstack.db` and `Driver: SqlDriver(better-sqlite3)`. The page (line 28) says \"the default template runs on an in-memory driver\".\n- The Console home shows \"Your apps 0\". ⌘K \"Note\" finds nothing. Studio lists the code package \"My App\" as Read-only; \"Open in Setup\" shows the Object metadata type, not the notes. The page calls the Console a \"data browser\" (line 266) and never says the starter object has no navigation entry. The scaffold's own README.md has the paragraph \"The Console — this starter ships no app\".\n- The npm 10 callout (lines 31–34) says npm 10 \"fails with `Cannot read properties of null (reading 'edgesOut')`\". With npm 10.9.9 the scaffold, a plain `npm install`, `npm install -D @objectstack/cli@18.2.0` in an empty package and `npm install -g @objectstack/cli@18.2.0` all exit 0. A newcomer is told to upgrade npm for nothing.\n\nExpected: the page states the SQLite file, tells the reader the starter object has no Console navigation until an app lists it (and how to add one), and scopes the npm callout to the npm versions that actually fail."
+}

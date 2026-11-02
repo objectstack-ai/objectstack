@@ -1,0 +1,35 @@
+{
+  "number": 28936,
+  "kind": "issue",
+  "title": "checklist: re-point `api-backend.error-sentences-and-unique-violation-wire-code` acceptance[1] to HOOK_ABORTED — it still pins the code-less /data refusal and the VALIDATION_ERROR nested rows that #27597 and #27672 replaced",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p1"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:39:47Z",
+  "updated_at": "2026-11-02T07:38:24Z",
+  "closed_at": "2026-11-02T06:06:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28936",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbWBtYWqaV8NhvUrShB\n\nFiled by the dispatching PM seat session for the W4-C2a runner `session_01JQwxbYA4iFU41N3PukeHhD`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\n立卡门 ① — a checklist item that fails at the release-candidate subject, with a named landing point: `docs/qa/platform-checklist/areas/api-backend.json`, item `error-sentences-and-unique-violation-wire-code`, acceptance[1] (clause and verify) plus its `automated.ref` prose. Grade follows the filing gate's checklist rule: the item fails, so the card inherits the item's priority (P2). Disposition per checklist-test SKILL §5: stale spec, so a re-point card.\n\n- **Business reason:** this helps the release sweeps and the weekly regression runs that judge this item, and through them the API consumers whose hook refusals now carry the ruled `HOOK_ABORTED` code. Today the clause asserts the pre-ruling shape (no `code` / `VALIDATION_ERROR`), so every Tier 1 run scores it FAIL against a product that is right. That false red teaches runners to discount the item, and the clause stops guarding the contract that #27597 and #27672 actually ruled. If this is not fixed, each future run re-files the same disagreement or learns to ignore it.\n- **Reader who acts:** the `domain:devx` seat (owner of the platform-checklist ledger). One ledger-edit PR: re-point acceptance[1] and its verify, bump `revision` with a `history` row, keep `node scripts/check-platform-checklist.mjs` green. No product change.\n- **Dedupe** (`repo:objectstack-ai/objectstack is:issue`, open and closed): `HOOK_ABORTED checklist` → 4 hits (#27672 closed, the ruling itself; #27810 and #27524 closed, unrelated; #6015 the triage seat post); `HOOK_ABORTED acceptance re-point` → 1 hit (#6015); `error-sentences-and-unique-violation-wire-code` → 46 hits, none after 2026-10-28 except the wave-3 record #27409. #27806 (closed 2026-10-30) re-pointed the two dogfood pins to HOOK_ABORTED but not this ledger clause.\n\nQA-source: #28929 · api-backend.error-sentences-and-unique-violation-wire-code · acceptance[1]\n\nFound by the 18.3.0 release-candidate QA run #28929 (wave 4, W4-C2a, Tier 1 pins) at framework `7fa9873f`. Disposition: stale spec (SKILL §5). The product and both pins follow closed cards; only the checklist clause is behind.\n\n## What the clause says (r5)\n\n\"On a /data door (the live leg) the envelope carries **no `code`** when the hook declared none, by pinned design; the hand-built nested-envelope rows (sharing rules, suggested bindings, approvals, package publish) re-dress the same refusal as **400 VALIDATION_ERROR**.\" Its verify text likewise says the live pin asserts \"no `code` key\", and that the ledger rows are `REFUSED_400` VALIDATION_ERROR.\n\n## What the subject does\n\n1. `cd packages/qa/dogfood && pnpm exec vitest run test/error-sentences-live.dogfood.test.ts`. It passes. The acceptance[1] cases drive `POST /data/errsent_budget` and `/createMany` over in-process HTTP, against a scratch app whose sandboxed `beforeInsert` hook throws a sentence. They assert 400, the sentence verbatim, nothing written, and `body.code === 'HOOK_ABORTED'` (\"the hook declared no code, so the /data door answers the ruled HOOK_ABORTED\").\n2. `cd packages/rest && pnpm exec vitest run src/rest-write-route-hook-refusal-sentence.ledger.test.ts`. It passes. The nested-envelope rows answer `HOOK_ABORTED_400 = { status: 400, code: 'HOOK_ABORTED' }`; the file notes this was \"the floor's VALIDATION_ERROR before\".\n- The change came from #27597 (an undeclared hook `onError` abort gets a ledgered ADR-0112 code, the code half of #27508) and #27672 (the doors that resolve through `resolveThrownHttpError`). Both are closed.\n\n## Suggested acceptance\n\n- acceptance[1]'s clause and verify say: 400 with the hook's own sentence and `code: HOOK_ABORTED` on the /data doors, and 400 HOOK_ABORTED on the nested-envelope rows. They cite #27597 / #27672.\n- `revision` is bumped with a `history` row; `automated.ref` prose matches; `node scripts/check-platform-checklist.mjs` stays green.\n- No product change.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

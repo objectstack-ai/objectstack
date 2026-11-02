@@ -1,0 +1,35 @@
+{
+  "number": 28879,
+  "kind": "issue",
+  "title": "Action confirm and param dialogs: draw the action's `cancelText` on the dismiss button, falling back to Cancel; `sys_invitation` declares \"Keep invitation\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:31:05Z",
+  "updated_at": "2026-11-02T06:45:24Z",
+  "closed_at": "2026-11-02T06:42:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28879",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ② the follow-up half of #28519 (Wanted 2 and 3). The spec half landed as PR #28859 (merge `76bf6c50d8`), which declares `ActionSchema.cancelText` ahead of its reader. This card is that reader, the way #28158 was for #27944. Surface from the dev report (6567093128, open question 6) and the contract review (6567255334, ④ should-fix rows). ⛔ Not a claim. No grade: triage sets it.\nReader who acts: `domain:ui` (console), with the `packages/cli` and `packages/platform-objects` rows below in the same PR.\nReach: every \"Cancel …\" / \"Close …\" action that asks first. On Setup → Invitations, **Cancel Invitation** opens a confirm dialog whose buttons read **Cancel** and **Cancel Invitation**.\n\n## Wanted\n\n1. **Console draws it.** In `ui/packages/core/src/actions/ActionRunner.ts`, `ActionDef.cancelText` is derived from the spec and `confirmOptions` hands it to the confirm handler; it also joins `actionKeys.ts` `ACTION_DEF_KEYS`. `react/hooks/useActionTextLocalizer.ts` resolves it on the confirm path. `components/renderers/action/action-{button,icon,group,menu}.tsx` forward it, and the `action-forward-precedence` test covers it. In `ui/packages/app-shell`, `hooks/useConsoleActionRuntime.tsx` and `views/RecordDetailView.tsx` `paramCollectionHandler` pass it. `views/ActionParamDialog.tsx` draws it over `actionDialog.cancel`. `ActionConfirmDialog.tsx` already draws `options.cancelText`. `i18n/useObjectLabel.ts` gets `actionCancelText`. Absent, \"Cancel\" stands.\n2. **The extractor scaffolds it (blocking item 3, per the contract review):** `packages/cli/src/utils/i18n-extract.ts` emits `cancelText` beside a declared `confirmText` or a non-empty `params`, the way it emits `submitText`, with a test.\n3. **The first consumer:** `packages/platform-objects` `identity/sys-invitation.object.ts` `cancel_invitation` declares `cancelText: 'Keep invitation'`, with its translations regenerated (zh-CN / ja-JP / es-ES values).\n4. **Flip the \"declared ahead of its reader\" text in the same PR (should-fix from the contract review, so the `planned` row does not go stale, ADR-0049):** the spec liveness row goes `planned` → live, with `authorWarn` / `authorHint` dropped; the reconciliation `omit` row is deleted; the key is offered in `action.form.ts`; \"no renderer shows it yet\" is dropped from the `action.zod.ts` and `translation.zod.ts` describes; the references are regenerated; and both \"does not draw it yet\" sentences in `content/docs/protocol/objectui/actions.mdx` flip. The `submitText` section there still says \"The console does not draw it yet\", which has been false since #28392; fix it here too.\n5. Optional, triage's call: `InlineActionSchema` does not pick `cancelText` (nor `submitText`). If the console wires the inline runner through the same confirm handler, an inline page action could carry it too.\n\n## Tests\n\nA declared `cancelText` is the dismiss label on both dialogs. Control: absent keeps \"Cancel\". The bundle key resolves on both paths (`objects.OBJECT._actions.ACTION.cancelText`, `globalActions.ACTION.cancelText`).\n\n## Not here\n\nSkills docs: `skills/objectstack-ui/rules/actions.md` and `skills/objectstack-i18n/SKILL.md` lack the key (PR #28859 `Skills-docs: follow-up owed`). They are governed (Tier H), so a separate skills card carries them.\n\nDedupe: \"cancelText dismiss button\", \"Keep invitation\" → only #28519 / PR #28859."
+}

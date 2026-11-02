@@ -1,0 +1,34 @@
+{
+  "number": 28972,
+  "kind": "pull_request",
+  "title": "pm-dispatch(triage): triage pushes the maintainer only from a seven-case list, no progress table",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T05:15:12Z",
+  "updated_at": "2026-11-02T06:06:51Z",
+  "closed_at": "2026-11-02T06:06:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T06:06:49Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28972",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xVcXmFXUUMj998HaK2NdanT)_\n\nFixes #28921\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:分诊不再出进度表,只在七种情况下推送你;清单写进分诊席章程 `lanes/triage.md`。\n- 为什么改:你说「有问题的时候要找我，没问题我也不需要看」,并「同意推送清单」;另补「pr 超过 6小时没更新」这一条。\n- 风险与回滚:只改席位规则文本和行数上限,不加门禁不加标签;回滚即 revert。分诊章程上限 8 → 15,分诊职责 102 → 99,合计 +4 行。\n- 先看:① `lanes/triage.md` 第 8–15 行(清单本身);② `triage-duties.md` 三处合并行;③ `check-skill-line-ratchet.mjs` 两条上限及注释。\n- 两分钟验证:`node scripts/pm/check-skill-line-ratchet.mjs`,预期 lanes/triage.md 15 行(上限 15)、triage-duties.md 99 行(上限 99),退出 0。\n- 需要你做的:无,席位复核后落地;若不同意把分诊章程上限抬到 15 行,在卡上回「否」。\n\n## What changes\n\n`lanes/triage.md` now carries the push list (lines 8–15): no progress table and no chat round report; the channel follows SKILL.md's push clause; everything else goes only into the seat post's round record. At-once cases ① security finding, ② p0 still unclaimed one round after the name escalation or a self-dispatched stop-bleed, ③ `main` or the merge queue red over 2 h with no fix PR in flight. End-of-round cases, merged into at most one push per round: ④ human-floor decision (names the decision card and the one letter), ⑤ release (new blocker, RC retest regression, Version PR waiting only on the maintainer's merge), ⑥ a lane that cannot move (p1 waiting over 4 h on a seatless lane; name escalation unanswered over 6 h where the reclaim needs the maintainer's word; an open PR with no update for over 6 h after the seat knock goes unanswered past the next round, with the addendum's exclusions), ⑦ a permission block, never done in the seat's place. Not pushed: grading, healing half-states, unlocks, contract reviews (PASS/FAIL go to the lane), doorbell answers, a green health reading.\n\nRuling of record (card body, maintainer verbatim): 「由分诊每天出一次中文进度表，频率太低，而且有问题的时候要找我，没问题我也不需要看」 · 「需要我协助的时候你应该推送消息给我 os-zhuang，但是需要和我沟通哪些情况下」 · 「同意推送清单，立卡？」; addendum comment 6568980556: 「pr 超过 6小时没更新，如果不是带决策或者是被阻塞，应该都属于有问题吧」. The raise follows the ratchet header's ruling-of-record path (ruling record 6184799323) by the measured delta only, on the seat's reading that these words order the text into `lanes/triage.md`.\n\n### Line budget (measured on a4182255)\n\n| File | Before | After | Ceiling |\n|:--|--:|--:|:--|\n| `lanes/triage.md` | 8 | 15 | 8 → 15 (+8 landed, −1 paid in place) |\n| `triage-duties.md` | 102 | 99 | 102 → 99 (lowered) |\n| both | 110 | 114 | net +4 |\n\nNew lines in `lanes/triage.md`, bytes against the 120-byte line budget: 117, 113, 106, 118, 118, 118, 120, 111.\n\n### Deletions and the surviving home of each\n\n| Deleted text | Surviving home | Reader |\n|:--|:--|:--|\n| `lanes/triage.md` scope line (objectstack incl. `ui/`, first touch, cross-lane dedupe, no app-repo triage seat) | `cross-repo-coordination.md` lines 4, 9, 11, 31; business rationale in `filing-gate.md` 24–26 | triage seat, before every routing and dedupe (SKILL.md index) |\n| `triage-duties.md` 10–11: the owed-review reading set, same-round claim-then-take, isolated subagent same-shape record, ⛔ no tier downgrade | `contract-review.md` lines 21, 23–27, 32, 45–46 | triage seat, when it takes an owed review |\n| `triage-duties.md` 94: the trigger \"two reds on untouched packages in an hour, any seat flips to report-only\" | AGENTS.md Build & Test (\"any seat flips a gate that reds untouched packages twice in an hour to report-only before any ruling\") | every seat |\n| `triage-duties.md` 101: report only at milestones, real blockers, when asked | superseded by the push list (`lanes/triage.md` line 8); its tail (intermediate state and rate-limit detail go only to the seat post and trigger) kept on the new pointer line | triage seat |\n| `triage-duties.md` 102: human-floor items still need explicit words, batched not one by one | explicit words: SKILL.md 216 and the `needs-user-decision` row (human only) plus the human-floor list in `triage-duties.md`; batching: the push list's one merged end-of-round push | triage seat |\n\nTwo wordings were tightened in the merged lines without changing the rule: 「不同意即翻回」 → 「否即翻回」, 「同笔送待决策汇总入下批,附两红 run」 → 「同笔附两红 run 入下批待决」.\n\n## Tests\n\nNo code path changed; `check-skill-line-ratchet.mjs` changed only in two `CEILINGS` rows and their comments. `node scripts/pm/check-skill-line-ratchet.mjs --self-test` :: exit 0.\n\n## Acceptance notes\n\n- `seat-lifecycle.md` still tells every seat to send a Chinese round-report table by chat each round; the new rule overrides it for triage only. Left alone on the seat's order (out-of-scope finding, carrier: seat).\n- PR #28935 also edits `triage-duties.md` (adds one line, deletes the round-report line); no overlap with the lines here. Whichever lands second re-measures the ceiling.\n- No new gate and no new label.\n\n## Verification\n\n<details><summary>dispatch-gates derivation and reconciliation (head a4182255)</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` :: exit 0 — 39 commands (the ratchet script in the diff widens the derivation). All 39 run, each exit 0; `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first answered exit 3 (prerequisite: unbuilt formula/lint), re-run after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` (lock VERDICT command-exit 0) :: exit 0. `pnpm check:pm-dispatch-gates` :: exit 0 (fast tier, 1937 cases). `check:pm-skill-ratchet` :: exit 0.\n\n`node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran FILE` :: exit 0 — \"39 derived famil(ies) accounted for — 39 run, 0 NOT-MEASURED (a DERIVED zero — all 39 recorded an exit code and none of them is 3)\".\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01J8VVAkXwVid5ZPTwRQJ5Yo)_\n"
+}

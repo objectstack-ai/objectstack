@@ -1,0 +1,37 @@
+{
+  "number": 28913,
+  "kind": "issue",
+  "title": "Record edit mode: the highlight strip expands to six narrow columns — a lookup shows one letter of the owner while the reader edits",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:01:15Z",
+  "updated_at": "2026-11-02T08:09:55Z",
+  "closed_at": "2026-11-02T08:02:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28913",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat from a second console review under epic #26676. An independent reviewer walked the console on `main` `bdb19ca6d9`, with `examples/app-crm` as the backend, at 1440 and 390 px. The seat then re-read the evidence. The maintainer approved the seat's checked list: 「Fable 评估（核对后） 同意立卡」 (2026-11-02). Code readings below are on `main` `5e1b9b0a77`. No `domain:*` label is set: triage routes this card.\n\n## Observed\n\nDouble-click a field on a lead, in the maximized pane at 1440 px. The whole record goes into edit mode. The strip grows from the fields that have a value to all six, including empty ones, in six columns. The owner lookup shows only 「D」, and the phone and email inputs are squeezed.\n\n## Reading\n\n`ui/packages/plugin-detail/src/HeaderHighlight.tsx`:\n\n- line 109: `editing ? fields : fields.filter(hasValue)`, so edit mode draws every strip field, which it needs in order to fill an empty one;\n- line 127: `@3xl:grid-cols-6`, which puts all six in one row.\n\n#28868 removes the derived strip, but a declared strip can still hold six fields, so this stays reachable. The two cards touch the same component: run them one after the other.\n\n## Target\n\n1. The strip's edit face caps at a column count where a lookup and its buttons keep a usable width. The fields wrap to a second row. The seat suggests 3 or 4 columns, and the claiming seat measures and names the number in the PR.\n2. Edit mode still draws empty strip fields, since they must stay fillable.\n3. The read face is unchanged.\n4. No new key and no new option. Whether a double-click should edit the whole record is not part of this card.\n\n## Acceptance\n\n- With six declared strip fields in the maximized pane at 1440 px and in the pane at 720 px, every lookup shows the full chosen name, or truncates with the name available on hover, and its buttons do not overlap the value.\n- Save and cancel behave as today.\n- A test pins the edit face's column cap."
+}

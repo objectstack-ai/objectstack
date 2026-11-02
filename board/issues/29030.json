@@ -1,0 +1,34 @@
+{
+  "number": 29030,
+  "kind": "pull_request",
+  "title": "fix(components): data-table row actions trigger visible at rest in a muted tone",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:17:51Z",
+  "updated_at": "2026-11-02T07:19:53Z",
+  "closed_at": "2026-11-02T07:19:51Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T07:19:51Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29030",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbNHpH8gM956qJ658EsM5n6b)_\n\nFixes #28923\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:通用 `data-table` 渲染器里每行的 ⋯ 操作按钮,静止时也画出来(灰色弱化色),鼠标移到该行、行内获得焦点、行被选中、按钮自己获得键盘焦点、菜单打开时,或在触屏上,变为正常前景色。与列表表格(#28871)的做法一致。菜单里有哪些项、各项的显示条件和顺序都不变。Console 列表名称旁的「整页打开」↗ 仍保持悬停才出现,只把它说「与行菜单一致」的注释改正。\n- **为什么改**:表头「操作」一直在,但桌面端按钮在鼠标移上行之前是透明的,整列看起来是空的,读者会以为「没有可用操作」。\n- **风险与回滚**:只改 `ui/packages/components` 一个按钮的样式类,另有一处 app-shell 注释;不动 spec、服务端、元数据和菜单逻辑。弱化色用文字色(`text-muted-foreground`),不是透明度。回滚 = revert 本 PR。\n- **先看**:`ui/packages/components/src/renderers/complex/data-table.tsx` 里 `data-testid=\"data-table-row-actions\"` 那个按钮的 `className`;再看新测试 `data-table-row-actions-atRest-28923.test.tsx`。\n- **两分钟验证**:`cd ui && pnpm exec vitest run packages/components/src/renderers/complex/__tests__/data-table-row-actions-atRest-28923.test.tsx`,应 1 个文件 4 个用例全部通过;或打开任一相关列表(1440 px),不移动鼠标就能看到每行的 ⋯。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n`data-table`'s row ⋯ trigger (`data-testid=\"data-table-row-actions\"`, drawn per row when the schema's `rowActions` leave at least one item):\n\n- **At rest:** drawn on every row, on every pointer type, in `text-muted-foreground`. The `opacity-0` / `transition-opacity` pair is gone.\n- **Full strength (`text-foreground`)** on row hover (`group-hover/row`), focus within the row (`group-focus-within/row`), a selected row (`group-data-[state=selected]/row`), an open menu (`data-[state=open]`), its own keyboard focus (`focus-visible`) and a coarse pointer (`pointer-coarse`). This is the class set `RowActionMenu` carries since #28871 (PR #28922).\n\n`objectViewOpenAsPage.tsx` (the Console list's per-row ↗ \"open as page\"): triage's call, **kept hover-revealed**. It is an extra link beside the name with no header of its own, so the empty-column defect does not apply, and drawing it on every row would crowd the name column. Only its docblock changes: it no longer claims to match the row menu, and says why the two differ. `OPEN_AS_PAGE_CLASS` is unchanged.\n\nUnchanged: the menu's items, gates and order (`useDataTableRowMenuPlan`, #28434), the empty-menu guard, the header, the accessible name. No key, option or prop is added. Changeset: `@object-ui/components` patch (app-shell's change is a comment only, not published).\n\n## Tests\n\n- `data-table-row-actions-atRest-28923.test.tsx` (new, 4 cases): at rest no `opacity-0` under any variant, `invisible`, `hidden` or `sr-only`, name kept; rests in `text-muted-foreground` with the five full-strength variants; the only `pointer-coarse:` class is `pointer-coarse:text-foreground`; control: opening the menu flips `data-state` to `open` and shows Edit.\n- `data-table-leadingCell-12423.test.tsx`: its row-actions-trigger case pinned the old `opacity-0` set and is repointed to the new one. Its checkbox cases are untouched.\n\n<details><summary>Ablation (scripts/ablation-replace.mjs, at 920a4d85, source-resolved, no dist)</summary>\n\n- `opacity-0` put back at rest (`text-muted-foreground transition-colors` to `text-muted-foreground opacity-0 transition-colors`): 1 failed (\"is drawn at rest on every row\"), 3 passed. Restored, blob `1d306e61` equal to HEAD, `git diff HEAD` empty.\n- Coarse-pointer leg put back to an opacity reveal (`pointer-coarse:text-foreground` to `pointer-coarse:opacity-100`): 1 failed (the every-pointer-type case), 3 passed. Restored, blob `1d306e61` equal to HEAD, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- None beyond the open-as-page choice above.\n\n## Verification\n\nAll on the final head `920a4d85` (base `origin/main` `62b3ec36`), after `pnpm install --frozen-lockfile` and `turbo run build --filter='@object-ui/components^...'` plus formula, sdui-parser, lint and client (43 tasks, exit 0), under `scripts/pm/os-verify-lock.sh`.\n\n- The whole `packages/components/` vitest suite (`--maxWorkers=2`): 470 files passed, 1 skipped; 4481 tests passed, 24 skipped. The three `data-table` row-menu files plus `ObjectView.recordOpenDisplay-26681.test.tsx` (app-shell, the open-as-page link): 22 passed.\n- `pnpm --filter @object-ui/components run type-check` (both `tsc` programs, the test one included): exit 0.\n- ESLint on the four changed tsx files: exit 0, 0 errors. 53 warnings: 51 on untouched lines of `data-table.tsx`, one on the 12423 file's existing `ComponentRegistry.get(...) as any`, and one on the same cast in the new test, copied from it.\n- Derived gates (`node scripts/pm/dispatch-gates.mjs --commands`): 34 of 34 run, each exit 0 (`check:type-check-debt` and `pnpm --dir ui exec vitest run scripts/` under the lock), including `node scripts/check-sdui-manifest.mjs` and the PR-body gates with this body as `GITHUB_EVENT_PATH`. `--ran` reconciles 34 derived, 34 run, 0 NOT-MEASURED. `check-partof-closing-keyword` with `PR_BODY`: exit 0.\n- Not run locally: app-shell `type-check` (the app-shell change is a docblock only) and the rest of app-shell's suite; CI's Type Check UI and Test UI run them.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jSXEKkhP494Y6s2au2\n"
+}

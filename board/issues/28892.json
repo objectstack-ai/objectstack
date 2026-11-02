@@ -1,0 +1,38 @@
+{
+  "number": 28892,
+  "kind": "issue",
+  "title": "object-tree 渲染器的加载态和空态是硬编码英文（Loading… / No records），应读 common.loading / common.noData",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "i18n",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T03:28:45Z",
+  "updated_at": "2026-11-02T05:25:03Z",
+  "closed_at": "2026-11-02T05:20:38Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28892",
+  "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\n立卡门类别：① 已复现缺陷（reach: 界面实测，见「已实测」）\n\nReader: domain:ui 车道，`ui/packages/plugin-tree/src/ObjectTree.tsx:1184`、`:1192`。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue \"Loading object-tree\"` total=0；`业务单元 英文 加载` total=2，无关；`plugin-tree Loading No records i18n` total=11，无同题。先例 objectui#12910 已把 repeater / record-picker 的同类字面改为 `common.loading` / `common.noData`，ObjectTree 没有一起改。\n\n业务理由：中文界面的管理员打开 Setup › 业务单元（默认视图是树），加载时和空状态都看到英文，和整页中文不一致。\n\n## 来源\n2026-11-02 staging 浏览器全量测试：cloud main `70e746ce`，objectstack pin `6cbdef1e`。控制面 https://cloud.objectos.app（组织 Release Check 1001，团队版，所有者账号），环境 https://os-2ph4c1.objectos.app（HotCRM 6.0.0）。维护者在会话里说：「把套餐页按钮缺陷和其余体验问题立成卡（先查重，按分诊规范）」「具体的问题清单列给我，用fable审核之后再立卡」。本卡的落点经第二个审核会话按 origin/main 核对过。\n\n## 已实测\n- 环境 Setup › 业务单元（`/_console/apps/com.objectstack.setup/sys_business_unit`，界面语言为中文）：加载中显示英文，加载完无数据时显示「No records」。（测试记录里加载态写成了「Loading object-tree…」，源码字面是 `Loading…`，以源码为准。）\n\n## 落点\n- `ObjectTree.tsx:1184` `<p>Loading…</p>`，`:1192` `<p>No records</p>`。\n- 路径：Setup 导航的业务单元项是 `sys_business_unit` 的对象列表（`packages/platform-objects/src/apps/setup-nav.contributions.ts:86`），默认视图 `type:'tree'`（`packages/platform-objects/src/identity/sys-business-unit.object.ts:46`），由 plugin-tree 渲染。\n\n## 验收\n1. 加载态与空态读 `common.loading` / `common.noData`，中文界面显示「加载中…」与对应空态文字。\n2. 视图声明了 `emptyText` 时仍优先使用声明值（与 objectui#12910 的规则一致）。\n3. 单测覆盖 zh 下的两种状态。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 28939,
+  "kind": "issue",
+  "title": "service-automation: a held connector instance logs its configuration-fault ERROR with {\"error\":\"undefined\"} instead of the reason, and the mcp oauth2-over-plain-http refusal sentence ends with \"..\"",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:43:39Z",
+  "updated_at": "2026-11-02T08:09:29Z",
+  "closed_at": "2026-11-02T07:34:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28939",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbWBtYWqaV8NhvUrShB\n\nFiled by the dispatching PM seat session for the W4-MCP runner `session_01JQwxbWWuY7DoeEEbb5fxS6`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\n立卡门类别：① 已复现产品缺陷（reach: 启动日志与 `POST /api/v1/automation/connectors/NAME/connection` 400 实测；拒绝句属于随版本发出的错误文字，立卡门例外照立）\n\n业务理由：运维人员的连接器实例被挂起（degraded）时，会按 ERROR 级别查原因，但这一行只写着 `{\"error\":\"undefined\"}`，原因要到下一行 WARN 才有；同时 API 返回给管理员的拒绝句以「..」结尾。不修的话，排查连接器配置故障时第一眼读到的是 \"undefined\"，错误文字随 18.3 发出后固定下来。\n\nReader: domain:services 车道，`packages/services/service-automation/src/plugin.ts` 挂起分支（约 3624 行）与约 753 行的拒绝句常量。\n\nDedupe（均含已关闭）: `\"failed to materialize connector instance\"` total=6（#28505 #28534 #5575 #24575 #24779 等，均为包内文件引用/物化问题，不同题）；`\"loopback host..\"` total=22（#26472 是 issuer 元数据问题，其余已关，均不涉及日志参数或双句号）；`describeThrownForLog undefined` total=6（#5912 #5737 #5575 #15807 #25222，均已关，不同路径）。\nQA-source: #28937 · ai.mcp-http-surface · observed beside the clauses\n\n## What happens\n\nA declarative `provider: 'mcp'` instance with `auth: { type: 'oauth2', grant: 'authorization_code' }` whose transport url is plain http to a non-loopback host (`http://192.0.2.2:41520/api/v1/mcp`) is correctly held degraded. Two defects in what it prints:\n\n1. The boot ERROR line carries no reason:\n   `ERROR [Automation] failed to materialize connector instance 'qa_mcp_oauth_plain' via provider 'mcp' (ADR-0097): a configuration fault, so the instance is no longer retried. Fix its declaration; an edit or a restart re-attempts it. {\"error\":\"undefined\"}`\n   The reason only appears on the following WARN line. An operator grepping ERROR lines for the cause reads the string \"undefined\".\n2. The refusal sentence (the degradedReason, and the `400 VALIDATION_ERROR` that `POST /api/v1/automation/connectors/NAME/connection` answers) ends \"… plain http:// is accepted only to a loopback host..\" — two periods.\n\n## Mechanism (read, not changed)\n\n1. `packages/services/service-automation/src/plugin.ts` (~line 3624, the held-instance branch) calls `ctx.logger.error(message, undefined, describeThrownForLog(info.cause))`; the comment above says \"the provider's message rides `meta`\", but this path's `info.cause` is not a thrown provider error, and the logger renders the `undefined` error argument as `{\"error\":\"undefined\"}`. `info.reason` (which holds the sentence) is not passed.\n2. The constant at ~line 753 of the same file already ends with \".\" and a caller appends another.\n\n## Reproduction\n\n1. Declare in an app's `connectors:` a `defineConnector({ name: 'qa_mcp_oauth_plain', type: 'api', provider: 'mcp', providerConfig: { transport: { kind: 'http', url: 'http://192.0.2.2:41520/api/v1/mcp' } }, auth: { type: 'oauth2', grant: 'authorization_code' } })` (with `ConnectorMcpPlugin` loaded, as the showcase does).\n2. Boot with `OS_BASE_URL=http://localhost:PORT`; read the boot log line for that instance.\n3. As admin, `POST /api/v1/automation/connectors/qa_mcp_oauth_plain/connection` {} → 400; read the message ending.\n\nExpected: the ERROR line names the reason; the sentence ends with one period. Actual: as above.\n\nFull evidence chain: #28937 (Part 2, connector-mcp)."
+}

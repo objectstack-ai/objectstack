@@ -1,0 +1,31 @@
+{
+  "number": 29025,
+  "kind": "issue",
+  "title": "metadata: a flow with an undeclared cycle (loop edge not typed back) reads valid as a draft and publishes, then the engine refuses to register it — a dead flow goes live",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:14:22Z",
+  "updated_at": "2026-11-02T07:20:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29025",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbX9avDwM2goWd7zimE\n\nFiling gate: ① a product defect, found beside the clauses (studio-authoring.flow-edge-type-authoring), reach: the metadata draft and publish doors, measured twice.\nBusiness reason: an author (API, MCP or a hand-written package) who publishes a loop flow without typing the loop-closing edge `back` gets a valid draft verdict and \"published\", and the flow never runs because the engine refuses to register it. The Studio canvas already flags the cycle; the server doors do not. #26707 closed the same \"draft and publish say valid, the engine refuses\" class for edge conditions.\nReader who acts: the triage seat, then the `domain:server` lane, `packages/metadata-protocol/src/runtime-authoring-gate.ts` (reuse the engine's cycle check). QA suggestion only: `area:automation`, p2.\nDuplicate search: `flow cycle back edge publish registration refused` → 40 hits, the near ones closed and different (#28840 save_notice after a suspending child, #21982 / #21898 node config); `26707` → 11 hits, #26707 and #26858 closed for conditions and CEL fields, none for cycles.\nBatch-of: release-18.3.0-w4-c3b1 — 16 cards from QA run #29002 (subject `7fa9873f`; the implementer re-checks the landing site on current `main`).\n\n## Reproduction\n1. `POST /api/v1/packages {\"manifest\":{\"id\":\"com.qa.r6flow\",\"name\":\"QA R6 Flow\",\"version\":\"0.1.0\",\"type\":\"app\",\"namespace\":\"qsixf\"}}`.\n2. `PUT /api/v1/meta/flow/qsixf_cycle2?mode=draft&package=com.qa.r6flow` with nodes start → push (http) → check (decision) → revise (assignment) and edges start→push, push→check, push→end_err, check→end_a, check→end_b, check→revise (conditional), and revise→push with **no** `type`.\n3. `GET …/qsixf_cycle2?state=draft&package=com.qa.r6flow` → `_diagnostics {\"valid\": true}`.\n4. `POST /api/v1/packages/com.qa.r6flow/publish-drafts` → 200 `outcome: \"published\"`.\n5. `GET /api/v1/meta/flow/qsixf_cycle2` → `registration {\"state\":\"refused\",\"reason\":{\"message\":\"Flow contains a cycle: push → check → revise → push. Only DAG flows are allowed — … mark the cycle-closing edge with type: 'back' (ADR-0044).\"}}`; the boot log warns \"a flow changed in the metadata store could not be registered\".\n\nExpected: the draft verdict and the publish gate refuse the undeclared cycle. Actual: valid draft, accepted publish, refused registration. Reproduced 2 times with fresh flows.\n\n## Mechanism (suspected)\n`runtime-authoring-gate.ts` has no cycle rule; the engine's `detectCycles` lives in `packages/services/service-automation/src/flow-registration-checks.ts`.\n\nQA-source: #29002 · studio-authoring.flow-edge-type-authoring · observed beside the clauses"
+}

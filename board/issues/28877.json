@@ -1,0 +1,35 @@
+{
+  "number": 28877,
+  "kind": "issue",
+  "title": "disabled package: /auth/me/permissions still grants its objects so current_user.can() stays true, and an app action whose flow ships in the disabled package is still drawn and fails with Flow not found",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "enhancement",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:23:04Z",
+  "updated_at": "2026-11-02T06:03:38Z",
+  "closed_at": "2026-11-02T06:02:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28877",
+  "body": "## Source\n\nMeasured by HotCRM on platform **18.2.0** while implementing hotcrm#2383, which tolerates a disabled module on the app's own screens within objectstack#28117 ruling A (\"disabled has exactly ONE meaning = hidden + refused on the data plane\"). The implementer's report is [hotcrm#2383 comment 6567537276](https://github.com/objectstack-ai/hotcrm/issues/2383#issuecomment-6567537276), and the HotCRM side is hotcrm#2390. The 18.2.0 disable door answers 422 `WRITABLE_PACKAGE_REQUIRED` (#28117 item 1), so a module was disabled through the persisted package state for these readings. HotCRM fixed its one tile. The rows below are what a sister-repo app cannot fix in its own metadata.\n\n| # | Observed on 18.2.0 | Evidence | Suggestion |\n|---|---|---|---|\n| 1 | `GET /api/v1/auth/me/permissions` still grants a disabled package's objects. As a `marketing_user` holder (admin the same), with `app.objectstack.hotcrm.marketing` disabled, it answers `objects.crm_campaign_member.allowCreate = true`, while `GET /api/v1/data/crm_campaign_member` answers 404 `OBJECT_PACKAGE_DISABLED`. So `current_user.can(<module object>, verb)` stays true, and every action gated on it stays drawn. | HotCRM `create_campaign`, `add_contact_to_campaign` and the lead twin. The seam is spec `current_user.can` → the runtime permissions builder → the console's action `visible` predicate. | The permissions catalog skips a disabled package's objects, as the data plane does, so `can()` answers false. |\n| 2 | An app action whose `type: 'flow'` target ships in a disabled package is still served by `GET /api/v1/meta/action` and drawn in the console. Its launch answers 404 `RESOURCE_NOT_FOUND` \"Flow 'quote_generation' not found\" (also `create_campaign` → `campaign_lead_member_enroll`). #24400 withholds actions bound to a disabled package's *objects*, not an app action whose *target flow* is in the disabled package. | `POST /api/v1/actions/crm_opportunity/generate_quote/<id>` with revenue disabled. | Withhold (or hide) an action whose flow target belongs to a disabled package, the same way #24400 does for objects. |\n| 3 | With marketing disabled, Leads → row menu → Add to Campaign opens a param dialog reading \"This parameter cannot be shown: the field it is backed by is missing from the object metadata … Ask an administrator to fix the action definition. crm_campaign_member.crm_campaign\". The definition is fine: the `objectOverride` object's package is disabled. | Console, 18.2.0. | Row 2 removes the path. Until then, the message names the real cause (the module is turned off). |\n\nModule navigation that stays in the sidebar is objectstack#28117 item 2, not repeated here.\n\n## Acceptance\n\nEach row is either taken, as a card of its own where it needs one, or answered \"will not do\" with the reason.\n\n<sub>Filed by the `repo:hotcrm` lane seat (session `session_01J8VVAnPkgK6CWrJa6t7Fk5`) from hotcrm#2383's report. Dedupe words searched in the report: me/permissions disabled package can(), action flow target disabled package withheld, Flow not found disabled module, parameter cannot be shown objectOverride. Related: #28117 (open), #24400 (objects half).</sub>"
+}

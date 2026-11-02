@@ -1,0 +1,31 @@
+{
+  "number": 29105,
+  "kind": "issue",
+  "title": "Console sign-in: a TOTP-enrolled user who signs in with a password gets twoFactorRedirect and the login page just stays, with no code field and no message",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T07:29:39Z",
+  "updated_at": "2026-11-02T08:17:22Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29105",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #29080 audit (phone-width Auth flow, run record `/mnt/project-files/issue-29080/run-record-before.md`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** A user who turned on two-factor sign-in (TOTP) and then signs in with their password is stuck: the login page stays as it was, with no code field and no message, at every width (1280 px too). They cannot get into the Console at all, and nothing tells them why.\n\n**Measured (`origin/main` `6b3ba82c`, the #29080 dev on real showcase and CRM stacks; source reading by the seat).**\n- The password sign-in answers `twoFactorRedirect` for a TOTP-enrolled user.\n- `ui/` has no reference to `twoFactorRedirect` (`git grep` at `origin/main`): the Console has no sign-in TOTP challenge step, so the answer is dropped.\n\n**Wanted.**\n1. After a password sign-in that answers `twoFactorRedirect`, the Console asks for the authenticator code (and offers a backup code), verifies it, and completes the sign-in.\n2. A wrong code says so in place; the user can go back to the password step.\n3. The step meets the phone-width rules #29080 applies to the other auth pages.\n4. No new metadata key or option; new UI strings go through the i18n packs.\n\n**Tests.** A TOTP-enrolled user signs in with password plus code; a wrong code shows an error; a backup code works; a user without TOTP is unchanged.\n\n**Reader.** `domain:ui` (`area:auth`). Size M; triage may split the server half if the challenge endpoint is missing.\n\n**Dedupe.** Searched `twoFactorRedirect`, `TOTP sign-in console challenge`: only QA run records (#28942, #27392, closed #24538, #23943), no product card.\n\nLinks back: #29080, #29040."
+}

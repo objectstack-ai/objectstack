@@ -1,0 +1,35 @@
+{
+  "number": 28962,
+  "kind": "pull_request",
+  "title": "fix(console): show the declared action label in the audit log's Action column and drawer",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:58:57Z",
+  "updated_at": "2026-11-02T05:24:17Z",
+  "closed_at": "2026-11-02T05:24:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T05:24:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28962",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb1icerCPt86vQXmeZ9u36z5)_\n\nFixes #28895\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:Setup › 审计日志的「操作」列徽章和详情抽屉标题里的徽章，改为显示 `sys_audit_log.action` 声明选项的标签(中文界面下即「更新」「创建」)。没有声明的 action 值仍显示原始存储值。\n- **为什么改**:同页的「操作」筛选器早已用声明选项的标签(`actionFilterOptionsOf`),表格和抽屉却直接打印存储值 `update` / `create`,中文界面下两者对不上(#28895,staging 实测 46 个单元格)。\n- **风险与回滚**:低。只改两处徽章文字，徽章颜色、筛选器和列表查询都不变;没有新的元数据键，没有新门禁。回滚即还原本 PR。\n- **先看**:`ui/apps/console/src/pages/system/auditLogActions.ts`(新的 `actionLabelOf`)、`ui/apps/console/src/pages/system/AuditLogPage.tsx`(两处调用)、`AuditLogPage.actionLabels-28895.test.tsx`。\n- **两分钟验证**:`pnpm --dir ui exec vitest run apps/console/src/pages/system/AuditLogPage.actionLabels-28895.test.tsx apps/console/src/pages/system/auditLogActions.test.ts`,预期 2 个文件、16 个测试全绿。\n- **需要你做的**:无，席位落地。\n\n## What changes\n\n- **One label for an action, read from the filter's own choices.** `auditLogActions.ts` gains `actionLabelOf(options, action)`: the declared label of the action's option among `options`, else the stored value; a missing or empty action answers `undefined`. `options` is the page's existing `actionOptions` (`actionFilterOptionsOf` over the served `sys_audit_log` document), so there is no second map and the badge names an action exactly as the filter does, a blank declared label included.\n- **The two readers.** In `AuditLogPage.tsx` the Action column's badge and the detail drawer's title badge print `actionLabelOf(actionOptions, ...) ?? '—'` instead of the raw value. Badge tones (`actionBadgeVariant`) still key on the stored value.\n\n## Tests\n\n- **New: `AuditLogPage.actionLabels-28895.test.tsx`, 3 cases.** A served `sys_audit_log` whose `action` options carry zh labels (创建 / 更新 / 删除) and a ledger with `update`, `create` and `nightly_purge` (declared by no option):\n  - the Action cells read 更新, 创建, `nightly_purge` (acceptance 1 and 2, cell);\n  - the drawer badge reads 更新 for the first row and `nightly_purge` for the undeclared one (acceptance 1 and 2, drawer);\n  - with no `sys_audit_log` document served, the cells show the stored values.\n- **`auditLogActions.test.ts` gains `actionLabelOf`, 4 cases**: a declared label, a blank declared label reading as the value, the stored-value fallback (an undeclared value, an empty option list, an `Object.prototype` name), and `undefined` for a missing action.\n- **Changed: `AuditLogPage.actionFilter-13175.test.tsx`.** Its filter case read the badge text after filtering and pinned the raw values `login_failed` / `nightly_purge`; it now pins their declared labels (Sign-in refused / Nightly purge). The tone case's comment names the labels.\n\n## Acceptance notes\n\n- **The Object column still shows API names** (`sys_flow_dispatch`). The card leaves it outside acceptance. The page holds object labels only as the Object filter's `Label (name)` combobox choices, so labelling the column means choosing a spelling for three sites (the cell, the drawer title, the target-record line), not a one-line reuse. Not done here; listed in the report for the seat.\n\n## Verification\n\nAll readings are on this branch. The fix is `7cbfbbe1`; the final head is `5e134182`, a merge of `main` (2 commits, `plugin-detail` and `spec`, none touching this diff's files). The audit log suites and the ratchet and changeset gates re-ran at the final head.\n\n<details><summary>Audit log suites · 8 of 8 files</summary>\n\n`pnpm exec vitest run --maxWorkers=2 apps/console/src/pages/system/AuditLogPage apps/console/src/pages/system/auditLogActions` from `ui/`, under `os-verify-lock`: Test Files 8 passed (8), Tests 49 passed (49), at `7cbfbbe1` and again at `5e134182`. `pnpm --filter @object-ui/console run type-check` at `7cbfbbe1`: exit 0.\n</details>\n\n<details><summary>Ablations · 2 legs, both red as predicted</summary>\n\nEach leg went through `scripts/ablation-replace.mjs` against the committed fix; each restore read blob == HEAD with `git diff HEAD` empty.\n\n1. The Action cell back to the raw value: the cell case red (1 of 3).\n2. The drawer badge back to the raw value: the drawer case red (1 of 3).\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 33 commands at `7cbfbbe1`; all 33 ran with exit 0, and `--ran` reconciled 33 derived, 33 run, 0 NOT-MEASURED, 0 UNRUN. The slowest: `pnpm --dir ui exec vitest run scripts/` (169 passed, 2 skipped, 4900 tests, 278 s), `pnpm check:query-options-erasure` (292 s), `node scripts/check-comment-mask-corpus.mjs` (172 s), `pnpm check:type-check-debt` (161 s, 0 raw tsc errors). `node scripts/check-sdui-manifest.mjs`: exit 0. At `5e134182`: `pnpm check:type-check-debt`, `check-changeset-no-major --base origin/main` (with this body as the event), `check-sdui-manifest` and `check-empty-changeset --base origin/main` re-ran, each exit 0.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jQnxoyK1uEFPjUqDDh)_\n"
+}

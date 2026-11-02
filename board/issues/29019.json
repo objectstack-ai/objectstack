@@ -1,0 +1,33 @@
+{
+  "number": 29019,
+  "kind": "issue",
+  "title": "console FormPage: a refused create shows the raw server JSON envelope to the end user (\"Create failed (403): {\"error\":…})",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:11:16Z",
+  "updated_at": "2026-11-02T08:04:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29019",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbX9avDwM2goWd7zimE\n\nFiling gate: ① a user-visible defect, found beside the clauses (studio-authoring.no-entry-property-matrix), reach: the console named form page, measured once with a deterministic cause in source.\nBusiness reason: an end user without create rights who opens a form link (`/_console/forms/NAME`) fills it in and presses Submit, and is shown the server's raw JSON in English: `Create failed (403): {\"error\":\"You do not have permission…\",\"code\":\"PERMISSION_DENIED\",\"object\":\"…\"}`. The report page tells the same user \"You don't have access\"; the form should give a readable, localized refusal (and ideally not offer a create form the caller cannot submit).\nReader who acts: the triage seat, then a `domain:ui` implementer in `ui/apps/console/src/components/FormPage.tsx`. QA suggestion only: `area:records`, p2.\nDuplicate search: `\"Create failed\"` → 271 hits, the near ones closed and different (#24914 raw node text in a screen flow, #25938 FLOW_FAILED rendering); `FormPage 403 raw JSON` → 9 hits, all QA run records or checklist revisions.\nBatch-of: release-18.3.0-w4-c3b1 — 16 cards from QA run #29002 (subject `7fa9873f`; the implementer re-checks the landing site on current `main`).\n\n## Reproduction\n1. A member m1 with read but no create on object `qar8_fsb`, which has a default form view.\n2. As m1, open `/_console/forms/qar8_fsb.form`. The form renders fully, with no \"no access\" state.\n3. Fill Name and press Submit → `POST /api/v1/data/qar8_fsb` → 403.\n\nExpected: a localized refusal sentence, without the JSON envelope. Actual: the banner and the toast read verbatim `Create failed (403): {\"error\":\"You do not have permission to perform this action. Contact your administrator if you need access.\",\"code\":\"PERMISSION_DENIED\",\"object\":\"qar8_fsb\"}`.\n\n## Mechanism (suspected)\n`FormPage.tsx` about L1968–1969 builds the message as a template of the verb, the status and the raw body; `refusedWriteError` (about L1990) parses code and details but keeps that raw message.\n\nQA-source: #29002 · studio-authoring.no-entry-property-matrix · observed beside the clauses"
+}

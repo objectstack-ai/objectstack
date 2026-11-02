@@ -1,0 +1,37 @@
+{
+  "number": 28949,
+  "kind": "issue",
+  "title": "List personalization: a stored sort or filter on a deleted or unreadable field is dropped when the list opens, as the URL route already does",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:50:28Z",
+  "updated_at": "2026-11-02T07:04:56Z",
+  "closed_at": "2026-11-02T07:03:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28949",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat from a review of list personalization under epic #26676. An independent reviewer read the code and tested on `examples/app-crm`, and the seat re-read the evidence. The maintainer: 「把「恢复默认清除偏好」、「账号偏好字段校验」、「个性化标记与统一重置」立卡，并收窄 #28912 的验收。命名个人视图暂不做。」 (2026-11-02). Code readings below are on `main` `a36409337b`. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nA reader's stored sort or filter names a field. Later the field is deleted, or the reader loses read access to it. From the code, the list then asks the server with that field. The expected result is an empty or refused list with no hint, and the reader does not know to press 「重置视图」.\n\n## Reading\n\n`ui/packages/app-shell/src/views/objectViewListUrlState.ts:96-120` seeds a list from two sources:\n\n- **URL:** `acceptField` drops a field the object does not declare, or one this user cannot read (field permissions gate once loaded).\n- **Stored preference:** `filters` and `sort` from `listPrefs` go in unchecked.\n\nSo a stale link is cleaned up and a stale preference is not.\n\nColumn names are already safe: a stored hidden field that matches nothing is inert (`objectViewListRenderer.tsx`, the `persistHiddenFields` comment).\n\n## Target\n\n1. The stored seed passes through the same field check as the URL seed, for sort levels and for filter conditions at any nesting.\n2. A dropped part leaves the rest of the reader's state in place, so the list opens usable.\n3. No new key and no new option.\n4. The claiming seat states in the PR whether the dropped part is also removed from the stored row, and how the check behaves while field permissions are still loading.\n\n### Premise to verify first\n\nThis has not been reproduced. Reproduce it on `examples/app-crm`: store a sort and a filter on a field, remove the field from the object, and open the list. Separately, revoke read on the field for a non-admin user.\n\nIf the list already opens correctly in both cases, stop and report it: the card closes with the reading. Do not add the check on assumption.\n\n## Acceptance\n\n- In both reproductions above, the list opens with rows, without the stale sort or condition.\n- A valid sort and filter stored beside the stale ones still apply.\n- A field the reader can read is untouched.\n- Tests pin the stored seed beside the existing URL seed tests."
+}

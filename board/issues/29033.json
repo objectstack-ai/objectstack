@@ -1,0 +1,34 @@
+{
+  "number": 29033,
+  "kind": "pull_request",
+  "title": "fix(console): the audit log names each row's object by its served label",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:18:15Z",
+  "updated_at": "2026-11-02T07:02:13Z",
+  "closed_at": "2026-11-02T07:02:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T07:02:10Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29033",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb9uVmskJeM8TUh3pJBNhBrf)_\n\nFixes #28968\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:Setup › 审计日志的「对象」列、详情抽屉标题、抽屉里的「目标记录」行，改为显示对象的标签(中文界面下如「客户」),不再显示 API 名 `crm_account`。元数据没有提供的对象(或标签为空)仍显示存储的 `object_name`。\n- **为什么改**:#28895 之后同一行的「操作」列已显示「更新」,对象列却还是 `crm_account`,管理员得认识 API 名才知道改的是哪个业务对象;同页的「对象」筛选器早已用标签。\n- **风险与回滚**:低。只改三处显示文字，标签与筛选器读同一份 `useMetadata().objects`;筛选器的「标签 (名称)」选项、列表查询都不变;无新元数据键、无新门禁。回滚即还原本 PR。\n- **先看**:`ui/apps/console/src/pages/system/AuditLogPage.tsx`(新的 `objectLabelOf` 与三处调用)、`AuditLogPage.objectLabels-28968.test.tsx`、`AuditLogPage.objectFilter-13165.test.tsx`(行读取改读标签)。\n- **两分钟验证**:在 `ui/` 下运行 `pnpm exec vitest run apps/console/src/pages/system/AuditLogPage apps/console/src/pages/system/auditLogActions`,预期 9 个文件、54 个测试全绿。\n- **需要你做的**:无，席位落地。\n\n## What changes\n\n- **One reading of a served object, two readers.** `AuditLogPage.tsx` gains `servedObjectOf(raw)`, the name and trimmed label the Object filter already read inline, and `objectFilterOptionsOf` now calls it (same choices, same `Label (name)` spelling, same order). Beside it, `objectLabelOf(objects, name)` answers the served label of the object whose API name is `name`, else the stored name; a missing or empty name answers `undefined`. Both read the page's existing `useMetadata().objects`: no second map and no object named in code.\n- **The three sites, label alone (the seat's ruling).** The Object column cell, the drawer title (still falling back to \"Audit Event\" when a row has no object) and the drawer's target-record line (`label / record_id`) print `objectLabelOf(objects, ...)`. The Object filter is unchanged.\n\n## Tests\n\n- **New: `AuditLogPage.objectLabels-28968.test.tsx`, 5 cases.** Served objects `crm_account` (客户) and `crm_blank` (blank label); a ledger naming `crm_account`, `nightly_widget` (served by no object), `crm_blank` and no object:\n  - the Object cells read 客户, `nightly_widget`, `crm_blank`, and a dash;\n  - the drawer of the served row reads 客户 in its title and `客户 / acc_1` on its target line;\n  - the drawer of the unserved row reads `nightly_widget` and `nightly_widget / wid_1`;\n  - with no objects served, the cells show the stored names;\n  - the Object filter still offers `客户 (crm_account)` and `crm_blank`.\n- **Changed: `AuditLogPage.objectFilter-13165.test.tsx`.** Its row reader picked Object cells whose text was the API name; it now reads the labels (Accounts / Contacts) the cells show. Every assertion is otherwise the same.\n\n## Acceptance notes\n\n- The target-record line keeps its monospace style; with a label it reads e.g. `客户 / acc_1`. The API name is still in the Object filter's choices.\n- No new metadata key, no new gate. The size check: 249 changed lines before the merge of `main`, well under 3000.\n\n## Verification\n\nFix `eda802a4`, changeset `40f0901d`; final head `f137f81a`, a merge of `main` (10 commits, none touching the audit log page or its tests). After the merge: `pnpm install`, the console's dependency closure rebuilt, and the audit log suites, the console type-check and the changeset and manifest gates re-ran.\n\n<details><summary>Audit log suites · 9 of 9 files</summary>\n\n`pnpm exec vitest run --maxWorkers=2 apps/console/src/pages/system/AuditLogPage apps/console/src/pages/system/auditLogActions` from `ui/`, under `os-verify-lock`: Test Files 9 passed (9), Tests 54 passed (54), at `40f0901d` and again at `f137f81a`. `pnpm --filter @object-ui/console run type-check`: exit 0 at both heads.\n</details>\n\n<details><summary>Ablations · 3 legs, each red as predicted</summary>\n\nEach leg went through `scripts/ablation-replace.mjs` against the committed fix (anchor 1 to 0, blob changed), running the new suite; each restore read blob == HEAD (`15c4495f`) and `git diff HEAD` empty.\n\n1. The Object cell back to `r.object_name`: the cell case red (1 of 5).\n2. The drawer title back to `selected?.object_name`: the served-drawer case red (1 of 5).\n3. The target line back to `selected.object_name`: the served-drawer case red (1 of 5).\n</details>\n\n<details><summary>Derived gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 33 commands at `40f0901d`; all 33 ran with exit 0. The slowest: `pnpm check:type-check-debt` under the lock (346 s, 0 raw tsc errors), `pnpm check:query-options-erasure` (246 s), `pnpm --dir ui exec vitest run scripts/` (241 s; 169 passed, 2 skipped files, 4900 tests passed), `node scripts/check-comment-mask-corpus.mjs` (160 s). `node scripts/check-sdui-manifest.mjs`: exit 0. `check-changeset-no-major --base origin/main` ran with this body as the event. At `f137f81a`: `check-sdui-manifest`, `check-empty-changeset --base origin/main` and `check-changeset-no-major` re-ran, each exit 0.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUWJpkV9c17Msdk5NL)_\n"
+}

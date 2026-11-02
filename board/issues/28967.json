@@ -1,0 +1,34 @@
+{
+  "number": 28967,
+  "kind": "pull_request",
+  "title": "fix(app-shell): render marketplace README quotes and release notes as Markdown",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T05:02:09Z",
+  "updated_at": "2026-11-02T05:33:29Z",
+  "closed_at": "2026-11-02T05:33:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T05:33:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28967",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbLfi9jA1E9WaVdGXSrhTFv2)_\n\nFixes #28891\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:应用市场详情页的 README 支持 `>` 块引用,GitHub 提示块(`> [!NOTE]` 等五种)降级为普通引用并去掉记号;「版本」面板的版本说明改用同一个 Markdown 渲染器(紧凑字号)。\n- **为什么改**:HotCRM 等官方应用的详情页把 `>`、`[!NOTE]`、`##`、`**` 原样显示,看起来像坏页面,而这是用户决定装不装的地方。\n- **风险与回滚**:只动 `MarkdownText` 的解析与渲染和版本面板一处调用;版本说明里单个换行现在按 Markdown 合并为空格。回滚即 revert 本 PR。\n- **先看**:`MarkdownText.tsx` 的 blockquote 分支(`parseBlocks` 里 `QUOTE_LINE` 一段)与 `renderBlocks` 的 `quote` 分支;`MarketplacePackagePage.tsx` 版本面板那一行。\n- **两分钟验证**:打开任一带引用的应用详情页(如 HotCRM),「简介」里引用显示为左侧竖线的引用块、没有 `>` 和 `[!NOTE]`;右侧「版本」里 `## 6.0.0` 显示为小标题、加粗正常。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `MarkdownText` gains a blockquote block: a run of consecutive `>` lines (up to three spaces of indent), with the marker and one optional space stripped, parsed recursively as blocks, so a quote holds paragraphs, lists, code and nested quotes. A quote interrupts a paragraph. A GitHub alert marker (`[!NOTE]`, `[!TIP]`, `[!IMPORTANT]`, `[!WARNING]`, `[!CAUTION]`, case-insensitive) alone on the quote's first line is dropped, leaving a plain quote. Lazy continuation is not read: an unprefixed line ends the quote. Raw HTML inside a quote is skipped as everywhere else.\n- `MarkdownText` takes a `size` prop (`base`, the default, unchanged; `compact` for a side column: small muted text, small headings, tighter gaps). The rendering moves into a `renderBlocks` helper so a quote can render its own blocks.\n- The Versions panel renders `release_notes` through `MarkdownText` with `size=\"compact\"` instead of a pre-line paragraph.\n\nNo new component, no new dependency, no raw HTML passthrough.\n\n## Tests\n\n- New `MarkdownText.blockquote-28891.test.tsx`: HotCRM's README opening and NOTE callout render as two `blockquote`s with no literal `>` or `[!NOTE]`; all five alert types and mixed case drop their marker; a quote nests a list and a quote; a quote ends a paragraph and ends at the first unprefixed line. Controls: `>` inside a fenced block stays code, `[!FOO]` stays text, the marker counts only on the first line, raw HTML inside a quote is still skipped.\n- New `MarketplacePackagePage.releaseNotes-28891.test.tsx` on the real page over the runtime-config boot: the 6.0.0 notes render an `h3`, two `strong`s and a list, with no `##` or `**`. Control: plain-text notes render as one paragraph, a version with no notes renders nothing under its header.\n- Reverse verification at `7e5152be`: with `MarkdownText.tsx` and `MarketplacePackagePage.tsx` restored to `origin/main` (`9a9823d9`), the two files ran 15 failed, 2 passed (the two controls); restored, 17 passed.\n\n## Acceptance notes\n\n- Release notes that relied on pre-line line breaks (single newlines inside a paragraph) now join them with a space, as Markdown does. Blank-line-separated paragraphs and lists keep their breaks.\n- Tables, images and horizontal rules are still outside the renderer's subset; HotCRM's README `---` lines print as a paragraph, as before this PR.\n\n## Verification\n\nReadings at `7e5152be` (the change commit) unless named; `29c82029` is that commit merged with `origin/main`.\n\n<details><summary>Tests</summary>\n\n- `vitest run` of the two new files: 2 files, 17 tests passed.\n- The 28 ui test files that name `MarkdownText` or `MarketplacePackagePage`: 28 passed, 336 tests.\n- After merging `origin/main` (head `29c82029`): the whole `packages/app-shell/src/console/marketplace/` directory, 45 files, 386 tests passed.\n- Reverse verification: see Tests above (15 red on `origin/main`, the 2 controls green).\n- `turbo run type-check --filter=@object-ui/app-shell`: 65 tasks successful (`tsc --noEmit` and `tsc -p tsconfig.test.json`).\n- `eslint` on the four touched ui files: 0 errors (11 warnings, none on changed lines).\n\n</details>\n\n<details><summary>Gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 families for this diff; all 34 ran and exited 0, and `--ran` reconciles 34 derived, 34 run, 0 NOT-MEASURED. That includes `node scripts/check-sdui-manifest.mjs` and `pnpm --dir ui exec vitest run scripts/` (169 files passed, 2 skipped). After the merge, `check-sdui-manifest`, `check-changeset-no-major` and `check-empty-changeset` re-ran at `29c82029`, exit 0. Changed lines: 457 (+411 / -46), under the 3000 threshold.\n\n</details>\n\n<details><summary>Screenshots</summary>\n\nA Vite harness in the Console dev server rendered the About card and the Versions panel with the page's own markup, the real `MarkdownText` (before: the `origin/main` file; after: this branch) and the Console's stylesheet, on an excerpt of HotCRM's published README and a 6.0.0 release note with a heading, bold text and a list. Before: every quote line printed `>`, the callout printed `[!NOTE]`, the notes printed `##` and `**`. After: three blockquotes, no `>`, `[!NOTE]`, `##` or `**` in the text, light and dark. The images are in the project folder for the card (light and dark, before and after); the harness was deleted.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jSnAkCQjAAqm9bmxCb)_\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 28912,
+  "kind": "issue",
+  "title": "List views: readers can hide and show columns by default — flip the userActions.hideFields default, so a generated app has the control without having to declare it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:spec",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:00:44Z",
+  "updated_at": "2026-11-02T07:52:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28912",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat from a second console review under epic #26676. An independent reviewer walked the console on `main` `bdb19ca6d9`, with `examples/app-crm` as the backend, at 1440 and 390 px. The seat then re-read the evidence. The maintainer approved the seat's checked list: 「Fable 评估（核对后） 同意立卡」 (2026-11-02). Code readings below are on `main` `5e1b9b0a77`. No `domain:*` label is set: triage routes this card.\n\n## Observed\n\nThe list's Display menu offers open mode, grouping, density, row numbers and inline edit. Nothing there or on a column header hides a column. A reader cannot remove a column they do not need, and `examples/app-crm` and generated apps do not turn the control on.\n\n## Reading\n\n- `ui/packages/plugin-list/src/ListView.tsx:1847`: `showHideFields: ua?.hideFields === true`.\n- `packages/spec/src/ui/view.zod.ts:1921`: `hideFields` defaults to `false`.\n- The comment at `view.zod.ts:1882-1888` records this as copied from the renderer's legacy reads, not as a product choice.\n\nThe seat recommended flipping the default, and the maintainer's approval above is that decision.\n\n## Target\n\n1. `hideFields` defaults on in the schema and in the renderer: `ua?.hideFields !== false`. An app can still set `false`.\n2. No new key.\n3. Record the changed default the way `packages/spec/scripts/lib/default-changes.ts` requires, and update the comment at `view.zod.ts:1882-1888`.\n\n### Premise to verify first\n\nThe control that `hideFields: true` draws today works end to end: it hides a column, and on a view that stores the choice (see the acceptance below), the choice survives a reload. If it does not, report that first. Flipping the default would otherwise put a broken control on every list.\n\n## Acceptance\n\n- A view that does not declare `hideFields` offers the control.\n- A view that declares `false` does not.\n- On a view that declares `columns`, or a saved view, a hidden column stays hidden after a reload, for that reader only.\n- On a system view that declares no `columns`, hiding lasts for the session only, under the objectui#10694 ruling (`persistHiddenFields`, `ui/packages/app-shell/src/views/objectViewListRenderer.tsx`, around line 373). This card does not change that.\n- The spec default, the renderer read and the default-change record agree.\n\n---\n\nAcceptance narrowed by the epic seat. The maintainer: 「把「恢复默认清除偏好」、「账号偏好字段校验」、「个性化标记与统一重置」立卡，并收窄 #28912 的验收。」 (2026-11-02). The earlier text said every hidden column survives a reload, which the seat had read too widely.\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 29015,
+  "kind": "issue",
+  "title": "Studio: a dashboard draft whose requiredPermissions the author does not hold reads 403, Studio treats that as \"no draft\", and the next autosave overwrites the draft without the key",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p1",
+    "target:v18"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:09:54Z",
+  "updated_at": "2026-11-02T08:06:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29015",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbX9avDwM2goWd7zimE\n\nFiling gate: ① a product defect, found beside the clauses (studio-authoring.api-written-keys-survive-studio-save), reach: the Studio autosave, measured twice.\nBusiness reason: a dashboard draft can carry an audience gate (`requiredPermissions`) that its author does not hold, for example one written over the API or MCP by another author. When that author opens it in Studio, Studio shows \"Draft · 1 unpublished\" but edits the published body, and the next autosave replaces the draft without the gate and without If-Match. Publishing then serves the dashboard to everyone: the gate fails open, and every other draft-only change is lost too. This is the data loss the item's negative[0] forbids. It is not an authorization hole: the author is a metadata writer on their own package.\nReader who acts: the triage seat, then a `domain:ui` implementer in `ui/packages/app-shell/src/views/metadata-admin/` and `studio-design/`. QA suggestion only: `area:studio`, p2.\nDuplicate search: `readDraftForSave` → 6 hits; #26837 (closed, a permission-set save dropping other doors' values) is the nearest and a different path; `requiredPermissions draft 403 Studio dashboard` → 34 hits, none about this.\nBatch-of: release-18.3.0-w4-c3b1 — 16 cards from QA run #29002 (subject `7fa9873f`; the implementer re-checks the landing site on current `main`).\n\n## Reproduction\n1. A writable package PKG with a published dashboard D (one metric widget, no requiredPermissions).\n2. As admin: `PUT /api/v1/meta/dashboard/D?mode=draft&package=PKG` with the published body plus `\"requiredPermissions\":[\"showcase.export_data\"]` (a capability the admin holds through no set) → 200 draft.\n3. `GET /api/v1/meta/dashboard/D?state=draft&package=PKG` → 403 PERMISSION_DENIED \"You do not have permission to open the 'D' dashboard.\" (by design, `packages/rest/src/meta-item-read-gate.ts`).\n4. Form sign-in → `/_console/studio/PKG/interfaces` → D in the Dashboards rail. The header shows \"Draft · 1 unpublished\"; the canvas shows the published body (network: the draft read 403, then `/layers` 200).\n5. Edit the Label and wait 2 s.\n\nExpected: Studio refuses to edit a draft it cannot read, or keeps the draft's keys; at least it never overwrites it unpinned. Actual: `PUT …/dashboard/D?mode=draft&package=PKG&surface=studio` → 200 with no `requiredPermissions` and no If-Match; the draft read afterwards has no gate. Reproduced 2 of 2 on fresh loads.\n\n## Mechanism (suspected)\n`readDraftForSave` in `ui/packages/app-shell/src/views/metadata-admin/DraftConflictDialog.tsx` catches any draft-read failure (403 included) and answers \"no pending draft\", so `StudioDesignSurface.tsx` (leaf load, about L5186–5216) seeds the leaf from the layered baseline and the save goes out with no pin.\n\nQA-source: #29002 · studio-authoring.api-written-keys-survive-studio-save · observed beside the clauses"
+}

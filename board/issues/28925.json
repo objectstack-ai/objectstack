@@ -1,0 +1,34 @@
+{
+  "number": 28925,
+  "kind": "pull_request",
+  "title": "docs(metadata-protocol, objectql): docblocks say a code package's objectExtensions are registered as extend contributors, never stored as items (#28874)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:31:24Z",
+  "updated_at": "2026-11-02T05:15:38Z",
+  "closed_at": "2026-11-02T05:15:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T05:15:36Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28925",
+  "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFixes #28874\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：三处注释改为说实话：代码包的 `objectExtensions` 从不存成 `object_extension` 条目，也不进 metadata 服务；ObjectQL 引擎的 `registerApp` 把每条注册为目标对象的 `'extend'` 贡献者。该类型的条目只有 `/api/v1/meta` 写入口存下的行。\n- **为什么改**：原注释说制品加载器把它们存成该类型的条目，或作为单独集合存进 metadata 服务，误导读者。措辞与 #28873 的 spec 注册表行注释一致。\n- **风险与回滚**：无行为变化，只改注释。回滚即还原本 PR。\n- **先看**：`packages/metadata-protocol/src/protocol-object-extension-item.ts` 头部注释。\n- **两分钟验证**：`git diff origin/main -- packages/` 只有注释行。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\nComment only, in three docblocks.\n\n1. `packages/metadata-protocol/src/protocol-object-extension-item.ts`, header (the card's site). It said \"`object_extension` is the type the artifact loader already stores a code package's `objectExtensions` under\". It now says they are never stored as items of this type: `registerApp` registers each one as an `'extend'` contributor, and the artifact loader maps the collection to this type but files no item from it, because an extension carries `extend` and no `name`. This type's items are the rows the `/api/v1/meta` doors write.\n2. `packages/metadata-protocol/src/protocol.ts`, the `foldObjectExtendersFromRegistry` docblock (triage's second site). It said an artifact deployment registers `objects` and `objectExtensions` into the metadata service \"as SEPARATE collections\". It now says only `objects` reach that service, and gives the reason above.\n3. **Third site, same drift:** `packages/objectql/src/registry.ts`, the public `SchemaRegistry#foldObjectExtendersOnto` docblock, said the same \"stored as SEPARATE collections\". Corrected the same way.\n\nRead before writing:\n- `packages/metadata/src/plugin.ts`: `ARTIFACT_FIELD_TO_TYPE` maps `objectExtensions` to `object_extension`, and `artifactItemSlot` returns no slot for a body with no `name`, so each registration loop skips it.\n- `packages/objectql/src/engine.ts`: the `registerApp` `objectExtensions` loop calls `registerObject(…, 'extend', priority)`.\n\nA `git grep` for the drift phrases finds no other site.\n\n**Changeset: patch** on `@objectstack/metadata-protocol` and `@objectstack/objectql`. The corrected docblocks ship in each package's `dist` declarations, and AGENTS.md rule 3 gives `none` a patch. ⛔ No `packages/spec/**`, no code change, no new gate.\n\n## Tests\n\n<details><summary>Typecheck, lint, gates</summary>\n\nNo behaviour change, so there is no new test. Head `c1c35ba7`, after a whole-repo `pnpm build` (exit 0):\n- `pnpm typecheck` in full: metadata-protocol exit 0, objectql exit 0 (test-typecheck ledger unchanged);\n- `eslint --no-inline-config src`: exit 0 for both packages;\n- `dispatch-gates.mjs --commands` derived 57 (including `check:dts-closure`, `check-dts-emitted`, the comment-mask and drift-comment gates), all run, every exit 0. `--ran`: 57 derived, 57 run, 0 NOT-MEASURED.\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5oTRCUNQ4EA3YV84sZ\n"
+}

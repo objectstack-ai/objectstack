@@ -1,0 +1,36 @@
+{
+  "number": 28891,
+  "kind": "issue",
+  "title": "应用市场详情页：README 块引用（> / > [!NOTE]）原样显示 >，「版本」面板的 release_notes 按纯文本输出 Markdown",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T03:28:13Z",
+  "updated_at": "2026-11-02T05:34:42Z",
+  "closed_at": "2026-11-02T05:33:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28891",
+  "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\n立卡门类别：① 已复现缺陷（reach: 界面实测，见「已实测」）\n\nReader: domain:ui 车道，`ui/packages/app-shell/src/console/marketplace/`（`MarkdownText.tsx`、`MarketplacePackagePage.tsx`），一个 PR 两条验收。不需要新组件。\n\nDedupe: `repo:objectstack-ai/objectstack marketplace readme markdown in:title,body is:issue` total=0；`应用市场 markdown` total=0；`release_notes markdown` total=0；`release notes 版本 markdown 原样` total=9，无同题；`blockquote` total=164，均为 spec/文档内容里出现这个词的无关卡。\n\n业务理由：应用市场详情页是用户决定装不装一个应用的地方。README 和版本说明显示成原始 Markdown（`>`、`##`、`**`），看起来像坏页面，官方应用 HotCRM 的详情页现在就是这样。\n\n## 来源\n2026-11-02 staging 浏览器全量测试：cloud main `70e746ce`，objectstack pin `6cbdef1e`。控制面 https://cloud.objectos.app（组织 Release Check 1001，团队版，所有者账号），环境 https://os-2ph4c1.objectos.app（HotCRM 6.0.0）。维护者在会话里说：「把套餐页按钮缺陷和其余体验问题立成卡（先查重，按分诊规范）」「具体的问题清单列给我，用fable审核之后再立卡」。本卡的落点经第二个审核会话按 origin/main 核对过。\n\n## 已实测\n- 环境 Setup › 应用市场 › HotCRM（`/_console/apps/com.objectstack.setup/system/marketplace/<pkg>`）：\n  - 「简介」里 `> **The ontology is the software.** …`、`> [!NOTE] **Small enough for an agent to hold whole.** …` 原样显示开头的 `>`。\n  - 右侧「版本」面板 v6.0.0 的说明原样显示 `## 6.0.0`、`**Who can enroll now.**` 等 Markdown 记号。\n\n## 落点\n- `MarkdownText.tsx:1-14` 自述支持的子集是标题 h1-h3、段落、ul/ol、行内、围栏代码；`parseBlocks` 没有 blockquote 分支，`>` 行被当作段落文字。\n- `MarketplacePackagePage.tsx:1443-1444`：`release_notes` 用 `<p className=\"whitespace-pre-line\">` 纯文本输出。\n\n## 修复方向\n- `MarkdownText` 增加 blockquote 块；GitHub alert 语法（`> [!NOTE]` 等）可以降级为普通引用，去掉 `[!NOTE]` 记号。\n- `release_notes` 改用 `<MarkdownText>` 渲染。\n\n## 验收\n1. README 里的 `>` 块引用渲染为引用样式，不显示 `>`；`> [!NOTE]` 不显示 `[!NOTE]` 字面。\n2. 版本面板的 release notes 渲染标题、加粗、列表，不显示 `##`、`**`。\n3. `MarkdownText` 单测覆盖 blockquote 与 alert 语法。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

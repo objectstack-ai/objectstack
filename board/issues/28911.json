@@ -1,0 +1,37 @@
+{
+  "number": 28911,
+  "kind": "issue",
+  "title": "Phone list: offer sort and the list search at 390 px — today both are hidden and the code tells the reader to switch to desktop",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:00:14Z",
+  "updated_at": "2026-11-02T07:43:41Z",
+  "closed_at": "2026-11-02T07:40:48Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28911",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat from a second console review under epic #26676. An independent reviewer walked the console on `main` `bdb19ca6d9`, with `examples/app-crm` as the backend, at 1440 and 390 px. The seat then re-read the evidence. The maintainer approved the seat's checked list: 「Fable 评估（核对后） 同意立卡」 (2026-11-02). Code readings below are on `main` `5e1b9b0a77`. No `domain:*` label is set: triage routes this card.\n\n## Observed\n\nAt 390 px the list toolbar offers 「在队列中」, filter and display. Sort and the list's own search are gone. Global search is the only way to find a name, and it spans objects and ignores the current view.\n\n## Reading\n\n`ui/packages/plugin-list/src/ListView.tsx:6001-6010`: the sort trigger is `hidden sm:inline-flex`, and the comment says \"Mobile relies on the (typically pre-sorted) default view; users who need ad-hoc sorting switch to desktop.\" The list search is desktop-only too (around line 6418), and its comment calls a list-scoped search redundant beside the global search.\n\nThe approved list stated this as deliberate today and left the scenario to the maintainer. The maintainer's approval above is the decision to offer both on the phone.\n\n## Target\n\n1. The phone list offers sort. The seat recommends placing it in the phone's existing display sheet, so the toolbar gains no new control.\n2. The phone list offers its own search as an icon that expands in place.\n3. Both respect the same `userActions` flags as on desktop. No new key and no new option.\n4. The comment that sends the reader to desktop goes.\n\nStay within the phone layout of #27058: card rows and a bottom action area are unchanged.\n\n## Acceptance\n\n- At 390 px, sort and search both work, and the card list reflects them.\n- A view that turns either off on desktop has it off on the phone.\n- Touch targets meet the existing phone size.\n- Tests and a 390 px screenshot are linked from the PR."
+}

@@ -1,0 +1,33 @@
+{
+  "number": 28943,
+  "kind": "issue",
+  "title": "MCP list_actions offers sys_api_key.revoke_api_key as runnable to an API-key caller, and run_action then refuses it 403",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:48:16Z",
+  "updated_at": "2026-11-02T08:20:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28943",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbWBtYWqaV8NhvUrShB\n\nFiled by the dispatching PM seat session for the W4-C3a runner `session_01JQwxbZsvATYMNMArStUo2M`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\n立卡门类别: ① 产品缺陷 — 具名落点 (`apiForwardCredentialRefusal` / `API_FORWARD_DOOR_ACCEPTS` in packages/runtime/src/action-execution.ts) + 复现\nreach: 公开入口实测一次错误结果 — MCP `/api/v1/mcp` `list_actions` under an osk_ key lists `revoke_api_key` with no `unavailable`, and `run_action` then answers 403 (three fresh boots at 7fa9873f)\n业务理由: an operator who runs an agent headless on an API key is told the key-revoke action is runnable, is asked by the agent to confirm it (428), and then the action fails. That wastes a human confirmation and breaks the agent's flow at the moment someone is trying to revoke a key. Fixing the marker keeps the list/run promise #28178 introduced. Not doing it: every API-key agent keeps offering an action it can never complete.\n动手的读者: the domain:server seat (runtime action execution, owner of the #28178 marker); triage first touch confirms the lane, then os-dev.\n查重: `revoke_api_key` → 16 hits (0 open cards; 2 open are QA run records #27392 / #27438), `list_actions unavailable` → 13 hits (0 open cards; #28178 closed is the related fix), `apiForwardCredentialRefusal` → 0. No duplicate.\n\nQA-source: #28942 · ai.mcp-run-action-exposure-gate · negative[1]\n\n**What happens.** `list_actions` marks an `api` action `unavailable` when its forward target cannot accept the caller's credential (#28178; `apiForwardCredentialRefusal` in packages/runtime/src/action-execution.ts). The marker reads a per-door table (`apiForwardTargetDoor` / `API_FORWARD_DOOR_ACCEPTS`) that classes `revoke_api_key`'s target, `PATCH /api/v1/data/sys_api_key/{id}`, as the data door, and the data door as accepting `api_key`. But the API-key management guard (packages/core/src/security/api-key-management-credential.ts) refuses any API-key-authenticated change to `sys_api_key` with 403 PERMISSION_DENIED.\n\nSo an MCP agent connected with an osk_ key is told `revoke_api_key` is runnable (no `unavailable`), confirms it with the human (428 first), and is then refused, with nothing changed. That is the list/run disagreement the checklist negative forbids. The ADR-0011 identity-actions addendum already says this target accepts a signed-in session, so the table is the outlier. The refusal itself holds; this is a listing-honesty defect, not an authorization hole.\n\n**Reproduction** (fresh stock showcase boot at 7fa9873f; reproduced on three fresh boots):\n1. Admin, signed in: `POST /api/v1/keys {\"name\":\"r2-repro\"}` → key K; `POST /api/v1/keys {\"name\":\"throwaway\"}` → id T.\n2. MCP Streamable HTTP on `/api/v1/mcp` with `Authorization: Bearer K` (initialize, then `notifications/initialized`).\n3. tools/call `list_actions {}`: the entry `revoke_api_key` (objectName `sys_api_key`, requiresConfirmation true) has no `unavailable` key, while every identity-route action in the same list carries `unavailable: {code: UNAUTHENTICATED, reason: \"…accepts a signed-in session only, and this request was authenticated with an API key…\"}`.\n4. tools/call `run_action {\"actionName\":\"revoke_api_key\",\"objectName\":\"sys_api_key\",\"recordId\":T,\"confirm\":true}` → isError `{\"code\":\"PERMISSION_DENIED\",\"status\":403,\"message\":\"PERMISSION_DENIED: Changing an API key requires a signed-in session. … a request authenticated with an API key cannot revoke, restore or change API keys.\"}`.\n5. Admin `GET /api/v1/data/sys_api_key`: T reads `revoked: false`.\n\n- Expected: the listing marks `revoke_api_key` `unavailable` for an API-key caller (with the guard's own sentence), or the run succeeds.\n- Actual: listed as runnable, then refused 403.\n- Control: the same `run_action` over MCP with the admin's session bearer → `ok: true`, T reads `revoked: true`.\n\n**Fix direction:** teach the credential table that the `sys_api_key` write routes refuse `api_key`, or derive the marker from the same guard. Related: #28178 (closed).\n\nFull evidence: QA run record #28942.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

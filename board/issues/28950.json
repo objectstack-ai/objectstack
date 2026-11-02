@@ -1,0 +1,32 @@
+{
+  "number": 28950,
+  "kind": "issue",
+  "title": "List personalization: one visible 「已个性化」 marker and one reset that restores the whole list — today two reset entries cover different parts and neither says what changed",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:50:30Z",
+  "updated_at": "2026-11-02T08:01:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28950",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat from a review of list personalization under epic #26676. An independent reviewer read the code and tested on `examples/app-crm`, and the seat re-read the evidence. The maintainer: 「把「恢复默认清除偏好」、「账号偏好字段校验」、「个性化标记与统一重置」立卡，并收窄 #28912 的验收。命名个人视图暂不做。」 (2026-11-02). Code readings below are on `main` `a36409337b`. No `domain:*` label is set: triage routes this card.\n\n## Business reason\n\nA reader can't tell they are looking at a personalized list, so \"why is my list different from my colleague's\" has no answer on screen. When they want to go back, there are two similarly named entries with different scopes, and neither restores everything.\n\n## Measured and read\n\n| Entry | Where | Restores | Leaves |\n|---|---|---|---|\n| 「重置视图」 | header ⋯, only when the view has a stored entry | sort, filters, column layout, density, hidden fields | search term, grouping, Display-only settings |\n| 「恢复视图默认设置」 | bottom of the Display popover | layout, grouping, row color, hidden fields, density, row numbers, inline edit | sort, filters, column layout, search term |\n\n- The reviewer measured that after 「重置视图」 the URL still carried `uf__search=Alan` and the cached term remained.\n- The tooltip `console.objectView.resetViewTitle` (`ui/packages/i18n/src/locales/zh.ts:2375`) names sort, filters and column width only. `resetViewPreference` (`ListPreferencesProvider.tsx`, around line 253) also clears density and hidden fields.\n- The Display badge counts Display settings only (`ListView.tsx`, around line 5442), so a list with a changed sort and filter shows 0.\n- Header entry: `objectViewListUrlState.ts:159-164`, `objectViewPageHeader.tsx`, around line 223. Display entry: `ViewSettingsPopover.tsx:668-679`.\n\n## Target\n\n1. A small marker beside the list title appears while the reader's list differs from the view. Opening it says what differs: sort, filters, columns, density, hidden fields, grouping, search.\n2. The marker holds one reset that returns the whole list to the view. That covers everything in the table above, the search term and URL state included.\n3. The two existing entries go, or point to this one. The claiming seat states which in the PR. One way back stays.\n4. Copy says exactly what the reset covers, across the ten packs.\n5. These are not part of the reset, because they are not this view's list state: the record-open preference, pinned views and favorites.\n6. No new metadata key and no new option. The marker is not configurable.\n\nNot in this card: named personal views (the maintainer: 「命名个人视图暂不做」, tracked by #28971) and admin-side reset.\n\nRun after #28948, because both touch the same reset paths. Also check #28912 and #28915, which touch the Display popover.\n\n## Acceptance\n\n- Change a sort: the marker appears and names it. Reset: the marker disappears, the list equals the view, and the URL has no `uf_*` state of the reader's.\n- On a list with nothing changed, there is no marker.\n- A narrow window and the phone keep the marker reachable without pushing out the view name.\n- Screenshots at 1440 and 390 px are linked from the PR, so the epic seat can check the marker's look.\n"
+}

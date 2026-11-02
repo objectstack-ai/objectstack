@@ -1,0 +1,38 @@
+{
+  "number": 28895,
+  "kind": "issue",
+  "title": "Setup › 审计日志：表格「操作」列和详情抽屉显示 action 原始值（update / create），同页筛选器已用字段选项标签",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "bug",
+    "domain:ui",
+    "i18n",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T03:30:10Z",
+  "updated_at": "2026-11-02T05:27:52Z",
+  "closed_at": "2026-11-02T05:24:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28895",
+  "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\n立卡门类别：① 已复现缺陷（reach: 界面实测，见「已实测」）\n\nReader: domain:ui 车道，`ui/apps/console/src/pages/system/AuditLogPage.tsx:660`、`:698-699`。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue 审计日志 操作 列 英文` total=1，无关；`sys_audit_log action label 翻译` total=9，均为席位卡或旧审计卡；`审计日志 操作 翻译` total=0。记录页「历史」时间线的同类问题另立一卡（不同组件）。\n\n业务理由：管理员在审计日志里逐行看「谁做了什么」，「操作」列是英文小写的存储值，而同页的「操作」筛选器已经显示中文标签，两者对不上。\n\n## 来源\n2026-11-02 staging 浏览器全量测试：cloud main `70e746ce`，objectstack pin `6cbdef1e`。控制面 https://cloud.objectos.app（组织 Release Check 1001，团队版，所有者账号），环境 https://os-2ph4c1.objectos.app（HotCRM 6.0.0）。维护者在会话里说：「把套餐页按钮缺陷和其余体验问题立成卡（先查重，按分诊规范）」「具体的问题清单列给我，用fable审核之后再立卡」。本卡的落点经第二个审核会话按 origin/main 核对过。\n\n## 已实测\n- 环境 Setup › 审计日志（`/_console/apps/com.objectstack.setup/component/audit/log`，界面语言为中文）：表格「操作」列的徽章显示 `update` / `create`（本次页面 46 个单元格）；表头与筛选器为中文。DOM 读数：`<td><div class=\"… rounded-full …\">update</div></td>`；页面组件为 `AuditLogPage`。\n\n## 落点\n- `AuditLogPage.tsx:660` `<Badge variant={variant}>{r.action || '—'}</Badge>`；`:698-699` 详情抽屉同样输出 `selected?.action`。\n- 同页的筛选器已从 `sys_audit_log.action` 的声明选项取标签（`auditLogActions.ts` 的 `actionFilterOptionsOf`，objectui#13175），表格和抽屉没有复用。\n\n## 修复方向\n表格和详情抽屉用同一份声明选项把 action 映射为标签（`actionFilterOptionsOf` 已经有 value→label），无标签时回退为原始值。「对象」列显示的是 API 名（如 `sys_flow_dispatch`），是否改为对象标签由车道一并判断，不作为本卡验收。\n\n## 验收\n1. 中文界面下「操作」列和详情抽屉显示选项标签（如「更新」「创建」）。\n2. 未声明的 action 值回退为原始值。\n3. 单测覆盖表格单元格与抽屉的标签映射。\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+}

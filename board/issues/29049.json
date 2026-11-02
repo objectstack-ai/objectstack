@@ -1,0 +1,31 @@
+{
+  "number": 29049,
+  "kind": "issue",
+  "title": "lint: os lint stays blind to a flow region the engine refuses to register; validate and build refuse it since #28893 through a CLI-only gate",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:devx",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:25:55Z",
+  "updated_at": "2026-11-02T07:58:02Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29049",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① out-of-scope finding of the #28893 dev (os-dev-report 6570600658), split off by this seat's placement ruling (A) and filed for `domain:devx`. Graded by this seat: p3. `validate` and `build` already refuse it, so only `os lint` and any lint-rule consumer miss it. Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: an author running `os lint` (or a tool built on the authoring-rules registry) on a flow whose `loop` / `parallel` / `try_catch` region is not single-entry/single-exit, or whose `parallel` has one branch.\nReader who acts: the `domain:devx` seat (`packages/lint`).\n\n## What happens\n\nPR #29043 (#28893) adds `packages/cli/src/utils/flow-region-shape.ts`. It runs `FlowSchema` and then the spec's `validateControlFlow` for `os validate` and `os build`, the way #28727's `findExtensionFieldSuffixRefusals` does. The authoring-rules registry (`runAuthoringRules`, shared by validate, build and lint) does not carry it, so `os lint` still passes such a flow. `cli/test/authoring-rule-command-parity.test.ts` records this as a `blindTo` row in its `OUTSIDE_THE_TABLE` table.\n\n## Wanted\n\n- An authoring rule in `packages/lint` that calls the spec's `validateControlFlow` (⛔ no copy), with the engine's message, so all three commands see it.\n- Then retire the CLI-only gate, or keep it as a delegate, and move the parity row into `CASES`.\n- One test per command.\n\nBlocked-by: #28893 (PR #29043).\n\nDedupe: searched `lint flow region single-exit`; none. **New.**\n\nLinks back: #28893, PR #29043, #28727."
+}

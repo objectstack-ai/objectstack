@@ -2,9 +2,9 @@
   "number": 28847,
   "kind": "pull_request",
   "title": "docs(skills): a locale added in the `.custom` pair is served on the base's address; a dependent's added locale stays under its own package",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
-  "draft": true,
+  "draft": false,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "needs-user-decision",
     "size/s",
     "tooling"
   ],
@@ -20,10 +19,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T00:23:10Z",
-  "updated_at": "2026-11-02T01:58:39Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-02T04:05:40Z",
+  "closed_at": "2026-11-02T04:05:39Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-02T04:05:39Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28847",

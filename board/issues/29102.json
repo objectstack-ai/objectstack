@@ -1,0 +1,31 @@
+{
+  "number": 29102,
+  "kind": "issue",
+  "title": "Console: a member refused the Setup app who opens /apps/setup/OBJECT/new gets the create form under the default app's shell, after #28988 refused only the alias list routes",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T07:21:04Z",
+  "updated_at": "2026-11-02T08:21:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29102",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #28988 os-dev-report (PR #29082, report 6571185519) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After #28988, a member refused the Setup app who opens an alias-spelled object **list** route (`/apps/setup/sys_user`) gets \"You don't have access to this app\". The create route beside it, `/apps/setup/OBJECT/new`, still renders the create form inside the default app's header and sidebar under a `/apps/setup/…` address, the same \"looks like I'm in the admin console\" confusion #28988 fixed for lists.\n\n**Measured (PR #29082 at `0259ffcd`, dev's reading and tests; NOT MEASURED by the seat at a public door).**\n- PR #29082 adds `isSetupObjectListRoute` to `appSurfaceAwaitsVerdict` in `ui/packages/app-shell/src/console/AppContent.tsx` for `:objectName`, `:objectName/view/:viewId` and `:objectName/data` only.\n- `OBJECT/new` was left out on purpose: #28988's claim limited the change to list routes, because `AppContent.tsx:537-543` leaves the Setup subtree's record routes (`/apps/setup/OBJECT/record/ID`, reached by members from the approvals inbox) as an open product decision (objectui#12706). `OBJECT/new` is not one of those inbox links.\n\n**Wanted.**\n1. A refused caller on `/apps/setup/OBJECT/new` (and the canonical `/apps/com.objectstack.setup/OBJECT/new`) gets the same access-denied page as the list route. Admins are unchanged.\n2. Record routes stay as they are until objectui#12706 is decided.\n3. No new metadata key or option.\n\n**Tests.** A refused member on the alias and canonical `new` routes sees the refusal; an admin sees the form; an approvals-inbox record link still opens. A test that fails on `main` after #29082.\n\n**Reader.** `domain:ui`. Size S. Waits for PR #29082 (#28988) to land.\n\n**Dedupe.** Searched `apps/setup new refused`: only #28988, #27507 and QA runs.\n\nLinks back: #28988, PR #29082."
+}

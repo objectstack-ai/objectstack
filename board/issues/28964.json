@@ -1,0 +1,34 @@
+{
+  "number": 28964,
+  "kind": "pull_request",
+  "title": "fix(app-shell): a ⌘K record hit opens under the app that lists its object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T04:59:22Z",
+  "updated_at": "2026-11-02T05:26:29Z",
+  "closed_at": "2026-11-02T05:26:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T05:26:27Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28964",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbWpUA7fw8QiGG9YiDDSgEUC)_\n\nFixes #28890\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:⌘K 搜到的记录,现在在「列出该对象的应用」里打开:当前应用列出它就留在当前应用;否则去第一个列出它的可打开应用;都没有才留在当前应用。\n- **为什么改**:没有对象导航的应用(如 cloud 的「账户」应用)会搜全部对象,搜到的环境记录却按「账户」应用拼链接,打开后左栏和应用切换器都不对。\n- **风险与回滚**:只改记录命中的链接,当前应用列出该对象时行为不变;回滚即 revert 本 PR。\n- **先看**:`ui/packages/app-shell/src/chrome/CommandPalette.tsx` 的 `recordHitAppSegment` 与 `appListsObject`;其次新测试文件。\n- **两分钟验证**:`cd ui && pnpm exec vitest run packages/app-shell/src/chrome/CommandPalette.recordHitApp-28890.test.tsx`,预期 4 个用例全绿。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n`CommandPalette.tsx` built every record hit's link from the palette's own app (`baseUrl`). An app with no object navigation searches every object (the scope at `CommandPalette.tsx` `searchableObjectNames`), so its hits named objects it does not list, and each one opened under that app with the wrong sidebar and switcher.\n\nA record hit now opens under:\n\n1. the palette's own app, when it lists the hit's object (unchanged behaviour);\n2. otherwise the first app the user can open that lists it: `filterActiveApps` (active, not hidden), in metadata order, addressed by `appAddressSegment`;\n3. otherwise the palette's own app.\n\n\"Lists\" means a `type: 'object'` entry naming the object at any depth of the app's `navigation` or any `areas[].navigation`, among the entries the member is shown there: `navEntriesShownToMember` under the palette's gates, walked with `navigationNames`. That is the way `activityObjectRoster` reads every app's navigation.\n\nNo new resolver module. On `main` at `9a9823d9` no console helper resolves an app from an object: `resolveHostAppSegment` (the card's named example) takes no object and answers \"the app the user is in, else the first active app\", and every other record-link producer uses the current app or `resolveHostAppSegment`. The two private functions added here compose the existing helpers (`filterActiveApps`, `appAddressSegment`, `navEntriesShownToMember`, `navigationNames`); only the \"does this app list this object\" predicate is new, and it stays private to the palette.\n\n## Tests\n\n`ui/packages/app-shell/src/chrome/CommandPalette.recordHitApp-28890.test.tsx` mounts the real palette and `CommandPaletteProvider`, chooses the record hit, and reads the address off the router:\n\n- from a component-only app, the hit opens under the first app that lists the object (skipping an app that lists nothing and a hidden app that lists it), addressed by its package id;\n- an app that lists the object only in an `areas[].navigation` counts as listing it;\n- CONTROL: from an app that lists the object, the hit stays there, even with an earlier app that also lists it;\n- CONTROL: when no openable app lists the object, the hit stays under the palette's app.\n\nAblation (`scripts/ablation-replace.mjs`, mutation landed and restored to the HEAD blob): with the hit's base forced back to `baseUrl`, the two branch cases go red (`Received: \"/apps/account/sys_environment_28890/record/E1\"`) and the two controls stay green.\n\n## Acceptance notes\n\n- Acceptance 1 is measured with a local reproduction (a component-only app and an object another app lists), not on the cloud control plane; the cloud repository was not needed.\n- Out of scope, per the ruling: the search scope (an app with no object navigation searches every object) is left as it is. It is what lets such an app find these records at all, and this PR only changes where they open.\n- A hit whose object is listed by several other apps opens under the first in metadata order, never a \"best\" one.\n\n## Verification\n\nLocal readings, `objectstack-ai/objectstack`. Derived gates on `af0d5914` (the fix and changeset, before the main merge); tests, type-check and the key gates re-run on the final head `938ba76b` (main merged at `a3640933`, plus a type-only commit).\n\n<details><summary>Derived gates: 34 derived, 34 run, 0 NOT-MEASURED, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 34 families for the 3 changed paths (199 changed lines, under 3000). Every one exited 0, including `node scripts/check-sdui-manifest.mjs` and its `--self-test`, the changeset gates (run with this body as the event), `pnpm check:cross-package-test-inputs`, `pnpm check:test-source-alias`, `pnpm check:type-check-coverage` / `-debt`, and `pnpm --dir ui exec vitest run scripts/` (169 files passed, 2 skipped). `dispatch-gates --ran` reconciled: 34 run, 0 NOT-MEASURED, 0 UNRUN.\n\nOn `938ba76b`: `check-sdui-manifest`, `check-changeset-no-major --base origin/main`, `check-empty-changeset --base origin/main`, `check:nul-bytes`, `check:type-check-debt`, `check:type-check-coverage`, `check:undeclared-dep-imports`: all exit 0.\n</details>\n\n<details><summary>Tests and type-check</summary>\n\n- New file: 4/4 passed.\n- Every test file that names `CommandPalette` (`git grep -l`, 71 files: 66 under `ui/packages`, 5 under `ui/apps/console`): 609 tests passed, on `af0d5914`. All 23 files in `ui/packages/app-shell/src/chrome/` (144 tests) passed again on `938ba76b`.\n- `turbo run type-check --filter=@object-ui/app-shell` (`tsc --noEmit` and `tsc -p tsconfig.test.json`): exit 0; both re-run on `938ba76b`, exit 0.\n- `eslint` on the two touched files: 0 errors, and no warning the file did not already have on `main`.\n- The whole app-shell suite is left to CI's Test UI.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTYffwZcQvQX8pCSso)_\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jTYffwZcQvQX8pCSso\n"
+}

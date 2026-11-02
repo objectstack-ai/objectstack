@@ -1,0 +1,31 @@
+{
+  "number": 29131,
+  "kind": "issue",
+  "title": "Console at phone width: Back with the nav drawer open leaves the page (to /home) instead of closing the drawer",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T08:05:40Z",
+  "updated_at": "2026-11-02T08:20:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29131",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #29075 audit (phone-width Navigation flow, run record `/mnt/project-files/issue-29075/run-record-before.md`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** On a phone, people close an open menu with Back, and Android's back gesture in the WebView does the same. Today Back with the nav drawer open throws them out of the list they were on and lands them on Home.\n\n**Measured (`origin/main` `6b3ba82c`, real Console, CRM and showcase, 375 and 390 px, step 07).** On `/_console/apps/com.example.crm/crm_lead`, open the nav drawer and press Back: the URL becomes `/_console/home` and the drawer is gone (`{\"urlAfter\":\".../_console/home\",\"drawerStill\":false}`), in all four runs.\n\n**Decision needed first.** `ui/AGENTS.md` #8 classifies the drawer as ephemeral state, so it pushes no history entry. Closing it on Back needs either a history entry while it is open (and a rule for removing it on a normal close) or a popstate guard. Settle which one before code.\n\n**Wanted.**\n1. Below `sm`, Back with the nav drawer open closes the drawer and leaves the URL as it was.\n2. Back with the drawer closed behaves as today.\n3. Opening and closing the drawer by tap leaves no stray history entries, so Back never stops on a no-op.\n4. Desktop is unchanged.\n\n**Tests.** Open the drawer, Back, and the drawer closes on the same URL. Open, tap close, Back, and you go to the previous page. Desktop has no history change.\n\n**Reader.** `domain:ui` (`area:navigation`). Size S to M, depending on the history decision.\n\n**Dedupe.** Searched `back drawer phone`, `android back drawer`, `sidebar back button`: no product card.\n\nLinks back: #29075, #29040."
+}

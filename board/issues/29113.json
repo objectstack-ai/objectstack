@@ -1,0 +1,31 @@
+{
+  "number": 29113,
+  "kind": "issue",
+  "title": "Studio Interfaces pillar: a leaf edit whose save was refused (422) is seen by no unsaved-changes guard, so a reload drops it silently",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T07:57:38Z",
+  "updated_at": "2026-11-02T08:17:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29113",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #29022 dev's reading at `origin/main` `5d3667e2` · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** In Studio's Interfaces pillar (reports, dashboards and other leaf items), when the server refuses a leaf's autosave (422), the edit stays on screen but nothing treats it as unsaved: no \"leave page?\" prompt, no header guard, no rail marker. A reload drops the edit with no warning. #29022 closes one door into this (a Joined report with no blocks); any other refused leaf save still loses work silently.\n\n**Measured (source reading, NOT MEASURED at a public door).**\n- `ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx`, `InterfacesPillar`: only `navDirty` is mirrored through `onDirtyChange`.\n- `heldEdit` carries held clauses only; a leaf save refused by the server is neither held nor dirty to the guards (`beforeunload`, header, rail).\n\n**Wanted.**\n1. While the open leaf's last save was refused and it still has edits, the pillar reports dirty, so `beforeunload` and the header guard ask before the edit is lost.\n2. A successful save, or loading another leaf, clears it.\n3. No new metadata key or option.\n\n**Tests.** A leaf edit refused with a 422 makes the guard ask on reload; a successful save afterwards clears it; an untouched leaf never asks.\n\n**Reader.** `domain:ui` (`area:studio`). Size S. Waits for #29015 (holds `StudioDesignSurface.tsx`).\n\n**Dedupe.** Searched `InterfacesPillar onDirtyChange refused save`, `studio leaf 422 lost reload`: only #29022.\n\nLinks back: #29022."
+}

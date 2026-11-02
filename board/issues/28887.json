@@ -1,0 +1,35 @@
+{
+  "number": 28887,
+  "kind": "pull_request",
+  "title": "fix(objectql): an object extension whose extend folds to a legacy ns__name key is filed under that key, not a second owner-less entry (#28858)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T03:06:41Z",
+  "updated_at": "2026-11-02T03:53:35Z",
+  "closed_at": "2026-11-02T03:53:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T03:53:33Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28887",
+  "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFixes #28858\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：对象扩展的 `extend` 写成短名，而 `getObject` 把它折叠到旧式 `ns__name` 键时，注册表把这条扩展登记到折叠后的那个键上，字段落到真正的对象，不再在旁边开一个没有所有者的第二个对象条目；同一写法每个包在日志里 `warn` 一次，并给出应写的键。\n- **为什么改**：#28853 让 `object_extension` 保存口拒绝这种写法，但清单的 `objectExtensions` 循环和启动时回灌存储行仍照原样登记，会多出一个幽灵条目，扩展的字段也到不了任何读取。\n- **风险与回滚**：低。只影响 `extend` 折叠到别的键的扩展；本仓库和 hotcrm 中这样的写法为 0。写对键、或对象恰好以该名字注册时行为不变。启动时不拒绝。回滚即还原本 PR。\n- **先看**：`packages/objectql/src/registry.ts` 的 `registerObject` 中 `extend` 分支新增的两行，以及 `extensionTargetKey`。\n- **两分钟验证**：`pnpm --filter @objectstack/objectql exec vitest run src/registry-extension-legacy-key-fold.test.ts`，预期 4/4。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n`registerObject`'s `extend` arm is the one place both entries reach: the manifest `objectExtensions` loop (`engine.ts`) and a stored `object_extension` row (`registerObjectExtension`). Right after the extend refusals, it now files the contribution under `extensionTargetKey(extend)`. That is `extend` itself when an entry is registered under it or nothing is registered that it folds to. It is `getObject`'s fold (`resolveObjectKey`) only when the fold names a different key. The folded spelling is named once at `warn`, keyed by spelling, resolved key and package (deduped like `reportFieldPatchMisses`), with the key to write. `registerObjectExtension` answers the resolved key, and the row delete's `withdrawObjectExtension` already resolves the same way.\n\nThere are no refusals at boot, no change to #28853's item gate, and `computeFQN` / `parseFQN` are untouched. There is no `packages/spec/**`, no new export, gate or error code.\n\n**Premise, measured (step 1).** The count is 0 everywhere:\n- in this repo (main 7e60dc23), the three non-test `extend` values are each a declared object's exact name, and no shipped object name contains `__`;\n- in hotcrm (a598256), there are 0 extensions and 0 such names.\n\nThe case is still reachable by authoring: the spec dist's `ObjectSchema` accepts `crm__account` and `survey__c`, and a stored object row from the FQN era reaches it too. The seat kept the card on that ground.\n\n**Clause-② measured: no.** No accept set moves and nothing is exported. For a package with the folded spelling (0 measured), the extension's fields now reach the object they name, where on main they reached no read.\n\n**Residual.** A legacy owner that registers after the extension is not yet there to fold to, so that extension is filed as written, as on main.\n\n## Tests\n\n<details><summary>Red first, ablation, controls</summary>\n\n- `objectql` `registry-extension-legacy-key-fold.test.ts` (4 cases, from source):\n  - manifest entry `extend: 'case'` beside the owner `crm__case`: the field lands on `crm__case`, no `case` contributors, one object listed, one warn across a re-read and a re-register;\n  - `registerObjectExtension` answers `crm__case`, warns once, and withdrawing by the short name removes it;\n  - controls: the registered key registers with no warn; an object registered exactly as `case` beside `crm__case` keeps its extension, with no warn.\n  - Red on main 45efba2a: 2 failed | 2 passed.\n- `runtime` `meta-object-extension-item-door-fit.test.ts`, new case: a stored row respelled at rest to `extend: 'case'`, then `loadMetaFromDb`. The field lands on `crm__case`, no `case` entry, one warn.\n  - Red on main (objectql rebuilt from base with `pnpm --filter`, head-only string count 0 in dist): 1 failed | 5 passed, with a `case` contributor present. On head (rebuilt, count 2): 6/6.\n  - #28853's item-gate pins stay green in the same file.\n- Ablation: the resolution line deleted through `ablation-replace.mjs` gave both objectql pins red (2 failed | 2 passed). Restore: `ok restored: blob == HEAD`, `git diff HEAD` empty.\n</details>\n\n<details><summary>Suites, typecheck, lint, gates</summary>\n\nHead `6db3a09f`, under the verify lock:\n- objectql: 524 files, 10030 tests passed;\n- metadata-protocol: 297 files passed, 4 skipped; 22093 tests passed, 26 skipped.\n\n`pnpm typecheck` in full (tsc plus check:test-typecheck) exits 0 for objectql and runtime, and both ledgers hold. eslint `--no-inline-config` on the 3 touched files: exit 0.\n\nGates: `dispatch-gates.mjs --commands` derived 63, all run, every exit 0. `--ran`: 63 derived, 63 run, 0 NOT-MEASURED.\n\nDogfood battery: not owed (no `!`, no narrowing arm).\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5oTRCUNQ4EA3YV84sZ\n"
+}

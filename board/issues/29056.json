@@ -1,0 +1,30 @@
+{
+  "number": 29056,
+  "kind": "pull_request",
+  "title": "pm-dispatch: register objectstack-ai/mobile as an on-demand repo lane",
+  "state": "open",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T06:30:28Z",
+  "updated_at": "2026-11-02T08:07:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29056",
+  "body": "No issue: this registers a sibling repository for the PM loop, at the maintainer's direction (quoted below).\n\n## What changes\n\n- `scripts/pm/check-governed-merges.mjs`:\n  - `GOVERNED_REPOS` gains `{ id: 'mobile', slug: 'objectstack-ai/mobile' }`;\n  - the docblock records why;\n  - the two self-test pins that spell the roster move five → six.\n  - The scoped `workflows` row is unchanged, so mobile's EAS workflows are not a governed surface (same as hotcrm). The default-scoped rows (ADRs, `.claude/**`, skills, `AGENTS.md`, `CLAUDE.md`, North Star) now govern mobile too.\n- `.claude/skills/pm-dispatch/references/lanes/mobile.md` (new): the `repo:mobile` seat charter.\n  - The seat is summoned on demand and creates no patrol routine.\n  - Business UI stays in the Console; the shell takes native capability only.\n  - Console defects found on mobile are filed at objectstack, never worked around in the shell.\n  - While a push to `main` runs `eas-build` / `eas-update`, merges in that repo are the maintainer's (AGENTS.md release directive).\n  - Device-only acceptance goes to the maintainer and is never reported as verified.\n- `scripts/pm/ensure-pm-labels.sh`: the pm vocabulary loop includes `objectstack-ai/mobile`. No `repo:mobile` seam row is added, because no reader exists yet.\n- `references/project-forms.md`: the seat words include `mobile`.\n- `references/cross-repo-coordination.md`: the single-lane repo list includes `mobile`.\n- `scripts/pm/check-skill-line-ratchet.mjs`: rows for the new charter (49 lines, 0 table-row bytes), at the landed count.\n\n## Why\n\n`objectstack-ai/mobile` 2.0 is a native shell around the Console (objectstack-ai/mobile#144). Its follow-up cards (objectstack-ai/mobile#145–#148) need a seat to be dispatched. Admission was put to the maintainer as three options; the answer was:\n\n> Register, seat on demand (Recommended)\n\nThe rationale presented with that recommendation: most follow-up work lands in this repository's existing `ui` / `server` lanes (#29039–#29042), so the mobile lane's volume is low and a standing routine would spend budget on an empty queue.\n\n## Verification\n\nRun in this branch's worktree, each with its exit code captured before any pipe:\n\n- `node scripts/pm/check-skill-line-ratchet.mjs --self-test`: 164 cases pass. The gate itself exits 0; it first flagged 7 charter lines over the 120-byte budget, which were wrapped before the pin was set.\n- `node scripts/pm/check-skill-id-lint.mjs` (and `--self-test`): clean.\n- `node scripts/pm/check-governed-merges.mjs --self-test`: 537 assertions, exit 0. It needs `pnpm install` first.\n- `node scripts/pm/check-governed-prose.mjs`: exit 0.\n- `node scripts/pm/post-stamped.mjs --self-test`: 753 cases. `OWN_REFERENCE_PREFIXES` derives from the roster.\n- `node scripts/pm/check-half-states.mjs --self-test`: 5185 cases.\n- `node scripts/pm/check-label-desc-cap.mjs`: exit 0.\n- `npx eslint` on the two changed `.mjs` files: clean. `bash -n scripts/pm/ensure-pm-labels.sh`: ok.\n- `node scripts/pm/dispatch-gates.mjs --self-test`: still running when this PR was opened; CI carries it.\n\nClause-②: no\nMetadata-protocol: none\n\nNothing here publishes: `scripts/pm` and `.claude/**` are repo tooling, so there is no changeset.\n\n## Landing\n\nGoverned surface: `.claude/**` is Tier S and no Tier H path is touched. This PR is left in draft for its contract-tier review of record. The steps after merge belong to the maintainer:\n\n- install the fleet App on `objectstack-ai/mobile`;\n- run `scripts/pm/ensure-pm-labels.sh` against it;\n- the seat's first summons writes its seat post.\n\n## 维护者速读\n\n- 改了什么:把 mobile 仓登记进 PM 循环:受管仓名册加一行，新增 `repo:mobile` 席位宪章（按需召唤、不建巡查 routine），标签词表与席位词同步。\n- 为什么改:mobile 已改为宿主 Console 的原生壳，后续卡要靠 pm-dispatch 派发；你选了「登记、按需召唤」。\n- 风险与回滚:只动 PM 工具与 `.claude/**`，不碰产品包；回滚即还原本 PR。mobile 的 EAS workflow 不纳入受管面。\n- 先看:`references/lanes/mobile.md` 的「常设承诺」，尤其是「main 上 push 触发 EAS 期间合并归你」这一条。\n- 两分钟验证:`node scripts/pm/check-governed-merges.mjs --self-test` 与 `node scripts/pm/check-skill-line-ratchet.mjs`，两者都应退出 0。\n- 需要你做的:按 Tier S 走达档复核后落地；合并后在 mobile 仓安装车队 App，再对它跑一次 `ensure-pm-labels.sh`。\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes on the changed files.\n- [ ] 4. One issue, one branch off an up-to-date `main`, one pull request. (no issue; branch off `main` from today)\n- [x] 5. A change that publishes carries a changeset. (nothing publishes)\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to generated or release-owned docs.\n- [x] 8. Title, body and comments are in English. (the 维护者速读 block is the maintainer's channel)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01Q4EjjRHkJgnuLkU9vVgHHR)_"
+}
