@@ -459,11 +459,12 @@ export function LoginForm({
   // its own enforcement declaration, or the SSO button. Never while the
   // server answers `features.sso: false` with no enforcement.
   const ssoOnlyCopy = ssoOnlyView && !noSignInMethod && (ssoEnforced || ssoEnabled);
-  // Under declared enforcement the SSO button IS the way in, so the SSO-only
-  // view draws it on first paint with the email field it routes, and no
-  // password field. It used to live only inside the password form, reachable
-  // solely through the break-glass link.
-  const ssoEmailFormVisible = ssoOnlyView && ssoEnforced && ssoEnabled;
+  // When the password form is collapsed (declared enforcement, or the password
+  // door shut) and the server advertises SSO, the SSO button IS the way in, so
+  // the SSO-only view draws it on first paint with the email field it routes,
+  // and no password field. It used to live only inside the password form,
+  // reachable solely through the break-glass link.
+  const ssoEmailFormVisible = ssoOnlyView && ssoEnabled;
 
   return (
     // `sm:max-w-[400px]`, not a fixed `sm:w-[400px]`: identical wherever the

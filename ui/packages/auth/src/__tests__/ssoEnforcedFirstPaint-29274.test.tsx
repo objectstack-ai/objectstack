@@ -15,8 +15,13 @@
  * and the SSO button, and no password field; the break-glass link still
  * reveals the password form.
  *
- * The controls: federated providers only, a server without enforcement, and
- * the password-off states keep their views.
+ * The same holds when the password door is shut (`emailPassword.enabled:
+ * false`) and the server advertises SSO without enforcing it: that collapses
+ * the same form, and the break-glass link there opens a password door the
+ * server refuses.
+ *
+ * The controls: federated providers only, a server whose password form is
+ * shown, and the no-method state keep their views.
  */
 import React from 'react';
 import { afterEach, describe, it, expect, vi } from 'vitest';
@@ -119,6 +124,22 @@ describe('LoginForm — SSO enforcement with SSO advertised: the first paint is 
   });
 });
 
+describe('LoginForm — password door shut with SSO advertised: the first paint is the SSO path too', () => {
+  it('draws the email field and the SSO button, and no password field, without enforcement', async () => {
+    renderLogin({
+      socialProviders: [],
+      emailPassword: { enabled: false },
+      features: { sso: true, ssoEnforced: false },
+    });
+    await configResolved();
+
+    expect(screen.getByLabelText('Email')).toBeTruthy();
+    expect(screen.getByRole('button', SSO_BUTTON)).toBeTruthy();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
+  });
+});
+
 describe('LoginForm — the views around it stay as they were', () => {
   it('enforcement with federated providers only: the providers and the link, no email field', async () => {
     renderLogin({ socialProviders: OIDC, features: { sso: false, ssoEnforced: true } });
@@ -139,19 +160,6 @@ describe('LoginForm — the views around it stay as they were', () => {
     expect(screen.getByRole('button', SSO_BUTTON)).toBeTruthy();
     expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
     expect(screen.queryByTestId('login-sso-email-form')).toBeNull();
-  });
-
-  it('password off with SSO advertised and no enforcement: the SSO button stays behind the link', async () => {
-    renderLogin({
-      socialProviders: [],
-      emailPassword: { enabled: false },
-      features: { sso: true, ssoEnforced: false },
-    });
-    await configResolved();
-
-    expect(screen.queryByRole('button', SSO_BUTTON)).toBeNull();
-    fireEvent.click(screen.getByRole('button', BREAK_GLASS));
-    expect(await screen.findByRole('button', SSO_BUTTON)).toBeTruthy();
   });
 
   it('password off and nothing else advertised: the no-method statement', async () => {
