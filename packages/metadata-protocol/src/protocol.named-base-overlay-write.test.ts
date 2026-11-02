@@ -310,7 +310,7 @@ describe('CONTROLS: the writes the close leaves open, as on main', () => {
     });
 
     it('a server-stated rewrite naming the base (`source` set) still writes the row it names', async () => {
-        const { protocol, rows, storeBaseRow } = makeProtocol();
+        const { rows, storeBaseRow } = makeProtocol();
 
         await storeBaseRow(VIEW.type, VIEW.name, VIEW.body('Rewritten'));
 
