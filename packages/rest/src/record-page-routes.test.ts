@@ -527,7 +527,7 @@ describe('[#28470] the record\'s streams and the related rows\' names ride in th
 });
 
 describe('[#28737] the timeline part is the 动态 stream\'s size, counted by the caller\'s own reads', () => {
-    const items = { ...ITEMS, sys_audit_log: systemObject('sys_audit_log') };
+    const items: Record<string, any> = { ...ITEMS, sys_audit_log: systemObject('sys_audit_log') };
     // Each count read answers its own total, so a sum that took one source's
     // count for another's would show.
     const countOf = (req: any) => {
