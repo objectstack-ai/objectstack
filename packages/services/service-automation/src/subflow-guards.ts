@@ -16,6 +16,7 @@
 import type { FlowParsed } from '@objectstack/spec/automation';
 import { describeTurnedOffPackagedItem } from '@objectstack/types';
 import type { AutomationEngine } from './engine.js';
+import { subflowNoticeTrap, transitiveSubflowCallers } from './subflow-notice-guard.js';
 
 /**
  * The `AutomationEngine` members the moved bodies read, each typed as the class
@@ -39,6 +40,7 @@ export interface SubflowGuardsHost {
     readonly describeDisabledSubflows: AutomationEngine['describeDisabledSubflows'];
     readonly boundFlowTriggers: AutomationEngine['boundFlowTriggers'];
     readonly subflowDeclinedFlows: AutomationEngine['subflowDeclinedFlows'];
+    readonly subflowNoticeDeclinedFlows: AutomationEngine['subflowNoticeDeclinedFlows'];
     readonly packagedSubflowCallers: AutomationEngine['packagedSubflowCallers'];
     readonly deactivateFlowTrigger: AutomationEngine['deactivateFlowTrigger'];
     readonly activateFlowTrigger: AutomationEngine['activateFlowTrigger'];
@@ -245,13 +247,26 @@ export function describeDisabledSubflows(
     return { reasons, remedy };
 }
 
-/** The body of {@link AutomationEngine.rejudgeSubflowCallers}, moved unedited; that method's docblock is its contract. */
-export function rejudgeSubflowCallers(this: Pick<SubflowGuardsHost, 'boundFlowTriggers' | 'subflowDeclinedFlows' | 'packagedSubflowCallers' | 'disabledPackagedSubflows' | 'deactivateFlowTrigger' | 'activateFlowTrigger'>, subflow: string): void {
-    if (this.boundFlowTriggers.size === 0 && this.subflowDeclinedFlows.size === 0) return;
+/** The body of {@link AutomationEngine.rejudgeSubflowCallers}; that method's docblock is its contract. */
+export function rejudgeSubflowCallers(this: Pick<SubflowGuardsHost, 'boundFlowTriggers' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'flows' | 'subflowTargets' | 'packagedSubflowCallers' | 'disabledPackagedSubflows' | 'deactivateFlowTrigger' | 'activateFlowTrigger'>, subflow: string): void {
+    if (this.boundFlowTriggers.size === 0 && this.subflowDeclinedFlows.size === 0 && this.subflowNoticeDeclinedFlows.size === 0) return;
+    const reoffered = new Set<string>();
     for (const caller of this.packagedSubflowCallers(subflow)) {
         const settled = this.boundFlowTriggers.has(caller)
             ? this.disabledPackagedSubflows(caller).length === 0
             : !this.subflowDeclinedFlows.has(caller);
+        if (settled) continue;
+        this.deactivateFlowTrigger(caller);
+        this.activateFlowTrigger(caller);
+        reoffered.add(caller);
+    }
+    // [#28840] The save-notice half reads the child's own calls, so every
+    // caller whose calls reach `subflow` can move, packaged or not.
+    for (const caller of transitiveSubflowCallers(this.flows, this.subflowTargets, subflow)) {
+        if (reoffered.has(caller)) continue;
+        const settled = this.boundFlowTriggers.has(caller)
+            ? subflowNoticeTrap(this.flows, caller) === undefined
+            : !this.subflowNoticeDeclinedFlows.has(caller);
         if (settled) continue;
         this.deactivateFlowTrigger(caller);
         this.activateFlowTrigger(caller);

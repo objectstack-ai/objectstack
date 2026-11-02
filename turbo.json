@@ -596,6 +596,7 @@
         "!**/node_modules/**",
         "$TURBO_ROOT$/packages/client/src/**",
         "$TURBO_ROOT$/packages/mcp/src/**",
+        "$TURBO_ROOT$/packages/plugins/plugin-audit/src/objects/sys-activity.object.ts",
         "$TURBO_ROOT$/packages/plugins/plugin-hono-server/src/**",
         "$TURBO_ROOT$/packages/rest/src/**",
         "$TURBO_ROOT$/packages/runtime/src/**",

@@ -96,9 +96,12 @@ const AUTOSAVE = { timeout: 5000 };
 const PAST_THE_PAUSE = 2500;
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// `all`, not `select`: the cases below make their unrelated edit in CHECK, which
+// the spec refuses on a `select` policy and the editor no longer offers there
+// (objectstack#28664).
 const policy = (using: string) => ({
   ...SET,
-  rowLevelSecurity: [{ name: 'hot_deals', object: 'a_account', operation: 'select', using, enabled: true }],
+  rowLevelSecurity: [{ name: 'hot_deals', object: 'a_account', operation: 'all', using, enabled: true }],
 });
 
 async function openPackageDoor(server: Server) {
