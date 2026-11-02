@@ -42,7 +42,9 @@
  *
  * The two rules above judge the caller against the FLOW. A start that names a
  * record also hands the run a row, and a `runAs: 'system'` run reads and
- * writes that row past the caller's own access. So every door asks a third
+ * writes that row past the caller's own access; a user run is asked the same,
+ * as the action door's load asks it of every run, so a persisted run is built
+ * only on a row its caller has shown it can read. So every door asks a third
  * question after them, through ONE function,
  * `refuseUnreadableFlowStartRecords` (`action-execution.ts`): every record key
  * the door hands the run in a row slot it defines (`recordId`, the

@@ -2725,15 +2725,19 @@ async function respondToFlowTrigger(
     // every row slot the built context carries is loaded in the caller's own
     // scope, by the read the action door's subject load makes, and refused with
     // its `404 RECORD_NOT_FOUND` BEFORE `execute()`, so a refused start has no
-    // run. Thrown, like the builder's own refusal above, and answered by the
-    // dispatcher with its code and status.
-    await refuseUnreadableFlowStartRecords(
-        automationService,
-        flowName,
-        flowStartRecordKeys(automationContext),
-        context?.executionContext,
-        (object, id) => callData(deps, context, 'get', { object, id }, context?.dataDriver, context?.environmentId, context?.executionContext),
-    );
+    // run. Answered through `errorFromThrown`, the exit the action door serves
+    // the same refusal through, so the two doors answer one envelope.
+    try {
+        await refuseUnreadableFlowStartRecords(
+            automationService,
+            flowName,
+            flowStartRecordKeys(automationContext),
+            context?.executionContext,
+            (object, id) => callData(deps, context, 'get', { object, id }, context?.dataDriver, context?.environmentId, context?.executionContext),
+        );
+    } catch (err) {
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
     const result = await automationService.execute(flowName, automationContext);
     const refusal = classifyFlowRefusal(flowName, result);
     if (refusal) {
