@@ -32,25 +32,32 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FORM_FIELD_UNKNOWN, validateFormLayout } from '@objectstack/lint';
+import { FORM_FIELD_UNKNOWN, FORM_SECTION_GROUP_UNKNOWN, validateFormLayout } from '@objectstack/lint';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
-/** The object as authored: what the gate's universe lists. */
+/** The object as authored, one declared field group among its keys. */
 const authoredTask = {
     name: 'task',
     label: 'Task',
     sharingModel: 'private',
+    fieldGroups: [{ key: 'details', label: 'Details' }],
     fields: {
-        title: { type: 'text', label: 'Title' },
+        title: { type: 'text', label: 'Title', group: 'details' },
         status: { type: 'text', label: 'Status' },
     },
 };
 
 /**
- * The object as the door SERVES it (`registry.getObject`): the authored fields
- * plus one an extension contributes. A form naming `region__c` names a field
- * the served object has, so it must not be reported.
+ * The object as the registry SERVES it: the authored fields plus one an
+ * extension contributes. A form naming `region__c` names a field the served
+ * object has, so it must not be reported.
+ *
+ * [#29309] Both registry reads answer this shape, and the stub below says so:
+ * `getObject` (the read's resolver) and `listItems('object')` (the publish
+ * gate's universe) both go through `SchemaRegistry.resolveObject`, the overlay
+ * plus every extender folded on. The stub's universe used to list the
+ * authored shape, which no real registry answers.
  */
 const servedTask = {
     ...authoredTask,
@@ -156,7 +163,9 @@ function makeStubEngine() {
         registry: {
             registerItem: () => {},
             registerObject: () => {},
-            listItems: (type: string) => (type === 'object' ? [authoredTask] : []),
+            // The publish gate's universe: `getAllObjects`, the same merged
+            // object `getObject` serves (`resolveObject` for both).
+            listItems: (type: string) => (type === 'object' ? [servedTask] : []),
             // The read path's resolver: the SERVED object, extensions folded on.
             getObject: (name: string) => (name === 'task' ? servedTask : undefined),
             getPackage: (id: string) => (id === PKG ? { manifest: { id: PKG } } : undefined),
@@ -259,5 +268,132 @@ describe('a form view naming a field its object lacks reads with the lint warnin
 
         await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG, mode: 'draft' });
         expect(await readDiagnostics(protocol, item.name, 'draft')).toEqual({ valid: true });
+    });
+});
+
+// ---------------------------------------------------------------------------
+// #29309 — the sibling finding on the read, and both findings on the save and
+// publish answers.
+//
+// Measured on `origin/main` `57cde8cb` before the fix: a section naming an
+// undeclared field group read `{ valid: true }` (the read let
+// `form-field-unknown` through and nothing else), and an active save and a
+// publish of a form naming an unknown field or group answered with no
+// `advisories` key at all (`validateFormLayout` was CLI-only in
+// `AUTHORING_RULES`). The publish gate's universe holds the bound object with
+// its extension fields on both doors that run rules (see `servedTask`), so the
+// rule is crossed to `runtimeTypes: ['view']`. A draft save runs no registry
+// rule (#4463 D1), so it carries no advisory; its read does.
+// ---------------------------------------------------------------------------
+
+/** A view container whose named form `edit` carries the given sections. */
+function formContainer(sections: Array<Record<string, unknown>>) {
+    return { name: 'task', object: 'task', formViews: { edit: { type: 'simple', sections } } };
+}
+
+/** The lint's findings on a container, from the rule itself — the one spelling. */
+function lintFindings(container: Record<string, unknown>) {
+    return validateFormLayout({ objects: [servedTask], views: [container] });
+}
+
+type Advisory = { rule: string; path: string; message: string; hint: string; severity: string };
+
+function formLayoutAdvisories(response: { advisories?: Advisory[] }): Advisory[] {
+    return (response.advisories ?? []).filter(
+        (a) => a.rule === FORM_FIELD_UNKNOWN || a.rule === FORM_SECTION_GROUP_UNKNOWN,
+    );
+}
+
+describe('form-section-group-unknown on the read, and both findings on save and publish (#29309)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it('a section naming a field group its object does not declare reads with the lint warning, draft and active', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const item = formItem('task.form', 'task', ['title']);
+        // A group-referencing section takes its presentation from the group,
+        // so it carries no `name` / `label` of its own (the save refuses both).
+        (item.config as { sections: unknown[] }).sections = [{ group: 'no_such_group' }];
+        const expected = validateFormLayout({
+            objects: [servedTask],
+            views: [{ name: item.name, object: item.object, form: item.config }],
+        }).filter((f) => f.rule === FORM_SECTION_GROUP_UNKNOWN);
+        expect(expected).toHaveLength(1);
+
+        await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG, mode: 'draft' });
+        const warning = { path: 'config.sections.0.group', message: expected[0].message };
+        expect(await readDiagnostics(protocol, item.name, 'draft')).toEqual({ valid: true, warnings: [warning] });
+
+        const published: any = await protocol.publishMetaItem({ type: 'view', name: item.name, packageId: PKG } as any);
+        expect(published).toMatchObject({ success: true });
+        expect(await readDiagnostics(protocol, item.name, 'active')).toEqual({ valid: true, warnings: [warning] });
+    });
+
+    it('an active save naming an unknown field and an unknown group answers both as warnings, and the write lands', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const container = formContainer([
+            { name: 'main', fields: ['no_such_field', 'title'] },
+            { group: 'no_such_group' },
+        ]);
+        const expected = lintFindings(container);
+        expect(expected.map((f) => f.rule).sort()).toEqual([FORM_FIELD_UNKNOWN, FORM_SECTION_GROUP_UNKNOWN]);
+
+        const saved: any = await (protocol as any).saveMetaItem({ type: 'view', name: container.name, item: container, packageId: PKG });
+        expect(saved).toMatchObject({ success: true });
+        const advisories = formLayoutAdvisories(saved);
+        expect(advisories.map((a) => a.severity)).toEqual(['warning', 'warning']);
+        expect(advisories.map(({ rule, message, hint }) => ({ rule, message, hint })))
+            .toEqual(expected.map(({ rule, message, hint }) => ({ rule, message, hint })));
+
+        // One finding, once: the active read carries each as a warning, and
+        // the read runs no runtime advisory of its own.
+        const read = await readDiagnostics(protocol, container.name, 'active');
+        expect(read.valid).toBe(true);
+        expect(read.warnings?.map((w) => w.message).sort()).toEqual(expected.map((f) => f.message).sort());
+    });
+
+    it('a publish of a draft naming an unknown field answers it as a warning, and is not refused', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const container = formContainer([{ name: 'main', fields: ['title', 'no_such_field'] }]);
+        const expected = lintFindings(container);
+        expect(expected.map((f) => f.rule)).toEqual([FORM_FIELD_UNKNOWN]);
+
+        const saved: any = await (protocol as any).saveMetaItem({ type: 'view', name: container.name, item: container, packageId: PKG, mode: 'draft' });
+        expect(saved).toMatchObject({ success: true, state: 'draft' });
+        // D1: a draft save runs no registry rule, so it carries no advisory.
+        expect(formLayoutAdvisories(saved)).toEqual([]);
+
+        const published: any = await protocol.publishMetaItem({ type: 'view', name: container.name, packageId: PKG } as any);
+        expect(published).toMatchObject({ success: true });
+        expect(formLayoutAdvisories(published).map(({ rule, message, hint, severity }) => ({ rule, message, hint, severity })))
+            .toEqual([{ rule: FORM_FIELD_UNKNOWN, message: expected[0].message, hint: expected[0].hint, severity: 'warning' }]);
+    });
+
+    it('control: a form naming only real fields (an extension field among them) and a declared group answers no advisory', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const container = formContainer([
+            { name: 'main', fields: ['title', 'status', 'region__c'] },
+            { group: 'details' },
+        ]);
+        expect(lintFindings(container)).toEqual([]);
+
+        const saved: any = await (protocol as any).saveMetaItem({ type: 'view', name: container.name, item: container, packageId: PKG });
+        expect(saved).toMatchObject({ success: true });
+        expect(formLayoutAdvisories(saved)).toEqual([]);
+        expect(await readDiagnostics(protocol, container.name, 'active')).toEqual({ valid: true });
+
+        await (protocol as any).saveMetaItem({ type: 'view', name: 'task', item: container, packageId: PKG, mode: 'draft' });
+        const published: any = await protocol.publishMetaItem({ type: 'view', name: 'task', packageId: PKG } as any);
+        expect(published).toMatchObject({ success: true });
+        expect(formLayoutAdvisories(published)).toEqual([]);
     });
 });
