@@ -37,6 +37,12 @@ import { markGuardRefusal } from './guard-refusal.js';
  * `subflow` / `map`, `runRegion` also cancels the child run that node parked,
  * so nothing is left parked under a run that failed.
  *
+ * The un-routability below holds inside the run that met the refusal. One call
+ * level up it does not, on purpose ([#29166], seat ruling record 6576815635,
+ * option B): when this refusal fails a CHILD run, its caller's `subflow` /
+ * `map` node meets an ordinary child failure, routable like any other, and
+ * the arming gate does not decline that caller. See `subflow-region-guard.ts`.
+ *
  * ## Why a dedicated error and not the plain `Error` this replaces
  *
  * `runRegion` already converted a region-contained suspension — into a plain
