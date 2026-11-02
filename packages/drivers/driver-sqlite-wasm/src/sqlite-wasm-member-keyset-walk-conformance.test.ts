@@ -71,7 +71,7 @@ describe("SqliteWasmDriver — a keyset walk by id visits every member once, in 
         : { organization_id: ORG, id: { $gt: after } };
       const page: Array<Record<string, unknown>> = await driver.find(
         TABLE,
-        { where, orderBy: [{ field: 'id', order: 'asc' }], limit: pageSize, fields: ['id', 'user_id'] } as any,
+        { where, orderBy: [{ field: 'id', order: 'asc' }], limit: pageSize, fields: ['id', 'user_id'] },
         READ_OPTIONS,
       );
       reads += 1;
@@ -88,7 +88,7 @@ describe("SqliteWasmDriver — a keyset walk by id visits every member once, in 
   const ordered = async () => {
     const rows: Array<Record<string, unknown>> = await driver.find(
       TABLE,
-      { where: { organization_id: ORG }, orderBy: [{ field: 'id', order: 'asc' }], fields: ['id', 'user_id'] } as any,
+      { where: { organization_id: ORG }, orderBy: [{ field: 'id', order: 'asc' }], fields: ['id', 'user_id'] },
       READ_OPTIONS,
     );
     return rows.map((r) => String(r.id));

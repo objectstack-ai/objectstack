@@ -63,7 +63,7 @@ describe("InMemoryDriver — a keyset walk by id visits every member once, in th
         : { organization_id: ORG, id: { $gt: after } };
       const page: Array<Record<string, unknown>> = await driver.find(
         TABLE,
-        { where, orderBy: [{ field: 'id', order: 'asc' }], limit: pageSize, fields: ['id', 'user_id'] } as any,
+        { where, orderBy: [{ field: 'id', order: 'asc' }], limit: pageSize, fields: ['id', 'user_id'] },
       );
       reads += 1;
       // A driver that ignores the cursor would page forever: fail instead of hanging.
@@ -79,7 +79,7 @@ describe("InMemoryDriver — a keyset walk by id visits every member once, in th
   const ordered = async () => {
     const rows: Array<Record<string, unknown>> = await driver.find(
       TABLE,
-      { where: { organization_id: ORG }, orderBy: [{ field: 'id', order: 'asc' }], fields: ['id', 'user_id'] } as any,
+      { where: { organization_id: ORG }, orderBy: [{ field: 'id', order: 'asc' }], fields: ['id', 'user_id'] },
     );
     return rows.map((r) => String(r.id));
   };
