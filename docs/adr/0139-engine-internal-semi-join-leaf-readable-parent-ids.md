@@ -135,6 +135,11 @@ follow from that position, and they are the whole reason for it:
 The leaf is legal on `find`, `findOne`, `count` and `aggregate` (`where` only). On a write verb, in a `having`, or at
 any position but a `$in` comparand, the engine refuses it loudly. ⛔ No second leaf, no `EXISTS`, no correlated form.
 
+> **Amendment note (2026-11-02, [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) — #29360).**
+> ADR-0147 (Proposed) revisits "No second leaf" for **one** leaf and nothing else: the organization-member set that
+> `FIELD in current_user.org_user_ids` names, under its own brand, never as a mode of `ReadableIds`. "No `EXISTS`, no
+> correlated form" stands. So does everything this D1 says about `ReadableIds`.
+
 ### D2 — ObjectQL composes the scope, once per parent object per request, fail closed
 
 At the engine's executor boundary — on the final AST, after ingress parsing, the comparand doors, the middleware chain
@@ -178,6 +183,12 @@ restriction".
   ⛔ not `INVALID_FILTER`. A consumer does not catch it into its deny-all sentinel: the read fails and says why
   (prefer failing to falling back). ⛔ No `DriverCapabilities` bit returns: the 17.0.0 rationale stands — a bit the
   engine does not consult is inert — and here the driver answers by compiling or refusing, so there is nothing to read.
+
+  > **Amendment note (2026-11-02, [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) — #29360).**
+  > For `ReadableIds` this bullet stands as written. ADR-0147 (Proposed) revisits it for its own leaf only. There a
+  > refusal is excluded, because it would fail every `sys_user` read on a driver that does not compile it. So the
+  > engine consults a driver declaration to choose between the compiled leaf and the exact-array floor before the call.
+  > A declaration the engine consults is not the inert bit the 17.0.0 rationale removed.
 - The leaf joins the per-driver conformance case-sets, so a driver that compiles it is measured and one that refuses
   is recorded as refusing.
 

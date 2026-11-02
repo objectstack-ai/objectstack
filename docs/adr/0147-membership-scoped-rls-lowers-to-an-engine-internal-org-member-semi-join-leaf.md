@@ -14,14 +14,17 @@ are cut after acceptance and ⛔ never before it. **This record declares; it imp
   [`6575719368`](https://github.com/objectstack-ai/objectstack/issues/29281#issuecomment-6575719368)): the redesign keeps
   exactly the set #29281 holds, no wider and no narrower; a change to who can see whom is a security boundary and goes
   to the maintainer first. [D-0](#d-0--the-same-set-invariant) states it as a decision of its own.
-- **Builds on**: [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) (the one engine-internal
-  semi-join leaf, its brand device, its position rules and its executor seam; D3's driver obligations, which this
-  record changes for its own leaf in [D-d](#d-d--driver-obligations-compile-or-the-exact-array-floor-chosen-up-front-never-a-refusal)),
+- **Builds on**: [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) (the engine-internal
+  semi-join leaf, its brand device, its position rules and its executor seam). This record **revisits two of its
+  prohibitions for this one leaf and nothing else**: D1's "⛔ No second leaf" ([D-a](#d-a--predicate-shape-the-spelling-stays-the-lowering-is-a-sibling-leaf-of-readableids))
+  and D3's "⛔ No `DriverCapabilities` bit returns" ([D-d](#d-d--driver-obligations-compile-or-the-exact-array-floor-chosen-up-front-never-a-refusal)),
   [ADR-0055](./0055-master-detail-controlled-by-parent.md) and [ADR-0056](./0056-permission-model-landing-verification.md)
   (the RLS compiler's deliberate lack of a subquery form, unchanged here), [ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md)
   D2 / D11 (`accessible_org_ids`; the `rls-membership-resolver` seam), [ADR-0091](./0091-grant-lifecycle-and-recertification.md) (validity windows), [ADR-0049](./0049-no-unenforced-security-properties.md)
   (enforce-or-remove), [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (the refusal envelope).
-- **Amends**: one bullet, by a dated note and nothing else —
+- **Amends**: three places, each by a dated, append-only pointer note and nothing else (no Status line moves) —
+  [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) D1 ("No second leaf") and D3 ("No
+  `DriverCapabilities` bit returns"), each revisited for this one leaf; and
   [ADR-0057-erp-authorization-core-business-units-and-scope-depth](./0057-erp-authorization-core-business-units-and-scope-depth.md)
   D3's "mirroring the `org_user_ids` cap" (the cap it cites no longer exists).
 - **Leaves unchanged**: the authoring spelling of every RLS predicate, `defaultRowScope` and shipped permission set; the
@@ -33,7 +36,8 @@ are cut after acceptance and ⛔ never before it. **This record declares; it imp
   compiler, the in-process judges, the explainer), `@objectstack/objectql` (the executor seam and the floor
   substitution), `@objectstack/core` (the request resolver and the one materialiser), `@objectstack/driver-sql` and the
   drivers that inherit it, `@objectstack/driver-turso`, `@objectstack/driver-memory`, `@objectstack/driver-mongodb`,
-  `@objectstack/driver-odata`, and the context builders and carriers [D-e](#d-e--org_user_ids-as-a-value-the-census-and-who-moves) names.
+  `@objectstack/driver-odata`, `@objectstack/service-analytics` (its native-SQL read-scope compiler), and the context
+  builders and carriers [D-e](#d-e--org_user_ids-as-a-value-the-census-and-who-moves) names.
 
 ---
 
@@ -52,8 +56,9 @@ engine-internal comparand, a sibling of ADR-0139's `ReadableIds`, provisionally 
 the set the list holds today: the caller, plus every non-blank `user_id` of the active organization's `sys_member` rows,
 read with system authority and filtered by nothing else. The SQL family compiles it to `IN (SELECT user_id FROM
 sys_member WHERE …)`. Every other evaluator (a driver that does not compile it, a federated object, an in-process
-judge) is handed the exact array instead, computed by the completion read #29356 landed. No driver refuses it. The
-request path then stops reading the membership on every request. ⛔ No set changes: an option that would make anyone see
+judge, the analytics raw-SQL read-scope compiler) is handed the exact array instead, computed by the completion read
+#29356 landed. No evaluator refuses it. The request path then stops reading the organization's membership on every
+request. ⛔ No set changes: an option that would make anyone see
 anyone they do not see today is listed under [Alternatives](#alternatives-considered) as rejected.
 
 ## Context
@@ -141,6 +146,12 @@ when the read runs, where the array was read when the request was resolved ([Con
 - **An array wins.** A context that carries a materialised `org_user_ids` array lowers the array exactly as today. So
   every context a producer hand-builds with an array answers as it does now, and only a context that carries the anchor
   and no array takes the leaf.
+- **A second leaf, so ADR-0139 D1 is revisited for it.** D1 ends "⛔ No second leaf, no `EXISTS`, no correlated
+  form". This record adds exactly one more leaf and keeps the other two prohibitions. D1's reason for one leaf is that
+  one brand carries one meaning, so no composer has to ask which meaning it holds. That reason is kept by giving the
+  second meaning its **own** brand, never a mode of `ReadableIds`
+  ([Alternatives](#alternatives-considered)). ADR-0139 D1 carries a dated pointer to this record; nothing else in D1
+  moves.
 - **It is not a `ReadableIds` variant.** It asks no security service and composes no caller scope. Its inner read is
   fixed ([D-b](#d-b--the-inner-filter-exactly-todays-read)), so it arrives at the engine's executor seam already
   composed, and the seam passes it through rather than composing it. ⛔ No `EXISTS`, no correlated form: SQL drivers
@@ -206,13 +217,30 @@ the floor path the evaluator is handed `$in: S` and answers exactly as today. �
 | a driver this repository does not ship | **floor**, unless it declares that it compiles the leaf |
 | an outer object bound to another datasource than `sys_member` | **floor**: no driver evaluates a subquery across two datasources (ADR-0139 D5.3's reason) |
 | the in-process judges, the plugin-security callers of `packages/formula/src/matches-filter.ts#matchesFilterCondition` that judge a compiled RLS predicate: the write gate's `check` (`packages/plugins/plugin-security/src/rls-check-stored-form.ts`, `packages/plugins/plugin-security/src/security-plugin-rls-filter.ts`), a field permission's `when` (`packages/plugins/plugin-security/src/security-plugin-object-inputs.ts`) and the explainer (`packages/plugins/plugin-security/src/explain-engine.ts`) | **floor** |
+| the analytics native-SQL read-scope compiler, `packages/services/service-analytics/src/read-scope-sql.ts#compileScopedFilterToSql`, which compiles `getReadFilter`'s answer into its own SQL. Today it binds one parameter per `$in` member, throws on a non-array `$in` and refuses a `ReadableIds` leaf at entry | **floor**, chosen up front like every other row. Handed the leaf, it would refuse every analytics read of `sys_user` (and of any object whose RLS names `org_user_ids`) that answers today, the narrowing this record forbids. Compiling the subquery in its own dialect is a later card in that package's lane; until then the floor holds |
 
 - **Chosen up front.** The engine picks the leaf or the floor before the driver call, from a declaration the driver
   makes and the engine consults. ⛔ It never catches a refusal and retries with the array (ADR-0139 D5: "the probe is
   chosen up front, never reached by catching a refusal"). ADR-0139 D3 needed no capability bit because a refusal was
   its answer. Here a refusal is excluded, so the engine must know before the call. A declaration the engine reads to
-  choose the plan is consulted, so it is not the inert bit ADR-0049 removes. Its name and shape are the spec card's,
-  under the maintainer's naming approval (O1).
+  choose the plan is consulted, so it is not the inert bit ADR-0049 removes. **This revisits ADR-0139 D3's "⛔ No
+  `DriverCapabilities` bit returns" for this one leaf:** D3's reason (a bit the engine does not consult is inert)
+  holds for `ReadableIds`, whose answer is compile-or-refuse, and fails here, where a refusal is excluded. ADR-0139 D3
+  carries a dated pointer to this record; `ReadableIds` keeps D3 as written. The declaration's name and shape are the
+  spec card's, under the maintainer's naming approval (O1).
+- **Every occurrence, nested ones included.** The choice is made for every occurrence of the leaf in the filter an
+  evaluator receives, including one inside a `ReadableIds` leaf's composed `scope`. That happens when the parent P is
+  `sys_user` or any object whose RLS names `org_user_ids`, and ADR-0139 D2 composes P's scope from `getReadFilter(P)`:
+  `packages/plugins/plugin-audit/src/parent-record-read-gate.ts`,
+  `packages/services/service-storage/src/attachment-access-hooks.ts` and `controlled_by_parent`. `driver-sql` compiles
+  a composed scope recursively (`packages/drivers/driver-sql/src/sql-driver.ts#readableIdsSubquery`), so the leaf
+  compiles there too. The engine's floor substitution descends into composed scopes the same way, so a floor
+  evaluator never meets a leaf nested one level down.
+- **What the explainer publishes.** The explainer publishes the composed predicate as `ExplainDecisionSchema.readFilter`
+  (`packages/spec/src/security/explain.zod.ts#ExplainDecisionSchema`). As a floor evaluator it materialises the array,
+  and it **publishes the array**, today's wire shape. ⛔ It never publishes the leaf, which would cross the wire
+  unbranded as the anchor's bare shape. A `readFilter` consumer reads the same artifact before and after, so no card
+  owes a Clause-② for it.
 - **The floor keeps today's costs.** That means the per-read completion and the backend's own ceiling: OData's request
   length, and MongoDB's 16 MB document bound, which is documented, not measured. On the floor path a read past that
   ceiling still fails loudly. The floor card owes it the remedy text #29356's review left open (should-fix 3: the
@@ -228,9 +256,9 @@ the automation, sharing and transport carriers.
 |:--|:--|:--|:--|
 | **The materialiser** | `packages/core/src/security/resolve-authz-context.ts#resolveUserAuthzGrants` | computes S exactly (first read, completion) | **keeps the array, default unchanged**: it is the floor's source and the value readers' source. It gains an opt-out that only the request path uses (name: the server card's) |
 | **The request path** | `packages/core/src/security/resolve-authz-context.ts#resolveAuthzContextInScope` | copies the array into every request's context | **moves**: stamps the anchor and issues no membership read. The array is materialised lazily, at most once per request (the request's grants memo), and only when a floor or a value reader asks |
-| Context builders | `packages/objectql/src/hook-run-as.ts#SEED_USER_GRANTS` (run-as `'user'` hooks; `packages/objectql/src/hook-wrappers.ts` delegates to it), `packages/services/service-automation/src/plugin.ts` (run setup), `packages/services/service-automation/src/run-resume.ts` (resume re-seeding), `packages/plugins/plugin-audit/src/mention-recipient-gate.ts#contextForMentionedUser`, `packages/plugins/plugin-security/src/explain-engine.ts#buildContextForUser` | seed a context with the array for engine reads | **move to the anchor**: each builds one user's context in one vetted organization, the same pair the array used. A builder whose context crosses JSON or persistence before its reads keeps the array; run resume re-seeds at resume, so it is safe |
+| Context builders | `ScopedContext[SEED_USER_GRANTS]` in `packages/objectql/src/engine.ts`, keyed by `packages/objectql/src/hook-run-as.ts#SEED_USER_GRANTS` (run-as `'user'` hooks; `packages/objectql/src/hook-wrappers.ts` delegates to it), `packages/services/service-automation/src/plugin.ts` (run setup), `packages/services/service-automation/src/run-resume.ts` (resume re-seeding), `packages/plugins/plugin-audit/src/mention-recipient-gate.ts#contextForMentionedUser`, `packages/plugins/plugin-security/src/explain-engine.ts#buildContextForUser` | seed a context with the array for engine reads | **move to the anchor**: each builds one user's context in one vetted organization, the same pair the array used. A builder whose context crosses JSON or persistence before its reads keeps the array; run resume re-seeds at resume, so it is safe |
 | Carriers | `packages/core/src/security/assemble-execution-context.ts` (the transport key list and the envelope), the explainer's delegated inheritance (D-c), `packages/services/service-automation/src/runtime-identity.ts#runOrgUserIds`, `packages/plugins/plugin-sharing/src/share-link-service.ts`, `packages/plugins/plugin-sharing/src/sharing-plugin.ts`, `packages/runtime/src/domains/share-links.ts` | copy the field between contexts | **carry the anchor** wherever they carry the array today, in the same change |
-| Presence probes | `Array.isArray(ctx.org_user_ids)` as "needs peers" in `SEED_USER_GRANTS` and run resume; `runOrgUserIds` | treat a missing array as unresolved | **read the anchor as present**. Otherwise they re-seed (a cost) or, in `runOrgUserIds`, answer `undefined`, the policy drops out, and S narrows to nothing. The server card pins it |
+| Presence probes | `Array.isArray(ctx.org_user_ids)` as "needs peers" in `ScopedContext[SEED_USER_GRANTS]` (`packages/objectql/src/engine.ts`) and run resume; `runOrgUserIds` | treat a missing array as unresolved | **read the anchor as present**. Otherwise they re-seed (a cost) or, in `runOrgUserIds`, answer `undefined`, the policy drops out, and S narrows to nothing. The server card pins it |
 | Value readers | the in-process judges (D-d); CEL evaluated in process in hooks and flows that read `current_user.org_user_ids` | read the ids | **keep the array**, materialised lazily |
 | Not readers | `packages/plugins/plugin-hono-server/src/current-user-endpoints.ts` (a comment; its read is system, by id); the approvals and sharing `exec-context-annotation.pin.ts` files (type pins); the lint vocabulary in `packages/lint/src/validate-rls-predicate-enforceability.ts` and `rule-explanations.ts` (the spelling is unchanged) | — | no change |
 
@@ -265,19 +293,29 @@ caller's own memberships, not by an organization's size, and are out of scope to
   - **No active organization**: S is `{ caller }`, and no subquery is issued.
   - **Delegation**: a delegated explanation's S carries the live principal, not the delegator.
   - **Floor parity**: a floor evaluator and the SQL family answer the same rows on the same fixture.
+  - **Analytics**: a native-SQL analytics query over `sys_user` answers the same rows as a direct `find` of
+    `sys_user` for the same caller (the floor path of `compileScopedFilterToSql`), and is never refused.
+  - **Nested**: a `ReadableIds` leaf whose parent is `sys_user` (an attachment or activity row about a user record)
+    answers the same rows on the SQL family, where the inner leaf compiles, and on a floor evaluator, where the
+    substitution descends.
+  - **Explain**: `readFilter` carries the array, byte-identical to today's for the same fixture.
 - **The ceiling, on the SQL family**: an organization of 40,000 members, which better-sqlite3 refuses today, answers its
   members. That is the ceiling's removal; the set is still S.
 
 ## Consequences
 
-- **Positive.** The request path issues no membership read, on any request. On the SQL family the bind-parameter
+- **Positive.** The request path issues no read of the **organization's** membership, on any request. (Leg 1 of
+  `#resolveUserAuthzGrants` still reads the caller's own `sys_member` rows, `{ user_id }`, on every request for
+  `accessible_org_ids` and the roles; that read is bounded by one user's memberships and does not move.) On the SQL family the bind-parameter
   ceiling goes, and a `sys_user` read is one statement, so `find`, `count` and `aggregate` agree by construction.
 - **Cost, named.** Every `sys_user` read carries an index-backed subquery. Spec gains one leaf and one driver
   declaration (two new public names, O1). The engine gains a floor substitution. Five driver packages get a compile or
-  floor answer, and the D-e sites move. That is roughly four cards over three lanes
+  floor answer, the analytics read-scope compiler takes the floor, and the D-e sites move. That is roughly four cards
+  over four lanes
   ([Execution plan](#execution-plan-after-acceptance)).
-- **Failure surface.** A `sys_member` outage used to fail every request's resolution (503). Now it fails the reads that
-  use the leaf, with the driver's error envelope. Fewer requests fail; none fails silently.
+- **Failure surface.** Unchanged in kind: a `sys_member` outage still fails every request's resolution (503) through
+  Leg 1's own read. A failure of the leaf's subquery fails that read with the driver's error envelope, never a shorter
+  list.
 - **Freshness.** The leaf reads `sys_member` when the read runs. With the opt-in cross-request grants cache on
   (`OS_AUTHZ_GRANTS_CACHE_TTL_MS`, `packages/core/src/security/resolve-user-grants-cache.ts`), the array could be as
   old as its cache entry, and the leaf never is. The rule is the same; its inputs are newer (O4).
@@ -311,14 +349,16 @@ caller's own memberships, not by an organization's size, and are out of scope to
 ## Open items (not blocking acceptance; each becomes a reading on its card)
 
 - **O1** — The leaf's name (provisionally `OrgMemberIds`) and the driver's compile declaration are new public names in
-  `@objectstack/spec`. They land under names the maintainer approves.
+  `@objectstack/spec`. They land under names the maintainer approves, decided with this record's approval.
+- **O7** — The analytics read-scope compiler takes the floor. Compiling the leaf in its own SQL is a later card in the
+  `service-analytics` lane, measured against the floor-parity pin.
 - **O2** — `driver-mongodb`: the cost of a `$lookup` compilation is unprototyped (shared with ADR-0139 O3). It takes
   the floor until measured.
 - **O3** — `org_user_ids` reads no ADR-0091 validity window where `accessible_org_ids` applies one. Since `sys_member`
   declares no bound today, no stored row is answered differently. This record keeps the asymmetry: closing it would
   change S on the day `sys_member` gains a bound, and that is the maintainer's decision.
-- **O4** — Freshness against the opt-in grants cache (Consequences). The rule is the same; whether a fresher input needs
-  the maintainer's word is put to the seat.
+- **O4** — Freshness against the opt-in grants cache (Consequences). The rule is the same; only the inputs' age
+  differs, inside the cache's accepted staleness contract. Not a set change.
 - **O5** — Ceilings. SQLite: 32,000 members served and 40,000 refused, measured on #29281 (better-sqlite3). Postgres:
   65,535, documented. OData and MongoDB floor ceilings: unmeasured.
 - **O6** — `packages/plugins/plugin-auth/src/admin-set-user-manager.ts` quotes ADR-0057 D3's "mirroring the
@@ -327,8 +367,10 @@ caller's own memberships, not by an organization's size, and are out of scope to
 
 ## Acceptance criteria
 
-The maintainer approves this record (Tier H), with the one amendment note it carries: ADR-0057-erp D3's "`org_user_ids`
-cap" bullet.
+The maintainer approves this record (Tier H), with the three pointer notes it carries: ADR-0139 D1 ("No second
+leaf"), ADR-0139 D3 ("No `DriverCapabilities` bit returns"), and ADR-0057-erp D3's "`org_user_ids` cap" bullet. Each is
+append-only and dated, and none moves a Status line. The maintainer also approves the names O1 asks for, with this
+record.
 
 ## Execution plan (after acceptance)
 
@@ -339,7 +381,7 @@ green (D-g).
 | Card | Decisions | What lands | Pins (red before, green after) | Order |
 |:--|:--|:--|:--|:--|
 | **S1** — the leaf | D-0, D-a, D-d | the leaf beside `packages/spec/src/data/readable-ids.ts`; the comparand door admits the branded value and refuses the unbranded one; the driver's compile declaration; the `rls.zod.ts` §7.3.1 exception prose (module header, the "does not lower" paragraph, "Dynamic membership"); the `execution-context.zod.ts` `org_user_ids` and `rlsMembership` prose; the per-driver conformance case-set (compiles, or floor) | a JSON round-trip of a `where` holding the leaf is refused; the plain-object spelling is refused 400; the case-set holds the NULL-negation, caller-arm and no-active-organization cases | first |
-| **V1** — lowering and floor | D-a to D-d | `cel-to-filter.ts` and `rls-compiler.ts` lower the comparand to the leaf when the context carries the anchor and no array; the engine seam passes a composed leaf through, or substitutes the exact array for a floor evaluator or a federated object; the in-process judges take the array | group posture; NULL `user_id` negation; caller arm; no active organization; an array on the context still lowers the array | after S1 |
+| **V1** — lowering and floor | D-a to D-d | `cel-to-filter.ts` and `rls-compiler.ts` lower the comparand to the leaf when the context carries the anchor and no array; the engine seam passes a composed leaf through, or substitutes the exact array for a floor evaluator or a federated object, descending into composed `ReadableIds` scopes; the in-process judges and the explainer take the array (the explainer publishes it); the analytics read-scope compiler (`domain:services`, `service-analytics`) is handed the floor | group posture; NULL `user_id` negation; caller arm; no active organization; an array on the context still lowers the array; nested; analytics; explain `readFilter` unchanged | after S1 |
 | **V2** — SQL family and memory | D-b, D-d | `driver-sql` compiles the leaf with no tenant scope on the subquery; wasm and local Turso inherit it; the remote transport compiles it; `driver-memory` evaluates it; MongoDB and OData declare the floor | floor parity; `count` equals the rows served; 40,000 members answer on better-sqlite3; the floor's past-ceiling refusal names the driver, the count and the remedy | after V1 |
 | **V3** — the request path | D-e | `resolveAuthzContextInScope` stamps the anchor and reads no membership; the lazy materialisation; the context builders, carriers and presence probes of D-e; the `admin-set-user-manager.ts` comment (O6) | a request in a 1,005-member organization issues no membership read unless a reader asks; run-as, automation, mention and delegated-explain contexts answer the same S | after V2 |
 | **V4** — MongoDB compiles (optional) | D-d, O2 | `$lookup` compilation, measured | floor parity, now on the leaf path | after V2; its own card |
