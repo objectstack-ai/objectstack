@@ -2519,7 +2519,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
           // same spelling as `PanelToggles` and `DeclaredActionsBar`).
           className={cn(
             'gap-2',
-            barFace && 'h-10 min-w-0 flex-1',
+            barFace && 'h-11 min-w-0 flex-1',
             pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
           )}
           onClick={() => {
@@ -2575,7 +2575,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
               <Button
                 variant="outline"
                 size="sm"
-                className={barFace ? 'h-10 w-10 shrink-0 px-0' : 'gap-1 px-2'}
+                className={barFace ? 'h-11 w-11 shrink-0 px-0' : 'gap-1 px-2'}
                 aria-label={tt('detail.moreActions', 'More actions')}
               >
                 <MoreHorizontal className="h-4 w-4" />

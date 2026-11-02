@@ -682,7 +682,9 @@ const DeclaredActionButton: React.FC<{
       // (`packages/components/src/ui/**` is a no-touch Shadcn zone).
       // The pressed face is Shadcn's toggle-on colours keyed off the attribute,
       // the record header's spelling (`PageHeaderActions`).
+      // Below `sm` a 44 px touch target (objectstack#29071).
       className={cn(
+        'h-11 sm:h-9',
         isOverride
           && 'border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300',
         pressed !== undefined && 'aria-pressed:bg-accent aria-pressed:text-accent-foreground hover:aria-pressed:bg-accent',
@@ -948,7 +950,7 @@ const DeclaredActionsToolbar: React.FC<
                     type="button"
                     variant="outline"
                     size="sm"
-                    className="gap-1 px-2 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
+                    className="h-11 gap-1 px-2 sm:h-9 border-amber-500/60 text-amber-700 hover:bg-amber-50 hover:text-amber-800 dark:text-amber-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-300"
                     aria-label={overrideMenuLabel}
                     title={overrideMenuLabel}
                     data-testid="declared-actions-override-menu"

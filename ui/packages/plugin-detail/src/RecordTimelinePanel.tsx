@@ -66,7 +66,7 @@ export const RecordTimelinePanel: React.FC<RecordTimelinePanelProps> = ({
   return (
     <section className="rounded-[10px] border border-border bg-card" aria-label={title} data-record-timeline-panel="">
       <div
-        className="group/panel-head relative flex h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
+        className="group/panel-head relative flex h-11 sm:h-9 items-center gap-1.5 px-3 text-[12.5px] font-semibold"
         data-record-timeline-panel-head=""
       >
         {onViewAll ? (
@@ -74,7 +74,7 @@ export const RecordTimelinePanel: React.FC<RecordTimelinePanelProps> = ({
           // stretches over the whole header.
           <button
             type="button"
-            className="flex min-w-0 cursor-pointer items-center gap-1.5 rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="flex min-w-0 cursor-pointer items-center gap-1.5 self-stretch rounded-sm text-left after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             title={count !== null ? t('detail.relatedPanelViewAll', { count, defaultValue: 'View all {{count}}' }) : undefined}
             data-record-timeline-panel-open=""
             onClick={onViewAll}

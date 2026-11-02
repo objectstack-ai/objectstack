@@ -97,7 +97,7 @@ Standardized answers to the recurring ambiguous cases:
   or boolean field (`percent` not under `sum`; `min`/`max` also dates); a `formula`
   has no column: refused whatever its `returnType` says. Store the number
   (user-entered, a `summary` rollup, or hook-kept) or title the widget the `count`
-  it is. Leave days: `sum` over the `formula` `days_requested` (`end - start`) is
+  it is. Leave days: `sum` over the `formula` `days_requested` (`daysBetween(start, end)`) is
   refused (`date` fields: no `duration`) ⇒ a stored `number` `days_count` a
   `beforeInsert`/`beforeUpdate` hook writes, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
 - **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and

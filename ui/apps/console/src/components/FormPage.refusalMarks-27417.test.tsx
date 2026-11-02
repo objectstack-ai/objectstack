@@ -17,8 +17,9 @@
  * error to, the same refusal in the runtime dispatcher's wrapped envelope, and
  * the flat `409 UNIQUE_VIOLATION` naming its one `field`.
  *
- * The banner and the toast are unchanged: a refusal that names no field marks
- * no row and still says what it said before.
+ * A refusal that names no field marks no row and still says the server's
+ * sentence; what the banner says for every other refusal is pinned in
+ * `FormPage.refusalText-29019.test.tsx`.
  */
 
 import type React from 'react';
@@ -180,9 +181,10 @@ describe('#27417 — a server refusal naming fields marks each of them', () => {
     expect(describedText(email)).toContain('Email is not a valid email address');
     // The row the refusal does not name stays unmarked.
     expect(screen.getByLabelText('Company')).not.toHaveAttribute('aria-invalid', 'true');
-    // The banner and the toast are unchanged.
+    // Every named row carries its reason, so the banner and the toast say the
+    // server's sentence — never the response body (#29019).
     expect(vi.mocked(toast.error)).toHaveBeenCalledTimes(1);
-    expect(String(vi.mocked(toast.error).mock.calls[0][0])).toContain('Submit failed (400)');
+    expect(vi.mocked(toast.error).mock.calls[0][0]).toBe('Validation failed');
   });
 
   it('internal route: the wrapped dispatcher envelope marks both named fields', async () => {

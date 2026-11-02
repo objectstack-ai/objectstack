@@ -27806,14 +27806,27 @@ export class ObjectStackProtocolImplementation implements
      * used to read it through {@link findEnvironmentRow}, which leaves the
      * legacy commit out, and answered `COMMIT_NOT_FOUND` for a commit that is
      * there.
+     *
+     * [ADR-0067] With `packageId`, a commit of ANOTHER package is not found
+     * either: the package a caller names (the REST doors' path id) decides
+     * which commits it can act on, so a commit id copied from the wrong
+     * package is answered `COMMIT_NOT_FOUND` naming that package, before
+     * anything is written. Without it (an in-process caller that names no
+     * package) any commit is read, as before.
      */
-    private async readRevertableCommit(commitId: string): Promise<any> {
+    private async readRevertableCommit(commitId: string, packageId?: string): Promise<any> {
         // [#21908, ADR-0096 D5] The explicit system opt-in: the commit ledger is a
         // platform store the door already authorized; the protocol scopes the
         // `where` by organization itself. Principal-less, the engine refuses it.
         const row = (await this.engine.findOne('sys_metadata_commit', { where: { id: commitId }, context: { isSystem: true } })) as any;
         if (!row) {
             const err: any = new Error(`No commit '${commitId}'.`);
+            err.code = 'COMMIT_NOT_FOUND';
+            err.status = 404;
+            throw err;
+        }
+        if (packageId !== undefined && String(row.package_id) !== packageId) {
+            const err: any = new Error(`No commit '${commitId}' in package '${packageId}'.`);
             err.code = 'COMMIT_NOT_FOUND';
             err.status = 404;
             throw err;
@@ -27860,6 +27873,12 @@ export class ObjectStackProtocolImplementation implements
      */
     async revertCommit(request: {
         commitId: string;
+        /**
+         * The package the commit must belong to (ADR-0067): a commit of any
+         * other package is refused `COMMIT_NOT_FOUND` (404) and nothing is
+         * written. Optional for in-process callers that name no package.
+         */
+        packageId?: string;
         actor?: string;
     }): Promise<{
         success: boolean;
@@ -27874,7 +27893,7 @@ export class ObjectStackProtocolImplementation implements
             `Commit '${request.commitId}'`, request,
         );
         await this.ensureOverlayIndex();
-        const row = await this.readRevertableCommit(request.commitId);
+        const row = await this.readRevertableCommit(request.commitId, request.packageId);
         const items = this.parseCommitItems(row.items);
         // #4556 — threaded into repo.put/delete → `recorded_by`; NULL when the
         // revert carries no human actor.
@@ -28363,6 +28382,12 @@ export class ObjectStackProtocolImplementation implements
      */
     async rollbackToPackageCommit(request: {
         commitId: string;
+        /**
+         * The package being rolled back (ADR-0067): a target commit of any
+         * other package is refused `COMMIT_NOT_FOUND` (404) and nothing is
+         * written. Optional for in-process callers that name no package.
+         */
+        packageId?: string;
         actor?: string;
     }): Promise<{
         success: boolean;
@@ -28373,7 +28398,7 @@ export class ObjectStackProtocolImplementation implements
         ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
             `Commit '${request.commitId}'`, request,
         );
-        const target = await this.readRevertableCommit(request.commitId);
+        const target = await this.readRevertableCommit(request.commitId, request.packageId);
         const all = await this.listCommits({ packageId: target.package_id });
         // listCommits is newest-first; revert every `apply` commit strictly newer
         // than the target (by created_at). Revert commits are skipped (their
