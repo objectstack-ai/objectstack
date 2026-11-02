@@ -5215,3 +5215,89 @@ describe('the object save door judges related-list names against the live regist
         expect(quoteRows(rows)).toEqual([]);
     });
 });
+
+// ── #29341: the connector save door carries `connector-credential-literal` ──
+//
+// `@objectstack/lint`'s own tests prove the rule is registered for `connector`
+// writes. This block asks the door's question, through the real
+// `saveMetaItem`: does a `PUT /meta/connector/:name` publish carry the
+// advisory back on the 2xx, with the row STORED (nothing refused), and stay
+// silent on an `auth.credentialRef`-routed entry? Every value is a probe
+// sentinel, not a credential.
+describe('the connector save door carries connector-credential-literal as an advisory (#29341)', () => {
+    const CONNECTOR_RULE = 'connector-credential-literal';
+    const SENTINELS = ['door-headers-sentinel', 'door-default-headers-sentinel', 'door-transport-sentinel', 'door-env-sentinel'];
+
+    const restConnector = (literal: boolean) => ({
+        name: 'vendor_api',
+        label: 'Vendor API',
+        type: 'api',
+        provider: 'rest',
+        providerConfig: {
+            baseUrl: 'https://api.vendor.invalid/v1',
+            headers: literal
+                ? { Authorization: `Bearer ${SENTINELS[0]}`, Accept: 'application/json' }
+                : { Accept: 'application/json' },
+            defaultHeaders: literal
+                ? { 'X-Vendor-Trace': `Bearer ${SENTINELS[1]}` }
+                : { 'User-Agent': 'objectstack' },
+        },
+        ...(literal ? {} : { auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' } }),
+    });
+
+    const mcpConnector = (kind: 'http' | 'stdio') => ({
+        name: `tools_${kind}`,
+        label: 'Tools',
+        type: 'api',
+        provider: 'mcp',
+        providerConfig: {
+            transport: kind === 'http'
+                ? { kind, url: 'https://mcp.vendor.invalid/mcp', headers: { Authorization: `Bearer ${SENTINELS[2]}` } }
+                : { kind, command: 'local-mcp-server', env: { MCP_UPSTREAM: `Bearer ${SENTINELS[3]}` } },
+        },
+    });
+
+    const saveConnector = (protocol: any, item: { name: string }, extra: Record<string, unknown> = {}) =>
+        protocol.saveMetaItem({ type: 'connector', name: item.name, item, ...extra });
+
+    const connectorRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'connector');
+
+    const ofRule = (result: any) => (result.advisories ?? []).filter((a: any) => a.rule === CONNECTOR_RULE);
+
+    it('⭐ LIT — each map\'s literal rides the 2xx as a warning, and the row is stored', async () => {
+        const { protocol, rows } = makeProtocol();
+        const results = [
+            await saveConnector(protocol, restConnector(true)),
+            await saveConnector(protocol, mcpConnector('http')),
+            await saveConnector(protocol, mcpConnector('stdio')),
+        ];
+
+        expect(results.flatMap((r) => ofRule(r).map((a: any) => a.path))).toEqual([
+            'connectors[0].providerConfig.headers.Authorization',
+            'connectors[0].providerConfig.defaultHeaders["X-Vendor-Trace"]',
+            'connectors[0].providerConfig.transport.headers.Authorization',
+            'connectors[0].providerConfig.transport.env.MCP_UPSTREAM',
+        ]);
+        for (const advisory of results.flatMap(ofRule)) {
+            expect(advisory.severity).toBe('warning');
+            expect(advisory.message).toContain('auth.credentialRef');
+        }
+
+        // Nothing refused: every save landed, as written.
+        expect(connectorRows(rows).map((r) => r.name).sort()).toEqual(['tools_http', 'tools_stdio', 'vendor_api']);
+        const stored = JSON.parse(connectorRows(rows).find((r) => r.name === 'vendor_api')!.metadata);
+        expect(stored.providerConfig.headers.Authorization).toBe(`Bearer ${SENTINELS[0]}`);
+
+        // The advisory rides the save response: it must not copy the credential it asks the author to move.
+        const wire = JSON.stringify(results.map((r) => r.advisories ?? []));
+        for (const sentinel of SENTINELS) expect(wire.includes(sentinel), sentinel).toBe(false);
+    });
+
+    it('DARK — an `auth.credentialRef`-routed connector with only ordinary headers draws none', async () => {
+        const { protocol, rows } = makeProtocol();
+        const result = await saveConnector(protocol, restConnector(false));
+        expect(ofRule(result)).toEqual([]);
+        expect(connectorRows(rows).map((r) => r.name)).toEqual(['vendor_api']);
+    });
+});
