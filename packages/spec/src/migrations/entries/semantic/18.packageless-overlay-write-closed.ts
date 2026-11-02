@@ -2,14 +2,19 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// ADR-0146 D11 — a runtime narrowing at the metadata write doors with no
-// authorable key: a write naming no package onto an item an installed package
-// ships is refused where `os migrate packageless-overlays` can move its row
-// as a declared override (a row it moves as the pair's own member stays open).
-// Registered because an upgrading deployment can carry the package-less Setup
-// rows those writes made, and the operator step that moves them into the
-// base's `.custom` pair ships in this same release, so it runs AFTER the
-// upgrade (the release-timing ruling on the card).
+// ADR-0146 D1, D11 — a runtime narrowing at the metadata write doors with no
+// authorable key, at the two addresses that bypassed a read-only package's
+// paired `.custom`: a write naming no package onto an item an installed
+// package ships is refused where `os migrate packageless-overlays` can move
+// its row as a declared override (a row it moves as the pair's own member
+// stays open), and a save, publish or rollback naming the read-only package
+// itself onto an item it ships is refused where the pair can take the
+// declared override (a delete naming the package stays open).
+// Registered because an upgrading deployment can carry the rows those writes
+// made, package-less or bound to the read-only package itself, and the
+// operator step that moves both kinds into the base's `.custom` pair ships in
+// this same release, so it runs AFTER the upgrade (the release-timing ruling
+// on the card).
 export const entry: SemanticMigration = {
   id: 'packageless-overlay-write-closed',
   surface:
@@ -46,9 +51,9 @@ export const entry: SemanticMigration = {
     + 'member\'s package-less write stays open, before and after its move. Every package-less row '
     + 'the preview lists and does not move keeps its package-less write, and every bound row it '
     + 'lists and does not move keeps its delete naming the package: `multi_shipped` (several '
-    + 'packages ship the name):delete it naming no package, then save it into the pair of the package it '
-    + 'customizes if it is still wanted (the pair\'s override is then served at that base\'s '
-    + 'address, `?package=<base>`); `no_pair` (the base\'s id forms no pair): nothing to do; '
+    + 'packages ship the name): delete it naming no package, then save it into the pair of the '
+    + 'package it customizes if it is still wanted (the pair\'s override is then served at that '
+    + 'base\'s address, `?package=<base>`); `no_pair` (the base\'s id forms no pair): nothing to do; '
     + '`foreign_declaration` (its `overrides` names another package): remove the key with a save '
     + 'naming no package, then re-run: the move declares the right override (a row bound to the '
     + 'read-only package cannot take that save, as a save naming the package is closed: delete it '
@@ -59,7 +64,8 @@ export const entry: SemanticMigration = {
     + 'package original (the DELETE above) and re-run to move this one; a `failed` move: fix what '
     + 'the error names and re-run; when the error names the pair (it cannot be ensured, or it '
     + 'refuses the row) or, for a declared override, the base\'s missing version, the row may also '
-    + 'be left, as it keeps its package-less write (a bound row, its delete naming the package)',
+    + 'be left, as it keeps its package-less write (a bound row, its delete naming the package, '
+    + 'and the save naming it where the pair could not take the override)',
   reason:
     'A customization of an installed package lives in its paired `.custom` package, where it is '
     + 'a declared override that is exported with the pair and judged against the base\'s version '
