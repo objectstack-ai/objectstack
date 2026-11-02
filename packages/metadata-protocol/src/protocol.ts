@@ -69,11 +69,6 @@ import {
     // it prints it at.
     findUndeclarableFieldType,
     isObjectFieldTypeRefused,
-    // [#20761, ADR-0126 §2] The ADR-0029 D9.6 reading of a body's own
-    // provenance stamps — asked by {@link
-    // ObjectStackProtocolImplementation.tenantAuthoredWriteRefusal} to tell a
-    // body that CLAIMS to be code-shipped from one that does not.
-    isCodeArtifactBody,
     // [#21059] The tenant marker the hydrator writes on every stored row it
     // registers (ADR-0010 `_provenance: 'org'`) — read by
     // {@link ObjectStackProtocolImplementation.getMetaItemLayered}'s code-layer
@@ -720,6 +715,11 @@ import type {
     RollbackMetaItemRequest,
     SaveMetaItemRequest,
 } from './protocol-door-requests.js';
+// [#25467 E1] The host a moved member body reaches this class through: the
+// class builds it in its static block below, and a stub hands it to the body.
+import { installProtocolHost, protocolHost } from './protocol-host.js';
+// [#25467 E1] The host split's pilot: one member's whole body, moved through the host.
+import { tenantAuthoredWriteRefusal } from './protocol-tenant-authored-write.js';
 
 /**
  * [#4435/#5138] The 404 a single-record operation answers when the id names no
@@ -1262,6 +1262,19 @@ export class ObjectStackProtocolImplementation implements
         this.getServicesRegistry = getServicesRegistry;
         this.environmentId = environmentId;
         this.authoringChannel = authoringChannel;
+    }
+
+    // [#25467 E1] The one place that can read this class's private members builds
+    // the host its moved bodies reach it through (`protocol-host.ts`). A static
+    // block adds no member to the class: the published `.d.ts` does not move.
+    static {
+        installProtocolHost((protocol) => ({
+            overrideWriteVerdict: (...a) => protocol.overrideWriteVerdict(...a),
+            packagedArtifactOwner: (...a) => protocol.packagedArtifactOwner(...a),
+            packagedBaseRefusal: (...a) => protocol.packagedBaseRefusal(...a),
+            storedFlowBindingAgrees: (...a) => protocol.storedFlowBindingAgrees(...a),
+            uninstalledNamedBaseRefusal: (...a) => protocol.uninstalledNamedBaseRefusal(...a),
+        }));
     }
 
     /**
@@ -11137,50 +11150,8 @@ export class ObjectStackProtocolImplementation implements
      *          proceed on these grounds.
      */
     async tenantAuthoredWriteRefusal(request: { type: string; name: string; item: unknown; packageId?: string | null }): Promise<Error | null> {
-        const folded = canonicalizeMetaRequestType(request);
-        const singular = PLURAL_TO_SINGULAR[folded.type] ?? folded.type;
-        if (singular !== 'flow') return null;
-        const shipped = this.packagedArtifactOwner(folded) !== undefined;
-        // [#28412, ADR-0146 D2 / D9] Rule 1's lock does not apply to the
-        // shipping package's declared override: the one override write gate
-        // ({@link overrideWriteVerdict}) admits it as the pair's own row, which
-        // edits nothing the package ships. Any other write of a shipped name
-        // keeps the lock.
-        if (shipped && this.overrideWriteVerdict({
-            type: singular,
-            name: folded.name,
-            item: folded.item,
-            ...(folded.packageId ? { packageId: folded.packageId } : {}),
-        }).verdict !== 'admit') {
-            const locked = this.packagedBaseRefusal({
-                type: folded.type,
-                name: folded.name,
-                operation: 'save',
-                ...(folded.packageId ? { packageId: folded.packageId } : {}),
-            });
-            if (locked) return locked;
-        }
-        // [#20863] The named-base rule (see the docblock): a base the write
-        // names must be a package the registry holds as installed. [#26708]
-        // The rule is {@link uninstalledNamedBaseRefusal}'s, which
-        // `saveMetaItem` asks for every other type too.
-        const unbound = this.uninstalledNamedBaseRefusal({ type: singular, name: folded.name, packageId: folded.packageId });
-        if (unbound) return unbound;
-        if (shipped) return null;
-        if (!isCodeArtifactBody(folded.item)) return null;
-        const stamped = String((folded.item as { _packageId?: unknown })._packageId);
-        if (folded.packageId === stamped) return null;
-        if (await this.storedFlowBindingAgrees(folded.name, stamped)) return null;
-        const err = new Error(
-            `Flow '${folded.name}' was sent with a code-package provenance, but no managed package ships a flow of `
-            + `that name. A flow written through an authoring door is authored in this deployment: which flows a `
-            + `package ships is established by the package loader, never by the definition a caller sends. `
-            + `Remove the provenance keys (_packageId, _packageVersion, _provenance) from the definition and send it `
-            + `again. Nothing was written. See docs/adr/0126-packaged-metadata-customization-model.md.`,
-        );
-        (err as any).code = 'INVALID_METADATA';
-        (err as any).status = 422;
-        return err;
+        // [#25467 E1] The body moved to `protocol-tenant-authored-write.ts`; it reaches this class through `protocol-host.ts`.
+        return tenantAuthoredWriteRefusal(protocolHost(this), request);
     }
 
     /**

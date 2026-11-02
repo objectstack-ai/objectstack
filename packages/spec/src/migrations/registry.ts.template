@@ -3447,6 +3447,19 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'authors are refused at parse rather than rewritten.',
   },
   {
+    id: 'ui-view-personal-declarations-retired',
+    order: 117,
+    text:
+      'It also retires the two inert `personal` declarations on a view (ADR-0049): `scope: \'personal\'` on '
+      + 'a view item and the list view\'s `sharing.type`. Nothing ever restricted a view to one user, so a view '
+      + 'marked personal was listed for everyone who can read its object, under a badge that said otherwise; '
+      + 'personal named views are ruled to be a user-owned record, not view metadata. Both are refused at parse '
+      + 'with their prescription (a `collaborative` value an older toolchain wrote out is accepted and '
+      + 'stripped); the D2 conversion `view-personal-declarations-removed` deletes them from existing sources '
+      + 'and stored rows, which changes nothing a reader sees. Its D3 record is the semantic entry '
+      + '`ui-view-personal-declarations-retired`.',
+  },
+  {
     id: 'view-data-api-provider-retired',
     order: 95,
     text:

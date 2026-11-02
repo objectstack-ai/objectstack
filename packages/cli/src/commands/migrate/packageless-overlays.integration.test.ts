@@ -24,6 +24,9 @@
  * controls, and a FRESH boot of the same database then serves the moved
  * content under the base's name on the package-less read, the read naming the
  * base, the layered read and the base's list; a second `--apply` moves 0.
+ *
+ * [#29392] A second template holds a row bound to the package itself (a save
+ * naming it, before that write was closed): listed and moved the same way.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
@@ -78,7 +81,7 @@ const viewBody = (name: string, columns: readonly string[]) => ({
   config: { type: 'grid', data: { provider: 'object', object: 'm28413_task' }, columns: columns.map((field) => ({ field })) },
 });
 
-interface SeedRow { type: string; name: string; state: string; body: Record<string, unknown> }
+interface SeedRow { type: string; name: string; state: string; body: Record<string, unknown>; packageId?: string }
 const SEED: SeedRow[] = [
   { type: 'view', name: VIEW, state: 'active', body: viewBody(VIEW, STORED_COLUMNS) },
   { type: 'view', name: VIEW, state: 'draft', body: viewBody(VIEW, DRAFT_COLUMNS) },
@@ -89,20 +92,50 @@ const SEED: SeedRow[] = [
   { type: 'permission', name: 'm28413_rep', state: 'draft', body: { name: 'm28413_rep', label: 'Saved in the environment', objects: {} } },
 ];
 
+/**
+ * [#29392] A database whose customization a save naming the package itself
+ * stored before that write was closed: an active row of the package's view
+ * bound to the package, beside the package-less environment row (control).
+ */
+const BOUND_SEED: SeedRow[] = [
+  { type: 'view', name: VIEW, state: 'active', body: viewBody(VIEW, STORED_COLUMNS), packageId: PKG },
+  { type: 'view', name: ENV_VIEW, state: 'active', body: viewBody(ENV_VIEW, STORED_COLUMNS) },
+];
+
 let dir: string;
 let templateDb: string;
+let boundTemplateDb: string;
 const savedCwd = process.cwd();
 const ENV_KEYS = ['OS_ARTIFACT_PATH', 'OS_DATABASE_URL', 'DATABASE_URL', 'OS_DATABASE_DRIVER', 'OS_HOME', 'NODE_ENV',
   'OS_AUTH_SECRET', 'AUTH_SECRET', 'BETTER_AUTH_SECRET', 'OS_ENVIRONMENT_ID'] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 let caseSeq = 0;
-function caseDb(): string {
+function caseDb(template = templateDb): string {
   caseSeq += 1;
   const file = join(dir, 'cases', `${caseSeq}.db`);
   mkdirSync(dirname(file), { recursive: true });
-  copyFileSync(templateDb, file);
+  copyFileSync(template, file);
   return file;
+}
+
+/** The rows an older release left, written at the driver the way that release stored them. */
+async function insertRows(dbFile: string, rows: readonly SeedRow[]): Promise<void> {
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: dbFile }, useNullAsDefault: true });
+  try {
+    const k = (driver as any).knex;
+    const now = new Date().toISOString();
+    let n = 0;
+    for (const row of rows) {
+      n += 1;
+      await k('sys_metadata').insert({
+        id: `seed_${n}`, type: row.type, name: row.name, package_id: row.packageId ?? null, state: row.state,
+        version: 1, checksum: null, created_at: now, updated_at: now, metadata: JSON.stringify(row.body),
+      });
+    }
+  } finally {
+    await driver.disconnect();
+  }
 }
 
 /** Every `sys_metadata` row, `type/name@binding/state`, read on a connection of our own. */
@@ -215,21 +248,10 @@ beforeAll(async () => {
     extraPlugins: [new PackageServicePlugin()],
   });
   await seed.shutdown();
-  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: templateDb }, useNullAsDefault: true });
-  try {
-    const k = (driver as any).knex;
-    const now = new Date().toISOString();
-    let n = 0;
-    for (const row of SEED) {
-      n += 1;
-      await k('sys_metadata').insert({
-        id: `seed_${n}`, type: row.type, name: row.name, package_id: null, state: row.state,
-        version: 1, checksum: null, created_at: now, updated_at: now, metadata: JSON.stringify(row.body),
-      });
-    }
-  } finally {
-    await driver.disconnect();
-  }
+  boundTemplateDb = join(dir, 'bound-template.db');
+  copyFileSync(templateDb, boundTemplateDb);
+  await insertRows(templateDb, SEED);
+  await insertRows(boundTemplateDb, BOUND_SEED);
 }, CASE_TIMEOUT_MS);
 
 afterAll(() => {
@@ -310,4 +332,55 @@ describe('os migrate packageless-overlays', () => {
     expect(exitCode).toBe(1);
     expect(await storedRows(db)).toEqual(before);
   }, CASE_TIMEOUT_MS);
+});
+
+/**
+ * [#29392] A row bound to the read-only package itself, stored by a save
+ * naming it before that write was closed: the census lists it beside the
+ * package-less rows (`boundToBase`), and `--apply` moves it into the pair with
+ * the declaration, the same outcome. Before, the census read package-less
+ * rows only: the preview listed nothing and the row's one exit was a delete.
+ */
+describe('os migrate packageless-overlays: a row bound to the read-only package', () => {
+  it('the preview lists it with its target pair and writes nothing', async () => {
+    const db = caseDb(boundTemplateDb);
+    const before = await storedRows(db);
+    const { payload, exitCode } = await runJson(['--database-url', `file:${db}`, '--json']);
+    expect(payload.error, JSON.stringify(payload).slice(0, 600)).toBeUndefined();
+    expect(exitCode).toBe(0);
+    expect(payload.rows.map((r: any) => `${r.type}/${r.name}/${r.state} ${r.disposition} ${r.base} → ${r.pair} ${r.boundToBase} ${r.outcome}`)).toEqual([
+      `view/${VIEW}/active movable ${PKG} → ${PAIR} true listed`,
+    ]);
+    expect(payload.movable).toBe(1);
+    expect(payload.environmentRows).toBe(1);
+    expect(await storedRows(db)).toEqual(before);
+    expect(await storedPackages(db)).not.toContain(PAIR);
+  }, CASE_TIMEOUT_MS);
+
+  it('--apply moves it into the pair with its `overrides` declaration, keeps the control, serves the same customization over the package\'s document, and a re-run moves 0', async () => {
+    const db = caseDb(boundTemplateDb);
+    const served = await servedColumns(db);
+    expect(served[1]).toEqual(STORED_COLUMNS);
+
+    const { payload, exitCode } = await runJson(['--apply', '--yes', '--database-url', `file:${db}`, '--json']);
+    expect(payload.error, JSON.stringify(payload).slice(0, 600)).toBeUndefined();
+    expect(exitCode).toBe(0);
+    expect(payload.bases).toEqual([{ base: PKG, pair: PAIR, pairCreated: true, moved: 1, declarationsCompleted: 0, failed: 0, shadowed: 0 }]);
+    expect(payload.rows.map((r: any) => `${r.state} ${r.outcome} ${r.packageId} ${r.basedOn} ${r.boundToBase}`)).toEqual([
+      `active moved ${PAIR} 1.4.0 true`,
+    ]);
+    expect(await storedRows(db)).toEqual([`view/${ENV_VIEW}@-/active`, `view/${VIEW}@${PAIR}/active`]);
+    expect((await storedBody(db, { type: 'view', name: VIEW, package_id: PAIR, state: 'active' })).overrides)
+      .toEqual({ package: PKG, basedOn: '1.4.0' });
+    expect(await storedPackages(db)).toContain(PAIR);
+
+    // A fresh boot serves the customization at every read of the package's item.
+    expect(await servedColumns(db)).toEqual([STORED_COLUMNS, STORED_COLUMNS, STORED_COLUMNS, STORED_COLUMNS]);
+
+    const again = await runJson(['--apply', '--yes', '--database-url', `file:${db}`, '--json']);
+    expect(again.payload.error, JSON.stringify(again.payload).slice(0, 600)).toBeUndefined();
+    expect(again.exitCode).toBe(0);
+    expect(again.payload.moved).toBe(0);
+    expect(again.payload.rows).toEqual([]);
+  }, CASE_TIMEOUT_MS * 3);
 });

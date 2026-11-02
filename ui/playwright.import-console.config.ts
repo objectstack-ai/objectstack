@@ -11,7 +11,6 @@ import { join } from 'node:path';
  *
  * This differs from:
  *   - playwright.live.config.ts        — general live console specs
- *   - playwright.import-harness.config.ts — a standalone hand-mounted wizard
  *
  * Prereqs (long-lived dev processes — NOT started by this config):
  *   1. An ObjectStack backend with the async import-job routes

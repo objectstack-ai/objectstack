@@ -145,10 +145,10 @@
         },
         "sharing": {
           "status": "live",
-          "verifiedAt": "2026-08-10",
+          "verifiedAt": "2026-11-02",
           "evidenceScope": "in-repo",
-          "evidence": "ui/packages/plugin-list/src/ListView.tsx (:2544 at objectui @11c1e71e) gates the toolbar sharing badge on schema.sharing.type, :2549 renders its tooltip from the same value and :2573 counts it when laying out the toolbar's left side; ui/packages/plugin-list/src/__tests__/ListView.test.tsx:2572 pins the lockedBy tooltip — measured objectui @11c1e71e",
-          "note": "RE-CITED 2026-08-10 (#7133/#7142): the old citation was the TEST ALONE, at ListView.test.tsx:2276. The test survives with its content intact — it is now packages/plugin-list/src/__tests__/ListView.test.tsx:2428, 'should display lockedBy in sharing tooltip when set' — so this was line drift, not deletion. A test is the weaker half of a liveness claim, so the production reader is cited first and the test kept as the pin. Verdict unchanged: LIVE. Supersedes the 2026-06 audit's 'sharing.lockedBy dead' line."
+          "evidence": "ui/packages/plugin-list/src/ListView.tsx#sharingLockedBy (the toolbar's read-only lock indicator draws `Locked by …` from schema.sharing.lockedBy, and the same helper counts it when laying out the toolbar's left side); ui/packages/plugin-list/src/__tests__/ListView.test.tsx pins it ('shows who locked the view from `sharing.lockedBy`')",
+          "note": "RE-CITED 2026-11-02 (#29037): the block's ownership `type` was RETIRED (ADR-0049; a `retiredKey()` tombstone with the released `collaborative` default accepted as residue, D2 `view-personal-declarations-removed`), so the badge that read it now draws only the lock: the row stays live on `lockedBy` alone, the one key its one reader reads. The sub-key cannot be drilled here (one level only); the tombstone is registered as `ui/ViewSharing:type`. Earlier: RE-CITED 2026-08-10 (#7133/#7142): the old citation was the TEST ALONE, at ListView.test.tsx:2276. The test survives with its content intact — it is now packages/plugin-list/src/__tests__/ListView.test.tsx:2428, 'should display lockedBy in sharing tooltip when set' — so this was line drift, not deletion. A test is the weaker half of a liveness claim, so the production reader is cited first and the test kept as the pin. Verdict unchanged: LIVE. Supersedes the 2026-06 audit's 'sharing.lockedBy dead' line."
         },
         "requiredPermissions": {
           "status": "live",
