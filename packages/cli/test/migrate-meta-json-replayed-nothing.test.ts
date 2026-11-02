@@ -152,6 +152,19 @@ describe('os migrate meta --json: a run that replayed no step says so', () => {
     expect(payload.replayedNothing).toEqual({ reason: 'inverted-range', widestRange: null });
   }, 120_000);
 
+  it('an inverted range whose --to is below the terminus offers no wider range either', async () => {
+    // `--from T --to T-1` and `--from T+1 --to T-1`: a "widest range" from a
+    // `--from` at or above the terminus is itself empty or inverted, so there
+    // is no wider range to name, whatever `--to` says.
+    for (const from of [TERMINUS, TERMINUS + 1]) {
+      const { exitCode, payload } = await json(['--from', String(from), '--to', String(BELOW)]);
+      expect(exitCode).toBeUndefined();
+      expect(payload.from).toBe(from);
+      expect(payload.to).toBe(BELOW);
+      expect(payload.replayedNothing).toEqual({ reason: 'inverted-range', widestRange: null });
+    }
+  }, 120_000);
+
   it('an empty range below the terminus names what the widest range holds, as the human run does', async () => {
     const flags = ['--from', String(BELOW), '--to', String(BELOW)];
     const { exitCode, payload } = await json(flags);

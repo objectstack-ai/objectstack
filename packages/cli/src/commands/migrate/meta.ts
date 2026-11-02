@@ -304,8 +304,9 @@ interface ReplayedNothing {
   /**
    * The widest range this build carries from the same `--from`, and how many
    * mechanical and manual changes it holds for THIS stack (zero and zero when
-   * it has nothing either). `null` when `--to` already reaches the terminus,
-   * so no wider range is available.
+   * it has nothing either). `null` when no wider range is available: `--to`
+   * already reaches the terminus, or `--from` is at or above it, so any range
+   * from that `--from` to the terminus is itself empty or inverted.
    */
   widestRange: { from: number; to: number; applied: number; manual: number } | null;
 }
@@ -345,7 +346,9 @@ function readReplayedNothing(
   if (result.hops.length > 0) return null;
   const { fromMajor, toMajor } = result;
   const reason = fromMajor > toMajor ? 'inverted-range' : 'empty-range';
-  if (toMajor >= CHAIN_TERMINUS_MAJOR) return { reason, widestRange: null };
+  if (toMajor >= CHAIN_TERMINUS_MAJOR || fromMajor >= CHAIN_TERMINUS_MAJOR) {
+    return { reason, widestRange: null };
+  }
   const wider = applyMetaMigrationsToPackages(stack, fromMajor, CHAIN_TERMINUS_MAJOR);
   return {
     reason,
