@@ -1839,7 +1839,7 @@ const es = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Necesita acceso a Studio para abrir Studio. Un administrador puede concedérselo con un conjunto de permisos en Configuración → Conjuntos de permisos.",
+      accessRequired: "Necesita acceso a Studio para abrir Studio. Un administrador puede concedérselo con un conjunto de permisos en Configuración → Asignación de conjuntos de permisos.",
     },
     saveAdvisoryTitle: "Guardado: la comprobación de creación generó {{count}} recomendación(es)",
     saveAdvisoryTitle_one: "Guardado: la comprobación de creación generó {{count}} recomendación",

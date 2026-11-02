@@ -22,7 +22,7 @@
 
 import * as React from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowUpRight, Boxes, Building2, Clock, Hammer, Library, Lock, Plus, Loader2, Copy, Store } from 'lucide-react';
+import { Boxes, Building2, Clock, Hammer, Library, Lock, Plus, Loader2, Copy, Store } from 'lucide-react';
 import { toast } from 'sonner';
 import { useRecentItems, type RecentNamedItem } from '../../context/RecentItemsProvider.js';
 import { useRecentItemLabel } from '../../hooks/useRecentItemLabel.js';
@@ -38,21 +38,13 @@ import { STUDIO_ALL_PACKAGES_SEGMENT, studioMetadataAreaPath } from './metadataA
 import { STUDIO_NEW_PARAM, STUDIO_NEW_PACKAGE_VALUE } from './studioNewPackage.js';
 
 /**
- * objectui#11808 — the two places a read-only package's card sends the author.
- * Both are routes the console already serves, spelled the way its own entries
- * spell them under the `setup` app: the Setup sidebar's metadata entries
- * (`/apps/setup/metadata/:type`) and Home's "Start with a template".
- *
- * The overlay route is the package's metadata directory, scoped by its
- * `package` query parameter. It marks, per metadata type, whether the type
- * accepts an environment overlay — the answer this page cannot give, because
- * `allowEnvironmentOverlay` belongs to the TYPE (ADR-0005), not to the package or the
- * item, and `PkgEntry` does not say which types a package ships. The Studio's
- * read-only link (objectui#12453) lands on the same route through `overlayPath`.
+ * objectui#11808 — where a read-only package's card sends the author beyond
+ * the package itself: Home's "Start with a template" (the marketplace), when
+ * this runtime serves one. The card's own button opens the package in Studio,
+ * where Customize and the "All metadata" area are; Studio links into no Setup
+ * metadata page (objectstack ADR-0146 D1, Setup carries none).
  */
 const MARKETPLACE_PATH = '/apps/setup/system/marketplace';
-export const overlayPath = (packageId: string) =>
-  `/apps/setup/metadata?package=${encodeURIComponent(packageId)}`;
 
 /** objectui#11863 — how many recent packages the landing lists: one row of cards. */
 const RECENT_PACKAGES_SHOWN = 3;
@@ -456,13 +448,13 @@ export function BuilderLanding(): React.ReactElement {
 
       {/* objectui#11808 — a read-only package is not a dead end. ADR-0070 D2:
         * code and installed packages take no new items, and D4's Duplicate
-        * clones a writable base, not them. They are customized by environment overlay
-        * where the item's metadata type declares `allowEnvironmentOverlay` (ADR-0005),
-        * so each card links to the package's metadata directory, which says
-        * per type whether an overlay is accepted (see `overlayPath`). The
-        * marketplace, which Home's "Start with a template" opens, is offered
-        * only when this runtime serves one (`isMarketplaceEnabled`,
-        * objectui#5504): elsewhere that route does not exist. */}
+        * clones a writable base, not them. Each card opens the package in
+        * Studio, where it is customized (objectstack ADR-0146: Customize, and
+        * the "All metadata" area's per-type overlays); the card links into no
+        * Setup page. The marketplace, which Home's "Start with a template"
+        * opens, is offered only when this runtime serves one
+        * (`isMarketplaceEnabled`, objectui#5504): elsewhere that route does not
+        * exist. */}
       {readonly.length > 0 && (
         <>
           <h2 className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -504,17 +496,6 @@ export function BuilderLanding(): React.ReactElement {
                 </button>
                 <div className="flex flex-col gap-1 border-t px-3 py-1.5">
                   {renderCustomizationLine(p.id)}
-                  <Link
-                    to={overlayPath(p.id)}
-                    title={t('engine.studio.landing.overlayTitle', locale)}
-                    data-testid="studio-landing-overlay"
-                    className="inline-flex self-start items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground hover:underline"
-                  >
-                    {/* objectui#12513 — the link leaves Studio for Setup: its
-                        name says where it goes, the arrow that it goes out. */}
-                    {t('engine.studio.landing.overlay', locale)}
-                    <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
-                  </Link>
                 </div>
               </div>
             ))}
