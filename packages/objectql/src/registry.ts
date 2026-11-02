@@ -4751,7 +4751,7 @@ export class SchemaRegistry {
         `[Registry] Field "${field}" of object "${object}" is declared in \`fields\` by ${declaredBy}; ` +
           `the definition served is the one from ${named(list[list.length - 1]!.packageId)}, the last the fold applies ` +
           '(ascending `priority`; at equal priority, the one registered last). Rename the field in one extension, ' +
-          'or change an owner field\'s display properties through `fieldPatches` instead of redeclaring it.',
+          'or patch an owner field\'s display properties instead of redeclaring it.',
       );
     }
   }
