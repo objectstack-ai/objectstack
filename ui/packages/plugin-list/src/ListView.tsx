@@ -16,7 +16,7 @@ import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
 import { ViewSettingsPopover, type ViewSettingsRecordOpen } from './components/ViewSettingsPopover';
-import { UserFilters } from './UserFilters';
+import { UserFilters, type UserFiltersHandle } from './UserFilters';
 import {
   calendarWindowCovers,
   calendarWindowFilter,
@@ -2173,6 +2173,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
   // User Filters State (Airtable Interfaces-style)
   const [userFilterConditions, setUserFilterConditions] = React.useState<any[]>([]);
+  // The mounted chip bar's handle: the empty state's "Clear filters" clears
+  // the chips through it (objectstack#29052). The selection stays the bar's.
+  const userFiltersRef = React.useRef<UserFiltersHandle>(null);
 
   // The user filter this component APPLIES — its fetch, the export, the node of
   // a view that queries for itself, the empty-state copy. Empty while a
@@ -3926,16 +3929,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   }, [onSearchChange]);
 
   // objectstack#28908 — the empty state's "Clear filters": removes the
-  // reader's whole query (the panel's conditions, the "In a queue" toggle and
-  // the search) and leaves the view's declared filter alone, which is not the
-  // reader's. The panel's group goes through the same emit as a panel edit, so
-  // the toolbar badge clears and the host stores the empty group. User-filter
-  // chips are not reset here: `UserFilters` holds its own selection and each
-  // chip clears in place.
+  // reader's whole query (the panel's conditions, the user-filter chips, the
+  // "In a queue" toggle and the search) and leaves the view's declared filter
+  // alone, which is not the reader's. The panel's group goes through the same
+  // emit as a panel edit, so the toolbar badge clears and the host stores the
+  // empty group. The chips clear through the bar's own handle, which reports
+  // the cleared selection to the host as a chip's × does (objectstack#29052).
   const handleClearReaderQuery = React.useCallback(() => {
     const cleared: FilterBuilderRowGroup = { ...currentFilters, conditions: [] };
     setCurrentFilters(cleared);
     onFilterChange?.(cleared);
+    userFiltersRef.current?.clear();
     setSittingInQueueOnly(false);
     if (searchInput) handleSearchChange('');
   }, [currentFilters, onFilterChange, searchInput, handleSearchChange]);
@@ -5680,6 +5684,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const cappedPosture = cappedWindow && surfaceDrawsFetchedRows;
   // Either short posture draws none of the object list's chrome.
   const listChromeShown = !compactPosture && !cappedPosture;
+  // The user-filter bar is on screen (the toolbar draws it below). Its chips
+  // are the reader's filter, so the empty state's "Clear filters" counts them;
+  // preset tabs are the view's presets and are not cleared.
+  const userFilterBarShown = listChromeShown && !!filterElements && toolbarFlags.showUserFilters;
+  const userFilterChipsClearable =
+    userFilterBarShown && filterElements?.element !== 'tabs' && appliedUserFilterConditions.length > 0;
   // The records the query matched, once a load settles: the server's total, or
   // the rows in hand when the whole result is in memory. The capped list's
   // 「View all N」 and the tab badge (`onTotalChange`) both say this number.
@@ -5905,9 +5915,10 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               them visible (single line, scrollable) to match the Airtable
               Interface pattern. Withheld on a dataset-bound chart, which they
               cannot reach (`datasetChartOnScreen`, objectui#10327). */}
-          {filterElements && toolbarFlags.showUserFilters && (
+          {filterElements && userFilterBarShown && (
               <div className="shrink-0 min-w-0 overflow-x-auto" data-testid="user-filters">
                 <UserFilters
+                  ref={userFiltersRef}
                   config={filterElements}
                   objectDef={objectDef}
                   objectDefPending={!objectDefLoaded}
@@ -6821,9 +6832,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // emptied: the empty state offers the way out.
             onClearSearch={searchTerm && searchTerm.trim() ? () => handleSearchChange('') : undefined}
             // objectstack#28908 — a filter the reader applied (the panel's
-            // finished conditions, the queue toggle) is part of the empty
-            // query: the one clear action removes it, the search with it.
+            // finished conditions, the user-filter chips, the queue toggle) is
+            // part of the empty query: the one clear action removes it, the
+            // search with it.
             onClearFilters={
+              userFilterChipsClearable ||
               appliedQueueSittingConditions.length > 0 ||
               (Array.isArray(appliedFilters?.conditions) && appliedFilterGroup(appliedFilters).conditions.length > 0)
                 ? handleClearReaderQuery
