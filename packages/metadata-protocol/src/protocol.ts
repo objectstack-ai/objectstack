@@ -219,6 +219,7 @@ import {
     decorateMetadataItem,
     decorateMetadataItems,
     type MetadataDiagnostics,
+    withFormLayoutWarnings,
     withPublishVerdict,
 } from './metadata-diagnostics.js';
 // [#8154] The per-type read-path redaction seam. `decorateMetadataItem` already
@@ -11455,6 +11456,15 @@ export class ObjectStackProtocolImplementation implements
         // Every read of `execution` below is one of those exits.
         const execution = opts.face === 'execution';
         const serveItem = <T>(resolved: T): T => (execution ? resolved : decorateMetadataItem(request.type, resolved));
+        // [#29196] A served VIEW's `_diagnostics` also carries the lint's
+        // `form-field-unknown` warnings ({@link withFormLayoutWarnings}), judged
+        // against the object the registry serves for each name the view spells.
+        // Applied at every served exit of this read, the draft ones included; a
+        // warning, so `valid` is left as the schema answered it. The execution
+        // face serves no `_diagnostics`.
+        const serveFormLayout = <T>(served: T): Promise<T> => (execution
+            ? Promise.resolve(served)
+            : withFormLayoutWarnings(request.type, served, (name) => this.engine?.registry?.getObject?.(name)));
         // [#26707] A served DRAFT is decorated as above and then told what its
         // publish would refuse: the runtime gate's verdict on the stored draft
         // body ({@link draftPublishVerdict}), folded into `_diagnostics`
@@ -11462,7 +11472,7 @@ export class ObjectStackProtocolImplementation implements
         // the promotion judges — never on the governed, converted or redacted
         // copy this read serves. The execution face serves no `_diagnostics`.
         const serveDraft = async <T>(resolved: T, row: { metadata?: unknown; package_id?: string | null }): Promise<T> => {
-            const served = serveItem(resolved);
+            const served = await serveFormLayout(serveItem(resolved));
             if (execution || !served || typeof served !== 'object') return served;
             const issues = await this.draftPublishVerdict({
                 type: request.type,
@@ -11753,7 +11763,7 @@ export class ObjectStackProtocolImplementation implements
             return {
                 type: request.type,
                 name: request.name,
-                item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : serveItem(governedDraft),
+                item: servedDraftRow ? await serveDraft(governedDraft, servedDraftRow) : await serveFormLayout(serveItem(governedDraft)),
                 // [#22114] The draft row's version token — the one a draft save
                 // (`?mode=draft`) at this address accepts as `If-Match`.
                 // [#22877] The member's own row's, as a save of that member's
@@ -12030,6 +12040,9 @@ export class ObjectStackProtocolImplementation implements
                 }
             } catch { /* reference diagnostics are best-effort */ }
         }
+        // [#29196] …and the lint's form-layout warnings, after the reference
+        // merge above (which rebuilds `_diagnostics` from its errors alone).
+        decorated = await serveFormLayout(decorated);
         // ADR-0010 — surface lock/provenance flags so Studio can render
         // the correct affordances without a second round trip. [#21670] They
         // report the write doors' verdicts — see {@link servedLockState}.
@@ -24941,6 +24954,13 @@ export class ObjectStackProtocolImplementation implements
      * the `_drafts` doors only. The package batch doors (publish, discard, the
      * batch closure) read the repository's `listDrafts` directly, so a
      * disabled package's drafts still publish and discard.
+     *
+     * [#29180] A `packageId` naming a package that is not installed and that
+     * no pending draft is bound to is refused `400 INVALID_REQUEST`, the
+     * diagnostics sweep's rule for its own package filter, rather than
+     * answered an empty list a caller reads as "nothing pending". An unknown
+     * `type` is refused by the transports before this is called, with the
+     * list door's verdict.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -24964,6 +24984,7 @@ export class ObjectStackProtocolImplementation implements
             get engine() { return readEngine(); },
             ensureOverlayIndex: (...a) => this.ensureOverlayIndex(...a),
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            getMetaItems: (...a) => this.getMetaItems(...a),
         };
         return listDrafts.call(host, request);
     }
