@@ -158,6 +158,14 @@ export interface CalendarViewProps {
   /** Granularity in minutes used by WeekView/DayView for snapping
    * drag-to-move, drag-to-resize, and drag-to-create. Defaults to 30. */
   slotMinutes?: number
+  /**
+   * Whether a gesture may move an event's END on its own: the month view's
+   * right-edge "Resize event end" handle and the week/day views' bottom resize
+   * handle. Defaults to `true`. A host whose events have no stored end passes
+   * `false` (`ObjectCalendar` does when the view declares no `endDateField`):
+   * an end-only edit has nothing to write there, so neither handle is drawn.
+   */
+  endEditable?: boolean
   className?: string
 }
 
@@ -174,6 +182,7 @@ function CalendarView({
   onEventDrop,
   onTimeRangeSelect,
   slotMinutes = 30,
+  endEditable = true,
   className,
 }: CalendarViewProps) {
   const [selectedView, setSelectedView] = React.useState(view)
@@ -442,6 +451,7 @@ function CalendarView({
             onEventClick={onEventClick}
             onDateClick={onDateClick}
             onEventDrop={onEventDrop}
+            endEditable={endEditable}
           />
         )}
         {selectedView === "week" && (
@@ -455,6 +465,7 @@ function CalendarView({
             onEventClick={onEventClick}
             onEventDrop={onEventDrop}
             onTimeRangeSelect={onTimeRangeSelect}
+            endEditable={endEditable}
           />
         )}
         {selectedView === "day" && (
@@ -468,6 +479,7 @@ function CalendarView({
             onEventClick={onEventClick}
             onEventDrop={onEventDrop}
             onTimeRangeSelect={onTimeRangeSelect}
+            endEditable={endEditable}
           />
         )}
       </div>
@@ -539,9 +551,11 @@ interface MonthViewProps {
   onEventClick?: (event: CalendarViewEvent) => void
   onDateClick?: (date: Date) => void
   onEventDrop?: (event: CalendarViewEvent, newStart: Date, newEnd?: Date) => void
+  /** {@link CalendarViewProps.endEditable}: `false` draws no resize-end handle. */
+  endEditable: boolean
 }
 
-function MonthView({ date, events, locale = "default", weekStart, onEventClick, onDateClick, onEventDrop }: MonthViewProps) {
+function MonthView({ date, events, locale = "default", weekStart, onEventClick, onDateClick, onEventDrop, endEditable }: MonthViewProps) {
   const days = React.useMemo(() => getMonthDays(date, weekStart), [date.getFullYear(), date.getMonth(), weekStart])
   const today = React.useMemo(() => new Date(), [])
   const { t } = useCalendarTranslation()
@@ -675,6 +689,9 @@ function MonthView({ date, events, locale = "default", weekStart, onEventClick, 
     newTargetDay.setHours(0, 0, 0, 0)
 
     if (payload.mode === "resize-end") {
+      // An end that is not editable has no handle; a payload naming the mode
+      // anyway writes nothing.
+      if (!endEditable) return
       // Resize: move the end to the drop-target day, keep start fixed. The
       // handle sits on the span's end cell, so the grabbed cell is the end's
       // own day, and the end moves by the calendar days from it to the drop
@@ -784,7 +801,9 @@ function MonthView({ date, events, locale = "default", weekStart, onEventClick, 
                 {dayEvents.slice(0, 4).map(({ event, isTitleDay, isSpanStart, isSpanEnd }, slotIdx) => {
                   const isContinuation = !isTitleDay
                   const { className: colorCls, inlineColor } = resolveEventColor(event.color)
-                  const showResizeHandle = !!onEventDrop && isSpanEnd
+                  // No handle where the end is not editable: dragging it would
+                  // hand back the unchanged start and nothing else.
+                  const showResizeHandle = !!onEventDrop && endEditable && isSpanEnd
                   return (
                     <div
                       key={`${event.id}-${slotIdx}`}
@@ -867,6 +886,8 @@ interface TimeGridViewProps {
   onEventClick?: (event: CalendarViewEvent) => void
   onEventDrop?: (event: CalendarViewEvent, newStart: Date, newEnd?: Date) => void
   onTimeRangeSelect?: (start: Date, end: Date) => void
+  /** {@link CalendarViewProps.endEditable}: `false` draws no bottom resize handle. */
+  endEditable: boolean
 }
 
 /**
@@ -1002,6 +1023,7 @@ function TimeGridView({
   onEventClick,
   onEventDrop,
   onTimeRangeSelect,
+  endEditable,
 }: TimeGridViewProps) {
   const { t } = useCalendarTranslation()
   const slotPx = (PX_PER_HOUR * slotMinutes) / 60
@@ -1584,7 +1606,7 @@ function TimeGridView({
                           aria-label={t('calendar.a11y.resizeStart')}
                         />
                       )}
-                      {onEventDrop && entry.isEnd && (
+                      {onEventDrop && endEditable && entry.isEnd && (
                         <div
                           onPointerDown={(e) => handleEventPointerDown(e, entry, dayIndex, "bottom")}
                           className="absolute bottom-0 left-0 right-0 h-1.5 cursor-ns-resize"
