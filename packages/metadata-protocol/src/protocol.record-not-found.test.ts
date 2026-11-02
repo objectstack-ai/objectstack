@@ -384,19 +384,23 @@ describe('[#4435] deleteManyData reports per id, not per request', () => {
   });
 });
 
-describe('a stale version token on a row the caller does not read gets the write door\'s answer, as no token does', () => {
+describe('a stale version token on a row absent from the caller\'s read gets the write door\'s answer, as no token does', () => {
   // The by-id OCC comparison runs before the write is authorized. When the
   // tokens disagree it re-reads the row as the caller, and a row that read
-  // does not return — absent, or the read refused — leaves the answer to the
-  // write door: what the same request without a token gets, status, code and
-  // sentence, which is also what a token on an id naming no row gets (ruling
-  // of record 5985885287: a row the caller cannot read answers what a
-  // nonexistent id answers, on update and delete alike).
+  // RETURNS NO ROW for leaves the answer to the write door: what the same
+  // request without a token gets, status, code and sentence, which is also
+  // what a token on an id naming no row gets (ruling of record 5985885287: a
+  // row the caller cannot read answers what a nonexistent id answers, on
+  // update and delete alike). Only an absent row is handed over: a caller
+  // read that THROWS — a refusal or a fault — propagates as raised.
   const CURRENT = '2026-10-30T08:00:00.000Z';
   const STALE = '2001-01-01T00:00:00.000Z';
   const CALLER = { userId: 'u1' };
   const MISSING = 'definitely_not_a_row';
   const row = (id: string) => ({ id, title: 'x', updated_at: CURRENT });
+  /** The read door's refusal of a caller without the object's read grant. */
+  const readRefusalError = () =>
+    Object.assign(new Error('Reading this object is not permitted.'), { code: 'PERMISSION_DENIED', status: 403 });
 
   /** A refused call as the doors render it: status, code and sentence. */
   const answerOf = (run: () => Promise<unknown>) => run().then(
@@ -423,21 +427,31 @@ describe('a stale version token on a row the caller does not read gets the write
         expect(store.get('real')).toEqual(row('real'));
       });
 
-      it('the caller\'s read REFUSES: the write door\'s refusal answers, never the read\'s', async () => {
-        // A declared client-band status in either spelling is a refusal.
-        for (const readRefusal of [
-          () => Object.assign(new Error('Reading this object is not permitted.'), { code: 'PERMISSION_DENIED', status: 403 }),
-          () => Object.assign(new Error('Reading this object is not permitted.'), { code: 'PERMISSION_DENIED', statusCode: 403 }),
-        ]) {
-          const { p, store } = makeProtocol({ real: row('real') }, { refuse: 'u1', readRefusal });
-          const stale = await answerOf(() => write(p, 'real', STALE));
-          const noToken = await answerOf(() => write(p, 'real'));
-          const missing = await answerOf(() => write(p, MISSING, STALE));
-          expect(stale).toEqual(noToken);
-          expect(stale.message).toBe(writeRefusal().message);
-          expect(withoutId(missing, MISSING)).toEqual(withoutId(stale, 'real'));
-          expect(store.get('real')).toEqual(row('real'));
-        }
+      it('the caller\'s read REFUSES and the write is refused too: the read refusal propagates, with the write\'s status and code', async () => {
+        // A caller holding neither grant. The refused read is the answer, so its
+        // sentence is the read door's: status and code are compared here, the
+        // sentence deliberately is not.
+        const { p, store } = makeProtocol({ real: row('real') }, { refuse: 'u1', readRefusal: readRefusalError });
+        const stale = await answerOf(() => write(p, 'real', STALE));
+        const noToken = await answerOf(() => write(p, 'real'));
+        const missing = await answerOf(() => write(p, MISSING, STALE));
+        expect(stale).toEqual({ code: 'PERMISSION_DENIED', status: 403, message: readRefusalError().message });
+        expect({ code: noToken.code, status: noToken.status }).toEqual({ code: stale.code, status: stale.status });
+        expect({ code: missing.code, status: missing.status }).toEqual({ code: stale.code, status: stale.status });
+        expect(store.get('real')).toEqual(row('real'));
+      });
+
+      it('the caller\'s read REFUSES and the write door admits the write (a write grant without a read grant): the read refusal propagates and nothing is written', async () => {
+        const { p, store, update, del } = makeProtocol({ real: row('real') }, { readRefusal: readRefusalError });
+        await expect(write(p, 'real', STALE)).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
+        expect(update).not.toHaveBeenCalled();
+        expect(del).not.toHaveBeenCalled();
+        expect(store.get('real')).toEqual(row('real'));
+        // Control: without a token the same double admits the same write, so the
+        // pin above is not vacuous.
+        await write(p, 'real');
+        if (verb === 'updateData') expect(store.get('real')).toMatchObject({ title: 'y' });
+        else expect(store.has('real')).toBe(false);
       });
 
       it('a hidden row, the write admitted up to its read question: the write door\'s 404, for the row and for no row alike', async () => {
@@ -451,10 +465,11 @@ describe('a stale version token on a row the caller does not read gets the write
         expect(store.get('real')).toEqual(row('real'));
       });
 
-      it('a read that FAULTS propagates as raised, and the write is never asked', async () => {
+      it('a read that FAULTS, or throws any other 4xx, propagates as raised, and the write is never asked', async () => {
         for (const fault of [
           new Error('connection reset'),
           Object.assign(new Error('store unavailable'), { code: 'SERVICE_UNAVAILABLE', status: 503 }),
+          Object.assign(new Error('bad read'), { code: 'VALIDATION_FAILED', statusCode: 400 }),
         ]) {
           const { p, update, del } = makeProtocol({ real: row('real') }, { readRefusal: () => fault });
           await expect(write(p, 'real', STALE)).rejects.toBe(fault);

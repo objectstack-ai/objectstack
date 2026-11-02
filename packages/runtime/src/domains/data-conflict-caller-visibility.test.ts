@@ -26,8 +26,13 @@
  *  - **The same, on an object the caller reads but may not write:** the write
  *    door answers first, so the control is its `403` — and a stale token, on
  *    the hidden row and on an id naming no row, gets that same `403` body. The
- *    comparison gives no answer of its own for a row the caller does not read.
- *    A row the caller reads there still conflicts `409`.
+ *    comparison gives no answer of its own for a row absent from the
+ *    caller's read. A row the caller reads there still conflicts `409`.
+ *  - **An object the caller may write but not read, with no row filter on
+ *    the write:** the caller's re-read is REFUSED, not empty, and a refusal is
+ *    never handed to the write door: a stale token answers the read door's
+ *    `403` and the row is unchanged, on update and on delete. The control
+ *    without a token lands, so the pin is not vacuous.
  *  - **A field the caller's FLS hides:** the `409`'s `currentRecord` does not
  *    carry it, as the caller's own read of the row does not.
  *  - **A row the caller may read whole (the positive control):** a stale token
@@ -67,6 +72,8 @@ const SCOPED = 'occ_vis_ledger';
 const PLAIN = 'occ_vis_plain';
 /** An object the member reads but may not write, under the same row scope as {@link SCOPED}. */
 const READONLY = 'occ_vis_readonly';
+/** An object the member may update and delete but not read, with no row rule at all. */
+const WRITEONLY = 'occ_vis_writeonly';
 
 const SYS_CTX = { isSystem: true, userId: 'usr_system' };
 
@@ -76,6 +83,7 @@ const MEMBER_SET = PermissionSetSchema.parse({
     objects: {
         '*': { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
         [READONLY]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+        [WRITEONLY]: { allowRead: false, allowCreate: false, allowEdit: true, allowDelete: true },
     },
     fields: { [`${SCOPED}.secret`]: { readable: false, editable: false } },
     rowLevelSecurity: [
@@ -99,6 +107,8 @@ const PLAIN_ID = 'p1';
 const READABLE_ID = 'r1';
 /** An id that names no row anywhere. */
 const MISSING_ID = 'occ_vis_missing';
+/** The row on {@link WRITEONLY}. */
+const WRITEONLY_ID = 'w1';
 
 /** A by-id read's options, typed to the engine's contract. */
 const byId = (id: string, context: EngineQueryOptions['context']): EngineQueryOptions => ({ where: { id }, context });
@@ -244,6 +254,14 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
                     },
                 },
                 {
+                    name: WRITEONLY,
+                    label: 'Write-only ledger',
+                    sharingModel: 'public_read_write',
+                    fields: {
+                        title: { name: 'title', type: 'text' },
+                    },
+                },
+                {
                     name: PLAIN,
                     label: 'Plain',
                     sharingModel: 'public_read_write',
@@ -290,7 +308,7 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
 
     /** A fresh copy of the three rows, so each case starts from a known store. */
     async function seed(): Promise<void> {
-        for (const [object, id] of [[SCOPED, HIDDEN_ID], [SCOPED, MASKED_ID], [PLAIN, PLAIN_ID], [READONLY, HIDDEN_ID], [READONLY, READABLE_ID]] as const) {
+        for (const [object, id] of [[SCOPED, HIDDEN_ID], [SCOPED, MASKED_ID], [PLAIN, PLAIN_ID], [READONLY, HIDDEN_ID], [READONLY, READABLE_ID], [WRITEONLY, WRITEONLY_ID]] as const) {
             if (await systemRow(object, id)) await engine.delete(object, { where: { id }, context: SYS_CTX } as any);
         }
         await engine.insert(SCOPED, [
@@ -302,6 +320,7 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
             { id: HIDDEN_ID, title: 'hidden', region: 'HIDDEN' },
             { id: READABLE_ID, title: 'readable', region: 'NA' },
         ], { context: SYS_CTX } as never);
+        await engine.insert(WRITEONLY, [{ id: WRITEONLY_ID, title: 'write-only' }], { context: SYS_CTX } as never);
     }
 
     /** The body with the id it names written out, so the answers for two ids compare. */
@@ -363,6 +382,25 @@ describe('[#23586] a 409 CONCURRENT_UPDATE reports only what the caller may read
                     expect({ status: readable.status, code: codeOf(readable.body) }, JSON.stringify(readable.body))
                         .toEqual({ status: 409, code: 'CONCURRENT_UPDATE' });
                     expect(await systemRow(READONLY, READABLE_ID)).toMatchObject({ title: 'readable' });
+                }, 60_000);
+
+                it('an object the caller may write but not read: a stale token answers the read refusal and the row is unchanged; without a token the write lands', async () => {
+                    await seed();
+                    const before = await systemRow(WRITEONLY, WRITEONLY_ID);
+                    expect(before).toMatchObject({ title: 'write-only' });
+
+                    const stale = await door().send(verb, WRITEONLY, WRITEONLY_ID, ifMatch(STALE));
+                    expect({ status: stale.status, code: codeOf(stale.body) }, JSON.stringify(stale.body))
+                        .toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+                    expect(JSON.stringify(stale.body)).not.toContain('currentRecord');
+                    expect(await systemRow(WRITEONLY, WRITEONLY_ID), 'the stale token wrote nothing').toEqual(before);
+
+                    // Control: the same request without a token is admitted and lands —
+                    // the caller really holds the write grant.
+                    const plain = await door().send(verb, WRITEONLY, WRITEONLY_ID);
+                    expect(plain.status, JSON.stringify(plain.body)).toBe(200);
+                    if (verb === 'PATCH') expect(await systemRow(WRITEONLY, WRITEONLY_ID)).toMatchObject({ title: 'written' });
+                    else expect(await systemRow(WRITEONLY, WRITEONLY_ID)).toBeFalsy();
                 }, 60_000);
 
                 it('a field FLS hides: the 409 carries the row the caller reads, without that field', async () => {

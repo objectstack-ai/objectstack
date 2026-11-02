@@ -18,12 +18,17 @@
 //      answer the same per-row refusal for both ids;
 //   3. `DELETE` keeps the one answer it already gave for both;
 //   4. ⭐ with a stale version token — `If-Match`, the PATCH body's
-//      `expectedVersion`, the DELETE's `?expectedVersion` — PATCH and DELETE
-//      answer the SAME status, code and sentence for both ids, and the answer
-//      the same request gets without a token. So do two rows the member's row
-//      scope hides on objects it reads (private OWD): an inquiry, which it may
-//      not update, and a note, which it may update but not delete. The version
-//      comparison answers only for a row the caller reads.
+//      `expectedVersion`, the DELETE's `?expectedVersion` — two rows the
+//      member's row scope hides on objects it reads (private OWD: an inquiry,
+//      which it may not update, and a note, which it may update but not
+//      delete) answer the SAME status, code and sentence for the row, for no
+//      row and without a token: the version comparison hands a row absent
+//      from the caller's read to the write door. On the two objects the member
+//      may neither read nor write, its read is REFUSED, and a refused read is
+//      not handed over: the row, no row and no token answer the same status
+//      and code. Their sentences are not compared — the read door's refusal
+//      and the write door's may word it differently, a residue aligned by its
+//      own item.
 //
 // Controls, so a green run is not "everything refuses":
 //
@@ -237,26 +242,36 @@ describe('update by id: one refusal whether or not the id exists, as delete', ()
     expect(account.status, JSON.stringify(account.body)).toBe(200);
   });
 
-  it('with a stale version token, PATCH and DELETE answer one status, code and sentence for a row and for no row — the answer without a token', async () => {
-    const families: Array<{ object: string; id: string; patch: Record<string, unknown>; status: { PATCH: number; DELETE: number } }> = [
-      { object: 'showcase_project_membership', id: existing.get('showcase_project_membership')!, patch: PATCHES.showcase_project_membership, status: { PATCH: 403, DELETE: 403 } },
-      { object: 'sys_user_permission_set', id: existing.get('sys_user_permission_set')!, patch: PATCHES.sys_user_permission_set, status: { PATCH: 403, DELETE: 403 } },
+  it('with a stale version token, PATCH and DELETE answer one answer for a row and for no row — the answer without a token', async () => {
+    /**
+     * `whole`: status, code and sentence (the row is absent from the member's
+     * read, so the write door answers). `status+code`: the member may not read
+     * the object, its refused read is the answer, and the sentence is
+     * deliberately not compared.
+     */
+    type Compare = 'whole' | 'status+code';
+    const families: Array<{ object: string; id: string; patch: Record<string, unknown>; status: { PATCH: number; DELETE: number }; compare: Compare }> = [
+      // Objects the member may neither read nor write.
+      { object: 'showcase_project_membership', id: existing.get('showcase_project_membership')!, patch: PATCHES.showcase_project_membership, status: { PATCH: 403, DELETE: 403 }, compare: 'status+code' },
+      { object: 'sys_user_permission_set', id: existing.get('sys_user_permission_set')!, patch: PATCHES.sys_user_permission_set, status: { PATCH: 403, DELETE: 403 }, compare: 'status+code' },
       // Rows the member's row scope hides, on objects it reads: no update grant on
       // the inquiry, and update without delete on the note.
-      { object: 'showcase_inquiry', id: foreignInquiryId, patch: { message: 'x' }, status: { PATCH: 403, DELETE: 403 } },
-      { object: 'showcase_private_note', id: foreignNoteId, patch: { title: 'x' }, status: { PATCH: 404, DELETE: 403 } },
+      { object: 'showcase_inquiry', id: foreignInquiryId, patch: { message: 'x' }, status: { PATCH: 403, DELETE: 403 }, compare: 'whole' },
+      { object: 'showcase_private_note', id: foreignNoteId, patch: { title: 'x' }, status: { PATCH: 404, DELETE: 403 }, compare: 'whole' },
     ];
-    for (const { object, id, patch, status } of families) {
+    const shown = (a: Answer, id: string, compare: Compare): unknown =>
+      compare === 'whole' ? withoutId(a, id) : { status: a.status, code: codeOf(a) };
+    for (const { object, id, patch, status, compare } of families) {
       const before = await stored(object, id);
       for (const method of ['PATCH', 'DELETE'] as const) {
         const noToken = await versioned(memberTok, method, object, id, patch, 'none');
         expect(noToken.status, `${method} ${object} without a token — ${JSON.stringify(noToken.body)}`).toBe(status[method]);
         for (const carrier of ['If-Match', 'expectedVersion'] as const) {
-          const where = `${method} ${object} (${carrier})`;
+          const where = `${method} ${object} (${carrier}, ${compare})`;
           const hit = await versioned(memberTok, method, object, id, patch, carrier);
           const miss = await versioned(memberTok, method, object, MISSING, patch, carrier);
-          expect(withoutId(hit, id), `${where}: the answer without a token`).toEqual(withoutId(noToken, id));
-          expect(withoutId(miss, MISSING), `${where}: the answer for no row`).toEqual(withoutId(hit, id));
+          expect(shown(hit, id, compare), `${where}: the answer without a token`).toEqual(shown(noToken, id, compare));
+          expect(shown(miss, MISSING, compare), `${where}: the answer for no row`).toEqual(shown(hit, id, compare));
         }
       }
       expect(await stored(object, id), `${object}: refused writes leave the row as it was`).toEqual(before);
