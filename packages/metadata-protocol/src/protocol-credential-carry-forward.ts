@@ -69,7 +69,12 @@ export const WITHHELD_KEY_DROPPED = 'withheld-key-dropped';
  * of its own collection (`SaveMetaItemResponseSchema.advisories`): the
  * written item is `<collection>[0]`, so a connector's `auth.token` is
  * `connectors[0].auth.token`. The position is one the served body never held,
- * so it names where the value sat at rest.
+ * so it names where the key sat in the body the carry-forward read: the
+ * stored row, or the code layer a first save starts from (#20552).
+ *
+ * `message` names the key and never its value, and it is true of every case
+ * that reaches here: a stored value, a cleared one (`null`, `''`), and a
+ * first save over the code layer, whose new row never held the key.
  */
 export function droppedWithheldKeyNotices(args: {
     type: string;
@@ -85,8 +90,8 @@ export function droppedWithheldKeyNotices(args: {
         where: `${singular} "${args.name}"`,
         path: root + dotted.split('.').map((segment) => (/^(0|[1-9][0-9]*)$/.test(segment) ? `[${segment}]` : `.${segment}`)).join(''),
         message:
-            `the stored row held a value at '${dotted}', a position the read withholds and no save keeps `
-            + '(no authoring door accepts it and nothing at runtime reads it), so this save removed it from the row at rest.',
+            `this save did not carry '${dotted}' forward: the read withholds that position and no save keeps it `
+            + '(no authoring door accepts it and nothing at runtime reads it), so the row this save wrote holds nothing there.',
         hint:
             'Nothing to restore if it was a leftover inline secret. If the item still needs that credential, store '
             + 'the secret outside the metadata and name it through the declared reference (a connector\'s '

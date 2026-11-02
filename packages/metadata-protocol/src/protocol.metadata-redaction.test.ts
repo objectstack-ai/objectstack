@@ -1779,6 +1779,7 @@ describe('[#28640 ②B] a save of the served connector form drains an undeclared
 
         expect(res.state).toBe('draft');
         expect(res.advisories).toEqual([droppedNotice('connectors[0].auth.token')]);
+        expect(allStrings(res)).not.toContain(LEGACY_AUTH_TOKEN);
         const draft = JSON.parse(Array.from(rows.values()).find((r) => r.type === 'connector' && r.state === 'draft')!.metadata);
         expect(draft.auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' });
     });
@@ -1794,6 +1795,9 @@ describe('[#28640 ②B] a save of the served connector form drains an undeclared
 
         expect(storedConnector(rows).auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' });
         expect(res.advisories).toEqual([droppedNotice('connectors[0].auth.token')]);
+        // The message names the key and claims no stored value: here there was none.
+        expect(res.advisories[0].message).toContain("'auth.token'");
+        expect(res.advisories[0].message).not.toMatch(/held a value/);
     });
 
     it('CONTROL: a datasource row\'s carry-forward is unchanged — its credentials stay at rest and the answer carries no `advisories`', async () => {
