@@ -192,8 +192,9 @@
  *
  * ## The four advisory rows — fenced on the ADVISORY, printing none of its text
  *
- * `ops.mjs`'s header section "The three rows that touch a security advisory"
- * is the authority; this is where its fences and landings are measured.
+ * `ops.mjs`'s header section "The four rows that touch a security advisory"
+ * is the authority, and its "The one row that READS an advisory" for the read
+ * below; this is where their fences and landings are measured.
  *
  *   - `advisory_report` is ONE POST of the row's body to the private-report
  *     endpoint, and nothing is read first. It LANDS on a 2xx whose answer
