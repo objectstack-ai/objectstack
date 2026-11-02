@@ -295,7 +295,9 @@ export function PercentField({ value, onChange, field, readonly, error, classNam
         max={sliderMax}
         step={sliderStep}
         disabled={readonly || props.disabled}
-        className="w-full"
+        // The root takes the pointer anywhere along its height, so below `sm`
+        // the touch floor is the slider's hit area, not only its 20 px thumb.
+        className={cn('w-full', PHONE_TOUCH_HEIGHT)}
         aria-label={t('fields.percent.slider')}
         data-testid="percent-slider"
       />
