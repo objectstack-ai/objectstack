@@ -11,6 +11,11 @@ import { lazySchema } from '../shared/lazy-schema';
  * notification (the same id the inbox lists and `markRead` takes), and
  * `route` is the Console path the shell opens.
  *
+ * **Declared ahead of its producer.** No push channel delivers yet, so
+ * nothing produces this data today; {@link PushDeliveryDataSchema} carries a
+ * `[PLANNED — not yet served]` marker in its `.describe()` until the push
+ * channel ships. The route rule below is the contract that channel owes.
+ *
  * **Where `route` comes from — derived, never authored.** There is no
  * `notify` key for it. It is the notification's existing `actionUrl`, the
  * value the inbox already serves: an explicit `url` / `actionUrl` in the
@@ -41,9 +46,13 @@ export const PushRouteSchema = z.string()
 export type PushRoute = z.input<typeof PushRouteSchema>;
 
 /** The data a push delivery carries to the shell. */
+// The marker comes off when the push channel (#29041) produces this data.
 export const PushDeliveryDataSchema = lazySchema(() => z.object({
   notificationId: z.string().min(1).describe('Notification id — the one the inbox lists and markRead takes'),
   route: PushRouteSchema.optional()
     .describe('Console route opened on tap: the notification actionUrl when it is a same-server relative path, absent otherwise'),
-}));
+}).describe(
+  '[PLANNED — not yet served] The data a push delivery carries to the shell: the notification id and the same-server route '
+  + 'opened on tap. No push channel delivers yet',
+));
 export type PushDeliveryData = z.input<typeof PushDeliveryDataSchema>;

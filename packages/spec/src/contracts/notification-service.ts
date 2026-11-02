@@ -27,6 +27,7 @@
  */
 import type { NotificationChannel } from '../system/notification.zod';
 import type { RegisterDeviceRequest, RegisterDeviceResponse, UnregisterDeviceResponse } from '../api/protocol.zod';
+import type { UserDevice } from '../system/push-device.zod';
 export type { NotificationChannel } from '../system/notification.zod';
 
 /**
@@ -214,15 +215,23 @@ export interface INotificationService {
     /* ------------------------------------------------------------------ */
 
     /*
-     * All three are OPTIONAL, for the reason the inbox trio is: a provider
+     * All four are OPTIONAL, for the reason the inbox trio is: a provider
      * with no push channel (SMTP, an SMS gateway, the dev stub) fills this
      * slot legitimately with no device registry. Absence means the
      * capability is unavailable — the device routes answer that, not a
      * crash — so every implementation written before these members stays
      * valid. Shapes are the wire contract the device routes serialize:
      * `RegisterDeviceRequestSchema` / `RegisterDeviceResponseSchema` /
-     * `UnregisterDeviceResponseSchema` (`api/protocol.zod.ts`).
+     * `UnregisterDeviceResponseSchema` (`api/protocol.zod.ts`), and the stored
+     * device `UserDeviceSchema` (`system/push-device.zod.ts`).
+     *
+     * Declared ahead of their implementation: no provider implements them
+     * and no route calls them yet. They are the contract the device registry
+     * and its routes owe when they land, not a description of running code.
      */
+    // First implementation and callers: the server device-registry slice
+    // (#29068); the push channel's invalid-recipient path calls
+    // invalidateDeviceToken (#29041).
 
     /**
      * Register or refresh a push device for this user.
@@ -236,7 +245,9 @@ export interface INotificationService {
      *   user, and the other user's device stops receiving it. A push meant
      *   for the previous owner never reaches the phone's new user.
      * - An absent `request.vendor` is derived from `request.platform`
-     *   (`ios` → `apns`, `android` → `fcm`).
+     *   (`ios` → `apns`, `android` → `fcm`). A `web` registration names its
+     *   vendor; without one there is nothing to derive, and it is refused as
+     *   a validation error, never stored with a guessed vendor.
      *
      * @param userId - The signed-in user, from the session; never a body member
      * @param request - The registration body
@@ -255,6 +266,18 @@ export interface INotificationService {
      * @param deviceId - The id {@link registerDevice} answered
      */
     unregisterDevice?(userId: string, deviceId: string): Promise<UnregisterDeviceResponse>;
+
+    /**
+     * List this user's devices, newest `lastSeenAt` first.
+     *
+     * Disabled devices (a token the vendor reported dead) are listed too,
+     * with `enabled: false` and their `invalidatedAt`, so a settings screen
+     * can say why a phone stopped receiving pushes. Only this user's devices
+     * are ever answered; there is no listing across users.
+     *
+     * @param userId - The signed-in user, from the session
+     */
+    listDevices?(userId: string): Promise<UserDevice[]>;
 
     /**
      * Retire a token the vendor reported dead (APNs `BadDeviceToken` /

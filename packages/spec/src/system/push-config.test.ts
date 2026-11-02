@@ -20,10 +20,10 @@ const APNS = {
   keyId: 'KEY1234567',
   topic: 'com.example.shell',
   environment: 'production',
-  keyRef: 'OS_PUSH_APNS_KEY',
+  credentialRef: 'OS_PUSH_APNS_KEY',
 } as const;
 
-const FCM = { projectId: 'example-project', serviceAccountRef: 'OS_PUSH_FCM_SERVICE_ACCOUNT' } as const;
+const FCM = { projectId: 'example-project', credentialRef: 'OS_PUSH_FCM_SERVICE_ACCOUNT' } as const;
 
 const PEM = '-----BEGIN PRIVATE KEY-----\nMIGTAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBHkwdwIBAQQg\n-----END PRIVATE KEY-----';
 const SERVICE_ACCOUNT_JSON = '{"type":"service_account","project_id":"example-project","private_key":"x"}';
@@ -49,9 +49,9 @@ describe('PushServiceConfigSchema', () => {
     'OS_PUSH_APNS_KEY',
     'push/apns-signing-key',
     'vault:push.apns.p8',
-  ])('accepts the reference form %j', (keyRef) => {
-    expect(ApnsTransportConfigSchema.safeParse({ ...APNS, keyRef }).success).toBe(true);
-    expect(FcmTransportConfigSchema.safeParse({ ...FCM, serviceAccountRef: keyRef }).success).toBe(true);
+  ])('accepts the reference form %j', (credentialRef) => {
+    expect(ApnsTransportConfigSchema.safeParse({ ...APNS, credentialRef }).success).toBe(true);
+    expect(FcmTransportConfigSchema.safeParse({ ...FCM, credentialRef }).success).toBe(true);
   });
 
   it.each(['key', 'privateKey', 'p8'])('refuses an inline APNs key under %j, by name', (key) => {
@@ -59,7 +59,7 @@ describe('PushServiceConfigSchema', () => {
     expect(parsed.success).toBe(false);
     const issue = parsed.error?.issues[0];
     expect(issue?.code).toBe('unrecognized_keys');
-    expect(issue?.message).toContain('keyRef');
+    expect(issue?.message).toContain('credentialRef');
   });
 
   it.each(['serviceAccount', 'serviceAccountJson', 'privateKey'])('refuses an inline FCM credential under %j, by name', (key) => {
@@ -67,19 +67,32 @@ describe('PushServiceConfigSchema', () => {
     expect(parsed.success).toBe(false);
     const issue = parsed.error?.issues[0];
     expect(issue?.code).toBe('unrecognized_keys');
-    expect(issue?.message).toContain('serviceAccountRef');
+    expect(issue?.message).toContain('credentialRef');
   });
 
-  it('refuses a PEM block pasted into keyRef', () => {
-    const parsed = ApnsTransportConfigSchema.safeParse({ ...APNS, keyRef: PEM });
+  it.each([
+    ['APNs', 'keyRef'],
+    ['FCM', 'serviceAccountRef'],
+  ] as const)('answers the %s near-miss %j with credentialRef, the house key for a secret reference', (transport, key) => {
+    const block = transport === 'APNs' ? APNS : FCM;
+    const schema = transport === 'APNs' ? ApnsTransportConfigSchema : FcmTransportConfigSchema;
+    const { credentialRef, ...rest } = block;
+    const parsed = schema.safeParse({ ...rest, [key]: credentialRef });
     expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0]?.path).toEqual(['keyRef']);
+    const issues = parsed.error?.issues ?? [];
+    expect(issues.some((i) => i.code === 'unrecognized_keys' && i.message.includes('credentialRef'))).toBe(true);
   });
 
-  it('refuses a service-account JSON document pasted into serviceAccountRef', () => {
-    const parsed = FcmTransportConfigSchema.safeParse({ ...FCM, serviceAccountRef: SERVICE_ACCOUNT_JSON });
+  it('refuses a PEM block pasted into the APNs credentialRef', () => {
+    const parsed = ApnsTransportConfigSchema.safeParse({ ...APNS, credentialRef: PEM });
     expect(parsed.success).toBe(false);
-    expect(parsed.error?.issues[0]?.path).toEqual(['serviceAccountRef']);
+    expect(parsed.error?.issues[0]?.path).toEqual(['credentialRef']);
+  });
+
+  it('refuses a service-account JSON document pasted into the FCM credentialRef', () => {
+    const parsed = FcmTransportConfigSchema.safeParse({ ...FCM, credentialRef: SERVICE_ACCOUNT_JSON });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(['credentialRef']);
   });
 
   it('refuses an environment outside sandbox / production', () => {
@@ -92,5 +105,17 @@ describe('PushServiceConfigSchema', () => {
     const parsed = PushServiceConfigSchema.safeParse({ fcm: FCM, hms: {} });
     expect(parsed.success).toBe(false);
     expect(parsed.error?.issues[0]?.code).toBe('unrecognized_keys');
+  });
+});
+
+// Declared ahead of its reader (ADR-0049): nothing reads this shape until the
+// push channel plugin ships, and each block says so in its description.
+describe('push transport configuration is declared, not yet read', () => {
+  it.each([
+    ['PushServiceConfigSchema', PushServiceConfigSchema],
+    ['ApnsTransportConfigSchema', ApnsTransportConfigSchema],
+    ['FcmTransportConfigSchema', FcmTransportConfigSchema],
+  ] as const)('%s carries the PLANNED marker', (_name, schema) => {
+    expect(schema.description).toMatch(/^\[PLANNED — /);
   });
 });

@@ -49,3 +49,9 @@ describe('PushDeliveryDataSchema', () => {
     expect(parsed.error?.issues[0]?.path).toEqual(['route']);
   });
 });
+
+describe('PushDeliveryDataSchema is declared, not yet served', () => {
+  it('carries the PLANNED marker until a push channel produces it', () => {
+    expect(PushDeliveryDataSchema.description).toMatch(/^\[PLANNED — /);
+  });
+});

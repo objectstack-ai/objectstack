@@ -3511,6 +3511,12 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
 /**
  * Register or refresh a push device for the signed-in user (ADR-0012 §6).
  *
+ * **Declared ahead of its producer.** No route serves this body yet: the
+ * device routes land together with their handlers, and until then each of
+ * the four device schemas below carries a `[PLANNED — not yet served]` marker
+ * in its `.describe()`. What follows is the contract that route owes, not a
+ * description of something running.
+ *
  * One request does both: registering a `deviceId` the user already has
  * refreshes that device (its token, vendor, app and locale) instead of adding
  * a second one. A request without `deviceId` gets one minted by the server
@@ -3520,7 +3526,12 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
  * The members after `name` (`vendor`, `appId`, `locale`) were added for the
  * push channel, all optional, so the body a client sent before still parses
  * unchanged. The device's owner is the session's user, never a body member.
+ * The stored device a registration produces is `UserDeviceSchema`
+ * (`system/push-device.zod.ts`).
  */
+// The marker comes off when the server device-registry slice (#29068) mounts
+// POST /api/v1/notifications/devices and the unregister route, adds their rows
+// to DEFAULT_NOTIFICATION_ROUTES and flips that table's catalog pin.
 export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   token: z.string().describe('Device push notification token'),
   platform: z.enum(['ios', 'android', 'web']).describe('Device platform'),
@@ -3530,24 +3541,28 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   ),
   name: z.string().optional().describe('Device friendly name'),
   vendor: PushVendorSchema.optional().describe(
-    'Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, android means fcm (web has no core vendor)',
+    'Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, '
+    + 'android means fcm; web has no core vendor, so a web registration names fcm or is refused',
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
   locale: z.string().optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
-}));
+}).describe(
+  '[PLANNED — not yet served] Register or refresh a push device for the signed-in user. No route serves it yet; '
+  + 'the device routes land together with their handlers',
+));
 
 export const RegisterDeviceResponseSchema = lazySchema(() => z.object({
   deviceId: z.string().describe('Registered device ID'),
   success: z.boolean().describe('Whether registration succeeded'),
-}));
+}).describe('[PLANNED — not yet served] Answer to a device registration: the device id the client keeps'));
 
 export const UnregisterDeviceRequestSchema = lazySchema(() => z.object({
   deviceId: z.string().describe('Device ID to unregister'),
-}));
+}).describe('[PLANNED — not yet served] Unregister one of the signed-in user\'s push devices'));
 
 export const UnregisterDeviceResponseSchema = lazySchema(() => z.object({
   success: z.boolean().describe('Whether unregistration succeeded'),
-}));
+}).describe('[PLANNED — not yet served] Answer to a device unregistration'));
 
 export const NotificationPreferencesSchema = lazySchema(() => z.object({
   email: z.boolean().default(true).describe('Receive email notifications'),

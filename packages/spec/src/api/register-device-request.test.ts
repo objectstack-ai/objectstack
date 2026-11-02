@@ -66,3 +66,16 @@ describe('RegisterDeviceRequestSchema (push device registry)', () => {
     expect(UnregisterDeviceResponseSchema.parse({ success: true })).toEqual({ success: true });
   });
 });
+
+// Declared ahead of its producer (ADR-0049): no route serves the device
+// schemas until the server device-registry slice lands, and each says so.
+describe('device registration schemas are declared, not yet served', () => {
+  it.each([
+    ['RegisterDeviceRequestSchema', RegisterDeviceRequestSchema],
+    ['RegisterDeviceResponseSchema', RegisterDeviceResponseSchema],
+    ['UnregisterDeviceRequestSchema', UnregisterDeviceRequestSchema],
+    ['UnregisterDeviceResponseSchema', UnregisterDeviceResponseSchema],
+  ] as const)('%s carries the PLANNED marker', (_name, schema) => {
+    expect(schema.description).toMatch(/^\[PLANNED — /);
+  });
+});

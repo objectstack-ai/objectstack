@@ -286,9 +286,10 @@ import type * as M195 from './security/queue.zod.js';
 // The push channel's transport configuration and delivery data (ADR-0012 §6) -- new modules, next free indices.
 import type * as M196 from './system/push-config.zod.js';
 import type * as M197 from './api/push-delivery.zod.js';
+import type * as M198 from './system/push-device.zod.js';
 
 // ---------------------------------------------------------------------------
-// 817 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 818 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1421,6 +1422,9 @@ export type Iso_system_pushConfig__FcmTransportConfigSchema = Assert<Eq< z.input
 export type Iso_system_pushConfig__PushServiceConfigSchema = Assert<Eq< z.input< typeof M196.PushServiceConfigSchema >, z.infer< typeof M196.PushServiceConfigSchema > >>;
 export type Iso_system_pushConfig__PushVendorSchema = Assert<Eq< z.input< typeof M196.PushVendorSchema >, z.infer< typeof M196.PushVendorSchema > >>;
 
+// system/push-device.zod.ts
+export type Iso_system_pushDevice__UserDeviceSchema = Assert<Eq< z.input< typeof M198.UserDeviceSchema >, z.infer< typeof M198.UserDeviceSchema > >>;
+
 // system/registry-config.zod.ts
 export type Iso_system_registryConfig__RegistrySyncPolicySchema = Assert<Eq< z.input< typeof M143.RegistrySyncPolicySchema >, z.infer< typeof M143.RegistrySyncPolicySchema > >>;
 
@@ -1758,7 +1762,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 817 isomorphic pins', () => {
+  it('still declares all 818 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2743,7 +2747,12 @@ describe('ADR-0122 type-alias convention', () => {
     // required and optional strings, enums and regex refinements, no default
     // and no transform (Iso_system_pushConfig__*, Iso_api_pushDelivery__*).
     // +6 added.
-    expect(pins).toHaveLength(817);
+    // 817 -> 818 is the push device registry's stored device shape
+    // (`system/push-device.zod.ts`, `UserDeviceSchema`): a plain object of
+    // required and optional strings, enums, a boolean and ISO instants, no
+    // default and no transform (Iso_system_pushDevice__UserDeviceSchema).
+    // +1 added.
+    expect(pins).toHaveLength(818);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

@@ -7,6 +7,11 @@ import { strictObject } from '../shared/strict-object';
 /**
  * Push Service Configuration Protocol — the push channel's transports.
  *
+ * **Declared ahead of its reader.** Every schema here carries a
+ * `[PLANNED — not yet read]` marker in its `.describe()`: nothing reads this
+ * shape until the push channel plugin lands, so a value written to it today
+ * changes nothing. The marker comes off with the change that wires the reader.
+ *
  * Operator-facing configuration for the `push` channel ADR-0012 §4 ships in
  * core: Apple Push Notification service with token-based auth, and Firebase
  * Cloud Messaging over its HTTP v1 API. It sits beside
@@ -15,21 +20,23 @@ import { strictObject } from '../shared/strict-object';
  *
  * **Secrets are references, never values (ADR-0143 D3, ADR-0097 §3).** Each
  * transport has one secret — the APNs `.p8` signing key and the FCM
- * service-account JSON — and each is named by a reference the push channel
- * resolves through the secrets layer when it sends (in the open tier, the
- * name of an environment variable). An inline secret is refused two ways:
- * written under a key an operator would reach for (`key`, `privateKey`,
- * `serviceAccount`, …), it is refused by name with the reference key as the
- * prescription; written into the reference itself, it is refused because a
- * reference is one token — a PEM block carries whitespace and a JSON document
- * carries braces, and a name carries neither.
+ * service-account JSON — and each is named by a `credentialRef`, the same key
+ * every other secret an author names is written under (ADR-0143 D3), which
+ * the push channel resolves through the secrets layer when it sends (in the
+ * open tier, the name of an environment variable). An inline secret is
+ * refused two ways: written under a key an operator would reach for (`key`,
+ * `privateKey`, `serviceAccount`, …), it is refused by name with
+ * `credentialRef` as the prescription; written into the reference itself, it
+ * is refused because a reference is one token — a PEM block carries
+ * whitespace and a JSON document carries braces, and a name carries neither.
  *
- * **What reads it.** The push channel plugin (`plugin-notification-push`,
- * ADR-0012 §11) is its one reader, and it is a later change than this
- * declaration: until it lands nothing reads this shape, and it is not a key
- * of the stack definition. Wiring it into a configuration door is that
- * change's to make, together with the reader, so a key is never authorable
- * before something honours it.
+ * **What reads it, and why it is not a stack key yet.** The push channel
+ * plugin (`plugin-notification-push`, ADR-0012 §11) is its one reader, and it
+ * is a later change than this declaration. The email transport selection it
+ * sits beside is read from `config.email` of the stack definition
+ * (`StackEmailConfigSchema`) and `OS_EMAIL_*`; this shape gets its own
+ * configuration door in the change that ships the reader, not here, so a key
+ * is never authorable before something honours it.
  *
  * Out of scope here: a hosted (cloud-side) configuration surface, and the
  * other vendors ADR-0012 §6 routes to alternate channel plugins (HMS,
@@ -68,15 +75,15 @@ function inlineSecretGuidance(transport: string, secret: string, refKey: string)
     + `put it in the secrets layer (an environment variable in the open tier) and name it with \`${refKey}\`.`;
 }
 
-const APNS_KEY_GUIDANCE = inlineSecretGuidance('APNs', '.p8 signing key', 'keyRef');
-const FCM_ACCOUNT_GUIDANCE = inlineSecretGuidance('FCM', 'service-account JSON', 'serviceAccountRef');
+const APNS_KEY_GUIDANCE = inlineSecretGuidance('APNs', '.p8 signing key', 'credentialRef');
+const FCM_ACCOUNT_GUIDANCE = inlineSecretGuidance('FCM', 'service-account JSON', 'credentialRef');
 
 /** APNs with token-based (`.p8` signing key) authentication. */
 export const ApnsTransportConfigSchema = lazySchema(() => strictObject(
   {
     surface: 'the APNs push transport',
     history: 'This block is strict from birth — no APNs configuration existed before it.',
-    aliases: { bundleId: 'topic', credentialRef: 'keyRef' },
+    aliases: { bundleId: 'topic', keyRef: 'credentialRef' },
     guidance: {
       key: APNS_KEY_GUIDANCE,
       privateKey: APNS_KEY_GUIDANCE,
@@ -92,10 +99,10 @@ export const ApnsTransportConfigSchema = lazySchema(() => strictObject(
     topic: z.string().min(1).describe('APNs topic: the app bundle ID the pushes are for'),
     environment: z.enum(['sandbox', 'production'])
       .describe('APNs gateway: sandbox (development builds) or production (TestFlight and App Store builds)'),
-    keyRef: secretReference('APNs .p8 signing key')
+    credentialRef: secretReference('APNs .p8 signing key')
       .describe('Secrets-layer reference to the .p8 signing key (an environment-variable name in the open tier). Never the key itself'),
   },
-));
+).describe('[PLANNED — not yet read] APNs transport with token-based auth (.p8 signing key by reference)'));
 export type ApnsTransportConfig = z.input<typeof ApnsTransportConfigSchema>;
 
 /** FCM over the HTTP v1 API, authenticated by a service account. */
@@ -103,7 +110,7 @@ export const FcmTransportConfigSchema = lazySchema(() => strictObject(
   {
     surface: 'the FCM push transport',
     history: 'This block is strict from birth — no FCM configuration existed before it.',
-    aliases: { credentialRef: 'serviceAccountRef' },
+    aliases: { serviceAccountRef: 'credentialRef' },
     guidance: {
       serviceAccount: FCM_ACCOUNT_GUIDANCE,
       serviceAccountJson: FCM_ACCOUNT_GUIDANCE,
@@ -112,15 +119,15 @@ export const FcmTransportConfigSchema = lazySchema(() => strictObject(
       secret: FCM_ACCOUNT_GUIDANCE,
       serverKey:
         'Not authorable. FCM legacy server keys belong to the retired legacy API; the HTTP v1 transport authenticates '
-        + 'with a service account — name its JSON with `serviceAccountRef`.',
+        + 'with a service account — name its JSON with `credentialRef`.',
     },
   },
   {
     projectId: z.string().min(1).describe('Firebase project ID the HTTP v1 send endpoint is addressed to'),
-    serviceAccountRef: secretReference('FCM service-account JSON')
+    credentialRef: secretReference('FCM service-account JSON')
       .describe('Secrets-layer reference to the service-account JSON (an environment-variable name in the open tier). Never the JSON itself'),
   },
-));
+).describe('[PLANNED — not yet read] FCM HTTP v1 transport (service-account JSON by reference)'));
 export type FcmTransportConfig = z.input<typeof FcmTransportConfigSchema>;
 
 /**
@@ -137,5 +144,5 @@ export const PushServiceConfigSchema = lazySchema(() => strictObject(
     apns: ApnsTransportConfigSchema.optional().describe('APNs transport (token-based auth). Absent: no delivery to apns devices'),
     fcm: FcmTransportConfigSchema.optional().describe('FCM HTTP v1 transport. Absent: no delivery to fcm devices'),
   },
-));
+).describe('[PLANNED — not yet read] Push channel transport configuration: one optional block per vendor (apns, fcm). Nothing reads it until the push channel plugin ships'));
 export type PushServiceConfig = z.input<typeof PushServiceConfigSchema>;
