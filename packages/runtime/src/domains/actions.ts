@@ -730,6 +730,18 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
     const paramsFailure = objectValueFailure('params', reqBody.params);
     if (paramsFailure) return invalidBody(`Invalid action body — \`params\` ${paramsFailure.message}`, paramsFailure);
     const recordId = recordIdFromPath ?? reqBody.recordId;
+    // The routed record is named by ONE id, a string or a number: the subject
+    // load below reads the row whose `id` equals it, and every branch hands it
+    // on as the row's id. Any other value names no one row, so it is refused
+    // here, before the param contract, the load and dispatch, with the `400`
+    // flow start admission answers for a record key that is not one id at the
+    // other doors (`refuseUnreadableFlowStartRecords`). A path segment is
+    // always a string; absent, `null` and `''` stay the record-less call.
+    if (recordId !== undefined && recordId !== null && recordId !== ''
+        && typeof recordId !== 'string' && typeof recordId !== 'number') {
+        const message = 'The record key `recordId` must name one record by its id.';
+        return invalidBody(`Invalid action body — ${message}`, { field: 'recordId', code: 'invalid_type', message });
+    }
     const reqParams: Record<string, unknown> = reqBody.params ?? {};
 
     // [ADR-0104 D2] Enforce the declared param contract before the handler
