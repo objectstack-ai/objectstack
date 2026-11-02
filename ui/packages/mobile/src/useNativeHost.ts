@@ -132,7 +132,9 @@ export function useNativeHostRouting({
   // The latest handler, read when the event fires, so the listener does not
   // re-install on every render that passes a new function.
   const onConnectionRemovedRef = useRef(onConnectionRemoved);
-  onConnectionRemovedRef.current = onConnectionRemoved;
+  useEffect(() => {
+    onConnectionRemovedRef.current = onConnectionRemoved;
+  }, [onConnectionRemoved]);
 
   useEffect(() => {
     if (host) postNativeReady(host);
