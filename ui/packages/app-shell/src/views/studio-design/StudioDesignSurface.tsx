@@ -391,6 +391,7 @@ import {
   fetchListedPackageManifests,
   fetchPackages,
   listedCustomizationPairOf,
+  listedPackageEntry,
   listedPackageVersion,
   prefixObjectName,
   type EnsuredCustomizationPackage,
@@ -907,9 +908,17 @@ function PackageSwitcher({
   tab,
   beforeNavigate,
   app = null,
+  openEntry = null,
 }: {
   /** The package's app, drawn as the chip's icon tile (objectui#12459); `null` draws the neutral tile. */
   app?: AppMarkApp | null;
+  /**
+   * objectstack#29567 — the surface's own entry for the open package, which
+   * the trigger reads when this list does not carry it: a kernel package is
+   * left out of the list (it is not offered), yet when it is open the chip
+   * still names it and says it is read-only. The menu never reads it.
+   */
+  openEntry?: PkgEntry | null;
   /** The open package, or `null` in the package-less scope (objectui#11553). */
   packageId: string | null;
   tab: string;
@@ -985,7 +994,9 @@ function PackageSwitcher({
     };
   }, [packageId]);
 
-  const current = pkgs?.find((p) => p.id === packageId) ?? null;
+  const listedCurrent = pkgs?.find((p) => p.id === packageId) ?? null;
+  // Only once the list has answered, so the three trigger states stay its own.
+  const current = listedCurrent ?? (pkgs !== null && openEntry?.id === packageId ? openEntry : null);
   // objectstack#28572 (ADR-0146 D3) — a base's paired `<base>.custom` has no
   // row of its own: it is folded under its base, which names it.
   const folded = React.useMemo(() => foldCustomizationPairs(pkgs ?? []), [pkgs]);
@@ -1493,10 +1504,10 @@ function PackageSwitcher({
             </div>
 
             <div className="mt-1 space-y-0.5 border-t pt-1.5">
-              {current && (
+              {listedCurrent && (
                 <button
                   type="button"
-                  onClick={() => void openManage(current.id)}
+                  onClick={() => void openManage(listedCurrent.id)}
                   disabled={manageBusy}
                   className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
                 >
@@ -1632,26 +1643,43 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
     listedIds.catch(() => {});
     const listedManifests = fetchListedPackageManifests();
     listedManifests.catch(() => {});
+    const settle = (entry: PkgEntry | null) => {
+      setPkgWritable(entry?.writable ?? null);
+      setPkgEntry(entry);
+      if (!entry || entry.writable) return;
+      listedManifests.then(
+        (manifests) => {
+          if (cancelled) return;
+          setBaseFacts({
+            for: packageId,
+            basedOn: listedPackageVersion(manifests, packageId),
+            listedPair: listedCustomizationPairOf(manifests, packageId),
+          });
+        },
+        () => {},
+      );
+    };
     fetchPackages()
       .then((list) => {
         if (cancelled) return;
         const entry = list.find((p) => p.id === packageId) ?? null;
-        setPkgWritable(entry?.writable ?? null);
-        setPkgEntry(entry);
-        if (entry && !entry.writable) {
-          listedManifests.then(
-            (manifests) => {
-              if (cancelled) return;
-              setBaseFacts({
-                for: packageId,
-                basedOn: listedPackageVersion(manifests, packageId),
-                listedPair: listedCustomizationPairOf(manifests, packageId),
-              });
-            },
-            () => {},
-          );
+        if (entry) {
+          settle(entry);
+          return;
         }
-        if (entry) return;
+        // objectstack#29567 — the switcher's entries leave the kernel packages
+        // out, but an open one is still judged: the listed row carries the
+        // server's verdict (read-only by scope), so the surface reads it
+        // read-only and offers Customize, as for a code-booted base.
+        // `pkgWritable` stays "still asking" until that answer lands.
+        listedManifests.then(
+          (manifests) => {
+            if (!cancelled) settle(listedPackageEntry(manifests, packageId));
+          },
+          () => {
+            if (!cancelled) settle(null);
+          },
+        );
         listedIds.then(
           (ids) => {
             if (!cancelled) setPkgMissing(!ids.has(packageId));
@@ -2484,7 +2512,13 @@ function StudioDesignSurfaceBody({ aiSlot, area }: StudioDesignSurfaceProps): Re
                 <HomeIcon className="h-4 w-4" />
               </button>
               <div className="flex min-w-0">
-                <PackageSwitcher packageId={packageId} tab={tab} beforeNavigate={confirmLeavePillar} app={packageApp} />
+                <PackageSwitcher
+                  packageId={packageId}
+                  tab={tab}
+                  beforeNavigate={confirmLeavePillar}
+                  app={packageApp}
+                  openEntry={pkgEntry?.id === packageId ? pkgEntry : null}
+                />
               </div>
             </div>
             <nav className={STUDIO_HEADER_PILLAR_NAV} data-testid="studio-pillar-nav">

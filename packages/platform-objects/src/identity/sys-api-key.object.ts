@@ -77,7 +77,6 @@ export const SysApiKey = ObjectSchema.create({
   description: 'API keys for programmatic access',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{name}',
   highlightFields: ['name', 'prefix', 'user_id', 'expires_at', 'revoked'],
 
   // Custom actions — sys_api_key is managed-by 'better-auth' but the

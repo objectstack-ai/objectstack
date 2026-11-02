@@ -262,10 +262,31 @@ export function decisionOutputParams(
         helpText: t('actions.decisionOutput.help'),
       };
     }
+    // A free-value output — `text`, a bare key, or a `position` with no
+    // registry reader — is sent in the shape its declaration names, which the
+    // server judges (objectstack#28658): `multiple: true` takes a list of
+    // strings, anything else one string.
+    //
+    // A list rides a `tags` param, not a comma convention: `TagsField` stores
+    // a `string[]`, trims each entry and skips a blank or a repeat as it is
+    // added, so the decide body carries a list the server's duplicate refusal
+    // never trips on. Both decision surfaces build their params here and both
+    // folds (`foldDecisionOutputs` below, the runtime api handler's
+    // `outputs.KEY` fold) hand a param's value on untouched, so this one
+    // widget choice is what both paths send. A single-value output stays a
+    // `text` box whose comma is literal: nothing splits it.
+    if (d.multiple === true) {
+      return {
+        ...base,
+        type: 'tags',
+        multiple: true,
+        helpText: t('actions.decisionOutput.help'),
+      };
+    }
     return {
       ...base,
       type: 'text',
-      helpText: t('actions.decisionOutput.helpMultiValue'),
+      helpText: t('actions.decisionOutput.help'),
     };
   });
 }

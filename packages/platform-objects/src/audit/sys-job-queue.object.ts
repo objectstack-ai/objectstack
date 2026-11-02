@@ -96,7 +96,6 @@ export const SysJobQueue = ObjectSchema.create({
   description: 'Durable job/message queue including dead letters',
   displayNameField: 'queue',
   nameField: 'queue', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{queue} #{id}',
   highlightFields: ['queue', 'status', 'attempts', 'scheduled_for', 'last_error'],
 
   fields: {
