@@ -239,6 +239,13 @@ describe('PackageExportManifestSchema.withheldMaps names each map the export wit
     if (result.success) expect(result.data).toEqual(manifest);
   });
 
+  it('is declared ahead of its producer: the describe opens with the planned marker and names the ADR, never a tracker id', () => {
+    const description = PackageExportManifestSchema.shape.withheldMaps.description ?? '';
+    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(description).toContain('ADR-0049');
+    expect(description).not.toMatch(/#\d{3,}/);
+  });
+
   it('is optional — an export that withheld nothing, or one from before the key, still parses', () => {
     expect(PackageExportManifestSchema.safeParse(identity).success).toBe(true);
   });
