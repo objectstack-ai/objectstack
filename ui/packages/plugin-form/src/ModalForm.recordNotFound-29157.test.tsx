@@ -26,7 +26,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { notifyDataChanged } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
-import { ModalForm } from './ModalForm';
+import { ModalForm, type ModalFormProps, type ModalFormSchema } from './ModalForm';
 
 registerAllFields();
 
@@ -38,26 +38,22 @@ function makeDS(record: Record<string, unknown> | null) {
     }),
     findOne: vi.fn().mockResolvedValue(record),
     find: vi.fn().mockResolvedValue({ data: [] }),
-    create: vi.fn(async (_o: string, d: any) => ({ id: 'n1', ...d })),
-    update: vi.fn(async (_o: string, id: string, d: any) => ({ id, ...d })),
+    create: vi.fn(async (_o: string, d: Record<string, unknown>) => ({ id: 'n1', ...d })),
+    update: vi.fn(async (_o: string, id: string, d: Record<string, unknown>) => ({ id, ...d })),
   };
 }
 
 function open(ds: ReturnType<typeof makeDS>, mode: 'edit' | 'create', recordId?: string) {
-  render(
-    <ModalForm
-      schema={{
-        type: 'object-form',
-        formType: 'modal',
-        objectName: 'showcase_category',
-        mode,
-        recordId,
-        title: mode === 'edit' ? 'Edit Category' : 'New Category',
-        open: true,
-      } as any}
-      dataSource={ds as any}
-    />,
-  );
+  const schema: ModalFormSchema = {
+    type: 'object-form',
+    formType: 'modal',
+    objectName: 'showcase_category',
+    mode,
+    recordId,
+    title: mode === 'edit' ? 'Edit Category' : 'New Category',
+    open: true,
+  };
+  render(<ModalForm schema={schema} dataSource={ds as unknown as ModalFormProps['dataSource']} />);
 }
 
 const nameBox = () => document.body.querySelector('input[name="name"]') as HTMLInputElement | null;
