@@ -1,5 +1,318 @@
 # @object-ui/plugin-report
 
+## 18.3.0
+
+### Patch Changes
+
+- 3e195be: feat(plugin-report): a report that declares `dateRange` draws a period chip and runs every query inside the chosen window
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `ReportSchema.dateRange` (`{ dimension?, defaultRange, allowCustomRange }`) was accepted but read by nothing, so a report showed every period whatever it declared. The report page now reads it:
+  
+  - **The chip.** A non-joined report that declares `dateRange` draws a date-range chip above its body: All time, the dashboard's presets under the dashboard's labels, and Custom… (two date inputs) unless `allowCustomRange: false`. It opens on `defaultRange`, or `this_month` when that is absent; `custom` opens the custom pick with no window until both ends are named.
+  - **The window.** The active window rides every dataset query the report makes (the grouped table, the matrix cross-tab and the embedded chart) as one `selection.timeDimensions` entry `{ dimension, dateRange }` with no `granularity`: a preset goes by name, a custom pick as `[start, end]`, and All time sends no entry. The server ANDs it with `runtimeFilter` and the dataset's own filter. A new pick re-queries.
+  - **The dimension.** A declared `dimension` is sent as written. Omitted, the renderer reads the dataset definition before any query and uses its one `type: 'date'` dimension; a dataset with none or several draws that authoring error in place of the report and queries nothing.
+  - **Unchanged without it.** A report that does not declare `dateRange` draws no chip, reads no dataset definition and posts exactly the selection it posted before. A `joined` report (where the spec refuses `dateRange`) is not affected.
+  
+  `@object-ui/i18n` gains `report.dateRange.from`, `report.dateRange.to`, `report.dateRange.datasetUnreadable` and `report.dateRange.noSingleDateDimension` in all ten locale packs; the preset labels reuse `dashboard.filters.*`.
+- c07f034: feat(plugin-report): the report page offers CSV / XLSX export of the table it draws (`exportOptions`)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `ReportSchema.exportOptions` (`{ formats?, includeHeaders?, fileNamePrefix? }`) was accepted but read by nothing, so a report table could not be downloaded. The report page now reads it:
+  
+  - **The control.** A non-joined report draws an Export control above its body once its table has rows, offering the declared formats in order: absent means CSV and XLSX, `formats: []` draws no control.
+  - **What is exported.** The table as drawn: the grouped table or the matrix cross-tab, its header row (dimension and measure labels as shown), its rows in the order shown and the server totals it draws. The file carries whatever the table's own query carried (the report's `runtimeFilter` and, where declared, its period); nothing is re-queried or re-aggregated. `includeHeaders: false` drops the header row.
+  - **Who may export.** Not a report key: the control is offered only when the viewer's effective API operations on the dataset's base object include `export` (`ObjectPermission.allowExport`, the predicate the list toolbar uses). An absent operation set (no permissions provider, an unrestricted object) keeps it, as on the list.
+  - **The files.** Both are written in the browser. The CSV is the drawn text (UTF-8 with a byte-order mark, RFC 4180 quoting; a data cell opening with a formula character is prefixed with a tab). The XLSX writes measure cells as numbers; ExcelJS is imported only when an XLSX is asked for. The file is named `fileNamePrefix`, else the report label, plus a local timestamp (the list export's file name builder).
+  
+  `@object-ui/plugin-report` now depends on `@object-ui/permissions` and `exceljs`.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 1ed3360: feat(ui): a `record`-mode currency amount shows each record's own currency; the code field is an ISO 4217 select pre-filled with the organization currency; Studio edits the mode and the pointer (ADR-0144 D2, D6, D8 rule 4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` now renders in the currency its record's `currency_code` holds, on every face that holds the record:
+  
+  - **Cells and widgets.** `resolveFieldCurrency(field, tenantDefault, record)` takes the record in scope as an optional third argument. Under `record` mode it reads only that record's code field; no record, or a blank code, resolves to no currency, so the amount shows as a plain number and never in the tenant default. `dynamic` and `fixed` fields resolve exactly as before. The list cell, the form and inline amount box (symbol, decimals and spinner step follow the selected code), formula cells returning `currency`, the record page's summary chips, the dashboard table and record drawer, and Gantt tooltips all pass the record. `recordCurrencyField(field)` names the pointer.
+  - **The code field.** A `text` field declaring `valueDomain: 'iso_4217_currency'` renders a searchable select instead of a free-text box, grouped "Available" (the organization currency, then rated currencies, then the codes the object's records already hold) and "All currencies (ISO 4217)". It offers only codes the value domain accepts. The form reads the used codes once per object, with one grouped query, and hands them to the field on its own metadata (`usedCurrencyCodes`); a data source without grouped queries offers home + the record's own code. The rated group is empty until the exchange-rate table ships. The picker itself is `CurrencyCodePicker` in `@object-ui/components`.
+  - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
+  - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
+  - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+  - **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget, the report table (and its export) and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
+  - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
+- 3ba5206: feat(plugin-report): a summary report with two or more `rows` levels draws a subtotal per outer group, and no longer repeats the outer value on every row
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  **Visible change on existing reports.** Every dataset-bound `summary` report whose `rows` names two or more dimensions now renders grouped on its next render, with nothing for the author to change:
+  
+  - Each outer group draws a header row naming its value once, then its inner rows with the outer column left blank, then a `Subtotal` row. With three or more levels the groups nest, one header and one subtotal per level above the innermost.
+  - The subtotals are the server's. The report asks the dataset for every proper prefix of `rows` through `totals.groupings` (`[[owner], []]` for `rows: [owner, stage]`), the way a `matrix` already asks for its row and column totals. They are never summed in the browser, so an `avg` or a distinct count subtotals correctly.
+  - Groups keep the order their first row arrives in: the declared option order of a select dimension, or the report's own `order`. Rows of one group that an `order` by a measure brings back apart are drawn together under it.
+  - Clicking a subtotal row drills into the whole group, scoped by the outer dimensions only. Clicking an inner row drills by every dimension, as before.
+  - The export (CSV and XLSX) writes the grouped table as drawn.
+  
+  Unchanged: a one-level `summary` (grand-total footer only), a `tabular` report, and a `matrix`, including a matrix without `columns`. A server that does not answer the prefix groupings gets the plain table, with the outer value repeated and no subtotal rows.
+  
+  `@object-ui/i18n` adds `report.subtotal` to every pack.
+- 2d3aa8c: feat(plugin-report): a report chart draws its `seriesBy` split
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A report chart that sets `chart.seriesBy` now draws the split it declares: one bar per `xAxis` value, split into one series per value of the `seriesBy` dimension (a bar per owner, split by stage). The chart's own dataset query asks for `[xAxis, seriesBy]` × `[yAxis]` and the rows are pivoted the way a dashboard widget with two dimensions pivots them, null group included. The series follow the split dimension's declared option order, and a `chart.series[]` entry whose `name` is a split value lands its colour and label on that series. Before this, the key was accepted and checked at publish, but the chart still drew a single series.
+  
+  - **Liveness.** The `chart.seriesBy` row of the report ledger is graded `live` with the renderer as its evidence, so `os validate` no longer prints the "nothing draws it yet" author warning for it.
+  - **Lint.** `os explain chart-axis-not-selected` now says the report chart queries its `xAxis` dimension and, when set, its `seriesBy` split. No rule, severity or finding changes.
+  
+  Nothing to do for existing reports. A chart without `seriesBy` queries and draws exactly as before.
+- Updated dependencies [2302b92]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [b3f7344]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [47b6392]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [6866e2e]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [a122269]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [da46b2a]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [fc92c62]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [d7df639]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [ee29ac3]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [2655ebd]
+- Updated dependencies [48bffe3]
+- Updated dependencies [a33fce2]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [4145210]
+- Updated dependencies [1ed3360]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [b223072]
+- Updated dependencies [e199adf]
+- Updated dependencies [ddbd08e]
+- Updated dependencies [7614f8f]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [efa2915]
+- Updated dependencies [aa874c8]
+- Updated dependencies [d220b9b]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [50d05cb]
+- Updated dependencies [af6ca00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [5da3a8c]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [bf74607]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [55a1feb]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [8a1f467]
+- Updated dependencies [2f2c6b9]
+- Updated dependencies [5c083e8]
+- Updated dependencies [a5d7098]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [946395d]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [b339465]
+- Updated dependencies [e15a87c]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [f91ab5a]
+- Updated dependencies [3ba5206]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [86dc686]
+- Updated dependencies [aaa5c1d]
+- Updated dependencies [bed8306]
+- Updated dependencies [91e4652]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [ea1751b]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [700ec85]
+- Updated dependencies [9da2f4b]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [768ec4b]
+- Updated dependencies [4bc963c]
+- Updated dependencies [a8d2fd7]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [82b29fe]
+- Updated dependencies [8c3f9d9]
+- Updated dependencies [4d278c9]
+- Updated dependencies [d5da45b]
+- Updated dependencies [3694d3b]
+- Updated dependencies [d62d973]
+- Updated dependencies [5e879ea]
+- Updated dependencies [1404938]
+- Updated dependencies [9182ff6]
+- Updated dependencies [272fec0]
+- Updated dependencies [693e100]
+- Updated dependencies [7253344]
+- Updated dependencies [da6f0ce]
+- Updated dependencies [0aaad18]
+- Updated dependencies [3e05ed1]
+- Updated dependencies [839aae5]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [847e424]
+- Updated dependencies [64bc7fa]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @object-ui/fields@18.3.0
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+  - @object-ui/permissions@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

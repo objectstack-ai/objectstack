@@ -1,5 +1,311 @@
 # @objectstack/connector-mcp
 
+## 18.3.0
+
+### Minor Changes
+
+- 7064615: feat(connector-mcp): an OAuth-protected MCP server is connected through the MCP authorization flow and dispatched with each organization's token (ADR-0143 S2, part of #26702)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  ADR-0143 lets a `provider: 'mcp'` instance over an http transport declare `auth: { type: 'oauth2', grant: 'authorization_code' }` and leave its endpoints, and its client, to discovery. Until now such an instance was held degraded, and the `mcp` provider did not ask the credential handle. Now:
+  
+  - **The connect runs the MCP authorization flow** (`@objectstack/service-automation`). When an administrator begins a connect, the server reads the MCP server's protected-resource metadata (RFC 9728), then its authorization server's metadata (RFC 8414, or OpenID Connect discovery). The `issuer` must be the one the server named, and `S256` must be listed. A declared `clientId` is used as is (the pre-registered form). Otherwise a public client is registered (RFC 7591) for the deployment's redirect URI. Every authorization and token request carries the server's resource indicator (RFC 8707), PKCE stays on, and a callback that names another issuer is refused before its code is used (RFC 9207). Every URL on the way must be https (plain http only to a loopback host). No request follows a redirect.
+  - **The connection keeps its client.** `sys_connector_connection` gains `registered_client`, an encrypted, masked field holding the discovered endpoints, the client id, and any client secret the registration issued (a declared client's secret stays behind its `credentialRef`). Refreshes use it, and a reconnect reuses it instead of registering again.
+  - **The `mcp` provider asks the credential handle** (`@objectstack/connector-mcp`). The plugin registers it with `{ credentialHandle: true }`. Over http, every request of the MCP session goes through a fetch that asks the handle. A `401` refreshes once and is sent once more; a second `401` fails the call with the `503` naming the instance. Each organization a dispatch runs for gets its own MCP session and token. The tools are listed at materialization, outside any run, with the connection connected earliest (`connected_at`, ties by organization id), so an instance several organizations connected still lists; when that connection is revoked, refused or connected again, the instance materializes again and lists with the next one. A dispatch whose run names no organization is answered as before: from the only connection, or refused with `422` when there are several. A handle on a stdio transport, or beside a static credential, is refused.
+  - An `oauth2` instance on `mcp` whose transport URL is not https is held degraded, and a `client_credentials` one still needs its declared endpoints.
+- 55b5042: fix(connector-mcp): `tools/list` follows `nextCursor` through every page, and a rejected credential (HTTP 401 / 403) is a fatal configuration fault, not a retried upstream outage
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped and no export is removed: discovery now reads every tools/list page, and a credential the server rejects is classified as a configuration fault. The fix is to a credential, not to the metadata's shape, so there is nothing for a metadata migration to rewrite and no tombstone. -->
+  
+  - **Pagination.** Discovery called `tools/list` once with no cursor, so a server that pages its tool list lost every tool past the first page, silently. The SDK-backed client now follows `nextCursor` until the server stops answering one, so every tool on every page becomes an action (and is offered to `providerConfig.include`). The walk is bounded at 100 pages: a server still answering a `nextCursor` after that fails discovery with an error naming the bound, never a connector built from a truncated tool list. On a declarative instance that failure is classified like any other failed discovery (the instance degrades and is retried). `McpClientLike.listTools()` is documented as returning every page; an injected client returns the whole list.
+  - **Rejected credential.** An HTTP 401 / 403 during connect, handshake or `tools/list` was wrapped as `ConnectorUpstreamUnavailableError`, so the instance degraded and was retried as if the server were down. The `mcp` provider now tells it apart by the MCP SDK's own HTTP-transport error (`StreamableHTTPError` with status 401 / 403, or `UnauthorizedError`, anywhere in the `cause` chain) and throws it plain: fatal at boot, a skipped entry on reload, never retried. A JSON-RPC error that merely carries code 401 is not one, and every other connect / discovery failure keeps the retryable classification.
+  
+  **BREAKING** for a declarative `mcp` instance whose server rejects its credential: it now fails boot with `connector-mcp provider: connector 'NAME' was refused by its MCP server (HTTP 401): … This is a configuration fault and is not retried …` instead of booting degraded. The remedy is a credential the server accepts (the instance `auth`, or `providerConfig.transport.headers`); the metadata keeps its shape.
+- 76b4ae4: feat(connector-mcp): `providerConfig.toolsSnapshot` pins each tool of an `mcp` instance by name
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  An `mcp` instance's `include` decides which tools it exposes. Until now nothing noticed when the server rewrote one of them, for example a new description that steers an agent or an `inputSchema` that asks for more than it did. `providerConfig.toolsSnapshot` is a record of tool name → the sha256 of that tool's definition. It is keyed by tool name, like `include`, and the two compose.
+  
+  - **The digest.** sha256, lowercase hex, of the UTF-8 canonical JSON of `{ name, description, inputSchema }` from the tool's `tools/list` entry. A member the server does not send is left out. Canonical JSON sorts object keys in UTF-16 code-unit order at every depth, keeps array order, writes primitives as `JSON.stringify` does and has no whitespace: the RFC 8785 (JCS) form for values read from JSON. `computeMcpToolsSnapshot(tools)` and `mcpToolDigest(tool)` are exported and are the functions the check uses.
+  - **The check.** On every materialization each pinned tool is hashed and compared on its own. A pinned tool served with a different description or `inputSchema`, or no longer served, degrades the instance: the provider throws `ConnectorUpstreamChangedError` (`CONNECTOR_UPSTREAM_CHANGED`), not the upstream-unavailable marker, so the logs say the pin did not match rather than that the server is down. Its reason names each such tool and the digest the server now serves, and none of the instance's tools are exposed. The instance is re-checked on the retry backoff and recovers once the server serves the pinned definitions again. An edited pin re-materializes it at once. A pinned tool that `include` also lists is reported by the pin when the server stops serving it, not as an `include` typo. When the instance's own credential reached the server (its `auth` over http), a pinned tool the server does not list takes the credential path instead (`ConnectorCredentialRejectedError`, 403, both causes named, a stored credential marked `rejected`), since the server may list only the tools that credential may use; a served pinned tool that hashes differently is still `CONNECTOR_UPSTREAM_CHANGED`.
+  - **Refused before connecting.** A `toolsSnapshot` that is not a record of tool name → 64 lowercase hex characters fails the boot, and so does a pin on a tool `include` leaves out, since that pin would never be checked.
+  - Without `toolsSnapshot`, an instance behaves exactly as before. A tool the pin does not name is not checked.
+  - `McpConnectorOptions.include` now also receives the tool's `tools/list` entry as a second argument. An existing one-argument predicate is unaffected.
+- 4694365: fix(connector-mcp)!: a declarative `mcp` instance refuses a `providerConfig.include` it cannot read, and an entry naming a tool the server does not list, instead of exposing every tool
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped: `providerConfig` is an open record the `mcp` provider reads itself, and `include` keeps its name and its allowlist meaning, now the same as the `openapi` provider's. What changes is that two values the provider used to drop silently are refused at materialization, each with a message naming the entry and the fix, so there is nothing for a metadata migration to rewrite and no tombstone. -->
+  
+  **BREAKING** accept-set narrowing of `providerConfig.include` on `provider: 'mcp'` connector instances (`@objectstack/connector-mcp`).
+  
+  - **Before.** An `include` that was not an array (a string such as `include: 'web_search'`, an object, `null`) was dropped and read as "no allowlist": the instance exposed **every** tool the server lists. Non-string entries were filtered out silently (`['web_search', 7]` exposed `web_search`). An entry naming a tool the server does not list was ignored: `include: ['nope']` brought the instance up `ready` with no actions and no error.
+  - **Now.** `include` keeps the `openapi` provider's meaning: absent means every tool; otherwise it must be an array of non-empty tool names.
+    - Any other shape is refused before connecting, with `connector-mcp provider: connector 'NAME' providerConfig.include must be an array of tool names (strings): ...`.
+    - An entry the server's `tools/list` does not carry is refused after listing, naming the entry and the tools the server lists (`... providerConfig.include names 'nope', which the MCP server does not list. ...`); the connection is closed first.
+    - Both are configuration faults, thrown plain: fatal at boot, a skipped entry on a reload. The instance never falls back to exposing every tool.
+  - **Who sees it.** An app whose `mcp` connector instance writes `include` as anything but an array of tool names, or lists a tool its server does not (a typo, or a tool the server renamed or dropped).
+  
+  **The remedy.** Write `include` as an array of the server's tool names (`include: ['web_search']`), or remove it to expose every tool. For an entry the refusal names, use a name from the tool list the refusal prints, or delete the entry.
+
+### Patch Changes
+
+- 7735d1d: fix(connector-mcp): a credential the MCP server rejects is thrown as `ConnectorCredentialRejectedError`, so the instance is degraded instead of failing the boot
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  An HTTP 401 / 403 on connect, handshake or `tools/list` used to throw a plain `Error`, which failed the boot. The provider now throws `ConnectorCredentialRejectedError` from `@objectstack/spec/integration`, with the status and the SDK error as `cause`; its message no longer says the fault "is not retried", since whether it is now depends on where the credential came from. The automation service degrades the instance naming the refusal and marks a stored credential `rejected` (#27237). Every other connect or `tools/list` failure is unchanged.
+  
+  An http instance whose handshake carried its credential (any auth but `none`, and not an api-key sent as a query parameter) now answers `credentialVerified: true`, so a stored credential the server accepted is recorded as verified.
+- d925ac7: fix(connector-mcp): when a server that was sent the instance's credential does not list an `include`d tool, the instance is degraded as a credential refusal instead of failing the boot as a declaration fault
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Some MCP servers list only the tools the credential they are sent may use: GitHub's hides each tool a classic personal access token's scopes do not cover. Its `tools/list` answer says nothing about what it hid, so a tool missing from it may be hidden from this credential or may not exist on the server at all.
+  
+  - **Before.** When `providerConfig.include` named a tool the server did not list, the `mcp` provider refused with a plain configuration fault in every case. With the credential in an environment variable, the whole boot failed. With a credential stored through the credential door, the instance was degraded with a reason telling the administrator to fix the app's declaration.
+  - **Now.** When the handshake carried the instance's `auth` credential (an `http` transport, the credential sent as a header), the refusal is a `ConnectorCredentialRejectedError` with status `403`. Its message names the missing tools and the tools the server does list for that credential, and it names both causes with the fix for each: give the credential the scopes those tools need and set it again, or fix `providerConfig.include`. The materializer handles it as it handles a `401` / `403`: the instance is degraded and the boot does not fail. A stored credential is marked `rejected` and held until it is set again; an environment or vault credential is retried on the backoff, so widening the token's scopes where it was issued recovers the instance without a restart.
+  - **Unchanged.** An instance whose handshake carried no static credential (no `auth`, an `api-key` sent as a query parameter, a `stdio` transport, or a grant-bearing `oauth2` / `app-credential` instance, whose token is borrowed per request from an organization's connection) keeps the plain configuration fault, fatal at boot, with the same message as before.
+  - **Where it reads.** The `sys_connector_credential.status` field description (`@objectstack/service-automation`) now names this second way a stored credential becomes `rejected`.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [1617b7f]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

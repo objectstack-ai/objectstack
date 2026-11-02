@@ -1,5 +1,342 @@
 # @objectstack/service-messaging
 
+## 18.3.0
+
+### Minor Changes
+
+- 63e3873: feat(spec)!: a single-word language name (`Chinese`, `English`, `Japanese`) is refused as a locale
+  
+  The 18.x locale shape refused `zh_CN`, a padded value and a multi-word name such as `Chinese (Simplified)`, but its 2–8 letter language subtag still admitted any single word of that length. An author who wrote `locale: 'Chinese'` got a green save, and the strings were stored under a locale no session ever asks for, so they never rendered. The refusal text already said a language name is refused.
+  
+  The language subtag is now 2–3 letters, the ISO 639 codes every tag in use starts with (BCP-47 reserves 4 letters and registers no 5–8 letter language). Everything else in the shape is unchanged: hyphen-separated 1–8 letter-or-digit subtags (`en`, `zh-CN`, `zh-Hans-CN`, `es-419`, `yue-HK`), and case is not judged. The one shape moves in all three places that hold it:
+  
+  - `LocaleSchema` (`@objectstack/spec/system`): a `translation` item's `locale`, translation bundle keys, `i18n.defaultLocale` / `fallbackLocale` / `supportedLocales`, a seed dataset's `locale` scope and the seed loader's `locale`.
+  - `SYS_USER_LOCALE_TAG_PATTERN` (`@objectstack/platform-objects/identity`): the `locale_bcp47_shape` rule on a user's own `sys_user.locale` column.
+  - `LOCALE_TAG_SHAPE` (`@objectstack/service-messaging`): the read side that picks a recipient's notification locale, byte-identical to the column rule.
+  
+  Clause-②: no (narrowing) — the locale shape refuses values it used to accept. Nothing is widened.
+  
+  Metadata-protocol: narrowed (a locale whose language subtag is 4–8 letters, in practice a language name, is refused on translation items, bundle keys, the i18n configuration and seed datasets)
+  
+  <!-- adr-0087: not-required (already-registered translation-locale-non-tag-refused) the 18.x D3 entry already prescribes rewriting a language name by hand, and its conversion already lists such a stored row as a TODO through LocaleSchema; this diff narrows the same shape and corrects that entry's subtag length -->
+  
+  **BREAKING** for an author or user who wrote a language name as a locale.
+  
+  - **Before.** `defineTranslation({ name: 'qa_x', locale: 'Chinese', … })` parsed and its strings never rendered; `PATCH` of a user's `locale` to `Japanese` was stored, and that user's notifications fell to the delivery ladder's floor.
+  - **Now.** The value is refused at `locale` (or at the bundle key) with a message naming the tag shape, and the user's write is refused by the column's `locale_bcp47_shape` rule.
+  - **Fix.** Write the tag, not the name: `Chinese` → `zh-CN`, `English` → `en`, `Japanese` → `ja-JP`. A language name has no single tag it can have meant, so `os migrate meta --stored` lists a stored translation row as a TODO (D3 entry `translation-locale-non-tag-refused`) and you rewrite it by hand. A user whose stored `locale` is already a name such as `Japanese` keeps loading: their notifications fall to the deployment default, and saving that value again is refused until it is replaced with a tag.
+- 79ed6f7: feat(formula, plugin-email, messaging, automation, ui)!: a template `currency` hole with no argument formats in the organization's default currency, and with none the render refuses it; nothing formats in US dollars by default any more (#26939)
+  
+  Clause-②: no (narrowing) — a mail send or render (`sendTemplate`, `renderTemplate`, and the messaging email and inbox channels on them), a flow text slot (notify, http, screen, end) and a templated formula evaluation refuse a `{{ amount | currency }}` hole with no argument when no default currency reaches the render, which they formatted in US dollars before. Authoring is unchanged: the hole is still accepted at save and publish. Nothing is widened.
+  Metadata-protocol: narrowed
+  Skills-docs: updated here — `content/docs/automation/email-templates.mdx`, `content/docs/automation/flows.mdx` and `content/docs/data-modeling/formulas.mdx` state the tenant default and the refusal; no skill under `skills/**` taught the dollar default (the formula skill names the formatter grammar only), so no skill line changes.
+  
+  <!-- adr-0087: registered template-currency-no-argument-tenant-default -->
+  
+  **BREAKING** semantic change of the `currency` formatter's no-argument form (`@objectstack/formula`), served by every template dialect: mail templates, flow text slots, and action / bulk-action confirm and success copy.
+  
+  - **Before.** `{{ amount | currency }}` formatted the amount in US dollars (`$1,234.50`) whatever currency the amount was in and whatever the organization's default currency was.
+  - **Now.** It formats in the organization's default currency, the `localization.currency` setting (Setup → Localization) that a currency field and a dashboard measure already display in: `CN¥1,234.50` for an `en-US` reader and `¥1,234.50` for a `zh-CN` reader when the default is CNY. Every server-side read goes through `resolveLocalizationContext` (`@objectstack/core`); the UI reads `useLocalization().currency`.
+  - **With no default currency.** The render refuses the hole by name and names the remedy: set the default, or write `currency:CODE` (a mail template's refusal also names `currency:@path`). A mail send or render fails with `TEMPLATE_INVALID` and nothing is sent; a messaging delivery records it as a permanent failure. A flow node with such a hole in a text slot fails with the refusal, which no fault edge routes. An action's confirm or success sentence is shown as written, the existing fallback for a sentence the template engine refuses.
+  - **How each host hands the default over.** `SendTemplateInput.currency` / `RenderTemplateInput.currency` (`@objectstack/spec/contracts`), filled by the messaging email and inbox channels from the delivery's organization, and by the auth mails (verification, password reset, invitations, magic link, notices) from the organization the mail names or, for identity mail, the deployment-wide setting (`@objectstack/plugin-auth`, once, on the email service it wires); `AutomationContext.currency`, seeded once at run setup from the run's tenant (`AutomationEngine.setTenantCurrencyResolver`, which the automation plugin wires), persisted with a suspended run and inherited by a subflow; `EvalContext.currency` in `@objectstack/formula`, a reserved channel like `locale`, never bound as a root; `ActionRunner.setTenantCurrency` in `@object-ui/core`, installed by the React action providers.
+  - **Unchanged.** `{{ amount | currency:EUR }}` formats in the code it names, with or without a default. A variable, field or root named `currency` is a value, never the default. Compile, `validateExpression` and the publish gates accept the no-argument form as before. A template with no no-argument currency hole needs no default.
+  - **Who sees it.** An organization with a default currency other than USD sees its own code where it saw dollars. An organization with no default currency that sends a mail, runs a flow or shows an action sentence with a no-argument `currency` hole now gets the refusal instead of dollars.
+  
+  **The remedy.** None where the amount is in the organization's default currency: set it in Setup → Localization. Where the amount is in one fixed currency, name it in the hole: `{{ amount | currency:USD }}`. Where a mail template shows each record's amount in that record's own currency, read the code from the send's data: `{{ amount | currency:@currency_code }}`.
+  
+  **Supersedes, in the same release.** The unreleased notes of the mail `currency:@path` and hole-grammar changes (`26660-currency-code-path-formula`, `26660-currency-code-path-plugin-email`, `26660-mail-hole-grammar-formula`, `26660-mail-hole-grammar`) describe a `currency` hole formatting in US dollars, and the first three say a hole with no argument still does. That was true when they were written; this entry moves it, and in this release a no-argument hole formats in the organization's default currency as described above.
+
+### Patch Changes
+
+- dabe771: fix(service-messaging): the email and inbox channels grade a `TEMPLATE_INVALID` template failure permanent, like the other template failures
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `@objectstack/plugin-email`'s `sendTemplate` and `renderTemplate` now fail with `TEMPLATE_INVALID` for a stored template whose hole the mail grammar refuses (a second formatter, or a `currency` argument that is not a literal ISO 4217 code). Retrying cannot succeed until the template is republished, so `classifyError` on both channels grades it `permanent`, as it already grades `TEMPLATE_NOT_FOUND`, `TEMPLATE_INACTIVE`, `MISSING_VARIABLES` and `TEMPLATE_UNSUPPORTED`: the delivery goes dead at once with the code on its row, instead of spending the whole retry schedule first. Every other failure keeps its grade.
+- 7739573: fix(core, service-messaging): a failed settings read no longer dead-letters a templated mail as `TEMPLATE_INVALID`; only a read that finds no default currency is permanent (#27257)
+  
+  Clause-②: yes (widening) — `resolveLocalizationContext`'s result (`@objectstack/core`) gains one optional member, `readFailed?: true`. Nothing is narrowed.
+  Metadata-protocol: none
+  
+  - **Before.** `resolveLocalizationContext` answered `currency: undefined` both when the organization has no default currency and when its `sys_setting` read failed (the failure is memoized for 30 s). So a messaging delivery whose template has a `{{ amount | currency }}` hole with no argument was refused `TEMPLATE_INVALID` during a transient settings fault, graded permanent and never sent, although a retry would have worked.
+  - **Now.** The answer carries `readFailed: true` when the direct `sys_setting` read threw, on the fresh read and on a hit of the failure memo alike. A settings-service refusal does not count, and the memo is not lengthened. Messaging's tenant-currency read rejects on it; the email and inbox channels then render without a currency. When that render answers `TEMPLATE_INVALID`, they render the template once more without sending, with the no-currency code `XXX` as the default: if that passes, the missing default was the only refusal, and the delivery is recorded without a `TEMPLATE_*` code and retried; if it still refuses, that refusal stands and is graded permanent, as before. Once the read succeeds, an organization with no default currency gets `TEMPLATE_INVALID` with its remedy, graded permanent, as before.
+  - **Unchanged.** A template with no no-argument `currency` hole is sent during a settings fault, as before. Every other template failure keeps its grade. The other callers of `resolveLocalizationContext` see the same values; the new member is optional and absent on every successful read.
+- f5e6709: fix(service-messaging): `EmailSenderSurface.sendTemplate` and `renderTemplate` declare the optional `currency` the email and inbox channels already send
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Before.** Both channels passed the organization's default currency to the email service's template render (#26939), and the trial render that grades a refusal after a failed currency read passed `XXX` (#27257), but the published `EmailSenderSurface` (re-exported from the package entry) named no `currency` on either input. The key reached the call only through an object spread, which TypeScript does not check against the target type, so a typed implementer of the surface was never told the key is sent and a rename on either side compiled.
+  - **Now.** Both input types declare `currency?: string`, mirroring `RenderTemplateInput.currency`. The channels build the input by name and set `currency` with a plain assignment, and the trial render writes `currency: probe` as a plain property, so TypeScript checks the key on every call.
+  - **Unchanged.** No default currency still sends no `currency` key; a default is still passed as is; the trial render still passes `XXX`. No delivery, grade or error text changes.
+- a727ba2: perf(service-messaging): an idle notification or HTTP dispatcher tick reads the database twice, instead of 18 and 10 times
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A kernel that mounts messaging runs two delivery dispatchers, and each one ticked against an empty outbox at a fixed price: one claim probe per partition (and, for notifications, one digest probe per partition), plus a visibility-timeout reap that issued its predicate `UPDATE` whether or not any claim had expired. With the default 8 partitions that was 18 statements per notification tick and 10 per HTTP tick, measured at the client on a kernel. A kernel's global `afterUpdate` hook makes the engine read the matched rows before it writes, so the reap cost two statements. At the framework's 30-second idle ceiling an idle tenant kernel read its database 56 times a minute.
+  
+  An idle tick is now two reads per dispatcher, whatever `partitionCount` is:
+  
+  - **The reap reads before it writes.** It reads one expired `in_flight` id. Only a hit runs the `UPDATE`, whose predicate is unchanged, so it still returns every claim expired by then to `pending`.
+  - **One due-work read gates the partition pass.** Before taking any partition lock, the dispatcher asks the outbox once, across every partition and organization, whether any `pending` row is due. For notifications this covers immediate and batched (digest) rows. If none is due, the tick ends: no lock is taken and no claim or digest probe runs. If one is due, the tick runs the full per-partition pass exactly as before, at the price of one extra read.
+  
+  `INotificationOutbox` and `IHttpOutbox` gain an optional `hasDueWork({ now })`, with `DueWorkOptions` and `HttpDueWorkOptions` exported for it. Both built-in stores, SQL and memory, implement it. A custom outbox that does not implement it keeps the per-partition probes it had. `partitionCount` and the stored `partition_key` are unchanged.
+  
+  The public surface widens, and that is all it does: the exported `INotificationOutbox` and `IHttpOutbox` interfaces gain one optional member each (`hasDueWork`), and the package exports two new option types (`DueWorkOptions`, `HttpDueWorkOptions`). No `packages/spec` path changes, and an existing outbox implementation compiles and behaves as before.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [a8ec04d]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [0bf7aaf]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [1e01924]
+- Updated dependencies [2c0a97b]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [9b4d193]
+- Updated dependencies [aa46d14]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [0c03ce2]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [0aaad18]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [1617b7f]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

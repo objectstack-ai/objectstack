@@ -1,5 +1,639 @@
 # @object-ui/plugin-form
 
+## 18.3.0
+
+### Minor Changes
+
+- 2d05cd4: fix(ui): a form view's `layout: 'horizontal'` draws each label beside its field, a tabbed form keeps it, and the form page draws `type: 'tabbed'` as tabs (#26843)
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A form view's `layout: 'horizontal'` reached every console form but drew nothing different, and the form page ignored `type: 'tabbed'`:
+  
+  - **`layout: 'horizontal'`** now places each field's label in a fixed column beside its control from the `sm` breakpoint up; below `sm` (a phone) the field stays stacked, label above control, as `vertical` draws it. The description and validation message stay under the control. `vertical`, and a form view with no `layout`, draw exactly as before. Before, the form renderer read the key only to align its action row.
+  - **A tabbed form** (`type: 'tabbed'`) now keeps an authored `layout: 'horizontal'` on every tab. It used to draw its fields `vertical` whatever the form view said.
+  - **The form page** (`/forms/:name`, and the public `/f/:slug`) now draws a `type: 'tabbed'` form view as one tab per section: `defaultTab` opens first, `tabPosition` places the strip, and a section hidden by its `visibleWhen` draws no tab. A submit carries every section's fields, the closed tabs' included, and a submit refused for a missing field opens the tab that holds it. A tabbed form view with a single section draws it stacked, as before. The page also draws `layout: 'horizontal'` rows. Before, it drew every section stacked and every label above its field.
+- 6af79c1: fix(console): every console form entry point renders the form view's `buttons`, `layout` and `defaults`, and a tabbed form with subforms opens on its `defaultTab` (#26843)
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A form view's `buttons`, `layout` and `defaults` saved and published, but the console set its own values over them, depending on which entry point opened the form:
+  
+  - **The full-page record form** (`/new`, `/record/:id/edit`) and **the New / Edit dialog** set `showSubmit: true`, their own submit and cancel labels and `layout: 'vertical'`, so an authored `buttons.submit.label`, `buttons.*.show: false` or `layout: 'horizontal'` did nothing. Both now read them from the form view the flow selects. An authored label may be a per-locale map. The New dialog also ignored `defaults`; a create there now opens with them.
+  - **`defaults` and the host's own opening values merge per field.** A URL prefill, a parent pre-link or a seeded calendar day still wins for the fields it names, and the form view's `defaults` fill the rest. Before, a create carrying any prefill dropped `defaults` entirely. An edit never reads `defaults`.
+  - **The form page** (`/forms/:name`, and the public `/f/:slug`) never read `buttons` or `defaults`. An authored submit or cancel label now shows, `show: false` removes the button (the public form still draws no Cancel), and a create opens with `defaults`, over the object's own field defaults and under a `?prefill_` param.
+  - **A tabbed form with subforms** opened on its first tab with the strip on top. `ObjectForm` now hands `defaultTab` / `tabPosition` (and `layout`) through `MasterDetailForm` to the header form. The modal's tabbed layout reads both keys, and its subforms arm now renders the header tabbed instead of stacked.
+  - **A hidden Cancel on a master-detail form** (`showCancel: false`, or `buttons.cancel.show: false`) is no longer drawn: the action bar draws Cancel only when it is handed `onCancel`, and both form arms now hand none.
+  
+  `buttons.reset` and the drawer keys (`drawerSide` / `drawerWidth`) are not covered: no console entry point draws a reset button or opens a form view as a drawer.
+- 2655ebd: feat(spec)!: a form view's `buttons` block holds `submit` and `cancel` only; `buttons.reset` is retired, because no form ever drew a reset button
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (`FormViewSchema.buttons.reset` is a tombstone)
+  
+  <!-- adr-0087: registered form-view-buttons-reset-removed, ui-form-view-buttons-reset-retired -->
+  
+  **BREAKING** accept-set narrowing on the form view surface (`@objectstack/spec`), ADR-0049 enforce-or-remove.
+  
+  The console draws a form's Submit and Cancel buttons on every entry point (the form page, the New and Edit dialogs, the record form page, master-detail forms). None of them drew a reset button, and `buttons.reset.label` was never read. The one renderer fold that read `buttons.reset.show` passed it to ObjectForm's clear-after-save flag, so `show: true` emptied the form after a successful save instead of adding a button.
+  
+  - **FROM → TO.** `buttons: { submit, cancel, reset }` → `buttons: { submit, cancel }`. No button replaces it: Cancel leaves the form without saving. `reset.show: true` used to clear the form after each save on ObjectView and the record form page; a converted form no longer clears after a save. A form that should clear after a save declares `submitBehavior: { kind: 'continue' }`, which ObjectForm and the console form page honour.
+  - **The one-line fix.** Delete `buttons.reset`. `os migrate meta --from 17` lists the edit for existing sources, and `--write` applies it. A stored `sys_metadata` row is converted when it is read (the `form-view-buttons-reset-removed` conversion), so a form view saved with the key keeps loading.
+  - **What the parse says.** "`view.form.buttons.reset` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form ever drew a reset button, and its label was never read. …", at every form view door (a view's `form` and `formViews.*`, a form view item record, a flattened form overlay) and at `defineStack` as `STACK_SCHEMA_INVALID` / 422. TypeScript rejects the key at the authoring site.
+  - **Unchanged.** `buttons.submit` and `buttons.cancel` parse and render as before.
+  
+  The renderer (`@object-ui/plugin-form`, `@object-ui/types`): `ObjectForm` no longer folds `buttons.reset.show` onto `showReset`, and the `ObjectFormSchema.buttons` mirror (type and zod) drops `reset`. The flat `showReset` prop itself is unchanged.
+- a33fce2: feat(spec,plugin-form)!: `ObjectForm` lays a form out and no longer picks its container; the `object-form` block drops `formType: 'split'` and `SplitForm` retires, while the block keeps opening `drawer` and `modal` forms itself
+  
+  Clause-②: no (narrowing)
+  
+  Metadata-protocol: narrowed (the `object-form` block's `formType` refuses `split`; its `splitDirection`, `splitSize`, `splitResizable` and `sections[].pane`, the `object-master-detail-form` block's `sections[].pane`, and `FormViewSchema.splitDirection`, are tombstones)
+  
+  <!-- adr-0087: not-required (already-registered form-view-presentation-types-removed, ui-form-view-type-layout-only) 18.3.0 is unreleased, so this change widens those two entries in place: the conversion now strips splitDirection and reaches object-form page blocks, four new RETIRED_KEYS_BY_MAJOR rows record the tombstoned keys, and the D3 entry names the block -->
+  
+  **BREAKING** accept-set narrowing on the `object-form` page block and the form view (`@objectstack/spec`), and a removed export (`@object-ui/plugin-form`). ADR-0050, the renderer half of #27155.
+  
+  The model: a form's `formType` says how it lays out its sections. Where it opens is the caller's. On the `object-form` block the caller is the block itself, so `drawer` and `modal` stay there as the two containers the block opens; `split` drew two panes and had no other reader, so it leaves with its renderer.
+  
+  - **FROM → TO (block).** `formType: 'split'` → `formType: 'tabbed'` (one tab per section) or delete the value for `simple`; delete each section's `pane` and the block's `splitDirection` / `splitSize` / `splitResizable`. To edit child records beside the parent, use an `object-master-detail-form` block. `formType: 'drawer'` and `formType: 'modal'` are unchanged. The `object-master-detail-form` block's parent `sections` share the shape, so delete each section's `pane` there too.
+  - **FROM → TO (form view).** `splitDirection` on a form view → delete it. It joins `splitSize` and `splitResizable`, which left in the same release.
+  - **The one-line fix.** Delete the retired value and keys. `os migrate meta --from 17` lists the edits for existing sources, and `--write` applies them. A stored page or view row is converted when it is read (the `form-view-presentation-types-removed` conversion now reaches `object-form` page blocks, the section `pane` of `object-master-detail-form` blocks, and `splitDirection` too), so a block saved with `split` keeps loading as a `simple` form.
+  - **What the parse says.** `formType: 'split'` is refused by name with its prescription ("'split' was removed from the `object-form` `formType` enum in @objectstack/spec 18.3.0 (ADR-0050) — …"); each tombstoned key is refused on every `formType`. TypeScript rejects each at the authoring site.
+  - **`@object-ui/plugin-form`.** `ObjectForm` renders the `simple`, `tabbed` and `wizard` layouts only; a `formType` of `drawer` or `modal` on a node handed straight to `<ObjectForm>` now renders the inline form, and the host opens its own drawer or dialog around it (the console's New and Edit dialogs already mount `ModalForm` themselves). The registered `object-form` block routes `drawer` and `modal` through the new internal `ObjectFormContainer`, which hands the node to `DrawerForm` or `ModalForm` as before. `SplitForm`, `SplitFormProps` and `SplitFormSchema` are no longer exported, and the block no longer publishes the `splitDirection`, `splitSize` and `splitResizable` inputs. FROM `import { SplitForm } from '@object-ui/plugin-form'` → TO a `TabbedForm`, or the `form` renderer's `fieldPanes` for a host that composes panes itself.
+  - **`@object-ui/types`.** `ObjectFormSchema.formType` is `'simple' | 'tabbed' | 'wizard' | 'drawer' | 'modal'`, and its `splitDirection` / `splitSize` / `splitResizable` are the spec's tombstones by reference; the section `pane` member is gone.
+  - **Console.** Studio's page-block inspector no longer offers `Split` for an `object-form` (its `engine.inspector.pageBlock.option.formType.split` string is removed from `@object-ui/i18n`), the record page passes no split keys, and a view whose `type` is not one of the three form layouts is no longer taken for a form (`@object-ui/console`).
+  - **Supersedes one line of the form view `type` entry (#27155).** That entry says `splitDirection` stays declared; in this release it leaves too.
+  - **Unchanged.** `drawerSide`, `drawerWidth`, `modalSize` and `modalCloseButton` keep their readers: the block's drawer and modal containers. The enforce-or-remove question for `drawerSide` / `drawerWidth` on form views stays on #27153.
+
+### Patch Changes
+
+- a260556: fix(types,core,components,plugin-form)!: `FormField` drops its open index signature, and a form-view field's `immutable` locks the control once the record exists
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-interface-only ui/packages/types/src/form.ts#FormField, ui/packages/core/src/validation/server-owned-value.ts#FieldWithDeclaredDefault) Two published TypeScript interfaces each lose their open index signature and nothing else: no member is removed or renamed, no metadata key, accepted value, export or error code moves, the zod mirror `FormFieldSchema` and the strict authoring face are unchanged, and `objectstack migrate meta` has nothing to rewrite. The affected party is a TypeScript consumer, reached by its own compiler (excess-property error naming the undeclared key). -->
+  
+  **BREAKING** type-surface narrowing, compile-time only.
+  
+  - **`@object-ui/types`.** `FormField` no longer ends in `[key: string]: any`. A key no member declares — a misspelling included — is now a compile error on a fresh `FormField` literal, as it already was on every node type since `BaseSchema` closed. The declared members are unchanged, and so are the zod mirror `FormFieldSchema` and the strict face `StrictAnyComponentSchema`, which already refused undeclared keys.
+  - **`@object-ui/core`.** `FieldWithDeclaredDefault`, the parameter type of `isServerOwnedValue`, drops its `[key: string]: unknown` signature, so a `FormField` value is assignable to it. It still reads only `field.defaultValue`.
+  - **`@object-ui/components`.** The form renderer types the field's raw metadata carrier as `Record<string, unknown> | FormField` (the stashed object field, else the field config itself), instead of reading the config through the signature.
+  - **`@object-ui/plugin-form`.** The host-written `group` key (copied from the object field for the field-group fallback) and the section-divider disclosure keys (`collapsible`, `collapsed`, `onToggle`) are typed on package-local hand-off types instead of riding the signature.
+  
+  **Fix (`@object-ui/plugin-form`).** A form-view field declaring `immutable: true` (spec `FormField.immutable`, "editable on create, locked once the record exists") is now drawn disabled when the form edits an existing record, and stays editable on a create form. It used to be copied onto the runtime field as `immutable`, which no renderer reads, so an edit form left the control editable.
+  
+  What to do: nothing if your `FormField` literals use only declared keys. Otherwise the compiler names each undeclared key on the literal that carries it (an excess-property error): correct a misspelling to the declared member, or, for a key only your host writes and reads, type it on a local intersection such as `FormField & { group?: string }` where its producer and reader live.
+- 4daad78: docs: the README's Contributing Guide and Roadmap links point at the ObjectStack repository (objectstack#26080)
+  
+  Every package README linked its "Contributing Guide" and "Roadmap" to `CONTRIBUTING.md` and `ROADMAP.md` in the archived `objectstack-ai/objectui` repository. Those documents now live at the root of `objectstack-ai/objectstack`, which is where the links point; the `@object-ui/console` README's roadmap links move there too. No code, export or behaviour changes.
+  
+  Clause-②: no
+  Metadata-protocol: none
+- 6866e2e: fix(plugin-form): the record form's edit dialog disables only the fields the server locks on that record
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An edit form for a stored record (`ModalForm`, the console's edit dialog; `ObjectForm` and every layout beneath it; `DrawerForm`) now asks the data source for that record's field projection and answers its field locks from it, through `RecordFieldAccessScope`. A field locked only from `approved` onward is live on a draft and locked on an approved row, in what the form draws and in what its save sends. The form asks again after a write to the record or a re-read of it, so a save that approves the row locks the field again. Create forms, `view` forms and data sources without `getRecordFieldAccess` behave as before. Row-level write scope is not part of the answer: on a row the caller may read but not write, the fields stay open and the server refuses the save, as before.
+- b5e4ce6: fix(plugin-form): the record edit dialog draws a record the caller may read but not write as read-only, says why, and offers no Save
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a record shared to the caller for reading only (sharing, ownership or row-level security), or held by a pending approval that locks it, the console's edit dialog used to open with every field live; the user filled it in and the server refused the save as a whole. The dialog now asks the server about the row itself:
+  
+  - **The row's verdict.** `RecordFieldAccess` (`@object-ui/types`) carries the record projection's `writable`, which `DataSource.getRecordFieldAccess` already passes through. Below `RecordFieldAccessScope` (`@object-ui/permissions`), `writable: false` refuses `write` on every field of the record and `check(object, 'update')` with the reason `record-not-writable`; `read`, `create`, other objects and other records keep the enclosing answer, and an object grant the provider already refuses keeps its own reason. `writable: true` and an absent `writable` (an older server) change nothing.
+  - **The approval lock.** The projection leaves out the approvals record lock, which the server judges on the values a save sends. `RecordFieldAccessScope` takes `lockedBy: 'approval'` for a lock the host reads, answered the same way with the reason `record-locked-by-approval`, and `ModalForm` takes the same `lockedBy` prop. The console's edit dialog passes it from the approvals read and rule the record page uses.
+  - **What the form draws.** Every field gate (`gateFormFields`, the outbound write gate, the record page's inline edit) reads the scoped answer with no call-site change. `closedFormAffordance` reports `record` or `approval` for such a row, the form's notice says "You don't have permission to edit this record. The fields are read-only." (new key `form.noPermissionToEditRecord` in every pack) or the record page's approval-lock sentence, and `ModalForm` and `DrawerForm` offer no Save on it.
+- 7587fd4: docs(ui): package homepages and README links point at objectstack.ai/docs; objectui.org is retired
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The ObjectUI documentation site at objectui.org is retired. Its pages now live in the ObjectStack docs, mostly under [User Interface](https://objectstack.ai/docs/frontend). Every `@object-ui/*` package's `homepage` and README links now go to the matching page there, and the old objectui.org addresses answer with a permanent redirect to the same page. The `description` fields spell the product name "ObjectUI". The `@objectstack/skills` bundle's ObjectUI skill links to the same pages. Nothing else changes in what these packages ship.
+- 1ed3360: feat(ui): a `record`-mode currency amount shows each record's own currency; the code field is an ISO 4217 select pre-filled with the organization currency; Studio edits the mode and the pointer (ADR-0144 D2, D6, D8 rule 4)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An amount declaring `currencyConfig: { currencyMode: 'record', currencyField: 'currency_code' }` now renders in the currency its record's `currency_code` holds, on every face that holds the record:
+  
+  - **Cells and widgets.** `resolveFieldCurrency(field, tenantDefault, record)` takes the record in scope as an optional third argument. Under `record` mode it reads only that record's code field; no record, or a blank code, resolves to no currency, so the amount shows as a plain number and never in the tenant default. `dynamic` and `fixed` fields resolve exactly as before. The list cell, the form and inline amount box (symbol, decimals and spinner step follow the selected code), formula cells returning `currency`, the record page's summary chips, the dashboard table and record drawer, and Gantt tooltips all pass the record. `recordCurrencyField(field)` names the pointer.
+  - **The code field.** A `text` field declaring `valueDomain: 'iso_4217_currency'` renders a searchable select instead of a free-text box, grouped "Available" (the organization currency, then rated currencies, then the codes the object's records already hold) and "All currencies (ISO 4217)". It offers only codes the value domain accepts. The form reads the used codes once per object, with one grouped query, and hands them to the field on its own metadata (`usedCurrencyCodes`); a data source without grouped queries offers home + the record's own code. The rated group is empty until the exchange-rate table ships. The picker itself is `CurrencyCodePicker` in `@object-ui/components`.
+  - **Filters.** In the list's filter builder, a condition on a `record`-mode amount gains a required currency picker, defaulting to the organization currency, and the filter reads `amount op X AND code = C`: the code condition is a second row of the same group, so stored filters keep their shape. A group holding such a pair stays on AND (under OR the pair would split), and a stored OR group says so. Presence checks (`is null`, `is empty`, …) need no currency.
+  - **Create forms.** A code field that a `record`-mode amount points at opens pre-filled with `localization.currency`, as a value the user submits; a declared `defaultValue` and the caller's record win, and nothing is seeded while the setting is unset.
+  - **Totals.** The grid footer draws no sum, average, minimum or maximum for a `record`-mode amount (its rows are in different currencies); counts stand. A group header keeps those aggregates only when the grid is grouped by the amount's code field. Consolidated totals belong to the home field, a `dynamic` amount that totals as before.
+  - **Dataset answers.** A grouped analytics answer over a `record`-mode amount marks its measure column with `currencyField`, the result column holding each row's code. The dashboard `table` widget, the report table (and its export) and the Studio dataset preview format each row in that row's currency; a row without a code, and the totals row, show a plain number. `measureCellCurrency(field, row)` in `@object-ui/core` is the one read. Columns without `currencyField` format exactly as before.
+  - **Studio.** A currency field (or a formula returning `currency`) gains a currency section: the mode (dynamic, fixed, record), the fixed code, and under `record` a `currencyField` picker listing the object's ISO 4217 code fields, with "Create currency field", which adds `currency_code` (`text`, `valueDomain: 'iso_4217_currency'`, required) and points the amount at it.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself and its aggregate refusals.
+- 0d45c0e: fix(ui): a wizard form keeps `layout: 'horizontal'`, and the form page draws `type: 'wizard'` as steps (#27224)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A wizard form view (`type: 'wizard'`) dropped two things it declares:
+  
+  - **A wizard form** now keeps an authored `layout: 'horizontal'` on every step, drawing each label beside its field from the `sm` breakpoint up, as simple and tabbed forms already do. It used to draw its fields `vertical` whatever the form view said. `vertical`, and a form view with no `layout`, draw exactly as before.
+  - **The form page** (`/forms/:name`, and the public `/f/:slug`) now draws a `type: 'wizard'` form view as one step per section, the way the app's wizard form does: a step indicator (hidden by `showStepIndicator: false`), **Next** checks the current step's required fields before the next step opens, **Back** is always free, a later step opens from the indicator once completed or under `allowSkip`, and the last step's **Submit** carries every step's fields. A submit refused for a missing field opens the step that holds it and marks it in the indicator. A wizard form view with a single section draws it stacked, as before. Before, the page drew every section stacked on one page with no steps.
+- 9c51314: fix(plugin-form): an ObjectForm block's `showReset` draws the Reset button it declares, instead of clearing the form after every save
+  
+  Clause-②: yes (widening)
+  
+  Metadata-protocol: none (the `object-form` block's `showReset` key and its spec text, "Show the reset button", are unchanged; the renderer now does what that text says. The two new keys are on `@object-ui/types`' `FormSchema`, the renderer-internal `form` node that `@objectstack/spec` does not declare)
+  
+  `showReset` on the `object-form` block is declared "Show the reset button", but the renderer passed it to the form's clear-after-save flag. So `showReset: true` drew no button and emptied the form after each successful save, and `showReset: false` did nothing.
+  
+  - **FROM → TO.** `showReset: true` now draws a Reset button beside Cancel and Save. Pressing it puts the form back to the values it opened with (the record being edited, or the create defaults) and saves nothing. A save no longer clears the form because of `showReset`. A form that should clear after a save declares `submitBehavior: { kind: 'continue' }`, or `resetOnSuccess: true` on a create form.
+  - **Where the button is drawn.** The simple form (flat or sectioned), the tabbed form, and the drawer and modal footers. The wizard and the master-detail form have their own action bars and draw no Reset button yet.
+  - **`@object-ui/types`.** `FormSchema` (the `form` node) gains two optional keys: `showReset`, which draws the button in the form's action bar, and `resetLabel`, its label (default: the session language's "Reset"). The `form` node also restores its opening values on a `reset` event, so a footer outside the form can reach it with a `type="reset"` button that names the form's `id`.
+- 03069ca: Clause-②: yes (widening: @object-ui/i18n gains the public export recordSaveMessage; no accept set moves)
+  Metadata-protocol: none
+  
+  A record saved from an `object-form` block's drawer or modal (`formType: 'drawer' | 'modal'`, including `<ObjectForm formType="drawer">` on a React page) now gets the record-named success toast the console's record dialogs give, such as `Task "Fix login" updated` or `Task "Write release notes" created`. A record with nothing nameable keeps the object-label toast, and a declared `successMessage` is used as written. The toast comes before the author's `onSuccess`, so a page whose `onSuccess` only closes the overlay and reloads its list needs no change. A host that mounts `DrawerForm` / `ModalForm` itself, and a form with a `submitHandler`, keeps owning its feedback and is not toasted twice. `@object-ui/i18n` adds `recordSaveMessage(t, { label, objectDef, saved, mode })`, the one builder of that message, which the console's record dialog and record page now share.
+- f40b777: Clause-②: yes (widening: `@object-ui/app-shell` exports `InvitationLinkHint` and `@object-ui/plugin-form` exports `useInitialFieldFocus`; no accept set moves)
+  Metadata-protocol: none (platform object metadata only, no authorable key: `sys_invitation.status` options gain display labels, with `rejected` read as "Declined"; the role param of the four `invite_user` actions, `sys_member.add_member` and `sys_member.update_member_role` gains one shared `helpText`; `sys_invitation.resend_invitation` gains a `description` and carries its email and role over from the row; `sys_member.update_member_role` gains a `description` naming the member; the `expired` invitations list projects `role`)
+  
+  The Invitations screens read more clearly and behave more predictably. Invitation statuses show as labels (Pending, Accepted, Declined, Expired, Canceled) instead of raw values. Every role picker that grants an organization role explains each role on its own line, and Change Role names the member it changes. Resend is a confirmation that names the invitee and keeps the invitation's email and role, instead of an editable form. The workspace's cancel dialog dismisses with "Keep invitation".
+  
+  The console's action dialogs check an email or URL param before anything runs and mark a malformed value on its field. They open on their first editable field instead of Cancel, and closing one returns focus to the control that opened it: an action button that was disabled while its action ran, a row menu's trigger, or the first opener when a param dialog hands over to a result dialog. This applies to every action that uses the param, confirm and result dialogs.
+  
+  The sign-in page tells a visitor to open their invitation link where sign-up is by invitation only. After accepting an invitation, the page says the user joined the organization and as which role, and Continue enters it.
+- 72b08ee: docs(skills): hand-written inventory counts are deleted; the names and the source of truth stay
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** `objectstack-data` counted its field types ("49") in SKILL.md and in `rules/field-types.md`, and its lifecycle events ("8") in SKILL.md and `references/data-hooks.md`; `objectstack-automation` counted its built-in node types ("20"); `objectui/README.md` counted its plugins ("18"); `objectui/guides/schema-expressions.md` counted the formula registry ("30 functions"); `objectstack-query` counted the aggregate functions ("six"). No gate reads any of those numbers against the tree, so each one goes wrong the moment the inventory moves, and a wrong count misleads the reader more than no count.
+  - **Now.** The numbers are gone; every enumeration that taught something (the node-type tables, the plugin names, the function table, the aggregate names) stays, and each page still points at the file or schema that is the source of truth. Deletion only: every touched file shrinks under its unchanged token ceiling.
+  - The same deletion in shipped READMEs and one shipped source comment: `@objectstack/spec` (a `//` comment in `src/kernel/metadata-plugin.zod.ts`, which ships), `@objectstack/metadata` (README), and the `@object-ui/*` READMEs of i18n, plugin-grid, components, fields, types, plugin-form and console. No schema, key or behaviour changes.
+- 5e2f386: fix(plugin-form): a sectioned `object-form` clears after a save when it declares `submitBehavior: { kind: 'continue' }` or `resetOnSuccess`, as the flat form does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A "save and add another" form declares `submitBehavior: { kind: 'continue' }`, or `resetOnSuccess: true` on a create form. When the form's fields were grouped into sections (explicit `sections`, or sections derived from the object's field groups), the form kept the saved record's values after the save, so the next entry started from them and could be saved as a near-duplicate. The flat form already cleared. Both now read one shared rule: `continue` clears, `resetOnSuccess` clears a create form when no `submitBehavior` is declared, and a form that declares neither keeps its values.
+- 5e1342a: fix(plugin-form): a create form offers a `state_machine`-governed select only the machine's `initialStates`, so no option on it ends in `invalid_initial_state`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An object's `state_machine` validation can declare `initialStates`, the values a new record may be created in; the server refuses an insert with any other value (`invalid_initial_state`). Create forms used to offer every option of that select anyway, so a user picking, say, `active` on the showcase "New Project + Tasks" form learned only from the refusal after submit that `planned` was the one value allowed.
+  
+  Now every create form layout (the in-page form, the master-detail header, the drawer, the dialog, the tabbed and wizard forms) offers such a select only its `initialStates`, through the same field gate that already narrows an edit form to the moves from the stored value. Two rules hold:
+  
+  - A machine that declares no `initialStates`, or that is `warning`/`info`, inactive or update-only, leaves the create form's options unconstrained, exactly where the server does not police the insert.
+  - The value the form opens with (a seeded `default: true` option or the caller's pre-fill) stays offered even outside `initialStates`, so the form never silently drops what it was handed; the server's refusal still names it.
+  
+  `@object-ui/core` gains `stateMachineInitialValues(objectSchema, fieldName)`, the insert-side sibling of `stateMachineNextValues`.
+- ba5c754: fix(plugin-form): a drawer or modal `object-form` save that answers warnings shows one toast, the record-named message carrying them
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A save from an `object-form` block with `formType: 'drawer'` or `'modal'` that succeeded with advisory warnings (a warning-severity validation rule, for example) showed two toasts: the record-named success one and the write-warning channel's own "Saved — with warnings". The record page and the Console's record dialogs already showed one. The container now does the same: while it is open it claims the answer warnings of the write it makes (its record's update, or a create of its object), and its save toast carries them on the warning variant, one per line, whether the message is the record-named one or a declared `successMessage`. A write the container did not make keeps the channel's toast, and so does a container with a `submitHandler`, which writes nothing itself.
+  
+  - **`@object-ui/react`**: new exports `claimAnswerWarnings`, `parkAnswerWarnings`, `answerWarningLines`, `toastRecordSave` and the types `AnswerWarningsEvent`, `AnswerWarningScope`, `AnswerWarningClaim` and `RecordSaveSink`. They are the one claim registry every record save surface and the write-warning channel share, moved here from `@object-ui/app-shell`, where they were internal, so `@object-ui/plugin-form` can reach them.
+  - **`@object-ui/app-shell`**: the write-warning channel, the record page and the record dialogs read the claim from `@object-ui/react`. Their behaviour is unchanged.
+- ea1751b: feat(fields): a lookup pick fills the fields its `lookupAutofill` declares, in the record form and in the line-item grid
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `FieldSchema.lookupAutofill` (`[{ target, source, overwrite? }]` on a single-value `lookup` / `master_detail`) now has its reader. Picking a record writes each declared `target` of the record being edited from the picked record's `source` — a quote line's `unit_price` from the picked product's `list_price` — before save, where a server hook used to be the only filler.
+  
+  - **The overwrite rule is the spec's.** Without `overwrite: true` a pick fills a target only while it is empty or still holds the value an earlier pick in the same form (or grid row) filled in; a value the user typed, or one the record already stored, stays. A pair declaring `overwrite: true` replaces the target on every pick. A `source` the picked record does not carry (a field the reader may not read is not served) writes nothing.
+  - **Record form.** `LookupField` applies the pairs on every single-value pick path: the dropdown, the keyboard, quick-create and the browse-all dialog. The form renderer hands it a new widget prop, `onAutofill(patch)`, which writes the targets as edits of the form (`setValue`, dirty), so the filled values are saved with the record.
+  - **Line-item grid.** `GridField` takes the child object's pairs through a new host prop, `lookupAutofill` (lookup field name → pairs, built with the new `lookupAutofillByField`), which `MasterDetailForm` and `LineItemsPanel` pass from the child schema they load. The column key `autofill` is unchanged and still governs only the same-named copy; a declared pair applies whatever it says and takes its target out of that copy, so one target has one writer per pick. A pick from the grid's browse-all dialog now reaches the grid once, with its record, so both copies run on that path too.
+  - **Types.** `LookupFieldMetadata.lookupAutofill` is declared by reference to the spec. New exports from `@object-ui/fields`: `declaredLookupAutofillPatch`, `lookupAutofillByField`, `LookupAutofillPair`, `LookupAutofillByField`; `lookupAutofillPatch` takes an optional fourth argument carrying the declared pairs.
+  - **Liveness.** The `lookupAutofill` row of `@objectstack/spec`'s field ledger moves from `planned` to `live`, citing these readers.
+  
+  A master-detail collection whose relationship and every column are authored loads no child schema, so its grid fills only the same-named copy.
+- b1e1dcf: feat(console): a save's toast shows the notice a hook set on the write, still one toast per write
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A create or update answer can carry a `notice`: one message a hook on the write set for the person who made it, such as "Sent to your manager for approval". The Console now shows it. The record form's save toast (the record dialog, its child-form task and the full-page form), the `object-form` drawer and modal, and the grid's inline-edit saves (the per-row save and "Save All") keep their own message as the title and show the notice under it. The toast stays a success when the notice is the only news, and moves to the warning variant, with the notice leading the lines, when the answer also carried warnings. A write no save surface reports itself, such as the record page's inline edit Save bar, gets one toast from the write-warning channel instead: an info toast with the notice as the hook wrote it, or the notice leading the "Saved — with warnings" lines.
+  
+  - **`@object-ui/data-objectstack`**: `WriteWarningEvent` gains an optional `notice`, read off the single-record create and update answers. The event is now also emitted when the notice is the answer's only news. What `create` and `update` resolve is unchanged.
+  - **`@object-ui/react`**: new type `RecordSaveFeedback` (`warnings`, optional `notice`). `AnswerWarningClaim.take` returns it, `AnswerWarningsEvent` gains `notice`, and `toastRecordSave` takes it as its third argument. These exports have not been released yet, so no released signature changes.
+- 2dbc774: fix(plugin-form): a keystroke in a master-detail header is no longer dropped while the page has other work pending
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A master-detail form (`object-master-detail-form`, `MasterDetailForm`) could lose what the user typed into a header field. The form host listens to the header's `input` events to feed the line grids' `parent` record, and that listener runs before React has passed the keystroke to the header form. Its state update ran at sync priority, so the browser flushed it right there together with any default-priority work the page had pending, such as a fetch that had just answered. That render drew the header input again with its old value, React then saw no change, and the keystroke never reached the form. The field showed the text for a moment and went blank, and Create was refused with "is required" for a field the user had filled.
+  
+  The line grids now take the header edit as a transition, which the browser does not flush at that point, so the header form always reads the keystroke first. The lines still follow the header: a `readonlyWhen: "parent.status == 'paid'"` cell locks as soon as the header says paid.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [2302b92]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [3e195be]
+- Updated dependencies [7990fb0]
+- Updated dependencies [3bfb357]
+- Updated dependencies [f486e9c]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [8a12a17]
+- Updated dependencies [c59b1bf]
+- Updated dependencies [8a12a17]
+- Updated dependencies [4b59358]
+- Updated dependencies [f708cf2]
+- Updated dependencies [4485536]
+- Updated dependencies [500bc9d]
+- Updated dependencies [94e29cd]
+- Updated dependencies [49b5059]
+- Updated dependencies [9ff8154]
+- Updated dependencies [6e5f909]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [a260556]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [607d3bb]
+- Updated dependencies [3cc4563]
+- Updated dependencies [4daad78]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c8ed4c9]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a89074a]
+- Updated dependencies [319d6fa]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [47b6392]
+- Updated dependencies [8222fa8]
+- Updated dependencies [785a7c3]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [6866e2e]
+- Updated dependencies [6866e2e]
+- Updated dependencies [a90163d]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [dc9d1ff]
+- Updated dependencies [74db43e]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [a20824f]
+- Updated dependencies [eab4bba]
+- Updated dependencies [bd504f5]
+- Updated dependencies [38490db]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [a122269]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [34c2407]
+- Updated dependencies [7414fc8]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [aeb9cf0]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [e1bfde3]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [fc92c62]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [e9e344a]
+- Updated dependencies [5ec398d]
+- Updated dependencies [a8ee8a2]
+- Updated dependencies [ee2aaf0]
+- Updated dependencies [7eb613c]
+- Updated dependencies [1986d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [8074feb]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [4049efa]
+- Updated dependencies [2d05cd4]
+- Updated dependencies [5866877]
+- Updated dependencies [ff648d7]
+- Updated dependencies [27e4d65]
+- Updated dependencies [2fe4a74]
+- Updated dependencies [6aba7cb]
+- Updated dependencies [0892156]
+- Updated dependencies [81b4599]
+- Updated dependencies [d7df639]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [69df290]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [9dacccf]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [829fcf2]
+- Updated dependencies [fd73f2b]
+- Updated dependencies [eef8373]
+- Updated dependencies [ee29ac3]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [ec66ac0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [b5e4ce6]
+- Updated dependencies [7587fd4]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [48bffe3]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [273137d]
+- Updated dependencies [9c51314]
+- Updated dependencies [86edcaf]
+- Updated dependencies [16d151b]
+- Updated dependencies [10755db]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [f0857d2]
+- Updated dependencies [6b125a7]
+- Updated dependencies [49a078e]
+- Updated dependencies [062a232]
+- Updated dependencies [7f80732]
+- Updated dependencies [d770b15]
+- Updated dependencies [ad2c286]
+- Updated dependencies [9462d8a]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [b223072]
+- Updated dependencies [e199adf]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [ddbd08e]
+- Updated dependencies [7614f8f]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [03069ca]
+- Updated dependencies [4c5023a]
+- Updated dependencies [c63e998]
+- Updated dependencies [34dc09b]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [c47f5eb]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [a552e86]
+- Updated dependencies [efa2915]
+- Updated dependencies [aa874c8]
+- Updated dependencies [d220b9b]
+- Updated dependencies [e7dda2c]
+- Updated dependencies [9ab75ee]
+- Updated dependencies [144702c]
+- Updated dependencies [9324232]
+- Updated dependencies [e0aed00]
+- Updated dependencies [0561a98]
+- Updated dependencies [4278c3b]
+- Updated dependencies [e35db83]
+- Updated dependencies [50d05cb]
+- Updated dependencies [af6ca00]
+- Updated dependencies [0ac6dab]
+- Updated dependencies [9e4f1cf]
+- Updated dependencies [5da3a8c]
+- Updated dependencies [75ecaf4]
+- Updated dependencies [f40b777]
+- Updated dependencies [d07e8d1]
+- Updated dependencies [637cfc6]
+- Updated dependencies [72b08ee]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [ad030d8]
+- Updated dependencies [bf74607]
+- Updated dependencies [3d2da4f]
+- Updated dependencies [55a1feb]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [bf658d1]
+- Updated dependencies [a7af1c1]
+- Updated dependencies [3702be4]
+- Updated dependencies [022e2d0]
+- Updated dependencies [c1b52de]
+- Updated dependencies [277275a]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [8a1f467]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [2f2c6b9]
+- Updated dependencies [5c083e8]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [a5d7098]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [0027c4a]
+- Updated dependencies [c5d51f0]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [946395d]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [5e1342a]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [fec60e0]
+- Updated dependencies [c0f9fdb]
+- Updated dependencies [2e20454]
+- Updated dependencies [88d6020]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [b339465]
+- Updated dependencies [e15a87c]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [25b8ef3]
+- Updated dependencies [4799600]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [13d85bb]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [f91ab5a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [3ba5206]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [9f13ee8]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [86dc686]
+- Updated dependencies [f23e051]
+- Updated dependencies [aaa5c1d]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [91e4652]
+- Updated dependencies [001c04b]
+- Updated dependencies [ef777b8]
+- Updated dependencies [be25e2d]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ba5c754]
+- Updated dependencies [be646ed]
+- Updated dependencies [0fd2d08]
+- Updated dependencies [69c39b1]
+- Updated dependencies [488b3ed]
+- Updated dependencies [501c864]
+- Updated dependencies [7eda096]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [b1e1dcf]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [9da2f4b]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ac09e7b]
+- Updated dependencies [768ec4b]
+- Updated dependencies [4bc963c]
+- Updated dependencies [ba0084e]
+- Updated dependencies [a8d2fd7]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [bede9de]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [82b29fe]
+- Updated dependencies [8c3f9d9]
+- Updated dependencies [4d278c9]
+- Updated dependencies [d5da45b]
+- Updated dependencies [5114b0e]
+- Updated dependencies [3694d3b]
+- Updated dependencies [d62d973]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [5e879ea]
+- Updated dependencies [1404938]
+- Updated dependencies [9182ff6]
+- Updated dependencies [272fec0]
+- Updated dependencies [693e100]
+- Updated dependencies [7253344]
+- Updated dependencies [da6f0ce]
+- Updated dependencies [0c1829a]
+- Updated dependencies [0aaad18]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [3e05ed1]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [839aae5]
+- Updated dependencies [99a6a78]
+- Updated dependencies [99a6a78]
+- Updated dependencies [6bc7643]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [847e424]
+- Updated dependencies [64bc7fa]
+- Updated dependencies [86aaff3]
+- Updated dependencies [ddab8b9]
+- Updated dependencies [e41642d]
+- Updated dependencies [ff784ef]
+- Updated dependencies [165bc50]
+- Updated dependencies [cd49bd5]
+  - @objectstack/spec@18.3.0
+  - @object-ui/fields@18.3.0
+  - @object-ui/i18n@18.3.0
+  - @object-ui/react@18.3.0
+  - @object-ui/components@18.3.0
+  - @object-ui/types@18.3.0
+  - @object-ui/core@18.3.0
+  - @object-ui/permissions@18.3.0
+
 ## 18.2.0
 
 ### Minor Changes

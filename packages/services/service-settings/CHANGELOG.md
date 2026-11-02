@@ -1,5 +1,344 @@
 # @objectstack/service-settings
 
+## 18.3.0
+
+### Patch Changes
+
+- f515124: fix(service-settings): the settings audit trail records the previous value's digest in `old_hash`, and a non-secret value's digest is the declared SHA-256
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `sys_setting_audit` and `sys_platform_setting_audit` declare `old_hash` as the SHA-256 of the previous value (null when it was unset) and `new_hash` as the SHA-256 of the new value (null on a reset). The write path passed `old_hash: null` on every write and recorded the adapter's FNV-1a 32 (`fnv32:…`) as the new hash, so an operator could not tell from the trail whether a write changed anything.
+  
+  - **`old_hash`** now holds the digest of the value the row held before the write, read off the row the upsert already looks up: no extra read, and none at all for a first write. It is null for a first write, after a reset, and for a row that held a secret.
+  - **A non-secret value's digest** is now `sha256:` followed by the hex SHA-256 of its canonical JSON, on both `new_hash` and the `config_change` row's digest in `sys_audit_log`. It no longer goes through `CryptoAdapter.digest`, so an injected adapter cannot change the format. The prefix keeps it distinct from the `fnv32:` rows already stored, which are left as they are: compare hashes only between rows that carry the same prefix.
+  - **Secret values are unchanged.** They keep the crypto provider's keyed digest (`hmac-sha256:…`) as `new_hash`, or none, and `old_hash` stays null for them.
+- 179598e: fix(service-settings): a secret overwrite's audit row records the previous value's keyed digest as `old_hash` (#26534)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  Ruling-ref: #26534 triage `6436617436`; the server seat 2 ruling, arm (a)
+  
+  A secret-valued setting's overwrite used to record `old_hash` null on `sys_setting_audit` / `sys_platform_setting_audit`, though the column declares null only when the key was previously unset. It now records the same keyed digest (`hmac-sha256:…`) that `new_hash` records, taken over the previous value, so an overwrite's `old_hash` equals the previous row's `new_hash` and a rewrite of the same secret reads `old_hash == new_hash`. It stays null when the key was unset or reset, when no keyed digest is available, or when the previous value can no longer be read, and it is never an unkeyed hash of the secret. Only a secret overwrite pays for it: one `sys_secret` read and one decrypt of the previous value, before the rotated-away secret is reaped.
+- 291bf44: feat(service-settings): the default currency (`localization.currency`) is locked once an exchange rate or a home-currency amount uses it, and the Localization page names what uses it (ADR-0144 D4)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  ⛔ Not released alone: this ships in the same release as the exchange-rate table and the home-currency amount it guards (ADR-0144 D9, release R2).
+  
+  The organization's default currency is its home currency: exchange rates are entered against it, and home-currency amounts are converted into it and stored. Changing it afterwards would relabel every amount already converted. So:
+  
+  - **The save is refused once the currency is used.** A change to a set default currency, to another code or to empty, is refused with `400 SETTINGS_VALIDATION` while the organization holds any exchange rate row, or any object declares `currencyConfig.homeAmount` on a field. The refusal sits on the `currency` field (`invalid_value`), names what uses it ("in use by 2 objects (Invoice, Order) and 14 exchange rates"), and carries the same facts as `constraint: { lockedBy: 'in_use', objects, exchangeRates }`. Re-saving the value in force is never refused, so the rest of the page still saves.
+  - **Choosing a first currency is never blocked.** While the currency is unset, nothing has been converted into it, so the first save passes; the page then asks for one.
+  - **The page says so.** Settings → Localization opens with a banner naming the lock and what uses the currency, or a warning while it is unset and already needed, in English, 简体中文, 日本語 or Español, following the request's language.
+  - **It lifts by itself** once the last exchange rate row is deleted and the last `homeAmount` declaration is removed. Nothing is recorded at boot; every save and every page read asks the engine.
+  
+  New for packages that own state a setting depends on: `SettingsService.registerWritePredicate(namespace, key, predicate)`, a rule over engine state asked when a write changes that key. A refusal refuses the whole batch before any row is written. Exported with its types `SettingsWritePredicate`, `SettingsWritePredicateInput`, `SettingsWriteRefusal` and `SettingsDisplayOptions` (the display language `setMany` and `liveStatusOf` now accept beside the caller's context).
+- 5448585: fix(service-settings): Setup → Settings help says what a setting does in business words, and Country is a picker that shows names and stores the code
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An administrator in Setup → Settings read help written like code comments. It now names the effect, and the technical detail stays in the deployment docs.
+  
+  - **Authentication.** The help names the Self-registration audience by the labels the page shows (Invitation only, Allowlisted email domains, Open), not by their stored keys. It no longer quotes env var names (the email-verification override, the Google client ID and secret), the stack-config paths, the API-key error codes or permission-set API names; it says "set in the server configuration" instead.
+  - **Feature Flags.** The beta banner says a feature set in the server configuration is locked for the whole deployment, without quoting an env var.
+  - **Mail.** The durable-queue help no longer names the queue's object, and the Send-test-email result for a log-only provider says the message was "kept in the email log" (`@objectstack/plugin-email`).
+  - **Webhooks.** The `sys_webhook` description, shown as the Webhooks subtitle, says what a webhook is without `defineStack` / `defineWebhook()` or the auto-enqueuer (`@objectstack/plugin-webhooks`).
+  - **The inherited-value badge** names the layer "Organization" (组织 / 組織 / Organización) instead of "Tenant".
+  - **Country pickers.** Company → Country and Localization → Default country are `select`s whose options are every ISO 3166-1 alpha-2 code with its name, in each shipped locale (`Germany (DE)`, `德国 (DE)`). The stored value is still the code, a stored code is one of the options, and the `iso_3166_alpha2` value domain stays the enforcement boundary, so the set of accepted values is unchanged. The names come from `Intl.DisplayNames`; the codes come from the shared `ISO_3166_ALPHA2_CODES`.
+  
+  Every shipped pack (en, zh-CN, ja-JP, es-ES) carries the same wording.
+- 57faf5d: fix(i18n): the Data Lifecycle settings page reads in the admin's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setup → All Settings → Data Lifecycle read English under Chinese (zh-CN), Japanese (ja-JP) and Spanish (es-ES): the hub card's title and description and every field on the page, while every other settings page and the Setup sidebar entry for this page were translated. The page now reads in those languages too: its title, description, and each field's label and help (Enforce lifecycle policies, Retention overrides, Row quotas, Per-class quota defaults, Growth alert threshold). The hub card and the sidebar entry now carry the same name in every shipped locale.
+  
+  Nothing to do: the translations ship in the built-in settings bundle and load with the settings service, as the other pages' do. The JSON examples inside the help text stay as written, since they are the values you type.
+- 57faf5d: fix(service-settings): AI & Embedder and Knowledge help is in business words
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On Setup → Settings → AI & Embedder and Knowledge, the help under several fields read like code comments, in every language: "Forwarded as OPENAI_API_KEY", traces saved "to sys_ai_trace", "Chunks per embed() call", "Per-source values on KnowledgeSource.adapterConfig take precedence", "topK × overFetch". The help now says what each setting does:
+  
+  - A provider API key or the gateway model is "used instead of the one set in the server configuration".
+  - Record traces keeps a record of each AI request and its response, so a conversation can be inspected and replayed.
+  - Batch size is the number of chunks sent to the embedding provider in one request.
+  - Indexing defaults: a value set on a knowledge source itself wins over these defaults.
+  - Over-fetch multiplier: search fetches this many times the requested number of results, so enough are left after filtering.
+  
+  The English, Chinese, Japanese and Spanish text changed together. No setting, default or accepted value changed, and model examples such as openai/gpt-4o stay as written because they are what you type.
+- 909c8c9: fix(service-settings): a locked settings row binds the organization's own administrators; only the platform rung writes through a lock at its own scope
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A locked settings row is platform-locked. A lock at an upper scope already refused every write below it; a lock at the write's own scope now binds too:
+  
+  - **A locked tenant row** refuses a save of that key by its own organization's administrators — `SettingsLockedError`, `409 SETTINGS_LOCKED` on `PUT /api/settings/:namespace`, `details.reason: 'locked-by-tenant'` — and a reset over it is refused the same way. Another organization's row and writes are unaffected.
+  - **A locked global row** refuses a write of that global key from anyone but the platform (`locked-by-global`).
+  - **The platform rung writes through**: a caller holding `manage_platform_settings`, or a trusted in-process caller (one whose `SettingsContext` is not `enforced`). The row keeps its lock after that write, on the engine store and on the in-memory store alike (the in-memory store now keeps a row's columns the write does not carry, as the engine's update does).
+  - A locked upper rung still refuses the platform's write below it, as before.
+  - The user rung carries no lock: `get()` reports none for a user row, and its owner's write is not refused.
+  
+  The read side is unchanged: `get()`, `getMany()` and `getNamespace()` already reported such a row as `locked: true`, and the settings page already showed the field as locked. What they report as locked is now what a non-platform save is refused on.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [416a760]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [da46b2a]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [c13ef04]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [a8ec04d]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [0c8c27e]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [ca64f6f]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [f40b777]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [8cb8c7f]
+- Updated dependencies [0bf7aaf]
+- Updated dependencies [8ec00cf]
+- Updated dependencies [5954705]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [f3d2845]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [1e01924]
+- Updated dependencies [2c0a97b]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [9b4d193]
+- Updated dependencies [aa46d14]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [0c03ce2]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [0aaad18]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [1617b7f]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+- Updated dependencies [e2772b4]
+- Updated dependencies [ac9c2f0]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/platform-objects@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

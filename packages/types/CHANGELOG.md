@@ -1,5 +1,389 @@
 # @objectstack/types
 
+## 18.3.0
+
+### Minor Changes
+
+- 1617b7f: fix(lint,metadata-protocol,rest,runtime,types): a roll-up the engine refuses at every recompute is refused at save and publish, and a child write that landed answers its success (#28661)
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — `skills/objectstack-data/rules/relationships.md` and `rules/field-types.md` teach `summaryOperations` only with `sum` over a numeric `amount` and `count`; no file under `skills/**` teaches a `sum`/`avg` over a text field, and every taught example stays admitted.
+  
+  **BREAKING** (narrowing) for a `summary` field whose `sum` or `avg` names a child field the engine does not aggregate (and, on `os validate`, `os build` and the runtime object save/publish door, a `min` / `max` whose answer is not a number, which `os lint` already refused).
+  
+  - **Before.** A published `summary` field with `sum` or `avg` over a child `text` field published as valid (`publish-drafts`, the draft's `_diagnostics: { valid: true }`, `os validate`, `os build`). Every later create, update and delete of a child then answered `500 INTERNAL_ERROR`, though the write had landed and the parent's valid roll-ups had recomputed: the recompute's aggregate refuses the pair after the commit. A client that retried a create made a duplicate.
+  - **Now, at the doors.** The roll-up rule moves from `os lint` alone into the authoring-rule registry (`lintSummaryRollups`, gating, on `os validate`, `os build`, `os lint` and the runtime object save/publish door). A `sum` or `avg` over a child field outside the aggregate × field-type table (`AGGREGATE_FIELD_TYPE_COMPATIBILITY`, the table the engine's aggregate door reads) is refused under `rollup/non-numeric-aggregand`, at `objects.<parent>.fields.<field>.summaryOperations.field`, with the accepted child types and `count` as the fix. The `min`/`max` arm `os lint` already reported keeps its message and now also gates `os validate`, `os build` and the runtime object save/publish door. A child staged as a draft in the same publish batch is judged with it. `os lint` no longer reports the rule a second time.
+  - **Now, after a write.** When a parent's roll-up cannot be recomputed after a child write — a roll-up stored before this gate, or any other recompute failure — `POST`, `PATCH` and `DELETE /api/v1/data/:object[/:id]` answer the write's own success (`201`/`200`, the same body the write answers when every roll-up recomputes), on both `RestServer` and the runtime dispatcher. The stale summary column is logged at `error`, with the fix, once per field per process (the memory is never cleared; a restart reports it again). The protocol's `createData`/`updateData`/`deleteData` still throw `ERR_SUMMARY_RECOMPUTE` carrying `written`, so the import runner and seed loader read it as before. The recogniser and the earned-answer carrier (`isSummaryRecomputeRefusal`, `earnedAnswerOf`, `staleSummaryAnswerLines`) are new exports of `@objectstack/types`, the one package the protocol, `rest` and `runtime` all depend on.
+  - **Not refused.** A `summaryOperations.object` naming no object (the card's `qsf_nope`) is still admitted: an unmanaged install (`install-local --unmanaged`) saves a package's parent before the child its roll-up reads, so a door refusing a missing child would refuse that install.
+  - **Who moves.** No `examples/**` or `hotcrm` roll-up is refused: every `sum`/`avg`/`min`/`max` there aggregates a `number` or `currency` child field.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the diff registers no retirement and no key changes shape: a roll-up summing or averaging a non-numeric child field never answered a value, and the fix is an authoring choice (a numeric child field, or count) that no mechanical rewrite can make -->
+
+### Patch Changes
+
+- 5aad4e0: fix(types): a unique refusal tells the user which field by its label, never by its API key
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A create or update refused by a single-column unique index answered `409 UNIQUE_VIOLATION` with a user-facing `error` that named the field by its API key ("A record with this gsku already exists"), while `developerMessage` named it by its label. The split was inverted: the developer read the label and the end user read `gsku`.
+  
+  - **The user-facing `error` names the field by its label.** For a field labelled `Global SKU`, the body now reads `"error": "A record with this Global SKU already exists"`. `field` still carries the API key (`gsku`) for programs, and `code`, the status and `developerMessage` are unchanged.
+  - **In the writer's locale.** The label is read the same way the record validator and the `DELETE_RESTRICTED` refusal read theirs: the translation bundle for the request's locale, then the declared `label`. That one label feeds both the user-facing sentence and the engine's own `message` (the `developerMessage` on the wire). A request in `zh-CN` against a translated object reads its labels in `zh-CN` in both. The sentence around the label stays English.
+  - **No label, no name.** When the field declares no label and the bundle holds none, the sentence is the generic `"A record with this value already exists"`, and `field` still names the key. The same applies to a raw driver unique error that no engine write door wrapped, since it carries no schema to read a label from, and to `sanitizeRowError` (`@objectstack/core`), the import runner's text cleaner. The composite-index answer is unchanged.
+  - **`DuplicateRecordError` gains `fieldLabel`** (`@objectstack/objectql`): the conflicting field's display name in the writer's locale, set only when the field has one. `envelopeUniqueViolation` takes the write's message context as an optional fourth argument, and every engine write door passes it.
+  
+  If a client matched the old sentence text to find the field, read `field` instead. It has carried the API key on this body all along.
+- 685d9f3: fix(runtime, plugin-sharing): a share link's resolve answer describes the fields it returns — authored label, type, picklist option labels, currency and lookup display bits — so the shared-record page no longer has only the field keys to show (#26991)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/share-links/TOKEN/resolve` answered `{ record, link, redactFields }` on both of its mounts (the `plugin-sharing` routes and the runtime dispatcher's `/share-links` domain). Its visitor is usually anonymous, and `GET /api/v1/meta/object/NAME` refuses an anonymous caller, so a page rendering the shared record could only humanize each key. The answer now also carries `fields`, keyed by field name:
+  
+  - **What an entry holds.** The field's authored `label` and `type`; a picklist's `options` (`value`, `label`, `color`); `multiple` when it is `true`; a currency field's `currencyConfig` (`currencyMode`, `defaultCurrency`); and a lookup's `reference` (the target object) and authored `displayField`. Labels are the authored ones the object schema holds, untranslated. A lookup's value in `record` is unchanged: the stored id.
+  - **Which fields.** Exactly the keys `record` carries that the shared object declares. A field the link redacts is absent from both `record` and `fields`; a field the record read never returns (`internal`) is absent from both; no other field of the object is described. The meta door's anonymous refusal is unchanged.
+  - **One builder.** Both mounts build the whole answer through `buildShareLinkResolveAnswer` (new in `@objectstack/types`, beside `redactSharedRecord` and `projectSharedRecordFields`), so they answer the same shape. Redaction is unchanged.
+  
+  The existing keys are unchanged, so a reader of the old answer reads the new one as before.
+- 1ed3360: fix(types, console): a shared `record`-mode currency amount shows its record's own currency (ADR-0144 D2, D9)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The share-link resolve answer's field projection (`buildShareLinkResolveAnswer`, `@objectstack/types`) carried a currency field's `currencyMode` and `defaultCurrency` only, so a shared `record`-mode amount, whose currency lives in a sibling code field, rendered as a plain number. A currency field's projected `currencyConfig` now also carries `currencyField`, the amount's code-field pointer, when the answer's `record` carries that code field. A link that redacts the code field gets neither the code nor the pointer, so the answer still describes nothing the record hides, and the amount shows as a plain number.
+  
+  The shared-record page hands the shared record to the currency face, which reads the code from it, so the amount shows in the currency its own record names. Every other field and every other key of the answer is unchanged.
+  
+  ⛔ Not released alone: this ships in the same release as `currencyMode: 'record'` itself.
+- 21c4bdd: fix(rest): a hook that aborts with free text answers the data door with `HOOK_ABORTED` instead of no `code`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **Before.** A sandboxed hook body that aborted a write with free text (`throw new Error('…')`, no `code`, no `refusals` catalogue) answered `/api/v1/data` with `400 {"error":"…","object":"…"}` and no `code`, the one refusal on that door a client could not branch on.
+  - **Now.** The same abort answers `400 {"error":"…","code":"HOOK_ABORTED","object":"…"}`; a body that declared a 4xx `status` (or `statusCode`) keeps that status and gains the same code. `HOOK_ABORTED` is registered in the ADR-0112 ledger under `@objectstack/types` (`@objectstack/spec`), stamped by `mapDataError`'s sandbox unwrap door and its wrapper fallback (`@objectstack/types`, exported as `UNDECLARED_HOOK_REFUSAL_CODE`) and by the route door's declared-status passthrough (`@objectstack/rest`).
+  - **Moved.** The same undeclared abort also changes value on doors that already carried a code, from the status-derived `VALIDATION_ERROR` to `HOOK_ABORTED`: the nested refusal envelopes of the sharing rules routes (`POST /api/v1/sharing/rules`, `DELETE /api/v1/sharing/rules/:idOrName`, `POST /api/v1/sharing/rules/:idOrName/evaluate`), the security suggested-bindings routes (`POST /api/v1/security/suggested-bindings/:id/confirm`, `…/dismiss`, `…/reopen`), the approvals request routes (`POST /api/v1/approvals/requests/:id/approve`, `…/reject`, `…/recall`, `…/reassign`, `…/comment`, `…/remind`, `…/request-info`, `…/resubmit`, `…/revise`), and each row of the `failures` list that `POST /api/v1/data/import/jobs/:jobId/undo` returns.
+  - **Unchanged.** A refusal that declared a code keeps it: a `refusals` catalogue entry still answers `declaredCode` beside the status-derived `code`, and a registered code a body throws is still its own wire `code`. A non-hook producer that declared no code still gets none, and a crashed body is still the sanitised `500 INTERNAL_ERROR`. The server log line for the abort is not changed here.
+- db44327: feat(rest,plugin-hono-server,cloud-connection): metadata lists, the uncached item reads, `runtime/config` and `auth/me/localization` answer an `ETag` and `304`; every timed response carries `db`, `meta` and `total`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Console's first reads on every load sent no validator, so each one was a full download every time. Measured against HotCRM on `main`, none of these sent an `ETag`, a `Cache-Control` or a `304`: `GET /runtime/config`, `GET /auth/me/localization`, the type list (`GET /meta`, `GET /meta/types`), every `GET /meta/:type` list, and the item reads the shared item cache never serves (`GET /meta/app/:name`, `/meta/dashboard/:name`, `/meta/doc/:name`, `/meta/book/:name`, and drafts, `?package=` and member-scoped reads). Each of them now answers:
+  
+  - **`ETag`**: a weak validator (`W/"…"`) that hashes the body actually served, after every per-caller step (read gates, the app filter, the field mask, the translation, the host's environment). Two callers whose permissions change what they see get different validators, and one caller's validator never answers `304` for another caller's body.
+  - **`Cache-Control: private, no-cache`**: the browser keeps the body and revalidates it on every use, so a publish, a permission change or a language switch shows on the next read. No shared cache stores it. A schema served under an undetermined field visibility keeps `private, no-store` and gets no validator.
+  - **`304 Not Modified`**, with no body, when `If-None-Match` names the current validator.
+  
+  `metadata.enableCache: false` still switches the `/meta` validators off, as its description says ("Enable HTTP cache headers").
+  
+  `Server-Timing` (still opt-in: `OS_SERVER_TIMING=true`, or an admin's `X-OS-Debug-Timing: 1`):
+  
+  - Every timed response carries `db` and `meta` beside `total`. A request that ran no SQL or read no metadata says so with a zero member (`db;dur=0;desc="0 queries"`), so "nothing spent there" no longer reads like "not measured".
+  - The `/meta` routes count each metadata read into `meta` (`meta;dur=…;desc="N reads"`).
+  - `GET /runtime/config` now opens the timing gate for an admin who sends `X-OS-Debug-Timing`. It resolves the caller only when that header is sent; the payload never depends on who asked.
+  
+  `@objectstack/types` exports the rule the three packages share: `representationEtag(body)`, `ifNoneMatchHits(header, etag)` and `REVALIDATE_PRIVATE_CACHE_CONTROL`.
+- 2fc3861: fix(types): a hook that aborts with free text answers `HOOK_ABORTED` on package publish and the runtime `/actions` doors too, not `VALIDATION_ERROR`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **Before.** Since #27597 a sandboxed body that aborts with free text (`throw new Error('…')`, no `code`) answers `/api/v1/data` with `HOOK_ABORTED`. The doors that take their code from `resolveThrownHttpError` (`@objectstack/types`) instead of from the `/data` classification still answered the same abort with the code its `400` derives, `VALIDATION_ERROR`, so a client branching on the code had to know which door the abort came through.
+  - **Now.** `resolveThrownHttpError` answers `UNDECLARED_HOOK_REFUSAL_CODE` (`HOOK_ABORTED`) for a sandboxed body's refusal that declared no code, at a 4xx status. It is the one constant `/data` already reads, now declared beside the resolver. The value moves, from `VALIDATION_ERROR` to `HOOK_ABORTED`, on these doors:
+    - `POST /api/v1/packages/publish` (`@objectstack/rest`);
+    - the runtime `/actions` doors: `POST /api/v1/actions/:object/:action`, `POST /api/v1/actions/:object/:action/:recordId`, `POST /api/v1/actions/global/:action` and `POST /api/v1/actions//:action`, for an action body's own free-text throw, a hook abort relayed through an action body, and an action body's unreadable rejection (`throw ''`, `throw Object.create(null)`) (`@objectstack/runtime`).
+  - **Unchanged.** A code the body declared is kept: a registered code is still its own wire `code`, and an unregistered one (a `refusals` catalogue entry) still rides `declaredCode` beside the status-derived `code`. `declaredCode` stays absent for an undeclared abort. A producer that is not a sandboxed body still derives its code from the status, a crashed body is still the sanitised `500 INTERNAL_ERROR`, and a sandboxed refusal resolved at a 5xx keeps the fault's code. `/api/v1/data` answers exactly as before.
+  - **Moved, not added.** No error code is added; `HOOK_ABORTED` is the one #27597 registered. `sandboxBusinessMessage` moved to its own module so the resolver can read it without an import cycle; `@objectstack/types` exports the same names as before.
+- 03cc871: fix(types): a write to a registered object whose table is missing answers `500 DATABASE_ERROR`, as the read does, instead of `404 OBJECT_NOT_FOUND` "is not registered"
+  
+  Clause-②: no (an existing refusal is re-classified to an existing catalog code; nothing accepted today is refused)
+  Metadata-protocol: none
+  
+  A registered object whose table was never created (a datasource that was never provisioned, schema drift) answered its two data doors differently. `GET /api/v1/data/:object` answered `500 DATABASE_ERROR`, which the SQL driver declares at its read exits. `POST /api/v1/data/:object` answered `404 OBJECT_NOT_FOUND` with "Object '…' is not registered", because the write paths leave the driver's own error undeclared and the shared data-error classification read its missing-relation line (`no such table: …`, Postgres `42P01 relation "…" does not exist`) as an unregistered object whenever the relation named the request's object.
+  
+  No unregistered name reaches a driver: the protocol's registry gate and the engine's name resolution both refuse one first, with the structured `OBJECT_NOT_FOUND` that the classification still answers `404`. So a driver's missing-relation line always means a registered object's storage is missing. The classification now answers it the sanitised, logged `500 DATABASE_ERROR` in every case, and the insert, update and delete doors agree with the read.
+  
+  - **What changes for a caller.** A write to such an object gets `500 {"error":"Internal data error","code":"DATABASE_ERROR"}` instead of a `404`. A bulk-import row that fails this way carries the same verdict. The driver text is withheld from the client and written to the server log, where the `404` used to leave no line.
+  - **Unchanged.** An unregistered object is still `404 OBJECT_NOT_FOUND` on every door. A missing relation that names some other table was already `500 DATABASE_ERROR`.
+- ed8b237: feat: a datasource that names a connector instance in `external.connector` borrows that instance's credential at runtime, and its driver presents it per request
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The runtime half of ADR-0015 amendment D7. A datasource over a vendor API that names a declared connector instance now reads with that instance's credential — the one set under Setup → Connector credentials (or the instance's environment variable, or the host's resolver) — so one credential serves the connector's flow actions and the datasource's virtual objects:
+  
+  ```ts
+  connectors: [{ name: 'sap_s4', type: 'api', provider: 'openapi', providerConfig: { spec: './sap-openapi.json' },
+    auth: { type: 'bearer', credentialRef: 'sap_token' } }],
+  datasources: [{ name: 'sap_orders', driver: 'sap_orders', config: {},
+    schemaMode: 'external', external: { connector: 'sap_s4' } }],
+  // served by createODataDriverPlugin({ name: 'sap_orders', serviceRoot: '…' }), its auth left at 'none'
+  ```
+  
+  - **`@objectstack/service-automation`** registers a `connector-credential-source` service that lends a declared instance's credential (bearer, API key, basic), resolved through the same chain the connector itself uses. A credential set or changed through the credential door is picked up by the datasource's next request, with no restart.
+  - **`@objectstack/service-datasource`** borrows it when such a datasource connects (a plugin driver the engine already adopted from its `driver.<name>` service is judged at that connect too), is probed (Test connection) or is saved from the admin door, and hands the driver factory a credential handle on `DatasourceConnectionSpec.credential`. A datasource whose instance is not declared, is a catalog descriptor, has no `auth` credential or is disabled — or a stack with no automation service to lend it — is refused, fail-closed, with a reason naming the fix: it never connects to fail its first read with an upstream 401.
+  - **`@objectstack/driver-odata`** presents it: a datasource it serves that names `external.connector` borrows the handle at its first request and sends every request through `callWithBorrowedCredential`, in the form the instance's `auth` declares (bearer, basic, or an API key as a header or query parameter). An upstream's error text is stripped of every spelling of the presented credential before it is thrown (`withoutBorrowedCredential`), so an API key sent as a query parameter never reaches an error body through a service that echoes the request URI. `external.credentialsRef` keeps its path; both channels at once, or an `auth.scheme` set on the plugin beside the connector, refuse the request.
+  - **`@objectstack/types`** carries the contract (`IConnectorCredentialSource`, `ConnectorCredentialHandle`, `CONNECTOR_CREDENTIAL_SOURCE_SERVICE`) and `callWithBorrowedCredential`, the one rule a plugin driver presents a borrowed credential by: refreshed when it has expired, refreshed once and retried on a `401`, and a `503 SERVICE_UNAVAILABLE` naming the instance when the fresh one is refused too.
+  
+  Nothing changes for a datasource that binds its own secret with `external.credentialsRef`. The handle answers the grant-bearing kinds (OAuth2 and the app-credential exchange) through the same interface when connector instances can declare them; a driver written against it today needs no change then.
+- 0a52b7d: feat: `os serve` publishes its datasource secret store's `resolve` as the kernel service `datasource-secret-resolver`, and `driver-odata` reads it when it is passed no secret store
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A stack served by `os serve` that mounts `createODataDriverPlugin` could not resolve its datasource's `external.credentialsRef`: the server's `sys_secret` store was handed only to the datasource admin, so a `sys_secret:` handle stored through Setup → Datasources did not resolve for the plugin, and the stack had to pass a `resolve` of its own. It now resolves with no code:
+  
+  ```ts
+  plugins: [createODataDriverPlugin({ name: 'erp', serviceRoot: 'https://erp.example.com/odata/', auth: { scheme: 'bearer' } })],
+  datasources: [{ name: 'erp', driver: 'erp', config: {}, schemaMode: 'external',
+    external: { credentialsRef: 'sys_secret:…' } }],
+  // no `secrets` option: under os serve the handle resolves through the server's own store
+  ```
+  
+  - **`@objectstack/cli`**: `os serve` registers the read half of the datasource secret binder it builds as the kernel service `datasource-secret-resolver` (plugin `com.objectstack.cli.datasource-secret-resolver`). Only `resolve` is published; storing and removing a credential stays the datasource admin's. It decrypts datasource credentials only: a settings secret or a secret field's row in `sys_secret` does not open through it. When `os serve` builds no binder (no crypto provider), the service is not registered.
+  - **`@objectstack/driver-odata`**: when `options.secrets` is absent, the plugin reads the `datasource-secret-resolver` service at the first request. An explicit `options.secrets` still wins. With neither, the request is refused as before, sent to nobody, and the message now names the service.
+  - **`@objectstack/types`**: `DATASOURCE_SECRET_RESOLVER_SERVICE` and `IDatasourceSecretResolver`, the contract a host publishes the resolver under and every plugin driver that dereferences a `credentialsRef` reads it by: an explicit store first, the service looked up at the first request (never at `init`), fail-closed when neither resolves.
+- 00c9a0b: fix: a plugin-driver datasource refused at boot for its connector instance's credential recovers on the next granted borrow, and the connector call path withholds the form-encoded spelling of a credential
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **`@objectstack/service-datasource`**: a datasource served by a plugin driver (driver-odata) that names `external.connector`, whose instance could not lend at boot (undeclared, disabled, no `auth`), was recorded `failed-credentials` and marked unavailable until a restart, although the driver borrows again on every request and served as soon as the instance was repaired. The first borrow the lender grants for that instance now retracts the verdict and the engine's unavailable mark, so Setup → Datasources shows it available again with no restart. A grant for any other instance leaves it standing. The degraded-boot banner says which recovery applies; with no lender registered the verdict still lasts until a restart.
+  - **`@objectstack/types`**: `IConnectorCredentialSource` gains an optional `onLent(listener)`, called with the instance's name on every granted borrow and returning the unsubscribe. A source without it keeps working; nothing then retracts such a verdict.
+  - **`@objectstack/service-automation`**: the connector credential source implements `onLent`. The connector call path's `credentialForms` now takes its list from `borrowedCredentialForms`, so an upstream that echoes an API key in a form-encoded query string (a space written `+`) has that spelling withheld from the degraded reason, the stored status and the logs, as a datasource borrowing the same credential already had.
+- 645534d: fix: a flow an administrator switched off is refused with a plain sentence, the same one a switched-off action reads as
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The flow refusal** (`@objectstack/service-automation`). A packaged flow switched off under Setup › Packaged automation is still refused `FLOW_DISABLED`, at every door that runs it: its trigger, a direct run, and a parent flow that calls it as a subflow. The message now reads: "This flow is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name." It no longer names the ledger table or the ADR. The engine writes those, with the code and the flow's name, to an `info` log line each time it refuses one. A flow disabled by its own status (`obsolete` / `invalid`) still reads "Flow '…' is disabled", so the two reasons stay distinguishable.
+  - **One sentence for both** (`@objectstack/types`, `@objectstack/objectql`). `describeTurnedOffPackagedItem('action' | 'flow')` builds the sentence. The action refusal (`ACTION_DISABLED`) reads from it too, and its wording is unchanged. Only the last clause differs: a flow can be copied under a new name, and an action cannot, so the action sentence still offers another action instead.
+- 3238750: feat(spec)!: `oauth2` and `app-credential` join declarative connector-instance auth, and the runtime `oauth2` variant is retired (ADR-0143 S0, #28137)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered connector-auth-config-oauth2-retired -->
+  
+  An upstream that takes no static credential (an OAuth 2.0 API, a Feishu, DingTalk or WeCom app) had no open-tier way to be declared: the instance `auth` stopped at four static kinds, and the runtime `authentication` shape had an `oauth2` variant that held a client secret and a refresh token inline and that nothing ran. ADR-0143 opens the grant-bearing kinds on the instance, with the secret as a reference.
+  
+  - **`@objectstack/spec`**: `ConnectorInstanceAuthSchema` gains `oauth2` (D2.1), one strict shape per `grant` (`authorization_code` with PKCE always on, `client_credentials` for a confidential client), and `app-credential` (D2.2, `vendor` `feishu` / `dingtalk` / `wecom`, `appId`, a required `credentialRef`). The publish door refuses a missing `tokenUrl`, `clientId` or `authorizationUrl` at its key under `auth`, except on `provider: 'mcp'` over `http`, where the MCP authorization flow discovers them. An inline `clientSecret`, `refreshToken`, `accessToken` or `appSecret` is refused by name with the `credentialRef` prescription. `signed` is not a member (#26710). `ConnectorOAuth2Schema` is removed from `ConnectorAuthConfigSchema` (D7), and `ResolvedConnectorAuth` stays the four static kinds. The per-dispatch handle types (`ConnectorCredentialHandle`, `BorrowedConnectorCredential`, `BorrowedConnectorAuth`, `ConnectorCredentialRequest`) move into `@objectstack/spec/integration`, and `ConnectorProviderContext` gains an optional `credentialHandle` (D4). The D3 entry `connector-auth-config-oauth2-retired` names the removal for `os migrate meta`.
+  - **`@objectstack/types`**: re-exports the four handle types from `@objectstack/spec/integration`; the same names, structurally unchanged.
+  - **`@objectstack/service-automation`**: this server does not run the per-dispatch token resolution yet (ADR-0143 S1). A grant-bearing instance is held **degraded** with a reason that names its kind, and its upstream is never called without the credential. A datasource that borrows it through `external.connector` is refused with `422`, naming the kind.
+  
+  **BREAKING** for a connector that writes `authentication: { type: 'oauth2', ... }`.
+  
+  - **Before.** `authentication: { type: 'oauth2', authorizationUrl, tokenUrl, clientId, clientSecret, refreshToken }` was accepted, with the secret and the refresh token inline, and no runtime obtained or refreshed a token from it.
+  - **Now.** `ConnectorAuthConfigSchema` refuses it at `type`, with a prescription naming ADR-0143 D7 and the replacement. No first-party source declares it.
+  - **Fix.** Declare the grant on a declarative instance's `auth`, with the secret as a reference: `auth: { type: 'oauth2', grant: 'authorization_code', authorizationUrl, tokenUrl, scopes, clientId, credentialRef: 'VENDOR_CLIENT_SECRET' }`, or `grant: 'client_credentials'` without `authorizationUrl`. Code that registers a connector with a token it already holds passes `{ type: 'bearer', token }`.
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [7e3822c]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [a9782b3]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/spec@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes

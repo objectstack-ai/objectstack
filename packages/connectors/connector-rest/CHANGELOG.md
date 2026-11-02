@@ -1,5 +1,285 @@
 # @objectstack/connector-rest
 
+## 18.3.0
+
+### Minor Changes
+
+- 7e9f814: feat(connectors): the built-in `rest` and `openapi` providers serve `oauth2` and `app-credential` instances through the per-dispatch credential handle, and the Feishu, DingTalk and WeCom app-credential exchanges run (ADR-0143 S2, part of #26702)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: semantic
+  
+  ADR-0143 S1 (#28317) served an `oauth2` instance only on a provider that asks the credential handle, and none of the built-in providers did; every `app-credential` instance was held degraded. Now:
+  
+  - **`rest` and `openapi` ask the handle.** Both plugins register their provider with `{ credentialHandle: true }`. A grant-bearing instance on either one is served: every request asks the handle for the run's organization, sends the token where the handle places it (an `Authorization: Bearer` header, or a vendor's header or query parameter), refreshes once and retries once on an upstream `401`, and a second `401` is the dispatch's `503` naming the instance. A thrown transport error has the token removed from its message first. A handle beside a static credential or a request signer is refused when the instance is built: a request is authenticated one way.
+  - **`openapi` reads the document's `security`.** An operation whose effective `security` is `[]` is anonymous: the handle is not asked and no token is sent. On a grant-bearing instance, a parameter that an `apiKey` scheme the operation requires names is filled by the platform and is no longer an input of the action. An `oauth2` scheme's flows stay documentation: the instance's own `auth` names the token endpoint.
+  - **`app-credential` exchanges run** (`@objectstack/service-automation`), each as its vendor documents it: Feishu's `client_credentials` token at `accounts.feishu.cn` (sent as a bearer token), DingTalk's v1.0 `accessToken` API (sent in `x-acs-dingtalk-access-token`; the legacy `oapi` APIs that take `access_token` in the query are not served), and WeCom's `gettoken` (sent as the `access_token` query parameter). The token is held in memory only, refreshed inside the 30 second skew margin, and concurrent asks share one exchange. The token request never follows a redirect. No answer, `429` or `5xx` is `CONNECTOR_UPSTREAM_UNAVAILABLE`; a refusal is a `503` naming the vendor's error code only, never the secret.
+  - **WeCom early invalidation.** WeCom answers an invalidated token inside an ordinary answer (`errcode` `40014` or `42001`). A WeCom instance's actions treat that as the `401` rule does: the token is obtained afresh once and the call is repeated once; a second refusal is the `503`.
+  - **The guard.** An `app-credential` instance is served on a provider that asks the credential handle and held degraded, naming the provider, on one that does not. `mcp` does not ask the handle yet, so an `oauth2` or `app-credential` instance on `mcp` stays degraded.
+- b358e79: feat(spec): `signed` joins declarative connector-instance auth, with `aliyun-acs3-hmac-sha256` as its first scheme (ADR-0143 D2.3, #26710)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  <!-- adr-0087: not-required (no-migration-prescription) One member is added to the instance-auth union and optional members to the provider context and materialization. Nothing an author or a provider wrote before is refused or re-shaped, so there is nothing for a migration to rewrite. -->
+  
+  An upstream that authenticates every request by a signature over the request itself, rather than by a token it is sent, had no way to be declared on a connector instance. ADR-0143 D2.3 adds that kind, `signed`, with a closed list of schemes. A scheme joins the list only together with its signer and its vendor test vectors. This release ships one scheme: Alibaba Cloud's OpenAPI V3 signature.
+  
+  - **`@objectstack/spec`**
+    - `ConnectorInstanceAuthSchema` gains `{ type: 'signed', scheme, keyId, credentialRef }`, a closed shape for each scheme. `keyId` is the public key identifier. The signing key is only ever a `credentialRef`.
+    - The publish door refuses an unknown or missing `scheme` at `auth.scheme`, naming the value it got and the schemes that ship. It refuses an inline `secret`, `privateKey`, `secretKey` or `accessKeySecret` by name, with the `credentialRef` prescription, and an authored `signature`. It refuses `signed` on `provider: 'mcp'` at `auth.type`.
+    - `@objectstack/spec/integration` gains the request-signer seam: `ConnectorRequestSigner` (`sign`, plus an optional `verifyResponse` for schemes that sign their responses), `ConnectorProviderContext.requestSigner`, and `ConnectorMaterialization.requestSignerApplied`.
+    - `connectorFetchOptions` takes an optional signer and signs every attempt `resilientFetch` makes, retries included. `readConnectorResponse` runs the scheme's response verification before parsing.
+    - With no signer, both behave exactly as before.
+  - **`@objectstack/service-automation`**
+    - A `signed` instance's key resolves through the same credential chain as the static kinds, with the same degrade on an unresolved reference.
+    - The key is bound to the scheme's signer at materialization, and the provider receives only the signer.
+    - The service refuses to serve a `signed` instance on a provider that does not acknowledge the signer, so such an instance never calls its upstream unsigned.
+    - A datasource that borrows a `signed` instance through `external.connector` is refused with `422`.
+  - **`@objectstack/connector-rest`, `@objectstack/connector-openapi`**
+    - Both apply a handed request signer to every request and acknowledge it.
+    - A static credential together with a signer is refused.
+    - `bearer`, `api-key` and `basic` requests are unchanged.
+
+### Patch Changes
+
+- cd0ec76: fix(connector-rest): a `baseUrl` that carries a query string sends each action to its own path
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A REST connector whose `baseUrl` carries a fixed query parameter (`https://api.example.com/v1?region=eu`, `?api-version=2024-01`) used to put every action's path inside that query: the base and the path were joined as text, so `/items` became `…/v1?region=eu/items` and the request went to `/v1`. The request URL is now built from the parsed base: the path joins the base's path with one slash between, the base's query parameters stay the query, and the action's own parameters (written inline in `path`, or in `query`, an api-key `paramName` included) come after them. **On a clash the action's value wins**: it is the more specific intent, and refusing would break a working action the day its base gains the parameter.
+  
+  A base without a query sends exactly the URL it sent before, and a path still only ever lands under the base's origin (a path like `//other.example` or an absolute URL stays a path segment). A base fragment keeps the place the text join gave it.
+- Updated dependencies [2f21b48]
+- Updated dependencies [0ea90c7]
+- Updated dependencies [dbf7e04]
+- Updated dependencies [a9f654e]
+- Updated dependencies [b49b752]
+- Updated dependencies [d8a9cc5]
+- Updated dependencies [b53d9f3]
+- Updated dependencies [8eeb3b3]
+- Updated dependencies [4f05de4]
+- Updated dependencies [95f818d]
+- Updated dependencies [b3f7344]
+- Updated dependencies [d90657b]
+- Updated dependencies [ff26bc4]
+- Updated dependencies [21a13f1]
+- Updated dependencies [c68869c]
+- Updated dependencies [162f668]
+- Updated dependencies [43714ca]
+- Updated dependencies [63e3873]
+- Updated dependencies [9bf6598]
+- Updated dependencies [a98693d]
+- Updated dependencies [d9bf777]
+- Updated dependencies [bb91ae8]
+- Updated dependencies [d434481]
+- Updated dependencies [f9f27a0]
+- Updated dependencies [02b1392]
+- Updated dependencies [c26d643]
+- Updated dependencies [13e85be]
+- Updated dependencies [13dc413]
+- Updated dependencies [eab4bba]
+- Updated dependencies [e438a55]
+- Updated dependencies [2205863]
+- Updated dependencies [9fab076]
+- Updated dependencies [74801d1]
+- Updated dependencies [17b5152]
+- Updated dependencies [ef7067f]
+- Updated dependencies [031d97a]
+- Updated dependencies [0c47e87]
+- Updated dependencies [e01edb2]
+- Updated dependencies [f79fa74]
+- Updated dependencies [b358e79]
+- Updated dependencies [5374967]
+- Updated dependencies [8a218fc]
+- Updated dependencies [1539aad]
+- Updated dependencies [cdd9f0a]
+- Updated dependencies [3fe9d25]
+- Updated dependencies [2ecf6a7]
+- Updated dependencies [fbe344b]
+- Updated dependencies [354dfcd]
+- Updated dependencies [d887aa9]
+- Updated dependencies [39fd5fb]
+- Updated dependencies [5aad4e0]
+- Updated dependencies [81b4599]
+- Updated dependencies [c13ef04]
+- Updated dependencies [6eaf404]
+- Updated dependencies [79ed6f7]
+- Updated dependencies [40320f1]
+- Updated dependencies [49d652e]
+- Updated dependencies [685d9f3]
+- Updated dependencies [0fb0dda]
+- Updated dependencies [e3470ed]
+- Updated dependencies [9ac5ae5]
+- Updated dependencies [c082af6]
+- Updated dependencies [6dbff8e]
+- Updated dependencies [c63ce2a]
+- Updated dependencies [12b5aec]
+- Updated dependencies [8b1740a]
+- Updated dependencies [b88519e]
+- Updated dependencies [e5b5c5b]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [10f27b6]
+- Updated dependencies [fe9e856]
+- Updated dependencies [d4ff1a0]
+- Updated dependencies [ae16687]
+- Updated dependencies [efdf11a]
+- Updated dependencies [2655ebd]
+- Updated dependencies [14e9685]
+- Updated dependencies [0cd578f]
+- Updated dependencies [a33fce2]
+- Updated dependencies [385aa12]
+- Updated dependencies [8bb2c31]
+- Updated dependencies [8d79bbd]
+- Updated dependencies [b8f4acc]
+- Updated dependencies [4145210]
+- Updated dependencies [194e66c]
+- Updated dependencies [57c51aa]
+- Updated dependencies [3604371]
+- Updated dependencies [1ed3360]
+- Updated dependencies [73b7270]
+- Updated dependencies [6762dd9]
+- Updated dependencies [556f323]
+- Updated dependencies [b445807]
+- Updated dependencies [6abcb72]
+- Updated dependencies [7735d1d]
+- Updated dependencies [7739573]
+- Updated dependencies [bc4c963]
+- Updated dependencies [86edcaf]
+- Updated dependencies [ad3a640]
+- Updated dependencies [fbaacfe]
+- Updated dependencies [dbf576b]
+- Updated dependencies [4fa4f2c]
+- Updated dependencies [76b4ae4]
+- Updated dependencies [0368504]
+- Updated dependencies [6663a66]
+- Updated dependencies [fbb8bec]
+- Updated dependencies [f557d90]
+- Updated dependencies [aad9ad5]
+- Updated dependencies [e0aed00]
+- Updated dependencies [72b08ee]
+- Updated dependencies [bf658d1]
+- Updated dependencies [3702be4]
+- Updated dependencies [4a5396b]
+- Updated dependencies [9d29223]
+- Updated dependencies [7538f27]
+- Updated dependencies [21c4bdd]
+- Updated dependencies [2c683cf]
+- Updated dependencies [86c9d53]
+- Updated dependencies [bfdaba4]
+- Updated dependencies [8441a01]
+- Updated dependencies [db44327]
+- Updated dependencies [0027c4a]
+- Updated dependencies [684f2f6]
+- Updated dependencies [869fa76]
+- Updated dependencies [2fc3861]
+- Updated dependencies [74aae1e]
+- Updated dependencies [2b4b970]
+- Updated dependencies [e063a87]
+- Updated dependencies [03cc871]
+- Updated dependencies [7811c3f]
+- Updated dependencies [755e285]
+- Updated dependencies [07585bf]
+- Updated dependencies [9cbe507]
+- Updated dependencies [2695de7]
+- Updated dependencies [0a4b0fb]
+- Updated dependencies [b373263]
+- Updated dependencies [d3b0a40]
+- Updated dependencies [ed8b237]
+- Updated dependencies [a68430a]
+- Updated dependencies [6da8c3c]
+- Updated dependencies [1ea3fe9]
+- Updated dependencies [3e0fd7a]
+- Updated dependencies [f552fa8]
+- Updated dependencies [dc4755c]
+- Updated dependencies [0a52b7d]
+- Updated dependencies [4793aa4]
+- Updated dependencies [3a054cb]
+- Updated dependencies [f934a41]
+- Updated dependencies [00c9a0b]
+- Updated dependencies [a7bdac4]
+- Updated dependencies [c3842ac]
+- Updated dependencies [916531a]
+- Updated dependencies [d85ff19]
+- Updated dependencies [7e3822c]
+- Updated dependencies [645534d]
+- Updated dependencies [3cc45cc]
+- Updated dependencies [3a2f4c0]
+- Updated dependencies [5b7dbb8]
+- Updated dependencies [8d36669]
+- Updated dependencies [e26cf9a]
+- Updated dependencies [6e0b16a]
+- Updated dependencies [7c3cc88]
+- Updated dependencies [9b1dc99]
+- Updated dependencies [f3fe660]
+- Updated dependencies [3739d8d]
+- Updated dependencies [f4a8eed]
+- Updated dependencies [8f36f6b]
+- Updated dependencies [80a9f99]
+- Updated dependencies [11a7f96]
+- Updated dependencies [b357250]
+- Updated dependencies [75c2658]
+- Updated dependencies [35f2055]
+- Updated dependencies [fb4e0bb]
+- Updated dependencies [7d846b5]
+- Updated dependencies [fc5d509]
+- Updated dependencies [71de060]
+- Updated dependencies [6fd87b7]
+- Updated dependencies [d359857]
+- Updated dependencies [3238750]
+- Updated dependencies [f23e051]
+- Updated dependencies [bed8306]
+- Updated dependencies [04c8930]
+- Updated dependencies [001c04b]
+- Updated dependencies [2d3aa8c]
+- Updated dependencies [85a1b9d]
+- Updated dependencies [361ea24]
+- Updated dependencies [ea1751b]
+- Updated dependencies [3fd4d6b]
+- Updated dependencies [a00f335]
+- Updated dependencies [700ec85]
+- Updated dependencies [8bceb6a]
+- Updated dependencies [8771726]
+- Updated dependencies [ef0f6a1]
+- Updated dependencies [9eaa209]
+- Updated dependencies [ba0084e]
+- Updated dependencies [462935d]
+- Updated dependencies [0ecc2c4]
+- Updated dependencies [d6e0967]
+- Updated dependencies [519089e]
+- Updated dependencies [16e7a80]
+- Updated dependencies [044d201]
+- Updated dependencies [12333ba]
+- Updated dependencies [4d278c9]
+- Updated dependencies [5114b0e]
+- Updated dependencies [e62dcc5]
+- Updated dependencies [0c1829a]
+- Updated dependencies [36fa4ff]
+- Updated dependencies [e170d42]
+- Updated dependencies [f5a400a]
+- Updated dependencies [1617b7f]
+- Updated dependencies [a9782b3]
+- Updated dependencies [60d8522]
+- Updated dependencies [8196881]
+- Updated dependencies [5493b88]
+- Updated dependencies [663b7c0]
+- Updated dependencies [50df124]
+- Updated dependencies [3cb8553]
+- Updated dependencies [70943dd]
+- Updated dependencies [2081a5e]
+- Updated dependencies [892eb66]
+- Updated dependencies [2cba2eb]
+- Updated dependencies [99a6a78]
+- Updated dependencies [04b1402]
+- Updated dependencies [672bda0]
+- Updated dependencies [3e54f99]
+- Updated dependencies [710c2da]
+- Updated dependencies [5d759b1]
+  - @objectstack/core@18.3.0
+  - @objectstack/spec@18.3.0
+  - @objectstack/types@18.3.0
+
 ## 18.2.0
 
 ### Patch Changes
