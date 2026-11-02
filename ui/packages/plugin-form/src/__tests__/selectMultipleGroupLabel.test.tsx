@@ -236,11 +236,11 @@ describe('normalizeSectionField decides the widget from the effective pair (obje
   };
 
   it('a string shorthand for a multi select resolves to the multi widget', () => {
-    expect(normalizeSectionField('regions', ctx).type).toBe('field:multiselect');
+    expect(normalizeSectionField('regions', ctx)!.type).toBe('field:multiselect');
   });
 
   it('a spec field def naming a multi select resolves to the multi widget', () => {
-    expect(normalizeSectionField({ field: 'regions' }, ctx).type).toBe('field:multiselect');
+    expect(normalizeSectionField({ field: 'regions' }, ctx)!.type).toBe('field:multiselect');
   });
 
   it('a view that restates only `multiple: true` moves the widget too', () => {
@@ -248,35 +248,33 @@ describe('normalizeSectionField decides the widget from the effective pair (obje
     // so a view can turn a single-value object field into a multi one without
     // restating `type`. Resolving the id from `fd.type` before `multiple` had
     // been merged would have left this on the single-value widget.
-    expect(normalizeSectionField({ field: 'stage', multiple: true }, ctx).type).toBe('field:multiselect');
+    expect(normalizeSectionField({ field: 'stage', multiple: true }, ctx)!.type).toBe('field:multiselect');
   });
 
   it('a view that restates only `multiple: false` moves it BACK', () => {
     // The inverse, which the same single computation buys: an object-level multi
     // field narrowed by the view must land on the single-value widget, whose
     // label association is the `for` one.
-    const f = normalizeSectionField({ field: 'regions', multiple: false }, ctx);
+    const f = normalizeSectionField({ field: 'regions', multiple: false }, ctx)!;
     expect(f.type).toBe('field:select');
     expect(f.multiple).toBe(false);
   });
 
   it('a view restating both keys agrees with the mapper', () => {
-    expect(normalizeSectionField({ field: 'stage', type: 'select', multiple: true }, ctx).type).toBe(
+    expect(normalizeSectionField({ field: 'stage', type: 'select', multiple: true }, ctx)!.type).toBe(
       mapFieldTypeToFormType('select', { multiple: true }),
     );
   });
 
   it('a single-value select is untouched', () => {
-    expect(normalizeSectionField({ field: 'stage' }, ctx).type).toBe('field:select');
-    expect(normalizeSectionField('stage', ctx).type).toBe('field:select');
+    expect(normalizeSectionField({ field: 'stage' }, ctx)!.type).toBe('field:select');
+    expect(normalizeSectionField('stage', ctx)!.type).toBe('field:select');
   });
 
-  it('a spec field naming nothing in the object schema keeps its fallback type', () => {
-    // `fromObjectSchema`'s `input` fallback, unchanged: with no type on either
-    // side there is nothing to decide, and `multiple` alone must not conjure a
-    // widget id.
-    const f = normalizeSectionField({ field: 'ghost', multiple: true }, ctx);
-    expect(f.type).toBe('input');
-    expect(f.multiple).toBe(true);
+  it('a spec field naming nothing in the object schema builds no field at all', () => {
+    // `fromObjectSchema` no longer falls back to an untyped `input` stub for a
+    // name the object does not declare (objectstack#29021): `multiple` alone
+    // must not conjure a widget id, nor a control.
+    expect(normalizeSectionField({ field: 'ghost', multiple: true }, ctx)).toBeUndefined();
   });
 });
