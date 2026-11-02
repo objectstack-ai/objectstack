@@ -291,6 +291,7 @@
     "system/TranslationDiffStatus",
     "system/TranslationItem",
     "system/UserActivityStatus",
+    "system/UserDevice",
     "system/VectorClock",
     "system/WorkerStats"
   ]

@@ -811,6 +811,8 @@
     "TranslationItemSchema (const)",
     "UserActivityStatus (const)",
     "UserActivityStatus (type)",
+    "UserDevice (type)",
+    "UserDeviceSchema (const)",
     "VALIDATION_MESSAGE_FALLBACK_LOCALE (const)",
     "VALIDATION_MESSAGE_KEY_PREFIX (const)",
     "VALUE_SHAPES_MIGRATION_ID (const)",

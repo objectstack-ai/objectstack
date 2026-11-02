@@ -43,6 +43,7 @@
     "dev-login",
     "fate-supplement",
     "push-config",
+    "push-device",
     "sms-config",
     "stack-server"
   ]

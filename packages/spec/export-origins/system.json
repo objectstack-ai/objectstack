@@ -773,6 +773,8 @@
     "TranslationItem": "src/system/translation.zod.ts#TranslationItem (type)",
     "TranslationItemSchema": "src/system/translation.zod.ts#TranslationItemSchema (const)",
     "UserActivityStatus": "src/system/collaboration.zod.ts#UserActivityStatus (type)",
+    "UserDevice": "src/system/push-device.zod.ts#UserDevice (type)",
+    "UserDeviceSchema": "src/system/push-device.zod.ts#UserDeviceSchema (const)",
     "VALIDATION_MESSAGE_FALLBACK_LOCALE": "src/system/validation-message.ts#VALIDATION_MESSAGE_FALLBACK_LOCALE (const)",
     "VALIDATION_MESSAGE_KEY_PREFIX": "src/system/validation-message.ts#VALIDATION_MESSAGE_KEY_PREFIX (const)",
     "VALUE_SHAPES_MIGRATION_ID": "src/system/migration.zod.ts#VALUE_SHAPES_MIGRATION_ID (const)",

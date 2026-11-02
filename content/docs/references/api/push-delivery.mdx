@@ -13,6 +13,11 @@ The shell reads it when the user taps the push: `notificationId` names the
 notification (the same id the inbox lists and `markRead` takes), and
 `route` is the Console path the shell opens.
 
+**Declared ahead of its producer.** No push channel delivers yet, so
+nothing produces this data today; `PushDeliveryDataSchema` carries a
+`[PLANNED — not yet served]` marker in its `.describe()` until the push
+channel ships. The route rule below is the contract that channel owes.
+
 **Where `route` comes from — derived, never authored.** There is no
 `notify` key for it. It is the notification's existing `actionUrl`, the
 value the inbox already serves: an explicit `url` / `actionUrl` in the
@@ -43,6 +48,8 @@ const result = PushDeliveryDataSchema.parse(data);
 ---
 
 ## PushDeliveryData
+
+[PLANNED — not yet served] The data a push delivery carries to the shell: the notification id and the same-server route opened on tap. No push channel delivers yet
 
 ### Properties
 

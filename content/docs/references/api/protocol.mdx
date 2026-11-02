@@ -2761,19 +2761,26 @@ The authoring surface of a metadata write. Closed: `copilot` is an AI assistant'
 
 ## RegisterDeviceRequest
 
+[PLANNED — not yet served] Register or refresh a push device for the signed-in user. No route serves it yet; the device routes land together with their handlers
+
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **token** | `string` | ✅ | Device push notification token |
 | **platform** | `Enum<'ios' \| 'android' \| 'web'>` | ✅ | Device platform |
-| **deviceId** | `string` | optional | Unique device identifier |
+| **deviceId** | `string` | optional | Client-held device id, stable per app install. Re-registering the same deviceId refreshes that device; absent, the server mints one and answers it, and the client keeps it for later registrations and unregister |
 | **name** | `string` | optional | Device friendly name |
+| **vendor** | `Enum<'apns' \| 'fcm'>` | optional | Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, android means fcm; web has no core vendor, so a web registration names fcm or is refused |
+| **appId** | `string` | optional | App the token was issued to: the iOS bundle ID or the Android application ID |
+| **locale** | `string` | optional | Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in |
 
 
 ---
 
 ## RegisterDeviceResponse
+
+[PLANNED — not yet served] Answer to a device registration: the device id the client keeps
 
 ### Properties
 
@@ -3019,6 +3026,8 @@ Uninstall package response
 
 ## UnregisterDeviceRequest
 
+[PLANNED — not yet served] Unregister one of the signed-in user's push devices
+
 ### Properties
 
 | Property | Type | Required | Description |
@@ -3029,6 +3038,8 @@ Uninstall package response
 ---
 
 ## UnregisterDeviceResponse
+
+[PLANNED — not yet served] Answer to a device unregistration
 
 ### Properties
 

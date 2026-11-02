@@ -538,6 +538,8 @@
     "TranslationItem": "system/TranslationItem",
     "TranslationItemSchema": "system/TranslationItem",
     "UserActivityStatus": "system/UserActivityStatus",
+    "UserDevice": "system/UserDevice",
+    "UserDeviceSchema": "system/UserDevice",
     "VectorClock": "system/VectorClock",
     "VectorClockSchema": "system/VectorClock",
     "WorkerStats": "system/WorkerStats",
