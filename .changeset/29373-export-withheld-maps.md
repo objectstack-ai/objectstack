@@ -1,11 +1,11 @@
 ---
-'@objectstack/spec': patch
+'@objectstack/spec': minor
 ---
 
 feat(spec): the package export manifest declares `withheldMaps`, the maps it withheld whole, and an unmanaged import accepts it
 
 Clause-②: yes (widening)
-Metadata-protocol: none
+Metadata-protocol: added
 
 `GET /packages/:id/export` writes each item as a served read returns it, so a connector's header and environment-variable maps are already withheld whole by the connector redactor and the exported item simply lacks them. An import elsewhere could not tell such a map from one the package never had. The export contract now has a place to say so:
 
