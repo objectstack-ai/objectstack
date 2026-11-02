@@ -223,8 +223,9 @@ describe('the currency arm alone: the timezone is chosen, the currency is unset 
     expect(within(dialog).getByText('Set the default currency')).toBeTruthy();
     expect(within(dialog).getByText(/no default currency yet/)).toBeTruthy();
     expect(within(dialog).getByText(/Chinese Yuan \(CNY\)/)).toBeTruthy();
+    // The combobox shows the curated option's label for the pre-filled code.
     const field = within(dialog).getByLabelText('Default currency') as HTMLInputElement;
-    expect(field.value).toBe('CNY');
+    expect(field.value).toBe('CNY — Chinese Yuan');
     // No timezone field: that key is chosen.
     expect(within(dialog).queryByLabelText('Default timezone')).toBeNull();
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
@@ -318,7 +319,7 @@ describe('both unset: ONE prompt, one write (objectstack#28872)', () => {
     expect(screen.getAllByRole('dialog')).toHaveLength(1);
     expect(within(dialog).getByText('Set the system timezone and default currency')).toBeTruthy();
     expect((within(dialog).getByLabelText('Default timezone') as HTMLInputElement).value).toBe(BROWSER_ZONE);
-    expect((within(dialog).getByLabelText('Default currency') as HTMLInputElement).value).toBe('CNY');
+    expect((within(dialog).getByLabelText('Default currency') as HTMLInputElement).value).toBe('CNY — Chinese Yuan');
     expect(within(dialog).getByText(/platform default timezone, UTC\./)).toBeTruthy();
     expect(within(dialog).getByText(/Chinese Yuan \(CNY\)/)).toBeTruthy();
     // Settings read once for both arms.

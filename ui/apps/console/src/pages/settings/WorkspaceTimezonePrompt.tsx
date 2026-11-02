@@ -139,12 +139,10 @@ export function WorkspaceTimezonePrompt() {
   if (currency && currencyDraft) changes[CURRENCY_KEY] = currencyDraft;
   const hasChanges = Object.keys(changes).length > 0;
 
+  // The offer as the copy names it: the currency's name in the UI language, and its code.
   const offered = currency
-    ? t('console.workspaceTimezonePrompt.currencyOffer', {
-        name: currencyName(language, currency.currency) ?? currency.currency,
-        code: currency.currency,
-      })
-    : '';
+    ? { name: currencyName(language, currency.currency) ?? currency.currency, code: currency.currency }
+    : undefined;
 
   const title = both
     ? t('console.workspaceTimezonePrompt.bothTitle')
@@ -217,7 +215,7 @@ export function WorkspaceTimezonePrompt() {
           <DialogDescription>
             {timezone
               ? t('console.workspaceTimezonePrompt.description', { current: timezone.current })
-              : t('console.workspaceTimezonePrompt.currencyDescription', { currency: offered })}
+              : t('console.workspaceTimezonePrompt.currencyDescription', offered)}
           </DialogDescription>
         </DialogHeader>
         {timezone ? (
@@ -236,7 +234,7 @@ export function WorkspaceTimezonePrompt() {
         ) : null}
         {both ? (
           <p className="text-sm text-muted-foreground" data-testid="workspace-timezone-prompt-currency-description">
-            {t('console.workspaceTimezonePrompt.currencyDescription', { currency: offered })}
+            {t('console.workspaceTimezonePrompt.currencyDescription', offered)}
           </p>
         ) : null}
         {currency ? (
