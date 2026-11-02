@@ -54,7 +54,9 @@
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`, or be one the write
  *                   names for the field in `keptOptionValues` (an import's kept
- *                   cell, #22183)
+ *                   cell, #22183); a single value that is a plain object or an
+ *                   array, or an array element that is one, is `invalid_type`
+ *                   whether or not `options` are declared (#29244)
  *  - boolean / toggle: must coerce to boolean
  *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999
  *                   for a `date` and from 1000 to 9999 for a `datetime` (#20280);
@@ -99,9 +101,6 @@ import {
   STRUCTURED_JSON_TYPES,
   NUMERIC_VALUE_TYPES,
   COMPUTED_VALUE_TYPES,
-  NON_TEXT_STORED_VALUE_TYPES,
-  STRING_VALUE_TYPES,
-  isUniqueDeclared,
   percentScaleOf,
   parseNumericString,
   classifyFilterToken,
@@ -110,7 +109,7 @@ import type { FieldErrorCode } from '@objectstack/spec/api';
 // [#24131] `isMissing` / `isEmptyForRequired` — the emptiness rule `required`
 // is judged by — live in core, so the public-form submit door in
 // `@objectstack/rest` judges a form's `required` by the same rule.
-import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand, multiValueStorageForm, isMissing, isEmptyForRequired } from '@objectstack/core';
+import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand, multiValueStorageForm, isMissing, isEmptyForRequired, ENGINE_LIFECYCLE_COLUMNS, blankAsNullColumns, blankStorageForm, type BlankAsNullReach } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -126,9 +125,7 @@ import {
 // business field (e.g. `sys_team`, a `managedBy: 'better-auth'` table where the
 // column is not injected) must get a normal required-check instead of silently
 // passing NULL through to the driver.
-const SKIP_FIELDS = new Set<string>([
-  'id', 'created_at', 'created_by', 'updated_at', 'updated_by',
-]);
+const SKIP_FIELDS = new Set<string>(ENGINE_LIFECYCLE_COLUMNS);
 
 // Linear-time email check. Domain labels exclude '.', so the quantifiers on
 // either side of each '.' can't overlap — this avoids the polynomial
@@ -682,8 +679,8 @@ export function normalizeMultiValueFields(
  * the declared type at all", with the same wire code and the same sentence a
  * non-readonly field gets: a `date` / `datetime` / `time` the platform reads,
  * a number for a number-typed field, a boolean, an array for a multi-value
- * field, no plain object or array on a string-typed field, no filter-operator
- * object, and the ADR-0104 reference / media / structured-JSON shape under
+ * field, no plain object or array on a string-typed field or as a select's
+ * value or option element, no filter-operator object, and the ADR-0104 reference / media / structured-JSON shape under
  * the object's own posture (warn-first until the deployment's evidence says
  * otherwise). It is never REQUIRED.
  *
@@ -717,8 +714,9 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
 /**
  * [#20308] A BLANK string on a non-string-typed column is that column's typed
  * blank, `null` — the write door's one reading of it. [#29176] So is `''` on
- * an optional text-like column a unique constraint covers (its own section
- * below).
+ * an optional text-like column a unique constraint covers, and [#29277] `''`
+ * on an optional single-value option, reference or file column (each its own
+ * section below).
  *
  * "Blank" is exactly what {@link isMissing} calls missing: `''` or a string of
  * whitespace. "Non-string-typed" is the spec's `NON_TEXT_STORED_VALUE_TYPES` —
@@ -738,7 +736,7 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * ## [#29176] The one string-stored arm: an optional column a unique constraint covers
  *
  * Exactly `''` on a column that is ALL of: text-like
- * ({@link UNIQUE_BLANK_TEXT_TYPES}), not `required: true`, and covered by a
+ * (`STRING_VALUE_TYPES` minus `password` / `secret`), not `required: true`, and covered by a
  * unique constraint — its own `unique`, or membership in a declared
  * `indexes[]` entry whose `unique` asks for one (`isUniqueDeclared`, the
  * predicate the drivers build their constraints by) — is `null` from the door
@@ -756,15 +754,41 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  *  - a blank here also takes a declared `defaultValue` on insert, as the typed
  *    arm's does — the door runs before the defaults, by design.
  *
+ * ## [#29277] One-string columns on the `$empty` table's `null_only` row
+ *
+ * Exactly `''` on a column that is ALL of: on the `$empty` table's
+ * `null_only` row (`expandEmptyOperator`, the table's own answer — so a
+ * `multiple: true` column, the `multi_value` row, is out), storing ONE string
+ * (`ONE_STRING_STORED_TYPES`: option, reference and file types), and not `required: true` — is `null` from
+ * the door on, unique or not (maintainer ruling B on #29346, record
+ * 6579813296). `''` is neither an option
+ * code, a record id nor a file id, so it holds no value there; the ruled table
+ * reads only `null` as empty on that row, and is unchanged — a row that
+ * already stores `''` keeps answering as a value until a data step cleans it.
+ * On a unique column the second record cleared is no longer refused `409`.
+ * The same edges as the text arm: never whitespace (a value), never a
+ * `required` column, and a blank on insert takes a declared `defaultValue`.
+ *
  * ## What it does NOT touch
  *
- * ⛔ Every other string-stored column — text no unique constraint covers,
- * lookup ids, select values. There `''` is a value, and the spec's value
- * round-trip fixture pins it (`str_empty`: an empty string must not become
- * null). What "empty" means for those columns is a separate question, not
- * answered here. ⛔ A non-blank value, and every non-string value, of any
+ * ⛔ Every other string-stored column — text no unique constraint covers, a
+ * `multiple: true` option, reference or file column (the table's
+ * `multi_value` row), and the `null_only` types that do not store one string
+ * (object/array-stored and engine-owned; `@objectstack/core`'s
+ * `blank-storage-form.ts` says why each is out). There `''` is a value, and the
+ * spec's value round-trip fixture pins it on text (`str_empty`: an empty
+ * string must not become null). ⛔ A non-blank value, and every non-string value, of any
  * type: `null`, `0`, `false`, `'abc'` pass through untouched, so every type
  * check and refusal downstream sees what it saw.
+ *
+ * ## One rule, two readers
+ *
+ * Which columns, and which blanks, is `blankAsNullColumns` /
+ * `blankStorageForm` in `@objectstack/core` (`blank-storage-form.ts`) — the
+ * one spelling of all three arms. This door applies it; the seed loader's
+ * replay (`@objectstack/metadata-protocol`, the `blankAsNull` replay
+ * comparand) compares a seed value in the form it stores, so a seed `''` the
+ * door stores as `null` is not a change on every replay.
  *
  * ## Where it runs, and why there
  *
@@ -792,87 +816,32 @@ export function normalizeBlankTypedValues<T>(
 ): T {
   const fields = objectSchema?.fields;
   if (!fields || !data || typeof data !== 'object') return data;
-  // Read once per call, and only when a row carries an `''` at all.
-  let uniqueBlank: ReadonlySet<string> | undefined;
-  const uniqueBlankColumns = () => (uniqueBlank ??= optionalUniqueTextColumns(fields, objectSchema?.indexes));
+  // Read once per call, and only when a row carries a blank at all.
+  let columns: ReadonlyMap<string, BlankAsNullReach> | undefined;
+  const reachOf = (name: string) => (columns ??= blankAsNullColumns(objectSchema)).get(name);
   if (Array.isArray(data)) {
     let rows: unknown[] | undefined;
     for (let i = 0; i < data.length; i++) {
-      const row = normalizeBlankTypedRow(fields, uniqueBlankColumns, data[i]);
+      const row = normalizeBlankTypedRow(reachOf, data[i]);
       if (row !== data[i]) (rows ??= data.slice())[i] = row;
     }
     return (rows ?? data) as T;
   }
-  return normalizeBlankTypedRow(fields, uniqueBlankColumns, data) as T;
+  return normalizeBlankTypedRow(reachOf, data) as T;
 }
 
 function normalizeBlankTypedRow(
-  fields: Record<string, FieldDef>,
-  uniqueBlankColumns: () => ReadonlySet<string>,
+  reachOf: (name: string) => BlankAsNullReach | undefined,
   row: unknown,
 ): unknown {
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
   for (const [name, value] of Object.entries(row)) {
     if (typeof value !== 'string' || !isMissing(value)) continue;
-    // Own-property: a field name may be `constructor` / `valueOf`.
-    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
-    if (!def) continue;
-    if (!NON_TEXT_STORED_VALUE_TYPES.has(def.type) && !(value === '' && uniqueBlankColumns().has(name))) continue;
+    if (blankStorageForm(value, reachOf(name)) !== null) continue;
     (out ??= { ...row })[name] = null;
   }
   return out ?? row;
-}
-
-/**
- * [#29176] The text-like types whose `''` the write door stores as `null` on
- * an optional column a unique constraint covers ({@link normalizeBlankTypedValues}).
- *
- * The spec's `STRING_VALUE_TYPES` — exactly the "text-like" row of the
- * `$empty` operator's ruled table, where `''` and `null` already answer as one
- * — read as the constant, never re-listed, minus the two credential types.
- * ⛔ `password` and `secret` stay out: a maintainer ruling refuses `''` on them
- * (`EmptyCredentialWriteError`) while `null` means "clear", so rewriting the
- * blank here would turn that refusal into a silent clear.
- *
- * ⛔ Not `select` / `radio` / `lookup` / `user` and the other single-value
- * string-stored types: the same `$empty` table reads their `''` as a value,
- * so rewriting it would change an `is_empty` answer. That is a separate
- * question from this one.
- */
-const UNIQUE_BLANK_TEXT_TYPES: ReadonlySet<string> = new Set(
-  [...STRING_VALUE_TYPES].filter((t) => t !== 'password' && t !== 'secret'),
-);
-
-/**
- * [#29176] The columns of one object whose `''` the write door stores as
- * `null`: text-like ({@link UNIQUE_BLANK_TEXT_TYPES}), not `required: true`,
- * not a lifecycle column the engine owns, and covered by a unique constraint
- * on either surface the drivers build one from — a field's own `unique`, or a
- * declared `indexes[]` entry whose `unique` asks for one. Both surfaces are
- * read through `isUniqueDeclared`, the drivers' own predicate, so a column
- * the store does not constrain is never rewritten.
- */
-function optionalUniqueTextColumns(fields: Record<string, FieldDef>, indexes: unknown): ReadonlySet<string> {
-  const covered = new Set<string>();
-  for (const [name, def] of Object.entries(fields)) {
-    if (def && isUniqueDeclared(def.unique)) covered.add(name);
-  }
-  if (Array.isArray(indexes)) {
-    for (const idx of indexes) {
-      if (!isPlainRecord(idx) || !isUniqueDeclared(idx.unique) || !Array.isArray(idx.fields)) continue;
-      for (const name of idx.fields) if (typeof name === 'string') covered.add(name);
-    }
-  }
-  const out = new Set<string>();
-  for (const name of covered) {
-    if (SKIP_FIELDS.has(name)) continue;
-    // Own-property: a field name may be `constructor` / `valueOf`.
-    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
-    if (!def || def.required === true || !UNIQUE_BLANK_TEXT_TYPES.has(def.type)) continue;
-    out.add(name);
-  }
-  return out;
 }
 
 /**
@@ -1687,8 +1656,26 @@ function validateOne(
   // question from two authorities that happen to agree today, which is the
   // drift the one-definition ruling (#17469) closes.
   if ((t === 'select' || t === 'radio') && !isMultiValueField(def)) {
-    // Option membership is the whole arm, and it is a constraint: ⛔ never on
-    // a readonly value (the open-vocabulary ruling, see ReadonlyValueScope).
+    // [#29244] A single-value select stores ONE option code (the spec's
+    // `valueSchemaFor`: a declared code, or a string when no `options` are
+    // declared). A plain object or an array is refused as a shape, never
+    // judged by its string reading: with no `options` the arm returned before
+    // looking at the value, so `{ a: 1 }` and `['x']` reached the driver as
+    // sent; with `options`, `['a']` passed membership as `String(['a'])` and
+    // the driver stored the array. Neither the list nor the filter door (which
+    // refuses an object or array comparand on this field) can read either.
+    // Same posture and sentence as the string arm's #29133 rule. A SHAPE test,
+    // so it runs ahead of `shapeOnly` and of option membership; a filter
+    // operator object was already refused above, with its own sentence.
+    if (isPlainObjectValue(value) || Array.isArray(value)) {
+      return fail(
+        'invalid_type',
+        { type: t, detail: `expected one option value, received ${Array.isArray(value) ? 'an array' : 'an object'}` },
+        'invalid_value_shape',
+      );
+    }
+    // Option membership is the rest of the arm, and it is a constraint: ⛔ never
+    // on a readonly value (the open-vocabulary ruling, see ReadonlyValueScope).
     if (shapeOnly) return null;
     const allowed = optionValues(def.options);
     if (picklist !== undefined && allowed.length === 0) return picklistUnresolved();
@@ -1728,6 +1715,20 @@ function validateOne(
     // including a system write. Whether a referenced id EXISTS is still
     // `assertReferencesResolve`'s question, with its own `isSystem` latitude.
     if (!isValueShapeJudgedType(t)) {
+      // [#29244] Each element is one option code, as for a single value. An
+      // element that is a plain object or an array is refused as a shape: with
+      // no `options` this branch admitted any array, and with `options` a
+      // nested `['a']` passed membership as `String(['a'])`. A shape test, so
+      // ahead of `shapeOnly`; an array of scalars is judged as before.
+      const nested = value.find((v) => isPlainObjectValue(v) || Array.isArray(v));
+      if (nested !== undefined) {
+        const received = Array.isArray(nested) ? 'an array' : 'an object';
+        return fail(
+          'invalid_type',
+          { type: t, detail: `expected an array of option values, received an element that is ${received}` },
+          'invalid_value_shape',
+        );
+      }
       if (shapeOnly) return null;
       const allowed = optionValues(def.options);
       if (allowed.length === 0) {

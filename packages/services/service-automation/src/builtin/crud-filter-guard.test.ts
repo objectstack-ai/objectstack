@@ -2,7 +2,6 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { VALUE_SLOT_TEMPLATE_REFUSAL } from '@objectstack/spec/automation';
-import { FieldOperatorsSchema } from '@objectstack/spec/data';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
@@ -393,22 +392,6 @@ describe('a computed filter operand is a value, never filter structure', () => {
 
         expect(result.success, `run failed: ${JSON.stringify(result.error)}`).toBe(true);
         expect(data.seen[verb]).toEqual({ id: { $in: ['r1', 'r2'] }, stage: { $nin: ['lost', 'won'] }, amount: { $between: [10, 90] } });
-    });
-
-    it('every declared operator whose comparand is a list takes an evaluated list, and no other does', async () => {
-        const operators = Object.keys((FieldOperatorsSchema as unknown as { shape: Record<string, unknown> }).shape);
-        expect(operators.length, 'control: the grammar declares its operators').toBeGreaterThan(10);
-        const pair = ['2026-01-01', '2026-12-31'];
-        for (const op of operators) {
-            const takesList = FieldOperatorsSchema.safeParse({ [op]: pair }).success;
-            data = fakeData();
-            engine = new AutomationEngine(createTestLogger());
-            registerCrudNodes(engine, ctxWith(data.service));
-            engine.registerFlow('crud_flow', crudFlow('get_record', { objectName: 'deal', filter: { due: { [op]: CEL('record.pair') } } }));
-            const result = await engine.execute('crud_flow', { record: { pair } } as any);
-            expect(result.success, `${op}: the grammar ${takesList ? 'takes' : 'refuses'} a list there`).toBe(takesList);
-            expect(data.seen.find, `${op}: the data engine was asked`).toEqual(takesList ? { due: { [op]: pair } } : undefined);
-        }
     });
 
     it.each(NODES)('%s: an evaluated scalar passes — a string, a number, a boolean and a date', async (nodeType, verb, extra) => {

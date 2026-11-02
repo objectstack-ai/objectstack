@@ -233,6 +233,16 @@ describe('the object judges what `homeAmount` names', () => {
       expect(issues.map((i) => i.path)).toEqual([`${AT}.${key}`]);
       expect(issues[0]!.message).toContain('declares an `expression`');
     });
+
+    it.each(['amount_home', 'amount_rate'] as const)('names both faults in one issue when `%s` has neither mark', (name) => {
+      const issues = objectIssues(invoice({ [name]: { ...BASE_FIELDS[name], readonly: false, expression: 'record.amount' } }));
+      const key = name === 'amount_home' ? 'field' : 'rateField';
+      expect(issues.map((i) => i.path)).toEqual([`${AT}.${key}`]);
+      expect(issues[0]!.code).toBe('custom');
+      expect(issues[0]!.message).toContain('does not declare `readonly: true`');
+      expect(issues[0]!.message).toContain('declares an `expression`');
+      expect(issues[0]!.message).toContain(`Add \`readonly: true\` to \`${name}\` and delete its \`expression\``);
+    });
   });
 
   it('refuses `homeAmount` on a `formula` amount, at `homeAmount`, judging no pointer', () => {

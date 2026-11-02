@@ -513,7 +513,7 @@
       "title": "Metadata authoring round-trip: draft → publish on a WRITABLE package; read-only packages and locked types are server-side refused",
       "since": "v16",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["seeded admin (admin@objectos.ai / admin123)"],
@@ -531,7 +531,7 @@
         "verify in the console that the published view is live for showcase_task (reload, open the view switcher)",
         "denied side A: attempt the same runtime create targeting the read-only CODE package; capture the refusal (expect writable_package_required — ADR-0070 D1)",
         "denied side B: attempt a PUT overlay against a PACKAGED object item (type 'object' has allowEnvironmentOverlay: false); capture the refusal (expect HTTP 403 not_overridable)",
-        "Studio browser half: open the page create form at /_console/apps/showcase_app/metadata/page/new — its Page type defaults to 'list', so set it to 'record', pick an object, and then set Kind to 'full': picking 'record' moves Kind to 'slotted' (the page-kind derive in ui/packages/app-shell/src/views/metadata-admin/anchors.ts), and only a full record page starts from a copy of the default record layout, a slotted one copies no regions (revision 7). The Save control is an icon-and-text button whose accessible name also carries the unsaved-changes dot, so match it by a substring — create the page, and capture the PUT /api/v1/meta/page/... it issues"
+        "Studio browser half: open the page create form of the writable package from steps[0] in Studio's All metadata area, /_console/studio/PKG/metadata/page/new?package=PKG (the retired Setup URL /_console/apps/showcase_app/metadata/page/new lands on the cross-package leg since #28818; the package's leg binds the save to PKG) — its Page type defaults to 'list', so set it to 'record', pick an object, and then set Kind to 'full': picking 'record' moves Kind to 'slotted' (the page-kind derive in ui/packages/app-shell/src/views/metadata-admin/anchors.ts), and only a full record page starts from a copy of the default record layout, a slotted one copies no regions (revision 7). The Save control is an icon-and-text button whose accessible name also carries the unsaved-changes dot, so match it by a substring — create the page, and capture the PUT /api/v1/meta/page/... it issues"
       ],
       "acceptance": [
         {
@@ -559,9 +559,9 @@
           "evidence": "the refusal response"
         },
         {
-          "clause": "DENY side of the overlay gate: an overlay write against a type with allowEnvironmentOverlay unset (object/field) answers HTTP 403 not_overridable, while view/dashboard (the ADR-0005 Phase 1 opt-ins) accept",
+          "clause": "DENY side of the overlay gate: an overlay write against a type with allowEnvironmentOverlay unset (object/field) answers HTTP 403 not_overridable, while a view saved into the writable package (the happy path) is accepted",
           "oracle": "api",
-          "verify": "the object-targeting PUT returns 403 not_overridable (contract stated on allowEnvironmentOverlay in packages/spec/src/kernel/metadata-plugin.zod.ts); the view PUT from the happy path succeeded",
+          "verify": "the object-targeting PUT returns 403 not_overridable (contract stated on allowEnvironmentOverlay in packages/spec/src/kernel/metadata-plugin.zod.ts); the view PUT from the happy path succeeded. An override of a PACKAGED view is no longer a package-less write: since ADR-0146 D11 it is a declared override saved in the base's .custom pair (studio-authoring.org-override-registry-gate, studio-authoring.package-customize-restore-display), and the package-less write onto it is refused (cli.packageless-overlay-ceremony-and-close)",
           "evidence": "both responses side by side"
         },
         {
@@ -595,7 +595,13 @@
         { "revision": 5, "date": "2026-10-20", "change": "automated.stale removed, automated.ref scoped per objectui spec, and acceptance[2].verify's stale note rewritten — round 14 of wave anchor #24579 (18.0 sweep), on the objectui pointer 6284006658. objectui#13132 (objectui 0b36ffa) repaired both specs the stale record named, and the console pin moved to 616df6598b42 (PR #24829), which contains 0b36ffa. studio-record-page.spec.ts: blob 181b2562c18d at the old pin 12dc7b47c340, 3844a60ccd79 at both 0b36ffa and 616df6598b42; it now sets Page type to record and picks the object from the Object combobox. studio-object-designer.spec.ts: blob 5967807df335, then 58a7f1cbf024 at both; F1 and F4 repaired. objectui measured its whole live suite at 0b36ffa as 61 passed (11.0m) on the shipped showcase; no live run exists at 616df6598b42, so the verdict there is NOT MEASURED. Re-read at the new pin, the ref keeps only what this record claimed: studio-record-page.spec.ts asserts acceptance[2], the clause the stale record sent to hand-driving, and studio-object-designer.spec.ts, on which no clause here rests, now says so. The dogfood pin is unchanged. No clause changed", "ref": "#24857" },
         { "revision": 6, "date": "2026-10-20", "change": "automated.ref and acceptance[3].verify narrowed — checklist-accuracy finding of QA run #24840 (18.0 sweep round 4, Tier 1 at 307ce4c4: acceptance[3]'s verify names the dogfood pin as covering the PUT door), round 15 of wave anchor #24579. Re-read at base b1676441ba, after round 14's ref edit: package-first-authoring.dogfood.test.ts calls protocol.saveMetaItem in-process on a booted CRM stack and never PUT /api/v1/meta. By RUNNER rule 6 (a pin scores only the layer it drives) it scores no clause of this item, and the ref and acceptance[3].verify now say so. The objectui studio-record-page.spec.ts keeps acceptance[2]. No clause changed", "ref": "#24891" },
         { "revision": 7, "date": "2026-10-28", "change": "automated.ref and acceptance[2].verify drop ui/e2e/live/studio-record-page.spec.ts, deleted by the triage of the live specs that ran in no CI lane (ruling Q3 B): measured red on the workspace backend at 1e8e5296, alone, twice: a Studio-created record page is saved kind slotted with no copied regions unless the author picks full (fd73f2b3, the page createSeed in ui/packages/app-shell/src/views/metadata-admin/anchors.ts; both outcomes unit-pinned in anchors.page-seed.test.ts beside it), so the spec's seeded-regions assertion reads a superseded design. acceptance[2] is hand-driven again. Its clause still reads 'seeded from the default layout', which now holds only for a page the author creates full; that clause is left for the ledger's owner. No clause changed", "ref": "#25914" },
-        { "revision": 8, "date": "2026-10-31", "change": "fixtures.requires[0], steps[0] and steps[7] corrected. Checklist-accuracy findings of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): the writable package must declare a dependency on com.example.showcase, or publish-drafts refuses the showcase_task view as outside the package's closure (list-view-object-outside-closure); and a record page created in Studio must also be set to Kind=full, since the record type defaults Kind to slotted (anchors.ts), as revision 7 recorded. The clauses are unchanged. Re-read at 3fd80337", "ref": "#27438" }
+        { "revision": 8, "date": "2026-10-31", "change": "fixtures.requires[0], steps[0] and steps[7] corrected. Checklist-accuracy findings of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): the writable package must declare a dependency on com.example.showcase, or publish-drafts refuses the showcase_task view as outside the package's closure (list-view-object-outside-closure); and a record page created in Studio must also be set to Kind=full, since the record type defaults Kind to slotted (anchors.ts), as revision 7 recorded. The clauses are unchanged. Re-read at 3fd80337", "ref": "#27438" },
+        {
+          "revision": 9,
+          "date": "2026-11-02",
+          "change": "steps[7] re-pointed to Studio's All metadata area on the writable package's leg (#28579 slice 2, FOLLOW-UPS §13c): the Setup create URL it named redirects since #28818. acceptance[4]'s clause said view/dashboard 'accept' an overlay as the ADR-0005 opt-ins; its verify always read the happy-path save into the writable package, and the package-less overlay of a packaged view is closed (ADR-0146 D11), so the clause now names what the verify reads and the verify points at the items that score the declared override and the close. The assertion is unchanged. Read at base eb123b7ccc",
+          "ref": "#28579"
+        }
       ]
     },
     {
@@ -3845,6 +3851,190 @@
           "date": "2026-10-31",
           "change": "fixtures.requires[1] and acceptance[4] name the host config the no-storage leg needs. Checklist-accuracy finding of QA run #27438 (18.3.0 wave 3, parked on anchor #27377; slice S4, #28338): a plugin-less production stack booted on SQLite instead of refusing. That is by design: shouldBootWithLibrary sends a config with no instantiated plugin through createStandaloneStack, which provisions the SQLite default, and only a host config reaches the storage guard (the integration pin boots one). The clause is unchanged for the shape it was written for. Re-read at 3fd80337",
           "ref": "#27438"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.customization-pair-ensure-door",
+      "title": "POST /packages/:id/ensure-customization is the one idempotent creation path of <base>.custom — explicit <base namespace>_custom, a ^major dependency, 201 then 200, walled 403 — and a base is not uninstalled while its pair is installed",
+      "since": "v18",
+      "status": "active",
+      "revision": 2,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "admin (holds manage_metadata; single posture)",
+        "member (no manage_metadata)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported; the admin session and a member session",
+          "the stock read-only base com.example.showcase (examples/app-showcase/objectstack.config.ts: id com.example.showcase, namespace showcase, version 0.1.0 — a booted code package, so read-only to isWritablePackage) and its customization pair com.example.showcase.custom (namespace showcase_custom, dependency ^0 on the base), created by the ensure door on the first customization; the run starts with no pair",
+          "for the uninstall leg: a writable project base of the run's own and its pair installed as an exported pair — POST /api/v1/packages { manifest: { id: 'com.example.qa-pair-base', name: 'QA pair base', version: '1.0.0', type: 'app', namespace: 'qapb', scope: 'project' } }, then POST /api/v1/packages { manifest: { id: 'com.example.qa-pair-base.custom', name: 'QA pair base (custom)', version: '0.1.0', type: 'module', namespace: 'qapb_custom', dependencies: { 'com.example.qa-pair-base': '^1' } } }; both deleted at teardown, the pair first"
+        ],
+        "knownGaps": [
+          "MEASURED FROM SOURCE (base eb123b7ccc): the pair-naming 409 is unreachable for a read-only base at DELETE /api/v1/packages/:id. The door refuses every read-only package first — a booted code package or an installed package of scope system or cloud — with 422 WRITABLE_PACKAGE_REQUIRED (requireWritablePackage runs before deletePackage, which is where assertPackageUninstallable is asked), so DELETE /api/v1/packages/com.example.showcase answers 422 whether its pair exists or not; packages/runtime/src/domains/packages-uninstall-refuse-before-mutate.test.ts pins exactly that ('a base the deployment ships … still answers the read-only 422 first'). The ensure door, meanwhile, refuses a writable base (409, customize it directly). So the open REST door reaches the pair-naming refusal only for a writable base whose pair was installed as an exported pair (fixtures.requires[2]); the epic's 「卸载 HotCRM 被拒并点名 hotcrm.custom」 holds at the registry (SchemaRegistry.assertPackageUninstallable), which every uninstall path asks. Recorded in FOLLOW-UPS.md §14b for the seat"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/packages/com.example.showcase/ensure-customization with no body, as admin; then GET /api/v1/packages/com.example.showcase.custom",
+        "repeat the same POST",
+        "refusals, each followed by a GET that shows nothing was installed: the same POST with a JSON body carrying a key; with a query parameter (?x=1); for com.example.showcase.custom (a pair as the base); for an id no package has (com.example.not-installed); for the run's writable project base com.example.qa-pair-base; and as the member",
+        "uninstall legs: DELETE /api/v1/packages/com.example.showcase; DELETE /api/v1/packages/com.example.qa-pair-base (its exported pair installed); GET /api/v1/packages/com.example.qa-pair-base; then DELETE /api/v1/packages/com.example.qa-pair-base.custom followed by DELETE /api/v1/packages/com.example.qa-pair-base"
+      ],
+      "acceptance": [
+        {
+          "clause": "the door creates the pair with the base's pairing: id com.example.showcase.custom, the explicit namespace showcase_custom (never the id-derived 'custom'), a dependency ^0 on the base, writable — 201 with created: true",
+          "oracle": "api",
+          "verify": "step 1 answers 201 with data { basePackageId: 'com.example.showcase', packageId: 'com.example.showcase.custom', namespace: 'showcase_custom', dependencyRange: '^0', created: true, writable: true }; the GET's manifest carries namespace showcase_custom and dependencies { 'com.example.showcase': '^0' }",
+          "evidence": "the 201 body + the package read"
+        },
+        {
+          "clause": "the door is idempotent: a second call answers 200 with created: false and writes nothing",
+          "oracle": "api",
+          "verify": "step 2 answers 200 with the same data except created: false; the pair's record is unchanged",
+          "evidence": "the 200 body + the before/after package reads"
+        },
+        {
+          "clause": "each refusal is thrown before anything is written: a body with keys or a query parameter 400, a pair as the base 400, a base not installed 404, a writable base 409, and a caller without manage_metadata 403",
+          "oracle": "api",
+          "verify": "status and error.code per call: 400 VALIDATION_ERROR (a body with keys — 'The ensure-customization door reads no body'; a query parameter; a pair as the base — 'is itself a paired customization package'), 404 RESOURCE_NOT_FOUND, 409 RESOURCE_CONFLICT ('is writable: customize it directly'), and the member's 403 PERMISSION_DENIED naming the manage_metadata capability; no package appears after any of them",
+          "evidence": "the six refusal bodies + the GETs"
+        },
+        {
+          "clause": "a base is not uninstalled while its pair is installed: the door's 409 RESOURCE_CONFLICT names the pair first and how to keep what it holds, and nothing is removed; with the pair deleted first, the same uninstall succeeds",
+          "oracle": "api",
+          "verify": "step 4's DELETE of com.example.qa-pair-base answers 409 RESOURCE_CONFLICT whose message starts 'Delete the customization package \"com.example.qa-pair-base.custom\" first' and names GET /api/v1/packages/com.example.qa-pair-base.custom/export; the GET still answers 200; after the pair's DELETE (200) the base's DELETE answers 200",
+          "evidence": "the 409 body + the GET + the two 200s"
+        },
+        {
+          "clause": "a read-only base is refused at the uninstall door before the pair is asked: DELETE of the booted showcase answers 422 WRITABLE_PACKAGE_REQUIRED with its pair installed",
+          "oracle": "api",
+          "verify": "step 4's DELETE of com.example.showcase answers 422 WRITABLE_PACKAGE_REQUIRED, and com.example.showcase and its pair are still listed. A 2xx is the FAIL; a 409 naming the pair here would mean the door's order changed — revise fixtures.knownGaps[0] before scoring",
+          "evidence": "the 422 body + the package list"
+        }
+      ],
+      "negative": [
+        "two pairs for one base, or a pair written with namespace 'custom', is the FAIL: the door is the pair's only creation path and its namespace is explicit (ADR-0146 D3, Q4)",
+        "an uninstall that answers 409 after removing the base's registry entry or its stored rows is a half-removed base — the refuse-before-mutate rule (#21276) this refusal shares"
+      ],
+      "traps": [
+        "wrong-persona",
+        "destructive-in-place",
+        "dispatcher-vs-hono-route"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/domains/packages-ensure-customization.test.ts (the door over the real protocol and registry: acceptance[0]–[2], including the walled postures) + packages/runtime/src/domains/packages-uninstall-refuse-before-mutate.test.ts (the 409 naming the pair, nothing moved, and the booted base's 422 first: acceptance[3] and [4]) + packages/objectql/src/registry-assert-package-uninstallable.test.ts. These drive the HttpDispatcher in-process. ui/e2e/live/studio-customize-journey.spec.ts (live Playwright against a booted showcase, in the required Live E2E UI job's test:e2e:live:ci allowlist) drives acceptance[4] at HTTP: DELETE /api/v1/packages/com.example.showcase with its pair installed answers 422 WRITABLE_PACKAGE_REQUIRED, and GET of the base and of the pair still answer 200 — it reads the two packages, not the package list. Acceptance[0]–[3] remain the run's live leg"
+      },
+      "source": [
+        "packages/metadata-protocol/src/protocol-customization-package.ts#ensureCustomizationPackage (the one creation path; idempotent, serialized per pair) + packages/metadata-protocol/src/protocol-customization-package.ts#customizationPairEnsureRefusal",
+        "packages/runtime/src/domains/packages.ts (POST /packages/:id/ensure-customization reads no body and no query; gated as the install door) + packages/runtime/src/route-ledger.ts (POST /packages/:id/ensure-customization: 201 created, 200 already installed)",
+        "packages/objectql/src/registry.ts#assertPackageUninstallable (the pair's refusal, RESOURCE_CONFLICT / 409) + packages/runtime/src/domains/packages.ts#requireWritablePackage (asked first at DELETE /packages/:id) + packages/metadata-protocol/src/package-writability.ts#isWritablePackage",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D3 (auto-created, dependency declared, namespace explicit, the base cannot be uninstalled while its pair exists)",
+        "#28407 (N-13) landed by PR #28512; #28408 (N-14) by PR #28506"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-02",
+          "change": "new item (ADR-0146 N-13 #28407 / PR #28512 and N-14 #28408 / PR #28506): the ensure door's create, idempotence and refusals on the showcase, and the pair's uninstall refusal. Measured from source at base eb123b7ccc: DELETE /packages/:id refuses a read-only base 422 WRITABLE_PACKAGE_REQUIRED before the pair is asked, so the 409 naming the pair is driven on a writable base with an exported pair (knownGaps[0], FOLLOW-UPS §14b)",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "automated adds the slice 3 live spec (ui/e2e/live/studio-customize-journey.spec.ts) for acceptance[4]: the showcase's uninstall answers 422 WRITABLE_PACKAGE_REQUIRED live, as knownGaps[0] measured from source; the slice 3 run (base 128681f4) measured the same. No clause, step or fixture changed",
+          "ref": "#28579"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.setup-metadata-redirects-to-studio",
+      "title": "Setup's metadata URLs open Studio's All metadata area in one hop, the query naming the leg, while every datasource URL stays in Setup; the retired Packaged automation bookmark opens Studio's Automations pillar",
+      "since": "v18",
+      "status": "active",
+      "revision": 2,
+      "priority": "P2",
+      "surface": "browser",
+      "personas": [
+        "admin"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin (admin@objectos.ai / admin123), and a console built from this tree with `pnpm console:build`",
+          "the stock datasource showcase_external (integration-system.external-datasource-federated-read's specimen) for the Setup-kept leg"
+        ],
+        "knownGaps": [
+          "AUTOMATION LIVES UNDER ui/ — the routing pins run from ui/: `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/console/__tests__/AppContent.setupMetadataStudio-28578.test.tsx` and `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/studio-design/setupMetadataRedirect.test.ts`"
+        ]
+      },
+      "steps": [
+        "type each URL into the address bar and record the history chain (one hop or two) and the page that renders: /_console/apps/setup/metadata, …/metadata/object, …/metadata/object/showcase_task, …/metadata/object/showcase_task?package=com.example.showcase, …/metadata/position?scope=environment, …/metadata/object/showcase_task?review=1, …/metadata/object/showcase_task#fields, and the pre-refactor alias …/component/metadata/resource/showcase_task?type=object. The console first rewrites an app segment to the app's canonical one (/apps/setup → /apps/com.objectstack.setup, /apps/showcase_app → /apps/com.example.showcase): record that hop on its own, or type the canonical segment",
+        "the same metadata path under another app's segment (/_console/apps/showcase_app/metadata/object)",
+        "Setup-kept: /_console/apps/setup/metadata/datasource, …/metadata/datasource/showcase_external and …/component/metadata/resource/showcase_external?type=datasource",
+        "the retired Packaged automation bookmark: /_console/apps/setup/component/automation/packaged, then the same with ?package=com.example.showcase"
+      ],
+      "acceptance": [
+        {
+          "clause": "every Setup metadata URL lands on Studio's All metadata area in one hop, on the same page below metadata, with its query and hash carried",
+          "oracle": "dom",
+          "verify": "per URL of steps 1–2, past the app segment's canonical rewrite, the chain has two entries (the Setup URL and its target) and the target is /_console/studio/~all/metadata/REST (setupMetadataStudioPath); the area's page renders there, never Setup's list or edit page",
+          "evidence": "the per-URL chain + target table, with one screenshot per page kind"
+        },
+        {
+          "clause": "the query names the leg: ?package=X opens X's leg keeping the parameter, ?scope=environment opens the cross-package leg and drops ?package, ?review=1 and the hash are kept",
+          "oracle": "dom",
+          "verify": "…?package=com.example.showcase lands on /_console/studio/com.example.showcase/metadata/object/showcase_task?package=com.example.showcase, whose object item then opens in its pillar, /_console/studio/com.example.showcase/data?surface=object%3Ashowcase_task (areaItemPillarPath; ADR-0146 D1, a pillar type opens its pillar); ?scope=environment on /_console/studio/~all/metadata/position?scope=environment; ?review=1 survives the redirect (the item page then opens the draft review and drops it) and #fields survives (areaLocationRedirect)",
+          "evidence": "the three landing URLs"
+        },
+        {
+          "clause": "the datasource stays in Setup: its list, item and legacy-alias URLs render Setup's pages and never redirect",
+          "oracle": "dom",
+          "verify": "step 3's URLs settle on Setup's datasource pages under the app's canonical segment, /_console/apps/com.objectstack.setup/metadata/datasource[/showcase_external], with no /studio entry in the chain, and render Setup's Datasources list (listing showcase_external) and its edit page (metadata-edit-datasource) (SETUP_KEPT_METADATA_TYPE is datasource; ADR-0146 D1 keeps it in Setup)",
+          "evidence": "the settled URLs + the page screenshots"
+        },
+        {
+          "clause": "the retired Packaged automation bookmark opens Studio: with a package its Automations pillar, without one the cross-package list of flows",
+          "oracle": "dom",
+          "verify": "step 4 lands on /_console/studio/~all/metadata/flow and on /_console/studio/com.example.showcase/automations?package=com.example.showcase (packagedAutomationStudioPath)",
+          "evidence": "the two landing URLs"
+        }
+      ],
+      "negative": [
+        "a Setup metadata URL that renders a Setup metadata page (other than a datasource's), or lands in two hops through Setup's canonical route, is the FAIL ADR-0146 D1 rules out: Setup carries no metadata editor",
+        "a datasource URL redirected to Studio is a FAIL — the area sends datasource URLs back to Setup, so it would loop"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "hydration-race"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/console/__tests__/AppContent.setupMetadataStudio-28578.test.tsx (the routed console: one hop to Studio for every TO_STUDIO URL, the STAYS datasource URLs, the Packaged automation bookmark) + ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.test.ts + noSetupMetadataLink-28578.test.ts (no Studio source links into /apps/APP/metadata). Router-level in jsdom with a stubbed Studio; the run's leg is the built console"
+      },
+      "source": [
+        "ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts#setupMetadataStudioPath, ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts#SETUP_KEPT_METADATA_TYPE, ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts#packagedAutomationStudioPath",
+        "ui/packages/app-shell/src/views/studio-design/metadataArea.ts#areaLocationRedirect (the leg the query names)",
+        "ui/packages/app-shell/src/console/AppContent.tsx (SetupMetadataRoute and LegacyMetadataRedirect on Setup's metadata routes)",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D1 (Studio owns all metadata; the datasource stays in Setup) and D11 (Packaged automation retires)",
+        "#28578 (N-28) landed by PR #28818, with PR #28785 for the Packaged automation half",
+        "cross-ref: platform-core.home-admin-cluster-links (the Administration targets and the legacy system/* URLs, re-pointed by slice 1); integration-system.external-datasource-federated-read (the datasource's own pages)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-02",
+          "change": "new item (ADR-0146 N-28, #28578 / PR #28818 with PR #28785): Setup's metadata URLs open Studio's All metadata area in one hop on the leg their query names, the datasource stays in Setup, and the Packaged automation bookmark opens Studio. Read from source at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "steps[0], acceptance[0], [1] and [2] corrected, assertion defects measured in the slice 3 run (base 128681f4): the console first rewrites /apps/setup and /apps/showcase_app to their canonical app segments, a hop of its own that the routing pin's stubbed app list does not make (typed with the canonical segment, each metadata URL reaches Studio in one hop); a package leg's object item opens its Data pillar (areaItemPillarPath, ADR-0146 D1), so the ?package landing is followed by that pillar; ?review=1 is carried by the redirect and dropped by the item page once it opens the draft review; and acceptance[2] named the jsdom stub test ids, now Setup's real Datasources page and metadata-edit-datasource. The run scored acceptance[1] FAIL against revision 1 for the pillar hop. acceptance[0] and [3]'s cross-package landing (/studio/~all/metadata/TYPE) is unchanged: the run found the area's list rewriting it to one package's leg, a product finding in FOLLOW-UPS §15",
+          "ref": "#28579"
         }
       ]
     }

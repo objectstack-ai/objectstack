@@ -86,6 +86,42 @@ export function resolveDeploymentAppName(
 }
 
 /**
+ * The deployment's base URL for the template context's `baseUrl` key, so a
+ * template can render an absolute link (`{{baseUrl}}/<object>/<id>`): the
+ * chain `os serve` resolves this deployment's address with, plus the one
+ * config carrier the template context already has, ending without a trailing
+ * slash. Order: `OS_AUTH_URL` (legacy `BETTER_AUTH_URL`) > `OS_BASE_URL` >
+ * `config.email.defaultTemplateContext.baseUrl` > `http://localhost:<port>`.
+ * Env wins, as it does for `appName`.
+ *
+ * ⛔ A MIRROR, not a second authority. The source is `resolveAuthBaseUrl` in
+ * `@objectstack/cli`'s `serve.ts`, which this package cannot import (the CLI
+ * depends on it). The parity pin lives where both are reachable:
+ * `serve-email-base-url-parity.test.ts` in `@objectstack/cli`, which drives
+ * both readers over the same environment and goes red when either chain moves.
+ * What is mirrored, and kept exactly as the source does it:
+ *  - `??`, not `||`: a SET-but-empty variable is a value and is not skipped,
+ *    as `readEnvWithDeprecation` and `serve` treat it (serve then warns about
+ *    it at boot; this reader adds no second dialect for it);
+ *  - the local tail's port is the one `serve`'s `--port` default reads
+ *    (`OS_PORT` > legacy `PORT` > `3000`), and a `--port` on argv reaches it
+ *    because `serve` exports it into the environment before the config loads.
+ * Not mirrored, because no reader here can know it: the `https` tail of a
+ * TLS listener and a dev port that shifted off a busy one. Both are the
+ * unconfigured local default only; a deployment reached anywhere else sets
+ * `OS_AUTH_URL` or `OS_BASE_URL`, which win.
+ */
+function resolveDeploymentBaseUrl(
+  cfgEmail: Record<string, any>,
+  env: NodeJS.ProcessEnv,
+): string {
+  const port = env.OS_PORT ?? env.PORT ?? '3000';
+  const value = env.OS_AUTH_URL ?? env.BETTER_AUTH_URL ?? env.OS_BASE_URL
+    ?? cfgEmail.defaultTemplateContext?.baseUrl ?? `http://localhost:${port}`;
+  return String(value).replace(/\/+$/, '');
+}
+
+/**
  * Resolve what `EmailServicePlugin` is constructed with, from `config.email`
  * plus `OS_EMAIL_*` env (env wins, so an operator can override per environment).
  *
@@ -140,7 +176,9 @@ export function resolveDeploymentAppName(
  * spelled `defaultTemplateContext: { appName: … }` made `OS_APP_NAME` inert and
  * the per-environment override an operator has for a repo-pinned config did
  * nothing, silently, in the mail body AND in the `no-reply@<slug>.local`
- * fallback sender derived from it. Every OTHER key of `defaultTemplateContext`
+ * fallback sender derived from it. `baseUrl` is the second key resolved the
+ * same way: the deployment's address, env first (see
+ * `resolveDeploymentBaseUrl`). Every OTHER key of `defaultTemplateContext`
  * is unchanged: it has no env or dedicated-config carrier, so the author's
  * context is still spread through wholesale.
  */
@@ -198,9 +236,13 @@ export function resolveEmailCapabilityArg(
   // `config.email.appName` > `config.email.defaultTemplateContext.appName` >
   // top-level `config.appName` > 'ObjectStack'.
   const cfgTemplateContext = cfgEmail.defaultTemplateContext || {};
+  // `baseUrl` is placed after the spread for the same reason, with the chain
+  // {@link resolveDeploymentBaseUrl} documents. A send's own `data.baseUrl`
+  // still wins: `EmailService` spreads the send's data over this context.
   const defaultTemplateContext = {
     ...cfgTemplateContext,
     appName: resolveDeploymentAppName(cfgEmail, env, configAppName),
+    baseUrl: resolveDeploymentBaseUrl(cfgEmail, env),
   };
   // Provide a sensible fallback `from` so templates can render even before
   // operators configure SMTP/SaaS. The log transport simply prints to stdout;

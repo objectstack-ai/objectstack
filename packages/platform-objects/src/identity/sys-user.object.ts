@@ -86,7 +86,6 @@ export const SysUser = ObjectSchema.create({
   description: 'User accounts for authentication',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{name}',
   highlightFields: ['name', 'email', 'email_verified'],
 
   // Custom actions — generic CRUD is suppressed because user accounts are

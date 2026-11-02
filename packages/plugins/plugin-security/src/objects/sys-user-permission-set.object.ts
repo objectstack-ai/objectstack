@@ -40,13 +40,13 @@ export const SysUserPermissionSet = ObjectSchema.create({
   // user and the set. With no pointer declared, the registry's designate-only
   // pass stamped `nameField: 'id'` (the first title-eligible field), so a
   // renderer honouring ADR-0079's order (an explicit `nameField` wins over
-  // `titleFormat`) drew the raw id as the record page's H1. `titleFormat` is
-  // the rung below the pointer: a renderer reaches it only where the title has
-  // no value (the user is not readable by this reader, or no longer exists).
+  // `titleFormat`) drew the raw id as the record page's H1. The retired
+  // `titleFormat` template, the rung below the pointer where the title has no
+  // value (the user is not readable by this reader, or no longer exists), is
+  // gone (refused at save and by `os validate`).
   // `sys-user-permission-set-person-title.test.ts` pins the title.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{user_id} → {permission_set}',
   highlightFields: ['user_id', 'permission_set', 'organization_id'],
 
   fields: {
@@ -66,7 +66,7 @@ export const SysUserPermissionSet = ObjectSchema.create({
     // `sys_user` applies, so the title carries nothing that reader could not
     // read on the user itself: a user the reader may not read, or one that no
     // longer exists, leaves the title null — never a value computed in its
-    // place — and a renderer falls to `titleFormat` below it.
+    // place — and a renderer falls to its derivation below it.
     // `user_id` is read only through the hop (a bare read beside a traversal
     // is refused, `traversal-bare-and-traversed`). Both columns are required
     // (the set by name, ADR-0131 D4); a legacy grant the v18 ceremony's

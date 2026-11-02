@@ -77,6 +77,8 @@ export * from './email-config.zod';
 export * from './email-template.zod';
 export * from './email-template.form';
 export * from './sms-config.zod';
+export * from './push-config.zod';
+export * from './push-device.zod';
 export * from './metadata-form-registry';
 // compliance.zod (GDPR/HIPAA/PCI configs) and masking.zod (role-based data
 // masking) were REMOVED per ADR-0056 D8 "design+enforce or remove": both were

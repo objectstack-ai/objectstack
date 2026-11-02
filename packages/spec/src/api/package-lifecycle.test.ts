@@ -16,6 +16,7 @@ import {
   RevertPackageCommitResponseSchema,
   RollbackToPackageCommitResponseSchema,
   PackageExportManifestSchema,
+  PackageExportBundleSchema,
   ReassignOrphanedMetadataResponseSchema,
   DuplicatePackageResponseSchema,
   PackagePublishResultSchema,
@@ -25,6 +26,7 @@ import {
 } from './package-lifecycle.zod';
 import { PackagePublishResultSchema as SystemPackagePublishResultSchema } from '../system/metadata-persistence.zod';
 import { CONNECTOR_CREDENTIAL_MAP_PATHS, redactConnectorItem } from '../integration/connector-credential-redaction';
+import { InstalledPackageSourceSchema } from '../kernel/package-registry.zod';
 
 describe('the ruled re-export of PackagePublishResultSchema into the `/api` namespace', () => {
   it('is the SAME declaration as the `/system` original — a re-export, never a second copy', () => {
@@ -271,6 +273,129 @@ describe('PackageExportManifestSchema.withheldMaps names each map the export wit
     ['an entry with no item name', { type: 'connector', path: 'providerConfig.headers' }],
   ])('refuses %s', (_label, entry) => {
     expect(PackageExportManifestSchema.safeParse({ ...identity, withheldMaps: [entry] }).success).toBe(false);
+  });
+});
+
+describe('PackageExportBundleSchema declares the whole-deployment export as composed per-package exports (#28914)', () => {
+  /**
+   * The bundle the card's done criteria name: a base, its `.custom` pair and a
+   * third package that extends the base, dependencies first. Each entry is
+   * shaped as `GET /packages/:id/export` answers it — the pair carries its
+   * overriding item with the `overrides` block (ADR-0146 D8 item 3), and the
+   * connector keeps its `credentialRef` as the reference it is.
+   */
+  const bundle = {
+    packages: [
+      {
+        id: 'com.example.crm',
+        name: 'example-crm',
+        version: '2.1.0',
+        label: 'Example CRM',
+        objects: [{ name: 'crm_customer', label: 'Customer', fields: { name: { type: 'text' } } }],
+        views: [{ name: 'crm_customer_list', object: 'crm_customer', type: 'grid' }],
+        connectors: [{
+          name: 'crm_vendor',
+          label: 'Vendor',
+          type: 'api',
+          provider: 'openapi',
+          providerConfig: { spec: 'https://vendor.example.com/openapi.json' },
+          auth: {
+            type: 'oauth2',
+            grant: 'client_credentials',
+            tokenUrl: 'https://vendor.example.com/oauth/token',
+            clientId: 'client-123',
+            credentialRef: 'VENDOR_CLIENT_SECRET',
+          },
+        }],
+      },
+      {
+        id: 'com.example.crm.custom',
+        name: 'com.example.crm.custom',
+        version: '1.0.0',
+        views: [{
+          name: 'crm_customer_list',
+          object: 'crm_customer',
+          type: 'grid',
+          overrides: { package: 'com.example.crm', basedOn: '2.1.0' },
+        }],
+      },
+      {
+        id: 'com.example.revenue',
+        name: 'example-revenue',
+        version: '1.0.0',
+        objectExtensions: [{ extend: 'crm_customer', fields: { revenue_tier: { type: 'text' } } }],
+      },
+    ],
+  };
+
+  it('parses the bundle and PRESERVES every entry, in the order listed', () => {
+    const result = PackageExportBundleSchema.safeParse(bundle);
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data).toEqual(bundle);
+    expect(result.data.packages.map((entry) => entry.id)).toEqual([
+      'com.example.crm',
+      'com.example.crm.custom',
+      'com.example.revenue',
+    ]);
+  });
+
+  it('judges each entry by THE per-package export schema — composed, never a second copy', () => {
+    expect(PackageExportBundleSchema.shape.packages.element).toBe(PackageExportManifestSchema);
+    const nameless = { packages: [bundle.packages[0], { objects: [] }] };
+    const result = PackageExportBundleSchema.safeParse(nameless);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path.join('.'))).toEqual(
+      expect.arrayContaining(['packages.1.id', 'packages.1.name', 'packages.1.version']),
+    );
+  });
+
+  it('parses an empty bundle — a deployment that holds only platform packages', () => {
+    expect(PackageExportBundleSchema.safeParse({ packages: [] }).success).toBe(true);
+  });
+
+  it('requires `packages` — an answer with no list is not a bundle', () => {
+    const result = PackageExportBundleSchema.safeParse({});
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.path).toEqual(['packages']);
+  });
+
+  it('is strict at the top level — a member the door starts serving is a change here first', () => {
+    const result = PackageExportBundleSchema.safeParse({ ...bundle, cycles: [] });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues[0]?.code).toBe('unrecognized_keys');
+    expect((result.error.issues[0] as { keys?: string[] }).keys).toEqual(['cycles']);
+  });
+
+  // Declared before it is served (ADR-0049): no runtime mounts
+  // `GET /packages/export` until the server slice of #28914 lands. That
+  // change drops the marker, adds the route's ledger row and flips this test.
+  it('is PLANNED until a runtime serves the route: the describe says so, naming no tracker id', () => {
+    const description = PackageExportBundleSchema.description ?? '';
+    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(description).toContain('ADR-0049');
+    expect(description).toContain('no runtime serves `GET /packages/export` yet');
+    // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the comments.
+    expect(description).not.toMatch(/#\d{3,}/);
+  });
+
+  // Which packages the door selects is read off the registry row's `source`
+  // (InstalledPackageSourceSchema), never derived from `manifest.scope`: the
+  // registry's own rule, and the runtime's #14375 correction of the same
+  // derivation. Both describes state the selection and the missing enabled state.
+  it('selects by the registry row\'s `source`, never by `manifest.scope`, and says it carries no enabled state', () => {
+    const packagesDescription = PackageExportBundleSchema.shape.packages.description ?? '';
+    const description = PackageExportBundleSchema.description ?? '';
+    for (const text of [packagesDescription, description]) {
+      expect(text).toContain('`source`');
+      expect(text).toContain('`code`');
+      expect(text).not.toMatch(/scope/);
+      expect(text).toContain('enabled');
+    }
+    expect(InstalledPackageSourceSchema.options).toContain('code');
   });
 });
 

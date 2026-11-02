@@ -33,6 +33,10 @@
  * `@objectstack/spec/security`, which measured +237 KB on the eager chunk. That
  * file's docblock carries the measurement and the reasoning.
  *
+ * Inside the mobile shell, when it announces `showConnectionSwitcher`, this
+ * renders nothing: `WorkspaceSwitcher` then draws the same badge and name, at
+ * the same widths, as the button that opens the shell's native switcher.
+ *
  * An absent or unrecognized posture (older server, config fetch still in
  * flight or failed) renders nothing, matching how every other posture-keyed
  * affordance in this repo fails toward today's rendering.
@@ -40,6 +44,7 @@
 
 import { useAuth } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { nativeHostCan, useNativeHost } from '@object-ui/mobile';
 import { OrgBadge } from './OrgBadge.js';
 import { postureHasOrgWall, useTenancyPosture } from '../hooks/useTenancyPosture.js';
 
@@ -47,6 +52,10 @@ export function CurrentOrganizationIndicator() {
   const { t } = useObjectTranslation();
   const { organizations, activeOrganization } = useAuth();
   const posture = useTenancyPosture();
+  const nativeSwitcher = nativeHostCan(useNativeHost(), 'showConnectionSwitcher');
+
+  // The shell's switcher button carries the organization instead.
+  if (nativeSwitcher) return null;
 
   // No organization wall in force ⇒ the top bar stays organization-silent,
   // exactly as it is today. Also covers the not-yet-resolved config.

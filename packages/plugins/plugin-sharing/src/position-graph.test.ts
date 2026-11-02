@@ -32,9 +32,11 @@ const ASSIGNMENTS = [
   { position: 'sales_rep', user_id: 'u_rep1' },
   { position: 'sales_rep', user_id: 'u_rep2' },
 ];
+// Every `sys_member` row carries its `id`, as a stored one does: the role read
+// pages by it (#29362) and refuses a row it cannot resume after.
 const MEMBERS = [
-  { role: 'sales_rep', user_id: 'u_legacy_rep' }, // better-auth transition source
-  { role: 'exec', user_id: 'u_exec' },
+  { id: 'm_legacy_rep', role: 'sales_rep', user_id: 'u_legacy_rep' }, // better-auth transition source
+  { id: 'm_exec', role: 'exec', user_id: 'u_exec' },
 ];
 
 describe('PositionGraphService (ADR-0090 D3 — flat expansion)', () => {
@@ -111,8 +113,8 @@ describe('PositionGraphService.holdsPosition — the user-scoped twin of the exp
     { position: 'mgr', user_id: 'u_a', organization_id: 'org_a' },
   ];
   const MEMBER = [
-    { role: 'rep', user_id: 'u_role_a', organization_id: 'org_a' },
-    { role: 'rep', user_id: 'u_role_b', organization_id: 'org_b' },
+    { id: 'm_role_a', role: 'rep', user_id: 'u_role_a', organization_id: 'org_a' },
+    { id: 'm_role_b', role: 'rep', user_id: 'u_role_b', organization_id: 'org_b' },
   ];
   /** Honours every predicate key both reads send: position / role, organization_id, user_id. */
   const engine = {

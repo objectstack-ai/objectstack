@@ -12,6 +12,7 @@ import {
   findUnguardedNullableOperands,
   nullGuardMessage,
   NULL_GUARD_HINT,
+  provenNonNullKeys,
 } from './validate-null-guards.js';
 
 const nullableFields = new Set(['start_date', 'end_date', 'budget', 'spent', 'score']);
@@ -208,6 +209,66 @@ describe('findUnguardedNullableOperands — one answer to "what parses" (#4812)'
   });
 });
 
+describe("findUnguardedNullableOperands — a flow's flattened bare names (#29026)", () => {
+  // A record-triggered run spreads the record's fields to top level, nulls
+  // included, so a bare `budget` IS `record.budget`. The caller names which
+  // bare names are flattened fields; nothing else changes.
+  const bareFields = new Set(['budget', 'score']);
+  const findBare = (source: string, presumed?: ReadonlySet<string>) =>
+    findUnguardedNullableOperands(source, { nullableFields, bareFields, ...(presumed ? { presumed } : {}) });
+
+  it('rejects the unguarded bare comparison that failed the showcase run', () => {
+    const findings = findBare('budget > 200000');
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ operand: 'budget', field: 'budget', operator: '>' });
+  });
+
+  it('accepts a bare `!= null` guard, and a guard on either spelling guards both', () => {
+    expect(findBare('budget != null && budget > 200000')).toEqual([]);
+    expect(findBare('record.budget != null && budget > 200000')).toEqual([]);
+    expect(findBare('budget != null && record.budget > 200000')).toEqual([]);
+    expect(findBare('budget == null || budget <= 200000')).toEqual([]);
+  });
+
+  it('still says `has()` does not guard a bare read', () => {
+    const [finding] = findBare('has(record.budget) && budget > 1');
+    expect(finding).toMatchObject({ operand: 'budget', hasOnlyGuard: true });
+    expect(nullGuardMessage('edge', 'showcase_project', finding!, 'run-fails')).toContain(
+      '`has(record.budget)` does not guard it',
+    );
+  });
+
+  it('leaves a bare name the caller did not name alone (a variable, or not a field)', () => {
+    // `spent` is nullable but not in `bareFields`: a declared variable of the
+    // flow holds that name, and the variable wins over the flattened field.
+    expect(findBare('spent > 1')).toEqual([]);
+    // Without `bareFields` the gate is exactly what it was: no bare name judged.
+    expect(find('budget > 200000')).toEqual([]);
+  });
+
+  it('does not read a comprehension or `cel.bind` variable as the field it shadows', () => {
+    expect(findBare('[1, 2].exists(budget, budget > 1)')).toEqual([]);
+    expect(findBare('cel.bind(score, 3, score > 1)')).toEqual([]);
+    // …but the macro's receiver, and the bind's initialiser, are outside the binding.
+    expect(findBare('[budget].exists(x, x > 1) && budget > 1').map((f) => f.operand)).toEqual(['budget']);
+    expect(findBare('cel.bind(x, score + 1, x > 1)').map((f) => f.operand)).toEqual(['score']);
+  });
+
+  it('presumes what a gating predicate proved (`presumed`)', () => {
+    const proved = provenNonNullKeys('budget != null && score != null', { bareFields });
+    expect([...proved].sort()).toEqual(['record.budget', 'record.score']);
+    expect(findBare('budget > 500000', proved)).toEqual([]);
+    expect(findBare('record.score <= 3', proved)).toEqual([]);
+    // Proved by only one arm of an `||` is not proved.
+    const half = provenNonNullKeys('budget != null || score != null', { bareFields });
+    expect(findBare('budget > 500000', half).map((f) => f.operand)).toEqual(['budget']);
+  });
+
+  it('proves nothing from a source that does not parse', () => {
+    expect(provenNonNullKeys('budget != null &&', { bareFields }).size).toBe(0);
+  });
+});
+
 describe('nullGuardMessage', () => {
   it('names the rule, the operand and the `!= null` fix', () => {
     const [finding] = find('has(record.end_date) && record.end_date < 5');
@@ -218,6 +279,38 @@ describe('nullGuardMessage', () => {
     expect(msg).toContain('`<`');
     expect(msg).toContain('has(record.end_date)` does not guard it');
     expect(msg).toContain(NULL_GUARD_HINT);
+  });
+
+  it("names a flow condition's real outcome: the run fails and the write lands (#29026)", () => {
+    const [finding] = find('record.budget > 5');
+    const msg = nullGuardMessage("flow 'f' · edge 'e2' condition", 'showcase_project', finding!, 'run-fails');
+    expect(msg).toContain('the flow run fails at this condition');
+    expect(msg).not.toContain('the write is rejected');
+    expect(msg).toContain(NULL_GUARD_HINT);
+  });
+
+  it('names the guard that holds on an insert for a `previous.` operand, and only for one (#29491)', () => {
+    const fullGuard = '`previous != null && previous.budget != null`';
+    const [prior] = find('previous.budget > 5');
+    for (const outcome of ['fail-closed', 'run-fails'] as const) {
+      const msg = nullGuardMessage("validation rule 'r'", 'showcase_project', prior!, outcome);
+      // The shared sentence stays verbatim, and the clause follows it.
+      expect(msg).toContain(`${NULL_GUARD_HINT} On an insert \`previous\` is itself null`);
+      expect(msg).toContain(`guard it with ${fullGuard}.`);
+    }
+    const [current] = find('record.budget > 5');
+    expect(nullGuardMessage("validation rule 'r'", 'showcase_project', current!)).not.toContain('previous');
+    const [bare] = findUnguardedNullableOperands('budget > 5', { nullableFields, bareFields: new Set(['budget']) });
+    expect(nullGuardMessage('edge', 'showcase_project', bare!, 'run-fails')).not.toContain('previous');
+
+    // The guard it names passes this gate, and is the one that evaluates on
+    // an insert, where `previous` is bound to null: the `!= null` test alone
+    // faults there.
+    expect(find('previous != null && previous.budget != null && previous.budget > 5')).toEqual([]);
+    const onInsert = (source: string) =>
+      celEngine.evaluate({ dialect: 'cel', source }, { record: { budget: 1 }, extra: { previous: null } });
+    expect(onInsert('previous != null && previous.budget != null && previous.budget > 5')).toMatchObject({ ok: true, value: false });
+    expect(onInsert('previous.budget != null && previous.budget > 5').ok).toBe(false);
   });
 
   it('closes with the runtime rejection wording verbatim (one voice, two gates)', () => {

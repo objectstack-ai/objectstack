@@ -67,7 +67,6 @@ export const SysSsoProvider = ObjectSchema.create({
   description: 'External SSO identity providers (OIDC / SAML) this system federates login to',
   displayNameField: 'provider_id',
   nameField: 'provider_id', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{provider_id}',
   highlightFields: ['provider_id', 'issuer', 'domain'],
 
   // All mutations go through @better-auth/sso's endpoints under

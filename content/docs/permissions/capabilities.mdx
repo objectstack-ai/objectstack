@@ -121,7 +121,7 @@ export default defineStack({
 | Field | Type | Required | Notes |
 |:--|:--|:--|:--|
 | `name` | `string` | ✅ | The contract. `^[a-z][a-z0-9_.]*$` — lowercase, digits, `_` and `.` |
-| `label` | `string` | optional | Shown in Setup. Defaults to a humanized `name` |
+| `label` | `string` | optional | Shown to the administrator who grants it. Defaults to a humanized `name` |
 | `description` | `string` | optional | What holding the capability permits |
 | `scope` | `'platform' \| 'org'` | optional | Defaults to `'platform'`. `org` = scoped to the caller's organization |
 | `packageId` | `string` | optional | Author-declared fallback provenance (ADR-0086 D3). Normally the registry stamps this for you |
@@ -269,7 +269,7 @@ to store arbitrary JSON on the authorization surface.
 ## Checklist
 
 - [ ] Name is namespaced and lowercase, and does not shadow a platform capability
-- [ ] `label` and `description` are written for the administrator who will grant it in Setup
+- [ ] `label` and `description` are written for the administrator who will grant it
 - [ ] `scope` is `org` unless the privilege really is platform-wide
 - [ ] The declaration is reachable from the stack (`capabilities: [...]`) or a `*.capability.ts` file
 - [ ] No other installed package declares the same name — the registry refuses a second holder at boot

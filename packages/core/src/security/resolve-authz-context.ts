@@ -1922,9 +1922,16 @@ export async function resolveUserAuthzGrants(
   //    membership only when it came back under its bound; at the bound it is a
   //    first page and the membership is read to completion here. Under the
   //    bound nothing more is read.
+  //
+  //    The completion's rows are UNIONED with Leg 1's, never put in their
+  //    place: a completion that comes back with fewer members than Leg 1
+  //    already held (a snapshot older than Leg 1's on another connection) would
+  //    otherwise shorten the list below what the first read alone answered.
+  //    The union cannot add a non-member — both reads are filtered to the
+  //    active organization — so the list is never shorter than Leg 1's.
   if (tenantId) {
     const orgMembers = orgMembersLeg.length >= ORG_MEMBERS_FIRST_READ_ROWS
-      ? await readOrganizationMembersToCompletion(ql, tenantId)
+      ? [...orgMembersLeg, ...await readOrganizationMembersToCompletion(ql, tenantId)]
       : orgMembersLeg; // (read in Leg 1 above)
     const ids = new Set<string>(
       orgMembers
