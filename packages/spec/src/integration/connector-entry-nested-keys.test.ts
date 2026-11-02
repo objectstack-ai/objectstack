@@ -18,8 +18,6 @@ import { ZodError } from 'zod';
 import {
   ConnectorActionSchema,
   ConnectorSchema,
-  DeclarativeConnectorEntryActionSchema,
-  DeclarativeConnectorEntryRetryConfigSchema,
   DeclarativeConnectorEntrySchema,
   RetryConfigSchema,
   defineConnector,
@@ -143,14 +141,25 @@ describe('an authored connector entry refuses a key its nested shapes do not dec
     });
   });
 
-  it('the closed nested shapes are the published twins, declaring exactly the open shapes\' keys', () => {
+  it('the closed nested shapes declare exactly the open shapes\' keys, as the same field instances', () => {
     const entry = DeclarativeConnectorEntrySchema.safeParse({ ...INSTANCE, retryConfig: RETRY });
     expect(entry.success).toBe(true);
-    const keysOf = (schema: unknown) => Object.keys((schema as { shape: Record<string, unknown> }).shape).sort();
-    const retryKeys = keysOf(RetryConfigSchema);
-    const actionKeys = keysOf(ConnectorActionSchema);
-    expect(keysOf(DeclarativeConnectorEntryRetryConfigSchema)).toEqual(retryKeys);
-    expect(keysOf(DeclarativeConnectorEntryActionSchema)).toEqual(actionKeys);
+    const shapeOf = (schema: unknown) => (schema as { shape: Record<string, unknown> }).shape;
+    const unwrapped = (schema: unknown): unknown => {
+      let node = schema as { unwrap?: () => unknown; shape?: unknown };
+      while (node.shape === undefined && typeof node.unwrap === 'function') node = node.unwrap() as typeof node;
+      return node;
+    };
+    const entryShape = shapeOf(DeclarativeConnectorEntrySchema);
+    const retryTwin = shapeOf(unwrapped(entryShape.retryConfig));
+    const actionTwin = shapeOf(unwrapped(unwrapped(entryShape.actions)));
+    const retryKeys = Object.keys(shapeOf(RetryConfigSchema)).sort();
+    const actionKeys = Object.keys(shapeOf(ConnectorActionSchema)).sort();
+    expect(Object.keys(retryTwin).sort()).toEqual(retryKeys);
+    expect(Object.keys(actionTwin).sort()).toEqual(actionKeys);
+    // The same instances, so the authorable-surface gate reaches the open defs through the twins.
+    for (const key of retryKeys) expect(retryTwin[key], `retryConfig.${key}`).toBe(shapeOf(RetryConfigSchema)[key]);
+    for (const key of actionKeys) expect(actionTwin[key], `actions[].${key}`).toBe(shapeOf(ConnectorActionSchema)[key]);
     // Every declared key is accepted by the closed entry …
     const everyRetry = Object.fromEntries(retryKeys.map((k) => [k, (RetryConfigSchema.parse({}) as Record<string, unknown>)[k]]));
     expect(DeclarativeConnectorEntrySchema.safeParse({ ...INSTANCE, retryConfig: everyRetry }).success).toBe(true);

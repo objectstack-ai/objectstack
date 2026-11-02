@@ -45,10 +45,6 @@
     "ConnectorType": "integration/ConnectorType",
     "ConnectorTypeSchema": "integration/ConnectorType",
     "DeclarativeConnectorEntry": "integration/DeclarativeConnectorEntry",
-    "DeclarativeConnectorEntryAction": "integration/DeclarativeConnectorEntryAction",
-    "DeclarativeConnectorEntryActionSchema": "integration/DeclarativeConnectorEntryAction",
-    "DeclarativeConnectorEntryRetryConfig": "integration/DeclarativeConnectorEntryRetryConfig",
-    "DeclarativeConnectorEntryRetryConfigSchema": "integration/DeclarativeConnectorEntryRetryConfig",
     "DeclarativeConnectorEntrySchema": "integration/DeclarativeConnectorEntry",
     "RetryConfig": "integration/RetryConfig",
     "RetryConfigSchema": "integration/RetryConfig"

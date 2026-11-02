@@ -165,8 +165,8 @@ an exception for itself.)
 ## TypeScript Usage
 
 ```typescript
-import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorAppCredentialVendorSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAppCredentialAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorInstanceOAuth2AuthSchema, ConnectorInstanceOAuth2AuthorizationCodeAuthSchema, ConnectorInstanceOAuth2ClientCredentialsAuthSchema, ConnectorInstanceSignedAlipayV3AuthSchema, ConnectorInstanceSignedAliyunAcs3AuthSchema, ConnectorInstanceSignedAuthSchema, ConnectorInstanceSignedTencentCloudTc3AuthSchema, ConnectorOAuth2GrantSchema, ConnectorRetryStrategySchema, ConnectorSigningSchemeSchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, DeclarativeConnectorEntryActionSchema, DeclarativeConnectorEntryRetryConfigSchema, RetryConfigSchema } from '@objectstack/spec/integration';
-import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorAppCredentialVendor, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAppCredentialAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorInstanceOAuth2Auth, ConnectorInstanceOAuth2AuthorizationCodeAuth, ConnectorInstanceOAuth2ClientCredentialsAuth, ConnectorInstanceSignedAlipayV3Auth, ConnectorInstanceSignedAliyunAcs3Auth, ConnectorInstanceSignedAuth, ConnectorInstanceSignedTencentCloudTc3Auth, ConnectorOAuth2Grant, ConnectorRetryStrategy, ConnectorSigningScheme, ConnectorType, DeclarativeConnectorEntry, DeclarativeConnectorEntryAction, DeclarativeConnectorEntryRetryConfig, RetryConfig } from '@objectstack/spec/integration';
+import { ConnectorSchema, ConnectorActionSchema, ConnectorActionEffectSchema, ConnectorAppCredentialVendorSchema, ConnectorInstanceAPIKeyAuthSchema, ConnectorInstanceAppCredentialAuthSchema, ConnectorInstanceAuthSchema, ConnectorInstanceBasicAuthSchema, ConnectorInstanceBearerAuthSchema, ConnectorInstanceNoAuthSchema, ConnectorInstanceOAuth2AuthSchema, ConnectorInstanceOAuth2AuthorizationCodeAuthSchema, ConnectorInstanceOAuth2ClientCredentialsAuthSchema, ConnectorInstanceSignedAlipayV3AuthSchema, ConnectorInstanceSignedAliyunAcs3AuthSchema, ConnectorInstanceSignedAuthSchema, ConnectorInstanceSignedTencentCloudTc3AuthSchema, ConnectorOAuth2GrantSchema, ConnectorRetryStrategySchema, ConnectorSigningSchemeSchema, ConnectorTypeSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from '@objectstack/spec/integration';
+import type { Connector, ConnectorAction, ConnectorActionEffect, ConnectorAppCredentialVendor, ConnectorInstanceAPIKeyAuth, ConnectorInstanceAppCredentialAuth, ConnectorInstanceAuth, ConnectorInstanceBasicAuth, ConnectorInstanceBearerAuth, ConnectorInstanceNoAuth, ConnectorInstanceOAuth2Auth, ConnectorInstanceOAuth2AuthorizationCodeAuth, ConnectorInstanceOAuth2ClientCredentialsAuth, ConnectorInstanceSignedAlipayV3Auth, ConnectorInstanceSignedAliyunAcs3Auth, ConnectorInstanceSignedAuth, ConnectorInstanceSignedTencentCloudTc3Auth, ConnectorOAuth2Grant, ConnectorRetryStrategy, ConnectorSigningScheme, ConnectorType, DeclarativeConnectorEntry, RetryConfig } from '@objectstack/spec/integration';
 
 // Validate data
 const result = ConnectorSchema.parse(data);
@@ -940,40 +940,6 @@ Connector type
 | **effect** | `Enum<'read' \| 'write'>` | optional | What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero |
 
 ### Nested Shape: `DeclarativeConnectorEntry.retryConfig`
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **strategy** | `Enum<'exponential_backoff' \| 'linear_backoff' \| 'fixed_delay' \| 'no_retry'>` | optional (default: `"exponential_backoff"`) | Retry strategy |
-| **maxAttempts** | `number` | optional (default: `3`) | Maximum retry attempts |
-| **initialDelayMs** | `number` | optional (default: `1000`) | Initial retry delay in ms |
-| **maxDelayMs** | `number` | optional (default: `60000`) | Maximum retry delay in ms |
-| **backoffMultiplier** | `number` | optional (default: `2`) | Exponential backoff multiplier |
-| **retryableStatusCodes** | `number[]` | optional (default: `[408,429,500,502,503,504]`) | HTTP status codes to retry |
-| **retryOnNetworkError** | `boolean` | optional (default: `true`) | Retry on network errors |
-| **jitter** | `boolean` | optional (default: `true`) | Add jitter to retry delays |
-
-
----
-
-## DeclarativeConnectorEntryAction
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **key** | `string` | ✅ | Action key (machine name) |
-| **label** | `string` | ✅ | Human readable label |
-| **description** | `string` | optional |  |
-| **inputSchema** | `Record<string, any>` | optional | Input parameters schema (JSON Schema) |
-| **outputSchema** | `Record<string, any>` | optional | Output schema (JSON Schema) |
-| **effect** | `Enum<'read' \| 'write'>` | optional | What the action does upstream: 'read' never mutates (reports acted:0); 'write' does (a successful dispatch reports acted:1). Omit when the effect is not knowable — the step is then reported as unmeasured, not as zero |
-
-
----
-
-## DeclarativeConnectorEntryRetryConfig
-
-### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |

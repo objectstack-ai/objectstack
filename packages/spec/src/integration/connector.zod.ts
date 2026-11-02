@@ -359,13 +359,33 @@ const ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE =
   + "server's tools), and a catalog descriptor's actions describe an integration without dispatching.";
 
 /**
+ * `make()`'s result, built on the first call and handed to every later one — so
+ * two carriers built from it share each field INSTANCE, not only its spelling.
+ */
+function sharedFields<T>(make: () => T): () => T {
+  let built: { value: T } | undefined;
+  return () => (built ??= { value: make() }).value;
+}
+
+/**
  * The retry configuration's declared keys — one declaration, two carriers: the
  * open {@link RetryConfigSchema} and the closed retry shape of an AUTHORED
- * connector entry ({@link DeclarativeConnectorEntryRetryConfigSchema}). A function, so each
- * carrier gets its own field instances (the reason `connectorBaseShape` below
- * records).
+ * connector entry ({@link AuthoredRetryConfigSchema}). Built ONCE, so both
+ * carriers hold the same field instances: the closed twin is module-private
+ * and emits no def of its own, and the authorable-surface gate
+ * (`computeSurfaceReachability()`, `scripts/build-schemas.ts`) recognises the
+ * open `integration/RetryConfig` as authorable through the twin by exactly
+ * that identity (its derived-clone bridge). Built per carrier instead, the
+ * open def was reached by no metadata root and a bare deletion from this
+ * declaration read as unreachable.
+ *
+ * The cost `connectorBaseShape` below avoids at the top level — the guidance
+ * census pairing the open def with the closed declaration's `guidance` — is
+ * read here and does not bite: that pairing is consulted only for a deleted
+ * baseline key the guidance NAMES, and every key the twin's guidance names
+ * (credential-shaped keys) is one the open def has never declared.
  */
-const retryConfigShape = () => ({
+const retryConfigShape = sharedFields(() => ({
   /**
    * Retry strategy
    */
@@ -405,34 +425,28 @@ const retryConfigShape = () => ({
    * Jitter to add randomness to retry delays
    */
   jitter: z.boolean().optional().default(true).describe('Add jitter to retry delays'),
-});
+}));
 
 /**
  * Retry Configuration — the open shape: the retry policy a plugin's connector
  * def carries (`ConnectorSchema`), and the shape the runtime parses a policy
  * with (`resolveConnectorFetchPolicy`, the instance materialization). An
- * AUTHORED entry's `retryConfig` is the closed
- * {@link DeclarativeConnectorEntryRetryConfigSchema}.
+ * AUTHORED entry's `retryConfig` is the closed {@link AuthoredRetryConfigSchema}.
  */
 export const RetryConfigSchema = lazySchema(() => z.object(retryConfigShape()));
 
 /**
  * The CLOSED retry shape of an authored connector entry
  * ({@link DeclarativeConnectorEntrySchema}): the keys {@link RetryConfigSchema}
- * declares, refusing every other, a credential-shaped key with the entry's own
- * prescription. An authored entry is stored as the body the save door accepts
- * (ADR-0005 appendix (c), ruling B), so on an open shape an undeclared key here
- * parsed green, was kept, and meant nothing to the runtime.
- *
- * Exported, and so published as its own def, for the reason the top-level
- * closed carrier is: it is the shape a metadata document's `retryConfig` is
- * parsed against, while {@link RetryConfigSchema} — built with its own field
- * instances (see {@link retryConfigShape}) — is reached by no metadata root,
- * so the authorable-surface gate judges a deletion from the shared declaration
- * on THIS def. The runtime keeps parsing a stored policy with the open
- * {@link RetryConfigSchema}.
+ * declares — the same field instances ({@link retryConfigShape}) — refusing
+ * every other, a credential-shaped key with the entry's own prescription. An
+ * authored entry is stored as the body the save door accepts (ADR-0005
+ * appendix (c), ruling B), so on an open shape an undeclared key here parsed
+ * green, was kept, and meant nothing to the runtime. Module private: the
+ * published carrier stays {@link RetryConfigSchema}, which the runtime keeps
+ * parsing a stored policy with.
  */
-export const DeclarativeConnectorEntryRetryConfigSchema = lazySchema(() => strictObject({
+const AuthoredRetryConfigSchema = lazySchema(() => strictObject({
   surface: "this connector entry's `retryConfig`",
   history: 'Until this shape was closed, an undeclared key here was accepted without effect.',
   guidance: { ...ENTRY_CREDENTIAL_KEYS_GUIDANCE },
@@ -441,9 +455,6 @@ export const DeclarativeConnectorEntryRetryConfigSchema = lazySchema(() => stric
 export type RetryConfig = z.input<typeof RetryConfigSchema>;
 /** Post-parse shape of {@link RetryConfig} — defaults applied, transforms run (ADR-0122). */
 export type RetryConfigParsed = z.infer<typeof RetryConfigSchema>;
-export type DeclarativeConnectorEntryRetryConfig = z.input<typeof DeclarativeConnectorEntryRetryConfigSchema>;
-/** Post-parse shape of {@link DeclarativeConnectorEntryRetryConfig} — defaults applied, transforms run (ADR-0122). */
-export type DeclarativeConnectorEntryRetryConfigParsed = z.infer<typeof DeclarativeConnectorEntryRetryConfigSchema>;
 
 // ============================================================================
 // Error Mapping Configuration — RETIRED (ADR-0049 enforce-or-remove)
@@ -873,10 +884,11 @@ export type ConnectorActionEffect = z.input<typeof ConnectorActionEffectSchema>;
 /**
  * A connector action's declared keys — one declaration, two carriers: the open
  * {@link ConnectorActionSchema} and the closed action shape of an AUTHORED
- * connector entry ({@link DeclarativeConnectorEntryActionSchema}). A function, so each
- * carrier gets its own field instances.
+ * connector entry ({@link AuthoredConnectorActionSchema}). Built ONCE, so both
+ * carriers hold the same field instances, for the reason
+ * {@link retryConfigShape} records.
  */
-const connectorActionShape = () => ({
+const connectorActionShape = sharedFields(() => ({
   key: z.string().describe('Action key (machine name)'),
   label: z.string().describe('Human readable label'),
   description: z.string().optional(),
@@ -896,26 +908,26 @@ const connectorActionShape = () => ({
    * the declaration from right here.
    */
   effect: ConnectorActionEffectSchema.optional(),
-});
+}));
 
 /**
  * Connector Action Definition — the open shape: the actions a plugin's
  * connector def carries and a provider derives (`ConnectorSchema`). An
  * AUTHORED entry's `actions` elements are the closed
- * {@link DeclarativeConnectorEntryActionSchema}.
+ * {@link AuthoredConnectorActionSchema}.
  */
 export const ConnectorActionSchema = lazySchema(() => z.object(connectorActionShape()));
 
 /**
  * The CLOSED action shape of an authored connector entry
  * ({@link DeclarativeConnectorEntrySchema}): the keys
- * {@link ConnectorActionSchema} declares, refusing every other, for the reason
- * {@link DeclarativeConnectorEntryRetryConfigSchema} records, and exported for
- * the same reason. A credential-shaped key meets the entry's own prescription;
- * an execution binding — `method`, `path`, `url` — meets ADR-0097 §5's: an
- * action carries none.
+ * {@link ConnectorActionSchema} declares — the same field instances — refusing
+ * every other, for the reason {@link AuthoredRetryConfigSchema} records. A
+ * credential-shaped key meets the entry's own prescription; an execution
+ * binding — `method`, `path`, `url` — meets ADR-0097 §5's: an action carries
+ * none. Module private: the published carrier stays {@link ConnectorActionSchema}.
  */
-export const DeclarativeConnectorEntryActionSchema = lazySchema(() => strictObject({
+const AuthoredConnectorActionSchema = lazySchema(() => strictObject({
   surface: 'this connector action',
   history: 'Until this shape was closed, an undeclared key here was accepted without effect.',
   guidance: {
@@ -928,9 +940,6 @@ export const DeclarativeConnectorEntryActionSchema = lazySchema(() => strictObje
   },
 }, connectorActionShape()));
 export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
-export type DeclarativeConnectorEntryAction = z.input<typeof DeclarativeConnectorEntryActionSchema>;
-/** Post-parse shape of {@link DeclarativeConnectorEntryAction} (ADR-0122). */
-export type DeclarativeConnectorEntryActionParsed = z.infer<typeof DeclarativeConnectorEntryActionSchema>;
 
 // `ConnectorTriggerSchema` / `ConnectorTrigger` (`key`, `label`, `description`,
 // `type: 'polling' | 'webhook'`, `intervalSeconds`, and the `interval` tombstone
@@ -952,7 +961,7 @@ export type DeclarativeConnectorEntryActionParsed = z.infer<typeof DeclarativeCo
  * one-declaration, two-doors finding).
  *
  * `authored` selects the closed nested shapes the closed entry is built with
- * ({@link DeclarativeConnectorEntryRetryConfigSchema}, {@link DeclarativeConnectorEntryActionSchema}),
+ * ({@link AuthoredRetryConfigSchema}, {@link AuthoredConnectorActionSchema}),
  * so the entry refuses an undeclared key inside `retryConfig` and inside each
  * `actions` element as it does at its own top level; the open carrier keeps
  * the open nested shapes.
@@ -1042,7 +1051,7 @@ const connectorBaseShape = (authored = false) => ({
   ),
 
   /** Zapier-style Capabilities */
-  actions: z.array(authored ? DeclarativeConnectorEntryActionSchema : ConnectorActionSchema).optional(),
+  actions: z.array(authored ? AuthoredConnectorActionSchema : ConnectorActionSchema).optional(),
 
   /**
    * `triggers` — RETIRED (ADR-0049 enforce-or-remove). A connector trigger never
@@ -1108,7 +1117,7 @@ const connectorBaseShape = (authored = false) => ({
   /**
    * Retry configuration
    */
-  retryConfig: (authored ? DeclarativeConnectorEntryRetryConfigSchema : RetryConfigSchema).optional().describe('Retry configuration'),
+  retryConfig: (authored ? AuthoredRetryConfigSchema : RetryConfigSchema).optional().describe('Retry configuration'),
   
   /**
    * `connectionTimeoutMs` — RETIRED (ADR-0049 enforce-or-remove). A bounded,

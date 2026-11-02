@@ -24,8 +24,6 @@
     "integration/ConnectorSigningScheme",
     "integration/ConnectorType",
     "integration/DeclarativeConnectorEntry",
-    "integration/DeclarativeConnectorEntryAction",
-    "integration/DeclarativeConnectorEntryRetryConfig",
     "integration/RetryConfig"
   ]
 }
