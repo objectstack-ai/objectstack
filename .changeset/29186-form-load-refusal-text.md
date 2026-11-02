@@ -5,7 +5,7 @@
 
 fix(console): a refused edit-form record read says a localized line, never the response body
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 An edit form (`/forms/NAME?recordId=ID`, and the in-app edit route) reads its record before it draws. When that read was refused, the banner said `Could not open record "ID" of OBJECT for editing (403): {"error":…}`: the record id, the object's machine name, the status and the server's JSON, in English. The load now reads its refusal through the same `WriteRefusal` the submit uses, and the banner says one localized line:
