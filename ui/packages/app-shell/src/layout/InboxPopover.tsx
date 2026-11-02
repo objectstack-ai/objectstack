@@ -368,7 +368,7 @@ export function InboxPopover({
         <Button
           variant="ghost"
           size="icon"
-          className={`h-8 w-8 relative shrink-0 ${pulse ? 'motion-safe:animate-bounce' : ''}`}
+          className={`h-8 w-8 max-md:size-11 relative shrink-0 ${pulse ? 'motion-safe:animate-bounce' : ''}`}
           aria-label={ariaLabel}
           title={t('sidebar.inbox', { defaultValue: 'Inbox' }) as string}
         >
