@@ -111,6 +111,14 @@ export const RECORD_RELATED_ENLARGE_PARAM = 'related';
  */
 export const RECORD_RELATED_ENLARGE_PUSHED_STATE = '__relatedEnlargePushed';
 
+/**
+ * History-state flag for the phone nav drawer: the entry was pushed when the
+ * drawer opened, so Back closes the drawer and stays on the page, and any
+ * other close pops it. Not a URL parameter. Written and read only by
+ * `usePhoneNavDrawerHistory`.
+ */
+export const NAV_DRAWER_OPEN_STATE = '__navDrawerOpen';
+
 /** Command palette overlay (ADR-0054 Phase 1; alias `cmdk`). */
 export const COMMAND_PALETTE_PARAM = 'palette';
 

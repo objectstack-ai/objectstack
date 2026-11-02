@@ -13,10 +13,19 @@ import { RecordPointerCell, type RecordPointerSource } from './RecordPointerCell
  * The class list both faces of {@link LinkCell} wear — the anchor is a visual
  * no-op against the span it upgrades, so a list does not change appearance
  * depending on whether its host publishes record URLs.
+ *
+ * `max-md:pointer-events-none` (objectstack#29219): below 768 px `ObjectGrid`
+ * draws every row as a phone card (`useObjectGridMobile`'s breakpoint), and
+ * the card opens the same record through the same `navigation.handleClick`.
+ * The link inside it is one text line in the card's subtitle, a target far
+ * under the 44 px a finger needs, so on a phone the tap goes through to the
+ * card around it: full width, and as tall as its title and subtitle lines.
+ * The link keeps its focus, Enter and Space; the desktop table, at 768 px and
+ * up, is unchanged.
  */
 
 const LINK_CELL_CLASS =
-  'text-primary font-medium underline-offset-4 hover:underline cursor-pointer truncate block max-w-full';
+  'text-primary font-medium underline-offset-4 hover:underline cursor-pointer truncate block max-w-full max-md:pointer-events-none';
 
 /**
  * The same list with the one-line clamp swapped for wrapping — what a cell in a

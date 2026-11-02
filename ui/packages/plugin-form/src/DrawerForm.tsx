@@ -69,6 +69,8 @@ import { usePermissions } from '@object-ui/permissions';
 import { useOccSave } from './occSave';
 import {
   NO_LOAD_FAILURES,
+  RecordNotFoundError,
+  RecordNotFoundState,
   beginLoadRun,
   shownLoadFailure,
   type LoadFailures,
@@ -443,9 +445,15 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
       try {
         const data = await dataSource.findOne(schema.objectName, schema.recordId);
         if (cancelled) return;
+        // `findOne` answers `null` for a record that does not exist: there is
+        // nothing to edit, so the read failed, and the form is not seeded.
+        if (data == null) {
+          run.fail(new RecordNotFoundError(schema.objectName, schema.recordId));
+          return;
+        }
         loadedRecordIdRef.current = schema.recordId;
         loadedRecordRef.current = snapshotLoadedRecord(schema, data);
-        setFormData(data || {});
+        setFormData(data);
         // The record on screen is the one this run read, so an earlier record
         // read's failure no longer describes it. A schema failure stays: this
         // read says nothing about the object's fields.
@@ -775,6 +783,9 @@ const DrawerFormBody: React.FC<DrawerFormProps> = ({
   };
 
   const renderContent = () => {
+    if (error instanceof RecordNotFoundError) {
+      return <RecordNotFoundState testId="drawer-form-record-not-found" />;
+    }
     if (error) {
       return (
         <div className="p-4 border border-red-300 bg-red-50 rounded-md">

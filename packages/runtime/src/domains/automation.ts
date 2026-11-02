@@ -252,17 +252,22 @@ function recordIdAlias(objectName: unknown): string | undefined {
  * judged, exactly as the run receives it. Read by the trigger routes and a
  * declared `type: 'flow'` endpoint, which share the builder, for flow start
  * admission's third question (`refuseUnreadableFlowStartRecords`).
+ *
+ * `inputs` is the whole built `params` bag, row slots included: every value
+ * the run's input variables are bound from, each judged against the object
+ * the flow's own definition reads it from, where it declares one.
  */
 export function flowStartRecordKeys(automationContext: Record<string, unknown>): {
     objectName: unknown;
     recordKeys: FlowStartRecordKeys;
+    inputs: FlowStartRecordKeys;
 } {
     const params = (automationContext.params ?? {}) as Record<string, unknown>;
     const objectName = automationContext.object;
     const alias = recordIdAlias(objectName);
     const recordKeys: Array<readonly [string, unknown]> = [['recordId', params.recordId]];
     if (alias !== undefined) recordKeys.push([alias, params[alias]]);
-    return { objectName, recordKeys };
+    return { objectName, recordKeys, inputs: Object.entries(params) };
 }
 
 export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {

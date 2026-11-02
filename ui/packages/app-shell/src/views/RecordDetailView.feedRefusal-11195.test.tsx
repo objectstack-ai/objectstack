@@ -17,7 +17,8 @@
  *   2. the control: a 200 with zero rows shows the empty state, unchanged;
  *   3. a 404 is not a refusal, so the empty state stays;
  *   4. a 500 is not a refusal either, so the panel never says "no permission"
- *      for it;
+ *      for it; since objectstack#29188 it shows the load-failure notice, not
+ *      the empty state;
  *   5. a refused `sys_comment` read beside an answered `sys_activity` read
  *      keeps the activity rows and says the comments are withheld.
  *
@@ -260,9 +261,11 @@ describe('RecordDetailView: a refused sys_activity read shows the no-permission 
 
     renderDetail(dataSource);
 
-    // The panel has no error state of its own, so a failure that is not a
-    // refusal still settles on the empty state.
-    expect(await screen.findByText(EMPTY_COMMENTS)).toBeTruthy();
+    // objectstack#29188: a failure that is not a refusal shows the panel's
+    // load-failure notice, never the empty state and never "no permission".
+    const notice = await screen.findByTestId('activity-load-failed');
+    expect(notice.querySelector('[data-failed-source="activity"]')).not.toBeNull();
+    expect(screen.queryByText(EMPTY_COMMENTS)).toBeNull();
     expect(screen.queryByTestId('activity-access-denied')).toBeNull();
     expect(screen.queryByText(ACTIVITY_DENIED)).toBeNull();
   });
