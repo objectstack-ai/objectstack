@@ -1889,6 +1889,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.access.nameLabel': '名称',
   'engine.studio.access.idLabel': '标识',
   'engine.studio.data.savedDraft': '对象「{label}」已存为草稿',
+  'engine.studio.draftSaved': '已保存 {item} 的草稿',
   'engine.studio.data.lastSaved': '已于 {time} 保存',
   // Pillar tab labels
   'engine.fieldType.text': '单行文本',
