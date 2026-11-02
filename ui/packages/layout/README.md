@@ -86,6 +86,7 @@ shell has to come from metadata, the key for that is `app-schema-renderer`.
 | `navbar` | `React.ReactNode` | — | Top bar content. `AppShell` supplies the sticky `<header>` around it, so pass only what goes inside. |
 | `sidebar` | `React.ReactNode` | — | Left sidebar node, rendered as a flex sibling of the content. Pass `SidebarNav`, or your own node. |
 | `rightRail` | `React.ReactNode` | — | Optional right-side rail. It reflows the content beside it rather than overlaying it (ADR-0057 P3a); absent → unchanged single-pane layout. |
+| `showHeader` | `boolean` | `true` | Whether the shell draws its top bar. `false` draws no `<header>` element at all, and `navbar` is not mounted: for a page that draws its own top bar (the console's record page on a phone). Leaving `navbar` out alone still draws the bar. |
 | `className` | `string` | — | Tailwind overrides for the content element — **not** for the outer container. |
 | `defaultOpen` | `boolean` | `true` | Initial open state of the underlying Shadcn `SidebarProvider`. |
 | `branding` | `AppShellBranding` | — | App branding, applied by `useAppShellBranding`: `primaryColor` / `accentColor` become CSS custom properties on the document root (re-derived for dark mode), `favicon` sets the icon link's `href`, and `title` sets `document.title`. |
