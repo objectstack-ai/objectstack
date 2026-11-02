@@ -2855,8 +2855,8 @@ export const CloneDataResponseSchema = lazySchema(() => z.object({
     + '`engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated, exactly as on '
     + '`createData`), so those keys are dropped and the field re-derives its default. '
     + 'Present ONLY when ≥1 field was dropped; the clone still succeeded without them '
-    + '(status/success semantics unchanged). Carried in the 201 body only — this route '
-    + 'relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. '
+    + '(status/success semantics unchanged). REST additionally surfaces this as the '
+    + '`X-ObjectStack-Dropped-Fields` response header. '
     + 'Optional — omit-when-empty keeps the shape backward-compatible for existing clients.'
   ),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
@@ -3229,8 +3229,9 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
     '`engine.insert` after the `beforeInsert` hooks and exempts keys a hook itself wrote, ' +
     'tracked per row: rows where a hook stamped a protected key drop a different set from ' +
     'rows where it did not. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
-    'without them (count/success unchanged). Optional — omit-when-empty keeps the shape ' +
-    'backward-compatible. (The same reading applies to the partial-success bulk create, whose ' +
+    'without them (count/success unchanged). REST additionally surfaces this union as the ' +
+    '`X-ObjectStack-Dropped-Fields` response header, each field and reason once. Optional — ' +
+    'omit-when-empty keeps the shape backward-compatible. (The same reading applies to the partial-success bulk create, whose ' +
     'batch-level `droppedFields` names no row for the same reason. The paths that DO carry ' +
     'per-row `droppedFields` on each result are the bulk UPDATE and the mixed batch, where each ' +
     'row is its own engine call — see BatchOperationResultSchema.)'

@@ -166,7 +166,7 @@ import type { FlowFunctionEffect } from '@objectstack/spec/automation';
 // contract is new (#5945).
 import type { IPubSub, IScopedContext, IScopedObjectRepository, IntrospectedSchema as SpecIntrospectedSchema } from '@objectstack/spec/contracts';
 // [#20157] The judge-only filter-admission member's verdict and options.
-import type { EngineFilterJudgement, EngineFilterJudgementOptions } from '@objectstack/spec/contracts';
+import type { EngineFilterJudgement, EngineFilterJudgementOptions, InternalFieldEvaluationOptions, InternalFieldEvaluationQuery } from '@objectstack/spec/contracts';
 import {
   IDataDriver,
   IDataEngine,
@@ -312,6 +312,7 @@ import { count, rejectCredentialAggregation } from './engine-count-aggregate.js'
 // ADR-0100: the credential-column guard's filter / sort half, beside the
 // aggregate half above — one collector, one envelope.
 import { rejectCredentialEvaluation } from './credential-evaluation-guard.js';
+import { assertNoInternalFieldEvaluated, rejectInternalFieldEvaluation } from './internal-field-evaluation-guard.js';
 import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-door.js';
 import { assertProjectionNamesAField, refuseProjectionOfUnknownColumns } from './empty-projection-door.js';
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
@@ -14441,6 +14442,10 @@ export class ObjectQL implements IObjectQLEngine {
     // for a non-system caller — judged on the caller's own `where` / `orderBy`
     // / `expand`, before the search term is expanded into `where` and before
     // the middlewares inject their server-authored filters.
+    // [internal: true] …and a flagged column is never evaluated for one either,
+    // judged first so the refusal is the data door's own (the door asks the
+    // same definition before the engine runs).
+    rejectInternalFieldEvaluation(object, ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
     rejectCredentialEvaluation(object, 'find', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection: rewrite ast.fields to drop virtual formula
@@ -14767,7 +14772,8 @@ export class ObjectQL implements IObjectQLEngine {
     // [commit 74155c735] And the same default-filling as find(), for the same reason.
     const { context: _findOneContext, ...findOneQuery } = query ?? {};
     const ast: QueryAST = { ...this.fillQueryAstDefaults(findOneQuery), object: objectName, limit: 1 };
-    // [ADR-0100] Same credential-column refusal as `find`, same position.
+    // [ADR-0100] Same internal-field and credential-column refusals as `find`, same position.
+    rejectInternalFieldEvaluation(objectName, ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
     rejectCredentialEvaluation(objectName, 'findOne', ast, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
 
     // Plan formula projection (same as find): rewrite ast.fields so the driver
@@ -21138,6 +21144,21 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * The `internal: true` evaluate refusal for EVERY caller — the
+   * `QueryEvaluationGate` member of the `objectql` slot contract. The body is
+   * `internal-field-evaluation-guard.ts`, the one definition, which this
+   * engine's own read path also applies to every non-system caller; a door
+   * asks this method and never restates it.
+   */
+  assertNoInternalFieldEvaluated(
+    object: string,
+    query: InternalFieldEvaluationQuery,
+    options?: InternalFieldEvaluationOptions,
+  ): void {
+    assertNoInternalFieldEvaluated(object, query, this.relatedSchemaOf, options);
+  }
+
+  /**
    * Fail-closed guard (ADR-0100 / #3171 / #7922): refuse to aggregate over a
    * field whose value is withheld on the generic read path. Such fields reach
    * this guard through **two independent collectors**, and it needs both:
@@ -21197,6 +21218,11 @@ export class ObjectQL implements IObjectQLEngine {
       // [ADR-0100] The filter half of the credential-column guard — `where`
       // and every `aggregations[i].filter` — before the search term joins
       // `where`; the aggregate half (`rejectCredentialAggregation`) follows.
+      // [internal: true] The flagged-column refusal goes first, over every
+      // position at once (`where`, `groupBy`, each aggregation's `field` and
+      // `filter`), so a non-system caller meets the data door's words here
+      // too rather than the aggregate guard's.
+      rejectInternalFieldEvaluation(object, query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       rejectCredentialEvaluation(object, 'aggregate', query, mergeReadContext(query?.context, options?.context), this.relatedSchemaOf);
       // ADR-0061 `search` → the rows are searched BEFORE they are grouped, by
       // the one expander `find` runs, at the same point in the sequence (after

@@ -220,8 +220,9 @@ export const BatchOperationResultSchema = lazySchema(() => z.object({
     ' on update, or the in-engine static `readonly` strip on create. Per-row because a batch can drop ' +
     'different fields on different rows (`readonlyWhen` is record-state-dependent). Present ' +
     'ONLY when ≥1 field was dropped for this row; the row still succeeded (success unchanged). ' +
-    'A single response header cannot express per-row drops, so this body field is the ' +
-    'canonical bulk channel — REST does not emit `X-ObjectStack-Dropped-Fields` for batches. ' +
+    'A single response header cannot say which row dropped what, so this body field stays the ' +
+    'canonical per-row channel; REST also sends the `X-ObjectStack-Dropped-Fields` response header ' +
+    'on the answer, naming the union of the rows\' drops (each field and reason once). ' +
     'Optional — omit-when-empty keeps the shape backward-compatible.'
   ),
 }));

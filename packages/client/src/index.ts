@@ -543,8 +543,8 @@ export interface CloneDataResult<T = any> {
    * a non-system clone cannot seed a static `readonly` column, whether the value
    * was COPIED from the source row or supplied through `overrides`, so those
    * keys are dropped and the field re-derives its default. Present only when
-   * ≥1 field was dropped; the clone still succeeded. Body only: unlike `create`,
-   * the clone route sets no `X-ObjectStack-Dropped-Fields` header.
+   * ≥1 field was dropped; the clone still succeeded. REST also mirrors this in
+   * the `X-ObjectStack-Dropped-Fields` response header, as it does for `create`.
    */
   droppedFields?: DroppedFieldsEvent[];
   /**

@@ -900,7 +900,9 @@ describe('validateExpression (ADR-0032)', () => {
         'record.end_date < "2026-01-01"',
         'record.end_date == today()',
         '"Due: " + record.end_date',
-        'record.end_date - record.start_date',          // → Duration, no further arith
+        // `record.end_date - record.start_date` is no longer here: the runtime
+        // holds a date field as its text and faults on it (#28944,
+        // `validate-date-text-arithmetic.test.ts`).
       ]) {
         const r = validateExpression('value', src, schema);
         expect(r.errors, `should be clean: ${src}`).toHaveLength(0);
