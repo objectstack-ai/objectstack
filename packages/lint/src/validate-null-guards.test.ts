@@ -289,6 +289,30 @@ describe('nullGuardMessage', () => {
     expect(msg).toContain(NULL_GUARD_HINT);
   });
 
+  it('names the guard that holds on an insert for a `previous.` operand, and only for one (#29491)', () => {
+    const fullGuard = '`previous != null && previous.budget != null`';
+    const [prior] = find('previous.budget > 5');
+    for (const outcome of ['fail-closed', 'run-fails'] as const) {
+      const msg = nullGuardMessage("validation rule 'r'", 'showcase_project', prior!, outcome);
+      // The shared sentence stays verbatim, and the clause follows it.
+      expect(msg).toContain(`${NULL_GUARD_HINT} On an insert \`previous\` is itself null`);
+      expect(msg).toContain(`guard it with ${fullGuard}.`);
+    }
+    const [current] = find('record.budget > 5');
+    expect(nullGuardMessage("validation rule 'r'", 'showcase_project', current!)).not.toContain('previous');
+    const [bare] = findUnguardedNullableOperands('budget > 5', { nullableFields, bareFields: new Set(['budget']) });
+    expect(nullGuardMessage('edge', 'showcase_project', bare!, 'run-fails')).not.toContain('previous');
+
+    // The guard it names passes this gate, and is the one that evaluates on
+    // an insert, where `previous` is bound to null: the `!= null` test alone
+    // faults there.
+    expect(find('previous != null && previous.budget != null && previous.budget > 5')).toEqual([]);
+    const onInsert = (source: string) =>
+      celEngine.evaluate({ dialect: 'cel', source }, { record: { budget: 1 }, extra: { previous: null } });
+    expect(onInsert('previous != null && previous.budget != null && previous.budget > 5')).toMatchObject({ ok: true, value: false });
+    expect(onInsert('previous.budget != null && previous.budget > 5').ok).toBe(false);
+  });
+
   it('closes with the runtime rejection wording verbatim (one voice, two gates)', () => {
     // Lifted from `unevaluableRuleError` in
     // packages/objectql/src/validation/rule-validator.ts — if that text moves,
