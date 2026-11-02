@@ -525,13 +525,13 @@ from. `modal`, `split` and `popover` were removed in @objectstack/spec 18.3.0 (A
 a stored value is refused with its fix, and `os migrate meta --from 17` drops it. On a phone
 every record opens as a page, whatever the view declares.
 
-Whether the record opens beside the list is the reader's choice, not the view's. The list's
-**Display** menu offers **Open records**: **Split** (the default) draws the record page in a
-pane beside the list, **Drawer** draws it over the list, and **Full page** navigates. The
-choice is kept in the browser for every drawer-mode object, and is not offered for an object
-declared to open as a page; a record's **↗** always opens the full page. The reader also
-drags the pane's edge, and **⤢** or **Open as full page** leaves the pane, while **Collapse
-to drawer** returns to the stack it left. The `size` bucket on `navigation` sets only the
+Whether a row opens the drawer or the full page is the reader's choice, not the view's. The
+list's **Display** menu offers **Open records**: **Drawer** (the default) draws the record over
+the list, which keeps its full width, and **Full page** navigates. The choice is kept in the
+browser for every drawer-mode object, and is not offered for an object declared to open as a
+page; a record's **↗** always opens the full page. The reader also drags the drawer's edge,
+**⤢** maximizes it in place, **Open as full page** leaves the drawer, and **Collapse to
+drawer** returns to the stack it left. The `size` bucket on `navigation` sets only the
 drawer's starting width; `width` is deprecated.
 
 The record opened from a list is addressable: `?recordId=` on the list's URL, so a

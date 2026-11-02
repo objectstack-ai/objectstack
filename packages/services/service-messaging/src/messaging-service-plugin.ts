@@ -13,7 +13,11 @@ import { DEFAULT_MAX_IDLE_INTERVAL_MS, NotificationDispatcher, type DispatchClus
 import { HttpDispatcher } from './http-dispatcher.js';
 import { createEmailChannel } from './email-channel.js';
 import { createSmsChannel } from './sms-channel.js';
-import { NotificationTemplateStore } from './template-renderer.js';
+import {
+    NotificationTemplateStore,
+    TEMPLATE_DECLARED_FALLBACK_LOCALE,
+    type NotificationTemplateStoreWiring,
+} from './template-renderer.js';
 import {
     bindTemplateHolePlacement,
     unbindTemplateHolePlacement,
@@ -456,7 +460,24 @@ export class MessagingServicePlugin implements Plugin {
         // Whether a MOUNTED channel can send is the separate question
         // `isAvailable` answers.
         if (typeof ctx.hook === 'function') {
-            const templateStore = new NotificationTemplateStore({ getData });
+            // [#28919] The store's ladder reads the stack's declared fallback
+            // locale (`i18n.fallbackLocale`, else `defaultLocale`) before
+            // `DEFAULT_LOCALE`, as the email template ladder does since
+            // #28880. Probed at each resolve like `getDefaultTemplateLocale`:
+            // both hops may be missing, and either leaves the rung out.
+            const getDeclaredFallbackLocale = (): string | undefined => {
+                try {
+                    const i18n = ctx.getService<{ getFallbackLocale?: () => string | undefined }>('i18n');
+                    return typeof i18n?.getFallbackLocale === 'function' ? i18n.getFallbackLocale() : undefined;
+                } catch {
+                    return undefined;
+                }
+            };
+            const templateStoreWiring: NotificationTemplateStoreWiring = {
+                getData,
+                [TEMPLATE_DECLARED_FALLBACK_LOCALE]: getDeclaredFallbackLocale,
+            };
+            const templateStore = new NotificationTemplateStore(templateStoreWiring);
             ctx.hook('kernel:ready', async () => {
                 service.registerChannelProvider('email', lazyChannelMount({
                     resolveTransport: getEmail,
