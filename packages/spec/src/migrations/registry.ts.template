@@ -3022,6 +3022,18 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'Its D3 record is the semantic entry `ui-form-view-buttons-reset-retired`.',
   },
   {
+    id: 'ui-form-view-drawer-keys-retired',
+    order: 116,
+    text:
+      'It also retires the form view\'s `drawerSide` and `drawerWidth` (ADR-0049): once `type: '
+      + '\'drawer\'` left the form view, no form view opened in a drawer and no form-view surface read '
+      + 'either key. Both are refused at parse with their prescription; the D2 conversion '
+      + '`form-view-drawer-keys-removed` strips them from existing sources and stored rows, which changes '
+      + 'nothing a reader sees. The React `ObjectForm` block keeps both as props of its own for the drawer '
+      + 'it opens with `formType=\'drawer\'`, as does the `object-form` page block. Its D3 record is the '
+      + 'semantic entry `ui-form-view-drawer-keys-retired`.',
+  },
+  {
     id: 'ui-form-view-type-layout-only',
     order: 112,
     text:

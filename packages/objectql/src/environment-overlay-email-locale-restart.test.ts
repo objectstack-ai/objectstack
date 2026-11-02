@@ -205,8 +205,9 @@ async function boot(
  * delete that names no package, and adds the declaration to a saved body of a
  * member the package ships (one it does not ship is the pair's own item) —
  * the member semantics pinned below are the pair's, row for row, as they were
- * the package-less row's. A write that names a package (the drafts into
- * `PKG` below) is passed through untouched.
+ * the package-less row's. A write that names a package (the drafts into the
+ * pair below, declared; [#28905] a write naming `PKG` itself is refused) is
+ * passed through untouched.
  */
 const PAIR = 'com.acme.mail.custom';
 const DECLARATION = { package: PKG, basedOn: '1.0.0' };
@@ -634,11 +635,17 @@ describe('[#26699] the layered read addresses ONE member by the selector', () =>
 });
 
 describe('the package-batch doors and the cluster fan-out carry the member (#22877, stage 2)', () => {
-    /** A zh-CN draft bound to the package, beside an en-US active overlay that has none. */
+    /**
+     * A zh-CN draft bound to the package's pair, beside an en-US active
+     * overlay that has none. [#28905, ADR-0146 D1] A draft naming the
+     * read-only package itself is refused now, so the package-batch doors are
+     * asked of the pair, whose drafts declare the override; the member
+     * semantics pinned below are the same, row for row.
+     */
     async function bootWithZhDraft(stores: Map<string, Map<string, Record<string, unknown>>>) {
         const booted = await boot(stores);
         await booted.protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
-        await booted.protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'DRAFT zh'), mode: 'draft', packageId: PKG });
+        await booted.protocol.saveMetaItem({ type: T, name: NAME, item: { ...template('zh-CN', 'DRAFT zh'), overrides: DECLARATION }, mode: 'draft', packageId: PAIR });
         return booted;
     }
     const draftRows = (stores: Map<string, Map<string, Record<string, unknown>>>) =>
@@ -650,7 +657,7 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         const { protocol } = await bootWithZhDraft(stores);
         expect(draftRows(stores).map((r) => r.bundle_member)).toEqual(['zh-CN']);
 
-        const out: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        const out: any = await protocol.publishPackageDrafts({ packageId: PAIR });
         expect(out, JSON.stringify(out)).toMatchObject({ success: true, publishedCount: 1, failedCount: 0 });
         expect(draftRows(stores)).toEqual([]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'DRAFT zh' });
@@ -659,7 +666,7 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
     it('revertCommit: the revert of that publish removes the zh-CN row it created and leaves en-US', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { protocol } = await bootWithZhDraft(stores);
-        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PAIR });
         expect(published.commitId, JSON.stringify(published)).toBeTruthy();
 
         const reverted: any = await protocol.revertCommit({ commitId: published.commitId });
@@ -667,7 +674,7 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
         expect(overlayRows(stores).map((r) => r.bundle_member ?? null)).toEqual([null]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
         // [#23073] The timeline serves each item's member: the publish and its revert, zh-CN both.
-        const commits = await protocol.listCommits({ packageId: PKG });
+        const commits = await protocol.listCommits({ packageId: PAIR });
         expect(commits.map((c) => c.items.map((it) => [it.type, it.name, it.member]))).toEqual([
             [[T, NAME, 'zh-CN']], [[T, NAME, 'zh-CN']],
         ]);
@@ -676,23 +683,23 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
     it('discardPackageDrafts: the zh-CN draft is discarded as zh-CN', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { protocol } = await bootWithZhDraft(stores);
-        const out: any = await protocol.discardPackageDrafts({ packageId: PKG });
+        const out: any = await protocol.discardPackageDrafts({ packageId: PAIR });
         expect(out, JSON.stringify(out)).toMatchObject({ success: true, discardedCount: 1, failedCount: 0 });
         expect(draftRows(stores)).toEqual([]);
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
-        const listed = await protocol.listDrafts({ packageId: PKG });
+        const listed = await protocol.listDrafts({ packageId: PAIR });
         expect(listed.drafts).toEqual([]);
     });
 
     it('[#23073] the draft list and the commit timeline tell two languages of one template apart, and each listed member addresses its own item by name', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { protocol } = await boot(stores);
-        await protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'DRAFT en'), mode: 'draft', packageId: PKG });
-        await protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'DRAFT zh'), mode: 'draft', packageId: PKG });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: { ...template('en-US', 'DRAFT en'), overrides: DECLARATION }, mode: 'draft', packageId: PAIR });
+        await protocol.saveMetaItem({ type: T, name: NAME, item: { ...template('zh-CN', 'DRAFT zh'), overrides: DECLARATION }, mode: 'draft', packageId: PAIR });
         const wording: Record<string, string> = { 'en-US': 'DRAFT en', 'zh-CN': 'DRAFT zh' };
 
         // Two drafts of one `type` and `name`, told apart by `member` alone.
-        const listed = await protocol.listDrafts({ packageId: PKG });
+        const listed = await protocol.listDrafts({ packageId: PAIR });
         expect(listed.drafts.map((d) => [d.type, d.name, d.member]).sort()).toEqual([[T, NAME, 'en-US'], [T, NAME, 'zh-CN']]);
         // The listed member round-trips through the by-name door: each reads its own draft.
         for (const d of listed.drafts) {
@@ -700,9 +707,9 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
             expect(read?.item?.subject).toBe(wording[d.member!]);
         }
 
-        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PAIR });
         expect(published, JSON.stringify(published)).toMatchObject({ success: true, publishedCount: 2, failedCount: 0 });
-        const [commit] = await protocol.listCommits({ packageId: PKG });
+        const [commit] = await protocol.listCommits({ packageId: PAIR });
         expect(commit!.items.map((it) => [it.type, it.name, it.member]).sort()).toEqual([[T, NAME, 'en-US'], [T, NAME, 'zh-CN']]);
         for (const it of commit!.items) {
             const read: any = await protocol.getMetaItem({ type: it.type, name: it.name, member: it.member });

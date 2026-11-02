@@ -41,8 +41,9 @@ export interface LoginFormLabels {
   /**
    * Divider label between the social provider buttons and the email/password
    * form (defaults to "or continue with email"). Rendered only when the server
-   * reports at least one social provider, and only while that form is shown:
-   * under SSO-only mode it appears once "Use a password instead" reveals it.
+   * reports at least one social provider, and only while an email field is
+   * shown: under SSO-only mode, the SSO email field (when the server also
+   * advertises SSO) or the form "Use a password instead" reveals.
    */
   orText?: string;
   /**
@@ -341,9 +342,10 @@ export function LoginForm({
   const passwordFormCollapsed = ssoEnforced || passwordSignInOff;
   const passwordFormVisible = !passwordFormCollapsed || showPasswordFallback;
   // The break-glass link reveals the password form, so it is offered only
-  // while that form holds a door the server accepts: email+password itself, the
-  // SSO button (routes the entered email), or phone+password sign-in.
-  const breakGlassOffered = !passwordSignInOff || ssoEnabled || phonePasswordEnabled;
+  // while that form holds a password door the server accepts: email+password
+  // itself, or phone+password sign-in. The SSO button needs no link: the
+  // SSO-only view draws it on first paint (`ssoEmailFormVisible` below).
+  const breakGlassOffered = !passwordSignInOff || phonePasswordEnabled;
   // Nothing the server advertises lets anyone in: say so, instead of SSO copy
   // with no SSO affordance and a password link the server refuses.
   const noSignInMethod =
@@ -506,6 +508,12 @@ export function LoginForm({
   // its own enforcement declaration, or the SSO button. Never while the
   // server answers `features.sso: false` with no enforcement.
   const ssoOnlyCopy = ssoOnlyView && !noSignInMethod && (ssoEnforced || ssoEnabled);
+  // When the password form is collapsed (declared enforcement, or the password
+  // door shut) and the server advertises SSO, the SSO button IS the way in, so
+  // the SSO-only view draws it on first paint with the email field it routes,
+  // and no password field. It used to live only inside the password form,
+  // reachable solely through the break-glass link.
+  const ssoEmailFormVisible = ssoOnlyView && ssoEnabled;
 
   // objectstack#29105 — a password sign-in waiting for its second factor,
   // whoever started it (this form, or another `signIn` caller on the page).
@@ -593,7 +601,7 @@ export function LoginForm({
         <SocialSignInButtons
           mode="sign-in"
           dividerText={labels.orText}
-          hideDivider={!passwordFormVisible}
+          hideDivider={!passwordFormVisible && !ssoEmailFormVisible}
           buttonText={labels.socialButton}
           onProvidersResolved={(hasProviders) => setHasSocialProviders(hasProviders)}
         />
@@ -794,6 +802,43 @@ export function LoginForm({
              link to the password form for the env owner / local admin. */
           <div className="space-y-4">
             {error && <AuthErrorBanner message={error} />}
+            {ssoEmailFormVisible && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleSso();
+                }}
+                className="space-y-4"
+                data-testid="login-sso-email-form"
+              >
+                <div className="space-y-2">
+                  <label htmlFor="login-sso-email" className={AUTH_FIELD_LABEL_CLASS}>
+                    {l.emailLabel}
+                  </label>
+                  <input
+                    id="login-sso-email"
+                    type="email"
+                    inputMode="email"
+                    placeholder={l.emailPlaceholder}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="username"
+                    disabled={ssoSubmitting}
+                    className={AUTH_INPUT_CLASS}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={ssoSubmitting}
+                  aria-busy={ssoSubmitting}
+                  className={AUTH_PRIMARY_BUTTON_CLASS}
+                >
+                  {ssoSubmitting && <AuthSpinner />}
+                  {l.ssoButton}
+                </button>
+              </form>
+            )}
             {breakGlassOffered && (
               <button
                 type="button"

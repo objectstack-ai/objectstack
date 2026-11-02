@@ -699,6 +699,131 @@ function phoneCloseTouchTargetPatches(primitive) {
 }
 
 /**
+ * The phone-only height floor the menu-row and tab touch-target families add
+ * (objectstack#29215): 44 px below `sm`, nothing from `sm` up.
+ */
+const PHONE_ROW_TOUCH_HEIGHT = 'max-sm:min-h-11';
+
+/**
+ * Builds one touch-target patch: `insertAfter`, the last token of `find`, gets
+ * `phoneClass` written straight after it. Shared by the two families below.
+ *
+ * @param {{ id: string, reason: string, find: string, insertAfter: string,
+ *           phoneClass: string, occurrences: number }} spec
+ * @returns {LocalPatch}
+ */
+function phoneTouchTargetPatch({ id, reason, find, insertAfter, phoneClass, occurrences }) {
+  if (!find.includes(insertAfter)) {
+    throw new Error(`${id}: insertAfter ${JSON.stringify(insertAfter)} is not inside its anchor`);
+  }
+  const replace = find.replace(insertAfter, `${insertAfter} ${phoneClass}`);
+  return {
+    id,
+    issue: 'objectstack#29215',
+    reason,
+    find,
+    replace,
+    marker: replace,
+    occurrences,
+  };
+}
+
+/**
+ * The dropdown-menu row touch-target patch (objectstack#29215).
+ *
+ * Every row of a `DropdownMenu` (plain, checkbox and radio items, and the
+ * sub-menu trigger, which a phone user taps to open the sub-menu) is
+ * `py-1.5 text-sm` upstream with no minimum height: 32 px tall. The Console
+ * runs inside the mobile app's WebView, and its phone-width audit
+ * (objectstack#29040) holds every control to a 44 px touch target, so every
+ * record "more" menu and list row-action menu failed it. Below `sm` each row
+ * is at least 44 px tall, its text and icon centred by the row's own
+ * `items-center`; from `sm` up the class list is upstream's, token for token.
+ *
+ * Inline, for the reason the close-button families give: the payload is one
+ * utility class. Every `find` is written from
+ * `scripts/__tests__/fixtures/shadcn-registry/dropdown-menu.registry.txt`. The
+ * checkbox and radio items share one class string upstream, so one anchor with
+ * two occurrences covers both. `DropdownMenuLabel` is not a control and keeps
+ * its height.
+ *
+ * @type {LocalPatch[]}
+ */
+const dropdownMenuRowTouchTargetPatches = [
+  phoneTouchTargetPatch({
+    id: 'dropdown-menu-sub-trigger-phone-touch-target',
+    reason:
+      'DropdownMenuSubTrigger is a 32 px row upstream. Below `sm` it is at least ' +
+      '44 px tall (objectstack#29040); from `sm` up upstream classes apply unchanged.',
+    find: 'px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent',
+    insertAfter: 'py-1.5',
+    phoneClass: PHONE_ROW_TOUCH_HEIGHT,
+    occurrences: 1,
+  }),
+  phoneTouchTargetPatch({
+    id: 'dropdown-menu-item-phone-touch-target',
+    reason:
+      'DropdownMenuItem is a 32 px row upstream. Below `sm` it is at least 44 px ' +
+      'tall (objectstack#29040); from `sm` up upstream classes apply unchanged.',
+    find: 'px-2 py-1.5 text-sm outline-none transition-colors',
+    insertAfter: 'py-1.5',
+    phoneClass: PHONE_ROW_TOUCH_HEIGHT,
+    occurrences: 1,
+  }),
+  phoneTouchTargetPatch({
+    id: 'dropdown-menu-choice-item-phone-touch-target',
+    reason:
+      'DropdownMenuCheckboxItem and DropdownMenuRadioItem share one 32 px row class ' +
+      'upstream. Below `sm` both are at least 44 px tall (objectstack#29040); from ' +
+      '`sm` up upstream classes apply unchanged.',
+    find: 'py-1.5 pl-8 pr-2 text-sm',
+    insertAfter: 'py-1.5',
+    phoneClass: PHONE_ROW_TOUCH_HEIGHT,
+    occurrences: 2,
+  }),
+];
+
+/**
+ * The tabs touch-target patch (objectstack#29215).
+ *
+ * `TabsTrigger` is `py-1.5 text-sm` upstream, 38 px tall inside the fixed
+ * `h-10` `TabsList`, under the 44 px phone floor (objectstack#29040) on every
+ * record tab strip and Studio tab strip. Below `sm` the trigger is at least
+ * 44 px tall and the list drops its fixed height so it grows with it; from
+ * `sm` up both class lists are upstream's, token for token.
+ *
+ * Inline, like the menu-row family. Both anchors are written from
+ * `scripts/__tests__/fixtures/shadcn-registry/tabs.registry.txt`. The list's
+ * phone class goes at the end of its class string, so the string still opens
+ * with upstream's `inline-flex h-10` (`e2e/approvals-inbox-phone.spec.ts`
+ * reads it by that opening).
+ *
+ * @type {LocalPatch[]}
+ */
+const tabsTouchTargetPatches = [
+  phoneTouchTargetPatch({
+    id: 'tabs-list-phone-auto-height',
+    reason:
+      'TabsList is a fixed `h-10` upstream, too short for a 44 px trigger. Below ' +
+      '`sm` its height follows its triggers; from `sm` up it is upstream `h-10`.',
+    find: 'rounded-md bg-muted p-1 text-muted-foreground"',
+    insertAfter: 'text-muted-foreground',
+    phoneClass: 'max-sm:h-auto',
+    occurrences: 1,
+  }),
+  phoneTouchTargetPatch({
+    id: 'tabs-trigger-phone-touch-target',
+    reason:
+      'TabsTrigger is 38 px tall upstream. Below `sm` it is at least 44 px tall ' +
+      '(objectstack#29040); from `sm` up upstream classes apply unchanged.',
+    find: 'whitespace-nowrap rounded-sm px-3 py-1.5 text-sm',
+    insertAfter: 'py-1.5',
+    phoneClass: PHONE_ROW_TOUCH_HEIGHT,
+    occurrences: 1,
+  }),
+];
+
+/**
  * Component name (as tracked in `shadcn-components.json`) → patches it needs.
  *
  * @type {Record<string, LocalPatch[]>}
@@ -713,6 +838,8 @@ export const LOCAL_PATCHES = {
   ],
   slider: sliderThumbPassThroughPatches,
   calendar: calendarDisplayLocalePatches,
+  'dropdown-menu': dropdownMenuRowTouchTargetPatches,
+  tabs: tabsTouchTargetPatches,
 };
 
 /** Components that carry at least one declared patch. */
