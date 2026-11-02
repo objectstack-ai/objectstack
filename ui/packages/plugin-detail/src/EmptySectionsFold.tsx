@@ -190,7 +190,7 @@ export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
         type="button"
         aria-expanded={revealed}
         onClick={() => setRevealed((r) => !r)}
-        className="inline-flex min-h-[44px] items-center sm:min-h-0 rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center sm:min-h-0 sm:min-w-0 rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {revealed
           ? t('detail.hideEmptySections', { defaultValue: 'Collapse' })

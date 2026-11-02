@@ -182,7 +182,7 @@ export function RecordTopBar({ leading, leadingTestId, stepper, toggles, frame, 
   return (
     <div
       className={cn(
-        'flex h-11 sm:h-10 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 text-xs text-muted-foreground',
+        'flex min-h-11 sm:h-10 sm:min-h-0 min-w-0 shrink-0 items-center justify-between gap-2 border-b px-2 text-xs text-muted-foreground',
         className,
       )}
       data-record-top-bar=""

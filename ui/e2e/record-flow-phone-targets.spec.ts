@@ -67,6 +67,7 @@ const F = {
   composer: 'packages/plugin-detail/src/RichTextCommentInput.tsx',
   header: 'packages/components/src/renderers/layout/containers.tsx',
   page: 'packages/app-shell/src/views/RecordDetailView.tsx',
+  topBar: 'packages/components/src/custom/record-top-bar.tsx',
   dialog: 'packages/components/src/custom/mobile-dialog-content.tsx',
 };
 const S = Object.fromEntries(Object.entries(F).map(([k, rel]) => [k, read(rel)])) as Record<keyof typeof F, string>;
@@ -92,6 +93,8 @@ const CLS = {
   barButton: g('header', /barFace && '(h-11 min-w-0 flex-1)'/, ['h-11', 'flex-1']),
   barMore: g('header', /barFace \? '(h-11 w-11 shrink-0 px-0)'/, ['h-11', 'w-11']),
   back: g('page', /const phoneBackClass =\s*'([^']+)'/, ['min-h-[44px]']),
+  topBar: g('topBar', /'(flex min-h-11 sm:h-10 [^']*)'/, ['min-h-11', 'sm:h-10']),
+  topBarButton: g('topBar', /const RECORD_TOP_BAR_BUTTON_CLASS =\s*'([^']+)'/, ['h-11', 'w-11', 'sm:h-7']),
   dialog: (() => {
     const block = S.dialog.slice(S.dialog.indexOf('// Mobile-first: full-screen'), S.dialog.indexOf('// Animations'));
     const parts = [...block.matchAll(/'([^']+)'/g)].map((m) => m[1]).join(' ');
@@ -114,7 +117,13 @@ const fixture = () => {
     `<button type="button" class="${CLS.buttonBase} px-3 ${cls}" data-t="${label}" ${extra}>${label.length > 2 ? label : '<svg width="16" height="16"></svg>'}</button>`;
   return `
 <div id="page" class="flex flex-col bg-background">
-  <div class="flex h-12 items-center px-2"><a href="#" class="${CLS.back}" data-t="back">‹ Accounts</a></div>
+  <div class="${CLS.topBar}" id="top-bar">
+    <div class="flex min-w-0 flex-1 items-center gap-1"><a href="#" class="${CLS.back}" data-t="back">‹ Accounts</a></div>
+    <div class="flex shrink-0 items-center gap-0.5"><span class="mr-1">3 / 21</span>
+      <button type="button" class="${CLS.topBarButton}" data-t="next record"><svg width="14" height="14"></svg></button>
+      <button type="button" class="${CLS.topBarButton}" data-t="previous record"><svg width="14" height="14"></svg></button>
+    </div>
+  </div>
   <div class="px-4">
     <div role="tablist" class="flex min-w-0 items-center gap-4 border-b">
       <button role="tab" class="${CLS.tab} border-primary" data-t="tab Overview">Overview</button>
@@ -175,7 +184,7 @@ test.beforeAll(async () => {
       return { path: file, base: path.dirname(file), content: readFileSync(file, 'utf8') };
     },
   });
-  const extra = 'flex flex-col flex-1 h-12 px-2 px-3 px-4 pt-3 pb-3 mt-4 gap-2 gap-4 border border-b border-t border-primary border-transparent rounded-md rounded-full rounded-[10px] text-xs text-sm text-lg font-semibold relative sticky bottom-0 shrink-0 min-w-0 truncate group items-start items-center justify-between justify-end flex-wrap py-1 py-2 overflow-y-auto h-10 my-4 bg-card bg-background';
+  const extra = 'flex flex-col flex-1 h-12 gap-0.5 gap-1 mr-1 px-2 px-3 px-4 pt-3 pb-3 mt-4 gap-2 gap-4 border border-b border-t border-primary border-transparent rounded-md rounded-full rounded-[10px] text-xs text-sm text-lg font-semibold relative sticky bottom-0 shrink-0 min-w-0 truncate group items-start items-center justify-between justify-end flex-wrap py-1 py-2 overflow-y-auto h-10 my-4 bg-card bg-background';
   css = compiler.build([...Object.values(CLS), extra].join(' ').split(/\s+/).filter(Boolean));
   if (!css.includes('@media') || !css.includes('pointer: coarse')) {
     throw new Error('Tailwind produced no `sm:` or `pointer-coarse:` media query — the phone faces would be inert.');
@@ -216,6 +225,9 @@ test.describe('the record flow at phone width (objectstack#29071)', () => {
       const r = await measure(page, fixture());
       expect(r.scrollWidth, `the page is ${r.scrollWidth}px wide in a ${r.innerWidth}px viewport`).toBeLessThanOrEqual(width);
       expect(r.boxes.length).toBeGreaterThan(15);
+      // The top bar holds its 44 px controls: they do not spill out of it.
+      const bar = await page.evaluate(() => document.getElementById('top-bar')!.getBoundingClientRect().height);
+      expect(bar, 'the record top bar is shorter than its controls and its border').toBeGreaterThanOrEqual(45);
       for (const box of r.boxes) {
         expect(box.h, `"${box.t}" is ${box.h}px tall`).toBeGreaterThanOrEqual(44);
         expect(box.w, `"${box.t}" is ${box.w}px wide`).toBeGreaterThanOrEqual(44);
@@ -255,6 +267,7 @@ test.describe('the record flow at phone width (objectstack#29071)', () => {
     expect(box('M').h).toBe(24);
     expect(box('Save').h).toBe(36);
     expect(box('pencil').opacity).toBe(0);
+    expect(box('next record').h).toBe(28);
     await page.context().close();
   });
 });

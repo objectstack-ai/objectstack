@@ -280,7 +280,7 @@ const EmptyPanelsLine: React.FC<{ entries: FoldStackEntry[]; standalone: boolean
       <span aria-hidden>·</span>
       <button
         type="button"
-        className="inline-flex min-h-[44px] items-center rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0"
+        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:min-w-0"
         onClick={onExpand}
         data-related-empty-fold-expand=""
       >
