@@ -305,6 +305,53 @@ const PINS: { readonly [C in ExpressionRefusalCode]: readonly [Pin<C>, ...Pin<C>
         'in whole days, and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
     },
   ],
+  'date-text-arithmetic': [
+    {
+      produce: () =>
+        onlyError('value', 'record.end_date - record.start_date', {
+          scope: 'record',
+          fieldTypes: { start_date: 'date', end_date: 'date' },
+        }),
+      params: { operands: 'DateText - DateText', reference: 'record.start_date' },
+      message:
+        'date arithmetic `DateText - DateText` — `record.start_date` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
+        'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
+        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+    {
+      produce: () =>
+        onlyError('predicate', 'end_at - start_at > duration("1h")', {
+          fields: ['start_at', 'end_at'],
+          fieldTypes: { start_at: 'datetime', end_at: 'datetime' },
+        }),
+      params: { operands: 'DateText - DateText', reference: 'start_at' },
+      message:
+        'date arithmetic `DateText - DateText` — `start_at` is a date field, and the runtime holds a date field ' +
+        'as its text (`YYYY-MM-DD`, or an ISO-8601 instant for a date-time), which CEL can\'t do arithmetic on: this ' +
+        'faults at runtime, so the field silently evaluates to null. Use `daysBetween(a, b)` for the span in whole days, ' +
+        'and `daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
+  'date-duration-value': [
+    {
+      produce: () =>
+        onlyError('value', 'today() - record.start_date', { scope: 'record', fieldTypes: { start_date: 'date' } }),
+      params: { reference: 'record.start_date' },
+      message:
+        'date arithmetic — this computes a `google.protobuf.Duration` from `record.start_date`, and a field can\'t hold ' +
+        'a duration: it reads `{}` at runtime. Use `daysBetween(a, b)` for the span in whole days, and ' +
+        '`daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+    {
+      produce: () => onlyError('value', 'today() - daysAgo(3)', { scope: 'record', fieldTypes: { name: 'text' } }),
+      params: {},
+      message:
+        'date arithmetic — this computes a `google.protobuf.Duration`, and a field can\'t hold ' +
+        'a duration: it reads `{}` at runtime. Use `daysBetween(a, b)` for the span in whole days, and ' +
+        '`daysFromNow(n)` / `addDays(d, n)` / `addMonths(d, n)` to shift a date.',
+    },
+  ],
   'type-mismatch': [
     {
       produce: () => onlyWarning('predicate', 'record.name > 5', { scope: 'record', fieldTypes: { name: 'text' } }),
@@ -460,6 +507,8 @@ const SWEEP_SOURCES: readonly string[] = [
   "current_user.positions.contains('zzz')",
   'record.close_date + 1',
   'close_date + 1 > 3',
+  'record.close_date - record.close_date',
+  'today() - record.close_date',
   'record.name > 5',
   'record.active + 1 > 5',
   "record.account == 'a1' && record.account.name == 'x'",

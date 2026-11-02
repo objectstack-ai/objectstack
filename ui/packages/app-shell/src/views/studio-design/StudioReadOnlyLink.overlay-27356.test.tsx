@@ -2,17 +2,19 @@
 
 /**
  * #27356 row 13 (hotcrm#2320 Studio S2) — the read-only mark in a Studio item
- * header offers an environment overlay only where one exists: an open item
- * whose type the served registry marks `allowEnvironmentOverlay` gets
- * "Read-only · Customize with an overlay", linking to that item's page —
- * Setup's once, the item's page in Studio's "All metadata" area since
- * objectstack ADR-0146 D1 (N-28).
- * Every other case (a type that takes no overlay, no open item, a registry not
- * read) gets a plain "Read-only" that links nowhere.
+ * header used to offer an environment overlay where the served registry marks
+ * a type `allowEnvironmentOverlay`: "Read-only · Customize with an overlay",
+ * linking to that item's overlay page (Setup's once, then that page in
+ * Studio's "All metadata" area, ADR-0146 D1).
  *
- * objectstack#28562 (ADR-0146 D2) — so do a view, a dashboard and a report,
- * overlay-able or not: Studio customizes those itself, into the base's paired
- * customization package, so Setup's overlay page is not their editor.
+ * objectstack#28562 (ADR-0146 D2) took a view, a dashboard and a report off
+ * that link: Studio customizes those itself, into the base's paired
+ * customization package.
+ *
+ * objectstack#28576 (ADR-0146 D11) — and now no item keeps it: that page's
+ * save names no package, and the server refuses that write onto a packaged item.
+ * Every case gets a plain "Read-only" that links nowhere, an overlay-able
+ * type (`email_template`, `translation`) included, whatever the registry says.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -59,19 +61,9 @@ afterEach(() => {
   registry.entries = [];
 });
 
-describe('the read-only mark offers an overlay only for a type that takes one (#27356 row 13)', () => {
-  it('an open overlay-able item Studio does not customize: the overlay link, landing on that item’s page in the All metadata area', () => {
-    registry.entries = SERVED;
-    const mark = renderMark({ type: 'email_template', name: 'welcome' });
-    expect(mark.tagName).toBe('A');
-    expect(mark).toHaveTextContent(LINK);
-    // Not Setup's page: Setup's metadata routes redirect into Studio's "All
-    // metadata" area (objectstack ADR-0146 D1, N-28), so the link goes there.
-    expect(mark).toHaveAttribute('href', '/studio/~all/metadata/email_template/welcome');
-    expect(mark).toHaveAttribute('title', 'hint');
-  });
-
+describe('the read-only mark offers no overlay on any packaged item (objectstack#28576)', () => {
   it.each([
+    ['an open email template (overlay-able, Studio does not customize it)', { type: 'email_template', name: 'welcome' }],
     ['an open view (Studio customizes it, objectstack#28562)', { type: 'view', name: 'open_tickets' }],
     ['an open dashboard (Studio customizes it, objectstack#28562)', { type: 'dashboard', name: 'pipeline' }],
     ['an open report (Studio customizes it, objectstack#28562)', { type: 'report', name: 'won_deals' }],
@@ -85,10 +77,11 @@ describe('the read-only mark offers an overlay only for a type that takes one (#
     expect(mark).toHaveTextContent(READ_ONLY);
     expect(mark).not.toHaveTextContent(LINK);
     expect(mark).not.toHaveAttribute('href');
+    expect(screen.queryByRole('link')).toBeNull();
     expect(mark).toHaveAttribute('title', 'hint');
   });
 
-  it('a registry not read yet: no overlay promised, even for an overlay-able type', () => {
+  it('a registry not read yet: a plain "Read-only" too', () => {
     const mark = renderMark({ type: 'email_template', name: 'welcome' });
     expect(mark.tagName).toBe('SPAN');
     expect(mark).toHaveTextContent(READ_ONLY);

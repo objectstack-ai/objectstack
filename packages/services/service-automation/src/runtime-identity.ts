@@ -2,6 +2,7 @@
 
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import { AuthzPostureSchema, type AuthzPosture } from '@objectstack/spec/security';
+import { markFlowWriteReferenceCheck } from '@objectstack/core';
 import { markGuardRefusal } from './guard-refusal.js';
 
 /**
@@ -335,7 +336,12 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
     // `userId` is absent, which is what keeps a genuinely user-less run's
     // writes attributable instead of "Unknown user" (#4366).
     const actor = `svc:flow:${context.flowName ?? 'automation'}`;
-    return {
+    // [#28881] Elevation is for authorization, not for links to rows that do
+    // not exist: the mark keeps the engine's write-time reference check on
+    // this run's record writes (`reference_not_found`, as on the user path),
+    // while `isSystem` keeps every authorization exemption below. Not an
+    // authorable key; see `markFlowWriteReferenceCheck` (@objectstack/core).
+    return markFlowWriteReferenceCheck<RunDataContext>({
       isSystem: true,
       actor,
       // #5494 — elevation is not anonymity. When the trigger resolved a user
@@ -379,7 +385,7 @@ export function resolveRunDataContext(context: AutomationContext | undefined): R
       ...(context.userId ? {} : { positions: [], permissions: [] }),
       ...(flowRunId ? { flowRunId } : {}),
       ...(locale ? { locale } : {}),
-    };
+    });
   }
   if (!context?.userId) {
     // #3760 — FAIL CLOSED. There is no identity to present. Presenting none

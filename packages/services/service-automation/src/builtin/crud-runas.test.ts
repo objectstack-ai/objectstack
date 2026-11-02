@@ -21,6 +21,7 @@
  * kinds are the engine's, not this package's.
  */
 import { describe, it, expect } from 'vitest';
+import { FLOW_WRITE_REFERENCE_CHECK } from '@objectstack/core';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
 import { registerScreenNodes } from './screen-nodes.js';
@@ -210,7 +211,7 @@ describe('flow.runAs identity enforcement at the data layer (#1888)', () => {
 describe('resolveRunDataContext (#1888 unit)', () => {
   it("maps runAs:'system' to an elevated context attributed to the flow AND the acting user (#4366, #5494)", () => {
     expect(resolveRunDataContext({ runAs: 'system', userId: 'u1', flowName: 'mirror_status' })).toEqual({
-      isSystem: true, actor: 'svc:flow:mirror_status', userId: 'u1',
+      isSystem: true, actor: 'svc:flow:mirror_status', userId: 'u1', [FLOW_WRITE_REFERENCE_CHECK]: true,
     });
   });
 
@@ -222,7 +223,9 @@ describe('resolveRunDataContext (#1888 unit)', () => {
       runAs: 'system', userId: 'u1', tenantId: 'org_a', flowName: 'sweep', flowRunId: 'r1',
       positions: ['sales_rep'], permissions: ['deal_rep'],
     });
-    expect(ctx).toEqual({ isSystem: true, actor: 'svc:flow:sweep', userId: 'u1', tenantId: 'org_a', flowRunId: 'r1' });
+    expect(ctx).toEqual({
+      isSystem: true, actor: 'svc:flow:sweep', userId: 'u1', tenantId: 'org_a', flowRunId: 'r1', [FLOW_WRITE_REFERENCE_CHECK]: true,
+    });
     expect(Object.keys(ctx!)).not.toContain('positions');
     expect(Object.keys(ctx!)).not.toContain('permissions');
   });
@@ -230,15 +233,18 @@ describe('resolveRunDataContext (#1888 unit)', () => {
   it('a user-less system run keeps the empty positions and permission sets, its organisation included', () => {
     expect(resolveRunDataContext({ runAs: 'system', tenantId: 'org_a', flowName: 'night' })).toEqual({
       isSystem: true, actor: 'svc:flow:night', tenantId: 'org_a', positions: [], permissions: [],
+      [FLOW_WRITE_REFERENCE_CHECK]: true,
     });
   });
 
   it("labels a system run without a flow name as the generic automation principal (#4366)", () => {
     expect(resolveRunDataContext({ runAs: 'system' })).toEqual({
-      isSystem: true, actor: 'svc:flow:automation', positions: [], permissions: [],
+      isSystem: true, actor: 'svc:flow:automation', positions: [], permissions: [], [FLOW_WRITE_REFERENCE_CHECK]: true,
     });
   });
 
+  // [#28881] The reference-check mark rides the system arm only: `toEqual`
+  // compares symbol keys, so this pin also says a user run never carries it.
   it("maps runAs:'user' to the triggering user's identity", () => {
     expect(resolveRunDataContext({ runAs: 'user', userId: 'u1', positions: ['r'], tenantId: 't' })).toEqual({
       isSystem: false, userId: 'u1', positions: ['r'], permissions: [], tenantId: 't',
@@ -280,6 +286,7 @@ describe('resolveRunDataContext (#1888 unit)', () => {
     expect(() => resolveRunDataContext({ runAs: 'user', flowRunId: 'r' })).toThrow();
     expect(resolveRunDataContext({ runAs: 'system', flowRunId: 'r' })).toEqual({
       isSystem: true, actor: 'svc:flow:automation', positions: [], permissions: [], flowRunId: 'r',
+      [FLOW_WRITE_REFERENCE_CHECK]: true,
     });
   });
 });
