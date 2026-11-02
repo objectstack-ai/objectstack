@@ -4,7 +4,7 @@
 
 fix(plugin-calendar): a calendar view with no `endDateField` draws no resize-end handle, and a drop that changes no date writes nothing
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 On a calendar view that declares only `startDateField`, every month-view card still drew the "Resize event end" handle. Dragging it moved nothing, yet wrote the record's unchanged start date, so `updated_at` moved and every after-update trigger and flow ran for an edit nobody made.
