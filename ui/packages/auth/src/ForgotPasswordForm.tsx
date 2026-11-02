@@ -14,6 +14,7 @@ import {
   AUTH_INPUT_CLASS,
   AUTH_LINK_CLASS,
   AUTH_PRIMARY_BUTTON_CLASS,
+  AUTH_TOUCH_TARGET_CLASS,
   AuthErrorBanner,
   AuthFormHeader,
   AuthMailIcon,
@@ -273,7 +274,7 @@ export function ForgotPasswordForm({
         />
         {loginUrl && (
           <p className="text-center text-sm text-muted-foreground">
-            <LinkComp href={loginUrl} className={AUTH_LINK_CLASS}>
+            <LinkComp href={loginUrl} className={`${AUTH_LINK_CLASS} inline-flex items-center ${AUTH_TOUCH_TARGET_CLASS}`}>
               ← {l.backToSignInText}
             </LinkComp>
           </p>
@@ -299,7 +300,7 @@ export function ForgotPasswordForm({
         />
         {loginUrl && (
           <p className="text-center text-sm text-muted-foreground">
-            <LinkComp href={loginUrl} className={AUTH_LINK_CLASS}>
+            <LinkComp href={loginUrl} className={`${AUTH_LINK_CLASS} inline-flex items-center ${AUTH_TOUCH_TARGET_CLASS}`}>
               ← {l.backToSignInText}
             </LinkComp>
           </p>
@@ -360,7 +361,7 @@ export function ForgotPasswordForm({
               type="button"
               onClick={handleSendOtp}
               disabled={otpSending || otpCooldown > 0 || !phone.trim() || resetting}
-              className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50"
+              className={`shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50 ${AUTH_TOUCH_TARGET_CLASS}`}
             >
               {otpSending && <AuthSpinner />}
               {otpCooldown > 0
@@ -399,7 +400,7 @@ export function ForgotPasswordForm({
         <button
           type="button"
           onClick={() => switchMode('email')}
-          className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+          className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
         >
           {l.useEmailResetText}
         </button>
@@ -434,7 +435,7 @@ export function ForgotPasswordForm({
           <button
             type="button"
             onClick={() => switchMode('phone')}
-            className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+            className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
           >
             {l.usePhoneResetText}
           </button>
