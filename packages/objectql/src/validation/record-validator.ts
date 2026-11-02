@@ -852,6 +852,25 @@ function isPlainObjectValue(value: unknown): boolean {
  * driver copy. A value a `before*` hook writes after the door is the hook's
  * own and is not rewritten; the arm still judges it by the same grammar.
  *
+ * ## [#29241] The string arm's half: a number or a boolean on a text field
+ *
+ * The mirror case on the string-stored side. The record validator's string arm
+ * (`BOUNDED_STRING_FIELD_TYPES`, the spec's set: text, textarea, email, url,
+ * phone, password, markdown, html, richtext, code, signature, qrcode) judges a
+ * number or a boolean by its string reading, `String(value)`: `42` is bounded,
+ * domain-checked and format-checked as `'42'`, `true` as `'true'`. The write
+ * carried the raw scalar, so driver-memory stored and read back the number `42`
+ * while a TEXT column hands back a string: one write, two stored shapes, and
+ * an equality filter or a sort that differs by driver. This writes the string
+ * the arm judged, on the same fields the numeric half reads (the validator's
+ * walk, `readonly` included). Nothing is refused or newly admitted: only the
+ * stored form of a value the arm already admits changes.
+ *
+ * ⛔ Not touched: a string (judged and written as itself), `null` and a missing
+ * key, a plain object or an array (the arm refuses them, #29133), every other
+ * non-scalar, and every field outside the set — `json` and the structured
+ * types, the number and boolean fields, select and the reference types.
+ *
  * Same contract as {@link normalizeBlankTypedValues}: one record or an array of
  * them, pure — the same reference comes back when nothing changed, else a
  * shallow copy (per row, and a copied array).
@@ -877,15 +896,31 @@ function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknow
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
   for (const [name, value] of Object.entries(row)) {
-    if (typeof value !== 'string') continue;
+    const isString = typeof value === 'string';
+    if (!isString && !isStringReadScalar(value)) continue;
     // Own-property: a field name may be `constructor` / `valueOf`.
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
-    if (!def || !isJudgedNumberType(def.type) || !isInReadonlyScope(name, def, 'include')) continue;
-    const n = parseNumericString(value);
-    if (n === undefined) continue;
-    (out ??= { ...row })[name] = n;
+    if (!def || !isInReadonlyScope(name, def, 'include')) continue;
+    if (isString) {
+      if (!isJudgedNumberType(def.type)) continue;
+      const n = parseNumericString(value);
+      if (n === undefined) continue;
+      (out ??= { ...row })[name] = n;
+    } else if (BOUNDED_STRING_FIELD_TYPES.has(def.type)) {
+      // [#29241] The string arm's reading of a number or a boolean.
+      (out ??= { ...row })[name] = String(value);
+    }
   }
   return out ?? row;
+}
+
+/**
+ * [#29241] A number or a boolean: the scalars the record validator's string arm
+ * judges by their string reading (`String(value)`), so the door writes that
+ * string into a text-family field ({@link normalizeNumericStringValues}).
+ */
+function isStringReadScalar(value: unknown): value is number | boolean {
+  return typeof value === 'number' || typeof value === 'boolean';
 }
 
 /**
@@ -1132,7 +1167,9 @@ function validateOne(
     // stored value for this class and neither has a string reading the author
     // meant, so the arm refuses it with the number arm's #20309 posture: never
     // silently alter a value. It is a SHAPE test, so it runs ahead of
-    // `shapeOnly`. A number or a boolean keeps its string reading; a
+    // `shapeOnly`. A number or a boolean keeps its string reading, and
+    // [#29241] `normalizeNumericStringValues` has already written that string
+    // into the payload at the door, so the driver stores what was judged; a
     // filter-operator object was already refused above, with its own sentence.
     if (isPlainObjectValue(value) || Array.isArray(value)) {
       return fail(
