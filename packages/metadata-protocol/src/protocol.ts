@@ -9350,10 +9350,13 @@ export class ObjectStackProtocolImplementation implements
      * object's resolved schema is DEFINED (ADR-0029 D9.2 / D9.6) as a base layer
      * with its `extend` contributors folded on, and the MetadataService copy is
      * only the base layer. A deployment that ingests a compiled artifact
-     * (`artifactSource`, i.e. every sealed/served runtime) registers `objects`
-     * and `objectExtensions` into that service as SEPARATE collections, so the
-     * body this method receives is the owner's declaration with no extender in
-     * it. Serving it unfolded is what made the showcase's three
+     * (`artifactSource`, i.e. every sealed/served runtime) registers its
+     * `objects` into that service, and its `objectExtensions` never reach it as
+     * items: the ObjectQL engine's `registerApp` registers each one as an
+     * `'extend'` contributor of its target object, and the artifact loader files
+     * no item from that collection, because an extension carries `extend` and no
+     * `name`. So the body this method receives is the owner's declaration with
+     * no extender in it. Serving it unfolded is what made the showcase's three
      * `objectExtensions` fields readable through `GET /meta/object`, writable
      * through the data API, and absent from `GET /meta/object/:name` — the read
      * the edit and new forms derive from.
