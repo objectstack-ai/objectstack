@@ -46,8 +46,8 @@
  *     one came from outside them, and what it holds cannot be judged key by
  *     key: an `auth: '<token>'` is the secret itself. Withheld whole, fail
  *     closed, rather than served as stored.
- *  5. **The credential parts of every URL under `providerConfig`** — rewritten,
- *     not removed: the userinfo (`https://user:pass@host`, and the
+ *  5. **The credential parts of every URL under `providerConfig` and
+ *     `auth`** — rewritten, not removed: the userinfo (`https://user:pass@host`, and the
  *     `https://<token>@host` form several HTTP APIs read as a token, so the
  *     user part goes too) and each credential query parameter
  *     ({@link CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES}, plus the
@@ -58,8 +58,13 @@
  *     It covers `providerConfig.baseUrl` (`rest`, `openapi`),
  *     `providerConfig.transport.url` (`mcp` over http) and a URL
  *     `providerConfig.spec` (`openapi`), and any other URL a provider keeps at
- *     an OBJECT depth of `providerConfig`: a string is judged when it starts
- *     with `scheme://`.
+ *     an OBJECT depth of `providerConfig`; and the endpoints an instance-auth
+ *     kind declares (`auth.tokenUrl`, `auth.authorizationUrl`, `auth.resource`)
+ *     and any URL a kind declares later. A string is judged when it starts
+ *     with `scheme://`. What a credential part is lives in ONE place,
+ *     `./connector-url-credentials.ts`, which the write door's refinement
+ *     judges by too: an authored URL holding one is refused, so only a row
+ *     stored before that refusal can carry one to this read.
  *  6. **An array under `providerConfig` that holds such a URL, WHOLE**, and
  *     **a key under `providerConfig` whose own name carries a dot that holds
  *     such a URL at any depth, WHOLE.** The carry-forward cannot address an
@@ -123,8 +128,14 @@
 import { ConnectorInstanceAuthSchema } from '../shared/connector-auth.zod';
 import { ConnectorActionSchema, DeclarativeConnectorEntrySchema, RetryConfigSchema } from './connector.zod';
 import { METADATA_READ_DECORATIONS } from '../kernel/metadata-read-decorations';
-import { CREDENTIAL_URL_QUERY_PARAM_NAMES } from '../data/driver/common.zod';
 import { redactUrlCredentialQueryParams } from '../data/datasource-credential-redaction';
+import {
+  CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES,
+  CONNECTOR_URL_ROOTS,
+  URL_USERINFO_RE,
+  connectorCredentialQueryParamsOf,
+  connectorUrlCredentialPartsOf,
+} from './connector-url-credentials';
 import { objectShapeOf, wrapperChainOf, zodDefOf } from '../kernel/metadata-credential-fields';
 import type { MetadataRedactionResult } from '../kernel/metadata-type-redaction';
 
@@ -138,55 +149,17 @@ export const CONNECTOR_CREDENTIAL_MAP_PATHS: readonly (readonly string[])[] = Ob
 
 /**
  * The query parameters whose value a connector URL is read as carrying a
- * credential in (see the module note, item 5): the datasource set
- * (`password`, `authToken`) and the names HTTP APIs conventionally take a key,
- * token or signature under. Matched case-insensitively on the decoded name
- * (`credentialQueryParamOf`). A name here that holds no secret on some API
- * costs that API's served URL the parameter, never its stored value: the
- * carry-forward keeps it on a save of the served form.
+ * credential in (see the module note, item 5) — declared once, beside the
+ * walk the write door shares (`./connector-url-credentials.ts`). A name here
+ * that holds no secret on some API costs that API's served URL the parameter,
+ * never its stored value: the carry-forward keeps it on a save of the served
+ * form.
  */
-export const CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES: readonly string[] = Object.freeze([
-  ...CREDENTIAL_URL_QUERY_PARAM_NAMES,
-  'access_token',
-  'api_key',
-  'api-key',
-  'apikey',
-  'auth_token',
-  'client_secret',
-  'id_token',
-  'key',
-  'passwd',
-  'refresh_token',
-  'secret',
-  'sig',
-  'signature',
-  'token',
-  'x-api-key',
-]);
-
-/** `scheme://` — the strings item 5 judges. */
-const URL_SCHEME_RE = /^[a-z][a-z0-9+.\-]*:\/\//i;
-
-/**
- * `scheme://userinfo@` — the whole userinfo. Every class excludes `/?#`, so the
- * `@` must sit in the authority; the greedy class backtracks to the LAST `@`
- * before the path, the userinfo boundary RFC 3986 defines (the reading
- * `URL_USERINFO_RE` in the datasource module documents).
- */
-const URL_USERINFO_RE = /^([a-z][a-z0-9+.\-]*:\/\/)[^/?#]*@/i;
+export { CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES };
 
 /** One URL with its userinfo and credential query parameters removed; the input when there is none. */
 function redactConnectorUrl(value: string, params: readonly string[]): string {
   return redactUrlCredentialQueryParams(value.replace(URL_USERINFO_RE, '$1'), params);
-}
-
-/** The query parameter names item 5 strips for `item`: the fixed set plus its own `auth.paramName`. */
-function credentialQueryParamsOf(item: Record<string, unknown>): readonly string[] {
-  const auth = item.auth;
-  const own = isPlainRecord(auth) && auth.type === 'api-key' && typeof auth.paramName === 'string' && auth.paramName !== ''
-    ? auth.paramName
-    : undefined;
-  return own === undefined ? CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES : [...CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES, own];
 }
 
 /** One instance-auth kind as the union declares it: its literal-valued keys, and every key it declares. */
@@ -394,9 +367,9 @@ function withValueAt(item: Record<string, unknown>, path: readonly string[], val
   return { ...item, [head]: withValueAt(item[head] as Record<string, unknown>, rest, value) };
 }
 
-/** Whether `value` is a URL whose credential parts {@link redactConnectorUrl} removes. */
+/** Whether `value` is a URL holding a credential part — the parts {@link redactConnectorUrl} removes. */
 function isCredentialUrl(value: string, params: readonly string[]): boolean {
-  return URL_SCHEME_RE.test(value) && redactConnectorUrl(value, params) !== value;
+  return connectorUrlCredentialPartsOf(value, params) !== undefined;
 }
 
 /** Whether `value` holds, at any depth, a URL {@link isCredentialUrl} judges (item 6). */
@@ -408,18 +381,16 @@ function holdsCredentialUrl(value: unknown, params: readonly string[]): boolean 
 }
 
 /**
- * Items 5 and 6: every URL under `providerConfig`, at object depth, whose
- * credential parts {@link redactConnectorUrl} removes — the path and the
- * rewritten value — and every array there holding such a URL, withheld whole
- * (`value` absent).
+ * Items 5 and 6: every URL under `providerConfig` and `auth`
+ * ({@link CONNECTOR_URL_ROOTS}), at object depth, whose credential parts
+ * {@link redactConnectorUrl} removes — the path and the rewritten value — and
+ * every array there holding such a URL, withheld whole (`value` absent).
  */
 function credentialUrlRewritesOf(
   item: Record<string, unknown>,
 ): Array<{ path: string[]; value?: string }> {
   const rewrites: Array<{ path: string[]; value?: string }> = [];
-  const providerConfig = item.providerConfig;
-  if (!isPlainRecord(providerConfig)) return rewrites;
-  const params = credentialQueryParamsOf(item);
+  const params = connectorCredentialQueryParamsOf(item);
   const walk = (node: Record<string, unknown>, prefix: readonly string[]): void => {
     for (const [key, value] of Object.entries(node)) {
       const path = [...prefix, key];
@@ -443,7 +414,10 @@ function credentialUrlRewritesOf(
       }
     }
   };
-  walk(providerConfig, ['providerConfig']);
+  for (const root of CONNECTOR_URL_ROOTS) {
+    const node = item[root];
+    if (isPlainRecord(node)) walk(node, [root]);
+  }
   return rewrites;
 }
 
