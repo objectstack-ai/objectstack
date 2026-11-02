@@ -102,7 +102,7 @@
       "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
       "since": "v16",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -135,13 +135,13 @@
         {
           "clause": "a new field's API name derives from its label on blur, so the data column is the derived name — never a frozen field_N (the contract behind audit finding 2, where the saved record stored 'field_2': 'in_progress' forever)",
           "oracle": "api",
-          "verify": "the field's API-name input shows asset_code after the label blur (corroborated at the Setup designer door by objectui F3, which drives that door, not Studio), and the stored record's column key is asset_code",
+          "verify": "the field's API-name input shows asset_code after the label blur (corroborated by F3 at the All metadata area's designer door, /studio/PKG/metadata/object/new — a sibling door inside Studio, not the Data pillar), and the stored record's column key is asset_code",
           "evidence": "designer screenshot + the record read"
         },
         {
           "clause": "typed identifiers survive per-keystroke sanitisation — repair_asset keeps its underscore when typed char-by-char, and the stored name is NS_repair_asset",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the dialog rendered, the identifier input's value equals the typed repair_asset, character for character, and the dialog's stored-name preview reads NS_repair_asset; the meta read's name is NS_repair_asset (pre-fix repair_asset yielded 'repairasset'; objectui F2 corroborates the typing half at the Setup designer door)",
+          "verify": "after a screenshot confirms the dialog rendered, the identifier input's value equals the typed repair_asset, character for character, and the dialog's stored-name preview reads NS_repair_asset; the meta read's name is NS_repair_asset (pre-fix repair_asset yielded 'repairasset'; F2 corroborates the typing half at the All metadata area's designer door)",
           "evidence": "screenshot + input value read"
         },
         {
@@ -155,9 +155,12 @@
         "an API name frozen at field_N after its label was set pre-save is audit finding 2 regressed — FAIL, but confirm against a fresh objectui build first: the vendored /_console bundle may predate the derive-on-blur fix the e2e now pins"
       ],
       "traps": ["stale-console-bundle", "automation-input"],
-      "automated": { "kind": "e2e", "ref": "ui/e2e/live/studio-object-designer.spec.ts — ⚠ F2, F3 and F4 drive the Setup designer route (/apps/showcase_app/metadata/object/new), not the Studio Data pillar this item's steps drive since revision 9, so each is evidence at a sibling door onto the same save. F3 pins acceptance[1]'s designer half (the API-name input derives asset_code from the label on blur) and F2 pins acceptance[2] (a name typed character by character keeps its underscore). F4 pins acceptance[3]'s banner half ONLY: it gives the picklist one real option, not three, adds an empty row and finds no metadata-validation banner after the debounce, but it never publishes or reads the stored options, so 'the PUBLISHED picklist carries exactly the 3 authored options' is driven by hand. F1 (a package created from the Studio surface's switcher appears in it without a reload) asserts no clause of this item. No pin covers acceptance[0] or acceptance[1]'s stored-column half" },
+      "automated": {
+        "kind": "e2e",
+        "ref": "ui/e2e/live/studio-object-designer.spec.ts — F2, F3 and F4 drive Studio's All metadata area designer on a package the test authors (/studio/PKG/metadata/object/new?package=PKG, the metadata-admin object editor; the Setup designer route they drove before redirects there since #28818, ADR-0146 D1), not the Data pillar's New object dialog this item's steps drive since revision 9, so each is evidence at a sibling door onto the same save. F3 pins acceptance[1]'s designer half (the API-name input derives asset_code from the label on blur) and F2 pins acceptance[2]'s typing half (a name typed character by character keeps its underscore). F4 corroborates acceptance[3] under a different fixture: it gives the picklist ONE real option, adds an empty row, finds no metadata-validation banner after the debounce, then saves a DRAFT and reads back exactly the one option — so the banner half and 'the empty row was dropped' are pinned at that door, while 'the PUBLISHED picklist carries exactly the 3 authored options' is still driven by hand. F1 (a package created from the Studio surface's switcher appears in it without a reload) asserts no clause of this item. No pin covers acceptance[0] or acceptance[1]'s stored-column half"
+      },
       "source": [
-        "objectui: e2e/live/studio-object-designer.spec.ts (F1–F4, the objectui#1926 regression classes: per-keystroke sanitisation, label→api-name derivation, empty picklist row, switcher refresh)",
+        "ui/e2e/live/studio-object-designer.spec.ts (F1–F4, the objectui#1926 regression classes: per-keystroke sanitisation, label→api-name derivation, empty picklist row, switcher refresh; F2–F4 open the All metadata area's designer since #28818)",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 2 — field API name did not follow the label at audit time)",
         "docs/audits/2026-07-studio-package-create-ux-dogfood.md (finding 1 — read-only package rejects designer saves server-side, which is why a writable package is a fixture requirement)"
       ],
@@ -212,7 +215,13 @@
           "ref": "#26715"
         },
         { "revision": 10, "date": "2026-10-31", "change": "steps[1] names the New object dialog's confirm button: 'Save as draft', not Create, in both places the step named it. Every Studio create dialog takes its submit label from engine.studio.createDraft (ui/packages/i18n/src/namespaces/studio/en.ts; ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx, the engine.studio.data.newObject dialog). Accuracy finding of QA run #27438. No clause changed. Wave anchor #27377, wave-3 accuracy slice S2; read at base a0f865491d", "ref": "#27438" },
-        { "revision": 11, "date": "2026-11-02", "change": "fixtures.knownGaps[0] names the invocation the ui vitest guard accepts, the form revision 8 of studio-authoring.expression-editors landed in its knownGaps[1] (#28701): a jsdom unit pin runs from ui/ as cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE. The pnpm --filter @object-ui/PKG exec form it quoted runs in the package directory, which the guard refuses (ui/scripts/vitest-invocation-guard.mjs, verdict package-cwd), so a runner following it is refused at config load, before any test runs. Wording only; no clause changed. Checklist-accuracy finding of QA run #28656 (W3-RT), carried by #28750", "ref": "#28656" }
+        { "revision": 11, "date": "2026-11-02", "change": "fixtures.knownGaps[0] names the invocation the ui vitest guard accepts, the form revision 8 of studio-authoring.expression-editors landed in its knownGaps[1] (#28701): a jsdom unit pin runs from ui/ as cd ui && pnpm exec vitest run --maxWorkers=1 packages/PKG/src/FILE. The pnpm --filter @object-ui/PKG exec form it quoted runs in the package directory, which the guard refuses (ui/scripts/vitest-invocation-guard.mjs, verdict package-cwd), so a runner following it is refused at config load, before any test runs. Wording only; no clause changed. Checklist-accuracy finding of QA run #28656 (W3-RT), carried by #28750", "ref": "#28656" },
+        {
+          "revision": 12,
+          "date": "2026-11-02",
+          "change": "automated.ref, source[0] and acceptance[1]/[2] verify re-pointed: the live spec's F2–F4 no longer drive the Setup designer route; since #28818 (ADR-0146 D1) they open Studio's All metadata area designer on a package the test authors, /studio/PKG/metadata/object/new?package=PKG, and F4 now saves a draft and reads back the one stored option. Re-read at base dfbe34d887 (ui/e2e/live/studio-object-designer.spec.ts newObjectIn, F4's draft read). The pins stay corroboration at a sibling door (the area's metadata-admin editor, not the Data pillar's New object dialog the steps drive), and F4 still seeds one option where acceptance[3] judges three and reads a draft where the clause reads the published picklist, so no clause's scoring basis changed",
+          "ref": "#28579"
+        }
       ]
     },
     {
