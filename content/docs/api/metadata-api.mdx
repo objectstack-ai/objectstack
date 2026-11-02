@@ -109,9 +109,10 @@ never overridden; it is copied under a new name. What the reads then serve is in
 [Metadata lifecycle](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146).
 `POST /packages/hotcrm/ensure-customization` creates the pair when absent (Studio calls
 it on the first change), and `GET /packages/hotcrm/customizations` lists its overrides,
-extensions and switched-off items in one read, beside `contributions`: the fields and flows
-other installed packages contribute to `hotcrm`, each entry naming its package. Its `nav` kind
-(a navigation item another package contributes to a `hotcrm` app) is declared and not yet served.
+extensions and switched-off items in one read, beside `contributions`: the fields (kind `field`)
+and flows (kind `flow`) other installed packages contribute to `hotcrm`'s objects, each entry
+naming its package. Its `nav` kind (a navigation item another package contributes to a
+`hotcrm` app) is declared and not yet served.
 
 **Body**: `{ type: "object", name: "account", item: { ... } }`  
 **Response**: `{ success: true }`
