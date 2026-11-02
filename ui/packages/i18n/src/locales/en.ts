@@ -1861,7 +1861,6 @@ const en = {
     undo: 'Undo',
     redo: 'Redo',
     canvasMinimap: 'Canvas minimap',
-    versionHistory: 'Version history',
   },
   dashboard: {
     total: 'Total',
