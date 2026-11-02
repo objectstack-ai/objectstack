@@ -1680,3 +1680,135 @@ describe('the read exits withhold the declared ssl secret member of a datasource
         expect(stored.ssl).toEqual({ ...SSL_PUBLIC, key: SSL_KEY });
     });
 });
+
+// ---------------------------------------------------------------------------
+// [#28640 ②B] Legacy cleartext under a connector's undeclared `auth` key drains
+// on a normal save, and the save names what it dropped
+// ---------------------------------------------------------------------------
+//
+// The instance-auth shapes are strict, so the save door refuses an undeclared
+// `auth` key: a row holding one was written before they were, and only a direct
+// seed reproduces it. The redactor marks the position withheld AND not carried
+// forward, so a save of the served form persists the row without it.
+
+const LEGACY_AUTH_TOKEN = 'TEST_PLACEHOLDER_LEGACY_AUTH_TOKEN';
+const MAP_HEADER_VALUE = 'TEST_PLACEHOLDER_MAP_HEADER_VALUE';
+
+function legacyAuthConnectorBody() {
+    return {
+        name: 'vendor_api',
+        label: 'Vendor API',
+        type: 'api',
+        provider: 'rest',
+        // A DECLARED credential position (withheld whole, carried forward): the control.
+        providerConfig: { baseUrl: 'https://api.vendor.example/v1', headers: { Authorization: `Bearer ${MAP_HEADER_VALUE}` } },
+        auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN', token: LEGACY_AUTH_TOKEN },
+    };
+}
+
+function seedLegacyAuthConnectorRow(rows: Map<string, Row>, body: Record<string, unknown> = legacyAuthConnectorBody()) {
+    const where = { type: 'connector', name: 'vendor_api', organization_id: null, package_id: null, state: 'active' };
+    rows.set(keyOf(where), {
+        id: 'r_connector_legacy_auth', ...where, metadata: JSON.stringify(body), checksum: hashSpec(body), version: 1,
+    } as Row);
+}
+
+const droppedNotice = (path: string) => expect.objectContaining({
+    rule: 'withheld-key-dropped',
+    severity: 'warning',
+    where: 'connector "vendor_api"',
+    path,
+});
+
+describe('[#28640 ②B] a save of the served connector form drains an undeclared `auth` key', () => {
+    it('read serves without it → save of the served form stores no `auth.token` and names it on `advisories`', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedLegacyAuthConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const read: any = await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' });
+        expect(read.item.auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' });
+        expect(allStrings(read)).not.toContain(LEGACY_AUTH_TOKEN);
+
+        const res: any = await protocol.saveMetaItem({
+            type: 'connector', name: 'vendor_api', item: { ...read.item, label: 'Vendor API (edited)' },
+        });
+
+        const atRest = storedConnector(rows);
+        expect(atRest.label).toBe('Vendor API (edited)');
+        expect(atRest.auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' });
+        expect(allStrings(atRest)).not.toContain(LEGACY_AUTH_TOKEN);
+        expect(res.advisories).toEqual([droppedNotice('connectors[0].auth.token')]);
+        // The notice names the position, never the value it dropped.
+        expect(allStrings(res)).not.toContain(LEGACY_AUTH_TOKEN);
+    });
+
+    it('CONTROL: the declared credential position beside it (a header map) round-trips through the carry-forward unchanged', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedLegacyAuthConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        expect(served.providerConfig).toEqual({ baseUrl: 'https://api.vendor.example/v1' });
+        await protocol.saveMetaItem({ type: 'connector', name: 'vendor_api', item: served });
+
+        expect(storedConnector(rows).providerConfig).toEqual(legacyAuthConnectorBody().providerConfig);
+    });
+
+    it('the drain converges: a second save of the served form drops nothing and carries no `advisories` key', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedLegacyAuthConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const first: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        await protocol.saveMetaItem({ type: 'connector', name: 'vendor_api', item: first });
+        const second: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        const res: any = await protocol.saveMetaItem({ type: 'connector', name: 'vendor_api', item: second });
+
+        expect(res).not.toHaveProperty('advisories');
+        expect(storedConnector(rows).providerConfig.headers).toEqual(legacyAuthConnectorBody().providerConfig.headers);
+    });
+
+    it('a draft save drains too, and names the drop on its answer', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedLegacyAuthConnectorRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        const res: any = await protocol.saveMetaItem({ type: 'connector', name: 'vendor_api', item: served, mode: 'draft' });
+
+        expect(res.state).toBe('draft');
+        expect(res.advisories).toEqual([droppedNotice('connectors[0].auth.token')]);
+        expect(allStrings(res)).not.toContain(LEGACY_AUTH_TOKEN);
+        const draft = JSON.parse(Array.from(rows.values()).find((r) => r.type === 'connector' && r.state === 'draft')!.metadata);
+        expect(draft.auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' });
+    });
+
+    it('a cleared undeclared `auth` key is withheld too, so the served form saves instead of meeting the strict shape', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedLegacyAuthConnectorRow(rows, { ...legacyAuthConnectorBody(), auth: { type: 'bearer', credentialRef: 'VENDOR_API_TOKEN', token: null } });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'connector', name: 'vendor_api' })).item;
+        expect(served.auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' });
+        const res: any = await protocol.saveMetaItem({ type: 'connector', name: 'vendor_api', item: served });
+
+        expect(storedConnector(rows).auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_API_TOKEN' });
+        expect(res.advisories).toEqual([droppedNotice('connectors[0].auth.token')]);
+        // The message names the key and claims no stored value: here there was none.
+        expect(res.advisories[0].message).toContain("'auth.token'");
+        expect(res.advisories[0].message).not.toMatch(/held a value/);
+    });
+
+    it('CONTROL: a datasource row\'s carry-forward is unchanged — its credentials stay at rest and the answer carries no `advisories`', async () => {
+        const { engine, rows } = makeStubEngine();
+        seedLegacyRow(rows);
+        const protocol = new ObjectStackProtocolImplementation(engine);
+
+        const served: any = (await protocol.getMetaItem({ type: 'datasource', name: 'warehouse' })).item;
+        const res: any = await protocol.saveMetaItem({ type: 'datasource', name: 'warehouse', item: { ...served, label: 'Warehouse (edited)' } });
+
+        expect(storedBody(rows)).toEqual({ ...legacyDatasourceBody(), label: 'Warehouse (edited)' });
+        expect(res).not.toHaveProperty('advisories');
+    });
+});
