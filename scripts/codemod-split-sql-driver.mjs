@@ -75,7 +75,8 @@
  *
  * Exit codes: 0 done · 1 a proof failed (stop: the generated split is never
  * hand-edited to pass) · 2 the script could not run (unknown banner, missing
- * prerequisite, bad arguments).
+ * prerequisite, bad arguments) · 3 an input does not parse (`ts-parse.mjs`'s
+ * refusal, which names the parse errors).
  */
 
 import { createHash } from 'node:crypto';
@@ -86,6 +87,7 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { isEntrypoint } from './invoked-as.mjs';
+import { parseSourceFile } from './ts-parse.mjs';
 
 const ROOT = join(fileURLToPath(new URL('.', import.meta.url)), '..');
 const SRC_REL = 'packages/drivers/driver-sql/src';
@@ -225,13 +227,20 @@ async function loadTsMorph() {
   }
 }
 
-/** One in-memory project per parse: no file system, no lib, no build output. */
+/**
+ * One in-memory project per parse: no file system, no lib, no build output.
+ * The text goes through `ts-parse.mjs`'s checked parse first, which refuses a
+ * source with parse errors (its exit 3) instead of handing back a recovered
+ * partial tree; ts-morph then reads the same text, already vouched for.
+ */
 function parse(tm, fileName, text) {
+  parseSourceFile(fileName, text);
   const project = new tm.Project({
     useInMemoryFileSystem: true,
     compilerOptions: { target: tm.ts.ScriptTarget.ES2020, strict: true, noLib: true, allowJs: false },
   });
-  return project.createSourceFile(fileName, text, { overwrite: true });
+  project.getFileSystem().writeFileSync(fileName, text);
+  return project.addSourceFileAtPath(fileName);
 }
 
 /** A reason the script cannot run at all (exit 2) — never a verdict on the split. */
