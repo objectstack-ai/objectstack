@@ -206,16 +206,15 @@ describe('P1.1 ListView Spec Alignment', () => {
   });
 
   // P2: Sharing / ExportOptions / Pagination protocol alignment tests
-  it('should accept sharing in spec format { type, lockedBy }', () => {
+  // objectstack#29037: the spec retired `sharing.type`; the block is `{ lockedBy }`.
+  it('should accept sharing in spec format { lockedBy }', () => {
     const schema: ListViewSchema = {
       type: 'list-view',
       objectName: 'Account',
       sharing: {
-        type: 'collaborative',
         lockedBy: 'admin@example.com',
       },
     };
-    expect(schema.sharing?.type).toBe('collaborative');
     expect(schema.sharing?.lockedBy).toBe('admin@example.com');
   });
 

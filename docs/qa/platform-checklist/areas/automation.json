@@ -2023,7 +2023,7 @@
       "title": "Disabling a packaged flow that packaged callers invoke as a subflow is refused 409 DELETE_RESTRICTED naming every caller; the refused attempt writes no ledger row; enabling the subflow itself is never guarded",
       "since": "v17",
       "status": "active",
-      "revision": 11,
+      "revision": 12,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2052,7 +2052,7 @@
         "remedy sequence (the refusal's own instruction): POST /api/v1/automation/showcase_task_done_notify_owner/toggle {\"enabled\": false} (the CALLER — it has no packaged callers of its own, so this lands), then RETRY POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} and record what it answers",
         "enable arm, child FIRST: POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": true} while its caller is still off (confirm it is never refused), then toggle showcase_task_done_notify_owner back ON, then repeat the child's enable with the caller armed (a no-op enable). ⚠️ Enabling the CALLER while its packaged subflow is still disabled is refused by design since 679f95e (#20711) — 409 RESOURCE_CONFLICT 'cannot be enabled while 1 packaged subflow it calls is disabled … Enable it first' — so the caller-first order is not a fail of this item",
         "teardown: re-enable anything left disabled (or discard the run's own DB)",
-        "scope, not a probe: the UI half (the caller names rendered verbatim in a role=alert on the Setup packaged-automation page) is deliberately NOT scored here; it is automation.setup-packaged-automation-board's refusal clause",
+        "scope, not a probe: the UI half (the caller names rendered verbatim in Studio's refusal strip, whose sentence (data-testid studio-refusal-message) carries role=alert, when the flow's ledger switch is turned off — the retired Setup packaged-automation page's bookmark now opens Studio (#28785, #28818)) is deliberately NOT scored here; it is automation.setup-packaged-automation-board's refusal clause",
         "several-callers leg (negative[1]): run the qa-second-packaged-caller recipe, then POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} and record the answer — 409 DELETE_RESTRICTED whose message counts 2 packaged callers and names both showcase_task_done_notify_owner and qasub_second_notify_caller, and NO active=false sys_metadata_activation row for showcase_notify_owner: its row is UNCHANGED. Run in this item's order, steps[5]'s enables already wrote that row (active true), so 'no row at all' holds only on a boot where nothing has toggled the child yet; then the recipe's teardown, after which the same disable names the stock caller alone"
       ],
       "acceptance": [
@@ -2131,7 +2131,13 @@
           "change": "fixtures.provisioning opts into the new area recipe qa-second-packaged-caller, negative[1] says how its door leg is staged, steps[8] drives it, fixtures.knownGaps gains its CLOSED-by-recipe line and source cites the install-local door and packagedArtifactOwner. Card #26622 (maintainer-directed in the 18.2.0 wave-2 session: 「补测试数据配方。立卡」): negative[1] scored blocked(fixture) in both 18.2.0 waves because only a package-loader-installed package can add a second PACKAGED caller. Re-driven once on the recipe, on a fresh showcase boot at d31329f1: with the package installed, POST /api/v1/automation/showcase_notify_owner/toggle {\"enabled\": false} answered 409 DELETE_RESTRICTED, 'cannot be disabled while 2 packaged flows still call it as a subflow: 'showcase_task_done_notify_owner', 'qasub_second_notify_caller'', with both callers in the remedy sentence; sys_metadata_activation held no row; after the teardown the same disable named showcase_task_done_notify_owner alone. Verdict for negative[1]: pass (no FAIL observed). No clause changed",
           "ref": "#26622"
         },
-        { "revision": 11, "date": "2026-10-31", "change": "steps[8] reads the ledger row as unchanged, not absent. Checklist-accuracy finding of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377): run in the item's own order, steps[5]'s enable arm had already written an active row for showcase_notify_owner, so 'NO sys_metadata_activation row' could not hold when steps[8] runs. What the refusal must not do is write an active=false row. Re-read at base 488b3ed0: packages/services/service-automation/src/engine.ts toggleFlow (the durable row is written FIRST on every toggle that lands, enables included). acceptance[2] is unchanged: at steps[3] no toggle has landed yet", "ref": "#27392" }
+        { "revision": 11, "date": "2026-10-31", "change": "steps[8] reads the ledger row as unchanged, not absent. Checklist-accuracy finding of QA run #27392 (18.3.0 sweep, wave 3, at c4c515ad; sweep anchor #27377): run in the item's own order, steps[5]'s enable arm had already written an active row for showcase_notify_owner, so 'NO sys_metadata_activation row' could not hold when steps[8] runs. What the refusal must not do is write an active=false row. Re-read at base 488b3ed0: packages/services/service-automation/src/engine.ts toggleFlow (the durable row is written FIRST on every toggle that lands, enables included). acceptance[2] is unchanged: at steps[3] no toggle has landed yet", "ref": "#27392" },
+        {
+          "revision": 12,
+          "date": "2026-11-02",
+          "change": "steps[7]'s scope note re-pointed (#28579 slice 2, FOLLOW-UPS §13c): the UI half it defers is rendered in Studio's refusal strip from the ledger switch, as automation.setup-packaged-automation-board's acceptance[5] scores it since slice 1, not on the retired Setup page. No clause changed. Read at base eb123b7ccc",
+          "ref": "#28579"
+        }
       ]
     },
     {
@@ -2841,6 +2847,112 @@
           "date": "2026-10-26",
           "change": "acceptance[1].verify and acceptance[2].verify say they are scored on a served boot, not from the pins. Checklist-accuracy finding of the 18.2.0 sweep (QA run #25815, release-18.2.0-tier1, at 6679644a: a1/a2; wave anchor #25807, card #25840): both pins assert that flows are armed (or not) and the refusal sentence on a LiteKernel; neither observes a served boot log line or run rows after intervals. Re-read at base 9753d1637f (both per-kernel-scheduled-work-policy.test.ts files assert getTriggerBindingAudit and the triggers' refusal text). No clause changed",
           "ref": "#25840"
+        }
+      ]
+    },
+    {
+      "id": "automation.package-flow-override",
+      "title": "Customize a read-only base's flow in Studio: the pair's item under the base's name, declaring the override, is armed in place of the base in one reload, keeps the base's ledger switch, lets a waiting run finish on the base, and Restore re-arms the base — New similar stays a separate copy under a new name",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "admin (holds manage_metadata; single posture)",
+        "dev admin as the approver (holds the manager position, so showcase_budget_approval's manager_review routes to them)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase on its own port and DB (dogfood §0) with OS_PORT exported, signed in as the seeded admin (admin@objectos.ai / admin123), and a console built from this tree with `pnpm console:build`",
+          "the stock read-only base com.example.showcase (examples/app-showcase/objectstack.config.ts: id com.example.showcase, namespace showcase, version 0.1.0 — a booted code package, so read-only to isWritablePackage) and its customization pair com.example.showcase.custom (namespace showcase_custom, dependency ^0 on the base), created by the ensure door on the first customization",
+          "the packaged flow showcase_budget_approval (record-after-update on showcase_project, condition budget != null && budget > 100000 && budget != previous.budget; an approval node manager_review), whose run waits on an approval — the specimen for both the override and the waiting run",
+          "a showcase_project record whose budget the run can PATCH above 100000 (approvals.json's stock recipe for raising showcase_budget_approval requests)"
+        ],
+        "knownGaps": [
+          "AUTOMATION LIVES UNDER ui/ — `cd ui && pnpm exec vitest run --maxWorkers=1 packages/app-shell/src/views/studio-design/FILE`; the jsdom pins mock the server",
+          "the engine's arming and the waiting run are pinned at the engine layer only (packages/services/service-automation/src/flow-sync-one-precedence.test.ts drives the boot pull, the kernel:ready sync and the metadata:reloaded re-sync against a fake store); no pin drives the HTTP doors this item reads"
+        ]
+      },
+      "steps": [
+        "start a run on the BASE first: PATCH a showcase_project budget above 100000; GET /api/v1/automation/showcase_budget_approval/runs and record the paused run's id",
+        "open /_console/studio/com.example.showcase/automations and select showcase_budget_approval: the canvas is read-only and Customize (studio-customize) is offered; press it — nothing is sent",
+        "edit the flow (e.g. a node's label) and let the autosave run: capture POST /api/v1/packages/com.example.showcase/ensure-customization and PUT /api/v1/meta/flow/showcase_budget_approval?mode=draft&package=com.example.showcase.custom; confirm no POST /api/v1/automation/showcase_budget_approval/toggle and no sys_metadata_activation write",
+        "publish the pair; then GET /api/v1/automation/_status (one row for the name) and GET /api/v1/meta/flow/showcase_budget_approval (no package); read the header: the override badge (studio-override-chip) and the ledger switch (auto-ledger-switch) — no definition switch",
+        "as the approver, approve the step-1 run's pending request; GET /api/v1/automation/showcase_budget_approval/runs/RUN_ID",
+        "PATCH the project budget again (a new value above 100000): the new run's step log",
+        "ledger: switch the flow off with auto-ledger-switch, PATCH the budget again (no run starts), switch it back on",
+        "Restore package original (studio-restore-original), read the confirmation and confirm: capture the two DELETEs at the pair; PATCH the budget once more and read the new run",
+        "New similar on the same flow (auto-new-similar-*): give a new name and label; read where the copy opens and its status"
+      ],
+      "acceptance": [
+        {
+          "clause": "Customize writes the flow's draft into the pair under the base's own name, declaring overrides: { package: 'com.example.showcase', basedOn: '0.1.0' }, and writes no ledger row",
+          "oracle": "network",
+          "verify": "step 3: one ensure POST, then the flow draft PUT naming package=com.example.showcase.custom with the overrides block and name showcase_budget_approval; no toggle POST and no activation write",
+          "evidence": "the network trace of steps 2–3 + GET /api/v1/meta/flow/showcase_budget_approval?state=draft&package=com.example.showcase.custom"
+        },
+        {
+          "clause": "once published, the override is the packaged flow: armed in place of the base with no restart, one body per name, and it is what new runs execute",
+          "oracle": "api",
+          "verify": "step 4: _status lists showcase_budget_approval once; the package-less meta read serves the override's body with its overrides block; step 6's new run's step log follows the override's edited definition (resolveFlowPrecedence's declared rank — the override wins inside the base's held name, by declaration, never by arrival order)",
+          "evidence": "_status + the meta read + the new run's step log"
+        },
+        {
+          "clause": "a run suspended on the base finishes on the base; only runs started after the publish run the override",
+          "oracle": "api",
+          "verify": "step 5: the step-1 run completes, and its run record and step log are the base's definition, not the override's (real version pinning, #28405 / N-12)",
+          "evidence": "the step-1 run's record before and after the approval"
+        },
+        {
+          "clause": "the override inherits the base's ledger identity: one switch, the ledger switch — off silences the override, on re-arms it — and no definition switch is drawn",
+          "oracle": "api",
+          "verify": "step 7: the toggle POSTs answer 200 and write the base's sys_metadata_activation row; with it off the budget change starts no run, with it on the next change runs the override; the header draws auto-ledger-switch and no second switch",
+          "evidence": "the toggle answers + the runs list across the three changes + the header screenshot"
+        },
+        {
+          "clause": "'Restore package original' deletes the pair's draft and row and the base's flow is re-armed in place",
+          "oracle": "api",
+          "verify": "step 8: both DELETEs name package=com.example.showcase.custom and answer 200; the next run follows the base's definition; GET /meta/flow/showcase_budget_approval serves the base with no overrides key",
+          "evidence": "the DELETE trace + the post-restore run's step log + the meta read"
+        },
+        {
+          "clause": "New similar is a different door: a whole copy under a NEW name, written switched off (status obsolete) into the pair and opened there — it overrides nothing",
+          "oracle": "network",
+          "verify": "step 9 sends POST /api/v1/automation/showcase_budget_approval/clone with the new name and label and no package; the answer names com.example.showcase.custom and the copy opens there, listed 'In com.example.showcase.custom'; the base stays armed. The clone door's own contract is automation.packaged-flow-clone-contract; the dialog's validation is automation.setup-packaged-automation-board — cite them",
+          "evidence": "the clone request and answer + the rail screenshot"
+        }
+      ],
+      "negative": [
+        "both the base and the override firing on one record change (two runs) is the FAIL — the double-fire ADR-0146 D9 replaced clone-and-switch to remove",
+        "an override that needs a server restart to arm, or a restore that leaves the override armed, is the FAIL D9's 'rebound in one reload' rules out"
+      ],
+      "traps": [
+        "stale-console-bundle",
+        "automation-input",
+        "eventual-consistency",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/studio-design/AutomationsPillar.customizeFlow-28570.test.tsx + AutomationsPillar.newSimilar-28567.test.tsx (jsdom: acceptance[0], [4] and [5]'s console calls against a mocked server) + packages/services/service-automation/src/flow-sync-one-precedence.test.ts (engine layer: the override is armed by every step and its removal re-arms the base; the ledger is the base's; 'with N-12: a run suspended on the base finishes on the base' — corroborates acceptance[1]–[4], drives no HTTP door). the browser journey has no live spec yet: the e2e is owed by #28579 slice 3 (the card's Wanted 3), so until it lands every browser and api clause is the run's live leg"
+      },
+      "source": [
+        "packages/services/service-automation/src/flow-precedence.ts#resolveFlowPrecedence (the declared .custom rank, #28412)",
+        "packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#refusePackagedBaseOverride (a declared override from the base's pair is admitted; every other write onto the sealed flow is refused)",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Automations pillar's Customize, the pair's save, and Restore) + ui/packages/app-shell/src/views/studio-design/FlowItemMoreMenu.tsx#FlowItemMoreMenu (Restore package original and New similar on a flow)",
+        "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (the specimen: an approval step that waits)",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D4 (New similar) and D9 (a flow override is served over the base's name, rebound in one reload, inherits the ledger identity, waits for real version pinning)",
+        "#28412 (N-11) landed by PRs #28693 and #28770; #28570 (N-18) by PR #28824; #28567 (N-22) by PR #28668; version pinning #28405 (N-12)",
+        "cross-ref: automation.packaged-flow-clone-contract (the clone door), automation.setup-packaged-automation-board (the ledger switch and the New similar dialog), studio-authoring.packaged-automation-studio-lock (the lock that holds until Customize)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-02",
+          "change": "new item (ADR-0146 N-11 #28412 / PRs #28693 and #28770, N-18 #28570 / PR #28824, N-22 #28567 / PR #28668): a flow customized in Studio is the pair's item under the base's name declaring the override, armed in place of the base, keeping the base's ledger switch, with a waiting run finishing on the base and Restore re-arming it; New similar is the separate copy under a new name. Specimen showcase_budget_approval. Read from source at base eb123b7ccc",
+          "ref": "#28579"
         }
       ]
     }
