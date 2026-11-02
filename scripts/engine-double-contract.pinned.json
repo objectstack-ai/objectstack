@@ -1292,6 +1292,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.named-base-stored-binding.test.ts",
       "verb": "delete",
       "pinned": 1
