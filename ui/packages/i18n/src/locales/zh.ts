@@ -2724,6 +2724,11 @@ const zh = {
         invalidCredentials: '邮箱或密码错误，请重试。',
         emailNotVerified: '请先验证您的邮箱后再登录。',
         oauthCallbackFailed: '单点登录未能完成——登录链接已过期或已被使用，请重新发起登录。',
+        twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
+        twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
+        twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
+        twoFactorExpired: '本次登录已过期，请重新使用密码登录。',
+        twoFactorLocked: '失败次数过多，您的账户已被暂时锁定，请稍后再试。',
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -2743,6 +2748,16 @@ const zh = {
       ssoOnlyDescription: '使用你所在组织的单点登录进行登录',
       usePasswordText: '改用密码登录',
       backToSsoText: '返回单点登录',
+      twoFactorTitle: '双重验证',
+      twoFactorDescription: '请输入身份验证器应用中的 6 位验证码。',
+      twoFactorBackupDescription: '请输入您设置双重验证时保存的任意一个备用码。',
+      twoFactorCodeLabel: '验证码',
+      twoFactorBackupCodeLabel: '备用码',
+      twoFactorVerifyButton: '验证',
+      twoFactorVerifyingButton: '正在验证…',
+      twoFactorUseBackupCodeText: '改用备用码',
+      twoFactorUseAuthenticatorText: '改用身份验证器应用',
+      twoFactorBackText: '返回登录',
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: '欢迎回来',

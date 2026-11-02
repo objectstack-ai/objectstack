@@ -2721,6 +2721,11 @@ const es = {
       signUpText: "Regístrate",
       errors: {
         oauthCallbackFailed: "No se pudo completar el inicio de sesión único: el enlace de acceso caducó o ya se había utilizado. Vuelva a intentarlo.",
+        twoFactorInvalidCode: "Ese código no es válido. Revise su aplicación de autenticación e inténtelo de nuevo.",
+        twoFactorInvalidBackupCode: "Ese código de respaldo no es válido o ya se ha utilizado.",
+        twoFactorTooManyAttempts: "Demasiados códigos incorrectos. Vuelva a iniciar sesión con su contraseña.",
+        twoFactorExpired: "Este inicio de sesión ha caducado. Vuelva a iniciar sesión con su contraseña.",
+        twoFactorLocked: "Demasiados intentos fallidos. Su cuenta está bloqueada temporalmente. Inténtelo más tarde.",
         invalidCredentials: "Correo o contraseña inválidos. Inténtelo de nuevo.",
         emailNotVerified: "Verifique su correo electrónico antes de iniciar sesión.",
       },
@@ -2742,6 +2747,16 @@ const es = {
       ssoOnlyDescription: "Accede con el inicio de sesión único de tu organización",
       usePasswordText: "Usar una contraseña en su lugar",
       backToSsoText: "Volver al inicio de sesión único",
+      twoFactorTitle: "Autenticación en dos pasos",
+      twoFactorDescription: "Introduzca el código de 6 dígitos de su aplicación de autenticación.",
+      twoFactorBackupDescription: "Introduzca uno de los códigos de respaldo que guardó al configurar la autenticación en dos pasos.",
+      twoFactorCodeLabel: "Código de autenticación",
+      twoFactorBackupCodeLabel: "Código de respaldo",
+      twoFactorVerifyButton: "Verificar",
+      twoFactorVerifyingButton: "Verificando…",
+      twoFactorUseBackupCodeText: "Usar un código de respaldo",
+      twoFactorUseAuthenticatorText: "Usar la aplicación de autenticación",
+      twoFactorBackText: "Volver a iniciar sesión",
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "Bienvenido de nuevo",

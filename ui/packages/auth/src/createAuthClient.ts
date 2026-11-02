@@ -378,7 +378,10 @@ function createBearerFetch(baseFetch?: typeof fetch): typeof fetch {
  * @example
  * ```ts
  * const authClient = createAuthClient({ baseURL: '/api/v1/auth' });
- * const { user, session } = await authClient.signIn({ email, password });
+ * const result = await authClient.signIn({ email, password });
+ * if (result.twoFactor) {
+ *   // ask for the code, then: await authClient.verifySignInTwoFactor(code, 'totp');
+ * }
  * ```
  */
 export function createAuthClient(config: AuthClientConfig): AuthClient {
@@ -500,10 +503,14 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       }
       // objectstack#29105 — an account with two-factor sign-in on: the server
       // accepted the password, deleted the session it had just made, and holds
-      // the pending sign-in in a signed `two_factor` cookie. No token exists
-      // yet, so nothing is stored; the caller asks for the code.
+      // the pending sign-in in a signed `two_factor` cookie; the caller asks
+      // for the code. The same answer still carries `set-auth-token` naming
+      // the DELETED session (measured: it resolves to no session), which
+      // `bearerFetch` has just stored. Drop it: no credential exists until
+      // the code is verified.
       const challenge = data as unknown as { twoFactorRedirect?: boolean; twoFactorMethods?: unknown };
       if (challenge?.twoFactorRedirect === true) {
+        TokenStorage.clear();
         const methods = Array.isArray(challenge.twoFactorMethods)
           ? challenge.twoFactorMethods.filter(
               (m): m is TwoFactorMethod => m === 'totp' || m === 'otp',

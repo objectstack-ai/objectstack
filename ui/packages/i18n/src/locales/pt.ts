@@ -2716,6 +2716,11 @@ const pt = {
       signUpText: "Cadastre-se",
       errors: {
         oauthCallbackFailed: "Não foi possível concluir o logon único — o link de acesso expirou ou já foi utilizado. Tente novamente.",
+        twoFactorInvalidCode: "Esse código não é válido. Verifique seu aplicativo autenticador e tente novamente.",
+        twoFactorInvalidBackupCode: "Esse código de backup não é válido ou já foi usado.",
+        twoFactorTooManyAttempts: "Muitos códigos incorretos. Faça login novamente com sua senha.",
+        twoFactorExpired: "Este login expirou. Faça login novamente com sua senha.",
+        twoFactorLocked: "Muitas tentativas malsucedidas. Sua conta está temporariamente bloqueada. Tente novamente mais tarde.",
         invalidCredentials: "E-mail ou senha inválidos. Por favor, tente novamente.",
         emailNotVerified: "Por favor, verifique seu e-mail antes de fazer login.",
       },
@@ -2737,6 +2742,16 @@ const pt = {
       ssoOnlyDescription: "Entre com o logon único da sua organização",
       usePasswordText: "Usar uma senha em vez disso",
       backToSsoText: "Voltar ao logon único",
+      twoFactorTitle: "Autenticação em duas etapas",
+      twoFactorDescription: "Digite o código de 6 dígitos do seu aplicativo autenticador.",
+      twoFactorBackupDescription: "Digite um dos códigos de backup que você salvou ao configurar a autenticação em duas etapas.",
+      twoFactorCodeLabel: "Código de autenticação",
+      twoFactorBackupCodeLabel: "Código de backup",
+      twoFactorVerifyButton: "Verificar",
+      twoFactorVerifyingButton: "Verificando…",
+      twoFactorUseBackupCodeText: "Usar um código de backup",
+      twoFactorUseAuthenticatorText: "Usar o aplicativo autenticador",
+      twoFactorBackText: "Voltar para o login",
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "Bem-vindo de volta",

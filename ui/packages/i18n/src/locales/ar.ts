@@ -2904,6 +2904,11 @@ const ar = {
       signUpText: "إنشاء حساب",
       errors: {
         oauthCallbackFailed: "تعذّر إكمال الدخول الموحّد — انتهت صلاحية رابط تسجيل الدخول أو سبق استخدامه. يرجى المحاولة مرة أخرى.",
+        twoFactorInvalidCode: "هذا الرمز غير صالح. تحقّق من تطبيق المصادقة وحاول مرة أخرى.",
+        twoFactorInvalidBackupCode: "رمز النسخ الاحتياطي هذا غير صالح أو سبق استخدامه.",
+        twoFactorTooManyAttempts: "رموز غير صحيحة كثيرة جدًا. سجّل الدخول بكلمة المرور مرة أخرى.",
+        twoFactorExpired: "انتهت صلاحية تسجيل الدخول هذا. سجّل الدخول بكلمة المرور مرة أخرى.",
+        twoFactorLocked: "محاولات فاشلة كثيرة جدًا. حسابك مقفل مؤقتًا. حاول مرة أخرى لاحقًا.",
         invalidCredentials: "بريد إلكتروني أو كلمة مرور غير صحيحة. يرجى المحاولة مرة أخرى.",
         emailNotVerified: "يرجى التحقق من بريدك الإلكتروني قبل تسجيل الدخول.",
       },
@@ -2925,6 +2930,16 @@ const ar = {
       ssoOnlyDescription: "سجّل الدخول عبر الدخول الموحّد لمؤسستك",
       usePasswordText: "استخدام كلمة المرور بدلاً من ذلك",
       backToSsoText: "العودة إلى الدخول الموحّد",
+      twoFactorTitle: "المصادقة الثنائية",
+      twoFactorDescription: "أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة.",
+      twoFactorBackupDescription: "أدخل أحد رموز النسخ الاحتياطي التي حفظتها عند إعداد المصادقة الثنائية.",
+      twoFactorCodeLabel: "رمز المصادقة",
+      twoFactorBackupCodeLabel: "رمز النسخ الاحتياطي",
+      twoFactorVerifyButton: "تحقّق",
+      twoFactorVerifyingButton: "جارٍ التحقق…",
+      twoFactorUseBackupCodeText: "استخدام رمز نسخ احتياطي بدلًا من ذلك",
+      twoFactorUseAuthenticatorText: "استخدام تطبيق المصادقة بدلًا من ذلك",
+      twoFactorBackText: "العودة إلى تسجيل الدخول",
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "مرحبًا بعودتك",

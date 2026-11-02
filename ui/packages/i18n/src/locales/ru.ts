@@ -2789,6 +2789,11 @@ const ru = {
       signUpText: "Зарегистрироваться",
       errors: {
         oauthCallbackFailed: "Не удалось завершить единый вход — ссылка для входа истекла или уже была использована. Попробуйте ещё раз.",
+        twoFactorInvalidCode: "Неверный код. Проверьте приложение-аутентификатор и попробуйте ещё раз.",
+        twoFactorInvalidBackupCode: "Резервный код неверен или уже использован.",
+        twoFactorTooManyAttempts: "Слишком много неверных кодов. Войдите с паролем ещё раз.",
+        twoFactorExpired: "Срок действия этого входа истёк. Войдите с паролем ещё раз.",
+        twoFactorLocked: "Слишком много неудачных попыток. Учётная запись временно заблокирована. Повторите попытку позже.",
         invalidCredentials: "Неверный email или пароль. Попробуйте ещё раз.",
         emailNotVerified: "Пожалуйста, подтвердите email перед входом.",
       },
@@ -2810,6 +2815,16 @@ const ru = {
       ssoOnlyDescription: "Войдите через единый вход вашей организации",
       usePasswordText: "Использовать пароль",
       backToSsoText: "Вернуться к единому входу",
+      twoFactorTitle: "Двухфакторная аутентификация",
+      twoFactorDescription: "Введите 6-значный код из приложения-аутентификатора.",
+      twoFactorBackupDescription: "Введите один из резервных кодов, сохранённых при настройке двухфакторной аутентификации.",
+      twoFactorCodeLabel: "Код аутентификации",
+      twoFactorBackupCodeLabel: "Резервный код",
+      twoFactorVerifyButton: "Подтвердить",
+      twoFactorVerifyingButton: "Проверка…",
+      twoFactorUseBackupCodeText: "Использовать резервный код",
+      twoFactorUseAuthenticatorText: "Использовать приложение-аутентификатор",
+      twoFactorBackText: "Вернуться ко входу",
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: "С возвращением",
