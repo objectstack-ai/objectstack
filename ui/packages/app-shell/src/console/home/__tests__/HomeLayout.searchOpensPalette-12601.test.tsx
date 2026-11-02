@@ -168,9 +168,9 @@ function LocationProbe() {
   return <output data-testid="location" data-search={search} />;
 }
 
-function renderHome() {
+function renderHome(url = '/home') {
   return render(
-    <MemoryRouter initialEntries={['/home']}>
+    <MemoryRouter initialEntries={[url]}>
       <HomeLayout>
         <div data-testid="home-page" />
       </HomeLayout>
@@ -198,12 +198,13 @@ afterEach(() => {
 describe('Home’s top bar searches through the console’s command palette (objectui#12601)', () => {
   it('the search field opens the command palette', () => {
     renderHome();
-    const probe = screen.getByTestId('palette-probe');
-    expect(probe).toHaveAttribute('data-open', 'false');
+    // objectstack#29121 — the palette is mounted from its first open, so a
+    // closed one reads nothing.
+    expect(screen.queryByTestId('palette-probe')).toBeNull();
 
     fireEvent.click(screen.getByTestId(DESKTOP));
 
-    expect(probe).toHaveAttribute('data-open', 'true');
+    expect(screen.getByTestId('palette-probe')).toHaveAttribute('data-open', 'true');
     expect(screen.getByTestId('location').getAttribute('data-search')).toContain('palette=1');
   });
 
@@ -235,12 +236,12 @@ describe('Home’s top bar searches through the console’s command palette (obj
 
   it('the palette searches Home’s host app: the app the user was last in, else the first openable app', () => {
     state.currentAppName = 'ops';
-    const { unmount } = renderHome();
+    const { unmount } = renderHome('/home?palette=1');
     expect(screen.getByTestId('palette-probe')).toHaveAttribute('data-active-app', 'ops');
     unmount();
 
     state.currentAppName = undefined;
-    renderHome();
+    renderHome('/home?palette=1');
     expect(screen.getByTestId('palette-probe')).toHaveAttribute('data-active-app', 'crm');
   });
 

@@ -317,7 +317,9 @@ describe('#8034 stdio transport: capability ↔ served surface agreement', () =>
       listObjects: vi.fn(async () => [{ name: 'task', label: 'Task', fields: { title: {} } }]),
       getObject: vi.fn(async () => null),
       get: vi.fn(async () => null),
-      list: vi.fn(async () => []),
+      // [#28940] One agent, so the bridged assembly really serves `prompts`:
+      // `agent_prompt` is advertised only on a boot that holds an agent.
+      list: vi.fn(async (type: string) => (type === 'agent' ? [{ name: 'support_triage' }] : [])),
       exists: vi.fn(async () => false),
       getRegisteredTypes: vi.fn(async () => ['object']),
       register: vi.fn(),

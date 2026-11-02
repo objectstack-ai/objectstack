@@ -383,14 +383,41 @@
  * The library path (`packRequest`) is not judged here: its callers are the tools above, each of which judges
  * its own body first.
  *
+ * ## A pull request's body, rewritten by the seat after round 1 — signed on its LAST line (#29145)
+ *
+ * The dev writes a PR body once, at `pr_create`; a later rewrite (a review's "bring the body to the new head") is
+ * the seat's, through an `issue_patch` on the pull's number. Its line 1 belongs to the attribution comment and
+ * the `Fixes #n` line, as at `pr_create`, so that body joins `pr_create` outside the first-line rule — the same
+ * scope the ruling above draws, extended from the create to the edit — and carries the signature at its other
+ * end instead: the LAST non-empty line is the trailer `<!-- signed: LANE#N · ACCOUNT · SESSION -->`
+ * (`PR_BODY_TRAILER_SHAPE`), whose inside parses with the same `readSignatureLine` (`readPrBodyTrailer`). An
+ * HTML comment because the body is rendered: a visible signature line would sit under the prose a maintainer
+ * reads. Three rules, in the order `main` applies them:
+ *
+ *   - an `issue_patch` body that opens with the signature passes exactly as before, whatever it targets — no read;
+ *   - one that carries neither the signature line nor the trailer is refused as usage (2) before anything is read,
+ *     the refusal naming both shapes — it is wrong whether its target is an issue or a pull request;
+ *   - one that carries only the trailer (`pullRequestBodyCandidates`) is judged by READING THE PLATFORM, never by
+ *     its content: `GET /repos/{repo}/issues/{issue}` (the read-back's own locator for this op) answering 200 with
+ *     a `pull_request` key passes; 200 without one is an ISSUE, whose body stays under the first-line rule —
+ *     usage (2); any other answer, or none, is PREREQUISITE NOT MET (3): ⛔ an unread target is never a pass.
+ *     The read runs after the packer and BEFORE the dry-run exit, so a dry run refuses what the send would; it
+ *     needs the token and the proxy route the send needs, and the process re-execs for it the way the send does.
+ *
+ * `comment_edit` takes no trailer: a comment is a post, never a pull request body. The stored body is the
+ * platform's, not this door's: an edit of a pull's body gets the bare footer block appended after the trailer
+ * (`platform-readings.md`, the edit side), so send no footer of your own.
+ *
  * ## Exit codes — capture them BEFORE any pipe
  *
  *   0   the run completed with conclusion `success`, every body it wrote
  *       reads back as the bytes sent, and every run it started is listed.
- *   2   usage, the packed payload refused by the validator, or a seat's edit body
- *       carrying no signature line (nothing sent).
+ *   2   usage, the packed payload refused by the validator, a seat's edit body
+ *       carrying no signature line, or a trailer-signed `issue_patch` body whose
+ *       target the platform answers is an issue (nothing sent).
  *   3   PREREQUISITE NOT MET — no token, no session in dispatch mode, the
- *       dispatch route dead (401/407/0), or the run list unreadable.
+ *       dispatch route dead (401/407/0), the run list unreadable, or the target
+ *       of a trailer-signed `issue_patch` body unreadable (nothing sent).
  *   4   NOT STORED — the run succeeded and the read-back shows a body the board
  *       does not hold as sent (op, object and first differing byte printed).
  *       Go READ it; ⛔ do not retry.
@@ -409,7 +436,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../../invoked-as.mjs';
-import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
+import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute, readSignatureLine, SEAT_SIGNATURE_SHAPE, signatureRefusal, signatureRefusalText } from '../check-half-states.mjs';
 // The roster's generator marker, IMPORTED so the one generated body this door exempts is named by its own writer.
 import { ROSTER_MARKER } from '../fleet-roster.mjs';
 import { classifyHttp } from '../label-write.mjs';
@@ -658,21 +685,130 @@ export const SIGNED_EDIT_OPS = Object.freeze(['comment_edit', 'issue_patch']);
 /** The opening marker lines of the bodies a SCRIPT generates and rewrites whole — out of the signature's scope (header). */
 export const GENERATED_BODY_MARKERS = Object.freeze([ROSTER_MARKER]);
 
+/** The one edit op whose target may be a pull request, and so whose body may be signed on its last line instead (header). */
+export const PR_BODY_EDIT_OP = 'issue_patch';
+
+/** The trailer a seat's pull request body ends with, as a refusal prints it — placeholders only (header). */
+export const PR_BODY_TRAILER_SHAPE = '<!-- signed: LANE#N · ACCOUNT · SESSION -->';
+
+/** ONE trimmed line is the trailer's comment; its inside is captured for `readSignatureLine`, never re-spelled here. */
+const PR_BODY_TRAILER_LINE = /^<!--[ \t]*signed:[ \t]*(.*?)[ \t]*-->$/u;
+
+/**
+ * The trailer a body ends with, read off its LAST non-empty line: `{ line, shaped, signature }`, where `shaped`
+ * says the line is the trailer's comment and `signature` is `readSignatureLine`'s reading of its inside (null for a
+ * near miss); null for an empty body. Pure.
+ *
+ * @returns {{ line: string, shaped: boolean, signature: ReturnType<typeof readSignatureLine> } | null}
+ */
+export function readPrBodyTrailer(body) {
+  const lines = String(body ?? '').split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (line === '') continue;
+    const m = PR_BODY_TRAILER_LINE.exec(line);
+    return { line, shaped: m !== null, signature: m ? readSignatureLine(m[1]) : null };
+  }
+  return null;
+}
+
+/** Is this action an edit body the first-line rule judges — an edit op carrying a body, not a generated one? Pure. */
+function judgedEditBody(a) {
+  if (a === null || typeof a !== 'object' || !SIGNED_EDIT_OPS.includes(a.op) || typeof a.body !== 'string') return false;
+  return !GENERATED_BODY_MARKERS.some((marker) => a.body.trimStart().startsWith(marker));
+}
+
+/** Does this `issue_patch` body defer to the platform: no signature line first, a parsing trailer last? Pure. */
+function trailerSigned(a) {
+  return a.op === PR_BODY_EDIT_OP && signatureRefusal(a.body) !== null && readPrBodyTrailer(a.body)?.signature != null;
+}
+
+/** Why an `issue_patch` body's last line is no trailer — printed beside the first-line refusal (header). Pure. */
+function trailerWhy(body) {
+  const read = readPrBodyTrailer(body);
+  if (read === null) return { line: '(the body is empty)', why: 'there is no last line to carry the trailer' };
+  const line = read.line.length > 160 ? `${read.line.slice(0, 160)}…` : read.line;
+  return read.shaped
+    ? { line, why: "the last non-empty line is the trailer's comment, but its inside is not a signature — check the lane, the `#N` seat number, the login, the full session id, and that each separator is exactly ` · `" }
+    : { line, why: 'the last non-empty line is not the trailer' };
+}
+
 /**
  * The actions in a seat's stroke whose edit body opens with no signature line, each with `signatureRefusal`'s row —
- * empty when every `comment_edit` / `issue_patch` body is signed, generated, or absent. Pure.
+ * empty when every `comment_edit` / `issue_patch` body is signed, generated, or absent. An `issue_patch` body
+ * signed by its trailer instead is not a row: it waits for the platform read (`pullRequestBodyCandidates`); every
+ * other `issue_patch` row also carries `trailer`, why its last line is no trailer either. Pure.
  *
- * @returns {{ action: number, op: string, line: string, why: string }[]} — `action` is 1-based, as the read-back rows count.
+ * @returns {{ action: number, op: string, line: string, why: string, trailer?: { line: string, why: string } }[]} — `action` is 1-based, as the read-back rows count.
  */
 export function unsignedEditBodies(actions) {
   if (!Array.isArray(actions)) return [];
   const rows = [];
   actions.forEach((a, i) => {
-    if (a === null || typeof a !== 'object' || !SIGNED_EDIT_OPS.includes(a.op) || typeof a.body !== 'string') return;
-    if (GENERATED_BODY_MARKERS.some((marker) => a.body.trimStart().startsWith(marker))) return;
+    if (!judgedEditBody(a) || trailerSigned(a)) return;
     const row = signatureRefusal(a.body);
-    if (row !== null) rows.push({ action: i + 1, op: a.op, ...row });
+    if (row !== null) rows.push({ action: i + 1, op: a.op, ...row, ...(a.op === PR_BODY_EDIT_OP ? { trailer: trailerWhy(a.body) } : {}) });
   });
+  return rows;
+}
+
+/**
+ * The `issue_patch` actions whose body opens with no signature but ends with a parsing trailer — the ones only a
+ * platform read can pass, because only a pull request's body may be signed that way (header). Pure.
+ *
+ * @returns {{ action: number, op: string, issue: number, signature: { lane: string, seat: number, account: string, session: string, line: string } }[]}
+ */
+export function pullRequestBodyCandidates(actions) {
+  if (!Array.isArray(actions)) return [];
+  const rows = [];
+  actions.forEach((a, i) => {
+    if (judgedEditBody(a) && trailerSigned(a)) rows.push({ action: i + 1, op: a.op, issue: a.issue, signature: readPrBodyTrailer(a.body).signature });
+  });
+  return rows;
+}
+
+/** The first-line refusal, plus — for an `issue_patch` — the pull request alternative and why it did not hold. Pure. */
+export function editBodyRefusalText(row) {
+  const text = signatureRefusalText(row, { tool: 'fleet-write/dispatch', where: `action ${row.action} (${row.op})'s body` });
+  if (!row.trailer) return text;
+  return (
+    `${text}\n` +
+    `  2. [pull request] when the target is a pull request, its body may instead END with the trailer — ${row.trailer.why}\n` +
+    `      line:  ${row.trailer.line}\n` +
+    `      write: ${PR_BODY_TRAILER_SHAPE} — as the LAST non-empty line, alone; line 1 stays the attribution comment or the closing keyword.\n` +
+    '      The platform is read to confirm the target is a pull request; an issue body takes the first-line signature only.'
+  );
+}
+
+/**
+ * Is each trailer-signed `issue_patch` target a pull request? ONE `GET /repos/{repo}/issues/{issue}` per distinct
+ * number — the read-back's locator for this op — judged in three buckets (header): `pull` (200 with a
+ * `pull_request` key), `issue` (200 without one) and `unread` (any other answer, or none). Reads only, never
+ * paced; never throws.
+ *
+ * @returns {Promise<{ action: number, issue: number, verdict: 'pull'|'issue'|'unread', why: string }[]>}
+ */
+export async function readPullRequestTargets(candidates, { repo, api = DEFAULT_API, fetch, token = '' } = {}) {
+  const seen = new Map();
+  const rows = [];
+  for (const c of candidates) {
+    const path = `/repos/${repo}/issues/${c.issue}`;
+    if (!seen.has(c.issue)) seen.set(c.issue, await rest(api, path, {}, { fetch, token }));
+    const r = seen.get(c.issue);
+    const isObject = r.json !== null && typeof r.json === 'object' && !Array.isArray(r.json);
+    let verdict = 'unread';
+    let why = `GET ${path} answered ${r.status === 0 ? `nothing — ${r.detail}` : `HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`}, so whether ${repo}#${c.issue} is a pull request was not read`;
+    if (r.status === 200 && isObject && r.json.pull_request !== null && typeof r.json.pull_request === 'object') {
+      verdict = 'pull';
+      why = `GET ${path} answered 200 with a pull_request key: ${repo}#${c.issue} is a pull request`;
+    } else if (r.status === 200 && isObject) {
+      verdict = 'issue';
+      why = `GET ${path} answered 200 with no pull_request key: ${repo}#${c.issue} is an issue, and an issue body opens with the signature line — the trailer signs a pull request body only`;
+    } else if (r.status === 200) {
+      why = `GET ${path} answered 200 without a readable issue object, so whether ${repo}#${c.issue} is a pull request was not read`;
+    }
+    rows.push({ action: c.action, issue: c.issue, verdict, why });
+  }
   return rows;
 }
 
@@ -1517,12 +1653,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the release.yml refresh at the seat: the stroke packs with inputs refresh_version_pr true and travels in ONE dispatch; its started run is read back from release.yml's own run list; force, false, absent or any other input is refused before anything is sent, exit 2": 6,
   "the batch gap at the seat: content creation read off the op table; a stroke at or above write-pace's threshold is batched through its last content-creating write and waited for exactly that much longer; a stroke whose pacing the relay job cannot hold is refused before anything is sent, naming the per-op doors; the job's timeout mirrors the workflow's": 13,
   "the signature at the seat's door: a comment_edit or issue_patch body opens with the seat's signature line or the file is usage (2), nothing packed; generated, body-less and the other doors' ops are left alone": 13,
+  "the pull request body at the seat's door: an issue_patch body signed only by its LAST-line trailer passes when the platform answers its target is a pull request, before the dry-run exit; an issue, an unread target and a trailer-less body are refused; comment_edit takes no trailer": 19,
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
   "the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 5,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
-// hierarchy link seat battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 24;
+// hierarchy link seat battery, 24 → 25 with the pull request body battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 25;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -2559,6 +2696,87 @@ export async function selfTest() {
       })());
     }
 
+    // ── the pull request body at the seat's door ───────────────────────────
+    battery("the pull request body at the seat's door: an issue_patch body signed only by its LAST-line trailer passes when the platform answers its target is a pull request, before the dry-run exit; an issue, an unread target and a trailer-less body are refused; comment_edit takes no trailer");
+    {
+      const REPO = 'objectstack-ai/objectstack';
+      const SIG = `domain:devx#2 · marchtian · ${SESSION}`;
+      const TRAILER = `<!-- signed: ${SIG} -->`;
+      const ATTRIBUTION = '<!-- claude-projects-attribution: {"github_login":"marchtian"} -->';
+      const PR_BODY = `${ATTRIBUTION}\nFixes #29145\n\n## What changes\n\nRewritten for the new head.\n\n${TRAILER}\n`;
+      const ROWS = (actions) => unsignedEditBodies(actions).map((r) => `${r.action}:${r.op}`);
+      const CANDS = (actions) => pullRequestBodyCandidates(actions).map((r) => `${r.action}:${r.issue}`);
+      t('the trailer parses with the existing signature reader: the same four parts as the bare line', [readPrBodyTrailer(PR_BODY)?.shaped, readPrBodyTrailer(PR_BODY)?.signature], [true, readSignatureLine(SIG)]);
+      t('…trailing blank lines are not the last line, and spaces inside the comment are trimmed', readPrBodyTrailer(`x\n<!--signed:   ${SIG}   -->\n\n\n`)?.signature?.session, SESSION);
+      t('⛔ the trailer on an EARLIER line is not one: the last non-empty line decides', readPrBodyTrailer(`${TRAILER}\nMore prose`)?.signature ?? null, null);
+      t('⛔ a bare signature on the last line, or the comment around a near miss, is no trailer — the near miss still reads as shaped', [readPrBodyTrailer(`x\n${SIG}`)?.shaped, readPrBodyTrailer(`x\n<!-- signed: domain:devx#2 · marchtian -->`)?.shaped, readPrBodyTrailer(`x\n<!-- signed: domain:devx#2 · marchtian -->`)?.signature], [false, true, null]);
+      t('a trailer-only issue_patch body is a candidate for the platform read, and not a first-line refusal', [CANDS([{ op: 'issue_patch', issue: 29200, body: PR_BODY }]), ROWS([{ op: 'issue_patch', issue: 29200, body: PR_BODY }])], [['1:29200'], []]);
+      t('⛔ comment_edit takes no trailer: still refused, never a candidate', [CANDS([{ op: 'comment_edit', comment_id: 7, body: `Edited.\n${TRAILER}` }]), ROWS([{ op: 'comment_edit', comment_id: 7, body: `Edited.\n${TRAILER}` }])], [[], ['1:comment_edit']]);
+      t('a first-line-signed issue_patch body needs no read — the trailer beside it changes nothing', [CANDS([{ op: 'issue_patch', issue: 3, body: `${SIG}\nSeat post\n${TRAILER}` }]), ROWS([{ op: 'issue_patch', issue: 3, body: `${SIG}\nSeat post\n${TRAILER}` }])], [[], []]);
+      const unsignedRow = unsignedEditBodies([{ op: 'issue_patch', issue: 29200, body: `${ATTRIBUTION}\nFixes #29145\n\nProse.\n` }])[0];
+      t('a body with neither is refused without a read, and its refusal names BOTH shapes — the first line and the trailer', [unsignedRow?.trailer?.why, editBodyRefusalText(unsignedRow).includes('LANE#N · ACCOUNT · SESSION'), editBodyRefusalText(unsignedRow).includes(PR_BODY_TRAILER_SHAPE), editBodyRefusalText(unsignedRow).includes('as the LAST non-empty line')], ['the last non-empty line is not the trailer', true, true, true]);
+      t("…a near-miss trailer is named as one; a comment_edit row carries no trailer alternative", [unsignedEditBodies([{ op: 'issue_patch', issue: 1, body: 'x\n<!-- signed: domain:devx#2 · marchtian -->' }])[0]?.trailer?.why.startsWith("the last non-empty line is the trailer's comment"), editBodyRefusalText(unsignedEditBodies([{ op: 'comment_edit', comment_id: 7, body: 'Edited.' }])[0]).includes(PR_BODY_TRAILER_SHAPE)], [true, false]);
+      // The platform, faked at fetch: GET /repos/{repo}/issues/{n} answers from `store`, and every request is recorded.
+      const readFake = (store) => {
+        const seen = [];
+        const fetch = async (url, init) => {
+          const path = new URL(url).pathname;
+          seen.push(`${init?.method ?? 'GET'} ${path}`);
+          const answer = store[path];
+          if (answer === undefined) throw new Error('connect ECONNREFUSED (fixture)');
+          return { status: answer.status, headers: { get: () => null }, json: async () => answer.json };
+        };
+        return { fetch, seen, api: 'https://api.github.test' };
+      };
+      const PULL = { status: 200, json: { number: 29200, pull_request: { url: 'https://api.github.test/repos/x/pulls/29200' } } };
+      const ISSUE = { status: 200, json: { number: 29145 } };
+      const read = async (store, cands) => {
+        const f = readFake(store);
+        return { rows: await readPullRequestTargets(cands, { repo: REPO, api: f.api, fetch: f.fetch, token: TOKEN }), seen: f.seen };
+      };
+      const asPull = await read({ [`/repos/${REPO}/issues/29200`]: PULL }, [{ action: 1, issue: 29200 }, { action: 2, issue: 29200 }]);
+      t('a pull request is READ: 200 with a pull_request key is pull — ONE GET per distinct number, no write method', [asPull.rows.map((r) => r.verdict), asPull.seen], [['pull', 'pull'], [`GET /repos/${REPO}/issues/29200`]]);
+      const asIssue = await read({ [`/repos/${REPO}/issues/29145`]: ISSUE }, [{ action: 1, issue: 29145 }]);
+      t('an issue is READ: 200 with no pull_request key is issue, the reason naming the first-line rule', [asIssue.rows[0].verdict, asIssue.rows[0].why.includes('no pull_request key')], ['issue', true]);
+      const asUnread = await read({ [`/repos/${REPO}/issues/1`]: { status: 404, json: { message: 'Not Found' } }, [`/repos/${REPO}/issues/2`]: { status: 200, json: [] } }, [{ action: 1, issue: 1 }, { action: 2, issue: 2 }, { action: 3, issue: 3 }]);
+      t('⛔ 404, a 200 that is no issue object, and no answer are all UNREAD — never pull, never issue', [asUnread.rows.map((r) => r.verdict), asUnread.rows[0].why.includes('HTTP 404'), asUnread.rows[2].why.includes('ECONNREFUSED')], [['unread', 'unread', 'unread'], true, true]);
+      // The CLI, in process, on a DRY RUN: the read deps stand in for the platform.
+      const cliRead = async (actions, store, envExtra = {}) => {
+        const file = join(dir, `prbody-${paceCase++}.json`);
+        writeFileSync(file, JSON.stringify(actions), 'utf8');
+        const f = readFake(store);
+        const out = [];
+        const err = [];
+        const [log, error] = [console.log, console.error];
+        console.log = (l) => out.push(String(l));
+        console.error = (l) => err.push(String(l));
+        try {
+          const code = await main(['--repo', REPO, '--actions-file', file, '--request-id', 'fw-test-1', '--dry-run'], { env: { GITHUB_TOKEN: TOKEN, [SESSION_ENV]: SESSION, ...envExtra }, read: { api: f.api, fetch: f.fetch } });
+          return { code, out: out.join('\n'), err: err.join('\n'), seen: f.seen };
+        } finally {
+          [console.log, console.error] = [log, error];
+        }
+      };
+      const signedPr = await cliRead([{ op: 'issue_patch', issue: 29200, body: PR_BODY }], { [`/repos/${REPO}/issues/29200`]: PULL });
+      t('⭐ a signed pull request body passes on a DRY RUN: the target read once, exit 0, the payload printed with the body exactly as written', [signedPr.code, signedPr.seen, signedPr.code === EXIT_OK ? JSON.parse(signedPr.out).client_payload.actions[0].body : null], [EXIT_OK, [`GET /repos/${REPO}/issues/29200`], PR_BODY], signedPr.err.slice(-300));
+      const trailerIssue = await cliRead([{ op: 'issue_patch', issue: 29145, body: `Card prose\n${TRAILER}` }], { [`/repos/${REPO}/issues/29145`]: ISSUE });
+      t('⭐ an ISSUE body with only the trailer is still refused: usage (2), the refusal naming the issue and the first-line shape, no payload', [trailerIssue.code, trailerIssue.err.includes('is an issue') && trailerIssue.err.includes('LANE#N · ACCOUNT · SESSION'), trailerIssue.out.includes('"event_type"')], [EXIT_USAGE, true, false], trailerIssue.err.slice(-300));
+      const unreadable = await cliRead([{ op: 'issue_patch', issue: 29200, body: PR_BODY }], { [`/repos/${REPO}/issues/29200`]: { status: 503, json: { message: 'down' } } });
+      t('⭐ an unreadable target refuses: PREREQUISITE NOT MET (3) naming the status, no payload — never a pass', [unreadable.code, unreadable.err.includes('HTTP 503') && unreadable.err.includes('PREREQUISITE NOT MET'), unreadable.out.includes('"event_type"')], [EXIT_PREREQUISITE, true, false], unreadable.err.slice(-300));
+      const noToken = await cliRead([{ op: 'issue_patch', issue: 29200, body: PR_BODY }], { [`/repos/${REPO}/issues/29200`]: PULL }, { GITHUB_TOKEN: '', GH_TOKEN: '' });
+      t('…and with no token the target cannot be read: exit 3 before any request', [noToken.code, noToken.seen], [EXIT_PREREQUISITE, []]);
+      const unsignedPr = await cliRead([{ op: 'issue_patch', issue: 29200, body: `${ATTRIBUTION}\nFixes #29145\n\nProse.\n` }], { [`/repos/${REPO}/issues/29200`]: PULL });
+      t('⭐ an unsigned pull request body is refused: usage (2), the refusal naming the trailer shape, ZERO reads', [unsignedPr.code, unsignedPr.err.includes(PR_BODY_TRAILER_SHAPE), unsignedPr.seen], [EXIT_USAGE, true, []], unsignedPr.err.slice(-300));
+      const mixed = await cliRead([{ op: 'issue_patch', issue: 29200, body: PR_BODY }, { op: 'issue_patch', issue: 3, body: `${SIG}\nSeat post` }], { [`/repos/${REPO}/issues/29200`]: PULL });
+      t('a stroke beside a first-line-signed issue body reads only the trailer-signed target and packs both', [mixed.code, mixed.seen, mixed.code === EXIT_OK ? JSON.parse(mixed.out).client_payload.actions.length : null], [EXIT_OK, [`GET /repos/${REPO}/issues/29200`], 2], mixed.err.slice(-300));
+      t('structural: the platform read runs in main after the packer and BEFORE the dry-run exit', (() => {
+        const src = readReal(SELF_PATH, 'utf8');
+        const body = src.slice(src.lastIndexOf('export async function main('));
+        const at = body.indexOf('readPullRequestTargets(candidates');
+        return at > body.indexOf('packRequest(') && at < body.indexOf('if (opts.dryRun)');
+      })());
+    }
+
     // ── the no-run conformance ──────────────────────────────────────────────
     battery('the no-run conformance: every sender — discovered from the source — answers an accepted dispatch with no run, or none completed, UNCONFIRMED (6) after ONE dispatch with ZERO direct writes, under auto and explicit dispatch alike; under direct its write is seen');
     {
@@ -2769,7 +2987,9 @@ const USAGE = [
   `  ⛔ Never as a prefix on the command line: the seats' allow rules are literal command prefixes. The dispatch always`,
   `  goes to ${RELAY_REPO}; --repo names the target.`,
   '  A comment_edit or issue_patch body opens with the seat\'s signature line, LANE#N · ACCOUNT · SESSION, or the file is',
-  '  refused (2) before anything is packed; the fleet roster\'s generated body is the one exemption.',
+  '  refused (2) before anything is packed; the fleet roster\'s generated body is the one exemption. A pull request\'s',
+  `  issue_patch body may instead end with ${PR_BODY_TRAILER_SHAPE} on its last non-empty line: the target is then`,
+  '  read from the platform, a dry run included — an issue refused (2), an unread target refused (3).',
   `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
   `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
@@ -2836,7 +3056,7 @@ export async function main(argv, deps = {}) {
   // packer or a dry run, so the refusal does not depend on the environment.
   const unsigned = unsignedEditBodies(actions);
   if (unsigned.length > 0) {
-    for (const row of unsigned) console.error(signatureRefusalText(row, { tool: 'fleet-write/dispatch', where: `action ${row.action} (${row.op})'s body` }));
+    for (const row of unsigned) console.error(editBodyRefusalText(row));
     console.error('fleet-write/dispatch: nothing was sent.');
     return EXIT_USAGE;
   }
@@ -2852,6 +3072,33 @@ export async function main(argv, deps = {}) {
     console.error(refusalText(packed.errors));
     console.error('fleet-write/dispatch: nothing was sent.');
     return EXIT_USAGE;
+  }
+  // A trailer-signed issue_patch body passes only on a pull request — READ from the platform, never judged from the
+  // body, and before the dry-run exit so a dry run refuses what the send would (header).
+  const candidates = pullRequestBodyCandidates(actions);
+  if (candidates.length > 0) {
+    const readToken = env.GITHUB_TOKEN ?? env.GH_TOKEN ?? '';
+    if (!readToken) {
+      console.error(`fleet-write/dispatch: PREREQUISITE NOT MET — action ${candidates[0].action} (issue_patch)'s body is signed by its trailer, which passes only on a pull request, and with no GITHUB_TOKEN / GH_TOKEN in the environment the target cannot be read. Nothing was sent.`);
+      return EXIT_PREREQUISITE;
+    }
+    if (!deps.read) {
+      const rearmedForRead = rearmThroughProxy(argv);
+      if (rearmedForRead !== null) return rearmedForRead;
+    }
+    const targets = await readPullRequestTargets(candidates, { repo: opts.repo, token: readToken, ...(deps.read ?? {}) });
+    const issues = targets.filter((r) => r.verdict === 'issue');
+    const unread = targets.filter((r) => r.verdict === 'unread');
+    for (const r of targets) {
+      if (r.verdict === 'pull') console.error(`fleet-write/dispatch: action ${r.action} (issue_patch)'s body is signed by its trailer — ${r.why}.`);
+      else console.error(`fleet-write/dispatch: ${r.verdict === 'issue' ? 'REFUSED' : 'PREREQUISITE NOT MET'} — action ${r.action} (issue_patch)'s body opens with no signature line and is signed only by its trailer: ${r.why}.`);
+    }
+    if (issues.length > 0 || unread.length > 0) {
+      if (issues.length > 0) console.error(`  An issue body opens with the signature line: ${SEAT_SIGNATURE_SHAPE}.`);
+      if (unread.length > 0) console.error('  ⛔ An unread target is never a pass: re-run once the read answers, or sign the body on its first line.');
+      console.error('fleet-write/dispatch: nothing was sent.');
+      return issues.length > 0 ? EXIT_USAGE : EXIT_PREREQUISITE;
+    }
   }
   if (opts.dryRun) {
     console.error(`fleet-write/dispatch: DRY RUN — nothing sent. This is the request POST /repos/${RELAY_REPO}/dispatches would carry:`);

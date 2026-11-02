@@ -672,9 +672,10 @@ export function normalizeMultiValueFields(
  * the declared type at all", with the same wire code and the same sentence a
  * non-readonly field gets: a `date` / `datetime` / `time` the platform reads,
  * a number for a number-typed field, a boolean, an array for a multi-value
- * field, no filter-operator object, and the ADR-0104 reference / media /
- * structured-JSON shape under the object's own posture (warn-first until the
- * deployment's evidence says otherwise). It is never REQUIRED.
+ * field, no plain object or array on a string-typed field, no filter-operator
+ * object, and the ADR-0104 reference / media / structured-JSON shape under
+ * the object's own posture (warn-first until the deployment's evidence says
+ * otherwise). It is never REQUIRED.
  *
  * ⛔ It does NOT reach the author-declared constraints on top of the type:
  * option membership (`invalid_option`), `maxLength` / `minLength`,
@@ -1122,6 +1123,26 @@ function validateOne(
   if (BOUNDED_STRING_FIELD_TYPES.has(t)) {
     // A string type's stored shape is a string; everything below is a bound,
     // a domain or a format the author declared on top of it.
+    //
+    // [#29133] A plain object or an array is refused, never stringified. The
+    // arm used to judge `String(value)` while the write carried `value`, so
+    // `{ nested: true }` passed every bound (`"[object Object]"` is 15 chars)
+    // and reached the driver as sent, which stored its JSON text — on create,
+    // PATCH and the screen-flow resume alike. Neither shape is the spec's
+    // stored value for this class and neither has a string reading the author
+    // meant, so the arm refuses it with the number arm's #20309 posture: never
+    // silently alter a value. It is a SHAPE test, so it runs ahead of
+    // `shapeOnly`. A number or a boolean keeps its string reading; a
+    // filter-operator object was already refused above, with its own sentence.
+    if (isPlainObjectValue(value) || Array.isArray(value)) {
+      return fail(
+        'invalid_type',
+        { type: t, detail: `expected a string, received ${Array.isArray(value) ? 'an array' : 'an object'}` },
+        // The ADR-0104 shape sentence the operator refusal above also uses:
+        // one catalog entry for "this value's SHAPE is wrong for this type".
+        'invalid_value_shape',
+      );
+    }
     if (shapeOnly) return null;
     const s = typeof value === 'string' ? value : String(value);
     if (def.maxLength !== undefined && s.length > def.maxLength) {
