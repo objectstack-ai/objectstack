@@ -176,10 +176,12 @@ function makeAdapter() {
         },
         getItem: (type: string, name: string) => {
           server.calls.push(`${type}/${name}`);
-          const item = (type === 'object' ? OBJECTS : []).find((o) => o.name === name);
+          // objectstack#29416 — a page outside the app bundle is read by name
+          // first, as the server answers it; only object reads are held.
+          const item = (type === 'object' ? OBJECTS : type === 'page' ? (server.pages as Array<{ name: string }>) : []).find((o) => o.name === name);
           const answer = () =>
             item ? Promise.resolve({ type, name, item: structuredClone(item) }) : Promise.reject(Object.assign(new Error('not found'), { httpStatus: 404, code: 'RESOURCE_NOT_FOUND' }));
-          if (!server.holdByName) return answer();
+          if (!server.holdByName || type !== 'object') return answer();
           return new Promise((resolve, reject) => held.push(() => answer().then(resolve, reject)));
         },
       },

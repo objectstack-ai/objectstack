@@ -132,13 +132,17 @@ export function useServedViewItems(read = true): ServedViewReads {
   // objectui#12980 — inside an app whose served item names NO package, on the
   // same condition, the served object documents are the names-only scope's:
   // the objects the app's route asked for by name (`AppContent` names the
-  // objects the app's entries require, and a page route the objects its page
-  // binds). Its handle is the app's `requiresObject` names, which `AppContent`
-  // asks on every scoped route, so this read asks nothing new. An app that
-  // names none reads nothing, as `readPageObjectScope` reads nothing for a
-  // page that binds no object. Such an app reads the whole registry on an
-  // object route anyway (`appObjectScope.ts`), so the condition is false
-  // there and the label sites keep the whole list.
+  // objects the app's entries require, an object route its object and that
+  // object's lookup targets, and a page route the objects its page binds).
+  //
+  // objectstack#29416 — its handle is the app's navigation objects and its
+  // `requiresObject` names, in `navigation` and `areas[].navigation`: an
+  // object route of such an app reads the names-only scope now, not the whole
+  // registry, and the route's object is one of the navigation's. The app
+  // bundle answers each of them by name, so this read asks nothing new, and
+  // the views it composes are the bundle's, which hold the route object's.
+  // An app that names none reads nothing, as `readPageObjectScope` reads
+  // nothing for a page that binds no object.
   const { app } = useExpressionContext();
   if (!read) return NOTHING_READ;
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
@@ -154,7 +158,7 @@ export function useServedViewItems(read = true): ServedViewReads {
     objects = scope.served;
     views = scope.views;
   } else if (scoped && isPackagelessApp(app)) {
-    const names = navigationNames(app.navigation, (item) => item.requiresObject);
+    const names = packagelessAppObjectNames(app);
     if (names.length > 0) {
       const scope = metadata.readObjectScope!({ names }) as { served: unknown; views?: unknown };
       objects = scope.served;
@@ -168,6 +172,20 @@ export function useServedViewItems(read = true): ServedViewReads {
   }
   if (views === undefined) views = metadata.getItemsByType('view');
   return servedViewReads(payloadOf(views), payloadOf(objects));
+}
+
+/**
+ * The objects a package-less app's entries open or require, in its
+ * `navigation` and every `areas[].navigation`, once each (objectstack#29416).
+ */
+function packagelessAppObjectNames(app: Record<string, unknown>): string[] {
+  const pick = (item: Record<string, unknown>) => (item.type === 'object' ? item.objectName : undefined);
+  const trees = [app.navigation, ...(Array.isArray(app.areas) ? app.areas : []).map((area) => (isRecord(area) ? area.navigation : undefined))];
+  const names = trees.flatMap((tree) => [
+    ...navigationNames(tree, pick),
+    ...navigationNames(tree, (item) => item.requiresObject),
+  ]);
+  return [...new Set(names)];
 }
 
 /**
