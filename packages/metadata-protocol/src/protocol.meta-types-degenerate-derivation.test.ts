@@ -262,10 +262,13 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
         // [#28404] 50 → 51: `overrides` (the ADR-0146 D2 override declaration
         // a `<base>.custom` item carries) joined the accepted set, and the
         // sample names it.
-        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(51);
+        // [#28519] 51 → 52: `cancelText` (the dismiss button label of the
+        // action's confirm or param dialog) joined the accepted set, and the
+        // sample names it.
+        expect(Object.keys(properties).length + retiredTopLevelCount('action')).toBe(52);
         // A sample an author would actually address, and the one #17500's
         // repeater titles need a node to sit on.
-        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'overrides']) {
+        for (const key of ['name', 'label', 'objectName', 'type', 'params', 'locations', 'outcomeMessages', 'requiresMembershipReach', 'disabledReason', 'pressed', 'submitText', 'cancelText', 'overrides']) {
             expect(Object.keys(properties)).toContain(key);
         }
     });
