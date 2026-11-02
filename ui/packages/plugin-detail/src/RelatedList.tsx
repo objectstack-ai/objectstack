@@ -31,7 +31,7 @@ import {
   useIsMobile,
   RelatedCountStore,
 } from '@object-ui/components';
-import { SchemaRenderer, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useAction, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, declaredUserMessage, extractWriteErrorMessage, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -2728,28 +2728,45 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const viewSchema = React.useMemo(() => {
     if (schema) return schema;
 
+    // objectstack#28865 (#27524 item 9) — the ENLARGED tab is the child
+    // object's list face, on a desktop as on a phone (objectstack#28484): the
+    // list page's grid, `object-grid`, over the rows this list already read.
+    // The grid draws the row height and density, the name link, the row
+    // actions and (under 768 px) the phone list's card rows. Resolved through
+    // the registry: `plugin-grid` depends on this package, so it cannot be
+    // imported here.
+    //
+    // This list stays the source of truth for everything the rows came from.
+    // Its window, page and sort reach the grid on the grid's HOST channel
+    // (`enlargedGridHost`, the React props `plugin-list`'s `ListView` hands
+    // it), never as node keys; the filter box, the chips, 新建 and 导出 stay
+    // in this list's toolbar; its own pager stays the one pager, so the
+    // grid's is off.
+    if (enlargedFace && (type === 'grid' || type === 'table')) {
+      return {
+        type: 'object-grid',
+        objectName: api,
+        data: { provider: 'value', items: paginatedData },
+        columns: effectiveColumns
+          .map((c: any) => c.accessorKey || columnIdentity(c))
+          .filter(Boolean),
+        showSearch: false,
+        showPagination: false,
+        // The host's row actions (`list_item`, and `record_related` inside a
+        // parent record), already localized — the non-author host key the
+        // console's object page hands the same grid. A dispatch from them is
+        // routed back to `onRowAction` (`enlargedGridActions`).
+        ...(hasCustomRowActions && onRowAction ? { rowActionDefs: rowActions } : {}),
+        onRowClick: handleRowClick,
+      };
+    }
+
     // Mobile: render grid/table data as a card gallery — single-column,
     // tap-friendly, visually consistent with the standalone gallery view.
     // Reuses the registered `object-gallery` schema so we don't ship a
     // duplicate renderer. Falls back to the data-table on desktop and
     // when explicit `type='list'` is requested (legacy path).
     if (isMobile && (type === 'grid' || type === 'table')) {
-      // objectstack#28484 — the ENLARGED tab's phone cards are the phone
-      // list's card rows (`object-grid`'s card face: the name, one subtitle
-      // line, one status chip) at the body's full width, over the rows this
-      // list already read. Resolved through the registry: `plugin-grid`
-      // depends on this package, so it cannot be imported here.
-      if (enlargedFace) {
-        return {
-          type: 'object-grid',
-          objectName: api,
-          data: { provider: 'value', items: paginatedData },
-          columns: effectiveColumns
-            .map((c: any) => c.accessorKey || columnIdentity(c))
-            .filter(Boolean),
-          onRowClick: handleRowClick,
-        };
-      }
       const titleField = effectiveColumns[0]?.accessorKey || columnIdentity(effectiveColumns[0]);
       const visibleFields = effectiveColumns
         .slice(1, 4)
@@ -2826,6 +2843,82 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         return { type: 'div', children: 'No view configured' };
     }
   }, [type, paginatedData, tableColumns, effectiveColumns, schema, effectivePageSize, hasRowActions, hasCustomRowActions, rowActions, onRowAction, onRowEdit, onRowDelete, handleDeleteRow, handleRowClick, isMobile, compact, enlargedFace, api, objectSchema, activeSort, handleTableSort]);
+
+  const enlargedGrid = enlargedFace && !schema && (type === 'grid' || type === 'table');
+
+  /**
+   * objectstack#28865 — the enlarged face's grid, driven by this list on the
+   * grid's host channel: the React props `ObjectGrid` reads when a host owns
+   * the rows (`ObjectGridExternalPaginationProps`), the channel `plugin-list`'s
+   * `ListView` uses. Spread on `SchemaRenderer` as props, never node keys.
+   *
+   *  - `manualPagination` with this list's page and count: `data` IS the page
+   *    this list holds, so the grid neither slices nor re-pages it. The grid's
+   *    pager is off (`showPagination: false` on the node); this list's pager
+   *    answers a window whose total the server did not send (`hasMore`), which
+   *    a pager over a row count cannot.
+   *  - `sort` / `onSortChange` are this list's sort (objectui#3106), in BOTH
+   *    of its modes: windowed it is the server's `$orderby`; while the filter
+   *    box has text the list sorts its in-memory rows itself. Under a host
+   *    sort the grid offers no header sort on a relational column (the stored
+   *    value is an id, not the name the cell shows), in either mode.
+   *  - `objectFields`: the definition this list already read, so no column
+   *    paints withheld while the grid reads its own (objectui#10657).
+   *  - `onEdit` / `onDelete`: this list's row Edit and its confirm-then-delete.
+   */
+  const enlargedGridHost = React.useMemo(() => {
+    if (!enlargedGrid) return undefined;
+    const heldBefore = currentPage * (effectivePageSize || 0);
+    const rowCount = windowed
+      ? total ?? heldBefore + relatedData.length + (hasMore ? 1 : 0)
+      : sortedData.length;
+    return {
+      manualPagination: true,
+      rowCount,
+      page: currentPage + 1,
+      pageSize: Math.max(1, effectivePageSize || paginatedData.length),
+      onPageChange: (page: number) => setCurrentPage(Math.max(0, page - 1)),
+      sort: activeSort,
+      onSortChange: handleTableSort,
+      ...(objectSchema?.fields ? { objectFields: objectSchema.fields } : {}),
+      ...(onRowEdit ? { onEdit: onRowEdit } : {}),
+      ...(onRowDelete ? { onDelete: handleDeleteRow } : {}),
+    };
+  }, [enlargedGrid, windowed, total, currentPage, effectivePageSize, relatedData.length, hasMore, sortedData.length, paginatedData.length, activeSort, handleTableSort, objectSchema, onRowEdit, onRowDelete, handleDeleteRow]);
+
+  /**
+   * objectstack#28865 — where a row action the enlarged grid dispatches goes.
+   *
+   * The grid runs a row action def through the surrounding action runner with
+   * the row under `params._rowRecord` and no object of its own: on the record
+   * page that runner's object is the PARENT's, and nothing tells this list to
+   * read its rows again afterwards. The host that handed this list its row
+   * actions also handed it `onRowAction`, which dispatches against the child
+   * object and its row and signals the child object changed — the path the
+   * row menu of the table this face drew before took. So a dispatch carrying
+   * one of THIS list's action defs and a row goes there; every other dispatch
+   * (a bulk action, anything the grid runs without a row) reaches the
+   * surrounding runner unchanged.
+   */
+  const outerActions = useAction();
+  const outerActionsRef = React.useRef(outerActions);
+  outerActionsRef.current = outerActions;
+  const enlargedGridActions = React.useMemo(() => {
+    if (!enlargedGrid || !hasCustomRowActions || !onRowAction) return null;
+    const execute = async (action: any): Promise<any> => {
+      const row = action?.params?._rowRecord;
+      const def = row && typeof action?.name === 'string'
+        ? rowActions!.find((candidate) => candidate.name === action.name)
+        : undefined;
+      if (!def) return outerActionsRef.current.execute(action);
+      await onRowAction(def, row);
+      return { success: true };
+    };
+    return { ...outerActions, execute };
+    // `outerActions` is read through the ref for dispatch; the spread only
+    // carries the runner's state fields, which the grid does not read.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enlargedGrid, hasCustomRowActions, rowActions, onRowAction]);
 
   const headerClassName = isCollapsible ? 'cursor-pointer select-none' : undefined;
   const handleHeaderClick = isCollapsible ? () => setCollapsed((c) => !c) : undefined;
@@ -3165,6 +3258,12 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // tab names the list, and its count is the 全部 chip's.
   if (enlargedFace) {
     const shownCount = filterActive ? filteredData.length : recordCount;
+    // objectstack#28865 — one count: while the 全部 chip is on and nothing
+    // narrows the rows, the chip already says how many there are, so the
+    // line under the toolbar does not say it again. A chip that narrows (我的,
+    // 逾期) or a filter text keeps the line's count, which is then a
+    // different number from the chip's.
+    const countOnChip = chips.length > 1 && enlargedChip === 'all' && !filterActive && allCount !== null && allCount === shownCount;
     const chipLabel: Record<EnlargedChip, string> = {
       all: t('detail.relatedChipAll', { defaultValue: 'All' }),
       mine: t('detail.relatedChipMine', { defaultValue: 'Mine' }),
@@ -3308,12 +3407,22 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           </div>
         ) : (
           <>
-            <div className="text-xs text-muted-foreground" data-related-enlarged-status="">
-              {t('detail.relatedRows', { count: shownCount, defaultValue: '{{count}} rows' })}
-              {showPagination && ` · ${t('detail.pageOf', { current: currentPage + 1, total: totalPages })}`}
-            </div>
+            {(!countOnChip || showPagination) && (
+              <div className="text-xs text-muted-foreground" data-related-enlarged-status="">
+                {[
+                  countOnChip ? null : t('detail.relatedRows', { count: shownCount, defaultValue: '{{count}} rows' }),
+                  showPagination ? t('detail.pageOf', { current: currentPage + 1, total: totalPages }) : null,
+                ].filter(Boolean).join(' · ')}
+              </div>
+            )}
             <div className={cn('min-w-0', loading && 'pointer-events-none opacity-60 transition-opacity')}>
-              <SchemaRenderer schema={viewSchema} />
+              {enlargedGridActions ? (
+                <ActionCtxReact.Provider value={enlargedGridActions}>
+                  <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
+                </ActionCtxReact.Provider>
+              ) : (
+                <SchemaRenderer schema={viewSchema} {...enlargedGridHost} />
+              )}
             </div>
             {showPagination && (
               <div className="flex items-center justify-end gap-2">
