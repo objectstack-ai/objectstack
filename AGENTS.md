@@ -203,7 +203,7 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
    `packages/spec/src/{domain}/`. Environment-overlay opt-in lives only in `allowEnvironmentOverlay` on
    `DEFAULT_METADATA_TYPE_REGISTRY` — no parallel whitelists. See ADR-0005, amended by ADR-0131 C5.
 8. **North Star alignment.** Read `docs/NORTH-STAR.md` before structural changes. If a change doesn't advance a row of
-   its 路上的功能点 ladder, graded by its 优先级 — it probably shouldn't ship.
+   its *Features on the road* ladder, graded by its *Priority* — it probably shouldn't ship.
 9. **`OS_` env-var prefix + structure.** All ObjectStack-owned env vars MUST start with `OS_`, then follow
    **`OS_{DOMAIN}_{FEATURE}[_QUALIFIER]`** where `DOMAIN` is the subsystem (`AUTH`, `SEARCH`, `CORS`, `CLOUD`,
    `DATABASE`, `CLUSTER`, `MCP`, `SSO`, …) so related vars group together (cf. `OS_AUTH_*`, `OS_CORS_*`). Pick the

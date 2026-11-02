@@ -14,6 +14,9 @@ export const Lead = ObjectSchema.create({
   pluralLabel: 'Leads',
   icon: 'funnel',
   description: 'An inbound prospect not yet qualified as an opportunity.',
+  // What the record page shows at a glance, under the title. The stage is
+  // not here: the record page already draws it as the stage path.
+  highlightFields: ['company', 'source', 'lead_score', 'assigned_to'],
 
   fields: {
     name: Field.text({
@@ -73,9 +76,10 @@ export const Lead = ObjectSchema.create({
       max: 100,
       defaultValue: 0,
     }),
-    assigned_to: Field.text({
+    // The sales rep who works the lead: a person, so the list and the record
+    // page show a name, never a raw email address.
+    assigned_to: Field.user({
       label: 'Assigned To',
-      maxLength: 200,
     }),
     account: Field.lookup('crm_account', {
       label: 'Account',
@@ -89,6 +93,8 @@ export const Lead = ObjectSchema.create({
     /** CEL formula: is this lead in a terminal converted/disqualified state? */
     is_closed: Field.formula({
       label: 'Is Closed',
+      // `boolean`, so the record page draws a yes/no face, not the raw word.
+      returnType: 'boolean',
       expression: cel`record.status == "converted" || record.status == "disqualified"`,
     }),
   },
