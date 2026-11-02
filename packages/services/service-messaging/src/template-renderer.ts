@@ -2,6 +2,7 @@
 
 import type { IDataEngine } from '@objectstack/spec/contracts';
 import { FAN_OUT_SYSTEM_CONTEXT } from './fan-out-system-context.js';
+import { normalizeRecipientLocale } from './recipient-locale.js';
 
 /** The object notification templates live in. */
 export const TEMPLATE_OBJECT = 'sys_notification_template';
@@ -183,9 +184,33 @@ export interface NotificationTemplateStoreOptions {
 }
 
 /**
+ * [#28919] The key the composition hands the store the stack's DECLARED
+ * fallback locale under: a reader of `i18n.fallbackLocale` (else
+ * `defaultLocale`), through the i18n service's `getFallbackLocale`, called at
+ * each resolve so a service registered later is seen.
+ *
+ * Module-private on purpose: neither this symbol nor
+ * {@link NotificationTemplateStoreWiring} is re-exported from the package
+ * entry, so the published `NotificationTemplateStoreOptions` is unchanged. A
+ * store built without it (any caller outside this package) walks the ladder
+ * it always walked.
+ */
+export const TEMPLATE_DECLARED_FALLBACK_LOCALE: unique symbol = Symbol('notification-template.declared-fallback-locale');
+
+/** {@link NotificationTemplateStoreOptions} plus the in-package fallback reader. */
+export type NotificationTemplateStoreWiring = NotificationTemplateStoreOptions & {
+    [TEMPLATE_DECLARED_FALLBACK_LOCALE]?: () => string | undefined;
+};
+
+/**
  * Loads `sys_notification_template` rows by `(topic, channel, locale)` in the
- * recipient's organization, with a locale fallback (`en-US` → `en` →
- * {@link DEFAULT_LOCALE}). Best-effort: no data engine or a lookup error yields
+ * recipient's organization, with a locale fallback: the named tag, its primary
+ * subtag (`zh-CN` → `zh`), then the stack's declared fallback and its primary
+ * subtag (#28919, the same rung the email template ladder reads since #28880),
+ * then {@link DEFAULT_LOCALE}. The declared fallback is handed in by this
+ * package's own composition; a call that names no locale reads
+ * `DEFAULT_LOCALE` alone, and a store built without that reader skips the
+ * rung. Best-effort: no data engine or a lookup error yields
  * `null` (→ the renderer's generic fallback), never a throw — a template outage
  * must not block delivery.
  *
@@ -224,7 +249,7 @@ export class NotificationTemplateStore {
         const data = this.opts.getData();
         if (!data) return null;
         if (!organizationId) return null;
-        const candidates = localeCandidates(locale);
+        const candidates = localeCandidates(locale, locale ? declaredFallbackLocale(this.opts) : undefined);
         for (const loc of candidates) {
             try {
                 // The explicit system opt-in — see FAN_OUT_SYSTEM_CONTEXT: the
@@ -243,12 +268,34 @@ export class NotificationTemplateStore {
     }
 }
 
-/** `en-US` → ['en-US','en', DEFAULT_LOCALE]; dedups, keeps order. */
-function localeCandidates(locale?: string): string[] {
+/**
+ * The declared fallback, read now. A reader that is absent, answers no tag, or
+ * throws contributes no rung: the declared fallback refines the ladder and
+ * never costs the delivery its template.
+ */
+function declaredFallbackLocale(opts: NotificationTemplateStoreOptions): string | undefined {
+    const read = (opts as NotificationTemplateStoreWiring)[TEMPLATE_DECLARED_FALLBACK_LOCALE];
+    if (typeof read !== 'function') return undefined;
+    try {
+        return normalizeRecipientLocale(read());
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * `en-US` (declared fallback `zh-CN`) → ['en-US','en','zh-CN','zh', DEFAULT_LOCALE];
+ * dedups, keeps order. The fallback takes the same two steps as the named tag.
+ */
+function localeCandidates(locale?: string, declaredFallback?: string): string[] {
     const out: string[] = [];
     const push = (l?: string) => { if (l && !out.includes(l)) out.push(l); };
-    push(locale);
-    if (locale && locale.includes('-')) push(locale.split('-')[0]);
+    const tagThenPrimary = (l?: string) => {
+        push(l);
+        if (l && l.includes('-')) push(l.split('-')[0]);
+    };
+    tagThenPrimary(locale);
+    tagThenPrimary(declaredFallback);
     push(DEFAULT_LOCALE);
     return out;
 }

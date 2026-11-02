@@ -266,7 +266,7 @@ function PaneHost({ dataSource }: { dataSource: unknown }) {
     <RecordStackDrawer
       stack={stack}
       open
-      mode="split"
+      mode="drawer"
       mainContent={<div data-testid="list" />}
       objects={OBJECTS}
       stepScope="All leads"
