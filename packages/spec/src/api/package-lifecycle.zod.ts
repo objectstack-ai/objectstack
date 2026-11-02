@@ -196,25 +196,36 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
  * packages, in one read (#28914): the exit right that
  * {@link PackageExportManifestSchema}'s route grants one package at a time.
  *
- * Unlike its lifecycle siblings this is not a transcription: the route is new,
- * and this declaration is its contract (Clause-②, widening). Served by the
- * runtime dispatcher and enveloped like them (`{ success, data }`); this
- * schema declares the `data`.
+ * ⚠️ DECLARED AHEAD OF ITS PRODUCER (ADR-0049). No runtime serves
+ * `GET /packages/export` yet: no handler mounts it, so a call today is not
+ * answered with this shape. This declaration is the contract the server slice
+ * of #28914 must meet (Clause-②, widening): it mounts the route on the runtime
+ * dispatcher, enveloped like its lifecycle siblings (`{ success, data }`), and
+ * answers this schema as the `data`. Until it does, the describe carries
+ * `[PLANNED — not yet served]`. The house has no other planned channel for an
+ * API response: the liveness ledgers are per metadata type, the runtime route
+ * ledger records only what the dispatcher serves, and `PackageApiContracts`
+ * binds a route only in the change that mounts it. So the server slice drops
+ * the marker in the same change that mounts the route, adds its route-ledger
+ * row and its `PackageApiContracts` entry, and flips the test that pins the
+ * marker.
+ *
+ * Everything below is what that door MUST do. None of it is served today.
  *
  * ## One producer
  *
- * Each entry is exactly what `GET /packages/:id/export` answers for that
- * package. The bundle composes the per-package export and never assembles,
- * cleans or redacts an item a second way, so the two reads cannot disagree
- * about a package. Two consequences are this record's on purpose:
+ * Each entry must be exactly what `GET /packages/:id/export` (served today)
+ * answers for that package. The bundle composes the per-package export and
+ * must never assemble, clean or redact an item a second way, so the two reads
+ * cannot disagree about a package. Two consequences follow on purpose:
  *
  * - **A `.custom` pair is its own entry**, carrying its overriding items with
  *   their `overrides` blocks (ADR-0146 D8 item 3), and its base's entry carries
- *   the base unchanged. Environment-scope customizations are where the
+ *   the base unchanged. Environment-scope customizations stay where the
  *   per-package export already places them: under the package that owns them.
- * - **No credential value leaves.** The per-package export withholds credential
- *   positions as every served metadata read does, and the bundle adds no rule
- *   of its own: a `credentialRef` stays the reference it is.
+ * - **No credential value leaves.** The per-package export already withholds
+ *   credential positions, as every served metadata read does. The bundle must
+ *   add no rule of its own: a `credentialRef` stays the reference it is.
  *
  * ## Which packages, in which order
  *
@@ -224,28 +235,28 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
  * A pair of such a base is still exported. A metadata item bound to no package
  * is in no entry; ADR-0146 D11's migration binds it to one first.
  *
- * The order is ADR-0141 D5's, the order a boot hydrates installed packages in:
- * dependencies first. An entry comes after every entry its package's
- * `manifest.dependencies` names, so a pair comes after its base, and installing
- * the entries in the order listed is the whole consumption rule: a consumer
- * never re-sorts. Members of a dependency cycle keep the read's listing order
- * among themselves, as a boot hydrates them.
+ * The order must be ADR-0141 D5's, the order a boot hydrates installed
+ * packages in: dependencies first. An entry comes after every entry its
+ * package's `manifest.dependencies` names, so a pair comes after its base.
+ * Installing the entries in the order listed is the whole consumption rule: a
+ * consumer never re-sorts. Members of a dependency cycle keep the read's
+ * listing order among themselves, as a boot hydrates them.
  *
  * ## The door
  *
- * The read gate is the per-package export's: `studio.access` or `setup.access`,
- * or a system context, asked before anything is read. The query set is CLOSED
- * and empty: a query parameter is refused `400 VALIDATION_ERROR` naming it. No
- * request schema is declared, because the door reads no path id, no body and
- * no parameter. `export` can never be a package id (one has at least two
- * dot-separated segments, `MANIFEST_ID_PATTERN`), so the path never shadows
- * `GET /packages/:id`.
+ * The read gate must be the per-package export's: `studio.access` or
+ * `setup.access`, or a system context, asked before anything is read. The
+ * query set must be CLOSED and empty: the door refuses a query parameter
+ * `400 VALIDATION_ERROR`, naming it. No request schema is declared, because
+ * the door reads no path id, no body and no parameter. `export` can never be a
+ * package id (one has at least two dot-separated segments,
+ * `MANIFEST_ID_PATTERN`), so the path never shadows `GET /packages/:id`.
  *
- * The answer is whole or absent: a package whose export cannot be assembled
- * fails the read, naming that package. ⛔ Never a bundle that silently lacks a
- * package. Strict at the top level: a member the door starts serving is a
- * change to this declaration first. Each entry stays open, as ruled for
- * {@link PackageExportManifestSchema}.
+ * The answer must be whole or absent: a package whose export cannot be
+ * assembled fails the read, naming that package. ⛔ Never a bundle that
+ * silently lacks a package. Strict at the top level: a member the door starts
+ * serving is a change to this declaration first. Each entry stays open, as
+ * ruled for {@link PackageExportManifestSchema}.
  */
 export const PackageExportBundleSchema = lazySchema(() => z.object({
   packages: z.array(PackageExportManifestSchema).describe(
@@ -254,9 +265,16 @@ export const PackageExportBundleSchema = lazySchema(() => z.object({
     + '`manifest.dependencies` names, so a `.custom` pair comes after its base. Install the entries in this order; '
     + 'never re-sort them. Empty when the deployment holds only platform packages.',
   ),
+  // Declared before it is served (ADR-0049): the marker comes off when the
+  // server slice of #28914 mounts `GET /packages/export` in
+  // packages/runtime/src/domains/packages.ts, in the same change as its
+  // route-ledger row and its `PackageApiContracts` entry.
 }).strict().describe(
-  'Whole-deployment export: every installed package but the platform\'s own, as installable packages in '
-  + 'dependency order. Carries no credential value.',
+  '[PLANNED — not yet served] Whole-deployment export: every installed package but the platform\'s own, as '
+  + 'installable packages in dependency order. Carries no credential value. Declared ahead of its producer '
+  + '(ADR-0049): no runtime serves `GET /packages/export` yet. The server half of the whole-deployment package '
+  + 'export mounts it and the `os package export` command that calls it; until then this is the contract that '
+  + 'door must answer, not a read a client can make.',
 ));
 
 /**

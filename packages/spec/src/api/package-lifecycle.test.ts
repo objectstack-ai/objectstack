@@ -315,6 +315,19 @@ describe('PackageExportBundleSchema declares the whole-deployment export as comp
     expect(result.error.issues[0]?.code).toBe('unrecognized_keys');
     expect((result.error.issues[0] as { keys?: string[] }).keys).toEqual(['cycles']);
   });
+
+  // Declared before it is served (ADR-0049): no runtime mounts
+  // `GET /packages/export` until the server slice of #28914 lands. That
+  // change drops the marker, adds the route-ledger row and the
+  // `PackageApiContracts` entry, and flips this test.
+  it('is PLANNED until a runtime serves the route: the describe says so, naming no tracker id', () => {
+    const description = PackageExportBundleSchema.description ?? '';
+    expect(description).toMatch(/^\[PLANNED — not yet served\] /);
+    expect(description).toContain('ADR-0049');
+    expect(description).toContain('no runtime serves `GET /packages/export` yet');
+    // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the comments.
+    expect(description).not.toMatch(/#\d{3,}/);
+  });
 });
 
 describe('ReassignOrphanedMetadataResponseSchema declares the adopt-orphans body', () => {
