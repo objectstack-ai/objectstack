@@ -10,6 +10,7 @@ const zh = {
     banner: {
       message: '您正在以 {{user}} 的身份操作 —— 所有操作都会记录为该用户。',
       startedBy: '由管理员 {{admin}} 发起。',
+      startedByUnnamed: '由管理员发起。',
       stop: '结束模拟登录',
       stopping: '正在结束…',
       stopFailed: '无法结束模拟登录:{{reason}}',
@@ -180,6 +181,9 @@ const zh = {
     noPermissionToEdit: '您没有编辑{{object}}的权限，字段均为只读。',
     noPermissionToEditRecord: '您没有编辑此记录的权限，字段均为只读。',
     submitFailed: '保存失败，请重试。',
+    noPermissionToOpenRecord: '您没有权限查看这条记录。',
+    recordNotFoundOrHidden: '这条记录不存在，或者您没有权限查看它。',
+    openRecordFailed: '无法打开这条记录，请重试。',
     uploadInFlight: '请等待上传完成后再保存。',
     clearedOnHide: '已清空不再适用于当前取值的字段：{{fields}}',
     visibleWhenFaulted: '无法提交：{{fields}} 的 visibleWhen 规则无法求值。需先修正该规则，才能提交此表单。',
@@ -2740,6 +2744,11 @@ const zh = {
         invalidCredentials: '邮箱或密码错误，请重试。',
         emailNotVerified: '请先验证您的邮箱后再登录。',
         oauthCallbackFailed: '单点登录未能完成——登录链接已过期或已被使用，请重新发起登录。',
+        twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
+        twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
+        twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
+        twoFactorExpired: '本次登录已过期，请重新使用密码登录。',
+        twoFactorLocked: '失败次数过多，您的账户已被暂时锁定，请稍后再试。',
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -2760,6 +2769,16 @@ const zh = {
       noSignInMethodText: '当前没有可用的登录方式，请联系管理员。',
       usePasswordText: '改用密码登录',
       backToSsoText: '返回单点登录',
+      twoFactorTitle: '双重验证',
+      twoFactorDescription: '请输入身份验证器应用中的 6 位验证码。',
+      twoFactorBackupDescription: '请输入您设置双重验证时保存的任意一个备用码。',
+      twoFactorCodeLabel: '验证码',
+      twoFactorBackupCodeLabel: '备用码',
+      twoFactorVerifyButton: '验证',
+      twoFactorVerifyingButton: '正在验证…',
+      twoFactorUseBackupCodeText: '改用备用码',
+      twoFactorUseAuthenticatorText: '改用身份验证器应用',
+      twoFactorBackText: '返回登录',
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: '欢迎回来',

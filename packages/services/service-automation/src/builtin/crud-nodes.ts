@@ -37,6 +37,7 @@ import { refuseNode } from '../guard-refusal.js';
 import { parseNodeConfig } from './parse-config.js';
 import { resolveRunDataContext, stampSystemInsertOwner } from '../runtime-identity.js';
 import { refusalCarriedBy } from '../inner-refusal.js';
+import { staleSummaryAnswerLines, staleSummaryRefusalOrThrow } from '@objectstack/types';
 
 /**
  * Resolve a node's `filter` to the one the query runs (#19939, Fork R17 → A;
@@ -169,6 +170,29 @@ function droppedFieldsWarning(nodeType: string, e: DroppedFieldsEvent): string {
         return `${nodeType}(${e.object}): the requested value(s) for field(s) ${fields} were NOT stored — ${why}. The write succeeded with the computed value(s).`;
     }
     return `${nodeType}(${e.object}): requested field(s) ${fields} were NOT written — ${why}. The write succeeded without them.`;
+}
+
+/**
+ * [#28861] A record node's write that the data engine STORED, but whose parent
+ * roll-up summary it could not recompute after it, is the node's success
+ * (seat ruling 6570987196, seat 5's addendum 6567869052): the result the write
+ * earned, read off the engine's refusal (objectql's `SummaryRecomputeError`,
+ * `ERR_SUMMARY_RECOMPUTE`, "the triggering records WERE written", carrying as
+ * `written` exactly what the call returns on a healthy recompute). Answering
+ * it `success: false` failed the run at this node with the write committed —
+ * no transaction wraps a run — so every later node went unrun and a re-run
+ * wrote it twice.
+ *
+ * The stale column is said once per field per process at `error`, the line
+ * the data doors log (`staleSummaryAnswerLines`, `@objectstack/types`). Every
+ * other error, a refusal raised before the write was stored among them, is
+ * rethrown to the node's own `catch`, which answers it exactly as before.
+ * The node answers the same output on both paths; nothing is added to it.
+ */
+function landedWriteResult(e: unknown, nodeType: string, objectName: string, logger: PluginContext['logger']): unknown {
+    const stale = staleSummaryRefusalOrThrow(e);
+    for (const line of staleSummaryAnswerLines(stale, objectName)) logger.error(`[${nodeType}] ${line}`);
+    return stale.written;
 }
 
 /**
@@ -642,10 +666,16 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     // over a column that never landed. Driven end to end in
                     // `create-record-readonly-drop.test.ts`.
                     const dropped: DroppedFieldsEvent[] = [];
-                    const created = await data.insert(objectName, fields, {
-                        context: dataCtx,
-                        onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
-                    });
+                    let created: unknown;
+                    try {
+                        created = await data.insert(objectName, fields, {
+                            context: dataCtx,
+                            onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+                        });
+                    } catch (e) {
+                        // [#28861] A landed insert under a failing roll-up is this node's success.
+                        created = landedWriteResult(e, 'create_record', objectName, ctx.logger);
+                    }
                     const createdRecord = Array.isArray(created) ? created[0] : created;
                     const insertedId =
                         createdRecord && typeof createdRecord === 'object'
@@ -789,19 +819,25 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                     // requested fields never landed instead of reporting a clean
                     // success while the DB truth stayed unchanged.
                     const dropped: DroppedFieldsEvent[] = [];
-                    const result = await data.update(objectName, fields, {
-                        where: filter,
-                        // #5393 — the author's declared bulk intent, forwarded
-                        // to the engine's own word for it. Stated on EVERY call
-                        // rather than spread in when true: `multi: false` is the
-                        // half of the contract that makes the engine refuse a
-                        // predicate update, and a reader of this call should see
-                        // which half was asked for without inferring it from an
-                        // absent key.
-                        multi: cfg.multi === true,
-                        context: dataCtx,
-                        onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
-                    });
+                    let result: unknown;
+                    try {
+                        result = await data.update(objectName, fields, {
+                            where: filter,
+                            // #5393 — the author's declared bulk intent, forwarded
+                            // to the engine's own word for it. Stated on EVERY call
+                            // rather than spread in when true: `multi: false` is the
+                            // half of the contract that makes the engine refuse a
+                            // predicate update, and a reader of this call should see
+                            // which half was asked for without inferring it from an
+                            // absent key.
+                            multi: cfg.multi === true,
+                            context: dataCtx,
+                            onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); },
+                        });
+                    } catch (e) {
+                        // [#28861] A landed update under a failing roll-up is this node's success.
+                        result = landedWriteResult(e, 'update_record', objectName, ctx.logger);
+                    }
                     const droppedFields = dropped.flatMap((e) => e.fields);
                     return {
                         success: true,
@@ -883,7 +919,13 @@ export function registerCrudNodes(engine: AutomationEngine, ctx: PluginContext):
                 try {
                     // #5393 — `multi` is the author's declaration, forwarded to
                     // the engine's own word for it (see update_record above).
-                    const result = await data.delete(objectName, { where: filter, multi: cfg.multi === true, context: dataCtx });
+                    let result: unknown;
+                    try {
+                        result = await data.delete(objectName, { where: filter, multi: cfg.multi === true, context: dataCtx });
+                    } catch (e) {
+                        // [#28861] A landed delete under a failing roll-up is this node's success.
+                        result = landedWriteResult(e, 'delete_record', objectName, ctx.logger);
+                    }
                     return {
                         success: true,
                         output: { result, object: objectName },

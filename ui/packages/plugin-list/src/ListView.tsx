@@ -15,7 +15,13 @@ import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCo
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
-import { ViewSettingsPopover, type ViewSettingsRecordOpen } from './components/ViewSettingsPopover';
+import {
+  ViewSettingsPopover,
+  type ViewSettingsRecordOpen,
+  PHONE_POPOVER_GUTTER,
+  PHONE_TOUCH_TARGET,
+  useBelowSm,
+} from './components/ViewSettingsPopover';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
 import {
   calendarWindowCovers,
@@ -42,7 +48,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // objectui's keyed `{ key, defaultValue, params }` ref — that vocabulary lives
 // on the FLAT `schema.ariaLabel` and is resolved by `SchemaRenderer` instead
 // (objectui#5134).
-import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
+import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema, ViewSharingSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
 import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
@@ -1359,6 +1365,23 @@ function readSpecDisplayPageSize(): number {
 const DEFAULT_LIST_DISPLAY_PAGE_SIZE = readSpecDisplayPageSize();
 
 /**
+ * The ownership type a `sharing` block means when it declares none. READ from
+ * `@objectstack/spec`, not restated, the same read as the page size above:
+ * `ViewSharingSchema` declares `type` with a default, nothing on the render
+ * path parses the served view, so an authored `{ lockedBy }` arrives with
+ * `type` absent, and parsing an empty block is the spec's own answer.
+ */
+const SPEC_DEFAULT_SHARING_TYPE = ViewSharingSchema.parse({}).type;
+
+/**
+ * Whether the toolbar draws the sharing indicator: a declared `type` or a
+ * `lockedBy`. The lock keys on `lockedBy` alone and never waits on `type`.
+ */
+function hasSharingIndicator(sharing: { type?: string; lockedBy?: string } | undefined): boolean {
+  return !!(sharing?.type || sharing?.lockedBy);
+}
+
+/**
  * The `$top` of the ONE unpaged fetch a list view makes when no usable page
  * size is declared: every view this component does not page on the server
  * (`paginate` is false), which is every kind but the flat grid, plus a grouped
@@ -2629,6 +2652,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const handlePullRefresh = React.useCallback(async () => {
     setRefreshKey(k => k + 1);
   }, []);
+
+  // Below `sm` the Filter and Sort panels keep 16 px from both screen edges.
+  const belowSm = useBelowSm();
 
   const { ref: pullRef, isRefreshing, pullDistance } = usePullToRefresh<HTMLDivElement>({
     onRefresh: handlePullRefresh,
@@ -6158,6 +6184,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 size="sm"
                 className={cn(
                   "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  PHONE_TOUCH_TARGET,
                   hasFilters && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-filter-trigger"
@@ -6178,7 +6205,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between border-b pb-2">
                   <h4 className="font-medium text-sm">{t('list.filterRecords')}</h4>
@@ -6249,8 +6276,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           )}
 
           {/* Sort. Below `sm` the Display panel carries the Sort panel when it
-              is drawn (`sortInDisplay`), so this trigger hides there; with no
-              Display panel it stays on the bar at every width. */}
+              is drawn (`sortInDisplay`), so this trigger hides there while no
+              sort is active; with no Display panel it stays on the bar at
+              every width. */}
           {toolbarFlags.showSort && (
           <Popover open={showSort} onOpenChange={setShowSort}>
             <PopoverTrigger asChild>
@@ -6259,7 +6287,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 size="sm"
                 className={cn(
                   "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                  sortInDisplay && "hidden sm:inline-flex",
+                  PHONE_TOUCH_TARGET,
+                  // On a phone an active sort keeps this trigger, with its
+                  // level count, on the bar: the Display panel holds the
+                  // builder, but only the bar can show the list is sorted.
+                  // The open search field takes its slot while it is open.
+                  sortInDisplay && (currentSort.length === 0 || phoneSearchOpen) && "hidden sm:inline-flex",
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
@@ -6276,7 +6309,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
               {sortPanelBody}
             </PopoverContent>
           </Popover>
@@ -6543,12 +6576,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               (`type` + optional `lockedBy`), never a button. No view-sharing
               control or endpoint exists to open, so a clickable "Share" here
               was a dead button. `lockedBy` is the spec's free string ("User
-              who locked the view configuration"), rendered as written. */}
-          {schema.sharing?.type && (() => {
-            const sharingLabel = schema.sharing.type === 'personal'
+              who locked the view configuration"), rendered as written. A
+              block with `lockedBy` and no `type` shows the lock beside the
+              spec's default type. */}
+          {hasSharingIndicator(schema.sharing) && (() => {
+            const sharingType = schema.sharing?.type ?? SPEC_DEFAULT_SHARING_TYPE;
+            const sharingLabel = sharingType === 'personal'
               ? t('list.sharingPersonal')
               : t('list.sharingCollaborative');
-            const lockedBy = schema.sharing.lockedBy;
+            const lockedBy = schema.sharing?.lockedBy;
             const lockedLabel = lockedBy ? t('list.sharingLockedBy', { user: lockedBy }) : undefined;
             const hint = lockedLabel ? `${sharingLabel} · ${lockedLabel}` : sharingLabel;
             return (
@@ -6597,7 +6633,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
           {/* --- Separator: Print/Share/Export | Search --- */}
           {(() => {
-            const hasLeftSideItems = schema.allowPrinting || !!schema.sharing?.type
+            const hasLeftSideItems = schema.allowPrinting || hasSharingIndicator(schema.sharing)
               || (!toolbarFlags.compactToolbar && resolvedExportOptions && exportPermitted && exportableFormats.length > 0);
             return toolbarFlags.showSearch && hasLeftSideItems ? (
               <div className="h-5 w-px bg-border/50 mx-1 shrink-0" />
@@ -6686,14 +6722,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   if (!searchTerm) setPhoneSearchOpen(false);
                 }}
                 // 16px text: a smaller font makes iOS Safari zoom on focus.
-                className="h-7 w-36 pl-7 pr-7 text-base [&::-webkit-search-cancel-button]:hidden"
+                className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
                 autoFocus
                 data-testid="phone-search-input"
               />
               <Button
                 variant="ghost"
                 size="sm"
-                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
                 aria-label={t('list.clearSearch')}
                 title={t('list.clearSearch')}
                 onClick={() => {
@@ -6711,6 +6747,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               size="sm"
               className={cn(
                 "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                PHONE_TOUCH_TARGET,
                 searchTerm && "text-foreground font-medium",
               )}
               aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
