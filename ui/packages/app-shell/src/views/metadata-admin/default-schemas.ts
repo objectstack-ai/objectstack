@@ -362,4 +362,16 @@ export function registerDefaultMetadataSchemas(): void {
   // objectstack#26649 — two locales of one template are two members of one
   // name; the list tells them apart by `locale` and opens each by it.
   registerMetadataResource({ type: 'email_template', bundleMemberField: 'locale' });
+
+  // objectstack#29569 (ADR-0146 D10) — an `object_extension` is stored under
+  // the name of the object it extends, and its body carries `extend` and no
+  // `name` (`ObjectExtensionSchema` refuses one; the list read serves the body
+  // as stored). Its identity key is therefore `extend`: the list's name cell,
+  // its row link, its search and its customization mark all read it, so a row
+  // shows and opens the extended object instead of "—" and `(unnamed-N)`.
+  registerMetadataResource({
+    type: 'object_extension',
+    primaryKey: 'extend',
+    searchableFields: ['extend', 'label', 'description'],
+  });
 }
