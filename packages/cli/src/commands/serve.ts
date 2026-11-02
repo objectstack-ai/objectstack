@@ -5,9 +5,8 @@ import path from 'path';
 import fs from 'fs';
 import net from 'net';
 import chalk, { chalkStderr } from 'chalk';
-import { bundleRequire } from 'bundle-require';
 import { stampDatasourceEnvCredentialsDefault } from '../utils/datasource-env-credentials-default.js';
-import { loadConfig, BUNDLE_REQUIRE_EXTERNALS } from '../utils/config.js';
+import { loadConfig, bundleConfigModule } from '../utils/config.js';
 import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
@@ -2762,7 +2761,7 @@ export default class Serve extends Command {
         ? { mod: { default: {} as any } }
         : flags.prebuilt
           ? { mod: await import(absolutePath.startsWith('/') ? `file://${absolutePath}` : absolutePath) }
-          : await bundleRequire({ filepath: absolutePath, external: BUNDLE_REQUIRE_EXTERNALS });
+          : await bundleConfigModule(absolutePath);
 
       let config = mod.default || mod;
 

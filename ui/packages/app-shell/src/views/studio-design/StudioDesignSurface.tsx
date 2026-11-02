@@ -8581,7 +8581,9 @@ export function DataPillar({
   const inspector = useRegisteredMetadataInspector('object');
   // objectstack#28575 — on a base object the field rail is writable (into the
   // pair's extension) for a field, never for a group; a base field opens in
-  // the inspector's display-property mode.
+  // the inspector's display-property mode. The rail's read-only reason wrapper
+  // is then not drawn: the inspector describes each control it locks there
+  // (objectstack#28986).
   const fieldRailReadOnly = readOnly && !(extWritable && fieldSel?.kind === 'field');
   const selectedBaseField =
     extWritable && fieldSel?.kind === 'field' && baseOwnedFields !== null && baseOwnedFields.has(String(fieldSel.id));
@@ -10721,6 +10723,7 @@ export function AutomationsPillar({
           // the Data pillar threads it (objectui#2259). objectstack#28570 —
           // a customized flow's editors are open.
           readOnly: editLocked,
+          readOnlyReason: editLocked ? t('engine.studio.pkg.readonlyHint', locale) : undefined,
           locale,
         })}
       </div>
