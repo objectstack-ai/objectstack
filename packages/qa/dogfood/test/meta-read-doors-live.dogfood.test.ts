@@ -186,11 +186,16 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
       });
     }
 
-    it('CONTROLS — ?id=setup is one app, ?id= and a repeated id are 400, no id is the pruned list', async () => {
-      const one = await stack.apiAs(admin, 'GET', '/meta/app?id=setup');
+    it('CONTROLS — ?id=NAME is one app, ?id= and a repeated id are 400, no id is the pruned list', async () => {
+      const one = await stack.apiAs(admin, 'GET', '/meta/app?id=showcase_app');
       expect(one.status).toBe(200);
-      expect(appNames(await one.json())).toEqual(['setup']);
-      for (const query of ['id=', 'id=setup&id=setup']) {
+      expect(appNames(await one.json())).toEqual(['showcase_app']);
+      // The filter narrows: `setup` names no app on this stack, so `?id=setup`
+      // is an empty list where `?id[]=setup` answered the whole one.
+      const none = await stack.apiAs(admin, 'GET', '/meta/app?id=setup');
+      expect(none.status).toBe(200);
+      expect(appNames(await none.json())).toEqual([]);
+      for (const query of ['id=', 'id=showcase_app&id=showcase_app']) {
         const res = await stack.apiAs(admin, 'GET', `/meta/app?${query}`);
         expect({ query, status: res.status, code: codeOf(await res.json()) })
           .toEqual({ query, status: 400, code: 'VALIDATION_ERROR' });
@@ -201,9 +206,8 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
       expect(memberList.status).toBe(200);
       const adminApps = appNames(await adminList.json());
       const memberApps = appNames(await memberList.json());
-      expect(adminApps).toContain('setup');
-      expect(adminApps.length).toBeGreaterThan(1);
-      expect(memberApps.length).toBeGreaterThan(0);
+      expect(adminApps, JSON.stringify({ adminApps, memberApps })).toContain('showcase_app');
+      expect(memberApps, JSON.stringify({ adminApps, memberApps })).toContain('showcase_app');
       expect(memberApps, 'a member never sees setup').not.toContain('setup');
     });
   });
