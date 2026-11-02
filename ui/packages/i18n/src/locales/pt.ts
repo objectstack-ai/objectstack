@@ -884,8 +884,6 @@ const pt = {
     pullToRefresh: "Puxar para atualizar",
     refreshing: "Atualizando…",
     share: "Compartilhar",
-    sharingPersonal: "Visualização pessoal",
-    sharingCollaborative: "Visualização compartilhada",
     sharingLockedBy: "Bloqueada por {{user}}",
     print: "Imprimir",
     hideFieldsTitle: "Ocultar campos",

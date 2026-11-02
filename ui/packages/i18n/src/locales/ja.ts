@@ -859,8 +859,6 @@ const ja = {
     pullToRefresh: "引っ張って更新",
     refreshing: "更新中…",
     share: "共有",
-    sharingPersonal: "個人ビュー",
-    sharingCollaborative: "共有ビュー",
     sharingLockedBy: "{{user}} がロック中",
     print: "印刷",
     hideFieldsTitle: "フィールドを非表示",

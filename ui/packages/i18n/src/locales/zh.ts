@@ -882,8 +882,6 @@ const zh = {
     pullToRefresh: '下拉刷新',
     refreshing: '刷新中…',
     share: '分享',
-    sharingPersonal: '个人视图',
-    sharingCollaborative: '共享视图',
     sharingLockedBy: '由 {{user}} 锁定',
     print: '打印',
     hideFieldsTitle: '隐藏字段',

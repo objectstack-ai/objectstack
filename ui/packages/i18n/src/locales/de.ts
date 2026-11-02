@@ -859,8 +859,6 @@ const de = {
     pullToRefresh: "Zum Aktualisieren ziehen",
     refreshing: "Aktualisiere…",
     share: "Teilen",
-    sharingPersonal: "Persönliche Ansicht",
-    sharingCollaborative: "Geteilte Ansicht",
     sharingLockedBy: "Gesperrt von {{user}}",
     print: "Drucken",
     hideFieldsTitle: "Felder ausblenden",

@@ -859,8 +859,6 @@ const ko = {
     pullToRefresh: "당겨서 새로고침",
     refreshing: "새로고침 중…",
     share: "공유",
-    sharingPersonal: "개인 보기",
-    sharingCollaborative: "공유 보기",
     sharingLockedBy: "{{user}} 님이 잠금",
     print: "인쇄",
     hideFieldsTitle: "필드 숨기기",

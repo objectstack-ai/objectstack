@@ -915,8 +915,6 @@ const ru = {
     pullToRefresh: "Потяните для обновления",
     refreshing: "Обновление…",
     share: "Поделиться",
-    sharingPersonal: "Личное представление",
-    sharingCollaborative: "Общее представление",
     sharingLockedBy: "Заблокировано: {{user}}",
     print: "Печать",
     hideFieldsTitle: "Скрыть поля",
