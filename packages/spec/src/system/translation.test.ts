@@ -216,6 +216,29 @@ describe('LocaleSchema corrects a tag to its BCP-47 case (#28993)', () => {
     // Canonical rows come back untouched: the pass is idempotent.
     const canonical = { name: 'zh_cn', locale: 'zh-CN', messages: { x: 'y' } };
     expect(applyConversionsToStoredItem('translation', canonical)).toEqual(canonical);
+    // An underscore spelling is made a tag by the entry before and folded by
+    // the case entry after it: the order is what takes `zh_cn` to `zh-CN`.
+    const underscored = { name: 'zh_cn', locale: 'zh_cn', messages: { x: 'y' } };
+    expect(applyConversionsToStoredItem('translation', underscored)).toEqual({ ...underscored, locale: 'zh-CN' });
+  });
+
+  it('data at rest: the case entry reports a case collision instead of guessing, and merges an identical twin', () => {
+    const conversion = ALL_CONVERSIONS.find((c) => c.id === 'translation-locale-tag-case-folded')!;
+    expect(conversion.retiredAfter).toBe('18.2.0');
+    const todos: { path: string }[] = [];
+    const notices: { path: string }[] = [];
+    const stack = {
+      translations: [
+        // `zh-cn` is `zh-CN` in another case, which the entry already holds with other strings.
+        { 'zh-cn': { messages: { x: 'a' } }, 'zh-CN': { messages: { x: 'b' } } },
+        // An identical twin is merged: nothing is lost.
+        { 'ja-jp': { messages: { x: 'c' } }, 'ja-JP': { messages: { x: 'c' } } },
+      ],
+    };
+    const out = conversion.apply(stack, (n) => notices.push(n), { reportTodo: (t) => todos.push(t) });
+    expect(todos.map((t) => t.path)).toEqual(['translations[0].zh-cn']);
+    expect(notices.map((n) => n.path)).toEqual(['translations[1].ja-jp']);
+    expect(out.translations).toEqual([stack.translations[0], { 'ja-JP': { messages: { x: 'c' } } }]);
   });
 });
 

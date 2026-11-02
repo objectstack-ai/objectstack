@@ -112,7 +112,7 @@ export type Locale = z.input<typeof LocaleSchema>;
  * Refuses a bundle holding two locale keys that fold to one tag (`zh-cn` and
  * `zh-CN`), naming both. Picking a winner would discard one translator's
  * strings without a word, which is the policy the stored-row conversion
- * (`translation-locale-tag-canonicalized`) already follows for the same
+ * (`translation-locale-tag-case-folded`) already follows for the same
  * collision. Runs before {@link foldLocaleKeys}, so it sees the keys as written.
  */
 function refuseLocaleKeysFoldingTogether(bundle: Record<string, unknown>, ctx: z.RefinementCtx): void {
