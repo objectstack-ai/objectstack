@@ -14,6 +14,12 @@
  *   OrganizationsPage), plus shortcuts to manage members / create a workspace.
  * - No org context at all: renders nothing.
  *
+ * Inside the ObjectStack mobile shell (`@object-ui/mobile`), when the shell
+ * announces `showConnectionSwitcher`, the same button opens the shell's native
+ * switcher instead of the dropdown: it lists the saved organizations and
+ * company servers the shell holds, which the web menu cannot see. In a plain
+ * browser, or a shell without the capability, the dropdown opens as before.
+ *
  * Under `group` tenancy posture (ADR-0105) the switcher's meaning changes:
  * the active organization is only the WRITE target — reads span every
  * organization the member belongs to — so the dropdown labels it as the
@@ -25,6 +31,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@object-ui/auth';
 import type { AuthOrganization } from '@object-ui/auth';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { nativeHostCan, nativeShowConnectionSwitcher, useNativeHost } from '@object-ui/mobile';
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -45,6 +52,7 @@ export function WorkspaceSwitcher() {
   const { organizations, activeOrganization, switchOrganization, getAuthConfig } = useAuth();
   const [multiOrgDisabled, setMultiOrgDisabled] = useState(false);
   const isGroupPosture = useTenancyPosture() === 'group';
+  const nativeSwitcher = nativeHostCan(useNativeHost(), 'showConnectionSwitcher');
 
   useEffect(() => {
     let cancelled = false;
@@ -100,15 +108,42 @@ export function WorkspaceSwitcher() {
     });
   };
 
+  const triggerClassName =
+    'ml-2 inline-flex max-w-[14rem] items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground';
+  const triggerContent = (
+    <>
+      <OrgBadge name={current.name} />
+      <span className="hidden truncate sm:inline">{current.name}</span>
+      <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+    </>
+  );
+
+  // The shell's sheet replaces the web menu; switching there is the shell's
+  // own flow, so nothing is sent from here.
+  if (nativeSwitcher) {
+    return (
+      <button
+        type="button"
+        className={triggerClassName}
+        data-testid="workspace-switcher"
+        data-native-switcher=""
+        onClick={() => {
+          void nativeShowConnectionSwitcher().then((result) => {
+            if (result.status === 'failed') {
+              console.warn('[WorkspaceSwitcher] native connection switcher failed', result.code, result.message);
+            }
+          });
+        }}
+      >
+        {triggerContent}
+      </button>
+    );
+  }
+
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        className="ml-2 inline-flex max-w-[14rem] items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
-        data-testid="workspace-switcher"
-      >
-        <OrgBadge name={current.name} />
-        <span className="hidden truncate sm:inline">{current.name}</span>
-        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+      <DropdownMenuTrigger className={triggerClassName} data-testid="workspace-switcher">
+        {triggerContent}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-60">
         <DropdownMenuLabel className="text-xs text-muted-foreground">

@@ -31,6 +31,22 @@ export const NATIVE_HOST_GLOBAL = 'ObjectStackNative';
  */
 export const NATIVE_NAVIGATE_EVENT = 'objectstack-native:navigate';
 
+/**
+ * The window event the shell dispatches to a loaded Console when the user
+ * removes this Console's connection in the shell. The page answers by calling
+ * `event.waitUntil(promise)` and settling the promise once it has unregistered
+ * this device's push token under its own session; the shell then clears the
+ * host's cookies. A page that does not settle within 10 s is recorded by the
+ * shell as having left the token registered. See `NativeConnectionRemovedEvent`.
+ */
+export const NATIVE_CONNECTION_REMOVED_EVENT = 'objectstack-native:connectionRemoved';
+
+/** The `objectstack-native:connectionRemoved` event: a window `Event` carrying `waitUntil`. */
+export interface NativeConnectionRemovedEvent extends Event {
+  /** Hold the shell until `promise` settles (the shell waits at most 10 s). */
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 /** Haptic feedback kinds the shell accepts. */
 export type NativeHapticKind =
   | 'light'
@@ -56,7 +72,13 @@ export interface NativeSafeArea {
 }
 
 /** The callable bridge methods. Each is announced as a capability of the same name. */
-export type NativeHostMethod = 'getPushToken' | 'haptic' | 'openExternal' | 'navigate' | 'resetServer';
+export type NativeHostMethod =
+  | 'getPushToken'
+  | 'haptic'
+  | 'openExternal'
+  | 'navigate'
+  | 'resetServer'
+  | 'showConnectionSwitcher';
 
 /** `window.ObjectStackNative`, as the shell's bridge contract declares it. */
 export interface ObjectStackNative {
@@ -77,6 +99,11 @@ export interface ObjectStackNative {
   navigate(route: string): Promise<null>;
   /** Forget the configured server and return to the shell's server picker. */
   resetServer(): Promise<null>;
+  /**
+   * Open the shell's native connection switcher: the saved organizations and
+   * company servers, plus an add action.
+   */
+  showConnectionSwitcher(): Promise<null>;
 
   /** Event: the page is interactive (the shell lifts its loading cover). */
   ready(): void;
@@ -112,8 +139,13 @@ export function getNativeHost(): ObjectStackNative | null {
   return host !== null && typeof host === 'object' ? (host as ObjectStackNative) : null;
 }
 
-/** Whether the shell announces `capability` and the bridge carries the method. */
-function callable(host: ObjectStackNative | null, method: NativeHostMethod): host is ObjectStackNative {
+/**
+ * Whether the shell announces `method` as a capability and the bridge carries
+ * it, so a typed call wrapper would reach the shell. Lets a control choose its
+ * native or web path before it renders; the wrapper still answers
+ * `unavailable` on its own.
+ */
+export function nativeHostCan(host: ObjectStackNative | null, method: NativeHostMethod): host is ObjectStackNative {
   if (!host || typeof host.has !== 'function' || typeof host[method] !== 'function') return false;
   try {
     return host.has(method) === true;
@@ -127,7 +159,7 @@ async function callNative<T>(
   invoke: (host: ObjectStackNative) => Promise<T>,
 ): Promise<NativeCallResult<T>> {
   const host = getNativeHost();
-  if (!callable(host, method)) return { status: 'unavailable' };
+  if (!nativeHostCan(host, method)) return { status: 'unavailable' };
   try {
     return { status: 'ok', value: await invoke(host) };
   } catch (error) {
@@ -163,6 +195,11 @@ export function nativeNavigate(route: string): Promise<NativeCallResult<null>> {
 /** Forget the configured server and return to the shell's server picker. */
 export function nativeResetServer(): Promise<NativeCallResult<null>> {
   return callNative('resetServer', (host) => host.resetServer());
+}
+
+/** Open the shell's native connection switcher (organizations and company servers). */
+export function nativeShowConnectionSwitcher(): Promise<NativeCallResult<null>> {
+  return callNative('showConnectionSwitcher', (host) => host.showConnectionSwitcher());
 }
 
 // ── Events ──────────────────────────────────────────────────────────────────
