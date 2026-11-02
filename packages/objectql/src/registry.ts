@@ -4288,6 +4288,12 @@ export class SchemaRegistry {
     if (ownership === 'extend') {
       const extendRefusal = extendContributionRefusal(schema, packageId);
       if (extendRefusal) throw extendRefusal;
+      // [#28858] …filed under the key the object it extends is registered
+      // under — see {@link extensionTargetKey}. Every entry that registers an
+      // extension reaches this line: the manifest `objectExtensions` loop and
+      // a stored `object_extension` row ({@link registerObjectExtension}).
+      const target = this.extensionTargetKey(String(schema.name ?? ''), packageId);
+      if (target !== schema.name) schema = { ...schema, name: target };
     }
     // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
     // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
@@ -6257,6 +6263,46 @@ export class SchemaRegistry {
       'extend',
       typeof priority === 'number' ? priority : DEFAULT_EXTENDER_PRIORITY,
     );
+  }
+
+  /**
+   * [#28858] Spellings of an `extend` already named, keyed
+   * `spelled|resolved|package`. Per registry, for the reason
+   * {@link shadowedExtensionQueueWarned} gives.
+   */
+  private extensionSpellingWarned = new Set<string>();
+
+  /**
+   * [#28858, ADR-0146 D10] The key an extension of `name` is filed under: the
+   * key {@link getObject} reads `name` as. That is `name` itself whenever an
+   * entry is registered under it, or nothing is registered that `name` folds
+   * to. It differs only for a short name `getObject` folds to a legacy
+   * `<ns>__<name>` key ({@link resolveObjectKey}); filing such an extension
+   * under the short name would open a second, owner-less entry beside the
+   * object it meant, which nothing serves and nothing checks.
+   *
+   * The folded spelling is named once at `warn`, with the key to write. ⛔
+   * Never a refusal: the manifest loop and the boot hydration run while
+   * packages are still registering (AGENTS.md *Startup registry reads*). The
+   * `object_extension` item door refuses the same spelling at save (#28834),
+   * where the author is present to fix it. A legacy owner that registers
+   * AFTER the extension is not yet there to fold to, so that extension is
+   * filed under its own spelling, as before.
+   */
+  private extensionTargetKey(name: string, packageId: string | undefined): string {
+    if (name === '' || this.objectContributors.has(name)) return name;
+    const resolved = this.resolveObjectKey(name);
+    if (resolved === undefined || resolved === name) return name;
+    const key = `${name}|${resolved}|${packageId ?? ''}`;
+    if (!this.extensionSpellingWarned.has(key)) {
+      this.extensionSpellingWarned.add(key);
+      console.warn(
+        `[Registry] An extension${packageId ? ` from package "${packageId}"` : ''} names its object '${name}', ` +
+          `which is registered as '${resolved}': the extension is filed under '${resolved}', the object it ` +
+          `reads as. Write \`extend: '${resolved}'\` to name the object by the key it is registered under.`,
+      );
+    }
+    return resolved;
   }
 
   /**
