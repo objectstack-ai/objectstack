@@ -342,10 +342,6 @@ const READERS: Record<string, Row> = {
   'having-filter.ts#declaredReferenceNames :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
   'no-operator-object-door.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
   'no-operator-object-door.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
-  'validation/record-validator.ts#<module> :: created_at': { disposition: 'not-a-read', why: VOCABULARY },
-  'validation/record-validator.ts#<module> :: created_by': { disposition: 'not-a-read', why: VOCABULARY },
-  'validation/record-validator.ts#<module> :: updated_at': { disposition: 'not-a-read', why: VOCABULARY },
-  'validation/record-validator.ts#<module> :: updated_by': { disposition: 'not-a-read', why: VOCABULARY },
   'util.ts#convertIntrospectedSchemaToObjects :: created_at': {
     disposition: 'not-a-read',
     why: "drafts objects from a datasource's introspected tables, skipping the platform's own columns",

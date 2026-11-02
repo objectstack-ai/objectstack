@@ -20,6 +20,7 @@ import { z } from 'zod';
 import { agedOutSpecKeyRefusal, aliasKeyRefusal, durationKeyRenamedGuidance, handlerKeyRefusal, retiredNodeType, retirementTombstone } from './tombstone.zod.js';
 import {
   ChartTypeSchema as SpecChartTypeSchema,
+  checkDashboardReservedDateRangeGlobalFilters,
   checkDashboardWidgetChartMeasureArity,
   checkDashboardWidgetMetricMeasureArity,
   checkDashboardWidgetStageOrder,
@@ -1646,11 +1647,20 @@ export const GlobalFilterSchema = stripImportedDefaults(SpecGlobalFilterSchema);
  *  - `widgets` — objectui's element schema is its own ledger entry (the local
  *    widget still carries the legacy `component` envelope the spec has no room
  *    for); migration deferred.
- *  - `globalFilters` — re-added below over the exported {@link GlobalFilterSchema},
- *    which since objectui#7759 IS the spec's element schema by reference, so the
- *    accept set equals the spec member's; the separate const is kept because it
- *    is published API. (It used to be "deliberately looser than spec's" — the
- *    bare-string option shorthand and a relaxed `optionsFrom` — see that const.)
+ *  - `globalFilters` — re-added below as the spec's own SLOT, by reference
+ *    (`StrippedSpecDashboard.shape.globalFilters`): the array whose element is
+ *    the exported {@link GlobalFilterSchema} (since objectui#7759 the spec's
+ *    element schema by reference) and which carries the spec's array-level
+ *    refinement, so the accept set equals the spec member's. objectstack#29284:
+ *    until then this mirror rebuilt the array as `z.array(GlobalFilterSchema)`,
+ *    which kept every element check and dropped the array's own — the refusal
+ *    of two filters under one key (a filter's `name`, else its `field`;
+ *    objectstack#29023) — so this validator went green on a dashboard every
+ *    spec door refuses. It stays on the excluded list because that list is
+ *    published API and the TypeScript twin in `../complex.ts` restates the key
+ *    over the same element type. (It used to be "deliberately looser than
+ *    spec's" — the bare-string option shorthand and a relaxed `optionsFrom` —
+ *    see {@link GlobalFilterSchema}.)
  *
  * `dateRange` was a third member of that list until objectui#10334. Its local
  * element (`defaultRange` a bare `z.string()`, a stripping object) admitted
@@ -1679,7 +1689,8 @@ export const DASHBOARD_SPEC_EXCLUDED = [
 // TypeScript twin in `../complex.ts`, which extends `Omit< Dashboard, … >` over the same
 // array — so the published validator and the published type project one spec
 // surface and cannot drift apart again.
-const SpecDashboardFields = specFieldsExcept(stripImportedDefaults(SpecDashboardSchema).shape, DASHBOARD_SPEC_EXCLUDED);
+const StrippedSpecDashboard = stripImportedDefaults(SpecDashboardSchema);
+const SpecDashboardFields = specFieldsExcept(StrippedSpecDashboard.shape, DASHBOARD_SPEC_EXCLUDED);
 
 /**
  * Dashboard Schema — the objectui dashboard renderer node, derived from
@@ -1703,7 +1714,9 @@ export const DashboardComponentSchema = BaseSchema.extend(SpecDashboardFields.sh
   // (see `closeStrictUnionArms` in `./node-derivation.ts`).
   widgets: z.array(z.union(closeStrictUnionArms([DashboardWidgetSlotComponentSchema, DashboardWidgetSchema] as const)))
     .describe('Dashboard widgets'),
-  globalFilters: z.array(GlobalFilterSchema).optional().describe('Dashboard-level filters'),
+  // The spec's slot by reference, refinement included (objectstack#29284; see the
+  // `globalFilters` bullet on `DASHBOARD_SPEC_EXCLUDED`).
+  globalFilters: StrippedSpecDashboard.shape.globalFilters,
   body: retirementTombstone(
     'REFUSED (objectui#9256, ADR-0049) — `dashboard` reads NEITHER content channel: measured with the '
     + 'TypeScript type checker across all 24 registering packages, no renderer read consumes `body` or '
@@ -1741,7 +1754,12 @@ export const DashboardComponentSchema = BaseSchema.extend(SpecDashboardFields.sh
     'dashboard', 'dashboard.performance', 'performance', '17.0.0',
     'No renderer or runtime read it; dashboard performance tuning was never implemented. Delete the key.',
   ),
-});
+})
+  // objectstack#29213: the spec's one object-level dashboard check, re-attached because
+  // rebuilding from `SpecDashboardFields.shape` drops it. On a dashboard that declares
+  // `dateRange`, a `globalFilters` entry keyed `dateRange` is refused here with the spec's
+  // own issue, instead of replacing the date range on the board.
+  .superRefine(checkDashboardReservedDateRangeGlobalFilters);
 
 /**
  * Dashboard Widget Config Schema (for DashboardConfigPanel)

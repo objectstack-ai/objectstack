@@ -948,6 +948,14 @@ describe('dashboard-filter-binding-unknown (#27445)', () => {
     expect(findings[0].hint).toBe('Declare `dateRange` on the dashboard, or delete the `dateRange` entry.');
   });
 
+  it('a `globalFilters` entry named `dateRange` declares the name on a dashboard without `dateRange`', () => {
+    const findings = only(validateWidgetBindings(stack(
+      { dateRange: undefined, globalFilters: [{ name: 'dateRange', field: 'signed_at', type: 'date' }] },
+      { filterBindings: { dateRange: false } },
+    )));
+    expect(findings).toEqual([]);
+  });
+
   it('a dashboard with no filters at all refuses every key and says so', () => {
     const findings = only(validateWidgetBindings(stack(
       { dateRange: undefined, globalFilters: undefined },

@@ -253,35 +253,28 @@ describe('normalizeListViewSchema (#2890)', () => {
       expect(out.aria).toEqual({ ariaLabel: 'canonical', role: 'grid' });
     });
 
-    it('collapses the visibility audience onto the spec ownership type', () => {
-      // Only `private` is personal; every wider audience is collaborative.
-      for (const [visibility, type] of Object.entries({
-        private: 'personal',
-        team: 'collaborative',
-        organization: 'collaborative',
-        public: 'collaborative',
-      })) {
-        const out = normalizeListViewSchema({ viewType: 'grid', sharing: { visibility } }) as Record<string, unknown>;
-        expect(out.sharing).toEqual({ type });
+    // objectstack#29037: the spec's ownership `type` is retired, so the legacy
+    // audience pair folds onto nothing — it is dropped, and no `type` is written.
+    it('drops the legacy audience pair and writes no ownership type', () => {
+      for (const sharing of [
+        { visibility: 'private' },
+        { visibility: 'team' },
+        { visibility: 'organization' },
+        { visibility: 'public' },
+        { enabled: true },
+        { enabled: false },
+      ]) {
+        const out = normalizeListViewSchema({ viewType: 'grid', sharing }) as Record<string, unknown>;
+        expect(out.sharing, JSON.stringify(sharing)).toEqual({});
       }
     });
 
-    it('maps a bare `enabled: true` to `personal` — the badge it used to render', () => {
-      const out = normalizeListViewSchema({ viewType: 'grid', sharing: { enabled: true } }) as Record<string, unknown>;
-      expect(out.sharing).toEqual({ type: 'personal' });
-    });
-
-    it('leaves `enabled: false` without a type, so the share badge stays hidden', () => {
-      const out = normalizeListViewSchema({ viewType: 'grid', sharing: { enabled: false } }) as Record<string, unknown>;
-      expect(out.sharing).toEqual({});
-    });
-
-    it('preserves `lockedBy` and lets an explicit `type` win over `visibility`', () => {
+    it('preserves `lockedBy` beside the dropped pair', () => {
       const out = normalizeListViewSchema({
         viewType: 'grid',
-        sharing: { type: 'collaborative', visibility: 'private', lockedBy: 'u1' },
+        sharing: { visibility: 'private', enabled: true, lockedBy: 'u1' },
       }) as Record<string, unknown>;
-      expect(out.sharing).toEqual({ type: 'collaborative', lockedBy: 'u1' });
+      expect(out.sharing).toEqual({ lockedBy: 'u1' });
     });
   });
 

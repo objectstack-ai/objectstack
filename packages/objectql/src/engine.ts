@@ -201,7 +201,7 @@ import {
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
-import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, hookStoppedRefusal, rollbackFailedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -6008,7 +6008,13 @@ export class ObjectQL implements IObjectQLEngine {
         this.logger.debug('Skipping metadata-bound hook (skipAutomations)', { event, hook: entry.hookName });
         continue;
       }
-      await entry.handler(context);
+      // [#29422] A stale-roll-up refusal a hook's own `ctx.api` write raised
+      // describes THAT write, not this one: `hookStoppedRefusal`.
+      try {
+        await entry.handler(context);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, context.object, entry.hookName);
+      }
     }
   }
 
@@ -6056,7 +6062,9 @@ export class ObjectQL implements IObjectQLEngine {
    * (`transaction()` covers that one alone and would refuse the write), or when
    * that driver has no transactions (ADR-0119 D1; asking would only warn).
    * `SummaryRecomputeError` means "the records WERE written": it is rethrown
-   * after the commit, never through the rollback.
+   * after the commit, never through the rollback. Only the write's OWN refusal
+   * arrives here: one a hook's `ctx.api` write raised was already converted
+   * where it left the handler (#29422, `hookStoppedRefusal`), so it rolls back.
    */
   private opensAfterAbortUnit(event: 'afterInsert' | 'afterUpdate' | 'afterDelete', object: string, context: ExecutionContext | undefined): boolean {
     const threaded = context?.transaction;
@@ -6322,7 +6330,12 @@ export class ObjectQL implements IObjectQLEngine {
     } as unknown as HookContext;
     for (const entry of flagged) {
       if (skipAutomations && entry.meta) continue;
-      await entry.handler(wholeOpCtx);
+      // [#29422] As in `triggerHooks`.
+      try {
+        await entry.handler(wholeOpCtx);
+      } catch (e) {
+        throw hookStoppedRefusal(e, event, object, entry.hookName);
+      }
     }
     // `input` is identity-shared with the batch context, so the observation
     // covers everything the handlers touched.
@@ -21914,18 +21927,22 @@ export class ObjectQL implements IObjectQLEngine {
       else if (drv.commitTransaction) await drv.commitTransaction(trx);
       return result;
     } catch (err) {
+      let rollbackFailed = false;
       try {
         if (drv.rollback) await drv.rollback(trx);
         else if (drv.rollbackTransaction) await drv.rollbackTransaction(trx);
       } catch {
         // swallow rollback failures so the original error surfaces
+        rollbackFailed = true;
       }
       // [#21274] A boundary outside the middleware seam: a commit failure, or
       // a callback that reached the driver through the transaction handle.
       // An error that already crossed an engine boundary inside the callback
       // comes back as the same reference. A stale-roll-up refusal ("stored")
       // is no longer true once this rollback has run: `rolledBackRefusal`.
-      throw redactPropagatedDriverFault(rolledBackRefusal(err));
+      // [#29421] Nor is "rolled back" once the rollback threw:
+      // `rollbackFailedRefusal`.
+      throw redactPropagatedDriverFault(rollbackFailed ? rollbackFailedRefusal(err) : rolledBackRefusal(err));
     }
   }
 

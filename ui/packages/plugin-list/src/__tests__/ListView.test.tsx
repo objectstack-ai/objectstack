@@ -614,9 +614,10 @@ describe('ListView', () => {
     expect(region).toHaveAttribute('aria-live', 'polite');
   });
 
-  it('should render share button when sharing is enabled', () => {
-    // Legacy `sharing: { enabled, visibility }`; the fold collapses it onto the
-    // spec's `{ type }`, which is what the badge below asserts.
+  it('draws no sharing indicator for the legacy `{ enabled, visibility }` pair', () => {
+    // objectstack#29037: the fold drops the legacy audience pair (the spec's
+    // ownership `type` it used to fold onto is retired), so a view with no
+    // `lockedBy` is labelled nothing — never "Shared view" or "Personal view".
     const schema = authored({
       type: 'list-view',
       objectName: 'contacts',
@@ -629,14 +630,11 @@ describe('ListView', () => {
     });
 
     renderWithProvider(<ListView schema={schema} />);
-    const shareButton = screen.getByTestId('share-button');
-    expect(shareButton).toBeInTheDocument();
-    // #2890: the badge shows the spec's ownership type. The legacy four-value
-    // audience (`team`) collapses onto it — only `private` is personal.
-    expect(shareButton).toHaveAttribute('title', 'Shared view');
+    expect(screen.queryByTestId('sharing-locked-by')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shared view')).not.toBeInTheDocument();
   });
 
-  it('should not render share button when sharing is not enabled', () => {
+  it('should not render the sharing indicator when sharing is not declared', () => {
     const schema: ListViewSchema = {
       type: 'list-view',
       objectName: 'contacts',
@@ -645,7 +643,7 @@ describe('ListView', () => {
     };
 
     renderWithProvider(<ListView schema={schema} />);
-    expect(screen.queryByTestId('share-button')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('sharing-locked-by')).not.toBeInTheDocument();
   });
 
   it('should show record count bar when data is loaded', async () => {
@@ -2424,26 +2422,6 @@ describe('ListView', () => {
   });
 
   // ============================
-  // sharing spec format
-  // ============================
-  describe('sharing spec format', () => {
-    it('should render share button when sharing.type is set (spec format)', () => {
-      const schema: ListViewSchema = {
-        type: 'list-view',
-        objectName: 'contacts',
-        viewType: 'grid',
-        fields: ['name', 'email'],
-        sharing: { type: 'collaborative' } as any,
-      };
-
-      renderWithProvider(<ListView schema={schema} />);
-      const shareButton = screen.getByTestId('share-button');
-      expect(shareButton).toBeInTheDocument();
-      expect(shareButton).toHaveAttribute('title', 'Shared view');
-    });
-  });
-
-  // ============================
   // bulkActions bar
   // ============================
   describe('bulkActions bar', () => {
@@ -2580,93 +2558,62 @@ describe('ListView', () => {
   });
 
   // ============================
-  // sharing spec format — additional tests
+  // sharing — the lock indicator (objectstack#29037: `sharing.type` retired)
   // ============================
-  describe('sharing spec format — additional', () => {
-    it('shows the personal sharing type, and no lock owner when `lockedBy` is unset', () => {
+  describe('sharing lock indicator', () => {
+    it('shows who locked the view from `sharing.lockedBy`', () => {
       const schema: ListViewSchema = {
         type: 'list-view',
         objectName: 'contacts',
         viewType: 'grid',
         fields: ['name', 'email'],
-        sharing: { type: 'personal' },
+        sharing: { lockedBy: 'admin@example.com' },
       };
 
       renderWithProvider(<ListView schema={schema} />);
-      const indicator = screen.getByTestId('share-button');
-      expect(indicator).toHaveAttribute('title', 'Personal view');
-      expect(indicator).toHaveTextContent('Personal view');
-      expect(screen.queryByTestId('sharing-locked-by')).not.toBeInTheDocument();
+      const indicator = screen.getByTestId('sharing-locked-by');
+      expect(indicator).toHaveAttribute('title', 'Locked by admin@example.com');
+      expect(indicator).toHaveTextContent('Locked by admin@example.com');
     });
 
-    it('shows the lock owner from `sharing.lockedBy` beside a collaborative type', () => {
+    it('renders the indicator as read-only text, never a button (no dead Share button)', () => {
       const schema: ListViewSchema = {
         type: 'list-view',
         objectName: 'contacts',
         viewType: 'grid',
         fields: ['name', 'email'],
-        sharing: { type: 'collaborative', lockedBy: 'admin@example.com' },
+        sharing: { lockedBy: 'admin@example.com' },
       };
 
       renderWithProvider(<ListView schema={schema} />);
-      const indicator = screen.getByTestId('share-button');
-      expect(indicator).toHaveAttribute('title', 'Shared view · Locked by admin@example.com');
-      expect(screen.getByTestId('sharing-locked-by')).toHaveTextContent('Locked by admin@example.com');
-    });
-
-    it('shows no lock owner on a collaborative view without `lockedBy`', () => {
-      const schema: ListViewSchema = {
-        type: 'list-view',
-        objectName: 'contacts',
-        viewType: 'grid',
-        fields: ['name', 'email'],
-        sharing: { type: 'collaborative' },
-      };
-
-      renderWithProvider(<ListView schema={schema} />);
-      expect(screen.getByTestId('share-button')).toHaveAttribute('title', 'Shared view');
-      expect(screen.queryByTestId('sharing-locked-by')).not.toBeInTheDocument();
-    });
-
-    it('renders the sharing indicator as read-only text, never a button (no dead Share button)', () => {
-      const schema: ListViewSchema = {
-        type: 'list-view',
-        objectName: 'contacts',
-        viewType: 'grid',
-        fields: ['name', 'email'],
-        sharing: { type: 'collaborative', lockedBy: 'admin@example.com' },
-      };
-
-      renderWithProvider(<ListView schema={schema} />);
-      const indicator = screen.getByTestId('share-button');
+      const indicator = screen.getByTestId('sharing-locked-by');
       expect(indicator.tagName).not.toBe('BUTTON');
       expect(indicator.closest('button')).toBeNull();
       expect(indicator).not.toHaveAttribute('role');
       expect(indicator).not.toHaveAttribute('tabindex');
     });
 
-    // The lock keys on `lockedBy`, never on `type`: the spec defaults `type`
-    // to `collaborative` and the served view carries the authored body, so a
-    // view that writes only `lockedBy` arrives with `type` absent.
+    // A view served from a row older than the retirement can still carry the
+    // retired `type` until the conversion runs on it; the toolbar ignores it.
     it.each([
-      ['no `type` (the spec default)', { lockedBy: 'admin@objectos.ai' }, 'Shared view'],
-      ['`type: collaborative`', { type: 'collaborative' as const, lockedBy: 'admin@objectos.ai' }, 'Shared view'],
-      ['`type: personal`', { type: 'personal' as const, lockedBy: 'admin@objectos.ai' }, 'Personal view'],
-    ])('shows the lock from `sharing.lockedBy` with %s', (_case, sharing, typeLabel) => {
-      const schema: ListViewSchema = {
+      ['`type: personal`', { type: 'personal', lockedBy: 'admin@objectos.ai' }],
+      ['`type: collaborative`', { type: 'collaborative', lockedBy: 'admin@objectos.ai' }],
+    ])('labels no view personal or shared, whatever %s says, and still shows the lock', (_case, sharing) => {
+      const schema = authored({
         type: 'list-view',
         objectName: 'contacts',
         viewType: 'grid',
         fields: ['name', 'email'],
         sharing,
-      };
+      });
 
       renderWithProvider(<ListView schema={schema} />);
-      expect(screen.getByTestId('sharing-locked-by')).toHaveTextContent('Locked by admin@objectos.ai');
-      expect(screen.getByTestId('share-button')).toHaveAttribute('title', `${typeLabel} · Locked by admin@objectos.ai`);
+      expect(screen.getByTestId('sharing-locked-by')).toHaveAttribute('title', 'Locked by admin@objectos.ai');
+      expect(screen.queryByText('Personal view')).not.toBeInTheDocument();
+      expect(screen.queryByText('Shared view')).not.toBeInTheDocument();
     });
 
-    it('shows no sharing indicator for a `sharing` block with neither `type` nor `lockedBy`', () => {
+    it('shows no sharing indicator for a `sharing` block without `lockedBy`', () => {
       const schema: ListViewSchema = {
         type: 'list-view',
         objectName: 'contacts',
@@ -2676,7 +2623,6 @@ describe('ListView', () => {
       };
 
       renderWithProvider(<ListView schema={schema} />);
-      expect(screen.queryByTestId('share-button')).not.toBeInTheDocument();
       expect(screen.queryByTestId('sharing-locked-by')).not.toBeInTheDocument();
     });
   });
