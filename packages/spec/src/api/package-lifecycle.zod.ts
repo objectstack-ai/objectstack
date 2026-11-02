@@ -460,6 +460,7 @@ export const GetPackageCustomizationsResponseSchema = lazySchema(() => z.object(
       + 'A navigation item another installed package contributes to an app the base owns, one entry per item of '
       + 'the contribution\'s `items` (a contributed group\'s children ride inside it and are not entries of their '
       + 'own), read from the same contribution registry the served app\'s navigation fold reads (ADR-0029 D7). '
+      + 'An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry. '
       + 'A disabled package\'s contributions are not listed, as the fold drops them.',
     ),
   ])).describe(

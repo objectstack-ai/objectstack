@@ -417,4 +417,14 @@ describe('the `nav` kind of `contributions` is declared ahead of its producer (A
     expect(objectArm.description).not.toMatch(/PLANNED/);
     expect(member.description).not.toMatch(/#\d{3,}/);
   });
+
+  it('the schema-level describe says the navigation items are not yet served, so serving them drops that too', () => {
+    expect(GetPackageCustomizationsResponseSchema.description).toContain('not yet served');
+  });
+
+  it('the nav arm says an item with no id (a separator may omit it) is not an entry: `name` is required', () => {
+    expect(navArm.description).toContain('An item that declares no `id` (a separator may omit it) has no `name` to give and is not an entry.');
+    const { name: _dropped, ...noName } = { kind: 'nav', app: 'crm', name: 'nav_sep', packageId: 'com.example.acme-sync' };
+    expect(GetPackageCustomizationsResponseSchema.shape.contributions.element.safeParse(noName).success).toBe(false);
+  });
 });
