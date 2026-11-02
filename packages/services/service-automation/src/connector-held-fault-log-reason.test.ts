@@ -13,7 +13,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
-import type { Connector, ConnectorProviderFactory } from '@objectstack/spec/integration';
+import type { ConnectorProviderFactory } from '@objectstack/spec/integration';
 import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration';
 import { AutomationServicePlugin } from './plugin.js';
 import type { AutomationEngine } from './engine.js';
