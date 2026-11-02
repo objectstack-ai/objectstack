@@ -151,11 +151,17 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** An element's identity for an array hop: a non-empty string `id`, or none. */
+/**
+ * An element's identity for an array hop: a non-empty string `id`; for an
+ * element with no `id`, a non-empty string `key` (a connector action's machine
+ * name); otherwise none.
+ */
 function identityOf(element: unknown): string | undefined {
     if (!isPlainRecord(element)) return undefined;
     const id = element.id;
-    return typeof id === 'string' && id !== '' ? id : undefined;
+    if (typeof id === 'string' && id !== '') return id;
+    const key = element.key;
+    return typeof key === 'string' && key !== '' ? key : undefined;
 }
 
 /**
@@ -190,7 +196,9 @@ function elementWithIdentity(
  * into an identity, and every body — served and incoming — is then walked by
  * that identity, never by the index. Two kinds of identity:
  *
- *  - **the element's own `id`** (`{ elementId }`) — a flow node;
+ *  - **the element's own `id`** (`{ elementId }`) — a flow node — or, for an
+ *    element with no `id`, its own `key` — a connector action, whose `key` is
+ *    its machine name;
  *  - **for an element with no `id`, the identified element below it on the
  *    same path** (`{ anchor }`, #20590). A `parallel` block's branch carries no
  *    `id`, and a credential inside one sits at
@@ -201,8 +209,8 @@ function elementWithIdentity(
  *    is that walk: the hops from inside the element down to, and including,
  *    the first identified element beneath it.
  *
- * An array hop that reaches neither — an element with no `id` and no
- * identified element below it on the path, or an `id` shared with a sibling —
+ * An array hop that reaches neither — an element with no `id` or `key` and no
+ * identified element below it on the path, or an identity shared with a sibling —
  * resolves to nothing, and the path is skipped.
  */
 type PathHop =
