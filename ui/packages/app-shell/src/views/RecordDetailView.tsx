@@ -301,6 +301,31 @@ const PAGE_NODE_PROPERTY_KEYS = ['children', 'items'] as const;
 const TABS_URL_SYNC_KEYS: ReadonlySet<string> = new Set(['regions', 'components', 'children']);
 
 /**
+ * The fields the highlight strip of a synthesized record page draws: the
+ * `fields` of the `record:highlights` blocks among the page's top-level blocks,
+ * where the synthesizer places the strip (a phone's cut-short one included)
+ * and where a slotted page's own `highlights` slot lands. A field is read in
+ * either form the block accepts, a bare name or a `{ name }` entry, from the
+ * block's `properties` bag over its own keys.
+ */
+function drawnHighlightFieldsOf(page: unknown): string[] {
+  const out: string[] = [];
+  const regions = (page as { regions?: unknown } | null | undefined)?.regions;
+  for (const region of Array.isArray(regions) ? regions : []) {
+    const components = (region as { components?: unknown } | null | undefined)?.components;
+    for (const node of Array.isArray(components) ? components : []) {
+      if ((node as { type?: unknown } | null | undefined)?.type !== 'record:highlights') continue;
+      const props = { ...(node as object), ...((node as { properties?: object }).properties ?? {}) } as { fields?: unknown };
+      for (const field of Array.isArray(props.fields) ? props.fields : []) {
+        const name = typeof field === 'string' ? field : (field as { name?: unknown } | null | undefined)?.name;
+        if (typeof name === 'string' && name.length > 0 && !out.includes(name)) out.push(name);
+      }
+    }
+  }
+  return out;
+}
+
+/**
  * Whether a node of one of `types` is on screen when `page` opens with
  * `activeTab` as its `?tab=` value — that is, whether it is mounted.
  *
@@ -4416,6 +4441,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // data), so the early `effectivePage` synth never contains it and checking
   // that tree would double-render the panel (tab + bottom fallback).
   const hasApprovalsNode = hasExplicitApprovals(renderedPage as any);
+  // The strip this page draws (objectstack#28909), handed to the meta line so
+  // it leaves the owner out only when the strip shows it: on a phone the
+  // header draws fewer highlights than the object declares.
+  const drawnHighlightFields = drawnHighlightFieldsOf(renderedPage);
 
   // objectstack#26678 / objectstack#27524 — the page as its tier lays it out:
   // the record header, then the details and the right column (动态, then the
@@ -4905,6 +4934,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                         data={readablePageRecord}
                         objectSchema={objectDef}
                         objectName={objectName}
+                        drawnHighlightFields={drawnHighlightFields}
                       />
                     }
                   />
@@ -4979,6 +5009,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                     data={readablePageRecord}
                     objectSchema={objectDef}
                     objectName={objectName}
+                    drawnHighlightFields={drawnHighlightFields}
                   />
                 </DefaultRecordPageContext.Provider>
               )}
