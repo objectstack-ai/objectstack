@@ -514,13 +514,17 @@ describe('plugin-rest-api.zod', () => {
       expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('listNotifications');
       expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('markNotificationsRead');
       expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('markAllNotificationsRead');
-      // 3 = list + read + read/all, the routes the dispatcher actually mounts.
-      // The devices/preferences endpoints this table used to declare were
-      // removed as server routes in #3612 (in fact never built) and are gone
-      // from the catalog too (#3899) — same cure as DEFAULT_AI_ROUTES (#3718).
-      expect(DEFAULT_NOTIFICATION_ROUTES.endpoints).toHaveLength(3);
+      expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('registerDevice');
+      expect(DEFAULT_NOTIFICATION_ROUTES.methods).toContain('unregisterDevice');
+      // 5 = list + read + read/all + the two device routes, the routes the
+      // dispatcher actually mounts. The device rows came back with their
+      // handlers (#29068); `/preferences` stays gone, removed as a server
+      // route in #3612 (in fact never built) and from the catalog in #3899.
+      expect(DEFAULT_NOTIFICATION_ROUTES.endpoints).toHaveLength(5);
+      const routes = DEFAULT_NOTIFICATION_ROUTES.endpoints?.map(e => `${e.method} ${e.path}`) ?? [];
+      expect(routes).toContain('POST /devices');
+      expect(routes).toContain('DELETE /devices/:deviceId');
       const paths = DEFAULT_NOTIFICATION_ROUTES.endpoints?.map(e => e.path) ?? [];
-      expect(paths).not.toContain('/devices');
       expect(paths).not.toContain('/preferences');
     });
 

@@ -399,6 +399,26 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
     note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
   { route: 'DELETE /notifications/read/all', domain: '/notifications', disposition: 'server-only',
     note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  // Push devices (ADR-0012 §6): the device registry's two faces and their
+  // refusal-only verbs, mounted for the same every-face anonymous floor.
+  { route: 'POST /notifications/devices', domain: '/notifications', disposition: 'sdk', client: 'notifications.registerDevice' },
+  { route: 'DELETE /notifications/devices/:deviceId', domain: '/notifications', disposition: 'sdk', client: 'notifications.unregisterDevice' },
+  { route: 'GET /notifications/devices', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no notification service)' },
+  { route: 'PUT /notifications/devices', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no notification service)' },
+  { route: 'PATCH /notifications/devices', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no notification service)' },
+  { route: 'DELETE /notifications/devices', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no notification service)' },
+  { route: 'GET /notifications/devices/:deviceId', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no notification service)' },
+  { route: 'POST /notifications/devices/:deviceId', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no notification service)' },
+  { route: 'PUT /notifications/devices/:deviceId', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no notification service)' },
+  { route: 'PATCH /notifications/devices/:deviceId', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no notification service)' },
 
   // ── security (ADR-0090 suggested audience bindings) ───────────────────────
   { route: 'GET /security/suggested-bindings', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.list' },

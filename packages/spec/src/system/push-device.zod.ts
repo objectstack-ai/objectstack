@@ -15,10 +15,10 @@ import { PUSH_DEVICE_PLATFORMS } from './push-device-platform';
  * push channel reads to address a phone, and what the registry's listing
  * answers (`INotificationService.listDevices`).
  *
- * **Declared ahead of its producer.** No table stores it and no route serves
- * it yet; the schema carries a `[PLANNED — not yet served]` marker in its
- * `.describe()` until the device registry lands (in the push channel plugin's
- * `sys_user_device`, ADR-0012 §11).
+ * Stored in `sys_user_device`, the device registry's table (ADR-0012 §11),
+ * which `@objectstack/service-messaging` owns while no push channel plugin
+ * exists: its `INotificationService` device members write it, and the device
+ * routes under `/api/v1/notifications/devices` are the only door to it.
  *
  * Three rules the registry owes, stated here because they decide the shape:
  *
@@ -46,8 +46,6 @@ import { PUSH_DEVICE_PLATFORMS } from './push-device-platform';
  * domestic Android vendors plug in as alternate channel implementations) and
  * `platform` is the registration's own three (`ios` | `android` | `web`).
  */
-// The marker comes off when the server device-registry slice (#29068) stores
-// and serves this shape.
 export const UserDeviceSchema = lazySchema(() => z.object({
   deviceId: z.string().min(1).describe(
     'Client-held device id, stable per app install: the one the registration carried or the server minted. Unique per user',
@@ -68,8 +66,5 @@ export const UserDeviceSchema = lazySchema(() => z.object({
     'When the device last registered or refreshed. Every registration and refresh sets it, so it is absent only on a '
     + 'row no registration wrote; listDevices answers such a device last',
   ),
-}).describe(
-  '[PLANNED — not yet served] A push device of one user: one row per app install. No table stores it yet; '
-  + 'the device registry lands with the push channel',
-));
+}).describe('A push device of one user: one row per app install'));
 export type UserDevice = z.input<typeof UserDeviceSchema>;

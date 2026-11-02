@@ -72,7 +72,8 @@ describe('UserDeviceSchema', () => {
     expect(Object.keys(UserDeviceSchema.shape)).not.toContain('organizationId');
   });
 
-  it('carries the PLANNED marker until the device registry stores it', () => {
-    expect(UserDeviceSchema.description).toMatch(/^\[PLANNED — /);
+  it('carries no PLANNED marker: the device registry stores it', () => {
+    expect(UserDeviceSchema.description).toBeTruthy();
+    expect(UserDeviceSchema.description).not.toMatch(/PLANNED/);
   });
 });
