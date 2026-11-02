@@ -79,5 +79,4 @@ describe('HistoryTimeline action badge label (objectstack#28894)', () => {
     expect(screen.getByText('updated').className).toContain('uppercase');
     expect(screen.getByText('created').className).toContain('uppercase');
   });
-
 });
