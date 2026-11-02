@@ -148,9 +148,19 @@ describe('showcase: clone and createMany advertise the readonly strip in the hea
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(namesReadonlyLeadScore(body), JSON.stringify(body?.droppedFields)).toBe(true);
-    // A plain clone copies the source's other readonly columns too, so the
-    // header may name more than lead_score; it names what the body names.
-    expect(res.headers.get('X-ObjectStack-Dropped-Fields') ?? '').toContain('lead_score;reason=readonly');
+    // The source's readonly columns are all empty, so the clone carries none of
+    // them into the insert (#29200): the header names lead_score and nothing else.
+    expect(res.headers.get('X-ObjectStack-Dropped-Fields')).toBe('lead_score;reason=readonly');
+  });
+
+  // #29200: the source's lead_score is empty and the caller sent none, so a
+  // plain clone strips nothing and must not announce a dropped field.
+  it('a plain clone of a source whose lead_score is empty: no droppedFields, no header', async () => {
+    const res = await stack.apiAs(admin, 'POST', `${OBJ}/${sourceId}/clone`, {});
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(201);
+    expect(body?.droppedFields, JSON.stringify(body?.droppedFields)).toBeUndefined();
+    expect(res.headers.get('X-ObjectStack-Dropped-Fields')).toBeNull();
   });
 
   it('a two-row createMany carrying lead_score: body and header name lead_score once', async () => {
