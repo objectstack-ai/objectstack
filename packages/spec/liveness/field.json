@@ -407,8 +407,8 @@
     },
     "searchable": {
       "status": "live",
-      "evidence": "ui/packages/plugin-dashboard/src/WidgetConfigPanel.tsx (:458 in objectui, commit not pinned)",
-      "note": "LIVE via objectui renderer — the 2026-06 audit mis-classified as dead (renderer side not re-verified). Corrected after checking ../objectui."
+      "evidence": "packages/spec/src/data/search-fields.ts (admittedBySearchableFlag, the auto branch of resolveSearchFieldResolution); read by packages/objectql/src/search-filter.ts (the search expansion), packages/metadata-protocol/src/protocol-query-validation.ts (the $searchFields ingress allow-list) and packages/lint/src/validate-searchable-fields.ts",
+      "note": "Honoured since #29008 (ruling record 6573569376, letter A): with no object searchableFields, a field marked searchable: true joins the search set whatever its type, except secret / password / vector and a virtual formula field; a declared searchableFields stays the whole set and the flag is not read there. The row's earlier evidence, ui/packages/plugin-dashboard/src/WidgetConfigPanel.tsx, reads a dashboard WIDGET's searchable option, not this field key: before #29008 nothing read FieldSchema.searchable, as the card measured."
     },
     "externalId": {
       "status": "dead",

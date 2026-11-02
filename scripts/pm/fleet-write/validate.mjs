@@ -70,19 +70,22 @@
  *     facts this file cannot see: the executor judges them on its own reads
  *     before the write (`SUB_ISSUE_FENCES` in `ops.mjs`). Both spend
  *     `issues: write`, so they ride any stroke with the other issue ops;
- *   - a stroke carrying `advisory_report`, `advisory_collaborators_add` or
- *     `advisory_state` carries exactly that one action (each row's `alone`):
- *     its token carries `repository-advisories: write`. A report is `summary`
- *     and `description`, byte-capped, with an optional `severity` from
- *     GitHub's enum and `cwe_ids`, a capped list of `CWE-` ids; the other two
+ *   - a stroke carrying `advisory_report`, `advisory_create`,
+ *     `advisory_collaborators_add` or `advisory_state` carries exactly that
+ *     one action (each row's `alone`): its token carries
+ *     `repository-advisories: write`. A report is `summary` and
+ *     `description`, byte-capped, with an optional `severity` from GitHub's
+ *     enum and `cwe_ids`, a capped list of `CWE-` ids; a draft is the same
+ *     keys plus `packages`, a capped list of npm package names
+ *     (`NPM_PACKAGE_SHAPE`), each one `vulnerabilities` entry; the other two
  *     name `ghsa_id` — one advisory's id, `GHSA_ID_SHAPE` exactly — and either
  *     `collaborators`, a capped list of logins, or `advisory_state`, exactly
  *     `draft` or `closed`, with `published` refused BY NAME. ⛔ A refusal names
  *     the key and the byte count and never echoes the value: a payload's text
  *     reaches a public run log, and a value in the wrong key may be an
  *     advisory's prose (`FIELDS`' `quiet`). Any other key — a
- *     `vulnerabilities`, a `state`, a `collaborating_users` — is refused by
- *     name. The fences on the ADVISORY — readable, the one named, a state
+ *     `vulnerabilities`, a `state`, a `credits`, a `collaborating_users` — is
+ *     refused by name. The fences on the ADVISORY — readable, the one named, a state
  *     the action may act in — are facts this file cannot see: the executor
  *     judges them on its own read before the PATCH (`ADVISORY_FENCES` in
  *     `ops.mjs`);
@@ -159,6 +162,9 @@ import {
   SUB_ISSUE_FENCES,
   SUB_ISSUE_MODES,
   TARGET_OWNER,
+  ADVISORY_CREATE_ECOSYSTEM,
+  ADVISORY_CREATE_PATH_SHAPE,
+  ADVISORY_CREATED_STATE,
   ADVISORY_FENCES,
   ADVISORY_OPEN_STATES,
   ADVISORY_PATH_SHAPE,
@@ -172,8 +178,13 @@ import {
   GHSA_ID_SHAPE,
   LOGIN_SHAPE,
   MAX_ADVISORY_DESCRIPTION_BYTES,
+  MAX_ADVISORY_PACKAGES,
   MAX_ADVISORY_SUMMARY_BYTES,
+  MAX_NPM_PACKAGE_CHARS,
+  NPM_PACKAGE_SHAPE,
   advisoryCollaboratorPlan,
+  advisoryCreateLandedText,
+  advisoryCreateReadBack,
   advisoryFenceFailures,
   advisoryFenceText,
   advisoryLandedText,
@@ -446,7 +457,8 @@ export function tokenRepositoriesOf(payload) {
  * `PERMISSIONS` but the stroke-scoped ones, plus each stroke-scoped grant some
  * action's op spends. `{ …five grants }` for every stroke but a
  * `workflow_dispatch` or `run_rerun_failed` one, which adds `actions: write`,
- * and an `advisory_collaborators_add` one, which adds
+ * and an advisory row's (`advisory_report`, `advisory_create`,
+ * `advisory_collaborators_add`, `advisory_state`), which adds
  * `repository-advisories: write`. Pure.
  */
 export function tokenPermissionsOf(payload) {
@@ -913,7 +925,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the run_rerun_failed row: run_id alone, a positive integer, nothing that widens it; one bodiless POST to the run's rerun-failed-jobs; a stroke of exactly that one action; actions write minted for that stroke and EMPTY for every other, through the workflow's existing input; the five fences on the run and its pull, each accepted and refused — the head by the pull's own answer, never the run's embedded copy, and a run naming no pull refused by name; the read-back's judgment; and every other actions path still refused": 33,
   "the hierarchy rows: sub_issue_add and sub_issue_remove name a parent and a child by NUMBER — two different positive integers and nothing that widens them; one POST to the parent's sub_issues and one DELETE to its sub_issue, the body left to the executor; issues write, riding any stroke on the literal grants; the fences on the two cards, each accepted and refused — an issue on the repository, never a pull or a transferred card, the child free of any other parent or listed by this one; and the read-back's judgment by the child's id": 23,
   "the event file: the workflow carries client_payload in no step's env, and the payload is read from GITHUB_EVENT_PATH": 6,
-  "the advisory rows: advisory_report, advisory_collaborators_add and advisory_state — closed keys, a malformed id refused before any request, a refusal that names the key and the byte count and never echoes a value, published refused by name and reachable by no row; one request each, the two PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; every other security-advisories path refused; the fences, the transitions, the merge and the three read-backs, printing nothing of an answer but the id, the state and the logins": 44,
+  "the advisory rows: advisory_report, advisory_create, advisory_collaborators_add and advisory_state — closed keys, a malformed id or package refused before any request, a refusal that names the key and the byte count and never echoes a value, published refused by name and reachable by no row; one request each, the draft's body naming no state and the two PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the four read-backs, printing nothing of an answer but the id, the state and the logins": 51,
 });
 // Raised 11 → 12 with the run_rerun_failed battery, 12 → 13 with the hierarchy rows' battery, 13 → 15 with the event
 // file's battery and the advisory rows' battery: one battery, one row.
@@ -1059,6 +1071,7 @@ export async function selfTest() {
       workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
       run_rerun_failed: { run_id: 1 },
       advisory_report: { summary: 's', description: 'd' },
+      advisory_create: { summary: 's', description: 'd', packages: ['p'] },
       advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] },
       advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
     };
@@ -1086,7 +1099,7 @@ export async function selfTest() {
     const sample = {
       issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a b'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`,
       workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF, run_id: 7, sub_issue: 8, ghsa_id: GHSA, collaborators: ['u'],
-      summary: 's', description: 'd', severity: 'low', cwe_ids: ['CWE-79'], advisory_state: 'closed',
+      summary: 's', description: 'd', severity: 'low', cwe_ids: ['CWE-79'], advisory_state: 'closed', packages: ['p'],
     };
     const everyRequest = OP_NAMES.flatMap((op) => {
       const spec = OPS[op];
@@ -1232,7 +1245,7 @@ export async function selfTest() {
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, workflow_dispatch: { workflow: WORKFLOW_DISPATCH_ALLOWLIST[0], ref: WORKFLOW_DISPATCH_REF },
       run_rerun_failed: { run_id: 1 }, sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
-      advisory_report: { summary: 's', description: 'd' }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
+      advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
     };
     const narrow = OP_NAMES.filter((op) => !OPS[op].secondRepo);
     t('transfer is the ONLY row that reaches a second repository', OP_NAMES.filter((op) => OPS[op].secondRepo), ['transfer']);
@@ -1275,7 +1288,7 @@ export async function selfTest() {
     t('an inputs key on a file whose entry is null is refused BY NAME — the relay sends none there', refuses(one(start({ inputs: { reason: true } })), `actions[0].inputs: ${FILE} declares no inputs`));
     t('⛔ a workflow_dispatch beside any other op is refused — the stroke carries that one action alone', refuses(fixturePayload({ actions: [start(), { op: 'comment', issue: 7, body: 'x' }] }), 'actions[1] is `comment` in a stroke that carries a `workflow_dispatch`'));
     t('⛔ two workflow_dispatch in one stroke are refused too', refuses(fixturePayload({ actions: [start(), start()] }), 'a stroke carries exactly ONE `workflow_dispatch` and nothing else'));
-    t('the only rows that travel alone or widen the token: workflow_dispatch, run_rerun_failed and the three advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_collaborators_add', 'advisory_state'], ['transfer']]);
+    t('the only rows that travel alone or widen the token: workflow_dispatch, run_rerun_failed and the four advisory rows (alone) and transfer (second repository)', [OP_NAMES.filter((op) => OPS[op].alone), OP_NAMES.filter((op) => OPS[op].secondRepo)], [['workflow_dispatch', 'run_rerun_failed', 'advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_state'], ['transfer']]);
     t('…and actions is spent by the workflow_dispatch and run_rerun_failed rows and NOTHING else — each of them alone in its stroke', [OP_NAMES.filter((op) => OPS[op].permission === 'actions'), OP_NAMES.filter((op) => OPS[op].permission === 'actions').every((op) => OPS[op].alone === true)], [['workflow_dispatch', 'run_rerun_failed'], true]);
     const plain = validatePayload(fixturePayload()).payload;
     const run = validatePayload(one(start())).payload;
@@ -1283,7 +1296,7 @@ export async function selfTest() {
     t('…and the GitHub output spells that as permission_actions=write for the run stroke, EMPTY for every other — the mint action skips an empty input', [outputLine(run, 'permission_actions'), outputLine(plain, 'permission_actions'), [...STROKE_SCOPED_PERMISSIONS]], ['permission_actions=write', 'permission_actions=', ['actions', 'repository-advisories']]);
     // The fence on the grant: every path every row can spell, against the actions families — the dispatch call is the ONE
     // actions path reached; and a POSITIVE CONTROL that the families would catch what actions: write otherwise reaches.
-    const filled = { issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`, workflow: FILE, ref: WORKFLOW_DISPATCH_REF, run_id: 7, sub_issue: 8, ghsa_id: GHSA, collaborators: ['u'], summary: 's', description: 'd', severity: 'low', cwe_ids: ['CWE-79'], advisory_state: 'closed' };
+    const filled = { issue: 7, pull: 7, comment_id: 7, body: 'b', title: 't', head: 'h', base: 'main', labels: ['a'], assignees: ['u'], reviewers: ['u'], team_reviewers: ['t'], state: 'closed', state_reason: 'completed', expected_head_sha: SHA, target_repo: `${TARGET_OWNER}/objectui`, workflow: FILE, ref: WORKFLOW_DISPATCH_REF, run_id: 7, sub_issue: 8, ghsa_id: GHSA, collaborators: ['u'], summary: 's', description: 'd', severity: 'low', cwe_ids: ['CWE-79'], advisory_state: 'closed', packages: ['p'] };
     const everyPath = OP_NAMES.flatMap((op) => {
       const a = { op };
       for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = filled[k];
@@ -1388,7 +1401,7 @@ export async function selfTest() {
       pr_create: { title: 't', head: 'h', base: 'main' }, pr_request_reviewers: { pull: 1, reviewers: ['u'] }, pr_update_branch: { pull: 1, expected_head_sha: SHA }, pr_ready: { pull: 1 }, pr_draft: { pull: 1 },
       automerge_enable: { pull: 1 }, automerge_disable: { pull: 1 }, transfer: { issue: 1, target_repo: `${TARGET_OWNER}/objectui` },
       sub_issue_add: { issue: 1, sub_issue: 2 }, sub_issue_remove: { issue: 1, sub_issue: 2 },
-      advisory_report: { summary: 's', description: 'd' }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
+      advisory_report: { summary: 's', description: 'd' }, advisory_create: { summary: 's', description: 'd', packages: ['p'] }, advisory_collaborators_add: { ghsa_id: GHSA, collaborators: ['u'] }, advisory_state: { ghsa_id: GHSA, advisory_state: 'draft' },
     };
     const spendsNoActions = OP_NAMES.filter((op) => OPS[op].permission !== 'actions');
     t('…the ledger of ops spending no actions grant is every op but the two that do, no more and no less', [Object.keys(minimalOf).sort(), [...spendsNoActions].sort()], [[...spendsNoActions].sort(), [...spendsNoActions].sort()]);
@@ -1531,11 +1544,12 @@ export async function selfTest() {
   }
 
   // ── the advisory rows ─────────────────────────────────────────────────────
-  battery("the advisory rows: advisory_report, advisory_collaborators_add and advisory_state — closed keys, a malformed id refused before any request, a refusal that names the key and the byte count and never echoes a value, published refused by name and reachable by no row; one request each, the two PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; every other security-advisories path refused; the fences, the transitions, the merge and the three read-backs, printing nothing of an answer but the id, the state and the logins");
+  battery("the advisory rows: advisory_report, advisory_create, advisory_collaborators_add and advisory_state — closed keys, a malformed id or package refused before any request, a refusal that names the key and the byte count and never echoes a value, published refused by name and reachable by no row; one request each, the draft's body naming no state and the two PATCH bodies left to the executor; each a stroke of its own, repository-advisories write minted for it and EMPTY for every other; the bare collection reached by the draft's POST alone and every other security-advisories path refused; the fences, the transitions, the merge and the four read-backs, printing nothing of an answer but the id, the state and the logins");
   {
     const REPO = `${TARGET_OWNER}/objectstack`;
-    const ADVISORY_OPS = ['advisory_report', 'advisory_collaborators_add', 'advisory_state'];
+    const ADVISORY_OPS = ['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_state'];
     const report = (extra = {}) => ({ op: 'advisory_report', summary: 'A short summary.', description: 'What, where, how to reproduce.', ...extra });
+    const draft = (extra = {}) => ({ op: 'advisory_create', summary: 'A short summary.', description: 'What, where, how to reproduce.', packages: ['@objectstack/rest'], ...extra });
     const add = (extra = {}) => ({ op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators: ['os-dev-a'], ...extra });
     const move = (to = 'draft', extra = {}) => ({ op: 'advisory_state', ghsa_id: GHSA, advisory_state: to, ...extra });
     const one = (action) => fixturePayload({ actions: [action] });
@@ -1543,17 +1557,23 @@ export async function selfTest() {
     // Spaces and punctuation: prose, never a login's, an id's, a state's or a weakness id's shape.
     const PROSE = 'ADVISORY PROSE MARKER, in the wrong key';
     // The rows and their requests.
-    t('the rows: report takes summary and description, optionally severity and cwe_ids; the other two take ghsa_id with collaborators or advisory_state; all three spend repository-advisories alone, travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, true, null, null]]);
+    t('the rows: report takes summary and description, optionally severity and cwe_ids; the draft the same plus packages; the other two take ghsa_id with collaborators or advisory_state; all four spend repository-advisories alone, travel alone, reach no second repository and close no inputs', ADVISORY_OPS.map((op) => [OPS[op].required, OPS[op].optional, OPS[op].permission, OPS[op].alsoSpends ?? null, OPS[op].alone, OPS[op].secondRepo ?? null, OPS[op].closedInputs ?? null]), [[['summary', 'description'], ['severity', 'cwe_ids'], 'repository-advisories', null, true, null, null], [['summary', 'description', 'packages'], ['severity', 'cwe_ids'], 'repository-advisories', null, true, null, null], [['ghsa_id', 'collaborators'], [], 'repository-advisories', null, true, null, null], [['ghsa_id', 'advisory_state'], [], 'repository-advisories', null, true, null, null]]);
     t('the fields: summary and description byte-capped strings — 1024 and the body cap; severity GitHub\'s four, quiet; cwe_ids a quiet capped list of CWE ids; ghsa_id its own kind; collaborators a quiet login list capped like assignees; advisory_state a quiet enum of draft and closed with published refused by name', [FIELDS.summary, FIELDS.description.max === FIELDS.body.max, [...FIELDS.severity.values], FIELDS.severity.quiet, [FIELDS.cwe_ids.kind, FIELDS.cwe_ids.max, FIELDS.cwe_ids.shape === CWE_ID_SHAPE, FIELDS.cwe_ids.quiet], FIELDS.ghsa_id, [FIELDS.collaborators.max === FIELDS.assignees.max, FIELDS.collaborators.itemMax === FIELDS.assignees.itemMax, FIELDS.collaborators.shape === LOGIN_SHAPE, FIELDS.collaborators.quiet], [[...FIELDS.advisory_state.values], FIELDS.advisory_state.quiet, Object.keys(FIELDS.advisory_state.named)]], [{ kind: 'str', max: MAX_ADVISORY_SUMMARY_BYTES }, true, ['critical', 'high', 'medium', 'low'], true, ['list', 10, true, true], { kind: 'ghsa' }, [true, true, true, true], [['draft', 'closed'], true, ['published']]]);
     const filed = OPS.advisory_report.requests(report(), REPO);
     const filedFull = OPS.advisory_report.requests(report({ severity: 'high', cwe_ids: ['CWE-79', 'CWE-352'] }), REPO);
     t('advisory_report is ONE POST to the reports endpoint whose body is the summary and description, plus severity and cwe_ids when sent — and no other key', [filed.length, filed[0].verb, filed[0].path, filed[0].body, Object.keys(filedFull[0].body), ADVISORY_REPORTS_PATH_SHAPE.test(filed[0].path), REFUSED_PATH_FAMILIES.filter((re) => re.test(filed[0].path)).map(String)], [1, 'POST', `/repos/${REPO}/security-advisories/reports`, { summary: 'A short summary.', description: 'What, where, how to reproduce.' }, ['summary', 'description', 'severity', 'cwe_ids'], true, []]);
+    t('the packages field: a quiet list of npm package names, capped at ten and at the registry\'s 214 characters, shaped by NPM_PACKAGE_SHAPE; the ecosystem the draft names is npm alone', [FIELDS.packages.kind, FIELDS.packages.max, MAX_ADVISORY_PACKAGES, FIELDS.packages.itemMax, MAX_NPM_PACKAGE_CHARS, FIELDS.packages.shape === NPM_PACKAGE_SHAPE, FIELDS.packages.quiet, ADVISORY_CREATE_ECOSYSTEM], ['list', 10, 10, 214, 214, true, true, 'npm']);
+    const created = OPS.advisory_create.requests(draft(), REPO);
+    const createdFull = OPS.advisory_create.requests(draft({ packages: ['@objectstack/rest', 'hotcrm'], severity: 'high', cwe_ids: ['CWE-79'] }), REPO);
+    t('⭐ advisory_create is ONE POST to the bare collection — the create of a DRAFT — whose body is the summary, the description and one vulnerabilities entry per package naming the npm ecosystem and the name alone, plus severity and cwe_ids when sent; no state, no version range, no credit, no CVSS vector, no CVE id and no private fork', [created.length, created[0].verb, created[0].path, created[0].body, Object.keys(createdFull[0].body), createdFull[0].body.vulnerabilities, created[0].advisoryCreate, ADVISORY_CREATE_PATH_SHAPE.test(created[0].path), REFUSED_PATH_FAMILIES.filter((re) => re.test(created[0].path)).map(String)], [1, 'POST', `/repos/${REPO}/security-advisories`, { summary: 'A short summary.', description: 'What, where, how to reproduce.', vulnerabilities: [{ package: { ecosystem: 'npm', name: '@objectstack/rest' } }] }, ['summary', 'description', 'vulnerabilities', 'severity', 'cwe_ids'], [{ package: { ecosystem: 'npm', name: '@objectstack/rest' } }, { package: { ecosystem: 'npm', name: 'hotcrm' } }], true, true, []]);
+    t('…the collection shape is the bare path alone: a trailing slash, a query, an advisory\'s path, the reports endpoint and a path under a second segment are not it', ['/repos/o/r/security-advisories/', '/repos/o/r/security-advisories?state=draft', `/repos/o/r/security-advisories/${GHSA}`, '/repos/o/r/security-advisories/reports', '/repos/o/r/x/security-advisories', '/orgs/o/security-advisories'].filter((path) => ADVISORY_CREATE_PATH_SHAPE.test(path)), []);
     const patched = OPS.advisory_collaborators_add.requests(add({ collaborators: ['a', 'B'] }), REPO);
     const moved = OPS.advisory_state.requests(move('closed'), REPO);
     t("the two id rows are ONE PATCH of one advisory's path each, carrying NO body of the payload's — the executor sends { collaborating_users } or { state } after its own GET — and the id with the logins or the state asked for", [patched.length, patched[0].verb, patched[0].path, 'body' in patched[0], patched[0].advisoryCollaborators, moved.length, moved[0].verb, moved[0].path, 'body' in moved[0], moved[0].advisoryState], [1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, add: ['a', 'B'] }, 1, 'PATCH', `/repos/${REPO}/security-advisories/${GHSA}`, false, { ghsaId: GHSA, to: 'closed' }]);
     // Accepted.
-    const accepted = [report(), report({ severity: 'low', cwe_ids: ['CWE-79'] }), add(), move('draft'), move('closed')].map((a) => validatePayload(one(a)));
-    t('accepted: a report with and without its optional keys, the collaborators, and each of the two states — each normalised to exactly what was sent', accepted.map((v) => [v.ok, v.payload?.actions[0]]), [report(), report({ severity: 'low', cwe_ids: ['CWE-79'] }), add(), move('draft'), move('closed')].map((a) => [true, a]), accepted.flatMap((v) => v.errors).join(' | '));
+    const acceptedActions = [report(), report({ severity: 'low', cwe_ids: ['CWE-79'] }), draft(), draft({ packages: ['@objectstack/rest', 'hotcrm', 'create-objectstack'], severity: 'critical', cwe_ids: ['CWE-863'] }), add(), move('draft'), move('closed')];
+    const accepted = acceptedActions.map((a) => validatePayload(one(a)));
+    t('accepted: a report and a draft with and without their optional keys, the collaborators, and each of the two states — each normalised to exactly what was sent', accepted.map((v) => [v.ok, v.payload?.actions[0]]), acceptedActions.map((a) => [true, a]), accepted.flatMap((v) => v.errors).join(' | '));
     // Refused by value — and never echoed.
     const malformed = ['ghsa-abcd-2345-wxyz', 'GHSA-ABCD-2345-WXYZ', 'GHSA-abcd-2345', 'GHSA-abcd-2345-wxyz-mnop', 'GHSA-abcde-2345-wxyz', 'GHSA_abcd_2345_wxyz', 'CVE-2026-12345', `${GHSA}/cve`, `../${GHSA}`, ` ${GHSA}`, '', 17, null, [GHSA]];
     t('⛔ a malformed ghsa_id is refused before any request on both id rows, naming the shape: a lowercase prefix, uppercase groups, too few or too many groups, a long group, another separator, a CVE id, a path suffix or prefix, a space, empty, a number, null and an array', [add, (x) => move('draft', x)].map((row) => malformed.filter((ghsa_id) => !refuses(one(row({ ghsa_id })), "actions[0].ghsa_id must be one repository advisory's id")).length), [0, 0]);
@@ -1569,12 +1589,17 @@ export async function selfTest() {
       ['ghsa_id', add({ ghsa_id: PROSE })],
       ['summary', report({ summary: { text: PROSE } })],
       ['vulnerabilities', report({ vulnerabilities: [{ package: PROSE }] })],
+      ['packages', draft({ packages: [PROSE] })],
+      ['packages', draft({ packages: [{ name: PROSE }] })],
+      ['severity', draft({ severity: PROSE })],
+      ['description', draft({ description: { text: PROSE } })],
+      ['vulnerabilities', draft({ vulnerabilities: [{ package: { ecosystem: 'npm', name: PROSE } }] })],
     ];
     const quiet = quietly.map(([key, action]) => {
       const errors = errorsOf(action);
       return [key, errors.length > 0, errors.some((e) => e.includes('ADVISORY PROSE')), errors.some((e) => e.includes(`actions[0].${key}`))];
     });
-    t('⛔ the marker in the wrong key — a state, a severity, a weakness id, a login, an id, a summary that is not a string and an unknown vulnerabilities key — is refused naming the key, and NO refusal line carries it', quiet, quietly.map(([key]) => [key, true, false, true]));
+    t('⛔ the marker in the wrong key — a state, a severity, a weakness id, a login, an id, a package, a summary or description that is not a string and an unknown vulnerabilities key, on a report and a draft — is refused naming the key, and NO refusal line carries it', quiet, quietly.map(([key]) => [key, true, false, true]));
     const long = 'é'.repeat(513);
     t('⛔ an over-cap summary or description is refused naming the key and the byte count — the text itself never', [errorsOf(report({ summary: long })), errorsOf(report({ description: `${PROSE} ${'x'.repeat(60_000)}` })).some((e) => e.includes('ADVISORY PROSE')), refuses(one(report({ description: `${PROSE} ${'x'.repeat(60_000)}` })), 'actions[0].description is 60040 bytes, over its cap of 60000')], [['actions[0].summary is 1026 bytes, over its cap of 1024'], false, true]);
     t('⛔ cwe_ids: CWE-0, a lowercase cwe-79, a six-digit id, a CVE id, an empty list, eleven ids and one twice are refused; CWE-79 and CWE-352 pass', [[['CWE-0'], ['cwe-79'], ['CWE-123456'], ['CVE-2026-1'], [], Array.from({ length: 11 }, (_, i) => `CWE-${i + 1}`), ['CWE-79', 'CWE-79']].filter((cwe_ids) => !refuses(one(report({ cwe_ids })), 'actions[0].cwe_ids')).length, validatePayload(one(report({ cwe_ids: ['CWE-79', 'CWE-352'] }))).ok], [0, true]);
@@ -1582,21 +1607,26 @@ export async function selfTest() {
     // Refused by key.
     const takes = (op) => `is not a key \`${op}\` takes (it takes ${[...OPS[op].required, ...OPS[op].optional].join(', ')})`;
     t('⛔ refused BY NAME beside a report: vulnerabilities, a CVSS vector, a private fork, a state, an id, credits, a body and collaborators — the report is its prose and its two tags', ['vulnerabilities', 'cvss_vector_string', 'start_private_fork', 'state', 'ghsa_id', 'credits', 'body', 'collaborators'].filter((key) => !refuses(one(report({ [key]: 'x' })), `actions[0].${key} ${takes('advisory_report')}`)), []);
+    t('⛔ packages: a string, an empty list, eleven names, a 215-character name, one name twice, an uppercase name, a version or a range after the name, a path, a URL, a space and a bare scope are refused; a scoped and a plain name pass', [[['@objectstack/rest'].join(), [], Array.from({ length: 11 }, (_, i) => `p${i}`), ['x'.repeat(215)], ['hotcrm', 'hotcrm'], ['React'], ['hotcrm@1.0.0'], ['hotcrm <2.0.0'], ['../hotcrm'], ['https://npmjs.com/hotcrm'], ['hot crm'], ['@objectstack/']].filter((packages) => !refuses(one(draft({ packages })), 'actions[0].packages')).length, validatePayload(one(draft({ packages: ['@objectstack/rest', 'hotcrm'] }))).ok], [0, true]);
+    t('⛔ refused BY NAME beside a draft: vulnerabilities, a version range, patched versions, an ecosystem, a CVSS vector, a CVE id, a private fork, a state, an id, credits, a body and collaborators — the draft is its prose, its two tags and its package names', ['vulnerabilities', 'vulnerable_version_range', 'patched_versions', 'ecosystem', 'cvss_vector_string', 'cve_id', 'start_private_fork', 'state', 'ghsa_id', 'credits', 'body', 'collaborators'].filter((key) => !refuses(one(draft({ [key]: 'x' })), `actions[0].${key} ${takes('advisory_create')}`)), []);
     t('⛔ refused BY NAME beside the two id rows: a summary, a description, a severity, a state, the other row\'s key, collaborating_users, collaborating_teams, a body and an issue — an id with logins or a state, and nothing that carries content', [[add, 'advisory_state'], [(x) => move('draft', x), 'collaborators']].map(([row, other]) => ['summary', 'description', 'severity', 'state', other, 'collaborating_users', 'collaborating_teams', 'body', 'issue'].filter((key) => !refuses(one(row({ [key]: key === 'issue' ? 7 : 'x' })), `actions[0].${key} ${takes(row({}).op)}`))), [[], []]);
-    t('⛔ refused: each required key missing — never defaulted', [refuses(one({ op: 'advisory_report', description: 'd' }), 'actions[0].summary is required'), refuses(one({ op: 'advisory_report', summary: 's' }), 'actions[0].description is required'), refuses(one({ op: 'advisory_collaborators_add', ghsa_id: GHSA }), 'actions[0].collaborators is required'), refuses(one({ op: 'advisory_state', ghsa_id: GHSA }), 'actions[0].advisory_state is required'), refuses(one({ op: 'advisory_state', advisory_state: 'draft' }), 'actions[0].ghsa_id is required')], [true, true, true, true, true]);
+    t('⛔ refused: each required key missing — never defaulted', [refuses(one({ op: 'advisory_report', description: 'd' }), 'actions[0].summary is required'), refuses(one({ op: 'advisory_report', summary: 's' }), 'actions[0].description is required'), refuses(one({ op: 'advisory_create', summary: 's', description: 'd' }), 'actions[0].packages is required'), refuses(one({ op: 'advisory_create', description: 'd', packages: ['p'] }), 'actions[0].summary is required'), refuses(one({ op: 'advisory_collaborators_add', ghsa_id: GHSA }), 'actions[0].collaborators is required'), refuses(one({ op: 'advisory_state', ghsa_id: GHSA }), 'actions[0].advisory_state is required'), refuses(one({ op: 'advisory_state', advisory_state: 'draft' }), 'actions[0].ghsa_id is required')], [true, true, true, true, true, true, true]);
     // Fence: alone in its stroke.
-    t('⛔ fence alone, refused: each row beside a comment, two of a kind, and a report beside the collaborators it would want — each naming the action that does not belong', [
-      ...[report(), add(), move()].map((a) => refuses(fixturePayload({ actions: [a, { op: 'comment', issue: 7, body: 'x' }] }), `actions[1] is \`comment\` in a stroke that carries a \`${a.op}\``)),
+    t('⛔ fence alone, refused: each row beside a comment, two of a kind, a report beside the collaborators it would want, and a draft beside a report or the collaborators — each naming the action that does not belong', [
+      ...[report(), draft(), add(), move()].map((a) => refuses(fixturePayload({ actions: [a, { op: 'comment', issue: 7, body: 'x' }] }), `actions[1] is \`comment\` in a stroke that carries a \`${a.op}\``)),
       refuses(fixturePayload({ actions: [move('draft'), move('closed')] }), 'a stroke carries exactly ONE `advisory_state` and nothing else'),
+      refuses(fixturePayload({ actions: [draft(), draft()] }), 'a stroke carries exactly ONE `advisory_create` and nothing else'),
       refuses(fixturePayload({ actions: [report(), add()] }), 'in a stroke that carries a `advisory_report`'),
-    ], [true, true, true, true, true]);
-    t('fence alone, accepted: each stroke of that one action passes the stroke rules', [report(), add(), move()].map((a) => strokeErrors(REPO, [a])), [[], [], []]);
+      refuses(fixturePayload({ actions: [draft(), report()] }), 'in a stroke that carries a `advisory_create`'),
+      refuses(fixturePayload({ actions: [draft(), add()] }), 'in a stroke that carries a `advisory_create`'),
+    ], [true, true, true, true, true, true, true, true, true]);
+    t('fence alone, accepted: each stroke of that one action passes the stroke rules', [report(), draft(), add(), move()].map((a) => strokeErrors(REPO, [a])), [[], [], [], []]);
     // Fence: the stroke-scoped grant.
     const GRANTED = { issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', 'repository-advisories': 'write' };
-    t('⭐ fence grant, accepted side: each row\'s stroke mints the five literal grants plus repository-advisories write — never actions — for ONE repository, and the GitHub output spells it so', [report(), add(), move()].map((a) => {
+    t('⭐ fence grant, accepted side: each row\'s stroke mints the five literal grants plus repository-advisories write — never actions — for ONE repository, and the GitHub output spells it so', [report(), draft(), add(), move()].map((a) => {
       const p = validatePayload(one(a)).payload;
       return p ? [tokenPermissionsOf(p), tokenRepositoriesOf(p), outputLine(p, 'permission_repository_advisories'), outputLine(p, 'permission_actions')] : 'refused';
-    }), [0, 1, 2].map(() => [GRANTED, [REPO], 'permission_repository_advisories=write', 'permission_actions=']));
+    }), [0, 1, 2, 3].map(() => [GRANTED, [REPO], 'permission_repository_advisories=write', 'permission_actions=']));
     const minimalOf = {
       comment: { issue: 1, body: 'b' }, comment_edit: { comment_id: 1, body: 'b' }, labels_add: { issue: 1, labels: ['a'] }, labels_remove: { issue: 1, labels: ['a'] },
       assign: { issue: 1, assignees: ['u'] }, unassign: { issue: 1, assignees: ['u'] }, issue_patch: { issue: 1, state: 'closed' }, issue_create: { title: 't', body: 'b' },
@@ -1612,16 +1642,17 @@ export async function selfTest() {
       return v.ok ? [outputLine(v.payload, 'permission_repository_advisories'), tokenPermissionsOf(v.payload)['repository-advisories'] ?? null] : `refused: ${v.errors.join(' | ')}`;
     };
     t('⛔ fence grant, refused side: every other op — each alone in its stroke, the actions strokes among them, and the stroke of all that share one token — writes an EMPTY permission_repository_advisories and mints no such grant', [others.filter((op) => JSON.stringify(advisoryLine([{ op, ...minimalOf[op] }])) !== JSON.stringify(['permission_repository_advisories=', null])), advisoryLine(others.filter((op) => !OPS[op].secondRepo && !OPS[op].alone).map((op) => ({ op, ...minimalOf[op] })))], [[], ['permission_repository_advisories=', null]]);
-    t('repository-advisories is spent by the three rows and NOTHING else — as their permission, never as an alsoSpends', [OP_NAMES.filter((op) => OPS[op].permission === 'repository-advisories'), OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('repository-advisories'))], [ADVISORY_OPS, []]);
+    t('repository-advisories is spent by the four rows and NOTHING else — as their permission, never as an alsoSpends', [OP_NAMES.filter((op) => OPS[op].permission === 'repository-advisories'), OP_NAMES.filter((op) => (OPS[op].alsoSpends ?? []).includes('repository-advisories'))], [ADVISORY_OPS, []]);
     const repoRoot = resolve(SELF_PATH, '../../../..');
     const workflowText = readFileSync(resolve(repoRoot, '.github/workflows/fleet-write.yml'), 'utf8');
     const mintsFromOutput = [...workflowText.matchAll(/^\s+permission-repository-advisories:\s*\$\{\{\s*steps\.validate\.outputs\.permission_repository_advisories\s*\}\}\s*$/gm)].length;
     const mints = [...workflowText.matchAll(/^\s+(?:-\s+)?uses:\s*actions\/create-github-app-token@/gm)].length;
     t('⭐ the workflow mints permission-repository-advisories from the validator\'s output, never as a literal, names the expected Unexpected-input warning beside it, and has ONE mint step — no second, un-narrowed token for a refused mint to fall back to', [mintsFromOutput, /^\s+permission-repository-advisories:\s*(read|write)\s*$/m.test(workflowText), workflowText.includes("Unexpected input(s) 'permission-repository-advisories'"), mints], [1, false, true, 1]);
     // Every other advisory path stays refused, by no row reachable.
-    const refusedTails = ['', `/${GHSA}/cve`, `/${GHSA}/forks`, `/${GHSA}/`, `/${GHSA.toUpperCase()}`, '/GHSA-abcd-2345', `/${GHSA}x`, '/reports/', '/reportsx', `/reports/${GHSA}`, '/reports/x/cve'];
-    t('⛔ every other security-advisories path is caught by a refused family: the list and the create of a draft, the CVE request, the temporary fork, anything after the reports endpoint, and any id that is not exactly one advisory\'s', refusedTails.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/security-advisories${tail}`))), []);
-    const fillWith = { ...report({ severity: 'critical', cwe_ids: ['CWE-79'] }), ...add(), ...move('closed') };
+    const refusedTails = ['/', '?state=draft', '?per_page=100', '/x', `/${GHSA}/cve`, `/${GHSA}/forks`, `/${GHSA}/`, `/${GHSA.toUpperCase()}`, '/GHSA-abcd-2345', `/${GHSA}x`, '/reports/', '/reportsx', `/reports/${GHSA}`, '/reports/x/cve', 'x'];
+    t('⛔ every other security-advisories path is caught by a refused family: the collection with a trailing slash or a query (the list\'s spellings), anything after it but one advisory or the reports endpoint, the CVE request, the temporary fork, anything after the reports endpoint, and any id that is not exactly one advisory\'s', refusedTails.filter((tail) => !REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/security-advisories${tail}`))), []);
+    t('…while the three paths a row reaches are caught by none: the bare collection, the reports endpoint and one advisory\'s', ['', '/reports', `/${GHSA}`].filter((tail) => REFUSED_PATH_FAMILIES.some((re) => re.test(`/repos/${REPO}/security-advisories${tail}`))), []);
+    const fillWith = { ...draft({ severity: 'critical', cwe_ids: ['CWE-79'] }), ...add(), ...move('closed') };
     const every = OP_NAMES.flatMap((op) => {
       const a = { op };
       for (const k of [...OPS[op].required, ...OPS[op].optional]) {
@@ -1630,7 +1661,7 @@ export async function selfTest() {
       }
       return OPS[op].requests(a, REPO).map((r) => ({ op, ...r }));
     });
-    t('…and the ONLY security-advisories requests any row makes are the report\'s POST and the two PATCHes of one advisory', every.filter((r) => r.path.includes('security-advisories')).map((r) => `${r.op} ${r.verb} ${r.path}`), [`advisory_report POST /repos/${REPO}/security-advisories/reports`, `advisory_collaborators_add PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_state PATCH /repos/${REPO}/security-advisories/${GHSA}`]);
+    t('⛔ …and the ONLY security-advisories requests any row makes are the report\'s POST, the draft\'s POST to the bare collection — never a GET, the list — and the two PATCHes of one advisory', every.filter((r) => r.path.includes('security-advisories')).map((r) => `${r.op} ${r.verb} ${r.path}`), [`advisory_report POST /repos/${REPO}/security-advisories/reports`, `advisory_create POST /repos/${REPO}/security-advisories`, `advisory_collaborators_add PATCH /repos/${REPO}/security-advisories/${GHSA}`, `advisory_state PATCH /repos/${REPO}/security-advisories/${GHSA}`]);
     // ⛔ published: reachable by no row — not as a value, not through any body.
     const everyValue = OP_NAMES.flatMap((op) =>
       [...OPS[op].required, ...OPS[op].optional]
@@ -1673,9 +1704,10 @@ export async function selfTest() {
     t('⛔ …nor is a refused PATCH, or a 2xx whose answer is not an advisory', [advisoryReadBack({ missing: ['carol'], answer: answer({ message: 'Validation Failed' }, 422) }).why, advisoryReadBack({ missing: ['carol'], answer: answer([], 200) }).ok], ['HTTP 422', false]);
     t('⭐ a state lands only when the PATCH answer shows that state on the advisory named; another state, another id, a refusal or an answer that is no advisory is not a landing — each said in the id and the state alone', [advisoryStateReadBack({ ghsaId: GHSA, to: 'draft', answer: answer(advisory()) }).ok, advisoryStateReadBack({ ghsaId: GHSA, to: 'closed', answer: answer(advisory()) }).why, advisoryStateReadBack({ ghsaId: GHSA, to: 'draft', answer: answer(advisory({ ghsa_id: 'GHSA-wxyz-2345-abcd' })) }).why, advisoryStateReadBack({ ghsaId: GHSA, to: 'draft', answer: answer({ message: 'Forbidden' }, 403) }).why, advisoryStateReadBack({ ghsaId: GHSA, to: 'draft', answer: answer([], 200) }).ok, advisoryStateReadBack({ ghsaId: GHSA, to: 'closed', answer: answer(advisory({ state: PROSE })) }).why.includes(PROSE)], [true, 'HTTP 200, but the answer reads state draft, not closed', 'HTTP 200, but the answer names GHSA-wxyz-2345-abcd', 'HTTP 403', false, false]);
     t('⭐ a report lands on a 2xx carrying an advisory id; a 2xx without one is UNCONFIRMED and never re-sent; a refusal is its status; an id that is prose is no id', [advisoryReportReadBack(answer(advisory({ state: 'triage' }), 201)), advisoryReportReadBack(answer({ state: 'triage' }, 201)).why, advisoryReportReadBack(answer({ message: 'Validation Failed', errors: [PROSE] }, 422)).why, advisoryReportReadBack(answer(advisory({ ghsa_id: PROSE }), 201)).ok, advisoryReportReadBack(answer(advisory({ ghsa_id: PROSE }), 201)).why.includes(PROSE)], [{ ok: true, ghsaId: GHSA, state: 'triage', why: '' }, "HTTP 201, but the answer carries no advisory id — UNCONFIRMED: a report may have been filed; ⛔ do not re-send, ask the maintainer to read the repository's reports", 'HTTP 422', false, false]);
+    t('⭐ a draft lands on a 2xx carrying an advisory id that reads state draft — the one state the endpoint creates in; a 2xx without an id is UNCONFIRMED and never re-sent; one in another state is not a landing, named in the id and the state alone; a refusal is its status; prose in the id or the state never reaches the sentence', [ADVISORY_CREATED_STATE, advisoryCreateReadBack(answer(advisory(), 201)), advisoryCreateReadBack(answer({ state: 'draft' }, 201)).why, advisoryCreateReadBack(answer(advisory({ state: 'triage' }), 201)).why, advisoryCreateReadBack(answer(advisory({ state: 'published' }), 201)).ok, advisoryCreateReadBack(answer({ message: 'Validation Failed', errors: [PROSE] }, 422)).why, advisoryCreateReadBack(answer(advisory({ ghsa_id: PROSE }), 201)).ok, [advisoryCreateReadBack(answer(advisory({ ghsa_id: PROSE }), 201)).why, advisoryCreateReadBack(answer(advisory({ state: PROSE }), 201)).why].some((why) => why.includes(PROSE))], ['draft', { ok: true, ghsaId: GHSA, state: 'draft', why: '' }, "HTTP 201, but the answer carries no advisory id — UNCONFIRMED: a draft advisory may have been created; ⛔ do not re-send, ask the maintainer to read the repository's draft advisories", `HTTP 201, but ${GHSA} reads state triage, not draft — ⛔ do not re-send, put the id to the maintainer`, false, 'HTTP 422', false, false]);
     // The rows: the id, the state and the logins, each in its own shape, and nothing else.
-    t('the landed rows print the id, the state and the logins — nothing else of the answer exists for them to print', [advisoryReportLandedText({ ghsaId: GHSA, state: 'triage' }), advisoryLandedText({ ghsaId: GHSA, state: 'draft', logins: ['Alice', 'carol'], added: ['carol'] }), advisoryLandedText({ ghsaId: GHSA, state: 'triage', logins: ['Alice'], noop: true }), advisoryStateLandedText({ ghsaId: GHSA, from: 'triage', to: 'draft' })], [`reported ${GHSA} · state triage — add whoever works it with advisory_collaborators_add`, `${GHSA} · state draft · collaborators Alice, carol · added carol`, `no-op, nothing sent: ${GHSA} · state triage · collaborators Alice — every login asked for is already a collaborator`, `${GHSA} · state triage → draft`]);
-    t('⛔ …and a value outside its shape prints as a placeholder, never as itself — a login, a state and an id carrying prose, in every row', [advisoryLandedText({ ghsaId: PROSE, state: PROSE, logins: [PROSE], added: [PROSE] }), advisoryReportLandedText({ ghsaId: PROSE, state: PROSE }), advisoryStateLandedText({ ghsaId: PROSE, from: PROSE, to: PROSE })].some((row) => row.includes(PROSE)), false);
+    t('the landed rows print the id, the state and the logins — nothing else of the answer exists for them to print', [advisoryReportLandedText({ ghsaId: GHSA, state: 'triage' }), advisoryCreateLandedText({ ghsaId: GHSA, state: 'draft' }), advisoryLandedText({ ghsaId: GHSA, state: 'draft', logins: ['Alice', 'carol'], added: ['carol'] }), advisoryLandedText({ ghsaId: GHSA, state: 'triage', logins: ['Alice'], noop: true }), advisoryStateLandedText({ ghsaId: GHSA, from: 'triage', to: 'draft' })], [`reported ${GHSA} · state triage — add whoever works it with advisory_collaborators_add`, `created ${GHSA} · state draft — add whoever works it with advisory_collaborators_add`, `${GHSA} · state draft · collaborators Alice, carol · added carol`, `no-op, nothing sent: ${GHSA} · state triage · collaborators Alice — every login asked for is already a collaborator`, `${GHSA} · state triage → draft`]);
+    t('⛔ …and a value outside its shape prints as a placeholder, never as itself — a login, a state and an id carrying prose, in every row', [advisoryLandedText({ ghsaId: PROSE, state: PROSE, logins: [PROSE], added: [PROSE] }), advisoryReportLandedText({ ghsaId: PROSE, state: PROSE }), advisoryCreateLandedText({ ghsaId: PROSE, state: PROSE }), advisoryStateLandedText({ ghsaId: PROSE, from: PROSE, to: PROSE })].some((row) => row.includes(PROSE)), false);
     t('⛔ the platform\'s message is quoted only when it is one the relay names; any other — prose among them — is not printed', [advisoryPlatformText('Resource not accessible by integration'), advisoryPlatformText(PROSE), advisoryPlatformText(undefined), ADVISORY_PLATFORM_MESSAGES.includes('Not Found')], [' (the platform: Resource not accessible by integration)', '', '', true]);
   }
 
@@ -1714,8 +1746,8 @@ export async function selfTest() {
       "with that file's closed inputs — release.yml's bookkeeping lane and no other, read from its own guards — or one failed-jobs re-run of a run named by its id alone, " +
       'each minted for its stroke alone, every other actions path still refused, and an issue-hierarchy link named by two different issue numbers, ' +
       'fenced on its two cards and landed only when the parent\'s list reads the child back, the payload read from the event file and never a step\'s env, ' +
-      'and three advisory rows — a report, an advisory\'s collaborators and its state, each alone in its stroke — nothing echoed from a refusal, published refused by name and reachable by no row, ' +
-      'repository-advisories write minted for that one stroke, and no other advisory path.',
+      'and four advisory rows — a report, a draft, an advisory\'s collaborators and its state, each alone in its stroke — nothing echoed from a refusal, published refused by name and reachable by no row, ' +
+      'repository-advisories write minted for that one stroke, the bare collection reached by the draft\'s POST alone, and no other advisory path.',
   );
   selfTestReachedVerdict = true;
   return 0;
