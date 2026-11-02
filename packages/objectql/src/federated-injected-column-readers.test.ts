@@ -249,6 +249,10 @@ const READERS: Record<string, Row> = {
     disposition: 'excludes',
     why: 'the provenance the exclusion reads',
   },
+  'declared-read-columns.ts#selectedStoredColumns :: unprovisionedInjectedColumns()': {
+    disposition: 'excludes',
+    why: 'a read never answers an unprovisioned injected column as null: no storage stands behind it',
+  },
 
   // ── Seams that are not a storage read of a federated object's column ─────
   'engine-referential-integrity.ts#assertReferencesResolve :: referenceTargetOf()': {
