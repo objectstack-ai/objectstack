@@ -29,13 +29,16 @@ export const entry: SemanticMigration = {
     + '<base>.custom` to restore the package original. Every row the preview lists and does not '
     + 'move keeps its package-less write: `multi_shipped` (several packages ship the name): delete '
     + 'it naming no package, then save it into the pair of the package it customizes if it is still '
-    + 'wanted; `no_pair` (the base\'s id forms no pair): nothing to do; `foreign_declaration` (its '
-    + '`overrides` names another package): correct or remove the key with a save naming no package, '
-    + 'then re-run; `shadowed` (the pair already holds the item, and that row is served): nothing to '
-    + 'do to keep the pair\'s, or restore the package original (the DELETE above) and re-run to move '
-    + 'this one; a `failed` move (the pair cannot be ensured, the base records no version, or the '
-    + 'pair refuses the row, such as an email template locale the base does not ship): fix what the '
-    + 'error names and re-run, or leave the row, which keeps its package-less write',
+    + 'wanted (the pair\'s override is then served at that base\'s address, `?package=<base>`); '
+    + '`no_pair` (the base\'s id forms no pair): nothing to do; `foreign_declaration` (its '
+    + '`overrides` names another package): remove the key with a save naming no package, then '
+    + 're-run: the move declares the right override; `shadowed` (the pair already holds the item; '
+    + 'the pair\'s row is served when it declares the override, otherwise this row still is): '
+    + 'nothing to do to keep the pair\'s declared override, or restore the package original (the '
+    + 'DELETE above) and re-run to move this one; a `failed` move: fix what the error names and '
+    + 're-run; when the error names the pair (it cannot be ensured, or it refuses the row, such as '
+    + 'an email template locale the base does not ship) or the base\'s missing version, the row '
+    + 'may also be left, as it keeps its package-less write',
   reason:
     'A customization of an installed package lives in its paired `.custom` package, where it is '
     + 'a declared override that is exported with the pair and judged against the base\'s version '

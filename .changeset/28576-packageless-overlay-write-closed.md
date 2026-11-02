@@ -7,7 +7,7 @@
 
 fix(metadata-protocol)!: a write naming no package onto an installed package's view, dashboard, report, translation or email template is refused where `os migrate packageless-overlays` can move its row, naming the base's `.custom` pair and the command
 
-Clause-②: yes (narrowing) — the metadata save, publish, delete and rollback doors refuse a write that names no package onto an item of the five overlay types that one installed read-only package ships, where the ceremony would classify the row (or the first write's body) `movable` and its move can succeed; they accepted it before as a package-unbound Setup row. Every row the ceremony lists and does not move keeps that write. Nothing is widened.
+Clause-②: yes (narrowing) — the metadata save, publish, delete and rollback doors refuse a write that names no package onto an item of the five overlay types that one installed read-only package ships, where the ceremony would classify the row (or the first write's body) `movable` and its move can succeed; they accepted it before as a package-unbound Setup row. Every row the ceremony lists and does not move keeps that write. One write is widened: a rollback of the `.custom` pair's own declared row of an item its base ships (#28644 item 1) is judged as the pair's declared override, where the store sealed it as an artifact override before, on every type the pair can override (a page or flow pair row included).
 
 Metadata-protocol: narrowed (the `allowEnvironmentOverlay` flag of `view`, `dashboard`, `report`, `translation` and `email_template` no longer opens a package-less write onto a packaged item the ceremony can move; it stays the predicate the migration ceremony, the read of an unmigrated row and every row the ceremony leaves use)
 
@@ -21,11 +21,11 @@ Skills-docs: updated here — `skills/objectstack-platform/SKILL.md`'s ADR-0146 
 
 The preview lists five dispositions; only `movable` rows are moved, and every other row keeps its package-less write:
 
-- `movable`: `--apply` moves it into the pair. A move that ends `failed` keeps the row as it was; fix what the error names and re-run.
-- `multi_shipped` (several packages ship the name): delete it naming no package, then save it into the pair of the package it customizes if it is still wanted.
+- `movable`: `--apply` moves it into the pair. A move that ends `failed` keeps the row as it was; fix what the error names and re-run. When the error names the pair (it cannot be ensured, or it refuses the row) or the base's missing version, the row also keeps its package-less write and may be left.
+- `multi_shipped` (several packages ship the name): delete it naming no package, then save it into the pair of the package it customizes if it is still wanted (the pair's override is then served at that base's address, `?package=<base>`; a read naming no package is not pinned to it while several packages ship the name).
 - `no_pair` (the base's id forms no pair): nothing to do.
-- `foreign_declaration` (its `overrides` names another package): correct or remove the key with a save naming no package, then re-run.
-- `shadowed` (the pair already holds the item, and that row is served): nothing to do to keep the pair's; or restore the package original (`DELETE …?package=<base>.custom`) and re-run to move this one.
+- `foreign_declaration` (its `overrides` names another package): remove the key with a save naming no package, then re-run: the move declares the right override. (A package-less save that keeps a corrected `overrides` is refused by the override write gate.)
+- `shadowed` (the pair already holds the item; the pair's row is served when it declares the override, otherwise this row still is): nothing to do to keep the pair's declared override; or restore the package original (`DELETE …?package=<base>.custom`) and re-run to move this one.
 
 ### Migration: FROM → TO
 
