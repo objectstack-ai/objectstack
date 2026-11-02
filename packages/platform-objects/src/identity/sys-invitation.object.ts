@@ -126,6 +126,9 @@ export const SysInvitation = ObjectSchema.create({
       requiresFeature: 'organization',
       requiresMembershipReach: 'cancel_invitation',
       confirmText: 'Cancel this invitation? The recipient will no longer be able to accept it.',
+      // The dismiss button names what dismissing keeps: beside a "Cancel
+      // Invitation" confirm button, a bare "Cancel" reads as the same verb.
+      cancelText: 'Keep invitation',
       successMessage: 'Invitation canceled',
       refreshAfter: true,
       // ADR-0011 identity-actions note, bucket C: exposed, and the

@@ -176,6 +176,8 @@ const ActionIconRenderer = forwardRef<
           description: (schema as any).description,
           // The param dialog's submit-button verb, read by the same dialog.
           submitText: schema.submitText,
+          // The dismiss-button label of the confirm and param dialogs.
+          cancelText: schema.cancelText,
           target: schema.target,
           openIn: (schema as any).openIn,
           endpoint: schema.endpoint,

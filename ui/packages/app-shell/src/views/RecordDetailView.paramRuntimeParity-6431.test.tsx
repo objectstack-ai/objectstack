@@ -213,6 +213,7 @@ const ACTION = {
   label: 'Create environment',
   description: 'Provisions a new environment for this org.',
   submitText: 'Create',
+  cancelText: 'Not now',
 } as any;
 
 /** The fields `ActionParamDialog.tsx` reads off `state`. Written out rather
@@ -220,6 +221,8 @@ const ACTION = {
  *  assertions, and a runtime that stops supplying one is red here rather than
  *  silently blank in the dialog. */
 const DIALOG_READS = [
+  // The dismiss button's label (`cancelText`), resolved by each runtime.
+  'cancelText',
   'description',
   // The runner's template filler for each param's `helpText` (objectui#12967).
   // This suite's handlers are called without one, so it is written `undefined`;
@@ -571,6 +574,8 @@ describe('app-shell — both param runtimes reset ActionParamDialog the same way
     expect(viewClosed.description).toBe(hookClosed.description);
     expect(viewClosed.submitText).toBe('Create');
     expect(viewClosed.submitText).toBe(hookClosed.submitText);
+    expect(viewClosed.cancelText).toBe('Not now');
+    expect(viewClosed.cancelText).toBe(hookClosed.cancelText);
     expect(viewClosed.params.map((p: any) => p.name))
       .toEqual(hookClosed.params.map((p: any) => p.name));
     expect(typeof viewClosed.resolve).toBe(typeof hookClosed.resolve);
