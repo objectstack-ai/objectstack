@@ -174,6 +174,36 @@ Three properties of the renderer to author around:
   rendering by design; branching belongs in the caller, which passes in the
   already-decided values.
 
+## What every template can read: `appName` and `baseUrl`
+
+Every send's `data` is laid over a default context the deployment supplies, so
+two keys are always there unless the send passes its own:
+
+- `{{appName}}` — the product name (`OS_APP_NAME`, then `config.email.appName`,
+  then `config.email.defaultTemplateContext.appName`, then the stack's
+  `appName`, then `ObjectStack`).
+- `{{baseUrl}}` — the address this deployment is reached at, never ending in a
+  slash: `OS_AUTH_URL`, then `OS_BASE_URL`, then
+  `config.email.defaultTemplateContext.baseUrl`, then the local
+  `http://localhost:<port>`. It is the same address `os serve` resolves for the
+  deployment, so set `OS_AUTH_URL` (or `OS_BASE_URL`) to the public origin and
+  the mail's links follow it.
+
+`baseUrl` is only the prefix: the path after it is your application's own — a
+record page or an app route, whatever your Console or front end serves:
+
+```ts
+bodyText: 'Deal {{deal.name}} is yours: {{baseUrl}}/crm_deal/{{deal.id}}',
+```
+
+That renders `https://crm.example.com/crm_deal/42`, which mail clients show as
+a link. In `bodyHtml` the same text may sit in element text, but not inside an
+`href`: a hole in a URL attribute is refused by the placement rule above, and
+`{{{baseUrl}}}/…` is not the whole-value `url` shape either. For an `<a>`
+link in `bodyHtml`, pass the whole URL as a variable declared `type: 'url'`
+(`<a href="{{{deal_url}}}">`). A send that passes its own `baseUrl` in `data`
+overrides the default.
+
 ## Declared variables
 
 `variables` documents the holes: each entry has a `name` (the path as written in
