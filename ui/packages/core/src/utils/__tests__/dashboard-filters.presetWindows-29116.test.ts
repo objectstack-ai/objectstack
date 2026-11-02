@@ -104,7 +104,7 @@ describe('dashboard date presets lower through the spec window table', () => {
     (preset) => {
       const retired = RETIRED_PRESET_RANGES[preset];
       const retiredCondition = { $gte: retired.from, $lte: retired.to };
-      const condition = buildFilterCondition(dateDef, { preset });
+      const condition = buildFilterCondition(dateDef, { preset }) as { $gte: string; $lte: string };
       for (const now of REFERENCE_NOWS) {
         const resolved = resolveDateMacros(condition, now);
         // A real date on both bounds, not a token passed through unresolved.
