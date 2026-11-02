@@ -112,18 +112,7 @@ function respond(input: unknown): Promise<Response> {
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   AuthProvider: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  // The organization gate now sits inside `ConsolePermissionsScope` (objectstack#29114):
-  // a session in an organization the list confirms, so the gate renders through.
-  useAuth: () => ({
-    user: { id: 'u_agent', name: 'Agent', email: 'agent@example.com' },
-    isAuthenticated: true,
-    isLoading: false,
-    getAuthConfig: () => Promise.resolve({ features: { multiOrgEnabled: true } }),
-    session: { activeOrganizationId: 'org_1' },
-    organizations: [{ id: 'org_1', name: 'Acme', slug: 'acme' }],
-    activeOrganization: { id: 'org_1', name: 'Acme', slug: 'acme' },
-    isOrganizationsLoading: false,
-  }),
+  useAuth: () => ({ user: { id: 'u_agent', name: 'Agent', email: 'agent@example.com' }, isAuthenticated: true, isLoading: false }),
   // The network: every authenticated read the console makes goes through here.
   createAuthenticatedFetch: () => (input: unknown) => {
     net.calls.push(String(input));

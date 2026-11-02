@@ -9,11 +9,11 @@
  * don't need those use DefaultAppContent directly.
  */
 
-import { lazy, Suspense, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, RequireOrganization, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
-import { MePermissionsProvider, ServerReadScope } from '@object-ui/permissions';
+import { MePermissionsProvider, ServerReadScope, releaseMePermissionsRequest, startMePermissionsRequest } from '@object-ui/permissions';
 import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import type { DataSource } from '@object-ui/types';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
@@ -368,6 +368,56 @@ export function ApprovalRecordReads({ children }: { children: ReactNode }) {
 /** The objects whose rows `ApprovalRecordReads` reads through the approvals routes. */
 const APPROVAL_READ_OBJECTS = [APPROVAL_REQUEST_OBJECT, APPROVAL_ACTION_OBJECT] as const;
 
+/** The console's `/auth/me/permissions` URL. */
+function mePermissionsEndpoint(): string {
+  return `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth/me/permissions`;
+}
+
+/**
+ * The identity a `/auth/me/permissions` answer is for, once the session answer
+ * names it: the user and the organization the session is active in. The server
+ * answers that endpoint for exactly that pair (`resolveAuthzContext` reads
+ * `session.activeOrganizationId`, never a header), so an answer asked for the
+ * key is the answer the provider would ask for. `undefined` while the session
+ * names no organization: the organization pipeline may still activate one (the
+ * single-membership repair) or send the user to `/organizations`.
+ */
+function usePermissionsRequestKey(): string | undefined {
+  const { user, session } = useAuth();
+  const organizationId = session?.activeOrganizationId;
+  if (!user?.id || typeof organizationId !== 'string' || organizationId === '') return undefined;
+  return `${user.id}:${organizationId}`;
+}
+
+/**
+ * Asks `/auth/me/permissions` the moment the session answer names the active
+ * organization (objectstack#29114). Rendered by `App.tsx` beside the
+ * `ProtectedRoute` of the `/home` + `/apps` layout route; renders nothing.
+ *
+ * `ConsolePermissionsScope` reads the answer, and it mounts late on purpose:
+ * under the route's organization gate (`organization/list`) and the metadata
+ * shell (the adapter's `discovery`), both of which leave when the session
+ * answer lands. Asked from there, the request left a whole wave late. Asked
+ * from here, it leaves in that same wave, and the scope's provider takes it
+ * (`requestKey`) instead of asking again, so the request count does not move.
+ * Everything that needs the chosen organization still waits for the gate.
+ *
+ * A session that names no organization asks nothing here; the provider asks
+ * once the gate has passed, as before. Leaving the route, or the session naming
+ * another organization, drops a request nobody took.
+ */
+export function ConsolePermissionsRequest(): null {
+  const key = usePermissionsRequestKey();
+  const fetcher = useMemo(() => createAuthenticatedFetch(), []);
+  useEffect(() => {
+    if (!key) return undefined;
+    const endpoint = mePermissionsEndpoint();
+    startMePermissionsRequest({ endpoint, fetcher, key });
+    return () => releaseMePermissionsRequest(endpoint, key);
+  }, [key, fetcher]);
+  return null;
+}
+
 /**
  * The console's ONE `/auth/me/permissions` source, shared by Home and every app
  * (objectui#12700).
@@ -390,40 +440,23 @@ const APPROVAL_READ_OBJECTS = [APPROVAL_REQUEST_OBJECT, APPROVAL_ACTION_OBJECT] 
  * renders until the answer arrives, and a failure shows the console's error
  * splash with its Retry.
  *
- * It also owns this layout's organization gate (`App.tsx` mounts it under a
- * `ProtectedRoute` with `requireOrganization={false}`), because WHERE that gate
- * sits decides when the permissions request leaves (objectstack#29114). Under
- * the gate, the request waited for the whole `organization/list` round trip,
- * and everything Home and an app read after it waited one wave longer. The
- * server answers `/auth/me/permissions` for the session's active organization
- * (`resolveAuthzContext` reads `session.activeOrganizationId`, never a
- * header), so when the `get-session` answer already names that organization,
- * the request is asked now, in the same wave as `organization/list`, and the
- * gate sits below the provider. Everything that needs the chosen organization
- * (the `/me/apps` read and every page) still renders only after the gate
- * passes. A session that names no organization keeps the gate first: the
- * organization pipeline may still activate one (the single-membership repair)
- * or redirect to `/organizations`, and either way an answer asked now could be
- * for no organization or never read.
- *
- * The provider is keyed on that id, so the answer is always the one asked for
- * the organization the session names.
+ * Its first attempt is the request `ConsolePermissionsRequest` already asked
+ * for the same user and organization, when there is one (objectstack#29114).
  */
 export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
   const serverUrl = import.meta.env.VITE_SERVER_URL || '';
-  const endpoint = `${serverUrl}/api/v1/auth/me/permissions`;
+  const endpoint = mePermissionsEndpoint();
+  const requestKey = usePermissionsRequestKey();
   // [#2926 ④] /me/permissions must carry the Bearer token like every other
   // data call (same wrapper AdapterProvider uses) — with the cookie-only
   // default fetch, a token-only session resolved as anonymous and FLS
   // rendering fell open (restricted fields rendered editable).
   const authFetch = useMemo(() => createAuthenticatedFetch(), []);
-  const sessionOrganizationId = useAuth().session?.activeOrganizationId;
-  const sessionNamesOrganization = typeof sessionOrganizationId === 'string' && sessionOrganizationId !== '';
-  const permissions = (inner: ReactNode) => (
+  return (
     <MePermissionsProvider
-      key={sessionNamesOrganization ? sessionOrganizationId : undefined}
       endpoint={endpoint}
       fetcher={authFetch}
+      requestKey={requestKey}
       loadingFallback={<LoadingScreen />}
       // Without this, the provider's error state renders `loadingFallback` too —
       // an eternal spinner with a `retry` nobody can reach. The provider already
@@ -433,22 +466,15 @@ export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
       // error + retry affordance all along.
       errorFallback={(err, retry) => <LoadingScreen error={err.message} onRetry={retry} />}
     >
-      {inner}
+      {/* objectstack#26838 — the apps a launcher offers (Home's tiles, the app
+          switcher, the `app:launcher` block) are the `/me/apps` answer, which
+          drops an app the user's permission sets hide. One read for Home and
+          every app, so this common ancestor holds it, beside the answer above. */}
+      <LauncherAppsProvider endpoint={`${serverUrl}/api/v1/me/apps`} fetcher={authFetch}>
+        {children}
+      </LauncherAppsProvider>
     </MePermissionsProvider>
   );
-  /* objectstack#26838 — the apps a launcher offers (Home's tiles, the app
-     switcher, the `app:launcher` block) are the `/me/apps` answer, which drops
-     an app the user's permission sets hide. One read for Home and every app,
-     so this common ancestor holds it, beside the answer above. */
-  const launcher = (
-    <LauncherAppsProvider endpoint={`${serverUrl}/api/v1/me/apps`} fetcher={authFetch}>
-      {children}
-    </LauncherAppsProvider>
-  );
-  if (sessionNamesOrganization) {
-    return permissions(<RequireOrganization>{launcher}</RequireOrganization>);
-  }
-  return <RequireOrganization>{permissions(launcher)}</RequireOrganization>;
 }
 
 /**

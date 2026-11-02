@@ -8,22 +8,26 @@
  * ## The defect
  *
  * `ConsolePermissionsScope` (the one permissions source for `/home` and every
- * app) was mounted under `ProtectedRoute`'s default `RequireOrganization`, which
- * renders nothing below it until `organization/list` answers. So the permissions
- * request waited one whole round trip, and every read Home and an app make
- * after the answer waited one wave longer. The server answers that endpoint for
- * the session's active organization, which the session answer already carries.
+ * app) is mounted under `ProtectedRoute`'s `ConnectedShell`, which renders
+ * nothing until its adapter's `discovery` round trip answers, and under its
+ * `RequireOrganization`, which renders nothing until `organization/list`
+ * answers. Both leave when the session answer lands, so the permissions request
+ * left one whole wave late, and every read Home and an app make after the
+ * answer waited one wave longer. The server answers that endpoint for the
+ * session's active organization, which the session answer already names.
  *
  * ## What is real here
  *
- * `App`'s route tree, the real `ProtectedRoute`, the real `RequireOrganization`
- * (its loading wait and its redirect), `ConsolePermissionsScope` and the
- * `MePermissionsProvider` and `LauncherAppsProvider` it mounts. The auth state
- * is a store the test moves the way `AuthProvider` does: the session first,
- * with the organization list still in flight, then the list's answer. The
- * network is the console's authenticated fetcher, which records every URL.
- * `AuthGuard` and `ConnectedShell` decide nothing about this order (both have
- * opened by the time the session is known) and pass through.
+ * `App`'s route tree, `ConsolePermissionsRequest` beside the real
+ * `ProtectedRoute`, the real `RequireOrganization` (its loading wait and its
+ * redirect), `ConsolePermissionsScope` and the `MePermissionsProvider` and
+ * `LauncherAppsProvider` it mounts. The auth state is a store the test moves
+ * the way `AuthProvider` does: the session first, with the organization list
+ * still in flight, then the list's answer. `ConnectedShell` is cut down to its
+ * one effect on this order: nothing below it renders until the test says its
+ * adapter connected. `AuthGuard` has opened by the time the session is known
+ * and passes through. The network is the console's authenticated fetcher,
+ * which records every URL.
  */
 
 import '@testing-library/jest-dom/vitest';
@@ -36,6 +40,8 @@ interface AuthState {
   organizations: Array<{ id: string; name: string; slug: string }>;
   activeOrganization: { id: string; name: string; slug: string } | null;
   isOrganizationsLoading: boolean;
+  /** Whether the metadata shell's adapter has connected (its `discovery` round trip answered). */
+  shellReady: boolean;
 }
 
 const h = vi.hoisted(() => {
@@ -98,6 +104,11 @@ vi.mock('@object-ui/auth', async (importOriginal) => {
 
 vi.mock('@object-ui/app-shell', async (importOriginal) => {
   const { MetadataCtx } = await import('@object-ui/react');
+  const { useSyncExternalStore: useStore } = await import('react');
+  const subscribe = (l: () => void) => {
+    h.listeners.add(l);
+    return () => h.listeners.delete(l);
+  };
   // What `ConnectedShell` provides that this order reads: one active app, so the
   // launcher's `/me/apps` read has something to ask about.
   const metadata = {
@@ -110,9 +121,13 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => {
   return {
     ...(await importOriginal<Record<string, unknown>>()),
     ConsoleShell: ({ children }: { children?: ReactNode }) => <>{children}</>,
-    ConnectedShell: ({ children }: { children?: ReactNode }) => (
-      <MetadataCtx.Provider value={metadata}>{children}</MetadataCtx.Provider>
-    ),
+      // The real shell renders nothing below it until its adapter has connected,
+    // a round trip that leaves in the same wave as `organization/list`.
+    ConnectedShell: function ConnectedShell({ children }: { children?: ReactNode }) {
+      const ready = useStore(subscribe, () => h.auth.shellReady);
+      if (!ready) return null;
+      return <MetadataCtx.Provider value={metadata}>{children}</MetadataCtx.Provider>;
+    },
     ConsoleToaster: () => null,
     LoadingScreen: () => <div data-testid="loading-screen" />,
     DefaultHomeLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -166,10 +181,16 @@ async function settle() {
 }
 
 function openAt(url: string, session: AuthState['session']) {
-  // The moment `AuthGuard` opens: the session is known, `organization/list` is in flight.
-  h.auth = { session, organizations: [], activeOrganization: null, isOrganizationsLoading: true };
+  // The moment `AuthGuard` opens: the session is known; `organization/list` and
+  // the shell's `discovery` are in flight.
+  h.auth = { session, organizations: [], activeOrganization: null, isOrganizationsLoading: true, shellReady: false };
   window.history.pushState({}, '', url);
   return render(<App />);
+}
+
+/** The shell's adapter connects (`discovery` answers). */
+function shellAnswers() {
+  act(() => h.set({ shellReady: true }));
 }
 
 /** `organization/list` answers. */
@@ -190,10 +211,13 @@ afterEach(() => {
 describe('/auth/me/permissions leaves in the organization/list wave when the session names the active organization (objectstack#29114)', () => {
   it('the session names the organization: the request leaves while organization/list is still in flight, once; the page waits for the list', async () => {
     openAt('/home', { activeOrganizationId: ORG.id });
-    // Asked now, beside organization/list (still unanswered: the test holds it), not after it.
+    // Asked now, beside organization/list and discovery (both still unanswered:
+    // the test holds them), not after them.
     await waitFor(() => expect(permissionsCalls()).toHaveLength(1));
     await settle();
     // What needs the chosen organization still waits for it.
+    shellAnswers();
+    await settle();
     expect(screen.queryByTestId('home-page')).not.toBeInTheDocument();
     expect(launcherCalls()).toHaveLength(0);
 
@@ -209,14 +233,19 @@ describe('/auth/me/permissions leaves in the organization/list wave when the ses
     openAt('/apps/crm', { activeOrganizationId: ORG.id });
     await waitFor(() => expect(permissionsCalls()).toHaveLength(1));
     await settle();
-    expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
+    // The other order: the organization list answers before the shell connects.
     organizationsAnswer(ORG);
+    await settle();
+    expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
+    shellAnswers();
     await waitFor(() => expect(screen.getByTestId('app-content')).toBeInTheDocument());
     expect(permissionsCalls()).toHaveLength(1);
   });
 
   it('CONTROL: a session that names no organization asks nothing until the organization pipeline has chosen one', async () => {
     openAt('/home', { activeOrganizationId: null });
+    await settle();
+    shellAnswers();
     await settle();
     expect(permissionsCalls()).toHaveLength(0);
 
@@ -229,6 +258,7 @@ describe('/auth/me/permissions leaves in the organization/list wave when the ses
   it('CONTROL: a session with no active organization is sent to /organizations without asking for permissions', async () => {
     openAt('/home', { activeOrganizationId: null });
     await settle();
+    shellAnswers();
     organizationsAnswer(null, [ORG, { id: 'org_2', name: 'Beta', slug: 'beta' }]);
     await waitFor(() => expect(screen.getByTestId('organizations-page')).toBeInTheDocument());
     expect(permissionsCalls()).toHaveLength(0);
