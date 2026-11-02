@@ -616,14 +616,16 @@ export const ROUTE_SHADOWED_DATASOURCE_NAMES = Object.freeze(['drivers'] as cons
 const quotedRouteShadowedNames = ROUTE_SHADOWED_DATASOURCE_NAMES.map((name) => `'${name}'`).join(', ');
 
 /**
- * The refusal `DatasourceSchema.name` answers for a route-shadowed name: it
- * names the name and why, in the admin create door's sentence family.
+ * The refusal `DatasourceSchema.name` answers for a route-shadowed name: built
+ * from the offending input, so it names that one name and its route (never the
+ * whole list), in the admin create door's sentence family.
  */
-const ROUTE_SHADOWED_NAME_REFUSAL =
-  `Datasource name ${quotedRouteShadowedNames} is reserved: the datasource admin API serves its own route `
-  + `at /api/v1/datasources/${ROUTE_SHADOWED_DATASOURCE_NAMES.join(' and /api/v1/datasources/')}, ahead of `
-  + 'the by-name read /api/v1/datasources/:name, so a datasource of that name could never be read by '
-  + 'name. Pick another name.';
+function routeShadowedNameRefusal(issue: { input?: unknown }): string {
+  const name = String(issue.input);
+  return `Datasource name '${name}' is reserved: the datasource admin API serves its own route at `
+    + `/api/v1/datasources/${name}, ahead of the by-name read /api/v1/datasources/:name, so a datasource `
+    + 'of that name could never be read by name. Pick another name.';
+}
 
 /**
  * A second pattern on `name`, not a refinement: zod emits both patterns into
@@ -699,7 +701,7 @@ export const DatasourceSchema = lazySchema(() => strictObject(
    */
   name: z.string()
     .regex(/^[a-z_][a-z0-9_]*$/)
-    .regex(NOT_ROUTE_SHADOWED_NAME, ROUTE_SHADOWED_NAME_REFUSAL)
+    .regex(NOT_ROUTE_SHADOWED_NAME, { error: routeShadowedNameRefusal })
     .describe(
       `Unique datasource identifier (snake_case). Reserved: ${quotedRouteShadowedNames}, a path the `
       + 'datasource admin API serves itself, so a datasource of that name could never be read by name.',

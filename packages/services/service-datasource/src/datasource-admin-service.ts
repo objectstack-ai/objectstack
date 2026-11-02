@@ -54,7 +54,11 @@ import type {
 } from './contracts/index.js';
 import type { Logger } from './logger.js';
 
-/** Datasource name rule (mirrors `DatasourceSchema.name`). */
+/**
+ * Datasource name rule: the identifier pattern, the first of the two patterns on
+ * `DatasourceSchema.name`. The second, the route-shadowed names, is refused by
+ * name in `assertValidName` from the spec's `ROUTE_SHADOWED_DATASOURCE_NAMES`.
+ */
 const NAME_RE = /^[a-z_][a-z0-9_]*$/;
 
 /**

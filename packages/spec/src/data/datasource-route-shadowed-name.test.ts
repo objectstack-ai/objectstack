@@ -83,6 +83,13 @@ describe('DatasourceSchema.name refuses a route-shadowed name', () => {
       expect(message).toContain('could never be read by name');
       expect(message).not.toMatch(/#\d{3,}/);
     });
+
+    it(`the refusal for '${name}' names only that name: built from the input, never from the whole list`, () => {
+      const message = DatasourceSchema.safeParse(sqlite(name)).error!.issues[0]!.message;
+      // Every quoted name and every literal route the sentence carries is this one.
+      expect([...message.matchAll(/'([a-z0-9_]+)'/g)].map((m) => m[1])).toEqual([name]);
+      expect([...message.matchAll(/\/api\/v1\/datasources\/([a-z0-9_]+)/g)].map((m) => m[1])).toEqual([name]);
+    });
   }
 
   it('the code door: defineStack refuses it with STACK_SCHEMA_INVALID / 422 at datasources.0.name', () => {
