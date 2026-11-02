@@ -2086,6 +2086,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.nameLabel': 'Name',
   'engine.studio.access.idLabel': 'Identifier',
   'engine.studio.data.savedDraft': 'Object “{label}” saved as draft',
+  // objectstack#28984 — a landed draft autosave, named; the voice of `engine.edit.draftDiscarded`.
+  'engine.studio.draftSaved': 'Draft saved: {item}',
   'engine.studio.data.lastSaved': 'Saved {time}',
   // Pillar tab labels
   'engine.fieldType.text': 'Text',
