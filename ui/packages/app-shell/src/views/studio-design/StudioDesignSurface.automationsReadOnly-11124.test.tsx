@@ -221,6 +221,26 @@ describe('Automations pillar on a read-only package (objectui#11124)', () => {
     expect(body).toHaveAccessibleDescription(READ_ONLY_REASON);
   });
 
+  it('a selected connection opens read-only, and its inspector carries the package reason (objectstack#29077)', async () => {
+    renderPillar(true);
+    await openFlow();
+
+    const hit = [...document.querySelectorAll('path > title')].find((el) => el.textContent === 'Start → End');
+    expect(hit, 'the canvas must render the start → end connection').toBeTruthy();
+    fireEvent.click(hit!.parentElement!);
+    const rail = screen.getByRole('complementary');
+    const remove = await within(rail).findByRole(
+      'button',
+      { name: t('engine.inspector.flowEdge.remove', 'en') },
+      { timeout: 8000 },
+    );
+    expect(remove).toBeDisabled();
+    const body = screen.getByTestId('flow-edge-readonly-reason');
+    expect(body).toContainElement(remove);
+    expect(body).toHaveAttribute('tabindex', '0');
+    expect(body).toHaveAccessibleDescription(READ_ONLY_REASON);
+  });
+
   it('offers no canvas edit: no "add connected node" or "insert node" handle', async () => {
     renderPillar(true);
     await openFlow();
