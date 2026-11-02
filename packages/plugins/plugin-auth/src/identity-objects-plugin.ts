@@ -63,6 +63,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
 import { authIdentityManifest } from './manifest.js';
+import { registerPersonalViewHooks } from './personal-view-hooks.js';
 
 /** The kernel plugin name of {@link IdentityObjectsPlugin}. */
 export const IDENTITY_OBJECTS_PLUGIN_NAME = 'com.objectstack.auth.identity-objects';
@@ -122,6 +123,12 @@ export class IdentityObjectsPlugin implements Plugin {
    * plugin keeps it. A failure throws and fails the boot, never warn-only.
    */
   async start(ctx: PluginContext): Promise<void> {
+    // The manifest above registers `sys_personal_view`; its two write rules
+    // travel with it, exactly as `AuthPlugin` registers them.
+    const engine = ctx.getService<{ registerHook?: unknown }>('objectql');
+    if (engine && typeof engine.registerHook === 'function') {
+      registerPersonalViewHooks(engine, { packageId: `${IDENTITY_OBJECTS_PLUGIN_NAME}.personal-view` });
+    }
     if (postureInForce(ctx) !== 'single') return;
     const invariant = await ensureDefaultOrganizationExists(ctx.getService<IDataEngine>('objectql'), {
       logger: ctx.logger,

@@ -68,6 +68,7 @@ import {
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
 import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
+import { registerPersonalViewHooks } from './personal-view-hooks.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { registerSessionFirstActivity } from './session-first-activity.js';
@@ -1857,6 +1858,13 @@ export class AuthPlugin implements Plugin {
         // api-key-restore-guard.ts.
         registerApiKeyRestoreGuard(engine, {
           packageId: 'com.objectstack.plugin-auth.api-key-restore-guard',
+          logger: ctx.logger,
+        });
+        // A reader's own named list views: the body is judged as a ListView on
+        // every save, and a new default clears the owner's previous one for
+        // the same object. See personal-view-hooks.ts.
+        registerPersonalViewHooks(engine, {
+          packageId: 'com.objectstack.plugin-auth.personal-view',
           logger: ctx.logger,
         });
         // [cloud ADR-0024 D5.2] Break-glass — the same identity write
