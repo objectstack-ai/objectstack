@@ -12,16 +12,79 @@ import { CONSOLE_BASE, waitForReactMount } from './helpers';
  *    comes from the worker), and data calls fail visibly as offline: the
  *    sign-in screen's "Cannot connect to server" panel, and a direct API
  *    request rejects instead of answering from a cache.
- * 2. A new build is picked up within one navigation: a server that switches
- *    to a "next" build (new document, new worker build id) serves that
- *    document on the next navigation, and the new worker deletes the old
+ * 2. A new build is picked up within one navigation: once the server switches
+ *    to a "next" build (new document, new worker build id), the next
+ *    navigation runs that document, and the new worker deletes the old
  *    build's cache when it activates.
  *
- * Chromium only: `context.setOffline` and Cache Storage are measured there,
- * and the CI lane runs `--project=chromium`.
+ * The build is served here the way the framework CLI serves it, not by
+ * `vite preview`: the document carries `<base href>` for the mount, so the
+ * router keeps every route under the worker's scope. Under `vite preview`
+ * there is no `<base>`, the router's basename is `/`, and the app moves to
+ * `/login`, outside the scope, where no worker of the Console can answer.
+ *
+ * Chromium only: the CI lane runs `--project=chromium`.
  */
 
 const CACHE_PREFIX = 'objectui-console::';
+const DIST = path.resolve(import.meta.dirname, '../apps/console/dist');
+
+interface ConsoleServer {
+  origin: string;
+  /** The `service-worker.js` build id as emitted. */
+  build: string;
+  /** Switch to a "next" build: a marked document and a worker with a new build id. */
+  deploy(): void;
+  close(): Promise<void>;
+}
+
+async function serveConsole(): Promise<ConsoleServer> {
+  const index = fs.readFileSync(path.join(DIST, 'index.html'), 'utf8');
+  const worker = fs.readFileSync(path.join(DIST, 'service-worker.js'), 'utf8');
+  const build = /const BUILD = "([^"]+)";/.exec(worker)?.[1] ?? '';
+  let next = false;
+
+  const server = http.createServer((req, res) => {
+    const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+    if (!pathname.startsWith(`${CONSOLE_BASE}/`)) {
+      res.writeHead(404).end();
+      return;
+    }
+    const rel = pathname.slice(CONSOLE_BASE.length + 1);
+    if (rel === 'service-worker.js') {
+      const body = next ? worker.replace(`const BUILD = "${build}";`, `const BUILD = "${build}-next";`) : worker;
+      res.writeHead(200, { 'content-type': 'text/javascript' }).end(body);
+      return;
+    }
+    const file = path.join(DIST, rel);
+    if (rel && file.startsWith(DIST) && fs.existsSync(file) && fs.statSync(file).isFile() && !rel.endsWith('.html')) {
+      const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'application/octet-stream';
+      res.writeHead(200, { 'content-type': type }).end(fs.readFileSync(file));
+      return;
+    }
+    if (rel.startsWith('assets/')) {
+      res.writeHead(404).end();
+      return;
+    }
+    // The SPA document, with the `<base>` the CLI injects.
+    const head = `<head>\n    <base href="${CONSOLE_BASE}/">${next ? '<meta name="e2e-build" content="next">' : ''}`;
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(index.replace('<head>', head));
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+  return {
+    origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+    build,
+    deploy: () => {
+      next = true;
+    },
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
 
 /** Waits until the worker controls the page and holds every console file the page loaded. */
 async function waitForShellCached(page: Page) {
@@ -46,12 +109,22 @@ async function waitForShellCached(page: Page) {
 test.describe('Console service worker', () => {
   test.skip(({ browserName }) => browserName !== 'chromium', 'measured on chromium, the CI E2E project');
 
+  let server: ConsoleServer;
+  test.beforeEach(async () => {
+    server = await serveConsole();
+    expect(server.build, 'the emitted worker names its build').toBeTruthy();
+  });
+  test.afterEach(async () => {
+    await server.close();
+  });
+
   test('after one load, an offline reload shows the shell and data calls fail as offline', async ({
     page,
     context,
   }) => {
-    await page.goto(`${CONSOLE_BASE}/`);
+    await page.goto(`${server.origin}${CONSOLE_BASE}/`);
     await waitForReactMount(page);
+    await expect(page).toHaveURL(new RegExp(`${CONSOLE_BASE}/`));
     await waitForShellCached(page);
 
     await context.setOffline(true);
@@ -63,7 +136,7 @@ test.describe('Console service worker', () => {
     await expect(page.getByTestId('auth-server-unreachable')).toBeVisible({ timeout: 30_000 });
 
     // The API is network-only: offline, a data call rejects instead of
-    // answering from the worker's cache.
+    // answering from the worker's cache, and nothing under /api/ was cached.
     const apiAnswer = await page.evaluate(() =>
       fetch('/api/v1/auth/get-session').then(
         (res) => `answered ${res.status}`,
@@ -87,67 +160,24 @@ test.describe('Console service worker', () => {
   });
 
   test('a new build is picked up within one navigation, and its worker drops the old cache', async ({ page }) => {
-    const dist = path.resolve(import.meta.dirname, '../apps/console/dist');
-    const index = fs.readFileSync(path.join(dist, 'index.html'), 'utf8');
-    const worker = fs.readFileSync(path.join(dist, 'service-worker.js'), 'utf8');
-    const build = /const BUILD = "([^"]+)";/.exec(worker)?.[1];
-    expect(build, 'the emitted worker names its build').toBeTruthy();
+    await page.goto(`${server.origin}${CONSOLE_BASE}/`);
+    await waitForReactMount(page);
+    await waitForShellCached(page);
+    expect(await page.evaluate(() => caches.keys())).toContain(`${CACHE_PREFIX}${CONSOLE_BASE}/::${server.build}`);
 
-    // A server for the same dist that can switch to a "next" build: a new
-    // document and a worker with a new build id, the two things a deploy
-    // changes for the browser.
-    let next = false;
-    const server = http.createServer((req, res) => {
-      const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
-      if (!pathname.startsWith(`${CONSOLE_BASE}/`)) {
-        res.writeHead(404).end();
-        return;
-      }
-      const rel = pathname.slice(CONSOLE_BASE.length + 1);
-      if (rel === 'service-worker.js') {
-        const body = next ? worker.replace(`const BUILD = "${build}";`, `const BUILD = "${build}-next";`) : worker;
-        res.writeHead(200, { 'content-type': 'text/javascript', 'cache-control': 'no-cache' }).end(body);
-        return;
-      }
-      const file = path.join(dist, rel);
-      if (rel && file.startsWith(dist) && fs.existsSync(file) && fs.statSync(file).isFile()) {
-        const type = file.endsWith('.js') ? 'text/javascript' : file.endsWith('.css') ? 'text/css' : 'application/octet-stream';
-        res.writeHead(200, { 'content-type': type }).end(fs.readFileSync(file));
-        return;
-      }
-      if (rel.startsWith('assets/')) {
-        res.writeHead(404).end();
-        return;
-      }
-      const html = next ? index.replace('<head>', '<head><meta name="e2e-build" content="next">') : index;
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(html);
-    });
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    server.deploy();
+    await page.goto(`${server.origin}${CONSOLE_BASE}/login`);
+    await expect(page.locator('meta[name="e2e-build"]')).toHaveAttribute('content', 'next');
+    await waitForReactMount(page);
 
-    try {
-      await page.goto(`${origin}${CONSOLE_BASE}/`);
-      await waitForReactMount(page);
-      await waitForShellCached(page);
-      expect(await page.evaluate(() => caches.keys())).toContain(`${CACHE_PREFIX}${CONSOLE_BASE}/::${build}`);
-
-      // Deploy.
-      next = true;
-      await page.goto(`${origin}${CONSOLE_BASE}/login`);
-      await expect(page.locator('meta[name="e2e-build"]')).toHaveAttribute('content', 'next');
-      await waitForReactMount(page);
-
-      // The new worker installs, takes over and deletes the old build's cache.
-      await page.waitForFunction(
-        async ({ prefix, oldBuild }) => {
-          const keys = (await caches.keys()).filter((key) => key.startsWith(prefix));
-          return keys.length === 1 && keys[0].endsWith(`::${oldBuild}-next`);
-        },
-        { prefix: CACHE_PREFIX, oldBuild: build },
-        { timeout: 30_000, polling: 250 },
-      );
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
+    // The new worker installs, takes over and deletes the old build's cache.
+    await page.waitForFunction(
+      async ({ prefix, build }) => {
+        const keys = (await caches.keys()).filter((key) => key.startsWith(prefix));
+        return keys.length === 1 && keys[0].endsWith(`::${build}-next`);
+      },
+      { prefix: CACHE_PREFIX, build: server.build },
+      { timeout: 30_000, polling: 250 },
+    );
   });
 });
