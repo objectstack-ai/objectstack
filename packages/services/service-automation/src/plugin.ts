@@ -3620,14 +3620,17 @@ export class AutomationServicePlugin implements Plugin {
                 );
             }
         }
-        // #5575 — the provider's message rides `meta`, never the message.
+        // #5575 — the provider's message rides `meta`, never the message. A
+        // platform refusal (an `oauth2` instance this server cannot serve) has
+        // no thrown value: its reason rides `meta` instead, so the record never
+        // renders `describeThrownForLog(undefined)`, the string "undefined".
         ctx.logger.error(
             `[Automation] failed to materialize connector instance '${info.name}' via provider '${info.provider}' (ADR-0097): ` +
                 'a configuration fault, so the instance is no longer retried. ' +
                 (info.hasLive ? 'The previously-materialized connector keeps serving. ' : '') +
                 'Fix its declaration; an edit or a restart re-attempts it.',
             undefined,
-            describeThrownForLog(info.cause),
+            info.cause === undefined ? { reason: info.reason } : describeThrownForLog(info.cause),
         );
     }
 
@@ -3949,7 +3952,8 @@ export class AutomationServicePlugin implements Plugin {
             );
         }
         const notServable = oauth2NotServableReason(name, { ...entry, provider: entry.provider as string }, auth, true);
-        if (notServable !== undefined) throw credentialDoorRefusal(`${notServable}.`, 'VALIDATION_ERROR', 400);
+        // The reason ends its own sentence: the door answers it as it is.
+        if (notServable !== undefined) throw credentialDoorRefusal(notServable, 'VALIDATION_ERROR', 400);
         const organizationId = request?.context?.tenantId;
         if (typeof organizationId !== 'string' || organizationId.length === 0) {
             throw credentialDoorRefusal(
