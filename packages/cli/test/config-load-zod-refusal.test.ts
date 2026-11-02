@@ -173,6 +173,7 @@ describe('a define* helper ZodError at config load is one located refusal', { ti
     const r = await run(Compile, [mixed, '--output', out, '--json']);
     expect(r.code).not.toBe(0);
     const payload = JSON.parse(r.stdout) as { error: string };
+    expect(payload.error).toMatch(LOCATED_HEAD);
     expect(payload.error).toBe(validate.error);
   });
 
