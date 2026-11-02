@@ -164,8 +164,8 @@ const stored = (rows: Map<string, Row>, type: string, name: string) =>
         .map((r) => `${r.state}|${r.package_id ?? '-'}|${JSON.stringify(JSON.parse(r.metadata).externalId ?? null)}`)
         .sort();
 
-/** A schema-valid object body with `name` and `code` text fields (or the given ones). */
-const object = (name: string, fields: string[] = ['name', 'code']) => ({
+/** A schema-valid object body with `name` and `sku` text fields (or the given ones). */
+const object = (name: string, fields: string[] = ['name', 'sku']) => ({
     name,
     label: 'Seed Key',
     sharingModel: 'private',
@@ -173,7 +173,7 @@ const object = (name: string, fields: string[] = ['name', 'code']) => ({
 });
 
 /** The registered (served) form: the authored fields plus the columns the registry injects. */
-const registered = (name: string, fields: string[] = ['name', 'code']) => ({
+const registered = (name: string, fields: string[] = ['name', 'sku']) => ({
     ...object(name, fields),
     fields: {
         ...object(name, fields).fields,
@@ -186,7 +186,7 @@ const seed = (target: string, externalId: string | string[] | undefined, mode = 
     object: target,
     mode,
     ...(externalId !== undefined ? { externalId } : {}),
-    records: [{ name: 'G1', code: 'g', organization_id: 'org_seedkey' }],
+    records: [{ name: 'G1', sku: 'g', organization_id: 'org_seedkey' }],
 });
 
 /** Plant a seed draft as a draft stored before the rule sits at rest. */
@@ -246,7 +246,7 @@ describe('[#28952] the seed save door — an `externalId` that names no field of
         const { protocol, rows } = makeSession({ objects: OBJECTS });
 
         const err = await refusalOf(protocol.saveMetaItem({
-            type: 'seed', name: 'r_pair', item: seed('seedkey_other', ['code', 'no_such_field']), mode: 'draft',
+            type: 'seed', name: 'r_pair', item: seed('seedkey_other', ['sku', 'no_such_field']), mode: 'draft',
         }));
 
         expectRefusal(err, 'r_pair', [{ path: 'externalId.1', member: 'no_such_field', object: 'seedkey_other' }]);
@@ -254,13 +254,13 @@ describe('[#28952] the seed save door — an `externalId` that names no field of
     });
 
     it("an undeclared `externalId` is the default 'name', refused on an object with no `name` field", async () => {
-        const { protocol } = makeSession({ objects: { seedkey_coded: registered('seedkey_coded', ['code']) } });
+        const { protocol } = makeSession({ objects: { seedkey_sku: registered('seedkey_sku', ['sku']) } });
 
         const err = await refusalOf(protocol.saveMetaItem({
-            type: 'seed', name: 'r_default', item: { object: 'seedkey_coded', records: [{ code: 'g' }] }, mode: 'draft',
+            type: 'seed', name: 'r_default', item: { object: 'seedkey_sku', records: [{ sku: 'g' }] }, mode: 'draft',
         }));
 
-        expectRefusal(err, 'r_default', [{ path: 'externalId', member: 'name', object: 'seedkey_coded', implicit: true }]);
+        expectRefusal(err, 'r_default', [{ path: 'externalId', member: 'name', object: 'seedkey_sku', implicit: true }]);
     });
 });
 
@@ -324,9 +324,9 @@ describe('[#28952] the restore door — a seed version whose `externalId` names 
 describe('[#28952] controls — an `externalId` the object has is not refused', () => {
     it.each([
         ["`externalId: 'name'`", 'name'],
-        ["`externalId: 'code'`", 'code'],
+        ["`externalId: 'sku'`", 'sku'],
         ['an injected column, `id`', 'id'],
-        ['a composite whose every member is a field', ['name', 'code']],
+        ['a composite whose every member is a field', ['name', 'sku']],
         ["undeclared (the default 'name')", undefined],
     ])('%s: saves as a draft, publishes, and saves live', async (_label, externalId) => {
         const { protocol, rows, dataInserts } = makeSession({ objects: OBJECTS });
@@ -349,12 +349,12 @@ describe('[#28952] controls — an `externalId` the object has is not refused', 
     it('an object drafted in the same batch that declares the field publishes with the seed', async () => {
         const { protocol, rows } = makeSession();
         await protocol.saveMetaItem({ type: 'object', name: 'seedkey_new', item: object('seedkey_new'), mode: 'draft', packageId: PKG });
-        await protocol.saveMetaItem({ type: 'seed', name: 'r_new', item: seed('seedkey_new', 'code'), mode: 'draft', packageId: PKG });
+        await protocol.saveMetaItem({ type: 'seed', name: 'r_new', item: seed('seedkey_new', 'sku'), mode: 'draft', packageId: PKG });
 
         const res = await protocol.publishPackageDrafts({ packageId: PKG });
 
         expect(res, JSON.stringify(res.failed)).toMatchObject({ outcome: 'published', publishedCount: 2 });
-        expect(stored(rows, 'seed', 'r_new')).toEqual([`active|${PKG}|"code"`]);
+        expect(stored(rows, 'seed', 'r_new')).toEqual([`active|${PKG}|"sku"`]);
     });
 
     it('an object neither registered nor drafted is not judged here (the load reports it)', async () => {
