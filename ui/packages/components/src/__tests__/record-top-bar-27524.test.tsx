@@ -123,7 +123,7 @@ describe('NavigationOverlay draws the shared bar as the pane\'s (objectstack#275
       <NavigationOverlay
         isOpen
         isOverlay
-        mode="split"
+        mode="drawer"
         selectedRecord={{ id: 'r-1' }}
         close={() => {}}
         setIsOpen={() => {}}
@@ -141,6 +141,6 @@ describe('NavigationOverlay draws the shared bar as the pane\'s (objectstack#275
     expect(screen.getByTestId('record-drawer-leading').textContent).toBe('Leads › Mira Costa');
     const controls = Array.from(bar.querySelector('[data-record-top-bar-controls]')!.querySelectorAll('button, [data-testid="pane-toggles"]'));
     const names = controls.map((el) => el.getAttribute('aria-label') ?? el.getAttribute('data-testid'));
-    expect(names).toEqual(['Next record', 'Previous record', 'pane-toggles', 'Maximize', 'Close panel']);
+    expect(names).toEqual(['Next record', 'Previous record', 'pane-toggles', 'Maximize', 'Close']);
   });
 });
