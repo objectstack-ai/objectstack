@@ -201,6 +201,27 @@ function preloadAppRouteChunk(subPath: string, hostPaths: readonly string[] = []
   if (chunk) void chunk.preload().catch(() => {});
 }
 
+/**
+ * objectstack#28988 — the route paths that draw an object's LIST: the default
+ * list, a saved list view and the bare data surface. Record-scoped paths
+ * (`:objectName/record/...`, the `:objectName/:maybeRecordId` shorthand) and
+ * the create form are deliberately absent; see `appSurfaceAwaitsVerdict`.
+ */
+const OBJECT_LIST_ROUTE_PATHS: ReadonlySet<string> = new Set([':objectName', ':objectName/view/:viewId', ':objectName/data']);
+
+/**
+ * Whether the route at `subPath` (the path below `/apps/:appName`) draws an
+ * object's list. Matched the way `<Routes>` ranks paths, beside every path
+ * `AppContent` and the host declare, so a static route or a host route that
+ * shadows `:objectName` (`search`, `reports`, `system/...`) is not one.
+ */
+function isObjectListAppRoute(subPath: string, hostPaths: readonly string[] = []): boolean {
+  const routes = [...APP_ROUTE_METADATA_READS.map(({ path }) => ({ path })), ...hostPaths.map((path) => ({ path }))];
+  const matches = matchRoutes(routes, `/${subPath.replace(/^\/+/, '')}`);
+  const path = matches?.[matches.length - 1].route.path;
+  return path !== undefined && OBJECT_LIST_ROUTE_PATHS.has(path);
+}
+
 interface AppContentProps {
   /**
    * Extra <Route> elements appended to the inner /apps/:appName/* router.
@@ -550,12 +571,24 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // settings registered"), the raw capability error on a settings page, the
   // marketplace's admin-only notice. Each now reads as the app root does; the
   // pages' inner states stay for a caller the app lets in.
+  //
+  // objectstack#28988 — and the object LIST routes under the `setup` alias
+  // (`/apps/setup/OBJECT`, `…/view/ID`, `…/data`; the legacy
+  // `/apps/setup/system/users` forwards onto one). The `/apps/setup` subtree is
+  // a pseudo-route, so a member got the default app's chrome around the list
+  // while the canonical `/apps/com.objectstack.setup/OBJECT`, an ordinary
+  // unmatched app, already drew the refusal. The record routes the approvals
+  // inbox links to stay outside this gate, as above; the list paths are
+  // matched by route rank (`isObjectListAppRoute`), so they never reach one.
   const isSetupRootRoute = location.pathname === '/apps/setup' || location.pathname === '/apps/setup/';
   const [appSubRoot, appSubPage] = appSubPath.split('/');
   const isSettingsOrMarketplaceRoute =
     appSubRoot === 'system' && (appSubPage === 'settings' || appSubPage === 'marketplace');
+  const isSetupObjectListRoute = isSetupRoute && isObjectListAppRoute(appSubPath, hostRoutePaths);
   const appSurfaceAwaitsVerdict =
-    !!appName && !matchedApp && (isMetadataRoute || isSetupRootRoute || isSettingsOrMarketplaceRoute);
+    !!appName &&
+    !matchedApp &&
+    (isMetadataRoute || isSetupRootRoute || isSettingsOrMarketplaceRoute || isSetupObjectListRoute);
 
   // Post-publish readiness: when a requested app isn't in the loaded metadata,
   // re-check ONCE (the registry can lag a beat behind a publish) before
