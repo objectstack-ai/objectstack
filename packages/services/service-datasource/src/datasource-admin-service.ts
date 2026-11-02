@@ -1176,7 +1176,22 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       // inline copy is the last cleartext copy, so it is dropped only once the
       // existing ref is proved resolvable.
       const resolved = await this.tryReadSecret(plan.credentialsRef);
-      if (resolved == null || resolved === '') {
+      // [#29069] An empty credential is told apart from one that is gone, in
+      // the connect path's wording (`DatasourceConnectionService.connect`'s
+      // `secret === ''` branch): a row sealed empty before the admin doors
+      // refused an empty `secret` decrypts to ''. The outcome is the same
+      // refusal — dropping the inline copy would leave nothing that works.
+      if (resolved === '') {
+        return this.refuse(
+          name,
+          `Datasource '${name}' already references a stored secret, but credential `
+            + `'${plan.credentialsRef}' is empty (its sys_secret row holds an empty value). Removing the `
+            + 'inline credential would leave this datasource with no working credential at all.',
+          'Re-enter the credential in the connection form\'s secret field to set the datasource\'s '
+            + 'secret again — that rebinds it and replaces the empty one; the inline copy can then be removed.',
+        );
+      }
+      if (resolved == null) {
         return this.refuse(
           name,
           `Datasource '${name}' already references a stored secret, but it could not be resolved or `
