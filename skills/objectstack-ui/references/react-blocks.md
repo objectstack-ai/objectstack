@@ -24,7 +24,7 @@ Server-connected create/edit/view form for one object. Config props come from th
 | `customFields` | `any[]` | binding |  | Field definitions merged over the set generated from object metadata. With inline definitions and no data source, this becomes the only field source. |
 | `readOnly` | `boolean` | binding |  | Render every field read-only, whatever `mode` says. |
 | `drawerSide` | `'top' \| 'bottom' \| 'left' \| 'right'` | binding |  | Edge the drawer container opens from, when the React `ObjectForm` block opens this form with formType 'drawer' |
-| `drawerWidth` | `string` | binding |  | [DEPRECATED → size buckets] Width of the drawer container the React `ObjectForm` block opens with formType 'drawer', e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it. |
+| `drawerWidth` | `string` | binding |  | Size of the drawer container the React `ObjectForm` block opens with formType 'drawer', as a CSS length such as "480px": its width when drawerSide is left or right, its height when top or bottom. Unset, the drawer keeps its default size. |
 | `modalCloseButton` | `boolean` | binding |  | Show the close button of the block's modal container (formType 'modal'). |
 | `contentLayout` | `'simple' \| 'tabbed'` | binding |  | How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'. |
 | `confirmOnDiscard` | `boolean` | binding |  | Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately. |

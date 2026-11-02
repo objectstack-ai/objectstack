@@ -279,7 +279,7 @@ export const REACT_BLOCKS: ReactBlockDef[] = [
       // from the schema: only this block's `formType='drawer'` container
       // (objectui `ObjectFormContainer` → `DrawerForm`) reads them.
       { name: 'drawerSide', type: "'top' | 'bottom' | 'left' | 'right'", kind: 'binding', description: "Edge the drawer container opens from, when the React `ObjectForm` block opens this form with formType 'drawer'" },
-      { name: 'drawerWidth', type: 'string', kind: 'binding', description: '[DEPRECATED → size buckets] Width of the drawer container the React `ObjectForm` block opens with formType \'drawer\', e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it.' },
+      { name: 'drawerWidth', type: 'string', kind: 'binding', description: 'Size of the drawer container the React `ObjectForm` block opens with formType \'drawer\', as a CSS length such as "480px": its width when drawerSide is left or right, its height when top or bottom. Unset, the drawer keeps its default size.' },
       { name: 'modalCloseButton', type: 'boolean', kind: 'binding', description: "Show the close button of the block's modal container (formType 'modal')." },
       { name: 'contentLayout', type: "'simple' | 'tabbed'", kind: 'binding', description: "How the modal presentation lays out sections; 'tabbed' needs more than one section to differ from 'simple'." },
       { name: 'confirmOnDiscard', type: 'boolean', kind: 'binding', description: 'Ask before discarding unsaved edits when a drawer/modal form is dismissed. Set false to close immediately.' },

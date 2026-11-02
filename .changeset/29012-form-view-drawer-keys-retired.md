@@ -1,5 +1,6 @@
 ---
 '@objectstack/spec': minor
+'@objectstack/skills': patch
 ---
 
 feat(spec)!: a form view no longer declares `drawerSide` / `drawerWidth`; no form view opens in a drawer, so neither key was ever read there
@@ -8,7 +9,7 @@ Clause-②: no (narrowing)
 
 Metadata-protocol: narrowed
 
-Skills-docs: regenerated here — `skills/objectstack-ui/references/react-blocks.md` (`gen:react-blocks`) lists `<ObjectForm>`'s `drawerSide` / `drawerWidth` as binding props from the block's overlay instead of data props from the form view schema, with the same types and descriptions; no hand-written file under `skills/**` teaches either key on a form view (a `git grep` of `skills/` names only that contract and `rules/record-page.md`'s list-drawer width on `navigation`, which this does not touch).
+Skills-docs: regenerated here — `skills/objectstack-ui/references/react-blocks.md` (`gen:react-blocks`) lists `<ObjectForm>`'s `drawerSide` / `drawerWidth` as binding props from the block's overlay instead of data props from the form view schema, with the same types; `drawerWidth`'s description drops the form view's `[DEPRECATED → size buckets]` tag (the block's drawer has no size bucket) and says the value is the drawer's width, or its height from the top or bottom edge; no hand-written file under `skills/**` teaches either key on a form view (a `git grep` of `skills/` names only that contract and `rules/record-page.md`'s list-drawer width on `navigation`, which this does not touch).
 
 <!-- adr-0087: registered form-view-drawer-keys-removed, ui-form-view-drawer-keys-retired -->
 
