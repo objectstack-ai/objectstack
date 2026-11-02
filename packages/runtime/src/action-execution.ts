@@ -89,7 +89,7 @@ import {
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
 } from '@objectstack/objectql';
-import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
 // @objectstack/objectql (the engine owns the map they describe, and its
@@ -3724,7 +3724,20 @@ export async function executeDeclarativeUpdateAction(
     // ⛔ `ec`, never `buildActionExecutionContext(ec)`. See the docblock — this
     // single argument is the difference between a user edit and a privilege
     // escalation.
-    const written = await callData('update', { object: objectName, id: recordId, data }, driver, envId, ec);
+    // [#28856] An update the engine stored but whose parent roll-up it could
+    // not recompute (`ERR_SUMMARY_RECOMPUTE`) is still this action's write:
+    // the result below is composed from the answer `callData`'s producer
+    // attached to the refusal, exactly as from a normal answer, and attached
+    // in turn so each action door answers the action's success. Every other
+    // throw, a refusal before the write among them, propagates as is.
+    let stale: SummaryRecomputeRefusal | undefined;
+    let written: unknown;
+    try {
+        written = await callData('update', { object: objectName, id: recordId, data }, driver, envId, ec);
+    } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+        written = earnedAnswerOf(stale);
+    }
 
     const prior: Record<string, unknown> = subject.record ?? {};
     // The result carries the caller's merged patch (`record`'s fallback,
@@ -3768,13 +3781,15 @@ export async function executeDeclarativeUpdateAction(
         };
     }
 
-    return {
+    const result: DeclarativeUpdateResult = {
         operation: DECLARATIVE_UPDATE_OPERATION,
         object: objectName,
         id: recordId,
         record,
         ...(undo ? { undo } : {}),
     };
+    if (stale) throw withEarnedAnswer(stale, { ...result });
+    return result;
 }
 
 /**
@@ -3956,9 +3971,11 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
             action, objectName, recordId, params, subject, ec, driver, envId, callData,
         });
     } catch (err) {
-        await recordActionInvocation(deps, requestContext, envId, {
-            ...invocation, outcome: 'failed', ...actionInvocationFailure(err),
-        });
+        // [#28856] A refusal carrying the action's answer is answered as the
+        // success it is by the `run_action` tool, so the row records that.
+        await recordActionInvocation(deps, requestContext, envId, earnedAnswerOf(err)
+            ? { ...invocation, outcome: 'succeeded' }
+            : { ...invocation, outcome: 'failed', ...actionInvocationFailure(err) });
         throw err;
     }
     await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
@@ -3997,10 +4014,20 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
     // cannot disagree about the identity the write carries — the failure class
     // commit f19475c0a and #15168 each paid for once, on this exact seam.
     if (isDeclarativeUpdateAction(action)) {
-        const result = await executeDeclarativeUpdateAction(deps, action, {
-            objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData, requestContext,
-        });
-        return { ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result };
+        const answered = (result: unknown) => ({ ok: true, action: action.name, objectName, ...(recordId ? { recordId } : {}), result });
+        let result: DeclarativeUpdateResult;
+        try {
+            result = await executeDeclarativeUpdateAction(deps, action, {
+                objectName, actionName: name, subject, recordId, params, ec, driver, envId, callData, requestContext,
+            });
+        } catch (e) {
+            // [#28856] The write landed under a failing roll-up: the action's
+            // own answer rides the refusal for the `run_action` tool to relay.
+            const earned = earnedAnswerOf(e);
+            if (!earned) throw e;
+            throw withEarnedAnswer(e as SummaryRecomputeRefusal, answered(earned));
+        }
+        return answered(result);
     }
 
     // ── contract point 3: the caller-scope load's VERDICT, consumed ──────────

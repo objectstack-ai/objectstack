@@ -65,7 +65,7 @@ import {
 // generic replacement text — the same two `@objectstack/rest` composes into
 // `isScriptFaultMessage` / `UNCLASSIFIED_FAULT`, so this door's crash reading
 // cannot drift from the `/data` door's. ⛔ Never re-inline either.
-import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage, driverNotNullRefusalAnswer } from '@objectstack/types';
+import { isNativeErrorName, INTERNAL_ERROR_MESSAGE, sandboxBusinessMessage, driverNotNullRefusalAnswer, earnedAnswerOf, staleSummaryAnswerLines, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [ADR-0029 D9.6] The ONE "does a code package ship this?" reading, which the
 // activation write below asks to name the ledger row's package.
 import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core';
@@ -1068,6 +1068,17 @@ async function dispatchAdmittedRestAction(
         // carry a status now, so the extra layer lost its job.
         return { handled: true, response: deps.success(result) };
     } catch (err: any) {
+        // [#28856] An action whose write landed under a failing roll-up answers
+        // the result the runtime composed and attached (`executeDeclarativeUpdateAction`),
+        // as when the recompute succeeds; the stale column is logged once.
+        const earned = earnedAnswerOf(err);
+        if (earned) {
+            const log = deps.logger && typeof deps.logger.error === 'function'
+                ? (line: string) => deps.logger.error(`[HttpDispatcher] ${line}`)
+                : (line: string) => console.error(`[HttpDispatcher] ${line}`);
+            for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) log(line);
+            return { handled: true, response: deps.success(earned) };
+        }
         const full = err?.message ?? String(err);
         // The sandbox wraps a user throw as `<kind> '<name>' threw: <msg>` for
         // server logs; surface only the business `<msg>` to the client so an
