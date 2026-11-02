@@ -52,10 +52,18 @@ const LISTS: Record<string, Record<string, unknown>[]> = {
   page: [{ name: 'task_board', label: 'Task board', _packageId: PAIR }],
 };
 
+/**
+ * The package list as served: the code-provided base and its writable pair, a
+ * project package, which the cross-package leg's list scopes to.
+ */
+const PACKAGES = [
+  { manifest: { id: BASE, name: 'Showcase', scope: 'installed' } },
+  { manifest: { id: PAIR, name: 'Showcase (custom)' } },
+];
+
 /** Stable singleton — the page's load effect keys on the client identity. */
 const CLIENT = {
-  list: async (type: string) =>
-    type === 'package' ? [{ manifest: { id: BASE, name: 'Showcase', scope: 'installed' } }] : (LISTS[type] ?? []),
+  list: async (type: string) => (type === 'package' ? PACKAGES : (LISTS[type] ?? [])),
 };
 
 const entry = (type: string, label: string) => ({
