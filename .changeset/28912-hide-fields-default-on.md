@@ -16,4 +16,4 @@ A declared default moves. A list view whose `userActions` block says nothing abo
 - **Where the choice is kept** does not change. The control only subtracts from the columns the view draws. On a view that declares `columns`, or a saved view, the choice is stored on the reader's own list state and survives a reload for that reader only. On a system view that declares no `columns`, it lasts for the session. It never writes the shared view.
 - **To withhold the control**, write `userActions: { hideFields: false }`. Every authored `hideFields` parses exactly as before, and a non-boolean is still refused.
 - **Compiled artifacts.** A document that serialised an earlier parse (an `os compile` artifact) carries the old written `false` and keeps withholding the control. Recompile it, or delete the key.
-- The default change is declared in the build's default-change ledger. No key is added or removed.
+- **Upgrade path.** The ADR-0087 D3 semantic entry `list-view-hide-fields-default-on` carries the change to `os migrate meta` and the upgrade guide. The default change is declared in the build's default-change ledger. No key is added or removed.

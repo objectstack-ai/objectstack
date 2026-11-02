@@ -740,7 +740,7 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'document that SERIALISED an earlier parse (an `os compile` artifact) carries a written '
         + '`false` and keeps withholding the control: recompile it, or delete the key. To withhold '
         + 'the control, write `userActions: { hideFields: false }`. To take the platform default, '
-        + 'change nothing.',
+        + 'change nothing. D3 entry: `list-view-hide-fields-default-on`.',
     },
   ],
 };

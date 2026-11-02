@@ -1895,7 +1895,8 @@ export const VisualizationTypeSchema = lazySchema(() => z.enum([
  * renderer's legacy `=== true` read, not chosen as product; the renderer now
  * reads `ua?.hideFields !== false`. The choice stays the reader's own: stored
  * on their list state on a view that declares `columns` or a saved view,
- * session-only on a system view with no `columns` (objectui#10694).
+ * session-only on a system view with no `columns` (objectui#10694). D3 entry:
+ * `list-view-hide-fields-default-on` (protocol 18).
  *
  * `editInline` defaults ON by maintainer ruling (2026-10-10, the v18 line:
  * 「乙 v18 把 spec 默认翻成 true,editInline: false 变成关法。」): a list view
