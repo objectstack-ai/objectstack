@@ -123,8 +123,8 @@ const useRecordNotFoundTranslation = createSafeTranslation(
  * What a record form draws in place of its form for a `RecordNotFoundError`:
  * the record not-found state, never the "Error loading form" box (nothing
  * failed to load) and never an empty form. One drawing for every layout that
- * reads a record (`ModalForm`, `DrawerForm`, `TabbedForm`, `WizardForm`), so
- * each host shows the same state. The caller draws no footer or submit beside
+ * reads a record (`ObjectForm`'s default arm, `ModalForm`, `DrawerForm`,
+ * `TabbedForm`, `WizardForm`), so each host shows the same state. The caller draws no footer or submit beside
  * it: each already keeps those off while a load failure is shown.
  */
 export function RecordNotFoundState({ testId }: { testId: string }): ReactElement {
