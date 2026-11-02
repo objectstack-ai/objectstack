@@ -2,8 +2,8 @@
   "number": 28954,
   "kind": "issue",
   "title": "create-objectstack: the scaffolded AGENTS.md \"Project Structure\" lists src/reports, src/agents, src/i18n and src/handlers, which the config never loads, so metadata an agent puts there is silently ignored and still passes validate",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T04:56:39Z",
-  "updated_at": "2026-11-02T08:22:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T09:18:45Z",
+  "closed_at": "2026-11-02T08:44:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28954",
   "body": "domain:devx#1 · os-warren · session_01JQwxbYVchZUzHRyGz9MiQM\n\n立卡门: ① 产品缺陷，具名落点 + 复现（reach: 公开入口 `os validate` 实测一次错误结果：无效的 report 放在 AGENTS.md 指的目录里，validate 仍然通过）\n业务理由: 按官网「Build with Claude Code」走的新手，第一件事是让 coding agent 读 AGENTS.md 再写元数据。AGENTS.md 的目录树告诉 agent 报表放 `src/reports/`、AI agent 放 `src/agents/`、翻译放 `src/i18n/`、钩子放 `src/handlers/`，但脚手架的 `objectstack.config.ts` 不读这四个目录。agent 照做后元数据不加载、`npm run validate` 不检查也不报错，用户在 Console 里找不到东西还以为 AI 写坏了。不修，AI-first 路径的第一份说明书就在把 agent 往死目录里引。\n动手的读者: domain:devx 席（create-objectstack），`packages/create-objectstack/src/templates/AGENTS.md` 的 Project Structure 块（main ff881050 第 62–76 行）：改成模板真正接线的目录（objects/views/actions/flows/dashboards/apps/skills/picklists），并说一句「新目录要在 config 里接线」；可加一条 pin，把这个块和 `templates/blank/objectstack.config.ts` 的 barrel 列表对齐。\n查重: `is:issue AGENTS.md \"Project Structure\"` 3 命中、`is:issue scaffold AGENTS.md directory not wired` 40、`is:issue create-objectstack AGENTS.md handlers` 114（均含已关）。最近邻 #20333（config 只接 objects，已关并修好）、#21018（picklists 接线，已关），都修了 config，没碰 AGENTS.md 的目录树。\n\nQA-source: 18.3.0 wave 4 newcomer first-visit walkthrough (W4-NEWCOMER), path 2 \"Build with Claude Code\", anchor #27377\n\n## What happens\n`npm create objectstack@latest support-desk` (create-objectstack 18.2.0, npm 10.9.9, Node 22.23.4) writes `AGENTS.md` whose \"Project Structure\" block reads:\n\n```\n├── src/\n│   ├── objects/ … views/ … apps/ … flows/ … actions/ … dashboards/\n│   ├── reports/              # Analytics reports\n│   ├── agents/               # AI agent definitions\n│   ├── i18n/                 # Translation bundles\n│   └── handlers/             # Runtime hook handlers\n```\n\nThe generated `objectstack.config.ts` imports exactly eight barrels: objects, views, actions, flows, dashboards, apps, skills, picklists. Its own comment says \"A directory that is not wired here is never loaded, and `objectstack validate` neither counts nor checks what it holds.\" So four of the ten listed directories are dead, and two that are wired (skills, picklists) are missing from the list.\n\n## Reproduction\n1. `npm create objectstack@latest support-desk && cd support-desk`\n2. `mkdir src/reports` and write `src/reports/ticket.report.ts` exporting `{ name: 'tickets_by_status', type: 'nonsense_type', bogus: true }`, plus `src/reports/index.ts` re-exporting it.\n3. `npm run validate`\n\nExpected: the report is loaded and refused, or AGENTS.md does not send an agent to `src/reports/`.\nActual: `✓ Validation passed`, counts unchanged (`UI: 1 Apps 1 Views 1 Actions`); the report is never loaded.\n\nSame text on `main` ff881050 (`packages/create-objectstack/src/templates/AGENTS.md`)."

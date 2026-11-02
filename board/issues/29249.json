@@ -1,0 +1,31 @@
+{
+  "number": 29249,
+  "kind": "issue",
+  "title": "ui: the action text localizer resolves `description`, so an inline action's param dialog shows it in the user's language (cloud#3281 ruling A, half 2 of 2)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:19:48Z",
+  "updated_at": "2026-11-02T13:36:45Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29249",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate: executing a recorded ruling. objectstack-ai/cloud#3281 was ruled **A** by the maintainer (「3281 A 3138 A」, 2026-10-26, ruling comment 6408789175). This is the ui half; the spec half is objectstack-ai/objectstack#29248 and lands first.\n\n## What happens\n\nOnce an inline action can declare a `description` as an `I18nLabel` (a locale map), the console must collapse it to one string before `ActionParamDialog` shows it. Today the localizer does not touch `description`, so a locale map would reach the dialog unresolved, or the dialog falls back to the generic 「请填写以下信息以继续操作。」.\n\n## Where (objectstack `main` `0c0d3b68e1`)\n\n`ui/packages/react/src/hooks/useActionTextLocalizer.ts`, around line 129: `const DECLARED_COPY_KEYS = ['confirmText', 'successMessage', 'errorMessage'] as const;`. `elements.tsx` already forwards `description` to the dialog.\n\n## Ask\n\n- `DECLARED_COPY_KEYS` gains `description`, and the doc comment above `ActionTextLocalizer` names it.\n- Tests: an inline action with a zh-CN/en `description` map shows the active locale's string in the param dialog; an action with no `description` still shows the generic line.\n\n## Business reason\n\nThe console's invitation dialog is the one place a new owner invites a colleague. It should say what happens next in the owner's language.\n\n## Order\n\nBlocked-by: objectstack-ai/objectstack#29248 (the spec half). After both land, cloud bumps its pins and gives `INVITE_ACTION` the framework action's `description` in four locales (cloud#3281).\n\n## Dedup\n\nSearched objectstack issues and PRs for \"DECLARED_COPY_KEYS description\", \"InlineActionSchema description\" and \"cloud#3281\": nothing open or merged."
+}

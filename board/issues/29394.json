@@ -1,0 +1,28 @@
+{
+  "number": 29394,
+  "kind": "issue",
+  "title": "objectql: a $search expansion emits $icontains over a column the #15661 text-operator door calls never-string-capable (number, boolean, date, json), and the door never judges it; once #29008 honours searchable: true this can reach Postgres",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:02:21Z",
+  "updated_at": "2026-11-02T14:02:21Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29394",
+  "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ① an out-of-scope finding (class a, carrier `domain:server`) named by the #29008 dev (os-dev-report 6578774069, Q3) and by the `CONTRACT_REVIEW_TIER` review of PR #29385 (④ should-fix 2). ⛔ Not a claim. No grade: triage sets it.\n\n## What the code does (read, not measured on Postgres)\n\nIn `packages/objectql/src/engine.ts` `find()`, the #15661 door (`assertTextOperatorTargetsAreStringCapable`, ≈L1302) runs from the filter ladder on the caller's own `where` (≈L14464), and only then does `expandSearchOnAst` (≈L14478) add a `$icontains` clause for each resolved search field. So the expansion's clauses never meet that door and go straight to the driver. SQLite coerces and matches on the textual form. Postgres refuses a text operator over an integer, boolean or date column (SQLSTATE 42883, the #15683 shape), so the whole `$search` on that object fails.\n\nThe shape already exists for a declared `searchableFields` that names such a column (since #6674). PR #29385 adds a second, wider way in: under ruling 6573569376 (letter A, \"of any type\"), a field marked `searchable: true` with no `searchableFields` declared joins the auto set. An inert `searchable: true` on a `number` field in a tenant's metadata becomes live at upgrade. No shipped object has such a field. The census in the review shows only seven flagged `lookup`s.\n\n## Wanted (the server half, without departing from the ruling)\n\nMake the expansion skip, or cast to text, any resolved column the spec's text-operator sets (`packages/spec/src/data/filter-text-operator-declared-type.ts`) call never-string-capable. Do it for both branches, declared and auto. Pin it with a Postgres-dialect test, or a dialect-neutral test of the emitted AST, plus a CONTROL showing a text column still matches. If a cast is chosen, say what a search term matches on a date column.\n\nReader who acts: the `packages/objectql` search owner (`domain:server`).\n\nRelated: #29008 / PR #29385, #15661, #15683.\n\nDedupe: searched `expandSearchOnAst icontains non-string` and `search icontains number column postgres`. Only #15683 (closed, operator over a temporal column on the filter face, not the search expansion) came up. **New.**"
+}

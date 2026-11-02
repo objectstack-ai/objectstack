@@ -2,8 +2,8 @@
   "number": 29059,
   "kind": "issue",
   "title": "cli: harden the os validate/build flow-region gate (silent parse skip, vacuous blindness pin, untested packages[] subject) and count refused flows at boot",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:automation",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:37:05Z",
-  "updated_at": "2026-11-02T07:26:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T11:29:01Z",
+  "closed_at": "2026-11-02T11:25:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29059",
   "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: the four should-fix items of the contract review PASS on PR #29043 (comment 6570752949, PASS on head `d246cd7e`), plus the boot half of #28893 that the order kept to \"measure and name\". Filed by `domain:server` seat 5 so #28893 does not close over them. Graded by this seat: p3. None of them changes what is refused today; they make the new gate fail loudly instead of passing quietly, and make a refused flow visible at boot. Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: authors who run `os validate` / `os build` on a stack with flows, and operators who read the `os dev` / `os serve` boot banner.\nReader who acts: a `domain:server` seat.\n\n## What happens\n\n1. **Silent skip.** `findFlowRegionRefusals` (`packages/cli/src/utils/flow-region-shape.ts`, added by PR #29043) runs `FlowSchema.safeParse` on a flow that the stack schema already parsed, and `return`s with no row if that parse fails. Today the parse cannot fail, because `FlowSchema` is idempotent on its own output. If that ever stops being true, the gate passes the flow with no trace, which is the false-clean direction #28893 exists to close.\n2. **Vacuous pin.** The `OUTSIDE_THE_TABLE` row in `packages/cli/test/authoring-rule-command-parity.test.ts` asserts only that `runAuthoringRules('lint', …)` has no `single-exit` finding. It never asserts that the fixture trips `findFlowRegionRefusals`. A fixture typo (a region that is in fact single-exit) would leave the blindness assertion green. Its docblock also says \"`os lint` passes it\", but the pin measures the registry, not the `os lint` command.\n3. **Untested subject.** `validate-flow-region-shape.test.ts` has no `packages[]` case. The `packages[N].manifest.flows[i]` walk and its `path` spelling are claimed by the changeset and the PR body but are untested. The precedent #28727 tested both subjects.\n4. **Stale prose.** The parity file's test-budget header says \"the nine rule cases run in process\". There are now ten.\n5. **Boot.** A flow refused at `registerFlow` is logged once at WARN and boot continues (#28893's second ask). The #28893 dev measured `printAutomationSummary` and `declaredFlowCount` and reported that no one-line, same-file count exists. The refusal shows only as a per-flow line under Boot diagnostics.\n\n## Wanted\n\n- (1) On a parse failure, push a row naming the flow (or throw) instead of returning. Add a test that forces the branch.\n- (2) Assert in the same case that `findFlowRegionRefusals(testCase.stack)` is non-empty and carries the marker. Reword the docblock to say what is measured.\n- (3) Add one assembled-artifact (`packages[]`) fixture, asserting the exit code, the `path` and that no `dist/` is written.\n- (4) Fix the count.\n- (5) Count refused flow registrations in the boot banner beside the declared count (for example \"N flows declared, M refused at registration\"), from the engine's own refusals. ⛔ No change to whether boot continues. If the count needs a new engine or plugin surface, report the shape first instead of widening it.\n- Tests red first for (1), (2), (3) and (5).\n\nBlocked-by: #28893 (PR #29043 adds the gate this hardens).\n\nNot in this card: lint parity is #29049, and the top-level cycle is #29051.\n\nDedupe: searched `flow region gate packages[] test`, `boot refused flow count`; none. **New.**\n\nLinks back: #28893, PR #29043."

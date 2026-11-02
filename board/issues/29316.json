@@ -1,0 +1,34 @@
+{
+  "number": 29316,
+  "kind": "pull_request",
+  "title": "fix(app-shell): metadata history Back to item opens the item under every route nesting",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T11:41:02Z",
+  "updated_at": "2026-11-02T12:40:11Z",
+  "closed_at": "2026-11-02T12:40:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T12:40:08Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29316",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbKeKvZtRKpgpNfnuuBoDndk)_\n\nFixes #28626\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：元数据条目历史页的「Back to item」不再按匹配到的路由回退，改为从当前 URL 去掉最后一段（`history`）并保留查询串，因此回到 `…/metadata/TYPE/NAME`。\n- **为什么改**：原写法 `../NAME` 相对路由解析，会丢掉整条路由：有应用时落到以条目名命名的类型列表，无应用时落到应用根下的路径，并且丢掉 `?package=` / `?scope=environment`。目前在线上只有 Setup 的数据源历史页还会走到这条链接。\n- **风险与回滚**：只改一个按钮的跳转目标；Studio「All metadata」区域的链接分支没动。回滚即还原 `ResourceHistoryPage.tsx` 一处。\n- **先看**：`ui/packages/app-shell/src/views/item-tools/ResourceHistoryPage.tsx` 的 `goBackToItem`；新测试 `ResourceHistoryPage.backToItem-28626.test.tsx`。\n- **两分钟验证**：`pnpm --dir ui exec vitest run packages/app-shell/src/views/item-tools/ResourceHistoryPage.backToItem-28626.test.tsx`，预期 6/6 通过。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n`MetadataResourceHistoryPage` built its non-area **Back to item** link as `navigate('../NAME')`. React Router resolves that `..` against the matched route, not the URL, so it drops the whole matched route:\n\n- with an active app (`/apps/:appName/*` → `metadata` → `:type/:name/history`) it landed on `/apps/setup/metadata/NAME`, the `:type` route, which Setup then sends to Studio's list of a type named after the item;\n- with no app (`/apps/:appName/*` → `metadata/:type/:name/history`) it landed on `/apps/setup/NAME`;\n- under the exported `MetadataResourceRouter` (`component/:ns/:name/*`, type in `?type=`) it landed on `/apps/APP/NAME`;\n- the query (`?package=`, `?scope=environment`, `?type=`) was dropped every time.\n\nThe non-area branch now cuts the URL's own last segment as it is spelled and keeps the query: `navigate({ pathname: pathname.replace(LAST_SEGMENT, ''), search })`, where the pattern is a slash, one or more non-slash characters and an optional trailing slash at the end of the path. A relative `navigate({ pathname: '..', search }, { relative: 'path' })` was tried first and dropped: the router resolves it against the decoded match pathname, so an encoded name came back decoded (`sales%20db` → `sales db`). The encoded-name test row pins that.\n\nThe Studio \"All metadata\" area branch (built from `areaHost.basePath`) is unchanged and is the test's control row.\n\n**Reach today.** Since #28818 every Setup metadata route except the datasource's redirects to Studio's area, so in the Console only the datasource history page (with and without an active app) still reaches this link. The exported router is not mounted by the Console (`component/metadata/resource/*` is caught by `LegacyMetadataRedirect`), but a host can mount it, and the fix covers it too.\n\n## Tests\n\nNew `ui/packages/app-shell/src/views/item-tools/ResourceHistoryPage.backToItem-28626.test.tsx`: the real page and React Router, the metadata client stubbed. Six rows: both `AppContent` nestings, the query kept under both, an encoded name kept encoded, the exported router's splat with `?type=`, and the Studio area as control.\n\n- Fix head `da4f9be7`: 6 passed.\n- Red on the current line: the same file against `origin/main`'s page (`8a8a03d3`, restored from base, then restored to `HEAD` and proven by hash and an empty `git diff HEAD`): 5 failed, 1 passed (the Studio control). The relative-`..` variant (`6108d08c`) was 5 passed, 1 failed (encoded name).\n\n## Acceptance notes\n\n- Only the datasource history page reaches this link live in the Console today, as measured above.\n- Datasource names are `^[a-z_][a-z0-9_]*$` in the spec, so the decoded spelling never bites the live datasource page; the encoded-name row guards the exported router with other names.\n\n## Verification\n\nAll on head `da4f9be7`.\n\n<details><summary>Tests and type-check</summary>\n\n- `pnpm --dir ui exec vitest run packages/app-shell/src/views/item-tools/ResourceHistoryPage.backToItem-28626.test.tsx`: Tests 6 passed (6).\n- Reverse leg, `origin/main`'s page restored into the tree: Tests 5 failed, 1 passed (6); restored to `HEAD`, hash matched, `git diff HEAD` empty.\n- Every ui test file that names the page (`git grep -l` on `ResourceHistoryPage` / `MetadataResourceHistoryPage`, 21 files across app-shell and the console): Test Files 21 passed (21), Tests 306 passed (306). CI's Test UI runs the rest.\n- `pnpm exec turbo run type-check --filter=@object-ui/app-shell`: Tasks 65 successful, 65 total.\n- `pnpm --dir ui exec vitest run scripts/`: Test Files 169 passed, 2 skipped (171).\n\n</details>\n\n<details><summary>Derived gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --ran`: 34 derived families, 34 run, 0 NOT-MEASURED; every one exit 0, `check-sdui-manifest` included (no registry change).\n- `PR_BODY=... node scripts/check-partof-closing-keyword.mjs`: exit 0.\n- `pnpm --dir ui check:new-line-citations`: 0 new citations, exit 0.\n- Full dogfood battery: n/a (no `!` in the title, no narrowing arm).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jSipqJ9BXYCu6y2jgs)_\n"
+}

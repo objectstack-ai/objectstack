@@ -1,0 +1,37 @@
+{
+  "number": 29274,
+  "kind": "issue",
+  "title": "console login: under SSO enforcement the only working \"Sign in with SSO\" button sits behind the \"Use a password instead\" link",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:50:32Z",
+  "updated_at": "2026-11-02T13:53:20Z",
+  "closed_at": "2026-11-02T13:53:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29274",
+  "body": "domain:ui#5 · zhuangjianguo · session_01QsR2jQjvWkZ7is6GXbC6DB\n\nFiling gate: ① a user-visible sign-in defect with a named location and a reproduction. It is an out-of-scope finding, class a, from #29159 (PR #29257) and was filed by `domain:ui#5`. ⛔ Not a claim. Not graded: triage sets the grade.\n\n**Business reason.** On a deployment that enforces SSO (`OS_SSO_ENABLED=true OS_AUTH_SSO_ONLY=true`, with an OIDC provider registered), the sign-in card first shows only the SSO-only sentence and a link labelled \"Use a password instead\". The deployment's only working way in, the email-routed **Sign in with SSO** button, appears only after the user clicks that password link. A user told \"sign in with your organization's single sign-on\" sees no SSO control and is steered toward a password they may not have (JIT-provisioned SSO users have none). The operator docs (`content/docs/reference/security-and-compliance.mdx`) tell operators \"When SSO is on you can disable password login entirely\", so this is the configuration they are told to use.\n\n**Reach: MEASURED at a public door** by the #29159 os-dev at `origin/main` `f6a04e3a`. The pre-fix `LoginForm` behaves the same on this path, and PR #29257 does not change it.\n- Staging: a fresh showcase with `OS_SSO_ENABLED=true OS_AUTH_SSO_ONLY=true`. The admin (break-glass) called `POST /api/v1/auth/sso/register` for OIDC provider `acme-sso`, domain `acme.example`, and got 200.\n- `GET /api/v1/auth/config` answered `emailPassword {enabled:true, disableSignUp:true}`, `features.sso: true`, `features.ssoEnforced: true`, `socialProviders: []`.\n- Console `/login`, fresh Playwright context, 1280×800. First paint: the SSO-only copy, 0 \"Sign in with SSO\" buttons, 0 email fields, 0 password fields, and 1 \"Use a password instead\" link (the only control). After clicking that link: 1 SSO button, 1 email field, 1 password field. Typing `jane@acme.example` and clicking Sign in with SSO sends `POST /api/v1/auth/sign-in/sso`, which returns 200 with the IdP authorize URL, and the browser navigates to the IdP.\n- Screenshots: `/mnt/project-files/issue-29159/reach-sso-enforced-first-paint.png`, `/mnt/project-files/issue-29159/reach-sso-enforced-after-break-glass.png`.\n- Named producer: none in examples, scripts or hotcrm (`git grep ssoOnlyMode|OS_AUTH_SSO_ONLY|OS_SSO_ENABLED`). The producers are deployments that follow the operator docs.\n\n**Where (on `main` after PR #29257).** `ui/packages/auth/src/LoginForm.tsx`: the email-routed SSO button renders inside the password form block, which is collapsed under enforcement (`passwordFormCollapsed`) until the break-glass link sets `showPasswordFallback`. The SSO-only view draws only `SocialSignInButtons` (federated providers) and the break-glass link.\n\n**Wanted.**\n1. Under declared enforcement with `features.sso: true`, the first paint offers the SSO path itself: the email field that routes to the IdP plus the \"Sign in with SSO\" button, with no password field.\n2. \"Use a password instead\" stays the break-glass route to the password form and keeps its meaning.\n3. A deployment with federated providers only, a non-enforced deployment, and the no-method state from #29159 are unchanged.\n\n**Tests.** `{ssoEnforced:true, sso:true}` shows an email field and the SSO button at first paint and no password field. The break-glass link still reveals the password field. Ablation: restoring the button inside the collapsed form makes the case red.\n\n**Reader.** `domain:ui` (`ui/packages/auth`), size S. Serialize after PR #29257 (#29159) and seat 2's #29105 (`LoginPage.tsx`).\n\n**Dedupe.** Searched `\"Sign in with SSO\" enforced login` (6 hits) and `ssoEnforced break-glass SSO button` (2 hits: #29159, the parent of this finding; #25083, closed, hosted SSO-only user management, a different door). No card covers this.\n\nLinks back: #29159, PR #29257."
+}

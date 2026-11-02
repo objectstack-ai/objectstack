@@ -1,0 +1,35 @@
+{
+  "number": 29185,
+  "kind": "issue",
+  "title": "docs(north-star): the road paragraph says \"four promises\" and lists five entries — make the count and the list agree (#28842 follow-up, ruled)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T08:57:12Z",
+  "updated_at": "2026-11-02T11:52:16Z",
+  "closed_at": "2026-11-02T11:52:16Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29185",
+  "body": "director#1 · zhuangjianguo · session_01QsR2jV5sBSzCYNEDgpYLJw\n\nFiling gate: **② a maintainer decision.** The maintainer, on batch #452 item 2 (PR #28842's follow-up), verbatim: 「#452 其他同意」 — ruling 6572971843 (PR #28842): the count is corrected in a one-line follow-up. ⛔ Not a claim. `domain:skills`, docs only, size XS, Tier H by path (`docs/NORTH-STAR.md`), so the PR waits for the maintainer's own click.\nBusiness reason: `docs/NORTH-STAR.md` is the file every agent reads verbatim before it works. Its road paragraph states \"four promises\" and then lists five entries, so an agent that counts copies a number that does not add up, and a reader who trusts the sentence doubts the rest of the file. PR #28842 translated the sentence as written because the count was out of that card's scope (its acceptance note says so).\nReader who acts: `domain:skills` (the North Star's owner lane). No code, no protocol.\nDedupe (open AND closed): `four promises NORTH-STAR` → #28816 (the English original, landed as PR #28842, this card's source), #22172 (the promise-to-step mapping that wrote the sentence), #22195 (unrelated); no open card asks for the count.\n\n## 维护者速读\n\n- **改了什么**(本卡要做的):北极星「道路」那一段写着「四个承诺」,后面却列了五项(①、②③、④、⑤、⑥),把句子和清单改成同一个数。\n- **为什么**:这是所有 Agent 逐字读的文件,数字对不上就是一个会被照抄的错。\n- **先看**:`docs/NORTH-STAR.md` 第 11 行,\"The four promises are each kept by a step: ① AI can write it · ②③ it executes · ④ you own it · ⑤ agents can operate it · ⑥ it closes the loop.\"\n- **需要你做的**:PR 来了点一次(Tier H 路径)。\n\n## Measured (`origin/main`, read-only)\n\n- `docs/NORTH-STAR.md:11` reads: \"The four promises are each kept by a step: ① AI can write it · ②③ it executes · ④ you own it · ⑤ agents can operate it · ⑥ it closes the loop.\" Five entries follow \"four promises\". The four promises, as the positioning states them (`README.md`, \"AI writes it, the runtime runs it, agents operate it, you own it\"), are the first four entries; \"⑥ it closes the loop\" is the road's last step, not a promise.\n- There is no Chinese North Star file on `main` (`docs/` holds `NORTH-STAR.md` only), so the correction is one file.\n\n## Wanted\n\n1. Make the sentence and its list agree, keeping the promise-to-step mapping #22172 wrote: either state that the four promises are kept by steps ①–⑤ and the road's sixth step closes the loop, or count what the list counts. The seat chooses the wording; the test is that a reader counts the number the sentence states.\n2. Nothing else in the file moves.\n\n## Done criteria\n\n- `docs/NORTH-STAR.md`'s road paragraph states a count and lists that many entries, with the four promises still each mapped to a step (one diff hunk, prose only).\n- The PR carries a 维护者速读 and is approved by the maintainer (Tier H path).\n\nDedupe words: four promises, five entries, north star road paragraph, promise-to-step mapping.\n\nRuling-ref: PR #28842 comment 6572971843 (batch #452 item 2, 批+改).\nRelated: #28816, PR #28842, #22172."
+}

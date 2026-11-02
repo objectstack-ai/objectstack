@@ -1,0 +1,35 @@
+{
+  "number": 29198,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): deleteMany names the id entry it refuses",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:11:29Z",
+  "updated_at": "2026-11-02T10:40:01Z",
+  "closed_at": "2026-11-02T10:39:59Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T10:39:59Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29198",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9PYTuLPa8oWyz3qTsijRhsG)_\nFixes #29137\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：批量删除(deleteMany)的 ids 里有空字符串、null 或对象时，仍然 400 拒收，但 fields 现在点名出错的那一项(ids.N)，空字符串报 required，其余报 invalid_type。\n- 为什么改：原来不论哪种都只回一句「ids 必须是记录 id 数组」且 fields 为空，ids 明明是数组，调用方找不到是哪一项出错。\n- 风险与回滚：只改拒收时的句子和 fields，拒收与放行的范围不变；回滚即 revert 本 PR。\n- 先看：packages/metadata-protocol/src/protocol-batch-data.ts 的 deleteManyData 拒收分支和 deleteManyIdEntryField。\n- 两分钟验证：pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.delete-many.test.ts，应全部通过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n`deleteManyData` (the bulk delete door of `@objectstack/metadata-protocol`) used one check, with one sentence and no `fields`, for two different faults: `ids` is not an array, and `ids` is an array with an entry that is not a record id. It now splits them:\n\n- `ids` not an array: unchanged, the sentence \"requires 'ids' to be an array of record ids\" and no `fields`.\n- `ids` an array with bad entries: still `400 VALIDATION_FAILED`, now with one `fields[]` row per offending entry, `{ field: 'ids.N', code, message }`, the shape the REST ingress already gives `[null]` (`zodIssuesToFields`). An empty string answers `required` (the same fault the batch door's `rowRequiredIdError` calls \"Record id is required\"), anything else that is not a string or number (null, an operator object, a boolean) answers `invalid_type`. The sentence names the first offending entry, and says how many were refused when more than one.\n\nWhat is refused does not move: the fail-closed rule for non-scalar entries is unchanged, and a whitespace-only id still reaches the row loop and reports `RECORD_NOT_FOUND` for its row. No new error code (the codes are existing members of the ADR-0114 field-level catalog), no `packages/spec` edit.\n\n## Tests\n\n- `packages/metadata-protocol/src/protocol.delete-many.test.ts`: new cases for `['']`, `['a', '']`, `[{\"$ne\":null}]` (still refused, now named), `[null]` (same pair as the ingress), several bad entries named at once, a non-array (old sentence, no `fields`), and `['  ']` (still reaches the row loop).\n- `packages/rest/src/rest-delete-many-ingress.test.ts`: a new block through the real protocol at the REST door: `{\"ids\":[\"a\",\"\"]}` answers 400 with `fields` naming `ids.1` as `required`, and `[null]` keeps the ingress answer `ids.0` / `invalid_type`.\n- No existing test was edited.\n\n## Verification\n\nBase `fea2dbb7`, head `9e074bf5`.\n\n<details><summary>Base reading (REST door in-process, real protocol, fake engine)</summary>\n\n```\n{\"ids\":[\"\"]}           400 \"requires 'ids' to be an array of record ids\"  fields: []\n{\"ids\":[\"a\",\"\"]}       400 \"requires 'ids' to be an array of record ids\"  fields: []\n{\"ids\":[{\"$ne\":null}]} 400 \"Invalid deleteMany request\"  fields: [ids.0 invalid_type]  (ingress)\n{\"ids\":\"a\"}            400 \"Invalid deleteMany request\"  fields: [ids invalid_type]    (ingress)\n{\"ids\":[null]}         400 \"Invalid deleteMany request\"  fields: [ids.0 invalid_type]  (ingress)\n{\"ids\":[\"  \"]}         200 row RECORD_NOT_FOUND\n```\n\nIn-process (protocol called directly) every one of the first five got the array sentence and no `fields`. Premise holds.\n</details>\n\n<details><summary>Suites</summary>\n\n- `pnpm --filter @objectstack/metadata-protocol test`: Test Files 297 passed, 4 skipped; Tests 22069 passed, 26 skipped. `typecheck`: exit 0.\n- REST deleteMany data-door tests (the 17 `packages/rest/src/*.test.ts` files that mention deleteMany): Test Files 17 passed; Tests 1049 passed.\n- `pnpm exec eslint --no-inline-config` on the three touched source/test files: exit 0.\n</details>\n\n<details><summary>Ablation (two legs, each rebuilt, restored, git diff HEAD empty)</summary>\n\n- Leg 1, drop `err.fields = idFields`: 5 protocol cases red (`expected undefined to deeply equal [ { field: 'ids.0', ... } ]`) and the REST case red (`expected [] to deeply equal [ [ 'ids.1', 'required' ] ]`).\n- Leg 2, accept an empty string as an id: 3 protocol cases red and the REST case red (`expected 200 to be 400`).\n- Restored through `ablation-replace.mjs --restore` (blob equals HEAD), rebuilt, `ablation-dist-preflight --absent` passed.\n</details>\n\n<details><summary>Gates</summary>\n\n`dispatch-gates --commands` derived 60 commands; 58 exited 0. `check-plugin-teardown-shape --self-test` exited 3 on a shallow clone, then 0 after fetching its pinned fixture commit. `check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET: needs the whole workspace built): NOT MEASURED locally, CI runs it. `--ran` reconciliation: 60 derived, 60 run, 0 UNRUN.\n</details>\n\n## Acceptance notes\n\n- Choice of `required` for an empty string (rather than `min_length`, which a `z.string().min(1)` ingress would spell) follows the batch door's \"Record id is required\" for the same fault. Flagged to the seat as an open question.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQJyGvWVm7dbChPMZ7)_\n"
+}

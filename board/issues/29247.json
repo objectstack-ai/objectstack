@@ -1,0 +1,36 @@
+{
+  "number": 29247,
+  "kind": "issue",
+  "title": "DrawerForm, TabbedForm and WizardForm: editing a record that does not exist opens a blank editable form",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:17:53Z",
+  "updated_at": "2026-11-02T13:36:50Z",
+  "closed_at": "2026-11-02T13:35:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29247",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from #29157 (PR #29246; report `/mnt/project-files/issue-29157/os-dev-report.md`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** A user who opens an old link to a deleted record in a drawer, tabbed or wizard form sees a blank form they can edit. They fill it in and press save, and only then learn the record does not exist. #29157 fixes this for the modal form (the `?form=` overlay) only. The other three form shells still do it.\n\n**Measured (the #29157 dev, by reading at `dedc3505`; the modal case was probed live in tests).** `ObjectStackAdapter.readOne` answers `null` on a 404, and each shell turns that into an empty record:\n- `ui/packages/plugin-form/src/DrawerForm.tsx:448`: `setFormData(data || {})`\n- `ui/packages/plugin-form/src/TabbedForm.tsx:415`: `setFormData(data || {})`\n- `ui/packages/plugin-form/src/WizardForm.tsx:678-679`: `setFormData(data || {})`, which also sets `setPersistedRecord`\n\n**Wanted.** In edit mode, a null read in each shell draws the same not-found state PR #29246 gives `ModalForm`: `Empty` with `empty.recordNotFound` and `empty.recordNotFoundDescription`, no form, no footer and no save. Reuse #29246's private `RecordNotFoundError` in `loadFailure.ts`. Create mode and a found record are unchanged. No new string.\n\n**Tests.** For each shell, an edit whose `findOne` answers null renders the not-found state and no save control. Controls: create, and a found record. Each must be red on main.\n\n**Reader.** `domain:ui` (`area:records`). Size S. Serialize after PR #29246 (#29157), which adds the shared failure marker.\n\nLinks back: #29157, PR #29246."
+}

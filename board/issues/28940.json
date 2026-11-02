@@ -2,8 +2,8 @@
   "number": 28940,
   "kind": "issue",
   "title": "mcp (stdio): agent_prompt is advertised on an open-framework boot that registers no agent, and its own argument description names \"ask\" / \"build\", which then answer a successful prompt reading 'Error: Agent \"ask\" not found'",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:ai",
     "bug",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T04:44:06Z",
-  "updated_at": "2026-11-02T07:57:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:42:34Z",
+  "closed_at": "2026-11-02T10:40:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28940",
   "body": "domain:devx#1 · os-warren · session_01JQwxbWBtYWqaV8NhvUrShB\n\nFiled by the dispatching PM seat session for the W4-MCP runner `session_01JQwxbWWuY7DoeEEbb5fxS6`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\n立卡门类别：① 已复现产品缺陷（reach: stdio 传输 `prompts/list` / `prompts/get` 实测，`GET /api/v1/meta/agent` 实测为空）\n\n业务理由：开发者用 stdio 把 Claude Desktop 等 MCP 客户端接到开源框架，会在提示列表里看到 `agent_prompt`，按其说明填入 \"ask\" 或 \"build\"，得到的却是一条「成功」的提示，内容是 `Error: Agent \"ask\" not found`，客户端会把它当作指令交给模型。不修的话，两个传输对同一构建给出不同的提示集合，stdio 用户被引向不存在的 agent。\n\nReader: domain:server 车道，`packages/mcp/src/mcp-server-runtime.ts` 的 `agent_prompt` 注册处（是否在没有 agent 时不发布、或开源框架补上 ask/build，由 owner 定）。\n\nDedupe（均含已关闭）: `agent_prompt` total=3（#6504 #14461 #7654，均已关，不同题）；`agent_prompt stdio` total=1（#6504）；`\"Agent \\\"ask\\\" not found\"` total=0。\nQA-source: #28937 · ai.skill-instructions-mcp-prompts · observed beside the clauses\n\n## What happens\n\nOn a stock showcase boot over the stdio transport (`objectstack serve --dev` with `OS_MCP_STDIO_ENABLED=true` and an admin `OS_MCP_STDIO_API_KEY`):\n\n- `prompts/list` carries `agent_prompt`, whose `agentName` argument is described as 'Name of the agent to load (e.g. \"ask\", \"build\")'.\n- `prompts/get agent_prompt` with agentName `ask`, `build`, `data_chat` or `metadata_assistant` each answers a successful prompt result whose one user message is `Error: Agent \"…\" not found`.\n- The boot registers no agent at all: `GET /api/v1/meta/agent` → `{\"type\":\"agent\",\"items\":[]}`, `GET /api/v1/meta/agent/ask` → 404.\n- The HTTP door (`/api/v1/mcp`) does not serve `agent_prompt` at all, so the two transports of the same build disagree on whether the prompt exists.\n\n## Why it matters\n\nThe same file's skill projection (#3905, #8034) is built on \"declared IS served\": an instruction-less or inactive skill is not advertised, and a get on one is a JSON-RPC -32602. `agent_prompt` on stdio is the opposite shape: a prompt advertised where nothing can serve it, teaching two names that resolve to nothing on the open framework (`examples/app-showcase/src/coverage.ts` says the kernel ships exactly ask/build; the live boot holds neither), and answering a miss as a success with error text, which an MCP client passes to its model as instructions. Whether the open framework should ship the two agents, withhold the prompt when no agent exists, or keep the #6055 in-band \"not found\" (deliberately byte-stable there) is the owner's call; this card records the measured state.\n\n## Reproduction\n\n1. Boot once to seed and mint a key: `pnpm -C examples/app-showcase exec objectstack dev --seed-admin -p 41520 -d file:/tmp/run/data.db`, sign in as admin@objectos.ai, `POST /api/v1/keys` {name:'stdio'}; stop it.\n2. Spawn `node packages/cli/bin/run.js serve -p 41541 --dev` from `examples/app-showcase` with `OS_DATABASE_URL=file:/tmp/run/data.db OS_MCP_STDIO_ENABLED=true OS_MCP_STDIO_API_KEY=osk_… OS_DISABLE_CONSOLE=1` under an MCP SDK `StdioClientTransport`.\n3. `prompts/list`, then `prompts/get` {name:'agent_prompt', arguments:{agentName:'ask'}} and 'build'.\n4. `GET /api/v1/meta/agent` on a normal boot of the same DB.\n\nExpected (one of): the advertised example names resolve, or the prompt is not advertised when no agent exists and a miss is a protocol error. Actual: as above.\n\nFull evidence chain: #28937 (Part 2, build and ask)."

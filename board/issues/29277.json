@@ -1,0 +1,33 @@
+{
+  "number": 29277,
+  "kind": "issue",
+  "title": "objectql: a cleared optional unique `lookup` or `select` still stores '' and the second cleared record is refused 409 UNIQUE_VIOLATION",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "domain:server",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:52:20Z",
+  "updated_at": "2026-11-02T12:35:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29277",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① out-of-scope finding of the #29176 dev (os-dev-report 6575284496, `out_of_scope_findings` class a), measured at PR #29271's head `28fb6173`; kept out of that PR because the `$empty` ruled table reads `''` as a value on single `select` / `lookup`, so it needs its own ruling. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p2 · the sibling of #29176 on the non-text types.\n\nReach: any object with an optional `lookup` or `select` field declared `unique` (or in a unique `indexes[]` entry), when two records are saved with that field cleared; the console sends `''` for a cleared lookup / select.\nReader who acts: a `domain:server` seat (`packages/objectql/src/validation/record-validator.ts`, the write door #29176 extended), after a ruling on the `$empty` reading.\n\n## What happens (dev's scratch probe on SQLite at `28fb6173`)\n\n- unique optional text written `''` twice → both land (PR #29271 stores `null`).\n- unique optional `lookup` written `''` twice → second refused `DUPLICATE_RECORD` (409 `UNIQUE_VIOLATION` at REST).\n- unique optional `select` written `''` twice → same refusal.\n\n## Wanted\n\nA ruling first: does a cleared single `select` / `lookup` mean \"no value\" (store `null`, and the `$empty` table's reading of `''` for those types moves with it), or is `''` a legitimate stored value there? Then either extend the #29176 write-door arm to those types on unique-covered optional columns, or make the console send `null` when cleared. Report which readers depend on `''` before choosing.\n\nDedupe: searched `unique lookup cleared UNIQUE_VIOLATION`, `unique select empty string 409`; only #29176. **New.**\n\nLinks back: #29176, PR #29271."
+}

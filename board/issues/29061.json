@@ -2,8 +2,8 @@
   "number": 29061,
   "kind": "issue",
   "title": "skills: the formula skill and an analytics eval still teach date subtraction (`end - start`), which the formula gate now refuses (follow-up of #28944)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -21,9 +21,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:38:43Z",
-  "updated_at": "2026-11-02T08:02:29Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:41:55Z",
+  "closed_at": "2026-11-02T10:41:55Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

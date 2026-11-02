@@ -1,0 +1,34 @@
+{
+  "number": 29340,
+  "kind": "issue",
+  "title": "spec(approvals): the typed decision-output docblock and approvals docs say `type`/`multiple` only shape the widget — rewrite to the enforced rule (#28658 ruling A, text slice)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:workflow",
+    "documentation",
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T12:23:36Z",
+  "updated_at": "2026-11-02T13:24:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29340",
+  "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nParent: #28658 · Ruling-ref: 6566731522 (batch #450 item 2 · letter A)\n\n## What\n\nRuling A on #28658 makes the approvals door enforce a typed decision output's declared `type` and `multiple` at the decision. It splits the work into two PRs, and this text slice lands **first**:\n\n- `packages/spec/src/automation/approval.zod.ts`: the `DecisionOutputDefSchema` docblock (≈L660 at `5780fa49d`: \"`type` and `multiple` only shape the INPUT WIDGET, never the accepted value\") and the `required` docblock (≈L697-700: \"Unlike `type`/`multiple` — which only shape the input widget\") are rewritten to say what ADR-0104's 2026-10-30 amendment already records. A picker output is judged by id (`user`, `department`, `team`) or by machine name (`position`). `multiple: true` takes a list without duplicates, and an absent or false `multiple` takes one value. A mismatch is refused with `400 VALIDATION_ERROR` naming `outputs.<key>`, before any write.\n- `content/docs/automation/approvals.mdx` follows the same text.\n\n## Out of scope\n\n- No schema shape, key, or `.describe()` change unless a describe string states the same contradiction. If one does, rewrite only that sentence.\n- The runtime enforcement is the `domain:server` half (#28658, seat 5, branch `claude/project-thread-rsqu0h`). Its PR waits for this one to merge.\n\n## Declaration\n\n`Clause-②: no (narrowing)`, as the ruling writes it. `Metadata-protocol: none`. Docs/docblock text only."
+}

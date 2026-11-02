@@ -1,0 +1,34 @@
+{
+  "number": 29312,
+  "kind": "pull_request",
+  "title": "fix(plugin-list): a list view locked by lockedBy alone shows its lock indicator",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T11:39:05Z",
+  "updated_at": "2026-11-02T12:37:23Z",
+  "closed_at": "2026-11-02T12:37:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T12:37:21Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29312",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbProKrb75xotDgo6ojkBgdz)_\n\nFixes #29009\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:列表视图的 `sharing` 只写了 `lockedBy`、没写 `type` 时,工具栏现在会显示锁定标记「Locked by 用户」,旁边的类型标签按 spec 默认值显示为「Shared view」。写了 `type` 的视图显示不变;`sharing` 里两个键都没写时什么都不显示。\n- **为什么改**:spec 把 `type` 默认为 `collaborative`,但下发的视图是作者原文、不带默认值,而工具栏只在 `type` 存在时才画这个标记,所以「只写 lockedBy」的已锁定视图对其他人看不出被锁。现在锁定标记只看 `lockedBy`,以后 #29037 退役 `personal` 或 `type` 也不会再把它藏掉。\n- **风险与回滚**:只改工具栏一个只读标记的显示条件,没有新的元数据键、选项或文案;默认类型从 spec 的 `ViewSharingSchema` 读取,不在 ui 里重抄。回滚即 revert 本 PR。\n- **先看**:`ui/packages/plugin-list/src/ListView.tsx` 里 `hasSharingIndicator` 和 `SPEC_DEFAULT_SHARING_TYPE`,以及 sharing 标记块与分隔线的 `hasLeftSideItems`;`ListView.test.tsx` 的 `sharing spec format — additional`。\n- **两分钟验证**:`pnpm --dir ui exec vitest run packages/plugin-list/src/__tests__/ListView.test.tsx`,应 158/158 通过,其中「shows the lock from `sharing.lockedBy` with no `type`」一条。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- **The lock keys on `lockedBy`, not on `type`.** The toolbar's read-only sharing indicator rendered only under `schema.sharing?.type`, so a view authored as `sharing: { lockedBy: 'admin@objectos.ai' }` showed no lock at all. It now renders when `sharing` declares a `type` or a `lockedBy` (`hasSharingIndicator`), and the lock part depends on `lockedBy` alone. The toolbar separator's `hasLeftSideItems` reads the same predicate, so the separator follows the indicator.\n- **An absent `type` shows the spec's default type label.** The served view carries the authored body, and nothing on the render path parses it, so `type` arrives absent. The indicator reads the default from the contract, `ViewSharingSchema.parse({}).type` (today `collaborative`, shown as \"Shared view\"), once at module load, the same way `ListView` already reads the pagination page size from `PaginationConfigSchema`. Why the default and not \"no badge\": per the spec the view IS collaborative, and a view that writes `type: 'collaborative'` with the same lock already shows \"Shared view · Locked by USER\", so the two spellings of one contract value now render the same. If #29037 later retires `type`, this read stops compiling, which points the author at this spot.\n- **Unchanged.** A view with `type` set renders exactly as before; a `sharing` block with neither key, and a view with no `sharing`, show nothing; the copy (`list.sharingLockedBy`, `list.sharingPersonal`, `list.sharingCollaborative`) is untouched. No spec edit.\n\n## Tests\n\n- `ListView.test.tsx`, `sharing spec format — additional`:\n  - The card's reproduction, three rows: `sharing: { lockedBy: 'admin@objectos.ai' }` with no `type`, with `type: 'collaborative'`, and with `type: 'personal'`. Each shows \"Locked by admin@objectos.ai\" and the title `TYPE_LABEL · Locked by admin@objectos.ai`.\n  - `sharing: {}` (neither key) shows no indicator and no lock.\n\n## Acceptance notes\n\n- Sequencing with #29037 (open, `domain:spec`): that card retires the `personal` value and may retire `type` and the type label. This PR makes the lock independent of `type`, so the lock survives either outcome; the type label is the part #29037 owns.\n- Serial note: open PRs #29273 and #29266 also edit `ListView.tsx`. Neither had landed when this branch merged `origin/main` `f2bf2938`. This diff touches the `@objectstack/spec/ui` import line, one module-level block after `DEFAULT_LIST_DISPLAY_PAGE_SIZE`, the sharing block and the separator's `hasLeftSideItems` line; none of their hunks overlaps those lines.\n- Not measured in a real browser: the change is one render condition in `ListView`, and the tests render the real component.\n\n## Verification\n\nHead `57e2c4d1` merges `origin/main` `f2bf2938`, which does not touch `ui/packages/plugin-list/` or `packages/spec/src/ui/`; the delta against main is still exactly the three files of this PR. The runs below were taken on `b6269b70` (base `8a8a03d3`).\n\n<details><summary>Tests and the ablation</summary>\n\n- `vitest run packages/plugin-list/src/__tests__/ListView.test.tsx`: 158/158 passed.\n- Ablation with `scripts/ablation-replace.mjs`, replacing the guard `{hasSharingIndicator(schema.sharing) && (() => {` with the old `{schema.sharing?.type && (() => {` (anchor 1 to 0, blob `ccc95a10` to `9518d23b`): 1 failed, 157 passed. The failing case is \"shows the lock from `sharing.lockedBy` with no `type` (the spec default)\". Restored: blob equals HEAD and `git diff HEAD` is empty.\n\n</details>\n\n<details><summary>Package suite, type-check, lint and gates</summary>\n\n- Whole `packages/plugin-list/` suite under the verify lock, `--maxWorkers=2`, two batches: 185 files passed, 1767 tests passed.\n- `turbo run type-check --filter=@object-ui/plugin-list`: 50/50 tasks, exit 0 (`tsc --noEmit && tsc -p tsconfig.test.json`, so the test file is compiled).\n- `eslint` on the two touched files (from `ui/`): 0 errors.\n- `dispatch-gates --commands`: 34 derived families, all exit 0, including `node scripts/check-sdui-manifest.mjs` and `pnpm --dir ui exec vitest run scripts/` (169 files passed, 2 skipped). `dispatch-gates --ran`: 34 derived, 34 run, 0 NOT-MEASURED.\n- `pnpm check:new-line-citations` (ui): 0 new citations.\n- `check-closing-keyword-parity`, `check-changeset-no-major` and `check-adr-0087-registration` were also run against this body.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jSSoRjvEqsGsZZLPC9)_\n"
+}

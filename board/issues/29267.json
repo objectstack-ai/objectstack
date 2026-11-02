@@ -1,0 +1,35 @@
+{
+  "number": 29267,
+  "kind": "pull_request",
+  "title": "fix(create-objectstack)!: refuse a current-dir scaffold that would overwrite existing files",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:43:15Z",
+  "updated_at": "2026-11-02T11:52:16Z",
+  "closed_at": "2026-11-02T11:52:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T11:52:14Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29267",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9CP9N29Ty9eo6hBrrMoNuhG)_\nFixes #29134\n\nClause-②: no (narrowing) — measured: on base `49aba82b` a no-name and an `\"\"` run in a current directory holding `README.md` + `package.json` exited 0 and replaced both files; on head `791e47c3` the same runs exit 1, name both files, and leave the directory byte-identical. Nothing is widened.\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：在当前目录运行 `create-objectstack`（不带名字或名字为空）时，若模板文件会覆盖目录里已有的文件，脚手架直接拒绝（退出码 1），列出这些文件，什么都不写。\n- 为什么改：以前当前目录完全不检查，用户已有的 README.md 和 package.json 会被静默覆盖且退出码为 0；而指定名字的非空目录早就会被拒绝。\n- 风险与回滚：只多拒绝一种情形；只含模板不写的文件（如 `.git/`、笔记文件）的目录照常生成。回滚即撤销本 PR。\n- 先看：`packages/create-objectstack/src/index.ts` 的碰撞拒绝块；`src/template-copy.ts` 的 `findTemplateCollisions`；新测试 `src/scaffold-current-dir-collision.test.ts`。\n- 两分钟验证：在含 README.md 的空项目目录里跑 `npx tsx packages/create-objectstack/src/index.ts --skip-install --skip-skills`，应看到退出码 1、列出 README.md，文件内容不变。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/create-objectstack/src/template-copy.ts`: new read-only `findTemplateCollisions(src, dest)` walks the template the way `copyDir` does (same alias restoration, so `_gitignore` is checked as `.gitignore`) and returns every project-relative path that already exists where the template writes a file, or where a non-directory stands in place of a template directory. `copyDir` itself is unchanged apart from sharing the alias helper.\n- `packages/create-objectstack/src/index.ts`: before the first write (before `mkdirSync` and the copy), a non-empty target is checked; any collision prints `Directory is not empty and the template would overwrite N existing files: DIR`, lists each path, says nothing was written and names the two ways out (move the files aside, or scaffold into a new named directory), then exits 1. The named non-empty refusal (`Directory already exists and is not empty`) is untouched and still runs first; an empty target skips the walk.\n- Rule shape: the one the card prefers, scoped to collisions. A current directory holding only files the template does not write still scaffolds and keeps those files, which is what the existing comment and the \"the directory already had contents\" summary already intend.\n- `.changeset/29134-current-dir-overwrite-refusal.md`: `create-objectstack` patch, BREAKING banner, both declaration lines, ADR-0087 `not-required (no-migration-prescription)`.\n\n## Tests\n\nNew `src/scaffold-current-dir-collision.test.ts` (8 cases, real CLI through `tsx`, the no-build pattern of `scaffold-description.test.ts`):\n\n- no name and `\"\"` in a directory with a colliding `README.md` / `package.json` plus a non-colliding `notes.txt`: exit 1, the whole tree byte-identical, both paths named, `notes.txt` not named;\n- a directory holding only `.git/HEAD` and `notes.txt`: scaffolds (exit 0, `package.json` name is the directory name), both files untouched;\n- an empty current directory: scaffolds as before (`Created files:`);\n- a named non-empty directory: the old refusal and message, nothing written;\n- `findTemplateCollisions` unit cases: the aliased `.gitignore`, a file standing where the template needs `src/`, a shared `src/` with only user files (no collision).\n\nNo existing test needed editing.\n\n## Acceptance notes\n\n- No new CLI flag: a `--force` (overwrite on purpose) is a product choice and is left to the maintainer; see the report's open question.\n- Out of the template copy, two writers are not covered by this check and already do not overwrite: `AGENTS.md` and `.github/copilot-instructions.md` are written with exclusive create. The package-manager install and the skills installer write what they write, as before.\n\n## Verification\n\n<details><summary>Premise on base 49aba82b (card's reproduction)</summary>\n\nNo-name run and `\"\"` run in a temp `my-app/` holding `README.md` (`# my notes`) and `package.json` (`{\"name\":\"mine\"}`): both `EXIT=0`, `README.md` now starts `# My App`, `package.json` now `\"name\": \"my-app\"`. Named non-empty dir: `EXIT=1`, `Directory already exists and is not empty`.\n</details>\n\n<details><summary>Head 791e47c3, same reproduction</summary>\n\nBoth runs `EXIT=1`, files unchanged, output names `README.md` and `package.json` and says nothing was written.\n</details>\n\n<details><summary>Ablation of the refusal (negative pin)</summary>\n\n`scripts/ablation-replace.mjs` on `index.ts`, anchor `if (collisions.length > 0) {` x1 -> x0, replacement x0 -> x1, blob `c402bf41f8e7` -> `ee6ac763dfa4`. The test file goes red: `× refuses with no name …`, `× refuses with an empty name …`, `AssertionError: expected +0 to be 1`, `Tests 2 failed | 6 passed (8)`. Restored: blob == HEAD `c402bf41f8e7`, `git diff HEAD` empty. The suite runs `src/` through `tsx` and vitest with no `dist/` in the path, so no rebuild leg applies.\n</details>\n\n<details><summary>Package suite, typecheck, lint, gates, dogfood at 791e47c3</summary>\n\n- `os-verify-lock.sh -c \"pnpm --filter 'create-objectstack^...' build && pnpm --filter create-objectstack build && pnpm --filter create-objectstack test && pnpm --filter create-objectstack typecheck\"`: VERDICT command-exit 0; `Test Files 23 passed (23)`, `Tests 356 passed (356)`; `tsc --noEmit` lists the new test file (count 1).\n- eslint over `packages/create-objectstack` with `--no-inline-config` (the `pnpm lint` command, package-scoped): exit 0.\n- `dispatch-gates.mjs --commands`: 57 derived families, all exit 0; `--ran` reconciliation: 57 derived, 57 run, 0 NOT-MEASURED (derived zero, every line carries its exit code). Three first exited 3 on prerequisites and were re-run green: `check:type-check-debt` and `check:dual-build-cjs-loads` after the dogfood closure build, `check-plugin-teardown-shape --self-test` after fetching its pinned fixture commit.\n- Full dogfood (owed by the narrowing arm): VERDICT command-exit 0, `Test Files 388 passed | 3 skipped (391)`, `Tests 3208 passed | 28 skipped (3236)`.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQNsRpYUsG5efyi5Ur)_\n"
+}

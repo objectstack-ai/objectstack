@@ -2,8 +2,8 @@
   "number": 28924,
   "kind": "issue",
   "title": "AGENTS.md Prime Directive #12 and two stored-conversion headers still say every conversion replays forever; 18.3 drops the ≤16.x ones",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -20,9 +20,13 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T04:30:55Z",
-  "updated_at": "2026-11-02T06:38:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T09:01:49Z",
+  "closed_at": "2026-11-02T09:01:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
   "comments": 5,
   "locked": false,

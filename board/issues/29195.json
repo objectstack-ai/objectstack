@@ -1,0 +1,36 @@
+{
+  "number": 29195,
+  "kind": "issue",
+  "title": "Studio report: switching a report with a date range or export options to Joined sends keys a joined report refuses, and no visible control can clear them",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:10:21Z",
+  "updated_at": "2026-11-02T11:41:32Z",
+  "closed_at": "2026-11-02T11:39:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29195",
+  "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from #29022 (PR #29143; report `/mnt/project-files/issue-29022/os-dev-report.json`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** An author who switches an existing report to Joined in Studio gets a save the server refuses. The refusal names a key that the form hides on a joined report, so the author can't see or fix it.\n\n**Measured (source reading at `origin/main`; not run).** `ui/packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.tsx:105`: `JOINED_CONTAINER_CLEARED_KEYS = ['dataset', 'values', 'rows', 'columns', 'chart', 'order']`. These are the keys the inspector clears when a report becomes Joined. It omits `dateRange` and `exportOptions`. A joined report refuses both (#26548), and the form hides both on a joined report. So a report that carries either one and is switched to Joined is sent, and refused, at a key no visible control reaches.\n\n**Wanted.**\n1. Switching to Joined clears every key a joined report refuses (`dateRange` and `exportOptions` included), the same way it clears the six above.\n2. Switching back does not resurrect them unless the author sets them again.\n3. A non-joined report is unchanged.\n\n**Tests.** A report with `dateRange` and `exportOptions`, switched to Joined, saves without them and the server accepts the save. Ablation reds the case.\n\n**Reader.** `domain:ui` (`area:studio`). Size S. Serialize after PR #29143 (#29022) only if the dev touches `metadataError.ts`.\n\n**Dedupe.** Searched `joined report dateRange`, `JOINED_CONTAINER_CLEARED_KEYS`: no product card.\n\nLinks back: #29022, #26548."
+}

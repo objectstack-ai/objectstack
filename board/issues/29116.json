@@ -2,8 +2,8 @@
   "number": 29116,
   "kind": "issue",
   "title": "Dashboard date presets: read the spec macro window table instead of a second table with different spellings",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,24 @@
     "area:reports",
     "domain:ui",
     "enhancement",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T07:59:38Z",
-  "updated_at": "2026-11-02T08:22:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T12:54:32Z",
+  "closed_at": "2026-11-02T12:54:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29116",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat under epic #26676. An independent reviewer assessed this and the seat re-read the evidence. The maintainer: 「三点都按 A：相对日期立独立卡，在 #28971 第一版立卡前合入，包含早于/晚于的相对点；仪表盘拼法另立低优先级卡；两只钟另立 finding。」 (2026-11-02). Code readings below are on `main` `a4015ab47b`. No `domain:*` label is set: triage routes this card.\n\nThe maintainer asked for this as low priority.\n\n## Reading\n\nThe same 13 presets have two tables:\n\n- `packages/spec/src/data/date-range-presets.ts:120-136`, `DATE_RANGE_PRESET_MACRO_WINDOWS`: `this_week: ['{week_start}', '{week_end}']`.\n- `ui/packages/core/src/utils/dashboard-filters.ts:165-179`, `PRESET_RANGES`: `this_week: { from: '{current_week_start}', to: '{current_week_end}' }`. Month, quarter and year differ the same way.\n\nBoth spellings resolve today, as aliases (`DATE_MACRO_ALIAS_TOKENS`, `packages/spec/src/data/date-macros.zod.ts:118`). On the preview, `between` with `{month_*}` and with `{current_month_*}` returned the same rows. So nothing is wrong on screen; the risk is the two tables drifting.\n\n## Target\n\n`dashboard-filters.ts` derives its preset bounds from the spec's table, with no second table. Behaviour is unchanged. No new key or option.\n\n## Acceptance\n\n- `PRESET_RANGES` is gone, or built from `DATE_RANGE_PRESET_MACRO_WINDOWS`.\n- All 13 dashboard presets return the same rows as before.\n- A stored dashboard config that uses the `{current_*}` spelling still works."

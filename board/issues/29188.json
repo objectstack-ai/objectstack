@@ -1,0 +1,36 @@
+{
+  "number": 29188,
+  "kind": "issue",
+  "title": "record page: a failed comments or attachments read (500) shows as 「暂无评论」 and an empty attachment count; only a refusal is flagged, so a server error is silent",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T08:58:43Z",
+  "updated_at": "2026-11-02T13:54:49Z",
+  "closed_at": "2026-11-02T13:53:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29188",
+  "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: a product defect, measured on staging by cloud#3485 (every filtered `sys_comment` / `sys_attachment` read on hosted environments answers 500 `DATABASE_ERROR`; card filed by the maintainer's session 2026-11-02). Cloud is fixing its server half. This card is the Console half (cloud#3485 acceptance 3).\n\n## What happens\n\nOn a record page, when the comments read or the attachments read fails with a server error, the discussion panel shows 「暂无评论」 and the attachments tab shows an empty count. The user sees no sign of the failure; it is visible only in developer tools. On staging this has hidden a 500 on every hosted environment since at least 2026-10-29, so comments and attachments users wrote looked lost.\n\n## Cause (objectstack main)\n\n`ui/packages/app-shell/src/views/RecordDetailView.tsx`: the feed reads end in `.catch((err) => { recordRefusal('comments', isRefusedFeedRead(err)); })` (around lines 3098 and 3175). Only a refusal is recorded (`feedRefusalByRecord`, around 2899 and 2970), and any other failure falls through to the empty state. The attachments read has the same shape.\n\n## Ask\n\n- Tell a failed read apart from an empty one: a server error (5xx, network) shows a load-failure state with a retry, not the empty state. Refusals keep today's handling.\n- The same for the attachments tab and its count.\n- Tests: a 500 on each read renders the failure state; an empty 200 still renders 「暂无评论」.\n\n## Business reason\n\nComments and attachments sit on every business record. A silent empty state makes data look lost and hides outages from users and from support.\n\n## Reader\n\nThe Console record-page owner, through objectstack triage. No cloud change is needed for this half.\n\n## Dedup\n\nSearched open objectstack issues for \"暂无评论 load failure\", \"feed read error empty state\" and \"RecordDetailView refusal 500\": none open."
+}

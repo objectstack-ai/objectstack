@@ -2,8 +2,8 @@
   "number": 29121,
   "kind": "issue",
   "title": "租户首页为一个关着的命令面板读整个对象注册表（HotCRM 约 875 KB 原始 / 129 KB gz）：HomeLayout 挂载时就把 useMetadata().objects 交给面板（cloud#2914 子卡 OU-1）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "bug",
     "domain:ui",
     "performance",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T08:01:17Z",
-  "updated_at": "2026-11-02T08:19:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T11:02:15Z",
+  "closed_at": "2026-11-02T10:58:31Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29121",
   "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\n立卡门类别：①（父单 cloud#2914 是 ④；round 10 已测、未立的杠杆 OU-1）\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/console/home/HomeLayout.tsx:76`（`const { apps, objects } = useMetadata()`）与 `:122`（`objects={objects ?? []}` 交给命令面板）；改为面板打开时再读，或用当前应用的 bundle / 对象范围。不需要新组件或 spec 契约变化。建议档 p3，由分诊定。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue HomeLayout objects palette` total=0；`home object registry command palette closed` total=36（#28981 #27377 #28965 #27438，均为 QA 汇总或无关），无同题。\n\n业务理由：每个进入租户首页的用户。首页上没有任何地方需要全部对象定义，面板默认是关的；整表是首页最大的元数据载荷，网络慢时首页因此多等几秒，服务端也要为每次首页打开序列化一遍整个注册表。\n\n## 来源\n2026-11-02 staging 页面性能评估（cloud main `cd4e2e1f`，objectstack pin `6cbdef1e`；控制面 cloud.objectos.app，租户 os-2ph4c1.objectos.app / HotCRM 6.0.0；内置浏览器面板 zh-CN，读 resource timing 与 v2.7.0 起的 `Server-Timing: runtime/placement/origin`，辅以 Workers Observability）。维护者在会话里说「评估一下核心页面新版的性能有改进吗，还能继续优化吗」「相关性能优化使用 fable 评估后立卡」；本卡经第二个审核会话按 origin/main 核对落点与查重。\n⚠️ 本机链路当天很差（CF 边缘静态文件 65 KB/s），卡里的秒数只引用 Server-Timing 或请求的先后关系，不引用页面总耗时。\n\n## 已实测\n- round 10（cloud#2914 评论 6396581531）：租户首页打开读 875 KB 的对象注册表，只为关着的命令面板。\n- main 上代码原样：`HomeLayout.tsx:76` 在挂载时取 `objects`，`:122` 传给面板。本轮没有单独复测首页，判据沿用 round 10 的测量。\n\n## 验收\n1. 租户首页整页打开的 resource timing 里没有不带 `?package=` / 名字范围的 `GET /api/v1/meta/object`。\n2. 打开命令面板后对象搜索结果与现在一致。\n3. 请求计数测试 + 消融。\n\n## 相关\ncloud#2914（父单，OU-1）\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

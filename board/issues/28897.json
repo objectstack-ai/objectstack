@@ -2,8 +2,8 @@
   "number": 28897,
   "kind": "issue",
   "title": "automation: a subflow or map in a region body whose child suspends arms, fails every run at the region boundary, and leaves the child run suspended",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:automation",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T03:39:10Z",
-  "updated_at": "2026-11-02T08:13:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T09:48:43Z",
+  "closed_at": "2026-11-02T09:46:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28897",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nBlocked-by: #28846 (its PR changes `subflowTargets`, which this reads)\n\nFiling gate: ① the #28846 dev measured this before editing, in all six region cases (`subflow` and `map`, each in a `loop` body, a `parallel` branch and a `try_catch` slot). It was split off by seat ruling `6568462471`. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: a record-triggered (or any) flow whose region-nested `subflow` / `map` names a child that suspends (`approval`, `wait`, `screen`) has this behaviour:\n- It arms today, because no arming gate judges it.\n- Every run then fails at the region boundary with the ruled #18881 refusal (`region-suspension-refusal.ts`: \"durable pause inside a structured region\"). That run-time refusal is loud and is the ruled posture, ruling D.\n- The child run is left suspended (`kid@hold`). The dev measured this with and without a `save_notice`. An orphaned suspended child holds whatever it was waiting on, for example an approval request no decision can complete usefully.\n\nThe module's own header says the pause \"is knowable only at RUN time, and only the run can refuse it\", because the child record is not in hand at parse. Since #28840, the arming gate does have the child in hand (`declineOntoDisabledSubflows`, `declineOntoSuspendingSubflowNotice`, re-judged on every child registration).\n\n## Wanted\n\n1. Measure the orphan. After the region refusal, is the child run left suspended in storage, and what does a later decision on it do? If it is a leak, the region refusal also settles or cancels the child it started. ⛔ Do not change the refusal itself (#18881, ruling D).\n2. A caller whose region-nested `subflow` / `map` names a child that can suspend is registered but not armed. Use the existing arming gate with its own `FLOW_UNBOUND_CAUSES` value naming the region node, the call node and the child's suspending node, re-judged on child registration as #28840 does. ⛔ No new gate. ⛔ No change to `FLOW_PAUSE_CAPABLE_NODE_TYPES` (ruling D). Update the `region-suspension-refusal.ts` header so it names the arming gate as the first door.\n\nShipped flows: HotCRM `campaign_enrollment` has a region-nested call (a `loop` body, two `member-enroll` children). The dev measured that those children do not suspend, so it must keep arming. Pin that.\n\nThis narrows arming (a flow that arms today will not), and adds a published cause value. So it is `Clause-②: yes (narrowing)`, with a `CONTRACT_REVIEW_TIER` review owed.\n\n## Dedupe\n\nRead open issues for `durable pause structured region`, `subflow region suspend orphan` and `region boundary pause subflow`: only #28846 (the guards' target list). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-automation`).\n\nLinks back: #28846, #28840, PR #28875, #18881, #15646"

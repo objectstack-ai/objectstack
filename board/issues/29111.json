@@ -2,8 +2,8 @@
   "number": 29111,
   "kind": "issue",
   "title": "pm-dispatch(security): one fleet-wide rule for security findings — never a card, never a public mechanism; tracked as a GitHub draft security advisory, fixed by a no-card pm-dispatch order",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,7 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1",
     "tooling"
   ],
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T07:54:32Z",
-  "updated_at": "2026-11-02T07:54:32Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:27:34Z",
+  "closed_at": "2026-11-02T10:27:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29111",
   "body": "triage#1 · os-zhuang · session_01AavokzJ5DndAwitDXvKy4U\n\nFiling gate: **③ a task the maintainer assigned directly** (a pm rule change, filed because the maintainer named it). The maintainer said in the triage session, verbatim:\n- 「安全问题不要立卡，或者立卡不写细节，车队中遇到安全问题怎么处理你帮我考虑一下，应该优化skills。」\n- To triage's proposal: 「同意方案，选 B，立卡」.\n\nReader: `domain:skills`. Files:\n- `.claude/skills/pm-dispatch/references/` (a new `security-findings.md`)\n- `references/filing-gate.md`\n- `references/lanes/server.md`\n- `references/project-forms.md` (the mailbox ⛔ row)\n- `.claude/skills/checklist-test/SKILL.md` (point at the shared rule)\n- the `os-dev` agent's report format\n\nDedupe (open AND closed): `security finding in:title` and `disclosure in:title` show no card on a fleet-wide rule. The existing rule lives only in `checklist-test` (QA runners), plus one line in `lanes/server.md`.\n⛔ Not a claim. This card itself carries no finding and no mechanism.\n\n## Why\n\n`checklist-test` already says a QA runner's security finding is never a card: the reproduction goes privately to its PM session, which fixes it through `pm-dispatch`. On 2026-11-02, three security findings were still filed as public issues, by seats that rule does not cover: an app-repo lane measuring the framework, an app measurement, and a cloud seat. Meanwhile `lanes/server.md`'s 「安全族卡的披露纪律」 presumes the card exists, and the `os-dev` report has no private place for a security finding, so its `out_of_scope_findings` get filed as public cards by habit.\n\n## The rule (one reference, every seat, every dev, every repo)\n\n1. **What counts:**\n   - an authentication or authorization gap;\n   - a cross-tenant or cross-organization read or write;\n   - privilege escalation;\n   - a rate limit or lockout that can be bypassed;\n   - a secret or credential that leaks or is stored in cleartext;\n   - injection;\n   - an existence oracle.\n\n   When unsure, treat it as security.\n2. **Never public:**\n   - no issue;\n   - no mechanism in a PR title, body or comment, a commit message, a changeset, a review record or a mailbox;\n   - test names state the rule, not the attack.\n3. **Tracker: a GitHub draft security advisory (choice B).**\n   - The finding is recorded as a **draft repository security advisory** on the affected repo, visible only to admins, security managers and invited collaborators. It is the private card.\n   - The fix is dispatched through `pm-dispatch` as a no-card order to `os-dev` at `xhigh`, with the mechanism only in the dispatch prompt and the advisory.\n   - Where the advisory's private fork is used, the fix lands from it.\n   - Until the advisory channel is enabled on a repo, the fallback is session-only (choice A): the mechanism goes to the maintainer in session, and the seat post carries an opaque id and status only.\n4. **Cross-repo finders** (app repos measuring the framework, cloud seats):\n   - draft the advisory on the framework repo if they can;\n   - otherwise give the mechanism to the maintainer in session.\n\n   At most, a public line says 「a security item is with the maintainer」, with no detail.\n5. **`os-dev` report:** a new private field, `security_findings`. The seat handles it in session and in the advisory, never as an `out_of_scope_findings` card.\n6. **Fix PR:**\n   - The title, body and changeset state the hardening rule, for example 「the door reads the record in the caller's scope before it starts the flow」.\n   - Contract-review records stay rule-level, and the mechanism goes in the reviewer's local `security-note.md`.\n7. **Already public by mistake:**\n   - add no detail;\n   - label it `security`;\n   - push the maintainer at once (`lanes/triage.md` push case ①);\n   - the maintainer decides whether to move it into an advisory and close the issue.\n8. **Consistency edits:**\n   - `lanes/server.md`'s line is rewritten to match (no 「安全族卡」);\n   - `filing-gate.md`'s ⛔-not-a-card list gains 「安全发现」;\n   - `project-forms.md` keeps 「⛔ 不敲：安全发现」;\n   - `checklist-test` points at the shared rule instead of restating it.\n   - ⛔ No new gate, no new label (「新增门禁默认否」).\n\n## Acceptance\n\n- `security-findings.md` exists with the eight points above, in these words or tighter, and every listed file points at it.\n- The `os-dev` report schema carries `security_findings`, with the seat-side handling stated.\n- The advisory steps name only what the relay can do once the maintainer has granted it advisory permission. If the relay cannot create advisories, the rule says the maintainer creates them.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

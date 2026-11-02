@@ -1,0 +1,35 @@
+{
+  "number": 29155,
+  "kind": "issue",
+  "title": "Console as an installable PWA on desktop: register the Service Worker for the app shell, and prepare a `web_push` delivery path",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T08:27:16Z",
+  "updated_at": "2026-11-02T13:45:49Z",
+  "closed_at": "2026-11-02T13:36:54Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29155",
+  "body": "## Context\n\nDesktop users reach the Console in a browser, and the product decision is to serve them there rather than ship a native desktop client. The Console is already half a PWA:\n\n- `ui/apps/console/src/main.tsx` generates and injects a web app manifest (`generatePWAManifest`);\n- it wraps the app in `MobileProvider` with `pwa.enabled: true`.\n\nBut nothing registers a Service Worker. `@object-ui/mobile` ships `serviceWorker.ts` and `serviceWorkerSource.ts`, and no code path calls the registration. As a result:\n\n- the installed app has no offline app shell: a cold start with no network is a browser error page;\n- the browser has no Service Worker to deliver Web Push to, so desktop users cannot get OS notifications even after the platform's push channel exists (objectstack-ai/objectstack#29041, spec slice objectstack-ai/objectstack#29067).\n\nADR-0012 §6 already lists `web_push` among the push device vendors.\n\n## Ask\n\n1. **App shell caching.**\n   - Register a Service Worker from the Console that precaches the app shell (the HTML entry and the hashed entry assets of the current build) and serves it when offline.\n   - Hashed chunks are versioned by the build, so the worker must drop the previous build's cache on activation.\n   - The worker must not cache API responses: data stays network-only, and session cookies are never stored by the worker.\n2. **Update flow.** When a new build is deployed, the next load picks it up without a hard refresh. Either the worker activates on next navigation, or the Console offers a \"new version — reload\" prompt. A stale shell must never pin users to an old build.\n3. **`web_push` readiness.**\n   - The Service Worker handles `push` and `notificationclick`, and a click opens the payload's Console `route`, which is the same field the mobile shell reads.\n   - Registering a browser push subscription with the device registry is gated on objectstack-ai/objectstack#29041. Until then, the worker carries only the event handlers and their tests.\n4. **Install affordance.** Verify that the Console is installable in Chrome and Edge on desktop: the manifest is valid, it has icons at the required sizes, and its `start_url` and `scope` are correct under `/_console/`. Branding from Setup applies to the installed app's name and icon (the manifest is already built from runtime branding).\n\nOut of scope: a native desktop shell. If a concrete need appears later, the shape is a separate repository with a Tauri shell hosting the Console through the same `window.ObjectStackNative` bridge the mobile shell uses. The trigger needs are an installer or MDM distribution, tray residency, local file system or device access, or deep enterprise IM desktop integration. No card is opened for it until one of those needs is named.\n\n## Acceptance\n\n- Playwright test: after one load, going offline and reloading shows the Console shell, not a browser error, and data calls fail visibly as offline.\n- Deploying a new build is picked up within one navigation (test with two builds, or a mocked worker update).\n- Unit tests cover the worker's cache-versioning, the API-bypass rule, and the `push` / `notificationclick` handlers (the click opens the route; a route that escapes `/_console/` is refused).\n- A Lighthouse or Chrome \"installable\" check passes on the served Console."
+}

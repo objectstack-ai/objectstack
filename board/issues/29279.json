@@ -1,0 +1,37 @@
+{
+  "number": 29279,
+  "kind": "issue",
+  "title": "metadata: `migrate-stored` fails to heal a draft-only permission set that needs a conversion when it grants on an object with no active row, because the unknown-grant refusal reads the active row",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "bug",
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:54:28Z",
+  "updated_at": "2026-11-02T13:48:53Z",
+  "closed_at": "2026-11-02T13:47:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29279",
+  "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ① 产品缺陷 — 具名落点 (`packages/metadata-protocol/src/protocol.ts`, the `unknownGrantObjectSaveRefusal` block in `saveMetaItem`, whose held read is `readMetaItem({ type: 'permission', name })`, active-only by default) + 复现. Follow-up owed by landed work: should-fix 1–3 of contract review 6574758254 on PR #29093 (card #28990).\nreach: 公开入口实测 — the stored-metadata healing pass (`migrateStoredMetadata`, `source: 'migrate-stored'`) on the real kernel at PR head `8604d1dc`: a DRAFT-only permission set (no active row) granting on an object that has only a draft, then that object draft removed, with a body that needs a conversion (legacy `managedBy` key). Preview reports `outcome: pending`; apply reports `outcome: failed` with the 422 unknown-grant sentence (`failed: 1`). Control: with the object draft still present, apply reports `rewritten`. A canonical body is not re-saved and is not affected. Measured by the #28990 thread with a throwaway test, deleted after.\n业务理由: the healing pass exists so that rows stored before a rule keep converting after it lands; #28952 carves `writeSource !== 'migrate-stored'` out of its own save-door refusal for exactly this reason. Here a pre-rule draft that needs a conversion is reported `failed` and stays unconverted, so an operator who runs `migrate-stored` sees a failure they cannot act on from the pass, and the draft keeps its legacy shape. Not doing it: the changeset's \"not refused on re-save\" is untrue for this row class.\n动手的读者: the `domain:server` seat (metadata-protocol), after triage grades it; os-dev. Lands after PR #29093.\n查重: `migrate-stored draft permission refused` → 91 hits, `migrateStoredMetadata draft row active read` → 28 (incl. closed): none is this. Nearest: #28990 (the rule, PR #29093), #28952 (the `migrate-stored` carve-out precedent, PR #29066).\n\n**Fix (one PR, three items from the record).**\n1. In the save door, judge the unknown-grant refusal against the row being re-saved: carve `migrate-stored` out as #28952 does, or, when the re-save is a draft, read the held keys from the draft row (`state: 'draft'`). Pin the measured case (draft-only row + conversion → `rewritten`), and keep the control.\n2. Finding wording on the publish path (`promoteDraftForPublish`): \"none is saved here\" reads true only on the save path. Say \"and no published object, or object draft of this batch, carries it\". Keep the path and the first sentence, which tests and Studio key on.\n3. Changeset: one line saying that a draft stored before the rule is refused at its publish (as `26724-object-unknown-datasource-refused.md` does).\n\n**Level.** Item 1 widens what `migrate-stored` admits back to the pre-rule behaviour for that row class (`Clause-②: no`, measure). Items 2–3 are wording."
+}

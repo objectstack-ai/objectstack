@@ -2,8 +2,8 @@
   "number": 28919,
   "kind": "issue",
   "title": "messaging: NotificationTemplateStore's locale ladder (named tag, primary subtag, en) never reads the stack's declared i18n.fallbackLocale",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:i18n",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T04:14:36Z",
-  "updated_at": "2026-11-02T08:09:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T09:46:18Z",
+  "closed_at": "2026-11-02T09:23:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28919",
   "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① the #28880 dev's out-of-scope finding (os-dev-report 6568876497), filed by `domain:server` seat 5. Graded by this seat: p3. The sibling ladder already folds the primary subtag, so only a declared fallback outside the recipient's language is missed. Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: in-app, SMS and push notifications rendered from `sys_notification_template` for a recipient whose locale has no row, on a stack whose `i18n.fallbackLocale` names a locale other than `en`.\nReader who acts: a `domain:server` seat (`packages/services/service-messaging`).\n\n## What happens\n\n`NotificationTemplateStore` loads `(topic, channel, locale)` and walks a fixed candidate list: the named tag, then its primary subtag (`zh-CN` → `zh`), then `DEFAULT_LOCALE` (`en`). See the comment at `notification-template.object.ts` ~line 130. It never reads the stack's declared fallback (`i18n.fallbackLocale`, else `defaultLocale`, through the i18n service's `getFallbackLocale`). After PR #28917 (#28880), the email ladder does read it, so the two template families disagree for the same recipient and stack.\n\n## Wanted\n\n- Measure: does the store see the i18n service, and does any shipped stack declare a non-`en` fallback?\n- If so, the declared fallback joins the ladder before `en`, folded by `resolveBundleLocale` if the store can read its locale list. ⛔ No third copy of the BCP-47 ladder.\n- Tests red first, with an ablation. Update the comment at ~line 130 to the new two-resolver reading.\n\nBlocked-by: #28880 (PR #28917 lands the email side this aligns with).\n\nDedupe: searched `NotificationTemplateStore fallbackLocale`; none. **New.**\n\nLinks back: #28880, PR #28917, #28896."

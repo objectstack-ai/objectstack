@@ -1,0 +1,34 @@
+{
+  "number": 29259,
+  "kind": "pull_request",
+  "title": "docs(skills): record-page rule names drawer and full page as the reader's Open records choices",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:34:51Z",
+  "updated_at": "2026-11-02T12:01:17Z",
+  "closed_at": "2026-11-02T12:01:14Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-02T12:01:14Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29259",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbCFvAws9PJHw556qFuw9stX)_\n\nFixes #29110\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:`objectstack-ui` 技能的记录页规则第 6 条与评测第 2 题,把读者的「打开记录」选项改为抽屉(默认)或整页两种,并写明列表旁的分栏已退役。\n- **为什么改**:控制台已退役列表旁分栏、默认改为抽屉打开;技能仍教「分栏为默认」,会让 AI 向作者描述一个已不存在的选项。\n- **风险与回滚**:只改发布技能的两段文字与一份 patch changeset,无代码与契约改动;回滚即还原本 PR。\n- **先看**:`skills/objectstack-ui/rules/record-page.md` 第 6 条(47–53 行);`skills/objectstack-ui/evals/record-page.json` 第 2 题 `expected_output`。\n- **两分钟验证**:`node scripts/check-skills-token-ratchet.mjs`,预期 record-page.md 为 996 tokens(上限 996)且退出码 0。\n- **需要你做的**:审阅后批准(本 PR 改动 `skills/**`,需授权审批人批准方可落地)。\n\n## What changes\n\nThe console retired the split pane beside the list (#28915, landed as ea150b7f): a list record opens in the drawer (the default) or as the full page, and the Display menu's Open records offers Drawer and Full page only. The shipped `objectstack-ui` skill still taught the old model.\n\n- `skills/objectstack-ui/rules/record-page.md` rule 6: Open records now reads \"drawer — the default — or full page, for a drawer-mode object; the split beside the list is retired\". The rest of rule 6 is checked against main's console code and kept: the right-column switch (`RECORD_RELATED_COLUMN_PREFERENCE`), the related panels' order and hidden set (`RECORD_RELATED_ARRANGEMENT_PREFERENCE`), and the drag-resize width and maximize button, which live on the record drawer (`navigation-overlay.tsx` `useDrawerResize`, `maximizable`). One more word changed with it: \"the pane's dragged width and ⤢\" now says \"the drawer's\", since the drawer is the only pane left.\n- `skills/objectstack-ui/evals/record-page.json` eval 2: the prompt is unchanged (reps still ask for records beside the list). The expected answer now says a pane beside the list is no longer offered, that Open records is drawer (the default) or full page, kept in the browser, and that nothing is authored for it; `navigation: { mode: 'page' }` stays the one declaration. The assertions stay as they are and still hold: `must_contain` (`navigation: { mode: 'page' }`, `Display menu`) are both in the new text, and the `must_not_contain` entries are absent.\n- `.changeset/29110-record-page-skill-split-retired.md`: `@objectstack/skills` patch (`skills/` ships in that package's `files`).\n\nOther skill text: a grep of `skills/` for \"split beside\", \"beside the list\", \"Open records\" and \"split pane\" found only these two files. No other skill text changes.\n\n## Tests\n\nNo ui test is owed (text only). The skill gates the repo derives for this diff are listed under Verification.\n\n## Acceptance notes\n\n- `skills/` line readings. Changed file: `record-page.md` 65 lines before, 65 after (3981 bytes before, 3982 after; 996 tokens before and after, ceiling 996). The eval file is an eval fixture, measured and not ratcheted: 1899 bytes before, 1972 after. Whole package (sum of every `SKILL.md`): 4550 lines before and after; no `SKILL.md` is touched.\n- The rule file sits at its token ceiling, so the new words were paid for inside the same sentence; no ceiling moved.\n\n## Verification\n\nGates derived by `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` (43 families), run on head d0c28e8c and reconciled with `--ran`: 40 exit 0, 3 NOT MEASURED. Head eaef3b02 only adds a merge of `origin/main` that touches no `skills/` file; `check-skills-token-ratchet` re-ran green on it.\n\n<details><summary>Gate readings</summary>\n\n- `node scripts/check-skills-token-ratchet.mjs` exit 0 (record-page.md 996 tokens, ceiling 996) and `--self-test` exit 0.\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` exit 0, after building `@objectstack/formula` and `@objectstack/lint` (its first run exited 3 on that prerequisite).\n- `node scripts/check-sdui-manifest.mjs` exit 0.\n- NOT MEASURED (exit 3, prerequisite not met: they read every package's `dist`, which needs a full `pnpm build`; this diff touches no package code): `check:dts-closure`, `check:dual-build-cjs-loads`, `check:lean-entry-closure`. CI runs them.\n- Every other derived family exit 0 (closing-keyword parity, changeset no-major, ADR-0087 registration, empty changeset, skill compatibility, skill frame sync, skill identifier liveness, nul bytes, doc authoring and the rest).\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jT7tQShSRWpBCBAgea)_\n"
+}

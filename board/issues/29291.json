@@ -1,0 +1,32 @@
+{
+  "number": 29291,
+  "kind": "issue",
+  "title": "objectql: a cascade child's ERR_SUMMARY_RECOMPUTE escapes an atomic delete that rolled back, so every \"landed write answers success\" surface answers success for a delete that did not land",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T11:08:49Z",
+  "updated_at": "2026-11-02T13:31:03Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29291",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① finding of the seat's independent review of PR #29283 (#28861) at head `e591f329`, read from source and not run; the cause predates that PR (the data doors of #28781 / PR #28782 answer the same way), so it is out of #28861's scope. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p2 · a write surface answers success for a write that was rolled back.\n\nReach: a by-id delete whose `master_detail` cascade deletes children under the `'atomic'` plan, when one child's roll-up (summary) recompute into another parent fails. Every surface that turns `ERR_SUMMARY_RECOMPUTE` into the write's own success: the REST and MCP data doors and, after PR #29283, action `ctx.engine` / `ctx.api`, the sandbox repository and flow `delete_record`.\nReader who acts: a `domain:server` seat (`packages/objectql/src/engine.ts`, the cascade and the summary-recompute refusal).\n\n## What happens (source reading at `e591f329`)\n\n- `runByIdDelete` deletes each cascaded child through the public `this.delete` (engine.ts ~L20046) before the parent's own `driver.delete` (~L20903–20908); under the `'atomic'` plan the whole walk runs inside `this.transaction` (~L20917).\n- A child whose recompute fails throws `SummaryRecomputeError` (\"stored, only the recompute failed\"). The transaction rolls back, so neither the child nor the parent is deleted.\n- The error keeps its code on the way out, and `staleSummaryRefusalOrThrow` (`packages/types/src/summary-recompute-answer.ts` ~L69) decides success by the code alone, so the caller is told the parent delete landed, with the child's result as `written`.\n\n## Wanted\n\nMeasure first on `main` (a two-level cascade with a failing roll-up on the child, atomic plan). Then make the code mean what it says: a `SummaryRecomputeError` raised by a nested write inside a transaction that then rolls back must not leave the outer call carrying it (for example, the cascade or `transaction` wrapper converts it to the refusal it really is, or the error records which write landed and the answer checks it is the outer one). Pin it at the engine and at one answering surface.\n\nDedupe: searched `summary recompute cascade rollback success`, `ERR_SUMMARY_RECOMPUTE atomic cascade`; none. **New.**\n\nLinks back: #28861, PR #29283, #28781, PR #28782."
+}

@@ -1,0 +1,26 @@
+{
+  "number": 29378,
+  "kind": "issue",
+  "title": "Console: offer a scan affordance on text and lookup fields when the mobile shell exposes `scan()`",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T13:28:19Z",
+  "updated_at": "2026-11-02T13:28:19Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29378",
+  "body": "repo:mobile#1 · os-justin · session_01QSeKYnW1Xf6HDSWz1eGAqv\n\nFiling category ③: a direct task from the maintainer's card. objectstack-ai/mobile#146 says, verbatim: \"Follow-up: after acceptance, the seat files the Console consumer card in objectstack-ai/objectstack (a scan affordance on text/lookup fields when `has('scan')`).\"\n\n## What the shell now offers\n\nThe shell side merged as objectstack-ai/mobile#170, into mobile `main` at `92a0a26`. The bridge contract lives in mobile `docs/HYBRID-SHELL.md`, section \"Scanning codes\".\n\n- The call is `window.ObjectStackNative.scan(opts?: { formats?: string[] }): Promise<string | null>`. Feature-detect it with `has('scan')`.\n- The shell opens its native full-screen scanner, with torch and close.\n  - The call resolves to the decoded text, or `null` when the user closes the scanner.\n  - It fails with `failed` \"Camera permission denied\", or with `failed` \"A scan is already open\" if a second call arrives while one is open.\n  - Bad options are rejected with `bad_args`.\n- `formats` takes expo-camera `BarcodeType` names (`qr`, `ean13`, `code128`, …). If you omit it, every listed format is read.\n- Only pages on the configured server's origin can call it, the same rule as every bridge method.\n\n## Ask (Console, `ui/`)\n\n- When `has('scan')` is true, show a scan affordance on text fields and lookup fields. Tapping it calls `scan()`.\n  - Text: insert the decoded value.\n  - Lookup: search with the decoded value.\n- `null` means the user cancelled, so do nothing.\n- Show `failed` with the Console's existing error toast.\n- No affordance in a plain browser, or in an older shell where `has('scan')` is false.\n\n## Business reason\n\n- Who benefits: field users entering asset tags, product barcodes or document codes on a phone.\n- If not done: the shell capability ships with no caller, which is a declared-but-unused capability.\n\n## Who acts\n\nThe `domain:ui` seat. Triage first-touch decides grade and area. Where to declare the affordance (a generic field-level block, not a product-named widget) is the UI lane's call under its contract rules.\n\n## Duplicate check\n\n2026-11-02, open and closed:\n\n| Query | Hits | Relevant |\n| --- | --- | --- |\n| `is:issue \"has('scan')\"` | 0 | 0 |\n| `is:issue scan bridge console mobile field` | 4 | 0 (seat posts, a spec row, a registry) |\n| `is:issue barcode scan lookup field` | 0 | 0 |"
+}

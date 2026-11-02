@@ -1,0 +1,34 @@
+{
+  "number": 29352,
+  "kind": "pull_request",
+  "title": "fix(console): derive the sidebar fold width from the record drawer over the list",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T12:44:36Z",
+  "updated_at": "2026-11-02T13:35:56Z",
+  "closed_at": "2026-11-02T13:35:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T13:35:54Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29352",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbHKR9NdXoRePJwYZ8bT6wA4)_\n\nFixes #29109\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：控制台侧栏自动折叠阈值仍是 1416 px，只把它的推导理由从已退役的分屏改为「记录抽屉（720）＋其旁最窄可用列表（440）＋展开侧栏（256）」；记录页列宽档位的注释同步改正。\n- **为什么改**：分屏已于 #28915 退役，1416 的原推导理由不复存在；按裁决 6576273751（字母 D，维护者「同意」）保留数值、重写理由。\n- **风险与回滚**：零行为变化，任何窗口宽度下表现与 main 相同；常量不从包入口导出。回滚即还原本 PR。\n- **先看**：`ui/packages/app-shell/src/layout/consoleSidebarRail.ts`（常量与 docblock）、`consoleSidebarRail.width-27593.test.tsx`（推导钉）。\n- **两分钟验证**：`cd ui && pnpm exec vitest run packages/app-shell/src/layout/__tests__/consoleSidebarRail.width-27593.test.tsx`，预期 5 条全绿。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- `consoleSidebarRail.ts`: `RECORD_SPLIT_MIN_CONTENT_WIDTH` (the retired split pane) becomes `RECORD_DRAWER_MIN_CONTENT_WIDTH = LIST_MIN_COLUMNS_WIDTH (440, the #27545 measurement) + RECORD_DRAWER_WIDTH (720)`. `CONSOLE_SIDEBAR_RAIL_BELOW_WIDTH` is that plus the expanded sidebar (256), still 1416. The docblocks name the non-modal drawer over the full-width list as the reason and no longer mention the split pane. None of these constants is exported from the `@object-ui/app-shell` entry.\n- `consoleSidebarRail.width-27593.test.tsx`: holds `RECORD_DRAWER_WIDTH` equal to plugin-view's `overlayWidthFor('md', …)` (`min(92vw, 720px)`), pins the sum and the 1416 value, and checks that 1280 px and 1366 px windows fold (the rail leaves 512 / 598 px of list beside the drawer, where the expanded sidebar would leave 304 / 390) and that a 1440 px window does not.\n- `plugin-detail/src/synth/recordPageColumns.ts`: comment only. The window arithmetic now says the console folds to the 48 px rail below 1416 px (1232 px of page root at 1280), with the expanded-sidebar figures kept for a reader who keeps the sidebar open.\n- Changeset `29109-console-sidebar-fold-width-drawer.md`, `@object-ui/app-shell` patch.\n\n## Tests\n\nOn head e8cb2553, and the 13-file set again on the merged head b64f11a7 (main merged at a19759ac..origin/main; the merge touched none of these files):\n\n- Every ui test file naming `consoleSidebarRail`, `recordPageColumns` or `useResponsiveSidebar` (13 files): Test Files 13 passed (13), Tests 109 passed (109), lock VERDICT command-exit 0, on both heads.\n- Ablation via `scripts/ablation-replace.mjs`: `RECORD_DRAWER_WIDTH = 720` to `640` (anchor 1 to 0) made the width test go red, 3 failed and 2 passed (5). Restored: blob equals HEAD and `git diff HEAD` is empty.\n- `turbo run type-check --filter=@object-ui/app-shell --filter=@object-ui/plugin-detail`: 66 tasks successful, VERDICT command-exit 0.\n- `eslint` on the three touched files: 0 errors (11 existing `no-explicit-any` warnings in `recordPageColumns.ts`).\n\n## Acceptance notes\n\n- The maintainer's ruling 6576273751 picked letter D: the threshold stays 1416 px and the user-visible behaviour is unchanged. The brief's ablation (\"restore 1416\") does not apply because 1416 is kept. The ablation narrows the drawer width instead, which proves the pin binds the drawer.\n- The 440 px list floor has no other constant in code since the split pane retired. It is restated here as a named constant that cites #27545.\n- The two pending changesets that state 1416 (`27593-console-sidebar-narrow-rail.md`, `28077-console-sidebar-rail-rework.md`) are left as they are, as the ruling says. No `content/docs/**` line states 1416.\n- No browser run was done, as the ruling allows: the sum is unchanged.\n\n## Verification\n\n<details><summary>Derived gates on e8cb2553: 35 derived, 35 run, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 35 families. Each was run and recorded with its exit code, and `--ran` reconciled them: 35 derived, 35 run, 0 NOT-MEASURED, 0 UNRUN. That set includes `check-sdui-manifest.mjs` and its `--self-test`, the changeset and closing-keyword body gates (run against this body), `check:cross-package-test-inputs`, `check:test-source-alias`, `check:published-files` and `check:type-check-coverage` / `check:type-check-debt`. `pnpm --dir ui exec vitest run scripts/`: Test Files 169 passed, 2 skipped (171); Tests 4903 passed, 2 skipped (4905); lock VERDICT command-exit 0.\n\n</details>\n\nOn the merged head b64f11a7 the ratchet and package-surface gates were run again, all exit 0: `check:type-check-coverage`, `check:type-check-debt`, `check:cross-package-test-inputs`, `check:test-source-alias`, `check:published-files` and `check-sdui-manifest.mjs`. Re-deriving the gate list on that head is NOT MEASURED: the `--commands` call did not finish within 600 s and was stopped. The merge brought in no change to the four files in this diff.\n\nRepo-wide scans (`pnpm lint`, Test UI and the rest) are CI's: see this PR's check-runs.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jQy62PTjRj5La7392w\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jQy62PTjRj5La7392w)_\n"
+}

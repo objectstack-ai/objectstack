@@ -2,8 +2,8 @@
   "number": 29085,
   "kind": "issue",
   "title": "Console settings hub: a member who opens system/settings under an app they can use sees \"No settings registered. Plugins can register settings manifests via the SettingsService.\" instead of being told the settings are for administrators",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T07:04:39Z",
-  "updated_at": "2026-11-02T08:16:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:28:32Z",
+  "closed_at": "2026-11-02T10:27:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29085",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #28988 os-dev-report (PR #29082, report 6571185519) and #28988's own measurement · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** A plain member who opens the settings hub under an app they are allowed into (for example `/_console/apps/com.example.showcase/system/settings`) sees \"No settings registered. Plugins can register settings manifests via the SettingsService.\" That is a developer message, and it is wrong for this reader: settings exist, the server just returns none of them to a member. #27507 fixed the same symptom under the Setup app by refusing the route; under an app the member may open, the route renders, so the hub's own empty state is what they read.\n\n**Measured.**\n- #28988 (framework `7fa9873f`, stock showcase, plain member): `/_console/apps/com.example.showcase/system/settings` draws the hub with that sentence; the server returns 0 manifests to a member.\n- `origin/main` `d1f3ac0503`, source reading: `ui/apps/console/src/pages/settings/SettingsHub.tsx:125` draws `console.settingsHub.empty` for any empty list, whoever the caller is. PR #29082's dev confirmed the app verdict is not the fix site here (Showcase is granted, and #27507 pins that route as rendered unprobed).\n\n**Wanted.**\n1. When the hub's list is empty because the caller may not read settings (not because none are registered), it says so in user language, for example that settings are managed by an administrator, with the same tone as the app-level \"You don't have access\" page.\n2. The developer sentence stays only for a caller who could read settings and none are registered, or goes away entirely; the dev measures what the server lets the client tell apart.\n3. No new metadata key or option; new UI strings go through the i18n packs.\n\n**Tests.** A member on the hub sees the member copy; an admin with no manifests sees today's (or the reworded) copy; an admin with manifests sees the list.\n\n**Reader.** `domain:ui`. Size S.\n\n**Dedupe.** Searched `\"No settings registered\" member`: only #27507 (closed, the Setup-app half) and #28988.\n\nLinks back: #28988, PR #29082, #27507."

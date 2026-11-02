@@ -1,0 +1,35 @@
+{
+  "number": 29223,
+  "kind": "pull_request",
+  "title": "fix(objectql)!: a string-typed field refuses a plain object or an array instead of storing its JSON text",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:45:38Z",
+  "updated_at": "2026-11-02T10:58:31Z",
+  "closed_at": "2026-11-02T10:58:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T10:58:29Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29223",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi94xHkrh5JJ1hAdnahZC193U)_\nFixes #29133\n\nClause-②: no (narrowing) — measured: on base `fea2dbb7` a plain object or an array on a `text` / `textarea` field was admitted by `validateRecord` on insert and on update; on head it is refused `invalid_type` on every member of `BOUNDED_STRING_FIELD_TYPES`, on insert, update and multi-update. Nothing is widened.\nMetadata-protocol: none — measured: no schema, key, accepted metadata value or export changes; only a record write carrying a value of the wrong shape is refused.\nSkills-docs: none — no skill or doc teaches writing an object or an array into a string field, and the refusal reuses the existing catalog sentence.\n\n## 维护者速读\n\n- 改了什么:文本类字段(text、textarea、email、url 等 12 种)收到对象或数组时，现在直接拒收(invalid_type),不再把它转成 JSON 文本存进去。\n- 为什么改:之前创建、PATCH、屏幕流恢复时给文本字段传对象或数组都返回 201/200,库里存的是一段 JSON 文本，数据悄悄变脏。\n- 风险与回滚:是收窄，原来能写进去的错形状值现在会被拒;数字和布尔值仍按原样转成字符串，不受影响。回滚即 revert 本 PR。\n- 先看:`packages/objectql/src/validation/record-validator.ts` 字符串分支新增的那段;`record-validator.text-shape.test.ts`;`operator-object-write-value.test.ts` 的两处改动。\n- 两分钟验证:`pnpm --filter @objectstack/objectql exec vitest run --maxWorkers=2 src/validation/record-validator.text-shape.test.ts`,预期 107 个用例全绿。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/objectql/src/validation/record-validator.ts`, the `BOUNDED_STRING_FIELD_TYPES` arm: a plain object or an array is refused before any bound is judged, with the validator's existing `invalid_type` code and the existing ADR-0104 `invalid_value_shape` sentence (detail `expected a string, received an object` / `an array`). No new error code, no new message key, no `packages/spec` edit. It is a shape test, so it runs ahead of `shapeOnly` and a readonly field's value is judged the same way; the `ReadonlyValueScope` docblock lists it.\n- A filter-operator object keeps its own earlier sentence (the operator rule runs first). Numbers, booleans, `null`, a missing value, `json` and the structured-JSON types are unchanged.\n- Changeset `.changeset/29133-text-field-refuses-object-array.md` (`@objectstack/objectql` patch, BREAKING banner, ADR-0087 `not-required (no-migration-prescription)`).\n\n## Tests\n\n- New `packages/objectql/src/validation/record-validator.text-shape.test.ts` (107 cases): every member of the spec set × object / array / empty object / empty array × insert / update refuses with `code` + `constraint.type` + detail; the message names field, type and shape; the readonly scope refuses; the operator sentence still wins; strings, numbers, booleans, null and `json` still pass; the engine's insert, update and multi-update answer `VALIDATION_FAILED` and the driver is never written.\n- **Forced test edit**: `operator-object-write-value.test.ts`, two pins in \"what the rule deliberately leaves alone\" (`admits an UNDECLARED $-spelling`, `admits a plain non-operator object`) wrote `{ $inn: [...] }` / `{ a: 1 }` into the `text` field `title` and asserted admission. That is the coercion this card removes. Both pins move to the free-form `select` field `stage_free` already in that schema, so they keep asserting what they state (the operator rule is derived from the vocabulary, not from the `$` sigil) without depending on the text arm.\n\n## Acceptance notes\n\n- A number or a boolean on a string field keeps its string reading, as the card's scope says. Not measured exhaustively across seeds and fixtures, so it was left alone rather than narrowed; every consumer suite below stayed green with it.\n- Out of scope, noted not filed: a free-form `select` with no `options` still admits a plain object (the pin moved above shows it); same class as this card, different arm.\n\n## Verification\n\nAll readings at head `a50b8dce` unless named.\n\n<details><summary>Premise on base fea2dbb7</summary>\n\nA scratch `validateRecord` probe (deleted after): `{\"nested\":true}`, `[\"a\",\"b\"]`, `42`, `true` on `text` + `textarea` — ADMIT on insert and update, all eight.\n</details>\n\n<details><summary>Suites</summary>\n\n- `@objectstack/objectql` test: Test Files 528 passed (528), Tests 10233 passed; typecheck exit 0 (lock VERDICT command-exit 0).\n- `@objectstack/metadata-protocol` test: Test Files 297 passed, 4 skipped (301); Tests 22062 passed, 26 skipped.\n- `@objectstack/service-automation` test (screen-flow resume): Test Files 257 passed (257); Tests 3309 passed.\n- `@objectstack/dogfood` (full battery, narrowing arm): Test Files 386 passed, 3 skipped (389); Tests 3195 passed, 28 skipped (3223); lock VERDICT command-exit 0, after building the `@objectstack/dogfood^...` closure. No failure.\n- eslint over `packages/objectql` (`--no-inline-config`): exit 0.\n</details>\n\n<details><summary>Ablation</summary>\n\n`scripts/ablation-replace.mjs` replaced the guard `if (isPlainObjectValue(value) || Array.isArray(value)) {` with a never-true condition (anchor 1 → 0, replacement 0 → 1, blob 002f842a → 40e5174d). The new file ran red: Test Files 1 failed, Tests 100 failed | 7 passed (107) — every refusal case red with `expected [] to have a length of 1 but got +0`; the seven green are the leave-alone cases. Restore: blob == HEAD 002f842a, `git diff HEAD` empty; rerun 107/107 green. The suite imports the validator from `src`, so no dist leg; `ablation-dist-preflight --absent` confirmed the built dist never carried the marker.\n</details>\n\n<details><summary>Gates</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` at `a50b8dce` derived 61 families; all 61 run, each exit 0. `--ran` reconciliation: 61 derived, 61 run, 0 NOT-MEASURED, 0 UNRUN. Two first ran exit 3 on container prerequisites and were rerun green: `check-plugin-teardown-shape --self-test` (after `git fetch --depth=1` of its fixture commit) and `check:dual-build-cjs-loads` (after the dogfood closure build). CI families: read from this PR's check-runs.\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRRicnRgy1gLFe46z7)_\n"
+}

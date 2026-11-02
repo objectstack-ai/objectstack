@@ -2,7 +2,7 @@
   "number": 28850,
   "kind": "pull_request",
   "title": "fix(metadata-protocol)!: a package-less write onto a packaged view, dashboard, report, translation or email template is refused, naming the .custom pair (ADR-0146 D11)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -21,10 +21,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T00:36:06Z",
-  "updated_at": "2026-11-02T07:36:51Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-02T09:06:33Z",
+  "closed_at": "2026-11-02T09:06:31Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-02T09:06:31Z",
   "comments": 11,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/28850",

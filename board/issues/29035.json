@@ -2,8 +2,8 @@
   "number": 29035,
   "kind": "issue",
   "title": "metadata.endpoints.item radius: three comments outside the spec describe still say \"twelve\" mounts after the bundle route made it thirteen",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,21 @@
   },
   "labels": [
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:18:21Z",
-  "updated_at": "2026-11-02T08:06:31Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T13:20:12Z",
+  "closed_at": "2026-11-02T13:18:36Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29035",
   "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① the follow-up of #28934, named by its dev (os-dev-report 6570434793, acceptance notes) and kept out of PR #28996 because they are outside its claimed surface. ⛔ Not a claim. No grade: triage sets it.\n\nReach: maintainers reading the per-item mount code and its pins. #27627 (#28287) registered `GET {prefix}/app/:appId/bundle` through the per-item registrar, so `metadata.endpoints.item: false` removes thirteen mounts. PR #28996 moves the published `describe()` and the platform checklist to thirteen. These comments still say twelve.\n\n## Where (on `main`)\n\n1. `packages/rest/src/rest-server.ts`, the `registerPerItemRoute` docblock.\n2. `packages/rest/src/rest-config-mount-table.pin.test.ts`, the file header. Its `[#27627] Thirteen` row comment is already right.\n3. `packages/spec/liveness/metadata_endpoints.json`, the `item` row's `note`.\n\n## Done when\n\nAll three say thirteen and name the bundle route, matching the pin test's row. Comments and the ledger note only; no route moves.\n\nBlocked-by: #28934 (PR #28996 carries the describe wording to copy).\nDedupe: searched `endpoints.item twelve mounts`; only #28934. **New.**"

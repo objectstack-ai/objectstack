@@ -1,0 +1,32 @@
+{
+  "number": 29213,
+  "kind": "issue",
+  "title": "spec(dashboard): a globalFilters entry named `dateRange` parses and silently replaces the built-in date range's binding",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:37:02Z",
+  "updated_at": "2026-11-02T13:59:11Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29213",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① a defect named out of scope by the #29023 implementer (os-dev-report 6572629846, out_of_scope_findings[0]). ⛔ Not a claim. No grade: triage sets it. Reach is NOT MEASURED at a public door: the parse accepts it, and lint's `dashboardFilterDefs` lets the later definition win.\n\n## What happens\n\n- `GlobalFilterSchema.name` says `dateRange` is reserved for the built-in date range, and the widget `filterBindings` describe in `packages/spec/src/ui/dashboard.zod.ts` (≈L1389–1404 on main) keys the built-in filter as `dateRange` when the dashboard declares `dateRange`.\n- A dashboard that declares `dateRange` AND a `globalFilters` entry named `dateRange` parses. Lint's `dashboardFilterDefs` keeps the later definition, so the entry silently replaces the built-in filter's binding. An author reads a date-range control that filters some other field.\n- PR #29162 (#29023) refuses two `globalFilters` entries under one key, but `dateRange` is not a `globalFilters` entry, so this collision is outside that refusal.\n\n## Wanted\n\nMeasure it at the save door and on the console board first. If it reproduces, refuse a `globalFilters` entry keyed `dateRange` (by name, or by field when unnamed) on a dashboard that declares `dateRange`, naming the reserved word. That is a narrowing on the same predicate module as #29023 (`packages/spec/src/ui/duplicate-global-filter-names.ts`, after PR #29162 merges). Also read whether a `dateRange` entry is meaningful at all when the dashboard does NOT declare `dateRange`.\n\nReader who acts: `domain:spec`.\n\nDedupe: searched `reserved dateRange global filter name`, `globalFilters dateRange collision`, `dashboard reserved filter name`. Only #29023 and its PR. **New.**"
+}

@@ -1,0 +1,33 @@
+{
+  "number": 29169,
+  "kind": "pull_request",
+  "title": "docs(qa): draft-publish-lifecycle audit clause expects the catalogued refusal's denied row",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T08:39:43Z",
+  "updated_at": "2026-11-02T10:18:55Z",
+  "closed_at": "2026-11-02T10:18:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T10:18:52Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29169",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8QHK3iqqgqvPgxTg59PhVfa)_\nFixes #29013\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:发版检查清单 `studio-authoring.draft-publish-lifecycle` 的 acceptance[10] 改为:受编目的拒绝(四个码)各写一行 denied 审计,带操作者与小写码;NO_DRAFT、INVALID_REQUEST、5xx 不写。acceptance[3] 写明线上码 METADATA_CONFLICT,并说明过期 If-Match 要在草稿存在时发。\n- 为什么改:#28355 之后产品对 422 INVALID_METADATA 会写一行 denied 审计,旧条款仍说「不写」,QA 每轮都判 FAIL,让测试者习惯忽略红灯。\n- 风险与回滚:只改一份 QA 清单 JSON,不发布任何包、不动产品代码;回滚即 revert 本 PR。\n- 先看:`docs/qa/platform-checklist/areas/studio-authoring.json` 中该条目的 acceptance[10] clause/verify,其次 acceptance[3].verify 与新增的 revision 11 history 行。\n- 两分钟验证:`pnpm check:platform-checklist`,预期输出 `check-platform-checklist: OK — 16 areas, 352 items`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\nOne file, `docs/qa/platform-checklist/areas/studio-authoring.json` (+7 / -6), the item `studio-authoring.draft-publish-lifecycle` only:\n\n1. **acceptance[10].clause** — the denials list gains the four catalogued refusals the single-item doors (save, publish, rollback, delete) now audit after #28355: `invalid_metadata` (422 INVALID_METADATA), `not_overridable`, `not_creatable`, `destructive_change`, each exactly one `denied` row with the lower-case code. The sentence \"A 422 INVALID_METADATA spec refusal ... write no row\" is replaced by: a refusal outside that set writes no row (404 NO_DRAFT, 400 INVALID_REQUEST, any 5xx). Source pointer: `packages/metadata-protocol/src/protocol-refusal-audit.ts#REFUSAL_AUDIT_CODES`.\n2. **acceptance[10].verify** — asks for steps[7]'s stray-key 422 as exactly ONE `denied` / `invalid_metadata` / `save` row (source `protocol.saveMetaItem`) with the authenticated actor, and for no row from steps[12]'s 400 INVALID_REQUEST or a publish with no pending draft (404 NO_DRAFT). A missing row, a duplicate row, a SCREAMING-coded row, or a row for NO_DRAFT / INVALID_REQUEST is a FAIL.\n3. **acceptance[3]** — the clause spells the wire code `METADATA_CONFLICT`; the verify says to send the stale If-Match while a draft row exists, because with no draft row the `?mode=draft` door answers 409 \"(current is null)\" for any token, the published version included (`protocol-lock-version-gates.ts#storedParentForToken`), which does not exercise the stale-token guard.\n4. `revision` 10 → 11 and one `history` row (ref #29013).\n\n## Why\n\nQA run #29002 (subject 7fa9873f) scored acceptance[10] FAIL: the stray-key dashboard draft save answered 422 INVALID_METADATA and `/audit` held a `denied` / `invalid_metadata` row with the actor. That is what #28355 decided, so the clause, not the product, was stale. The rewrite is stronger, not weaker: a 422 that used to score a row as a FAIL now owes one, and two uncatalogued refusals are named as owing none.\n\n## Tests\n\nNo product code changed, so no test was added. The premise was re-measured on `origin/main` 0a41075a through the real protocol doors (`ObjectStackProtocolImplementation`, the persisting fake engine of `protocol.refusal-audit-rows.test.ts`) with a throwaway probe file, deleted before commit:\n\n<details><summary>Probe readings (vitest, 5/5 cases ran)</summary>\n\n| Case | Answer | Audit rows |\n|:---|:---|:---|\n| dashboard draft save, widget with a stray key, actor usr_admin | 422 INVALID_METADATA (`widgets.0` unrecognized key) | one: save / denied / invalid_metadata / actor usr_admin / protocol.saveMetaItem |\n| control: valid dashboard draft save | 200, state draft | one: save / allowed / ok |\n| publish, no pending draft | 404 NO_DRAFT | none |\n| rollback, no toVersion | 400 INVALID_REQUEST | none |\n| draft save with the published version as If-Match, no draft row | 409 METADATA_CONFLICT \"... (current is null)\", currentVersion null | one: save / denied / metadata_conflict |\n\nA sixth case (stale If-Match while a draft exists) is NOT MEASURED: that fake engine's `update` does not mutate rows, so the stored draft never moved and the token stayed current. The clause's stale-draft half is unchanged and was read as holding by QA run #29002.\n\n</details>\n\n## Acceptance notes\n\n- `steps` were not edited (file surface: acceptance[10], acceptance[3], revision, history). The NO_DRAFT leg in the new verify is a publish sent when no draft is pending, which a runner can send after steps[3] without a new step.\n- The batch-publish codes (`batch_aborted`, `namespace_prefix`, `stored_type_not_canonical`) and `item_locked` are carried over unchanged from revision 10.\n\n## Verification\n\n<details><summary>Gate run on e6afed5d7b — 16 derived, 16 run, 0 NOT-MEASURED</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 16 families for this one-file change; all 16 ran and exited 0, including `pnpm check:platform-checklist` (`OK — 16 areas, 352 items (347 active, 1 planned)`; symbol anchors 1088/1098 resolved, 10 on the named #16898 residual) and `pnpm --filter @objectstack/lint run check:doc-formula-expressions`. `dispatch-gates --ran FILE` → `Run reconciliation — 16 derived, 16 run, 0 NOT-MEASURED, 0 UNRUN`. CI-owned families (lint, Test Core and the rest) are not re-run locally.\n\n</details>\n\n---\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbWcvRkRqeQHg9HPzVi\n"
+}

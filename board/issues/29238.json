@@ -1,0 +1,34 @@
+{
+  "number": 29238,
+  "kind": "pull_request",
+  "title": "docs(spec): ConnectorConnectionState.status JSDoc drops \"expired\" from the no-refresh-token reconnect reason",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:09:42Z",
+  "updated_at": "2026-11-02T11:43:47Z",
+  "closed_at": "2026-11-02T11:26:37Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T11:26:37Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29238",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9RGMtg21zGTLxCeQagf8SHa)_\nFixes #28961\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改 `ConnectorConnectionState.status` 的一段 JSDoc 注释，去掉「过期（expired）」一词，外加一个 spec patch changeset。\n- 为什么改：没有 refresh token（或没有 client）的连接，在缓存未命中或请求遇到 401 时也会尝试刷新并被标为需要重连，此时 access token 可能仍然有效；旧注释把原因说成「token 过期」，与运行时不符。\n- 风险与回滚：零运行时风险，只是注释文字；回滚即还原这一个 commit。\n- 先看：`packages/spec/src/contracts/automation-service.ts`（第 1145–1148 行）。\n- 两分钟验证：在本分支运行 `git grep -n \"access token it has to renew with\" -- packages`，应看到 3 处：运行时 2 处（connector-connections.ts、sys-connector-connection.object.ts）和 spec 1 处，说法一致。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/spec/src/contracts/automation-service.ts`: the `reconnect_required` arm of the `ConnectorConnectionState.status` JSDoc said a connection is marked when it \"keeps nothing to renew an expired access token with\". A refresh also runs on a cache miss (a fresh replica, or a `revision` another replica moved) and on a dispatch's 401, so a connection with no refresh token, or no client to refresh with, is marked while its access token may still be valid. The arm now reads \"keeps nothing to renew an access token it has to renew with\", the wording the runtime already uses for the same fact in `ConnectorConnectionStore.markReconnectRequired` (`packages/services/service-automation/src/connector-connections.ts`) and in the `sys_connector_connection.status` description, and the sense of the reasons the runtime stores (`no_refresh_token` / `no_client` in `oauth2-grant/grant-handle.ts`: \"an access token the connection has to renew cannot be renewed\"). The runtime sentence from PR #28955 is on `main`, so no wording waits on it. No new claim is added.\n- `.changeset/28961-connector-connection-status-doc.md`: `@objectstack/spec` patch, with the two declaration lines.\n\nComment only: no schema, type, export or runtime string changes. No forced test edits.\n\n## Tests\n\nRun in the card worktree at head `8d3ba747`, each under `scripts/pm/os-verify-lock.sh`:\n\n<details><summary>packages/spec build, test, typecheck, check:generated</summary>\n\n- `pnpm --filter @objectstack/spec build` (plus the `@objectstack/lint` closure for the formula gate): `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec test`: `VERDICT command-exit 0`, Test Files 790 passed (790), Tests 23370 passed, 1 todo (23371).\n- `pnpm --filter @objectstack/spec typecheck`: `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec check:generated`: exit 0, \"All 14 generated artifacts are up to date\" against the dist just built. A JSDoc on an interface field is not a `.describe()`, so `content/docs/references/**` does not move.\n\n</details>\n\nNo consumer tests: the claim is `Metadata-protocol: none` and the public surface is byte-identical (`check:api-surface` green).\n\n## Acceptance notes\n\nNone.\n\n## Verification\n\n<details><summary>dispatch-gates derived set at 8d3ba747: 73 derived, 71 run green, 2 NOT MEASURED</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 73 commands for the 2 paths; every one was run and recorded with its exit code; `--ran` reconciles: \"73 derived famil(ies) accounted for, 71 run, 2 NOT-MEASURED\".\n- 71 exit 0, including `check:doc-authoring`, `check:api-surface`, `check:docs`, `check:changeset-no-major --base origin/main`, `check:empty-changeset --base origin/main`, `check:adr-0087-registration --base origin/main`, `check:nul-bytes`, `check:issue-citations`, `check:spec-docblock-symbol-anchors`.\n- `check-plugin-teardown-shape.mjs --self-test` first exited 3 on the shallow clone (its pinned fixture commit was unreachable); after fetching that one commit it exits 0, 48 cases pass.\n- NOT MEASURED locally, exit 3 PREREQUISITE NOT MET: `pnpm check:dual-build-cjs-loads` and `pnpm check:lean-entry-closure`. Both load every package's built `dist/`, which this card did not build (no package's code changes). CI's `Lint & Repo Gates` runs them.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQs2bVYuybG5pYYUg2)_\n"
+}

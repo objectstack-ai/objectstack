@@ -1,0 +1,34 @@
+{
+  "number": 29203,
+  "kind": "pull_request",
+  "title": "fix(app-shell): the metadata editor page tells its scoped inspector why it is read-only",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:17:12Z",
+  "updated_at": "2026-11-02T10:35:33Z",
+  "closed_at": "2026-11-02T10:35:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T10:35:31Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29203",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb2ejsWw32Bacu7MBXXjd2HN)_\n\nFixes #29079\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:元数据编辑页(Setup 的条目页，以及 Studio「全部元数据」下的 `/studio/包/metadata/flow/名称`)现在会把「为什么只读」告诉右侧的节点属性栏。属性栏显示的原因，就是编辑器上方提示条对当前原因说的那句话：只读软件包、锁定、缺少 `manage_metadata` 能力、代码包提供的条目、运行时只读的类型，以及安全目录的隔离墙。没有新增文案。\n- **为什么改**:#28985 之后，Studio 自动化页的流程节点属性栏会解释灰掉的控件，但同一个属性栏放在元数据编辑页上时，宿主不传原因，控件仍然灰着却没有任何说明。\n- **风险与回滚**:低。只多传一个可选属性 `readOnlyReason`,且只传给按选中项打开的属性栏;可写时不传，渲染与之前相同。未选中时的默认属性栏不变。回滚即还原本 PR。\n- **先看**:`ResourceEditPage.tsx` 中 `formReadOnly` 下方新增的 `inspectorReadOnlyReason`(原因的先后顺序与上方提示条一致),以及 `InspectorComponent` 调用处新增的一行。\n- **两分钟验证**:在 `ui/` 下运行 `pnpm exec vitest run packages/app-shell/src/views/metadata-admin/ResourceEditPage.inspectorReadOnlyReason-29079.test.tsx`,预期 6 个测试全绿;去掉调用处那一行后 5 个变红。\n- **需要你做的**:无，席位落地。\n\n## What changes\n\n- **`ResourceEditPage` derives `inspectorReadOnlyReason`** next to `formReadOnly` and passes it to the scoped inspector (`InspectorComponent`) as `readOnlyReason`, the prop #28985 added to `MetadataInspectorProps`. The sentence is the one the page's own notice gives for the cause in force, in the notices' order:\n  1. the walled security catalog: `engine.catalog.readOnly.walled`;\n  2. a read-only package (Studio's \"All metadata\" area): `engine.studio.pkg.readonlyHint`, the sentence Studio's Automations pillar passes;\n  3. a lock: the lock banner's title, then the `lockReason` the server serves;\n  4. a declaration-only catalog: its `engine.catalog.declaredOnly.hint` sentence;\n  5. a caller without `manage_metadata`: `engine.edit.capabilityReadOnly`;\n  6. an item a code package ships: `engine.edit.artifactLockedBanner`;\n  7. a type that is read-only at runtime: `engine.edit.readOnlyTypeBanner`.\n  An editable page passes none.\n- **No string is new**, so no i18n pack changes: every sentence is an existing key the page already shows above the editor.\n- **The no-selection default inspector is unchanged.** `MetadataDefaultInspectorProps` declares no `readOnlyReason`, and widening it is outside this card.\n\n## Deviations\n\nThe card asks for three causes on the node inspector: no write access, a pending walled decision, and view mode pointing at Edit. Measured on `main` `87d6baef`, only the first can reach the flow node inspector on this page:\n\n- **Walled** applies only to the security catalog types (`position`, `permission`, `capability`), and none of them registers a scoped inspector. The page still names the wall first, so an inspector a host registers for one of those types gets the right sentence and not the capability one. The test pins that through a host inspector registered for `position`.\n- **View mode does not reach a scoped inspector.** The inspector renders only beside a designer canvas. A designer type enters editing as soon as the item can be written (the designer auto-on effect), stays in editing after save and reset, and has no Edit button (the Edit button renders only when there is no preview). A sentence pointing at Edit would point at nothing, so view mode passes no reason. The seat accepted this shape before code.\n\n## Tests\n\n- **New: `ResourceEditPage.inspectorReadOnlyReason-29079.test.tsx`, 6 cases.** The real page, gates and `FlowInspector` → `FlowNodeInspector`; only the canvases (to emit a selection) and the data reads are stubbed. Each case opens the item, selects on the canvas and reads the accessible description of the node inspector's reason group:\n  - a writable flow: no reason group, and Remove node is enabled;\n  - a read-only package's area, a caller without `manage_metadata`, a locked item with a served reason, and a flow a code package ships: each shows its own sentence;\n  - the walled catalog: a host inspector registered for `position` receives `readOnly` and the wall's sentence.\n- **Red on main:** the same file on `87d6baef` reads 5 failed, 1 passed (only the writable control passes).\n- **Ablation:** deleting the `readOnlyReason={inspectorReadOnlyReason}` line through `scripts/ablation-replace.mjs` reads 5 failed, 1 passed; restored, blob equals `HEAD` and `git diff HEAD` is empty.\n\n## Verification\n\nAll readings on head `162f85c0`, base `87d6baef`.\n\n<details><summary>Tests</summary>\n\n- `pnpm exec vitest run` (from `ui/`) on `ResourceEditPage.inspectorReadOnlyReason-29079.test.tsx`: 6 of 6 passed. The same file on `87d6baef`: 5 failed, 1 passed.\n- Ablation of the `readOnlyReason={inspectorReadOnlyReason}` line (`scripts/ablation-replace.mjs`, anchor 1 to 0, blob `9e74e863` to `5d2abee0`): 5 failed, 1 passed; restored to the `HEAD` blob, `git diff HEAD` empty.\n- Sweep of the 120 ui test files that `git grep` finds naming `ResourceEditPage`, `MetadataResourceEditPage` or `readOnlyReason`, in three locked batches at `--maxWorkers=2`: 40/40 files (364 tests), 40/40 (204), 40/40 (547). Narrowed on purpose: CI's Test UI runs the rest of app-shell.\n- `pnpm exec turbo run type-check --filter=@object-ui/app-shell`: 65 of 65 tasks successful.\n- `eslint` on the two changed ui files: 0 errors; 51 warnings, the same count `ResourceEditPage.tsx` carries on `main`, none in the new test.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 34 families; all 34 ran with exit 0: the 33 unlocked ones with this body as the PR event (`check-adr-0087-registration`, `check-changeset-no-major`, `check-closing-keyword-parity` and `check-sdui-manifest` among them), and `pnpm --dir ui exec vitest run scripts/` locked: 169 files passed, 2 skipped (4,900 tests).\n- `dispatch-gates --ran`: 34 derived, 34 run, 0 NOT-MEASURED, 0 UNRUN.\n- `check:new-line-citations`: 0 new citations.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUgMp6a6PrErVUDx8h)_\n"
+}

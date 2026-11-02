@@ -1,0 +1,26 @@
+{
+  "number": 29362,
+  "kind": "issue",
+  "title": "plugins: sharing `expandRole` and approvals role-tier recipients read sys_member at a 10,000-row bound and turn a failed read into an empty list, so a large or unreadable membership silently shrinks the set",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T12:57:39Z",
+  "updated_at": "2026-11-02T12:57:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29362",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① same-family observation of the #29281 dev (os-dev-report 6577634380, `out_of_scope_findings`), source reading only, not reproduced. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 · the same defect class as #29281 (a membership read at its bound, or a failed read, silently shrinks a set), at a 10× larger bound.\n\nReach: an organization or role whose `sys_member` rows pass 10,000, or a moment when that read fails.\nReader who acts: a `domain:server` seat (plugin-sharing, plugin-approvals).\n\n## What happens (source reading)\n\n- `plugin-sharing` `team-graph.ts` `expandRole` (~L233) reads `sys_member` with `limit: 10000`, and a failed read is caught and becomes `[]`.\n- `plugin-approvals` `approval-service.ts` role-tier recipients (~L3365) read the same way: `limit: 10000`, `catch → []`.\n- So past 10,000 rows the expanded set is silently short, and on a failed read it is silently empty. That means sharing grants or approval recipients go missing, with no signal. By contrast, the approvals member screen (`MEMBER_SCREEN_READ_LIMIT`, ~L2999) is already loud.\n\n## Wanted\n\nMeasure both first. Then, as #29281 does: page the read to completion when it comes back at its bound (or reuse #29281's completion read if it fits), and make a failed read loud instead of an empty set. Say per site whether that is a narrowing (a call that answered now refuses).\n\nDedupe: searched `sys_member limit 10000 silent truncation`, `expandRole sys_member limit`, `approval tier recipients cap`; nearest #29281 (org_user_ids). **New.**\n\nLinks back: #29281, PR #29356."
+}

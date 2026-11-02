@@ -1,0 +1,30 @@
+{
+  "number": 29315,
+  "kind": "issue",
+  "title": "docs: the ObjectUI protocol pages claim native mobile rendering and offline-first mobile apps that the platform does not deliver",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:devx",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T11:39:39Z",
+  "updated_at": "2026-11-02T12:04:05Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29315",
+  "body": "Blocked-by: objectstack-ai/mobile#150\n\nThe maintainer asked for this design's cards to be filed but not dispatched yet (verbatim: 「开卡，不要派发」). objectstack-ai/mobile#150 is the release gate.\n\n## Defect\n\nCustomer-facing docs advertise capabilities the runtime does not deliver, which AGENTS.md Prime Directive 10 forbids (declared ≠ delivered):\n\n- `content/docs/protocol/objectui/index.mdx` ~line 183: \"Mobile app? Same YAML file renders natively (zero code)\".\n- `content/docs/protocol/objectui/index.mdx` ~lines 495–515, \"Offline-First Mobile Apps\":\n  - it shows a `mobile_renderer: { offline_cache, sync_strategy }` block, which is no metadata key the spec declares;\n  - it attaches dollar savings figures to it.\n- `content/docs/protocol/objectui/concept.mdx` ~lines 245–285: the server-driven-UI diagram describes a mobile app with a generic native renderer.\n\nRe-check: `grep -n \"renders natively\\|Offline-First Mobile\\|mobile_renderer\\|Mobile App Bundle\" content/docs/protocol/objectui/*.mdx`\n\n## Reality\n\nThe ObjectOS mobile app (objectstack-ai/mobile 2.0) is a native shell that hosts the web Console. Phones get the same Console renderer as browsers, so \"one definition, every screen\" is still true, but through the Console, not a native renderer. There is no offline mobile renderer.\n\n## Ask\n\n- Rewrite those passages to state what is delivered: one definition rendered by the Console on desktop and phone, and the mobile app hosting the Console.\n- Delete the `mobile_renderer` example and the unmeasured savings figures.\n- Keep the server-driven-UI argument, which still holds for the Console.\n\n## Acceptance\n\nThe re-check grep returns nothing that promises native rendering or offline mobile."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 29231,
+  "kind": "pull_request",
+  "title": "fix(runtime): forward a record-less aggregate api action that declares recordIdParam",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:58:11Z",
+  "updated_at": "2026-11-02T11:25:14Z",
+  "closed_at": "2026-11-02T11:25:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T11:25:11Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29231",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9R1CZoamh2wy4QFCvPHQnEN)_\nFixes #29173\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：动作门的 api 请求构建器只在本次调度确实点名了某条记录时，才用 `recordIdParam` 去取记录 id;没点名记录(批量\"聚合\"执行)时不再把空的 `{}` 当成一行。\n- 为什么改：列表里勾选多行、点\"Recalculate Selection\"这类 `execution: 'aggregate'` 的批量动作，自 #27611 起每次都被 400 拒掉，目标接口从未被调用，弹窗显示全部失败；18.3.0 发版清单的 P1 项因此变红。\n- 风险与回滚：只改一个条件(`recordIdParam && routedRecordId`),单记录运行、记录缺字段/字段为空的两条 #8018 拒绝都不变；回滚即 revert 本 PR。\n- 先看：`packages/runtime/src/action-execution.ts` 的 `buildApiActionRequest` 中 `recordIdParam` 那段;`packages/runtime/src/domains/api-action-forward.test.ts` 末尾新增的 `[#29173]` 一组。\n- 两分钟验证：`pnpm --filter @objectstack/runtime exec vitest run src/domains/api-action-forward.test.ts`,应见 77 个测试全过，其中 `[#29173]` 四条。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `buildApiActionRequest` (`packages/runtime/src/action-execution.ts`): the `recordIdParam` block now runs only when the dispatch names a record (`routedRecordId`, the same value the path half above it already uses to decide \"this dispatch names no record\"). A record-less dispatch arrives with the subject load's empty `{}` as its `record`; that `{}` was read as a row, had no `id`, and the request was refused 400 `VALIDATION_ERROR` (\"identifies its record by \"id\", but that field is not present on the record\"), so every `execution: 'aggregate'` api action declaring `recordIdParam` failed for the whole selection and its target was never called.\n- Layer chosen: the builder, not the dispatch. The subject load's `{}` is the handler-facing `ctx.record` contract for record-less and new-record actions (its own docblock says so), and the builder already defines record-less by `routedRecordId` for the path tokens. Fixing it there gives the request builder one meaning of record-less for both halves, and both doors (REST `/actions` and MCP `run_action`) share it. It also stays inside the claim's file surface.\n- The two #8018 refusals are unchanged for a dispatch that names a record: a row lacking the `recordIdField`, and a row holding null for it.\n- Changeset: `patch` for `@objectstack/runtime`.\n\n## Tests\n\nOne new `describe` in `packages/runtime/src/domains/api-action-forward.test.ts`, with a fixture in the showcase's \"Recalculate Selection\" shape (`type: 'api'`, `execution: 'aggregate'`, `recordIdParam: 'recordId'`):\n\n- REST door: `{ params: { _selectedIds } }` with no `recordId` answers 200, the target is called once at `/api/v1/apps/showcase/recalc`, the forwarded body is exactly `{ _selectedIds }`, and it has no `recordId` key.\n- MCP `run_action`: the same record-less run is forwarded with the same body and no invented `recordId`.\n- Per-record control: the same action run on one record still seeds `recordId` from that row.\n- Builder: `{}`, `null` and `undefined` records with no `recordId` build the plain request; an empty `recordId` is no id; a named record still gets both #8018 refusals (status 400, no path built).\n\nForced test edit: the shared `boot()` harness gains an optional `extraActions` list so the new fixture does not join the shared action roster. No existing assertion changed.\n\n<details><summary>Ablations (fix committed first; restored by ablation-replace, blob == HEAD, git diff HEAD empty)</summary>\n\n1. Put the defect back (`if (recordIdParam && routedRecordId) {` → `if (recordIdParam) {`): 3 failed / 74 passed. The REST case fails with `{\"success\":false,\"error\":{\"code\":\"VALIDATION_ERROR\",\"message\":\"Action \\\"Recalculate Selection\\\" identifies its record by \\\"id\\\", but that field is not present on the record — running without it would send a request that names no record.\",\"httpStatus\":400}}: expected 400 to be 200`. The MCP case and the builder case also fail. The per-record control stays green, as expected.\n2. Take the seeding away entirely (`… && false`): 7 failed / 70 passed, including the existing #8018 pin and the new named-record refusals (`expected undefined to be 400`), so those refusal pins are live.\n\n</details>\n\n## Acceptance notes\n\n- The console is unchanged, as the card asked. Its own `resolveRecordIdParamSeed` already skips seeding when it has no row record, which is the behaviour this restores on the server side.\n\n## Verification\n\n<details><summary>Local readings at head cab3213f (origin/main 0d15f8953 merged in)</summary>\n\n- `pnpm --filter @objectstack/runtime typecheck` (tsc plus the test typecheck): passed. Full runtime suite under os-verify-lock: `VERDICT command-exit 0`, Test Files 517 passed (517), Tests 9382 passed and 19 skipped (9401).\n- `pnpm --filter @objectstack/runtime exec vitest run src/domains/api-action-forward.test.ts`: 77/77 passed.\n- `eslint --no-inline-config packages/runtime`: exit 0, no findings.\n- `node scripts/pm/dispatch-gates.mjs --commands`: 61 derived families, all run, all exit 0. Two first answered exit 3 (prerequisite not met) and passed once it was met: the teardown-shape self-test after fetching its pinned fixture commit, and `check:dual-build-cjs-loads` after a full packages build. `--ran` reconciliation: 61 derived, 61 run, 0 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmNtfGcifoTscZGVzuo)_\n"
+}

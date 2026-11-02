@@ -1,0 +1,34 @@
+{
+  "number": 29239,
+  "kind": "pull_request",
+  "title": "docs(spec): tenancy-posture names @objectstack/organizations as open code, the licence as the commercial entitlement",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:10:01Z",
+  "updated_at": "2026-11-02T11:44:19Z",
+  "closed_at": "2026-11-02T11:29:02Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T11:29:02Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29239",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9JvmLZEmdwHTktmbLd7981y)_\nFixes #28826\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`packages/spec/src/security/tenancy-posture.ts` 里四处注释不再把 `@objectstack/organizations` 称为 \"enterprise\"；指许可证的地方改称「商业授权（commercial entitlement）」。只改注释，外加一条 spec patch changeset。\n- 为什么改：ADR-0132 之后该运行时已在本仓以 Apache-2.0 开源，商业仓只是同名子类加上许可证门。旧注释会让读者和 AI 以为组织隔离或写入盖章是闭源代码。\n- 风险与回滚：零行为变化，没有 schema、类型或 `.describe()` 改动，生成的参考文档不动。回滚即 revert 本 PR。\n- 先看：`packages/spec/src/security/tenancy-posture.ts`（文件头 \"Open code, entitled activation\" 一节，以及 `OrgScopingEntitlement` 的说明）。\n- 两分钟验证：`grep -n -i enterprise packages/spec/src/security/tenancy-posture.ts`，预期无输出（main 上有 4 处）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nEach of the four `enterprise` hits on `main` was read for whether it meant the package or the commercial licence:\n\n- File header, \"Open code, entitled activation\" (L27 on `main`): meant both. It now says that enabling `group` or `isolated` needs the `@objectstack/organizations` runtime mounted (ADR-0105 D12, ADR-0093 D5), that this runtime is open code from this repository under Apache-2.0 (ADR-0132 D1), and that what stays commercial is the entitlement: the licence gate that the same-named commercial package adds by subclassing the open one (ADR-0132 D2, D3). \"Open code does not mean free activation\" is kept: ADR-0105 D12 as amended by ADR-0132 still states the code-vs-activation split.\n- `postureStampsOrganization` docblock (L70): meant the package. Now \"The `@objectstack/organizations` runtime (open code, ADR-0132 D1) fills an absent value too\".\n- `OrgScopingEntitlement` docblock (L99): meant the commercial package. Now \"the commercial package of the same name ... under its commercial entitlement\", plus one sentence that the open package entitles both walled postures by construction (ADR-0132 D4).\n- Same docblock, per-deployment wall shaping (L114): meant any mounted runtime. Now \"only a mounted `org-scoping` runtime may declare anything here, and on a commercial host that is the licence-gated one\".\n- `.changeset/28826-tenancy-posture-open-runtime-wording.md`: `@objectstack/spec` patch, with the two declaration lines.\n\nNo `.describe()` in the file says \"enterprise\" (the file has none at all), so nothing generated moves. `check:generated` confirms it.\n\n## Tests\n\nNo forced test edits and no new tests: comment-only change. No ablation, because no tested behaviour changed.\n\n<details><summary>Readings on e6a8c4d7</summary>\n\n- `pnpm --filter @objectstack/spec build`: VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec check:generated`: VERDICT command-exit 0, \"All 14 generated artifacts are up to date\".\n- `pnpm --filter @objectstack/spec test`: VERDICT command-exit 0, Test Files 790 passed (790), Tests 23370 passed, 1 todo.\n- `pnpm --filter @objectstack/spec typecheck`: VERDICT command-exit 0.\n\n</details>\n\n## Acceptance notes\n\n- Not changed, on purpose: the next header paragraph (\"Cloud ADR-0016's 铁律 ... not by giving the posture away\") does not say \"enterprise\", so it is outside this card. It predates ADR-0132, which reads the same iron rule as \"a wall is enforcement\". Noted here, not filed.\n- No consumer tests: the claim is `Clause-②: no` / `Metadata-protocol: none`, and the published surface is unchanged apart from comment text in the emitted declarations.\n\n## Verification\n\nAll readings on head `e6a8c4d7` (objectstack-ai/objectstack).\n\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran FILE`: \"73 derived famil(ies) accounted for — 73 run, 0 NOT-MEASURED (a DERIVED zero — all 73 recorded an exit code and none of them is 3)\". Every one of the 73 exited 0.\n- Four of them first exited 3 (prerequisite not met, not a red): `check-plugin-teardown-shape --self-test` needed full history, and `check:doc-formula-expressions`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` needed built packages. After `git fetch --unshallow` and `pnpm build` (VERDICT command-exit 0, 117/117 tasks) all four exited 0.\n- `node scripts/check-changeset-no-major.mjs --base origin/main --event FILE` with this body: exit 0, \"LEVEL AXIS: this PR declares clause-② `no` and metadata-protocol `none` ... a non-protocol change at `patch`\".\n- `pnpm check:dev-prereqs` (local-only family): exit 0.\n- Not run locally, left to CI: `pnpm lint`, the repo-wide scans, and consumer packages (none are owed for a comment-only `Clause-②: no` change).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmRYknavAqEfbSsc1GG)_\n"
+}

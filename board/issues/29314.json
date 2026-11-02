@@ -1,0 +1,30 @@
+{
+  "number": 29314,
+  "kind": "issue",
+  "title": "Console: a \"Mobile app\" page under the user's settings that shows a connect QR code for the ObjectOS mobile app",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T11:39:31Z",
+  "updated_at": "2026-11-02T12:04:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29314",
+  "body": "Blocked-by: objectstack-ai/mobile#150\n\nThe maintainer asked for this design's cards to be filed but not dispatched yet (verbatim: 「开卡，不要派发」). objectstack-ai/mobile#150 is the release gate, and the maintainer closes it.\n\n## Context\n\nThe ObjectOS mobile app (objectstack-ai/mobile) connects to a private deployment by scanning a QR code. The mobile side is objectstack-ai/mobile#156. Today no Console surface tells a user how to connect the app: searching the Console for QR codes, \"mobile app\" and app-store links finds only the `qrcode` field type and demo data.\n\n## Ask\n\n1. **Page.** Add a page in the signed-in user's settings area, titled 移动应用 / \"Mobile app\". It shows:\n   - a QR code encoding `objectos://connect?server=<this server's public base URL, URL-encoded>`;\n   - the same URL as copyable text;\n   - one line: \"The code holds only this server's address, never your account\".\n2. **Public base URL.** Use the server's configured public origin, the one the auth layer uses (`OS_AUTH_URL` → `BETTER_AUTH_URL` → `OS_BASE_URL`), plus any sub-path mount. Do not use `window.location`, which can be an internal or proxied host.\n   - If no public URL is configured and the page would encode `localhost` or a private address, say so loudly with the remedy (set `OS_AUTH_URL`) instead of showing a QR that cannot work from a phone.\n3. **Optional app-store links.** Show them only when configured; no hard-coded store URLs.\n4. **Same Console on Cloud.** On Cloud, the environment's own host is its public URL. No Cloud-specific code is expected; if one is needed, say so in the PR.\n\n## Acceptance\n\n- Unit test: the QR payload is built from the configured public URL, including a sub-path mount.\n- Unit test: the localhost and private-address refusal path.\n- A Playwright check that the page renders the QR and the copyable URL."
+}

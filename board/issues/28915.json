@@ -2,8 +2,8 @@
   "number": 28915,
   "kind": "issue",
   "title": "Record open: the drawer is the default and the split pane retires — the list keeps its full width, and a record opens only as the drawer or the page",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T04:10:42Z",
-  "updated_at": "2026-11-02T08:06:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T09:22:22Z",
+  "closed_at": "2026-11-02T09:19:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28915",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat under epic #26676, on the maintainer's ruling. Code readings below are on `main` `9a9823d921`. No `domain:*` label is set: triage routes this card.\n\n## Ruling\n\nThe maintainer, 2026-11-02: 「默认应该是普通列表，右侧弹出。drawer」 and 「默认改抽屉，分屏彻底退役，只留抽屉和整页，立卡。」\n\nThis supersedes #27545 Target item 1 (\"Split is the default\") and the split half of item 2, written on the 2026-10-29 final design. The other #27545 items stand: the non-modal drawer, ⤢ maximizing in place, and the full page from ↗ and ⋯.\n\n## Why\n\n- **Observed.** Opening a record narrows the list. At 1440 px a lead list keeps three columns. In a narrower window it turns into card rows.\n- **No metadata pull.** `split` already left `NavigationModeSchema`, so no author can declare it. `ui/packages/app-shell/src/views/ObjectView.tsx:780` still turns a declared or default `drawer` into `split` unless the reader chose the drawer. HotCRM's task, opportunity and case views declare `mode: 'drawer'` and get a split pane.\n- **The scenario is already covered.** The drawer draws no dimming overlay and is non-modal, so the list stays visible, a click on another row swaps the record, and the 「1 / 13」 stepper works.\n\n## Reading: the split surface\n\n- `ui/packages/app-shell/src/utils/recordOpenPreference.ts`: the type at line 55, the default at line 61, and the decode at line 78.\n- `ui/packages/app-shell/src/views/ObjectView.tsx:780`: the mapping from `drawer` to `split`.\n- `ui/packages/components/src/custom/navigation-overlay.tsx`: the `'split'` mode, `RECORD_SPLIT_MIN_CONTENT_PX`, `useSplitEscape` and `paneBeside`.\n- `ui/packages/components/src/custom/record-list-face.tsx`, with its readers in `plugin-grid/src/ObjectGrid.tsx` and `plugin-list/src/ListView.tsx`: the narrowed list face.\n- `ui/packages/plugin-list/src/components/ViewSettingsPopover.tsx` (lines 74, 84, 343–355) and the `list.recordOpenSplit` key in the i18n packs.\n- `content/docs/frontend/plugins/plugin-view.mdx`, around line 520.\n\n## Target\n\n1. A record opened from a list opens in the drawer by default. The list keeps its full width underneath.\n2. `RecordOpenPreference` is `'drawer' | 'page'`. A stored `split` is an unknown value and reads as the default, with no compatibility read (startup posture).\n3. The split mode and its code go: the mapping at `ObjectView.tsx:780`, the overlay's split face and width floor, the narrowed list face if nothing else reads it, and the i18n key in every pack.\n4. The Display menu's 「打开记录」 offers 抽屉 and 整页.\n5. These stay: the non-modal drawer, a row click swapping the record, the stepper, drag-to-resize, ⤢ maximizing in place, and the modal sheet for a drawer with no list.\n6. No metadata change: `navigation.mode` keeps its values.\n\n### Premise to verify first\n\n`ui/packages/app-shell/src/layout/consoleSidebarRail.ts:50` derives the sidebar's auto-fold width from split content (1160 + 256 = 1416, #27593). Read whether anything other than the split pane needs that fold. Do not change it on assumption: name the reading in the PR. If the fold has no remaining reason, report it as a follow-up finding for the maintainer, because #27593 was a separate ruling.\n\n## Acceptance\n\n- At 1440 px and with the sidebar open, a row click opens the drawer, and the list behind it keeps its columns and width.\n- A click on another row swaps the record. ↑ ↓ step through the list. ⤢ maximizes in place.\n- With `split` stored in `os:record-open-mode`, a row click opens the drawer.\n- The Display menu shows 抽屉 and 整页 only. Choosing 整页 opens the record page.\n- A view that declares `navigation.mode: 'page'` still opens the page. A phone still opens the page.\n- A `grep` for `recordOpenSplit` and `RECORD_SPLIT_MIN_CONTENT_PX` finds nothing.\n- The #27545 tests are converted to the drawer, not deleted, wherever the behaviour stays (`ObjectView.recordPaneV4-27545`, `navigation-overlay-split-27545`, `ListView.recordPaneCount-27545`, `recordPaneGroupScope-28461`, `ObjectView.recordOpenPreference-26677`, `ObjectView.recordOpenDisplay-26681`).\n- Screenshots at 1440 and 1000 px are linked from the PR."

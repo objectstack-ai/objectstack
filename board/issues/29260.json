@@ -1,0 +1,34 @@
+{
+  "number": 29260,
+  "kind": "pull_request",
+  "title": "fix(app-shell): clear dateRange and exportOptions when a report switches to Joined",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:37:02Z",
+  "updated_at": "2026-11-02T11:39:16Z",
+  "closed_at": "2026-11-02T11:39:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T11:39:14Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29260",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb8C2BwXpb9gUHV68debZjbR)_\n\nFixes #29195\n\nClause-②: no\nMetadata-protocol: none\n\nClaim 6574419052.\n\n## 维护者速读\n\n- **改了什么**:Studio 报表属性里把「报表类型」切换为「联合」时,除了原来清掉的数据集、度量、行、列、图表和排序,现在同一次修改里也清掉「日期范围」(`dateRange`)和「导出选项」(`exportOptions`)。\n- **为什么改**:联合报表不接受这两个键,而切换后表单会把「期间与导出」整节隐藏。原来带着这两个键的报表切到联合后保存会被服务端拒收,拒收落在一个页面上没有任何控件能改的位置,作者无法自行修复。\n- **风险与回滚**:只改类型切换到联合那一个补丁,且只清报表上本来就有的键;切回非联合类型不会恢复它们,非联合类型之间切换完全不变。没有新文案、没有规范改动。回滚即 revert 本 PR。\n- **先看**:`ReportDefaultInspector.tsx` 的 `JOINED_CONTAINER_CLEARED_KEYS`;新测试 `ReportDefaultInspector.joinedClearsRefused-29195.test.tsx` 里的 \"SPEC AS JUDGE\" 用例(由 `ReportSchema` 判定清掉的键是否恰好等于规范拒收的键)。\n- **两分钟验证**:Studio 打开一个设置了日期范围或导出选项的汇总报表,把报表类型改为「联合」并添加一个块:保存成功,保存的报表里没有 `dateRange` 与 `exportOptions`。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- **`JOINED_CONTAINER_CLEARED_KEYS` gains `dateRange` and `exportOptions`.** `ReportSchema`'s joined arm refuses both on the container whatever their value, `{}` included (#26548), and the report form's \"Period & export\" section is hidden on a joined report. The type picker's switch to Joined cleared the other six refused keys (objectui#10746) and kept these two, so a report carrying either one was sent and refused at a key no visible control reached. Both are now cleared in the same patch, the same way: an own key holding `undefined`, which the wire omits, and only when the draft carries the key.\n- **The list is not a second hand-kept copy of the spec's rule.** The spec exports no list of the refused keys, so the new test makes `ReportSchema` the judge: a report carrying every top-level key a non-joined report can carry is switched to Joined through the inspector, and the keys the patch clears must equal the keys `ReportSchema` refuses on the type-only switch, after which the report must parse. A coverage case holds that fixture against the spec's own property list, so a key the spec adds later must join the fixture (or the named exclusion set, with its reason) and the parse then decides whether the switch must clear it.\n- Switching back to a non-joined type restores nothing, and switching between two non-joined types keeps both keys. `runtimeFilter`, `drilldown` and `description` travel through the switch untouched.\n\nNo spec, i18n or export change.\n\n## Tests\n\n- `ReportDefaultInspector.joinedClearsRefused-29195.test.tsx` (new, 7 cases): the maximal matrix fixture parses (instrument); coverage against the spec's property list, excluding `blocks`, `protection`, the ADR-0010 envelope keys (`MetadataProtectionFields`) and `overrides` (`OverrideDeclarationFields`), both read from `@objectstack/spec/kernel`; the spec-as-judge case above; the card's case (a summary report with `dateRange` and `exportOptions` switched to Joined saves without them and `ReportSchema` accepts the save); an empty `dateRange` and `formats: []` are cleared too; Joined back to Summary brings neither back; Matrix to Summary keeps both.\n- `ReportDefaultInspector.joinedClearsBinding-10746.test.tsx`: the comment on its six-keys constant now says those are the six its draft carries and points at the new file for the whole list. No assertion changed.\n\n## Acceptance notes\n\n- The card asks that \"the server accepts the save\". The test's verdict is `ReportSchema.safeParse` on the JSON-encoded draft, which is the schema the metadata save door validates a report with. It was not measured against a running server.\n- The coverage pin's exclusion set reads two of its groups from the spec (`MetadataProtectionFields`, `OverrideDeclarationFields`); `blocks` and `protection` are named by hand with their reason.\n\n## Verification\n\nAll on head `42c8f2b1` (base `origin/main` `45e9b2f1`, which contains `1e4841a2`).\n\n<details><summary>New tests, and the ablation that shows they fail on main's list</summary>\n\n- `vitest run` on the new file and the 10746 file: 2 files, 15/15 passed.\n- Ablation with `scripts/ablation-replace.mjs`, deleting the two new entries from `JOINED_CONTAINER_CLEARED_KEYS` (which leaves main's six-key list; anchor 1 to 0, blob `da0eaccf` to `c8803708`): 4 failed, 3 passed. The failures are the spec-as-judge case, the card's case, the empty-values case and the back-switch case. The three that pass are the instrument, the coverage pin and the non-joined control, which do not depend on the list. Restored: blob equals HEAD and `git diff HEAD` is empty.\n\n</details>\n\n<details><summary>Sweep, type-check and gates</summary>\n\n- Test sweep under the verify lock: every ui test file naming `ReportDefaultInspector` or `JOINED_CONTAINER_CLEARED_KEYS`, plus the 29022 and 27785 report hold files: 20 files, 131/131 passed.\n- `turbo run type-check --filter=@object-ui/app-shell`: 65/65 tasks, exit 0 (both `tsc --noEmit` and `tsc -p tsconfig.test.json`).\n- `dispatch-gates --commands`: 34 derived families, all exit 0, including `check-sdui-manifest`, `check-changeset-no-major`, `check-adr-0087-registration`, `check-closing-keyword-parity` (run against this body) and `pnpm --dir ui exec vitest run scripts/` (169 files passed, 2 skipped). `dispatch-gates --ran`: 34 derived, 34 run, 0 NOT-MEASURED. `check:new-line-citations`: 0 new.\n- Narrowing: the whole app-shell vitest suite is CI's Test UI; it was not run locally.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01QsR2jRtcfS3JVWfX3soquJ\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 29244,
+  "kind": "issue",
+  "title": "records: a free-form `select` field (no `options`) admits a plain object or an array on create and stores it as-is, although a select's stored value is a scalar option value",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:13:39Z",
+  "updated_at": "2026-11-02T11:10:38Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29244",
+  "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ① 产品缺陷 — 具名落点 (`packages/objectql/src/validation/record-validator.ts`, the `select` / `radio` arm when the field declares no `options`) + 复现. Follow-up owed by landed work: should-fix 2 of contract review 6574387576 on PR #29223 (card #29133).\nreach: 公开入口实测 — `engine.insert` on `origin/main` `45e9b2f1`, `select` field `stage_free` with no `options`: `{ stage_free: { a: 1 } }` → ADMIT, the driver's `create()` receives the object `{\"a\":1}`; `{ stage_free: [\"x\"] }` (field not `multiple`) → ADMIT, driver receives the array. Probe by the #29133 thread, deleted after.\n业务理由: a free-form select is how an object holds an open picklist (stage, category, source). A client that sends the wrong shape gets a success and a record whose select value is an object, which the list, the filter builder and reports cannot show or match. Same class as #29133, a different arm. Not doing it: the wrong shape keeps landing silently on every open picklist.\n动手的读者: the `domain:server` seat (objectql), after triage grades it; os-dev.\n查重: `select options plain object admitted` → 84 hits, `free-form select object value` → 32 (incl. closed): none is this. Nearest: #29133 (text arm, PR #29223), #27515 (closed, Studio filter on a picklist, unrelated).\n\n**Expected.** A non-`multiple` free-form select refuses a plain object or an array `invalid_type` on insert, update and multi-update; a `multiple: true` select keeps admitting an array of scalars. The #5922 operator-object sentence keeps running first.\n\n**Pins to re-home.** PR #29223 moved two #5922 pins in `packages/objectql/src/validation/operator-object-write-value.test.ts` (`admits an UNDECLARED $-spelling`, `admits a plain non-operator object`) onto `stage_free`; they rest on exactly this admission and must move again (or be restated as refusals) in the PR that closes this card.\n\n**Level.** A narrowing (`Clause-②: no (narrowing)`), owes a contract review at `CONTRACT_REVIEW_TIER`."
+}

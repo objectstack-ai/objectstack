@@ -2,8 +2,8 @@
   "number": 29077,
   "kind": "issue",
   "title": "Studio flow edge inspector: on a read-only package the edge controls are disabled with no reason, and the readOnlyReason its host hands it after #28985 is ignored",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:57:22Z",
-  "updated_at": "2026-11-02T07:35:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:42:35Z",
+  "closed_at": "2026-11-02T10:40:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29077",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #28985 os-dev-report (PR #29073, report 6571078597) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** On a read-only package, an administrator who selects a flow **edge** (not a node) in Studio sees every edge control greyed with no reason on hover, on keyboard focus or to assistive tech. #28985 fixes the same defect for the node inspector; the edge inspector sits beside it on the same canvas and is left behind, so `ux-conventions.disabled-control-reason` still fails on that surface.\n\n**Measured (`origin/main` `6b3ba82cbb`, source reading; NOT MEASURED at a public door).**\n- `ui/packages/app-shell/src/views/metadata-admin/inspectors/FlowEdgeInspector.tsx:223,232,239,270,287,348,370`: each control is `disabled={readOnly}`, with no `aria-describedby`, `title` or focusable described wrapper.\n- PR #29073 adds `readOnlyReason?: string` to `MetadataInspectorProps` and Studio's flow host passes it when `editLocked`. `FlowEdgeInspector` receives the same props and ignores it.\n\n**Wanted.**\n1. When `readOnly && readOnlyReason`, the edge inspector draws the same focusable, `aria-describedby` reason group as `FlowNodeInspector` after #28985, on hover, on keyboard focus and to assistive tech.\n2. Hosts that pass no reason are unchanged. No new key or option.\n\n**Tests.** A read-only edge with a reason: the disabled controls are described and the group is focusable. Without a reason: unchanged. A test that fails on `main`.\n\n**Reader.** `domain:ui`. Size S. Waits for PR #29073 (#28985) to land, since it reads the prop that PR adds.\n\n**Dedupe.** Searched `FlowEdgeInspector`, `flow edge inspector disabled reason`: only #28985.\n\nLinks back: #28985, PR #29073."

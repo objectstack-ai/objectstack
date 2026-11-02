@@ -2,8 +2,8 @@
   "number": 29052,
   "kind": "issue",
   "title": "List empty state: a list emptied by a user-filter chip alone offers no \"Clear filters\", because UserFilters keeps its selection internally and cannot be reset from outside",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:26:58Z",
-  "updated_at": "2026-11-02T08:14:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:28:33Z",
+  "closed_at": "2026-11-02T10:27:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29052",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class b, from the #28908 os-dev-report (PR #29047, report 6570628489) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** After #28908 lands, a list emptied by the reader's own Filter panel conditions or the \"In a queue\" toggle offers \"Clear filters\" in its empty state. A list emptied by a user-filter chip alone (the quick-filter chips above the grid) still says \"your current filters or search\" and offers only \"Add record\". The reader has to find the chip and clear it by hand, and the copy points at an action the page does not offer.\n\n**Measured (`origin/main` `0be247ce8b`, source reading; NOT MEASURED at a public door).**\n- `ui/packages/plugin-list/src/UserFilters.tsx:608`: `UserFilters` holds the chip selection in its own `useState` (`selectedValues`), seeded once from `initialSelections`. There is no controlled `selections` prop and no reset handle.\n- So `ListView` cannot clear the chips from the empty state without a key remount, which ui/AGENTS.md #8 forbids. PR #29047 records this under Acceptance notes and leaves the chip-only case add-only.\n\n**Wanted.**\n1. `UserFilters` accepts a controlled selection (or an equivalent reset signal) from its host, keeping today's uncontrolled behaviour when the host passes none.\n2. `ListView`'s \"Clear filters\" also clears the user-filter chips, so a list emptied by a chip alone offers the same action as one emptied by the panel.\n3. No new metadata key, no new option.\n\n**Tests.** A list emptied by a chip alone shows \"Clear filters\"; the click clears the chip and the rows come back; a host that passes no controlled selection behaves as today.\n\n**Reader.** `domain:ui`. Size S to M.\n\n**Dedupe.** Searched `UserFilters reset chip`, `UserFilters controlled`: only #28908 and QA runs.\n\nLinks back: #28908, PR #29047."

@@ -2,7 +2,7 @@
   "number": 29048,
   "kind": "pull_request",
   "title": "fix(service-messaging): a notification template read for a recipient locale with no row tries the stack's declared fallback before en",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -20,10 +20,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:25:43Z",
-  "updated_at": "2026-11-02T08:14:31Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-02T09:23:16Z",
+  "closed_at": "2026-11-02T09:23:14Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T09:23:14Z",
   "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/29048",

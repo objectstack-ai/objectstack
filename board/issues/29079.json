@@ -2,8 +2,8 @@
   "number": 29079,
   "kind": "issue",
   "title": "Studio metadata editor page: the flow node inspector on /studio/PKG/metadata/flow/NAME is read-only with no reason, because ResourceEditPage folds three causes into formReadOnly and passes no readOnlyReason",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:studio",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:57:58Z",
-  "updated_at": "2026-11-02T07:30:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:36:52Z",
+  "closed_at": "2026-11-02T10:35:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29079",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #28985 os-dev-report (PR #29073, report 6571078597) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** A flow also opens on the metadata editor page (`/studio/PKG/metadata/flow/NAME`, `ResourceEditPage`). There the node inspector can be read-only for three different reasons: the user cannot write, a walled decision is pending, or the page is in view mode and not editing yet. After #28985 the Studio flow canvas explains its read-only state, but this page still greys the inspector with no reason, and each cause needs its own sentence (view mode should point at \"Edit\", not at switching packages).\n\n**Measured (`origin/main` `6b3ba82cbb`, source reading; NOT MEASURED at a public door).**\n- `ui/packages/app-shell/src/views/metadata-admin/ResourceEditPage.tsx:2571`: `formReadOnly = readOnly || walledDeciding || (!editing && !createMode)`, passed as `readOnly` to the inspectors (`:3468`, `:3492`, `:3511`, `:3525`, `:3553`) with no reason.\n- PR #29073 adds `readOnlyReason?: string` to `MetadataInspectorProps`; `FlowNodeInspector` draws the described group only when a host passes it.\n\n**Wanted.**\n1. `ResourceEditPage` passes a `readOnlyReason` that names the cause in force: no write access, a pending walled decision, or view mode (with the way to start editing).\n2. The inspectors that honor `readOnlyReason` show it; others are unchanged. No new metadata key or option; new UI strings go through the i18n packs.\n\n**Tests.** Each of the three causes shows its own sentence on the node inspector; an editable page shows none. A test that fails on `main`.\n\n**Reader.** `domain:ui`. Size S to M. Waits for PR #29073 (#28985) to land.\n\n**Dedupe.** Searched `ResourceEditPage read-only reason`, `FlowEdgeInspector`: only #28985 and unrelated closed cards.\n\nLinks back: #28985, PR #29073."

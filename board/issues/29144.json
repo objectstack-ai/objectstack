@@ -2,8 +2,8 @@
   "number": 29144,
   "kind": "issue",
   "title": "Interface list page: four userActions toggles still read `=== true` while the shared UserActionsConfigSchema publishes them on by default (hideFields, filter, rowHeight, group)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,18 +11,26 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T08:17:43Z",
-  "updated_at": "2026-11-02T08:17:43Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T12:40:10Z",
+  "closed_at": "2026-11-02T12:40:10Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29144",
-  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① a should-fix from the contract review of PR #29083 (#28912), record 6572308637. It is outside that card's surface (the list view). ⛔ Not a claim. No grade: triage sets it.\n\nReach: authors of interface pages (`interfaceConfig.userActions`, the same `UserActionsConfigSchema` as a list view, `page.zod.ts` ≈L1076). The published contract says these toggles are on by default. The page draws them only for an explicit `true`.\n\n## Where (on `main`, after PR #29083)\n\n- `ui/packages/app-shell/src/views/InterfaceListPage.tsx` ≈L589 reads `userActions.hideFields === true` off `cfg.userActions || {}`, and does the same for `filter`, `rowHeight` and `group`. The spec defaults for all four are `true`.\n- The result splits on whether the document was parsed. For a parsed block that omits the key, the materialised `true` satisfies `=== true` and the control is drawn. For an absent block, or an unparsed stored page, it stays closed.\n\n## Wanted (pick one, triage or the ui seat)\n\n- A: `InterfaceListPage` reads the spec defaults for the four toggles (`!== false`), so one contract holds on both surfaces. Or:\n- B: the spec gives the interface page its own documented defaults (closed), with a schema of its own or a documented override, and says so in the describe.\n\nAlso, on next touch: the semantic entry `18.list-view-hide-fields-default-on`'s sentence \"An interface page keeps its own closed-by-default toolbar and still draws the control only for an explicit `true`\" overstates the page's closedness for a parsed block. Qualify it in line with A or B.\n\nDedupe: searched `InterfaceListPage userActions === true`; only #28912 / PR #29083. **New.**"
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nRuled: 6574404727 · letter A · 2026-11-02T10:07Z\n\nFiling gate: ① a should-fix from the contract review of PR #29083 (#28912), record 6572308637. It is outside that card's surface (the list view). ⛔ Not a claim. No grade: triage sets it.\n\nReach: authors of interface pages (`interfaceConfig.userActions`, the same `UserActionsConfigSchema` as a list view, `page.zod.ts` ≈L1076). The published contract says these toggles are on by default. The page draws them only for an explicit `true`.\n\n## Where (on `main`, after PR #29083)\n\n- `ui/packages/app-shell/src/views/InterfaceListPage.tsx` ≈L589 reads `userActions.hideFields === true` off `cfg.userActions || {}`, and does the same for `filter`, `rowHeight` and `group`. The spec defaults for all four are `true`.\n- The result splits on whether the document was parsed. For a parsed block that omits the key, the materialised `true` satisfies `=== true` and the control is drawn. For an absent block, or an unparsed stored page, it stays closed.\n\n## Wanted (pick one, triage or the ui seat)\n\n- A: `InterfaceListPage` reads the spec defaults for the four toggles (`!== false`), so one contract holds on both surfaces. Or:\n- B: the spec gives the interface page its own documented defaults (closed), with a schema of its own or a documented override, and says so in the describe.\n\nAlso, on next touch: the semantic entry `18.list-view-hide-fields-default-on`'s sentence \"An interface page keeps its own closed-by-default toolbar and still draws the control only for an explicit `true`\" overstates the page's closedness for a parsed block. Qualify it in line with A or B.\n\nDedupe: searched `InterfaceListPage userActions === true`; only #28912 / PR #29083. **New.**\n"
 }

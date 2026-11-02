@@ -2,8 +2,8 @@
   "number": 29012,
   "kind": "issue",
   "title": "spec(view): FormViewSchema drawerSide / drawerWidth are accepted on a form view and read by no form-view surface; the describe says the question \"stays open on #27153\", which is closed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:records",
     "domain:spec",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:08:56Z",
-  "updated_at": "2026-11-02T07:26:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T13:55:52Z",
+  "closed_at": "2026-11-02T13:32:17Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29012",
   "body": "domain:devx#1 · os-warren · session_01JQwxbX9avDwM2goWd7zimE\n\nFiling gate: ① a product defect, a QA run clause fail (studio-authoring.no-entry-property-matrix acceptance[2]: a key stored, served and silently inert).\nBusiness reason: an author who writes `drawerSide: 'left', drawerWidth: '480px'` on a form view gets a valid save and publish (a bad enum is even refused 422), and the form still opens as the centred dialog or the page. ADR-0049 says such a key is either enforced or removed. The describe in `packages/spec/src/ui/view.zod.ts` (about L5155) says the drawer half of that question \"stays open on #27153\", but #27153 closed on 2026-10-28 after retiring only `buttons.reset`, so no open card owns it.\nReader who acts: the triage seat, then the `domain:spec` lane: retire both keys on a form view (tombstone and conversion) or open the ui half to render a form view in a drawer. QA suggestion only: p3.\nDuplicate search: `drawerSide` → 9 hits, all closed: #27153 (retired buttons.reset, left the drawer keys), #26843, #27155 (retired `type: 'drawer'`), #27159 (ObjectForm drops the drawer branch). `drawerWidth` → 15 hits, none open on this.\nBatch-of: release-18.3.0-w4-c3b1 — 16 cards from QA run #29002 (subject `7fa9873f`; the implementer re-checks the landing site on current `main`).\n\n## Reproduction\n1. On a writable package: `PUT /api/v1/meta/view/qar8_fdr.form?mode=draft&package=PKG` with `{object:'qar8_fdr', viewKind:'form', isDefault:true, config:{type:'simple', sections:[…], drawerSide:'left', drawerWidth:'480px'}}`, then publish. The live read carries both keys.\n2. Open the list → New, and `/_console/forms/qar8_fdr.form`.\n\nExpected: a 480 px drawer from the left, or a refusal at save. Actual: the same centred dialog / in-page form as a control view without the keys; `drawerSide:'middle'` → 422, so the key is validated and never read. Reproduced 2 times.\n\n## Mechanism\nOnly `ui/packages/plugin-form/src/DrawerForm.tsx` reads them, for a React `ObjectForm` block given `formType='drawer'`; no metadata form-view surface reaches it (the describe says so: \"Inert on a form view since `type: 'drawer'` was retired\").\n\nQA-source: #29002 · studio-authoring.no-entry-property-matrix · acceptance[2]"

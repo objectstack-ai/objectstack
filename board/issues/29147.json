@@ -2,8 +2,8 @@
   "number": 29147,
   "kind": "issue",
   "title": "Console home at phone width: the launcher's links and buttons are 16–32 px tall, below the 44 px touch target",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,17 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue"
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T08:20:39Z",
-  "updated_at": "2026-11-02T08:20:39Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:51:59Z",
+  "closed_at": "2026-11-02T10:50:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29147",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #29075 audit (phone-width Navigation flow, run record `/mnt/project-files/issue-29075/run-record-before.md`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** Home is the first screen after sign-in. On a phone, its links are so small that people miss them or tap the wrong one.\n\n**Measured (`origin/main` `6b3ba82c`, real Console, CRM and showcase, 375 and 390 px, step 01, FAIL in all four runs).** Start with a template 170x32, New in Studio 128x32, Browse App Marketplace 159x16, Setup 52x16, My work: Open inbox 63x16, approvals View all 42x16, notifications View all 42x16, View all activity 101x16, recent rows 356x40. The app bar targets on the same page are #29075's.\n\n**Wanted.**\n1. Below `sm`, every home launcher link and button meets 44 px (height, or a padded hit area), in `ui/packages/app-shell/src/console/home/HomePage.tsx`, `HomeRail.tsx` and `HomeAppsStrip.tsx`.\n2. Desktop is unchanged.\n3. No new keys or options.\n\n**Tests.** A phone-width render test that asserts the phone classes on each target.\n\n**Reader.** `domain:ui` (`area:home`). Size S.\n\n**Dedupe.** Searched `home launcher touch target`, `home page phone`: no product card.\n\nLinks back: #29075, #29040."

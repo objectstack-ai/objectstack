@@ -1,0 +1,35 @@
+{
+  "number": 29289,
+  "kind": "pull_request",
+  "title": "docs(rest,spec): metadata.endpoints.item says thirteen mounts, names history methods (#29035)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T11:05:33Z",
+  "updated_at": "2026-11-02T13:18:36Z",
+  "closed_at": "2026-11-02T13:18:34Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T13:18:34Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29289",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9TBoN64CQFXszsEspiHHghp)_\n\nFixes #29035\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 业务影响：无行为变化，只改注释、describe 文案和一条台账说明。\n- 背景：#27627 把应用元数据 bundle 接入 per-item 开关后，`metadata.endpoints.item` 实际管 13 个挂载点，多处注释仍写“12”。\n- 改了什么：rest-server 注释、挂载表 pin 测试头注释、liveness 台账 note 均改为 13；路由台账注明当前 9 次 `registerPerItemRoute(` 调用。\n- 规格文案：spec describe 写明历史族方法（GET 读，POST publish/rollback），与 pin 测试拼写一致。\n- 生成物：重新生成 `content/docs/references/api/rest-server.mdx`；附 `@objectstack/spec` patch changeset。\n- 风险：极低；路由、成员、默认值、接受集合均未变。\n\n## Card items\n1. `registerPerItemRoute` docblock (`packages/rest/src/rest-server.ts`): thirteen mounts, bundle named, nine calls in three modules.\n2. `rest-config-mount-table.pin.test.ts` header: THIRTEEN (assertions untouched — no forced test edit).\n3. `packages/spec/liveness/metadata_endpoints.json` `item` note: thirteen.\n4. `rest-route-ledger.ts` ~L114: measured 9 `registerPerItemRoute(` calls (1 bundle + 2 writes + 6 history); original 80/51/29 reading left as recorded history.\n5. `rest-server.zod.ts` describe: `GET` `/history`, `/audit`, `/diff`, `/published`; `POST` `/publish`, `/rollback`.\n\nGenerated: `content/docs/references/api/rest-server.mdx` (gen:docs). gen:schema / gen:openapi moved nothing.\n\n## Verification\n- rest mount-table pin 24/24, rest-route-ledger conformance 7/7, spec liveness 12 files / 359 tests green.\n- dispatch-gates: 107 derived, 107 run, 0 NOT-MEASURED; `pnpm lint` exit 0.\n- No negative pin added → no ablation owed.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmPjMhcsBYvbCXPpq8G\n"
+}

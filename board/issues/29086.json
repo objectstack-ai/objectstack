@@ -2,8 +2,8 @@
   "number": 29086,
   "kind": "issue",
   "title": "docs: retire the npm 10 `edgesOut` notes in Getting Started, Troubleshooting and Self-hosting — their own removal condition now holds",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "marchtian"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T07:06:44Z",
-  "updated_at": "2026-11-02T08:06:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T11:50:47Z",
+  "closed_at": "2026-11-02T11:48:46Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29086",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured docs defect with named locations. Found while landing #28958, whose PR #29084 narrows the same note on Your First Project only.\nReader: `domain:devx` (docs on-ramp), one PR on `content/docs/getting-started/index.mdx`, `content/docs/deployment/troubleshooting.mdx` and `content/docs/deployment/self-hosting.mdx`.\nDedupe (open AND closed): \"edgesOut npm 10 docs\" → #28958 (open, Your First Project only), #23849 / #23805 / #23806 / #22912 (closed, the original npm 10 failure and the notes this card retires), #24926 / #24974 (closed, the separate pnpm-project `npm install --save-dev` case). None retires these notes.\nreach: public docs. Measured by the #28958 dev on 2026-11-02 with Node 22.23.4 and npm 10.9.9: dry-run installs of `@objectstack/cli@18.2.0` and `@objectstack/plugin-auth@18.2.0` exit 0 with no `edgesOut`; `@vitest/browser-webdriverio` 4.1.12 was published 2026-10-30.\ntype: Bug\n\nBusiness reason: these pages still tell every Node 22 reader that npm 10 cannot install the CLI and that they must upgrade npm first. That is no longer true, so a newcomer does an unneeded global npm upgrade, or gives up on the default toolchain.\n\n## Where\n\n`content/docs/deployment/troubleshooting.mdx` line 30 sets the removal condition for all of these notes: \"can be removed once `@vitest/browser-webdriverio` publishes the version that `npm view vitest dist-tags` lists as `V4`, and a plain npm 10 install of `@objectstack/plugin-auth` passes.\" Both halves now hold. Still stating the failure on `main`:\n- `content/docs/getting-started/index.mdx` lines 173–175 (\"npm 10 cannot install the CLI right now\").\n- `content/docs/deployment/troubleshooting.mdx` lines 13–30 (the whole `edgesOut` entry).\n- `content/docs/deployment/self-hosting.mdx` line 171 (the Dockerfile comment) and lines 365–366 (the npm 11 install step).\n\n## Wanted\n\n- Re-measure the removal condition at the time of the PR (`npm view vitest dist-tags`, a plain npm 10 install of `@objectstack/plugin-auth`) and record the reading in the PR.\n- If it holds: remove or narrow each note, as #29084 did on Your First Project. Keep any vitest pin advice that is still needed for its own reason (the GHSA-qxg6-89mg-rqv8 note on `~4.0.0`).\n- ⛔ Leave the separate pnpm-project `npm install --save-dev` note in `ai/skills.mdx` / `ai/skills-reference.mdx` alone: it is a different failure."

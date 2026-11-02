@@ -1,0 +1,35 @@
+{
+  "number": 29278,
+  "kind": "issue",
+  "title": "driver-mongodb: field `unique` is built as a sparse index, so two explicit `null` values collide, unlike the NULL-distinct rule of driver-sql and driver-memory",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:53:15Z",
+  "updated_at": "2026-11-02T13:26:24Z",
+  "closed_at": "2026-11-02T13:25:08Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29278",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① out-of-scope finding of the #29176 dev (os-dev-report 6575284496, `out_of_scope_findings` class b), read from source, NOT MEASURED (the dev's container could not download `mongod`). Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 · a driver diverges from the shared unique rule; no grant or disclosure.\n\nReach: a deployment on `driver-mongodb` with an optional field declared `unique`, when two records hold no value in it.\nReader who acts: a `domain:server` seat (`packages/drivers/driver-mongodb/src/mongodb-schema.ts`).\n\n## What happens (source reading)\n\n- `mongodb-schema.ts` builds a field's `unique` as `{ unique: true, sparse: true }`. A sparse index skips only documents that lack the field; it still indexes an explicit `null`, so two documents storing `null` collide.\n- driver-sql's unique index and driver-memory's key model are NULL-distinct (see the `memory-unique-constraint.ts` docblock): two `null` rows never collide.\n- PR #29271 (#29176) now stores a cleared optional unique text field as `null`. On Mongo that is no worse than before (two `''` collided too), but it does not get the fix.\n\n## Wanted\n\nMeasure on a real `mongod` first (the conformance harness). If confirmed, build the unique index so missing and `null` are both excluded (for example a `partialFilterExpression` on the field's type, or the driver omitting `null` fields on write), and add the case to the driver conformance ledger so all drivers answer it alike.\n\nDedupe: searched `mongodb sparse unique null`, `mongo unique index null collide`; none. **New.**\n\nLinks back: #29176, PR #29271."
+}

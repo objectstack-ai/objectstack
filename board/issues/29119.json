@@ -2,8 +2,8 @@
   "number": 29119,
   "kind": "issue",
   "title": "平台管理员每进一个应用页都重读 /api/v1/packages（317 KB 编码 / 约 1.5 MB 原始）只为 Studio 铅笔的设计门，答案不缓存（cloud#2914 子卡 OU-5）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "bug",
     "domain:ui",
     "performance",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T08:00:38Z",
-  "updated_at": "2026-11-02T08:19:14Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T11:17:58Z",
+  "closed_at": "2026-11-02T11:16:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29119",
   "body": "coordinator#1 · hotlong · session_6eb9ec2e0e3f410b91239dab7a337b9e\n\n立卡门类别：①（父单 cloud#2914 是 ④；round 10 已测、未立的杠杆 OU-5，且违反其 Target 1 / 4 的「不重复 URL」）\n\nReader: `domain:ui` 车道。`ui/packages/app-shell/src/hooks/useStudioDesignGate.ts`、`ui/packages/app-shell/src/views/studio-design/packages-io.ts:135-192`（会话内持有一次答案 + 进行中请求共享）；服务端可选在 `packages/rest/src/package-routes.ts` 加 ETag。建议档 p3，由分诊定。\n\nDedupe: `repo:objectstack-ai/objectstack is:issue useStudioDesignGate packages` total=7（#28076、#28147 closed，是只读包进 Studio 的功能卡，无同题）；`\"/api/v1/packages\" admin every page` total=119（无同题）。\n\n业务理由：组织所有者和管理员（每个托管环境的创建者就是管理员）。每进一个应用页都多下载一次几百 KB 的包列表，只为决定顶栏「在 Studio 中查看应用」铅笔是否可点；网络慢时这是页面上最大的一笔传输，而且和页面数据抢带宽。\n\n## 来源\n2026-11-02 staging 页面性能评估（cloud main `cd4e2e1f`，objectstack pin `6cbdef1e`；控制面 cloud.objectos.app，租户 os-2ph4c1.objectos.app / HotCRM 6.0.0；内置浏览器面板 zh-CN，读 resource timing 与 v2.7.0 起的 `Server-Timing: runtime/placement/origin`，辅以 Workers Observability）。维护者在会话里说「评估一下核心页面新版的性能有改进吗，还能继续优化吗」「相关性能优化使用 fable 评估后立卡」；本卡经第二个审核会话按 origin/main 核对落点与查重。\n⚠️ 本机链路当天很差（CF 边缘静态文件 65 KB/s），卡里的秒数只引用 Server-Timing 或请求的先后关系，不引用页面总耗时。\n\n## 已实测\n- 租户客户列表页：`GET /api/v1/packages` 编码体 317 KB，`Server-Timing runtime=66 origin=149`，浏览器侧整体 6.6 s（服务端很快，时间花在下载）；线索详情页、仪表盘页各又读一次（2671/4350/7099 ms 起）。\n- round 10（cloud#2914 评论 6396581531）：平台管理员在控制面 welcome / environments 上 5 次打开里有 3 次一次打开读两遍。\n- `useStudioDesignGate.ts:64-68` 注释原文：「One GET /api/v1/packages per package asked about … Nothing caches the answer」。`package-routes.ts` 没有 ETag / Cache-Control。\n\n## 验收\n1. 管理员一次应用页打开，`/api/v1/packages` ≤ 1 次；同一会话内再进其他应用不再重读（或改为按意图读）。\n2. cloud `verify-console-pin.mjs` 在 welcome 上的读数没有重复 URL。\n3. 非管理员行为不变（不发这个请求）。\n\n## 相关\ncloud#2914（父单，OU-5）\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"

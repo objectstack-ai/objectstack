@@ -2,8 +2,8 @@
   "number": 29150,
   "kind": "issue",
   "title": "Phone list card: no row-action control, and a long press opens the record, so a phone reader can't reach a row's actions from the list",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,17 +13,23 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:queue"
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T08:21:48Z",
-  "updated_at": "2026-11-02T08:21:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T12:28:02Z",
+  "closed_at": "2026-11-02T12:25:33Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29150",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from the #29074 audit (phone-width Lists flow, run record `/mnt/project-files/issue-29074/run-record-before.md`, `origin/main` `a4015ab4`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** On desktop, a list row offers its actions (edit, delete, declared row actions) from its row menu. On a phone, the list draws cards, and a card has no action control. A long press opens the record, the same as a tap. So a phone reader has to open each record to act on it, and some list-only row actions can't be reached at all.\n\n**Measured (real Console, app-crm and app-showcase, 375 and 390 px).** The phone card face shows no row-action control. A long press on a card opens the record.\n\n**Wanted.**\n1. On a phone, each card offers its row actions: the same set and order as the desktop row menu, through one 44 px control or a long-press sheet. The dev measures which one fits the #28484 card layout.\n2. Tapping the card still opens the record.\n3. Desktop is unchanged. No new metadata key.\n\n**Tests.** At 390 px, a card's row actions are reachable and match the desktop row menu, and a tap still opens the record.\n\n**Reader.** `domain:ui` (`area:records`). Size S to M; it changes the #28484 card layout. Serialize after #29074 (`ObjectGrid.tsx`).\n\n**Dedupe.** Searched `phone card row action`, `long press record card`: no product card.\n\nLinks back: #29074, #29040, #28484."

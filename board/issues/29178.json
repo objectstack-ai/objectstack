@@ -1,0 +1,34 @@
+{
+  "number": 29178,
+  "kind": "pull_request",
+  "title": "docs(pm): one fleet-wide rule for security findings — never a card, never a public mechanism",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T08:50:40Z",
+  "updated_at": "2026-11-02T10:27:34Z",
+  "closed_at": "2026-11-02T10:27:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T10:27:32Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29178",
+  "body": "domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\n<!-- claude-projects-attribution: {\"github_login\":\"huangyiirene\"} -->\n_Requested by **Irene** · [project thread](https://claude.ai/code/project/chan_01TJXtQ1tVD26ecLDZxFS67x?thread=cmsg_01TJXtQ1tVD26ecLDZxFS67xHtHg6svQJDqJvPkJe2ehiB)_\n\nFixes #29111\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:新增 pm-dispatch `references/security-findings.md`,把安全发现的处置写成全车队一条规则;立卡门、server 车道、信箱、`checklist-test`、`os-dev` 改为指向它,`os-dev` 终报新增私有字段 `security_findings`。\n- 为什么改:原规则只覆盖 QA runner,其他席位和 dev 仍把安全发现立成公开卡;卡上的方案 B 要求「不立卡、不公开机制、用私有安全公告当私卡」。\n- 风险与回滚:只改规则文本和棘轮数据行,不动代码与门禁;回滚即 revert 本 PR。\n- 先看:`security-findings.md` 第 3 节(公告步骤);`os-dev.md` 规则 3 新增一行、终报交付句与模板;`filing-gate.md` 例外行。\n- 两分钟验证:`pnpm check:pm-skill-ratchet && pnpm check:pm-skill-id-lint`,预期两者都以绿色判定行结束。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- **New `.claude/skills/pm-dispatch/references/security-findings.md`**: the card's eight points as one rule per line: what counts, never public (including the fleet-write relay payload, while its run log prints the payload), the repository security advisory as the private card, cross-repo finders, the `os-dev` private field, fix-PR wording, already public by mistake, and one source with no new gate or label.\n- **Advisory steps name only what is real today.** A write-role seat cannot create a draft advisory and the relay has no advisory op, so the maintainer creates drafts. A seat never reports or writes an advisory under its own account. Until the relay's report op (#29160) lands, the mechanism goes to the maintainer in session (choice A), who files the report or creates the draft. The relay's report and add-collaborators ops are named only as \"once available\". Private repositories stay session-only.\n- **Pointers instead of restatements:**\n  - `filing-gate.md`: 「安全发现」 joins the not-a-card list, and the possible-data-leak reach exception leaves the exceptions line, because such a finding is now a security finding.\n  - `lanes/server.md`: the security-card disclosure pair becomes one line that presumes no card.\n  - `project-forms.md`: keeps 「⛔ 不敲:安全发现」 and adds one pointer line.\n  - `checklist-test/SKILL.md`: the Guardrails definition and fix-dispatch text become a pointer. The runner's private report channel and the run-record line stay.\n  - `os-dev.md`: the reach exceptions drop `security`, one rule line routes a security finding to the new private field, the final report template gains `security_findings`, and the delivery sentence says the GitHub comment copy carries `withheld` or `none` in that field.\n- **`scripts/pm/check-skill-line-ratchet.mjs`**, data rows only (CEILINGS and the table-row pin):\n\n| File | Before | After | Delta | Basis |\n|:--|--:|--:|--:|:--|\n| `references/security-findings.md` | — | 55 | new row | ruling of record, the #29111 card body |\n| `references/filing-gate.md` | 66 | 67 | +1 | same ruling, measured delta |\n| `references/project-forms.md` | 54 | 55 | +1 | same ruling, measured delta |\n| `.claude/agents/os-dev.md` | 402 | 405 | +3 | same ruling, measured delta |\n| `references/lanes/server.md` | 87 | 86 | −1 | lowered |\n| `.claude/skills/checklist-test/SKILL.md` | 277 | 276 | −1 | lowered |\n\n  The card body records the maintainer's 「同意方案，选 B，立卡」 and orders this text into these files, which makes it the ruling of record for these raises. Each raise is the measured delta, after paying with the deleted restatements first: the server lane and checklist-test lose their restated security text. filing-gate, project-forms and os-dev held no restatement to pay with.\n\n## Tests\n\nNo runtime code changes. Rule text and ratchet data only.\n\n## Acceptance notes\n\n- `pm-dispatch/SKILL.md`'s phase index does not name the new reference: SKILL.md has no headroom, and readers reach it from the filing gate, `os-dev`, `checklist-test`, the server lane and the mailbox rules. carrier: none.\n- `lanes/triage.md`'s push case ① already says the mechanism is given in session only, and the new file cites it unchanged.\n- This change carries no finding and no mechanism.\n\n## Verification\n\nAll runs were on head `d08fd17e`, tree `objectstack-ai/objectstack`.\n\n<details><summary>Ratchet and id-lint</summary>\n\n- `pnpm check:pm-skill-ratchet` exited 0, and `--self-test` exited 0 with 164 cases (re-run on `d08fd17e` after the patch round).\n- `pnpm check:pm-skill-id-lint` exited 0: 107 file(s) clean.\n- The first ratchet run was red, because the new file had no table-row pin. The pin is now its measured 0.\n\n</details>\n\n<details><summary>Derived gate families (dispatch-gates --commands, reconciled with --ran)</summary>\n\n- On `d578bb13`, before the patch round: `node scripts/pm/dispatch-gates.mjs --commands` derived 41 commands for 7 paths (115 changed lines). All 41 ran locally and exited 0.\n- `pnpm --filter @objectstack/lint run check:doc-formula-expressions` first exited 3 (PREREQUISITE: `formula`/`lint` dist missing in a fresh worktree). After building those two packages under the verify lock (`VERDICT command-exit 0`), it exited 0.\n- `node scripts/pm/dispatch-gates.mjs --ran` returned: `41 derived famil(ies) accounted for — 41 run, 0 NOT-MEASURED (a DERIVED zero — all 41 recorded an exit code and none of them is 3).`\n- CI's own families (type-check lanes, Plan Test Core shards, artifact rosters) are left to this PR's check-runs.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01J8VVAnteUoDDkfSCMzkkwB)_\n\n"
+}

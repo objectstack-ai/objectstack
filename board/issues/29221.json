@@ -1,0 +1,36 @@
+{
+  "number": 29221,
+  "kind": "issue",
+  "title": "i18n(field help): the extractor's `help ?? inlineHelpText ?? description` stops at `inlineHelpText: ''`, and a field authoring both texts gets the inlineHelpText translation on description",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:i18n",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:42:37Z",
+  "updated_at": "2026-11-02T11:59:46Z",
+  "closed_at": "2026-11-02T11:58:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29221",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① two edges of the field-help derivation named by the #29153 implementer (os-dev-report 6573912237: a finding to file, plus open question [0], which the seat kept as ruled). They are out of PR #29217's claimed surface. ⛔ Not a claim. No grade: triage sets it.\n\n## The one derivation, three places\n\n- The extractor scaffolds `objects.O.fields.F.help` from `field.help ?? field.inlineHelpText ?? field.description` (`packages/cli/src/utils/i18n-extract.ts` ≈L1489 on main).\n- The console draws `inlineHelpText || description` (`fieldHelpText` in `@object-ui/fields`).\n- After PR #29217, the resolver serves the `help` entry on `description`, and also on `inlineHelpText` when that is non-empty.\n\n## Edge 1: `inlineHelpText: ''` (extractor)\n\n`??` does not skip an empty string, so for a field with `inlineHelpText: ''` and a `description`, the extractor seeds `help` from `''`: no usable entry is scaffolded. The console treats `''` as absent and draws `description`, so that description is never offered for translation. The implementer probed this with `collectExpectedEntries`. Wanted: the extractor skips an empty `inlineHelpText` the way the console does (`||` semantics for that link, or an explicit non-empty check). Reader: `packages/cli` owner.\n\n## Edge 2: both texts authored and different (resolver)\n\nA field that authors `inlineHelpText: 'A'` and `description: 'B'` gets one `help` entry, seeded from A, and the resolver serves its translation on BOTH slots. So any reader of `description` (not the console's help line, which draws `inlineHelpText` first) sees the translation of A where the source says B. This predates PR #29217: the entry was always served on `description`. Ruling for #29153 kept it (\"keeps serving `description` as today\"). Wanted: a reading of whether `description` should take the `help` entry only when the extractor seeded it from `description` (no non-empty `inlineHelpText`), and which readers of a field's `description` exist besides the help line. Reader: `domain:spec` (`packages/spec/src/system/i18n-resolver.ts`, `translateObject`).\n\nDedupe: searched `inlineHelpText extractor empty`, `field help translation description inlineHelpText`. Only #29153 and #25683. **New.**"
+}

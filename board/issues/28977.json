@@ -2,8 +2,8 @@
   "number": 28977,
   "kind": "issue",
   "title": "analytics: the /analytics/sql dry run renders a time bucket over a text, select, number or boolean column, where the query refuses INVALID_FIELD",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,20 +13,21 @@
   "labels": [
     "area:reports",
     "domain:server",
-    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [
-    "os-steve"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T05:29:10Z",
-  "updated_at": "2026-11-02T08:13:16Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T10:15:51Z",
+  "closed_at": "2026-11-02T10:14:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28977",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nBlocked-by: PR #28976 (same files)\n\nFiling gate: ① out-of-scope finding of the #28852 dev (PR #28976, os-dev-report `6569764928`), measured on `main` while measuring the preview. The seat has not re-measured it. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: a dataset selection with a `timeDimensions` granularity over a member whose column is text, select, number or boolean:\n- `/analytics/query` (native and ObjectQL) refuses it: the engine's temporal-bucket door answers `INVALID_FIELD` / 400 at `groupBy.N.dateGranularity`.\n- After PR #28976, the draft preview refuses it the same way.\n- The `/analytics/sql` dry run still renders a statement (`strftime` over the column) the query would refuse.\n\nSame family as #28841 (PR #28878): the echo shows SQL for a selection the query refuses.\n\n## Wanted\n\n1. Measure the echo for the four column types, ObjectQL and cross-object.\n2. If the echo renders where the query refuses, the echo refuses the same way, field for field, through the same reading PR #28976 adds (`preview-date-bucket-door.ts`), in the order `query()` refuses. ⛔ No new gate on the live faces, ⛔ no third copy of the refusal text.\n\nThis narrows the echo: a dry run that answers today is refused. So it is `Clause-②: no (narrowing)`, with a `CONTRACT_REVIEW_TIER` review owed.\n\n## Dedupe\n\nRead open issues for `analytics sql strftime` and `\"analytics/sql\" dateGranularity`: only #28852 (the preview face). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`).\n\nLinks back: #28852, PR #28976, #28841, PR #28878"

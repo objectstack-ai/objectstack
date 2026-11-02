@@ -2,8 +2,8 @@
   "number": 28960,
   "kind": "issue",
   "title": "docs(build-with-claude-code): the scaffold output shows an `npm install` the scaffolder does not print, \"ships nine\" skills (it installs 11), and the has() guard comment contradicts the objectstack-formula skill",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "bug",
     "domain:devx",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T04:58:21Z",
-  "updated_at": "2026-11-02T07:13:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T08:46:11Z",
+  "closed_at": "2026-11-02T08:44:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28960",
   "body": "domain:devx#1 · os-warren · session_01JQwxbYVchZUzHRyGz9MiQM\n\n立卡门: ① 用户可见的文档缺陷，具名落点 + 复现（reach: 公开入口——照官网页面跑脚手架，输出与页面不一致；页面与同一项目里装好的 skill 互相矛盾）\n业务理由: 「Build with Claude Code」是官网 Start here 的 AI-first 路径，读者是新手和他们的 coding agent。三处与现实不符：(1) 页面贴的脚手架输出有 `npm install`，真实输出没有（依赖已装好，只在没装时才打印），读者会多跑一遍或以为漏了步骤；(2) 「The bundle ships nine」，而项目里装的是 11 个 skill（多了 objectstack-platform、objectstack-upgrade、objectui），#27522 的计数清扫漏了这句；(3) Resolve 动作示例写 `has(record.status) && …`，注释说「has() guards the sparse list row … CEL faults on an absent key」，而同一项目里的 `.claude/skills/objectstack-formula/SKILL.md` 明说「has() is NOT a null check」「has(record.<declared_field>) … uniformly true and tell you nothing」。agent 读到两种相反的说法，只能猜。不修，AI 路径的样板教给 agent 一个已被修掉的旧坑和一个无效的守卫。\n动手的读者: domain:devx 席（docs on-ramp），`content/docs/getting-started/build-with-claude-code.mdx`（main ff881050）：第 83 行删掉 `npm install`（或注明只在安装失败时出现）；第 397 行删掉数字、保留名字（照 #27522 的规则）；第 170–172 行去掉 `has()` 与那段注释，和 formula skill 对齐（若 runtime 事实与 skill 不同，则反过来改 skill，二者只留一个说法）。\n查重: `is:issue build-with-claude-code has()` 54 命中、`is:issue build-with-claude-code skills nine` 5、`is:issue build-with-claude-code \"npm install\" next steps` 6（均含已关）。最近邻 #22152（同一 resolve_ticket 动作的 target 问题，已关）、#27522（计数漂移清扫，已关，漏了这句）、#8975（两种 guard 写法互相矛盾，已关，修复让 record 对声明字段总是完整，`has()` 注释从此过时）。\n\nQA-source: 18.3.0 wave 4 newcomer first-visit walkthrough (W4-NEWCOMER), path 2 \"Build with Claude Code\", anchor #27377\n\n## Reproduction (live site read 2026-11-02 04:44Z; published 18.2.0; Node 22.23.4, npm 10.9.9)\n1. `npm create objectstack@latest support-desk`. Real \"Next steps\": `cd support-desk`, `npm run dev`, `npm run validate`. The page's block (line 83) adds `npm install`.\n2. `ls support-desk/.claude/skills` → 11 directories: objectstack-ai, -api, -automation, -data, -formula, -i18n, -platform, -query, -ui, -upgrade, objectui. The page (line 397) says \"The bundle ships nine\".\n3. `grep -n \"has() is NOT a null check\" -A12 .claude/skills/objectstack-formula/SKILL.md` versus the page's lines 170–172.\n4. Authoring the Resolve action WITHOUT `has()` (`visible: P\\`record.status != \"resolved\" && record.status != \"closed\"\\``) passes `npm run validate`, shows Resolve in the record header on an open ticket, toasts \"Ticket resolved.\", hides the button and drops the ticket from the Open list, all as the page describes."

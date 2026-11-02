@@ -1,0 +1,35 @@
+{
+  "number": 29192,
+  "kind": "pull_request",
+  "title": "fix(service-datasource): migrateCredential's drop-inline refusal names an empty stored credential as empty",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:06:01Z",
+  "updated_at": "2026-11-02T10:35:34Z",
+  "closed_at": "2026-11-02T10:35:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T10:35:32Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29192",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9VrDSYbFeBRpZi2Rbi1iw6B)_\n\nFixes #29069\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：数据源凭据迁移（drop-inline）遇到已绑定的 sys_secret 解密出来是空值时，拒绝理由现在说「凭据为空」，用的是 #29064 连接路径同一句话；真的找不到行或密钥变了时，原来那句不变。\n- **为什么改**：以前两种情况共用一句「sys_secret 行丢失或加密密钥变了」，空凭据的管理员会去查错地方。\n- **风险与回滚**：极低。只改拒绝文案；结果仍是 `refused`、什么都不写、内联凭据保留。回滚即 revert。\n- **先看**：`packages/services/service-datasource/src/datasource-admin-service.ts` 的 `migrateCredential` 里新拆出的 `resolved === ''` 分支。\n- **两分钟验证**：`pnpm --filter @objectstack/service-datasource exec vitest run src/__tests__/datasource-admin-service.test.ts`，预期 `Tests 39 passed (39)`（main 上新用例红）。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- `migrateCredential`'s drop-inline step (`datasource-admin-service.ts`) splits its refusal. A ref that resolves to `''` is refused with: \"Datasource 'NAME' already references a stored secret, but credential 'REF' is empty (its sys_secret row holds an empty value). Removing the inline credential would leave this datasource with no working credential at all.\" The middle clause is the connect path's sentence from PR #29064 (`DatasourceConnectionService.connect`, the `secret === ''` branch), byte for byte. The remedy says to set the datasource's secret again.\n- A ref that does not resolve (`undefined`: a missing row or a decrypt failure) keeps its sentence and remedy unchanged.\n- Same outcome on both branches: `status: 'refused'`, no write, the inline copy kept. No new error code, status or member; the result shape is unchanged.\n- Changeset `.changeset/29069-migrate-credential-empty-refusal.md`: `patch` on `@objectstack/service-datasource`.\n\n## Tests\n\n`src/__tests__/datasource-admin-service.test.ts`, `migrateCredential (#8155)` block:\n\n- **Forced test edit:** the existing \"cannot be resolved\" case moved from `toContain('could not be resolved')` to an exact pin of the missing-row sentence, plus its remedy, so the unchanged text is held (the card asks a test to pin both texts).\n- **New:** a ref whose read-back is `''` is refused with the empty-credential sentence exactly, the reason names neither \"could not be resolved\" nor \"encryption key\", the remedy says to set the secret again, the inline password stays and the only store call is the read.\n\n<details><summary>Red on base, green on head, ablation</summary>\n\n- **Red** (tests at head, source at base `fea2dbb7`): `Tests 1 failed | 38 passed (39)`; the new case received the missing-row sentence. The missing-row pin was green on base, as it should be.\n- **Green** (head `b213c369`): `Tests 39 passed (39)`.\n- **Ablation** (`scripts/ablation-replace.mjs`, the whole `resolved === ''` branch replaced by the old conflated condition `if (resolved == null || resolved === '') {`, anchor 1 -> 0, blob `144b0a89` -> `bcdb23c3`): `Tests 1 failed | 38 passed (39)`; Expected the empty sentence, Received \"…but it could not be resolved or decrypted (a missing `sys_secret` row, or a changed encryption key)…\". Restore: blob after restore `144b0a89` equals HEAD's, `git diff HEAD` empty.\n\n</details>\n\n## Acceptance notes\n\n- The empty-credential clause is spelled in two places now (the connect path and this refusal). The claim's file surface is the admin service only, so no shared helper was extracted into `datasource-connection-service.ts`; each spelling is pinned by its own test.\n\n## Verification\n\nAll readings at head `b213c369`.\n\n<details><summary>Package suite, typecheck, lint</summary>\n\n- `pnpm --filter @objectstack/service-datasource test`: `Test Files 69 passed (69)`, `Tests 1153 passed (1153)`, exit 0.\n- `pnpm --filter @objectstack/service-datasource typecheck`: exit 0.\n- eslint `--no-inline-config` on the two changed source files: exit 0. Repo-wide `pnpm lint` is CI's.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates.mjs --commands, 61 families)</summary>\n\n- 60 of 61 run locally, all exit 0. `check-plugin-teardown-shape --self-test` first exited 3 on a shallow clone; after `git fetch --unshallow` it passed (48 cases).\n- `pnpm check:dual-build-cjs-loads` needs every package built; the full build runs and the reading goes in the os-dev-report, otherwise CI's check-run is the reading.\n\n</details>\n\nDogfood battery: not owed (no `!` in the title, no `(narrowing)` arm).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmP66rDL21VeBrVWovN)_\n"
+}
