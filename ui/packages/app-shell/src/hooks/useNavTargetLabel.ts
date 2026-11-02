@@ -138,8 +138,22 @@ function listViewsOf(def: LabelledRecord | undefined): Record<string, LabelledRe
   return views && typeof views === 'object' ? (views as Record<string, LabelledRecord | undefined>) : {};
 }
 
-export function useNavTargetLabel(): NavTargetLabelResolver {
+/**
+ * Where an object target's definition is read from, when not the whole
+ * `objects` list (objectstack#29121). Home names the objects of its recent
+ * record rows from definitions it read by name (`readObjectsByName`): handed
+ * here, an `object` target is looked up in them, and the whole list is never
+ * read for its label. A `view` target still reads `objects`: a definition read
+ * by name carries no composed views. Omitted, the resolver reads `objects`, as
+ * the sidebar and every other caller does.
+ */
+export interface NavTargetLabelSources {
+  objects?: readonly unknown[];
+}
+
+export function useNavTargetLabel(sources?: NavTargetLabelSources): NavTargetLabelResolver {
   const metadata = useMetadata();
+  const objectsSource = sources?.objects;
   const bundledReads = useBundledReads();
   const { objectLabel, viewLabel, dashboardLabel } = useObjectLabel();
   const { language, t } = useObjectTranslation();
@@ -149,7 +163,7 @@ export function useNavTargetLabel(): NavTargetLabelResolver {
     () => (target: NavLabelTarget) => {
       switch (target.kind) {
         case 'object': {
-          const def = findByName(metadata.objects, target.objectName);
+          const def = findByName(objectsSource ?? metadata.objects, target.objectName);
           const text =
             metadataText(def?.label, language) ?? draftText(drafts, 'object', target.objectName, language);
           return nonEmpty(objectLabel({ name: target.objectName, label: text ?? '' }));
@@ -174,6 +188,6 @@ export function useNavTargetLabel(): NavTargetLabelResolver {
           return undefined;
       }
     },
-    [metadata, bundledReads, objectLabel, viewLabel, dashboardLabel, language, t, drafts],
+    [metadata, objectsSource, bundledReads, objectLabel, viewLabel, dashboardLabel, language, t, drafts],
   );
 }
