@@ -85,6 +85,15 @@ describe('normalizeSectionField', () => {
     expect(normalizeSectionField('ghost', ctx)).toBeUndefined();
   });
 
+  it('with NO object schema to judge against, a bare name still builds its untyped stub', () => {
+    // The boundary: a form mounted without a data source (its host
+    // `submitHandler` owns the write, `submitTargetRefusal.test.tsx`) has no
+    // object to say the name is unknown, as the lint judges only a known
+    // object. The stub's value reaches that host, so it is not the defect.
+    const f = normalizeSectionField('ghost', { ...ctx, objectSchema: null })!;
+    expect(f).toMatchObject({ name: 'ghost', label: 'ghost', type: 'input' });
+  });
+
   // View-level conditional visibility (#2212): the spec field's predicate may
   // be an Expression object `{ dialect: 'cel', source }`. It must survive
   // normalization verbatim — into the runtime field's view-level `visibleOn`

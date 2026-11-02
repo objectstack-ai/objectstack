@@ -288,18 +288,27 @@ export function warnSectionMemberExcludedByFields(
  * `flatFields.ts`, and objectui#4755 for what a second hand-copied version
  * costs.
  *
- * `undefined` when the object does not declare `fieldName`: a name with no
- * field behind it has no control to draw. It used to fall back to a bare
- * `{ name, label: name, type: 'input' }` stub, so a form view section naming a
- * field the object lacks (a typo, a field deleted later) drew a live text box
- * labelled with the raw name — and what the user typed there was never sent,
- * because the save writes only declared fields. The lint already reports that
- * entry as `FORM_FIELD_UNKNOWN` ("never renders on the form"); the form now
- * agrees with it, as the default arm's pool and `buildFlatFields` already did.
+ * `undefined` when the resolved object schema does not declare `fieldName`:
+ * a name the object does not have has no control to draw. It used to fall back
+ * to a bare `{ name, label: name, type: 'input' }` stub, so a form view section
+ * naming a field the object lacks (a typo, a field deleted later) drew a live
+ * text box labelled with the raw name — and what the user typed there was
+ * never sent, because the record save writes only declared fields. The lint
+ * reports that entry as `FORM_FIELD_UNKNOWN` ("never renders on the form");
+ * the form now agrees with it, as the default arm's pool and
+ * `buildFlatFields` already did.
+ *
+ * With NO object schema at all (a form mounted without a data source, whose
+ * host `submitHandler` owns the write) there is no object to judge the name
+ * against — the lint's rule likewise judges only a known object — so the bare
+ * stub stays: its value does reach that host.
  */
 export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): FormField | undefined {
   const field = ctx.objectSchema?.fields?.[fieldName];
-  if (!field) return undefined;
+  if (!field) {
+    if (ctx.objectSchema != null) return undefined;
+    return { name: fieldName, label: fieldName, type: 'input' } as FormField;
+  }
   return {
     name: fieldName,
     label: ctx.fieldLabel(ctx.objectName, fieldName, field.label || fieldName),
@@ -351,9 +360,9 @@ export function sectionEntryName(fieldDef: unknown): string | undefined {
  * FormField) into a runtime FormField with a guaranteed `name`.
  *
  * `undefined` when the entry only NAMES a field — shape (1) or (2) — and
- * nothing defines it: the object does not declare it and no `customFields`
- * member names it. Such an entry draws no control (see `fromObjectSchema`);
- * {@link buildSectionFields} drops it.
+ * nothing defines it: the resolved object schema does not declare it and no
+ * `customFields` member names it. Such an entry draws no control (see
+ * `fromObjectSchema`); {@link buildSectionFields} drops it.
  */
 export function normalizeSectionField(
   fieldDef: string | Record<string, any>,
@@ -499,8 +508,8 @@ function resolveSectionEntry(
  * Normalize every field def in a section, in the section's AUTHORED order.
  *
  * Without a pool, a name-only entry naming a field nothing defines — the
- * object does not declare it and no `customFields` member names it — is
- * dropped: it draws no control, which is what the lint's `FORM_FIELD_UNKNOWN`
+ * resolved object schema does not declare it and no `customFields` member
+ * names it — is dropped: it draws no control, which is what the lint's `FORM_FIELD_UNKNOWN`
  * tells the author ("never renders on the form"). A section left with no
  * field this way is the same empty section any arm already handles.
  *
