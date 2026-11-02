@@ -14,6 +14,13 @@ export const Contact = ObjectSchema.create({
   pluralLabel: 'Contacts',
   icon: 'user',
   description: 'A person associated with an account.',
+  // The record's title is the person's full name. Without this pointer the
+  // title is derived from the first name-ish field, which reads "Ada" on the
+  // record page, in lookups and in pickers. A text formula is a display title:
+  // search reaches the person through `last_name` and `email` instead.
+  nameField: 'full_name',
+  // What the record page shows at a glance, under the title.
+  highlightFields: ['account', 'email'],
 
   fields: {
     first_name: Field.text({
@@ -28,6 +35,8 @@ export const Contact = ObjectSchema.create({
     }),
     full_name: Field.formula({
       label: 'Full Name',
+      // `text`, so the formula can back the record title (`nameField` above).
+      returnType: 'text',
       expression: cel`(record.first_name == null ? '' : record.first_name + ' ') + record.last_name`,
     }),
     email: Field.email({
