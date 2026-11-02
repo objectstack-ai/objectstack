@@ -319,9 +319,49 @@ export const ConnectorRetryStrategySchema = lazySchema(() => z.enum([
 export type ConnectorRetryStrategy = z.input<typeof ConnectorRetryStrategySchema>;
 
 /**
+ * What a credential-shaped key meets on an authored connector entry. A
+ * connector entry holds no secret at any key: a provider-bound instance names
+ * its credential with `auth.credentialRef` and the value lives in the secrets
+ * layer (ADR-0097 §3, ADR-0143 D3).
+ */
+const ENTRY_CREDENTIAL_KEY_GUIDANCE =
+  'Not authorable on a connector entry — connector metadata never holds a credential. A provider-bound '
+  + 'instance names its secret with `auth: { type, credentialRef }`, and the administrator sets the value '
+  + 'under that name (an environment variable in the open tier, or Setup → Connector credentials).';
+
+/**
+ * The credential-shaped keys an authored connector entry answers with
+ * {@link ENTRY_CREDENTIAL_KEY_GUIDANCE} — at its top level and inside each of
+ * its closed nested shapes (`retryConfig`, an `actions` element), so a secret
+ * misplaced one level down meets the same prescription.
+ */
+const ENTRY_CREDENTIAL_KEYS_GUIDANCE: Readonly<Record<string, string>> = Object.freeze({
+  apiKey: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  key: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  token: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  accessToken: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  secret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  clientSecret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  password: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  credentials: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+  credentialRef: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+});
+
+/**
+ * What an execution binding written on an authored connector action meets: an
+ * action carries none (ADR-0097 §5). A provider-bound instance derives its
+ * actions from the upstream; a catalog descriptor's actions describe, and
+ * dispatch nothing.
+ */
+const ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE =
+  'Not authorable on a connector action — an action carries no execution binding (ADR-0097 §5). A '
+  + 'provider-bound instance derives its actions from the upstream (the OpenAPI document, or the MCP '
+  + "server's tools), and a catalog descriptor's actions describe an integration without dispatching.";
+
+/**
  * The retry configuration's declared keys — one declaration, two carriers: the
  * open {@link RetryConfigSchema} and the closed retry shape of an AUTHORED
- * connector entry ({@link AuthoredRetryConfigSchema}). A function, so each
+ * connector entry ({@link DeclarativeConnectorEntryRetryConfigSchema}). A function, so each
  * carrier gets its own field instances (the reason `connectorBaseShape` below
  * records).
  */
@@ -371,21 +411,31 @@ const retryConfigShape = () => ({
  * Retry Configuration — the open shape: the retry policy a plugin's connector
  * def carries (`ConnectorSchema`), and the shape the runtime parses a policy
  * with (`resolveConnectorFetchPolicy`, the instance materialization). An
- * AUTHORED entry's `retryConfig` is the closed {@link AuthoredRetryConfigSchema}.
+ * AUTHORED entry's `retryConfig` is the closed
+ * {@link DeclarativeConnectorEntryRetryConfigSchema}.
  */
 export const RetryConfigSchema = lazySchema(() => z.object(retryConfigShape()));
 
 /**
  * The CLOSED retry shape of an authored connector entry
  * ({@link DeclarativeConnectorEntrySchema}): the keys {@link RetryConfigSchema}
- * declares, refusing every other. An authored entry is stored as the body the
- * save door accepts (ADR-0005 appendix (c), ruling B), so on an open shape an
- * undeclared key here parsed green, was kept, and meant nothing to the runtime.
- * Module private: the published carrier stays {@link RetryConfigSchema}.
+ * declares, refusing every other, a credential-shaped key with the entry's own
+ * prescription. An authored entry is stored as the body the save door accepts
+ * (ADR-0005 appendix (c), ruling B), so on an open shape an undeclared key here
+ * parsed green, was kept, and meant nothing to the runtime.
+ *
+ * Exported, and so published as its own def, for the reason the top-level
+ * closed carrier is: it is the shape a metadata document's `retryConfig` is
+ * parsed against, while {@link RetryConfigSchema} — built with its own field
+ * instances (see {@link retryConfigShape}) — is reached by no metadata root,
+ * so the authorable-surface gate judges a deletion from the shared declaration
+ * on THIS def. The runtime keeps parsing a stored policy with the open
+ * {@link RetryConfigSchema}.
  */
-const AuthoredRetryConfigSchema = lazySchema(() => strictObject({
+export const DeclarativeConnectorEntryRetryConfigSchema = lazySchema(() => strictObject({
   surface: "this connector entry's `retryConfig`",
   history: 'Until this shape was closed, an undeclared key here was accepted without effect.',
+  guidance: { ...ENTRY_CREDENTIAL_KEYS_GUIDANCE },
 }, retryConfigShape()));
 
 export type RetryConfig = z.input<typeof RetryConfigSchema>;
@@ -820,7 +870,7 @@ export type ConnectorActionEffect = z.input<typeof ConnectorActionEffectSchema>;
 /**
  * A connector action's declared keys — one declaration, two carriers: the open
  * {@link ConnectorActionSchema} and the closed action shape of an AUTHORED
- * connector entry ({@link AuthoredConnectorActionSchema}). A function, so each
+ * connector entry ({@link DeclarativeConnectorEntryActionSchema}). A function, so each
  * carrier gets its own field instances.
  */
 const connectorActionShape = () => ({
@@ -849,7 +899,7 @@ const connectorActionShape = () => ({
  * Connector Action Definition — the open shape: the actions a plugin's
  * connector def carries and a provider derives (`ConnectorSchema`). An
  * AUTHORED entry's `actions` elements are the closed
- * {@link AuthoredConnectorActionSchema}.
+ * {@link DeclarativeConnectorEntryActionSchema}.
  */
 export const ConnectorActionSchema = lazySchema(() => z.object(connectorActionShape()));
 
@@ -857,13 +907,22 @@ export const ConnectorActionSchema = lazySchema(() => z.object(connectorActionSh
  * The CLOSED action shape of an authored connector entry
  * ({@link DeclarativeConnectorEntrySchema}): the keys
  * {@link ConnectorActionSchema} declares, refusing every other, for the reason
- * {@link AuthoredRetryConfigSchema} records. An action carries no execution
- * binding (ADR-0097 §5), so a `method`, `path` or `url` here is refused too.
- * Module private: the published carrier stays {@link ConnectorActionSchema}.
+ * {@link DeclarativeConnectorEntryRetryConfigSchema} records, and exported for
+ * the same reason. A credential-shaped key meets the entry's own prescription;
+ * an execution binding — `method`, `path`, `url` — meets ADR-0097 §5's: an
+ * action carries none.
  */
-const AuthoredConnectorActionSchema = lazySchema(() => strictObject({
+export const DeclarativeConnectorEntryActionSchema = lazySchema(() => strictObject({
   surface: 'this connector action',
   history: 'Until this shape was closed, an undeclared key here was accepted without effect.',
+  guidance: {
+    // `key` is the action's own declared machine name here, not a misplaced
+    // credential, so the entry's credential table is taken without it.
+    ...Object.fromEntries(Object.entries(ENTRY_CREDENTIAL_KEYS_GUIDANCE).filter(([name]) => name !== 'key')),
+    method: ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE,
+    path: ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE,
+    url: ENTRY_ACTION_EXECUTION_BINDING_GUIDANCE,
+  },
 }, connectorActionShape()));
 export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
 
@@ -887,7 +946,7 @@ export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
  * one-declaration, two-doors finding).
  *
  * `authored` selects the closed nested shapes the closed entry is built with
- * ({@link AuthoredRetryConfigSchema}, {@link AuthoredConnectorActionSchema}),
+ * ({@link DeclarativeConnectorEntryRetryConfigSchema}, {@link DeclarativeConnectorEntryActionSchema}),
  * so the entry refuses an undeclared key inside `retryConfig` and inside each
  * `actions` element as it does at its own top level; the open carrier keeps
  * the open nested shapes.
@@ -977,7 +1036,7 @@ const connectorBaseShape = (authored = false) => ({
   ),
 
   /** Zapier-style Capabilities */
-  actions: z.array(authored ? AuthoredConnectorActionSchema : ConnectorActionSchema).optional(),
+  actions: z.array(authored ? DeclarativeConnectorEntryActionSchema : ConnectorActionSchema).optional(),
 
   /**
    * `triggers` — RETIRED (ADR-0049 enforce-or-remove). A connector trigger never
@@ -1043,7 +1102,7 @@ const connectorBaseShape = (authored = false) => ({
   /**
    * Retry configuration
    */
-  retryConfig: (authored ? AuthoredRetryConfigSchema : RetryConfigSchema).optional().describe('Retry configuration'),
+  retryConfig: (authored ? DeclarativeConnectorEntryRetryConfigSchema : RetryConfigSchema).optional().describe('Retry configuration'),
   
   /**
    * `connectionTimeoutMs` — RETIRED (ADR-0049 enforce-or-remove). A bounded,
@@ -1158,17 +1217,6 @@ const connectorBaseShape = (authored = false) => ({
 const ConnectorBaseSchema = lazySchema(() => z.object(connectorBaseShape()));
 
 /**
- * What a credential-shaped key meets on an authored connector entry. A
- * connector entry holds no secret at any key: a provider-bound instance names
- * its credential with `auth.credentialRef` and the value lives in the secrets
- * layer (ADR-0097 §3, ADR-0143 D3).
- */
-const ENTRY_CREDENTIAL_KEY_GUIDANCE =
-  'Not authorable on a connector entry — connector metadata never holds a credential. A provider-bound '
-  + 'instance names its secret with `auth: { type, credentialRef }`, and the administrator sets the value '
-  + 'under that name (an environment variable in the open tier, or Setup → Connector credentials).';
-
-/**
  * What a provider setting written at the top level of an entry meets: it
  * belongs under `providerConfig`, which the provider validates at
  * materialization (ADR-0097).
@@ -1212,15 +1260,7 @@ const DeclarativeConnectorEntryBaseSchema = lazySchema(() => strictObject({
     retry: 'retryConfig',
   },
   guidance: {
-    apiKey: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    key: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    token: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    accessToken: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    secret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    clientSecret: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    password: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    credentials: ENTRY_CREDENTIAL_KEY_GUIDANCE,
-    credentialRef: ENTRY_CREDENTIAL_KEY_GUIDANCE,
+    ...ENTRY_CREDENTIAL_KEYS_GUIDANCE,
     baseUrl: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
     url: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,
     spec: ENTRY_PROVIDER_CONFIG_KEY_GUIDANCE,

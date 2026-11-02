@@ -18,6 +18,8 @@ import { ZodError } from 'zod';
 import {
   ConnectorActionSchema,
   ConnectorSchema,
+  DeclarativeConnectorEntryActionSchema,
+  DeclarativeConnectorEntryRetryConfigSchema,
   DeclarativeConnectorEntrySchema,
   RetryConfigSchema,
   defineConnector,
@@ -106,11 +108,49 @@ describe('an authored connector entry refuses a key its nested shapes do not dec
     expect(ConnectorActionSchema.safeParse({ ...ACTION, token: PLACEHOLDER }).success).toBe(true);
   });
 
-  it('the closed nested shapes declare exactly the open shapes\' keys', () => {
+  describe('the prescription each refusal carries', () => {
+    const CREDENTIAL = ['connector metadata never holds a credential', 'auth: { type, credentialRef }'];
+    const BINDING = ['an action carries no execution binding (ADR-0097 §5)', 'derives its actions from the upstream'];
+
+    it.each(['secret', 'token', 'apiKey', 'key', 'password', 'credentials', 'credentialRef'])(
+      'a credential-shaped `%s` inside `retryConfig` meets the entry\'s credential prescription',
+      (name) => {
+        const { located, message } = refusal({ ...INSTANCE, retryConfig: { ...RETRY, [name]: PLACEHOLDER } });
+        expect(located).toEqual(['unrecognized_keys', 'retryConfig', [name]]);
+        for (const needle of CREDENTIAL) expect(message).toContain(needle);
+        expect(message).not.toContain(PLACEHOLDER);
+      },
+    );
+
+    it.each(['secret', 'token', 'apiKey', 'password', 'credentialRef'])(
+      'a credential-shaped `%s` inside an `actions` element meets the entry\'s credential prescription',
+      (name) => {
+        const { located, message } = refusal({ ...DESCRIPTOR, actions: [{ ...ACTION, [name]: PLACEHOLDER }] });
+        expect(located).toEqual(['unrecognized_keys', 'actions.0', [name]]);
+        for (const needle of CREDENTIAL) expect(message).toContain(needle);
+        expect(message).not.toContain(PLACEHOLDER);
+      },
+    );
+
+    it.each(['method', 'path', 'url'])('an execution binding `%s` on an action meets ADR-0097 §5\'s prescription', (name) => {
+      const { located, message } = refusal({ ...DESCRIPTOR, actions: [{ ...ACTION, [name]: 'x' }] });
+      expect(located).toEqual(['unrecognized_keys', 'actions.0', [name]]);
+      for (const needle of BINDING) expect(message).toContain(needle);
+    });
+
+    it('CONTROL: an action\'s own `key` is its declared machine name, never a misplaced credential', () => {
+      expect(DeclarativeConnectorEntrySchema.safeParse({ ...DESCRIPTOR, actions: [ACTION] }).success).toBe(true);
+    });
+  });
+
+  it('the closed nested shapes are the published twins, declaring exactly the open shapes\' keys', () => {
     const entry = DeclarativeConnectorEntrySchema.safeParse({ ...INSTANCE, retryConfig: RETRY });
     expect(entry.success).toBe(true);
-    const retryKeys = Object.keys((RetryConfigSchema as unknown as { shape: Record<string, unknown> }).shape).sort();
-    const actionKeys = Object.keys((ConnectorActionSchema as unknown as { shape: Record<string, unknown> }).shape).sort();
+    const keysOf = (schema: unknown) => Object.keys((schema as { shape: Record<string, unknown> }).shape).sort();
+    const retryKeys = keysOf(RetryConfigSchema);
+    const actionKeys = keysOf(ConnectorActionSchema);
+    expect(keysOf(DeclarativeConnectorEntryRetryConfigSchema)).toEqual(retryKeys);
+    expect(keysOf(DeclarativeConnectorEntryActionSchema)).toEqual(actionKeys);
     // Every declared key is accepted by the closed entry …
     const everyRetry = Object.fromEntries(retryKeys.map((k) => [k, (RetryConfigSchema.parse({}) as Record<string, unknown>)[k]]));
     expect(DeclarativeConnectorEntrySchema.safeParse({ ...INSTANCE, retryConfig: everyRetry }).success).toBe(true);

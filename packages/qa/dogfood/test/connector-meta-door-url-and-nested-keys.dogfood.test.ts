@@ -7,10 +7,12 @@
 //  - WRITE: the save door refuses, with the `422 INVALID_METADATA` envelope
 //    located at the position, a URL holding a userinfo or a credential query
 //    parameter — under `providerConfig` (`baseUrl`, `transport.url`, a URL
-//    `spec`) and under `auth` (`tokenUrl`, `authorizationUrl`) — and a key
-//    `retryConfig` or an `actions` element does not declare. Nothing is
-//    stored, and an existing row is left as it was.
-//  - CONTROL: an instance with credential-free URLs that names its secret with
+//    `spec`, a URL inside an inline `spec` document) and under `auth`
+//    (`tokenUrl`, `authorizationUrl`) — and a key `retryConfig` or an
+//    `actions` element does not declare. Nothing is stored, and an existing
+//    row is left as it was.
+//  - CONTROL: an inline `spec` document with credential-free URLs saves as
+//    written; an instance with credential-free URLs that names its secret with
 //    `credentialRef` saves, materializes and dispatches upstream with the
 //    reference resolved; a descriptor with declared action and retry keys saves.
 //  - READ: a stored row whose `auth` endpoints carry a userinfo (seeded through
@@ -99,6 +101,14 @@ describe('connector metadata doors: an authored connector keeps no credential in
       credentialRef: REF,
       ...over,
     },
+  });
+
+  /** A minimal inline OpenAPI document whose one server is `serverUrl`. */
+  const inlineSpec = (serverUrl: string) => ({
+    openapi: '3.0.3',
+    info: { title: 'CUN inline', version: '1.0.0' },
+    servers: [{ url: serverUrl }],
+    paths: {},
   });
 
   const descriptor = {
@@ -212,6 +222,10 @@ describe('connector metadata doors: an authored connector keeps no credential in
         () => ({ name: 'cun_w_openapi', label: 'CUN openapi', type: 'api', provider: 'openapi',
           providerConfig: { spec: `https://api.vendor.example.com/openapi.json?token=${PLACEHOLDERS.urlQuery}` },
           auth: { type: 'bearer', credentialRef: REF } }), 'providerConfig.spec'],
+      ['`token` in a URL inside an inline openapi `providerConfig.spec` document', 'cun_w_inline_spec',
+        () => ({ name: 'cun_w_inline_spec', label: 'CUN inline spec', type: 'api', provider: 'openapi',
+          providerConfig: { spec: inlineSpec(`https://api.vendor.example.com/v1?token=${PLACEHOLDERS.urlQuery}`) },
+          auth: { type: 'bearer', credentialRef: REF } }), 'providerConfig.spec.servers.0.url'],
       ['a userinfo password in `auth.tokenUrl`', 'cun_w_token_url',
         () => oauth2('cun_w_token_url', { tokenUrl: `https://c:${PLACEHOLDERS.authEndpoint}@auth.vendor.example.com/token` }), 'auth.tokenUrl'],
       ['a userinfo in `auth.authorizationUrl`', 'cun_w_authz_url',
@@ -253,6 +267,18 @@ describe('connector metadata doors: an authored connector keeps no credential in
       expect(out?.status, JSON.stringify(out)).toBe(200);
       expect(received.length).toBe(before + 1);
       expect(received[received.length - 1]).toMatch(/^\/v1\/probe/);
+    });
+
+    it('an inline openapi document whose URLs carry no credential part saves as written', async () => {
+      // Saved disabled: the pin is the door's answer, not a materialization.
+      const body = {
+        name: 'cun_inline_spec_clean', label: 'CUN inline spec (clean)', type: 'api', provider: 'openapi', enabled: false,
+        providerConfig: { spec: inlineSpec('https://api.vendor.example.com/v1?region=eu') },
+        auth: { type: 'bearer', credentialRef: REF },
+      };
+      const res = await stack.apiAs(admin, 'PUT', '/meta/connector/cun_inline_spec_clean', body);
+      expect(res.status, await res.clone().text()).toBe(200);
+      expect(bodyOf((await stored('cun_inline_spec_clean'))[0]).providerConfig).toEqual(body.providerConfig);
     });
 
     it('a descriptor with declared action keys, and an oauth2 instance with credential-free endpoints, save', async () => {

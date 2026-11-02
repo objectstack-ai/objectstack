@@ -95,13 +95,17 @@ const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
 
 /** #17356's pin. A def whose ONLY root is an UNREGISTERED KIND — `connector`,
  *  bound in `UNREGISTERED_KIND_SCHEMAS` by #6245 and deliberately absent from
- *  `listMetadataTypeSchemaTypes()`. `integration/RetryConfig` sits two hops
- *  from that root (`connector.retryConfig`, unwrapped once through `optional`),
- *  and `stack.connectors[]` / `PUT /api/v1/meta/connector/:name` both parse a
- *  real metadata document through it. (The def was `integration/DataSyncConfig`,
- *  the measured specimen below, until protocol 18 retired it whole with
- *  `connector.syncConfig` — ADR-0049; `RetryConfig` is the connector's other
- *  open block on the same root at the same depth.)
+ *  `listMetadataTypeSchemaTypes()`. `integration/DeclarativeConnectorEntryRetryConfig`
+ *  sits two hops from that root (`connector.retryConfig`, unwrapped once through
+ *  `optional`), and `stack.connectors[]` / `PUT /api/v1/meta/connector/:name`
+ *  both parse a real metadata document through it. (The def was
+ *  `integration/DataSyncConfig`, the measured specimen below, until protocol 18
+ *  retired it whole with `connector.syncConfig` — ADR-0049; then
+ *  `integration/RetryConfig`, the connector's other block on the same root at
+ *  the same depth, until the authored entry closed that block through its own
+ *  exported twin: the open `RetryConfig` is reached by no metadata root since,
+ *  and its twin is the def a metadata document's `retryConfig` is parsed
+ *  against.)
  *
  *  Until #17356 the gate built its roots from `listMetadataTypeSchemaTypes()`
  *  alone, so this def read `null` and check (c) proof 2 WAIVED a bare deletion
@@ -115,7 +119,7 @@ const DELETED_UNREACHABLE = 'api/SessionResponse:zzOverCollected4650';
  *  ever sees a key the build STOPPED emitting, and the def is judged by its
  *  DEF half (`key.slice(0, key.indexOf(':'))`), so a synthetic leaf under the
  *  real def runs the identical code path as the real deletion did. */
-const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/RetryConfig';
+const DELETED_VIA_UNREGISTERED_KIND_DEF = 'integration/DeclarativeConnectorEntryRetryConfig';
 
 const DELETED_VIA_UNREGISTERED_KIND = `${DELETED_VIA_UNREGISTERED_KIND_DEF}:zzOnlyRootIsAnUnregisteredKind17356`;
 
@@ -166,16 +170,18 @@ const DELETED_GUIDANCE_UNNAMED = `${GUIDANCE_ROUTE_DEF}:zzNotPrescribed18301`;
 
 /** The SHAPE of a maintainer ruling (2026-09-10, #16320) that retired a key while
  *  DELIBERATELY withholding the tombstone: a bare deletion from a reachable def
- *  that is a plain `z.object`, not a `strictObject`, so nothing declares a
- *  prescription for it and proof 4 has no route to it — which is what keeps this
- *  card an ADDED proof rather than a reversal of that ruling. The ruling's own
- *  key, `integration/DataSyncConfig:schedule`, was this fixture until protocol 18
- *  retired `DataSyncConfig` whole (ADR-0049), after which a line under it rides
- *  the vanished-def proof instead and would pin nothing here. So the fixture
- *  keeps the ruling's shape — the same `schedule` leaf on the connector's other
- *  open block, same root, same depth. If someone later writes a `guidance` entry
- *  that reaches it, this assertion flips, and it SHOULD. */
-const WITHHELD_TOMBSTONE = 'integration/RetryConfig:schedule';
+ *  where nothing declares a prescription for the key, so proof 4 has no route to
+ *  it — which is what keeps this card an ADDED proof rather than a reversal of
+ *  that ruling. The ruling's own key, `integration/DataSyncConfig:schedule`, was
+ *  this fixture until protocol 18 retired `DataSyncConfig` whole (ADR-0049),
+ *  after which a line under it rides the vanished-def proof instead and would pin
+ *  nothing here. So the fixture keeps the ruling's shape — the same `schedule`
+ *  leaf on the connector's other block, same root, same depth: the open
+ *  `integration/RetryConfig` until the authored entry closed that block, and its
+ *  exported closed twin since, whose `guidance` names credential-shaped keys and
+ *  not `schedule`. If someone later writes a `guidance` entry that reaches it,
+ *  this assertion flips, and it SHOULD. */
+const WITHHELD_TOMBSTONE = 'integration/DeclarativeConnectorEntryRetryConfig:schedule';
 
 const DELETED_SHARED_TWIN = `${SHARED_TWIN_DEF}:${TWIN_LEAF}`;
 
@@ -491,7 +497,8 @@ describe('build-schemas.ts — deleted baseline lines must prove themselves (#46
       // `listMetadataTypeSchemaTypes()`, which per #6245 deliberately does not
       // enumerate `UNREGISTERED_KIND_SCHEMAS`. `connector` lives there, so the
       // BFS never started from it, `integration/DataSyncConfig` (then this
-      // fixture's def; `integration/RetryConfig` since protocol 18) read `null`,
+      // fixture's def; then `integration/RetryConfig`, now the entry's closed
+      // retry twin `integration/DeclarativeConnectorEntryRetryConfig`) read `null`,
       // and a bare deletion of one of its baseline lines was waived as
       // over-collection — for a def `stack.connectors[]` parses on every boot.
       // The gate now enumerates its own reachability root union; the KIND

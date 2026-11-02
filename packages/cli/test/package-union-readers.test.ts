@@ -95,7 +95,8 @@ const app = { name: 'unr_app', label: 'Union', navigation: [{ id: 'nav_tickets',
 const ticketZh = { 'zh-CN': { objects: { unr_ticket: { label: '工单', pluralLabel: '工单', fields: { title: { label: '标题' } } } },
   apps: { unr_app: { label: '联合', navigation: { nav_tickets: { label: '工单' } } } } } };
 const noteZh = { 'zh-CN': { objects: { unr_note: { label: '笔记', fields: { name: { label: '名称' } } } } } };
-const conn = { name: 'unr_conn', label: 'Conn', type: 'api', retryConfig: { zzzUnionProbeKey: 1 } };
+const api = { name: 'unr_notes_api', path: '/unr/notes', method: 'GET', type: 'object_operation',
+  objectParams: { object: 'unr_note', operation: 'find', zzzUnionProbeKey: 1 } };
 `;
 
 const CONFIGS: Record<string, string> = {
@@ -119,13 +120,15 @@ export default composeStacks([svc, appStack], { manifest: 'preserve' });
   i18nOne: `${PIECES}
 export default defineStack({ manifest: appManifest, objects: [ticket, note], apps: [app], i18n: I18N, translations: [ticketZh, noteZh] } as any);
 `,
-  // An undeclared connector key. \`strict: false\` keeps it past the producer's
+  // An undeclared authoring key. \`strict: false\` keeps it past the producer's
   // parse, so the doors' own pre-parse walk is the only carrier into \`--json\`.
-  // It sits one level down, in \`retryConfig\` (a strip-mode shape the walk still
-  // visits): the connector entry's own root is closed, so a top-level key there
-  // is refused by the artifact load rather than warned about.
+  // It sits one level down, in an API endpoint's \`objectParams\` (a strip-mode
+  // shape the walk still visits): every collection root is closed, so a
+  // top-level key is refused by the artifact load rather than warned about. It
+  // was a connector's \`retryConfig\` until the authored connector entry closed
+  // its nested shapes too, after which the load refuses that key instead.
   keyTwo: `${PIECES}
-const svc = defineStack({ manifest: svcManifest, objects: [note], connectors: [conn] } as any, { strict: false });
+const svc = defineStack({ manifest: svcManifest, objects: [note], apis: [api] } as any, { strict: false });
 const appStack = defineStack({ manifest: appManifest, objects: [ticket], apps: [app] } as any);
 export default composeStacks([svc, appStack], { manifest: 'preserve' });
 `,
@@ -262,6 +265,6 @@ describe('#22238 — the undeclared-authoring-key walk reads the package union',
   it('`os validate --json` carries the finding in `warnings` for a two-package app', () => {
     const run = r.validateTwo;
     expect(run.code, `${run.stdout}\n${run.stderr}`).toBe(0);
-    expect(named(run)).toEqual([expect.stringContaining('connectors.unr_conn.retryConfig.zzzUnionProbeKey')]);
+    expect(named(run)).toEqual([expect.stringContaining('apis.unr_notes_api.objectParams.zzzUnionProbeKey')]);
   });
 });
