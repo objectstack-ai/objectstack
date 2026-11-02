@@ -284,6 +284,24 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // [#29007] The card's reproduction: a `titleFormat` on an object that
+        // authors no `nameField`. The stamped pointer outranks the template,
+        // so the save was a silent no-op; the ruling of record (6574393684,
+        // letter B) refuses it at the save gate.
+        rule: 'title-format-retired',
+        type: 'object',
+        item: {
+            name: 'qar8_tf2',
+            label: 'Title Format',
+            sharingModel: 'public_read_write',
+            titleFormat: '{code} @ {city}',
+            fields: {
+                code: { type: 'text', label: 'Code' },
+                city: { type: 'text', label: 'City' },
+            },
+        },
+    },
+    {
         // Reproduction 5: a dashboard global filter on a field the bound
         // widget's object does not have.
         rule: 'dashboard-filter-field-unknown',
@@ -772,5 +790,47 @@ describe('[#27445] a stored dashboard carrying an undeclared filterBindings key'
         const issue = err.issues.find((i: any) => i.rule === 'dashboard-filter-binding-unknown');
         expect(issue.message).toContain('`filterBindings.regoin`');
         expect(issue.message).toContain('(declared: region)');
+    });
+});
+
+describe('[#29007] a stored object carrying the retired titleFormat', () => {
+    const titled = CASES.find((c) => c.rule === 'title-format-retired')!.item;
+
+    it('still loads and reads the key — the schema parses it, no conversion drops it', async () => {
+        const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        // A row written before the refusal: the save path with the authoring
+        // gate switched off stores the body verbatim, as a pre-ruling write did.
+        process.env.OS_ALLOW_UNLINTED_METADATA_WRITES = '1';
+        try {
+            const saved: any = await (protocol as any).saveMetaItem({ type: 'object', name: titled.name, item: titled, packageId: PKG });
+            expect(saved.success).toBe(true);
+        } finally {
+            delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+        }
+        expect([...rows.values()].filter((r) => r.name === titled.name).map((r) => r.state)).toEqual(['active']);
+
+        const read: any = await protocol.getMetaItem({ type: 'object', name: titled.name, packageId: PKG } as any);
+        const tf = read.item.titleFormat;
+        expect(typeof tf === 'string' ? tf : tf?.source).toBe('{code} @ {city}');
+    });
+
+    it('is refused on its next save with the prescription, and the same body without it saves', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const err: any = await (protocol as any)
+            .saveMetaItem({ type: 'object', name: titled.name, item: titled, packageId: PKG })
+            .then(() => null, (e: unknown) => e);
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        const issue = err.issues.find((i: any) => i.rule === 'title-format-retired');
+        expect(issue, JSON.stringify(err.issues)).toBeDefined();
+        expect(issue.message).toContain('migrate to nameField');
+
+        // The control: the author's fix — the pointer, no template — saves.
+        const { titleFormat: _dropped, ...fixed } = titled as Record<string, unknown>;
+        const saved: any = await (protocol as any).saveMetaItem({
+            type: 'object', name: titled.name, item: { ...fixed, nameField: 'code' }, packageId: PKG,
+        });
+        expect(saved.success).toBe(true);
     });
 });
