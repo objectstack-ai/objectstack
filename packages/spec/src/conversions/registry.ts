@@ -3945,8 +3945,9 @@ const elementFormRemoved: MetadataConversion = {
 };
 
 /**
- * A locale written with `_` separators or surrounding whitespace becomes the
- * BCP-47 tag it meant (protocol 18, #25822): `zh_CN` → `zh-CN`, `'en '` → `en`.
+ * A locale written with `_` separators, surrounding whitespace or a case other
+ * than BCP-47's becomes the tag it meant (protocol 18, #25822, #28993):
+ * `zh_CN` → `zh-CN`, `'en '` → `en`, `zh-cn` → `zh-CN`.
  *
  * `LocaleSchema` was a bare string, so a translation item, a bundle's locale
  * key, the stack's `i18n` locales and a seed dataset's `locale` scope all
@@ -3955,33 +3956,41 @@ const elementFormRemoved: MetadataConversion = {
  * asks for: its strings were stored and never rendered. The schema now
  * refuses anything that is not tag-shaped.
  *
- * **What it rewrites.** Only the two spellings that have exactly one tag they
- * can have meant: `_` used as the subtag separator, and whitespace around the
- * value. Case is kept as written, because every resolver already folds it.
- * The result must pass `LocaleSchema`; a value that still does not (a
- * language name, `not a locale!!`) is left as stored and reported as a TODO,
- * because only its author knows which locale it was for.
+ * **What it rewrites.** Only the spellings that have exactly one tag they can
+ * have meant: `_` used as the subtag separator, whitespace around the value,
+ * and (#28993) the case of each subtag, which the result takes from the
+ * `LocaleSchema` parse (language lower, script title, region upper). Case was
+ * first kept as written on the premise that every resolver folds it; that
+ * premise was measured false: a resolver answers one locale, exact match
+ * first, so a stored `zh-cn` row was never merged into the stock `zh-CN`
+ * bundle and a `zh-CN` session never saw it. The metadata save door stores
+ * the authored body rather than the parse, so this stored-row pass is what
+ * carries the fold to a row saved in lower case. A value that is still not
+ * tag-shaped (a language name, `not a locale!!`) is left as stored and
+ * reported as a TODO, because only its author knows which locale it was for.
  *
  * **A rewrite changes what renders, on purpose.** A `zh_CN` item's strings
  * start resolving for `zh-CN` sessions, the strings their author wrote them
  * for. On a bundle a rename that would land on a locale key the entry already
  * holds is merged only when the two values are identical (`renameKey`);
  * otherwise both are left as stored and reported, because picking a winner
- * would silently discard one translator's strings.
+ * would silently discard one translator's strings. `TranslationBundleSchema`
+ * refuses the same pair (`zh-cn` beside `zh-CN`) for the same reason.
  *
  * **Reach.** `translations[]`: a bare item's `locale` (the shape stored
  * `translation` rows replay through), or a bundle entry's locale keys. A
- * bundle key is judged only when it carries something other than letters, so
- * a legacy item written before `locale` was required, whose top-level keys
- * are group names (`globalActions`, `dashboards`), is never misread as a
- * bundle with bad locale keys. Also `i18n.defaultLocale`,
+ * bundle key made only of letters is rewritten only when it is a tag in
+ * another case (`EN` → `en`) and is otherwise never judged, so a legacy item
+ * written before `locale` was required, whose top-level keys are group names
+ * (`globalActions`, `dashboards`), is never misread as a bundle with bad
+ * locale keys. Also `i18n.defaultLocale`,
  * `i18n.fallbackLocale`, `i18n.supportedLocales[]` and `data[].locale[]`.
  *
  * Retired from the load path from day one: a live author meets the parse's
  * refusal and its prescription instead of being rewritten. Stored rows
  * (`applyConversionsToStoredItem`) and a built artifact inside its
- * declared-floor window get the rewrite. Idempotent: a tag-shaped value is
- * never touched again.
+ * declared-floor window get the rewrite; the parse folds case for a live
+ * author itself. Idempotent: a canonical tag is never touched again.
  */
 const translationLocaleTagCanonicalized: MetadataConversion = {
   id: 'translation-locale-tag-canonicalized',
@@ -3992,27 +4001,29 @@ const translationLocaleTagCanonicalized: MetadataConversion = {
     'translation.locale / stack.translations[].<locale> / i18n.defaultLocale / i18n.fallbackLocale / '
     + 'i18n.supportedLocales[] / data[].locale[]',
   summary:
-    "a locale written with '_' separators or surrounding whitespace → the BCP-47 tag it meant "
-    + "('zh_CN' → 'zh-CN'): no resolver matched it, so its strings never rendered; a value that is "
-    + 'still not tag-shaped is left as stored and reported',
+    "a locale written with '_' separators, surrounding whitespace or a case other than BCP-47's → "
+    + "the tag it meant ('zh_CN' → 'zh-CN', 'zh-cn' → 'zh-CN'): no resolver merged it into the "
+    + 'canonical locale, so its strings never rendered; a value that is still not tag-shaped is left '
+    + 'as stored and reported',
   apply(stack, emit, context) {
-    const isTag = (v: string): boolean => LocaleSchema.safeParse(v).success;
-    /** The one tag `raw` can have meant, or `undefined` when it is a tag already or names none. */
-    const canonical = (raw: string): string | undefined => {
-      if (isTag(raw)) return undefined;
-      const tag = raw.trim().replace(/_/g, '-');
-      return isTag(tag) ? tag : undefined;
+    /** `v` in its canonical case when it is tag-shaped (the `LocaleSchema` parse), else `undefined`. */
+    const asTag = (v: string): string | undefined => {
+      const parsed = LocaleSchema.safeParse(v);
+      return parsed.success ? parsed.data : undefined;
     };
+    /** The one canonical tag `raw` can have meant (itself when canonical), or `undefined` when it names none. */
+    const canonical = (raw: string): string | undefined =>
+      asTag(raw) ?? asTag(raw.trim().replace(/_/g, '-'));
     const todo = (path: string, from: string, reason: string): void =>
       context?.reportTodo?.({ path, from: JSON.stringify(from), reason });
     const NOT_A_TAG =
       'is not a BCP-47 language tag and has no single tag it can have meant. Left as stored, it is '
       + 'refused where it is parsed. Rewrite it by hand as the tag its strings were written for '
       + '(`en`, `zh-CN`, `zh-Hans-CN`).';
-    /** A locale value: rewritten, reported, or (already a tag) returned as is. */
+    /** A locale value: rewritten, reported, or (already canonical) returned as is. */
     const value = (raw: string, path: string, subject: string): string => {
-      if (isTag(raw)) return raw;
       const tag = canonical(raw);
+      if (tag === raw) return raw;
       if (tag === undefined) {
         todo(path, raw, `${subject} ${NOT_A_TAG}`);
         return raw;
@@ -4042,9 +4053,12 @@ const translationLocaleTagCanonicalized: MetadataConversion = {
       // A bundle entry: locale code → data.
       let bundle = entry;
       for (const [key, data] of Object.entries(entry)) {
-        if (!isDict(data) || /^[A-Za-z]+$/.test(key) || isTag(key)) continue;
+        if (!isDict(data)) continue;
         const tag = canonical(key);
+        if (tag === key) continue;
         if (tag === undefined) {
+          // Letters only and not a tag: a legacy item's group name, not a locale key.
+          if (/^[A-Za-z]+$/.test(key)) continue;
           todo(`${path}.${key}`, key, `The translation bundle locale key ${NOT_A_TAG}`);
           continue;
         }
@@ -4089,14 +4103,18 @@ const translationLocaleTagCanonicalized: MetadataConversion = {
       translations: [
         // A stored item under an underscore spelling.
         { name: 'zh_cn', locale: 'zh_CN', messages: { commonSave: '保存' } },
-        // Already a tag, in lower case: resolvers fold case, so it is left alone.
+        // Tag-shaped but in lower case (#28993): no resolver merged it into
+        // `pt-BR`, so its case is corrected.
         { name: 'pt_br', locale: 'pt-br', messages: { commonSave: 'Salvar' } },
         // Not a tag and no single tag it can have meant: a TODO, left as stored.
         { name: 'qa_bad_locale', locale: 'not a locale!!', messages: { commonSave: 'x' } },
-        // A bundle entry: one padded key, one underscore key, one tag.
+        // A bundle entry: one padded key, one underscore key, two keys in
+        // another case (one of them letters only), one canonical tag.
         {
           'en ': { messages: { commonSave: 'Save' } },
           ja_JP: { messages: { commonSave: '保存' } },
+          'ko-kr': { messages: { commonSave: '저장' } },
+          IT: { messages: { commonSave: 'Salva' } },
           'zh-CN': { messages: { commonSave: '保存' } },
         },
         // A legacy item without `locale`: its group keys are not locale keys.
@@ -4108,21 +4126,23 @@ const translationLocaleTagCanonicalized: MetadataConversion = {
     after: {
       translations: [
         { name: 'zh_cn', locale: 'zh-CN', messages: { commonSave: '保存' } },
-        { name: 'pt_br', locale: 'pt-br', messages: { commonSave: 'Salvar' } },
+        { name: 'pt_br', locale: 'pt-BR', messages: { commonSave: 'Salvar' } },
         { name: 'qa_bad_locale', locale: 'not a locale!!', messages: { commonSave: 'x' } },
         {
           'zh-CN': { messages: { commonSave: '保存' } },
           en: { messages: { commonSave: 'Save' } },
           'ja-JP': { messages: { commonSave: '保存' } },
+          'ko-KR': { messages: { commonSave: '저장' } },
+          it: { messages: { commonSave: 'Salva' } },
         },
         { name: 'fr', globalActions: { export_all: { label: 'Tout exporter' } } },
       ],
       i18n: { defaultLocale: 'en-US', supportedLocales: ['en-US', 'zh-CN', 'ja-JP'], fallbackLocale: 'en' },
       data: [{ object: 'crm_lead', locale: ['zh-CN'], records: [] }],
     },
-    // One per rewritten value: the item, two bundle keys, the default locale,
-    // two supported locales and the seed scope.
-    expectedNotices: 7,
+    // One per rewritten value: two items, four bundle keys, the default
+    // locale, two supported locales and the seed scope.
+    expectedNotices: 10,
   },
 };
 
