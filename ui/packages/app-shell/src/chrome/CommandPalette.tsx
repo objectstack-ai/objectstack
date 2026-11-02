@@ -117,6 +117,9 @@ const NO_APP: Omit<AppCommandPaletteProps, 'scope'> = {
   dataSource: undefined,
 };
 
+/** The keys of an app the record-hit resolution reads: its route keys and navigation trees. */
+type PaletteApp = { navigation?: unknown; areas?: unknown } & Record<string, unknown>;
+
 /**
  * Whether `app` lists `objectName` (objectstack#28890): a `type: 'object'`
  * entry naming it, at any depth of its `navigation` or of any
@@ -125,7 +128,7 @@ const NO_APP: Omit<AppCommandPaletteProps, 'scope'> = {
  * `activityObjectRoster` reads every app's navigation). `gates` is `null`
  * only in the `studio` scope, which searches no record.
  */
-function appListsObject(app: any, objectName: string, gates: NavMemberGates | null): boolean {
+function appListsObject(app: PaletteApp | null | undefined, objectName: string, gates: NavMemberGates | null): boolean {
   if (!app) return false;
   const areas: unknown[] = Array.isArray(app.areas) ? app.areas : [];
   const trees = [app.navigation, ...areas.map((area) => (area as { navigation?: unknown } | null)?.navigation)];
@@ -151,8 +154,8 @@ function appListsObject(app: any, objectName: string, gates: NavMemberGates | nu
  * environment there instead of under the Cloud app that lists it).
  */
 function recordHitAppSegment(
-  apps: readonly any[],
-  activeApp: any,
+  apps: readonly PaletteApp[],
+  activeApp: PaletteApp | null | undefined,
   objectName: string,
   gates: NavMemberGates | null,
 ): string | undefined {
