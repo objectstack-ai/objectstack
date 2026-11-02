@@ -38,6 +38,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ScopedContext, SummaryRecomputeError } from '@objectstack/objectql';
 import { earnedAnswerOf, withEarnedAnswer } from '@objectstack/types';
 
@@ -86,6 +87,7 @@ function makeRig(handler: Handler) {
             throw new SummaryRecomputeError(FAILURES as any, { ...row });
         }),
         update: vi.fn(async (object: string, data: any, options?: any) => {
+            assertEngineUpdateDispatch(data, options);
             const id = String(options?.where?.id);
             if (id === 'refused') throw refuse(object);
             const row = { ...(rows.get(id) ?? { id }), ...data };
@@ -94,6 +96,7 @@ function makeRig(handler: Handler) {
             throw new SummaryRecomputeError(FAILURES as any, { ...row });
         }),
         delete: vi.fn(async (object: string, options?: any) => {
+            assertEngineDeleteDispatch(options);
             const id = String(options?.where?.id);
             if (id === 'refused') throw refuse(object);
             rows.delete(id);

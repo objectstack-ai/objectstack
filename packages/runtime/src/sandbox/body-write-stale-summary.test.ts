@@ -29,6 +29,7 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ScopedContext, SummaryRecomputeError } from '@objectstack/objectql';
 
 import { actionBodyRunnerFactory, hookBodyRunnerFactory, jobBodyRunnerFactory } from './body-runner.js';
@@ -50,10 +51,12 @@ function makeEngine() {
             throw new SummaryRecomputeError(FAILURES as any, { ...data });
         }),
         update: vi.fn(async (_object: string, data: any, options?: any) => {
+            assertEngineUpdateDispatch(data, options);
             writes.push(`update:${options?.where?.id}`);
             throw new SummaryRecomputeError(FAILURES as any, { id: options?.where?.id, ...data });
         }),
         delete: vi.fn(async (_object: string, options?: any) => {
+            assertEngineDeleteDispatch(options);
             writes.push(`delete:${options?.where?.id}`);
             throw new SummaryRecomputeError(FAILURES as any, { id: options?.where?.id });
         }),

@@ -26,6 +26,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { SummaryRecomputeError } from '@objectstack/objectql';
 import { AutomationEngine } from '../engine.js';
 import { registerCrudNodes } from './crud-nodes.js';
@@ -52,15 +53,17 @@ function makeData() {
             throw new SummaryRecomputeError(FAILURES as any, { ...fields });
         },
         async update(_object: string, fields: any, opts?: any) {
+            assertEngineUpdateDispatch(fields, opts);
             writes.push(`update:${opts?.where?.id}`);
             throw new SummaryRecomputeError(FAILURES as any, { id: opts?.where?.id, ...fields });
         },
         async delete(_object: string, opts?: any) {
+            assertEngineDeleteDispatch(opts);
             writes.push(`delete:${opts?.where?.id}`);
             throw new SummaryRecomputeError(FAILURES as any, { id: opts?.where?.id });
         },
         async find() { return []; },
-        async findOne() { return null; },
+        async findOne(object: string, query?: any) { assertEngineFindOnePredicate(object, query); return null; },
     };
     return { data, writes };
 }
