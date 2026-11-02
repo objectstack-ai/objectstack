@@ -111,7 +111,6 @@ function baseManifest(): Record<string, unknown> {
     };
 }
 
-const quiet = { debug() {}, info() {}, warn() {}, error() {} };
 let cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
     for (const c of cleanup.reverse()) await c();
