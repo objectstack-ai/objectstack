@@ -72,6 +72,8 @@ vi.mock('@object-ui/auth', async (importOriginal) => ({
 vi.mock('../AppContent', () => ({
   AppContent: stub('app-content'),
   ConsolePermissionsScope: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  // objectstack#29114: the early permissions request beside the route, nothing here.
+  ConsolePermissionsRequest: () => null,
 }));
 vi.mock('../components/ProtectedRoute', () => ({ ProtectedRoute: passthrough }));
 vi.mock('../components/RootLandingRedirect', () => ({ RootLandingRedirect: stub('root-landing') }));
