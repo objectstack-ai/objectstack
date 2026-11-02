@@ -187,7 +187,7 @@
  * read the parent and ⛔ never re-send. Every read is an unpaced GET, and the
  * one write is paced like every write verb.
  *
- * ## The three advisory rows — fenced on the ADVISORY, printing none of its text
+ * ## The four advisory rows — fenced on the ADVISORY, printing none of its text
  *
  * `ops.mjs`'s header section "The three rows that touch a security advisory"
  * is the authority; this is where its fences and landings are measured.
@@ -200,6 +200,12 @@
  *     with `advisory_collaborators_add`. A 2xx without an id is a FAILED
  *     action whose sentence says UNCONFIRMED — a report may have been filed,
  *     so ⛔ never re-sent.
+ *   - `advisory_create` is the same shape: ONE POST of the row's body to the
+ *     bare collection, nothing read first, LANDED on a 2xx whose answer
+ *     carries a `ghsa_id` and reads state `draft` (`advisoryCreateReadBack`),
+ *     its row (`advisoryCreateLandedText`) and annotation naming the id. A 2xx
+ *     without an id is UNCONFIRMED, one in another state FAILED: neither is
+ *     ever re-sent.
  *   - `advisory_collaborators_add` and `advisory_state` are fenced HERE, where
  *     the fences are AUTHORITATIVE (`advisoryPreflight`): the executor reads
  *     `GET /repos/{repo}/security-advisories/{ghsa_id}`, the last request
@@ -224,13 +230,13 @@
  * ⛔ The payload reaches this file through the event file (`readEventPayload`,
  * `validate.mjs`), never through `env:`, and the text this path prints — row,
  * log line, step summary, annotation — is built from the advisory's id, its
- * state and its collaborators' logins ALONE (`advisoryReportLandedText`,
+ * state and its collaborators' logins ALONE (`advisoryReportLandedText`, `advisoryCreateLandedText`,
  * `advisoryLandedText`, `advisoryStateLandedText`, `advisoryFenceText`, each
  * value in its own shape through `advisoryPrintable`), plus a platform
  * `message` only when it is one `ADVISORY_PLATFORM_MESSAGES` names. `resultOf`,
  * which reads an answer's `html_url`, never sees an advisory's answer. The
- * self-test files a report and serves advisories carrying a marker in its
- * summary, description and vulnerabilities and in every other field, and finds
+ * self-test files a report and a draft and serves advisories carrying a marker in
+ * their summary, description and vulnerabilities and in every other field, and finds
  * it in no line this file emits; its ablation is recorded in the PR that
  * landed this. The GET is an unpaced read; the POST and the PATCH are paced
  * like every write verb.
@@ -366,6 +372,8 @@ import {
   GHSA_ID_SHAPE,
   advisoryCollaboratorLogins,
   advisoryCollaboratorPlan,
+  advisoryCreateLandedText,
+  advisoryCreateReadBack,
   advisoryFenceFailures,
   advisoryFenceText,
   advisoryLandedText,
@@ -805,7 +813,7 @@ export async function confirmSubIssue(req, answer, pre, payload, api, t, { sleep
 }
 
 /**
- * The advisory's fences, AUTHORITATIVE (header: "The three advisory rows"): its own GET, judged against
+ * The advisory's fences, AUTHORITATIVE (header: "The four advisory rows"): its own GET, judged against
  * `ADVISORY_FENCES` — for `advisory_collaborators_add` an open advisory (`ADVISORY_OPEN_STATES`), for
  * `advisory_state` a transition `ADVISORY_TRANSITIONS` allows — then, for the collaborators, the merge. Returns
  * `{ plan, state }` (`plan` null for a state change; `plan.missing` empty is the no-op) to proceed, or `{ fail }`,
@@ -829,6 +837,7 @@ export async function advisoryPreflight(req, payload, api, t) {
 
 /**
  * Did an advisory action LAND? Judged on its own answer alone — `advisoryReportReadBack` (a 2xx carrying an id),
+ * `advisoryCreateReadBack` (a 2xx carrying an id that reads state `draft`),
  * `advisoryReadBack` (every login sent listed) or `advisoryStateReadBack` (the state asked for shown) — and spelled
  * by the row texts of `ops.mjs` alone. Returns `{ ok, why, result, ghsaId }`. ⛔ Never `resultOf`, never the
  * answer's body; a platform `message` only when `advisoryPlatformText` names it. Never throws.
@@ -840,6 +849,11 @@ export function confirmAdvisory(req, answer, pre) {
     const v = advisoryReportReadBack(answer);
     if (!v.ok) return refused ? failed(v.why) : { ok: false, why: v.why };
     return { ok: true, why: '', ghsaId: v.ghsaId, result: advisoryReportLandedText({ ghsaId: v.ghsaId, state: v.state }) };
+  }
+  if (req.advisoryCreate) {
+    const v = advisoryCreateReadBack(answer);
+    if (!v.ok) return refused ? failed(v.why) : { ok: false, why: v.why };
+    return { ok: true, why: '', ghsaId: v.ghsaId, result: advisoryCreateLandedText({ ghsaId: v.ghsaId, state: v.state }) };
   }
   if (req.advisoryState) {
     const { ghsaId, to } = req.advisoryState;
@@ -1263,7 +1277,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
           ? await confirmRerunFailed(req, r, pre, payload, api, t, rr)
           : sub
             ? await confirmSubIssue(req, r, sub, payload, api, t, si)
-            : adv || req.advisoryReport
+            : adv || req.advisoryReport || req.advisoryCreate
               ? confirmAdvisory(req, r, adv)
               : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
@@ -1339,7 +1353,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
-  "the advisory rows: advisory_report is ONE POST of its body, landed on a 2xx carrying an id that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's summary and description and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 22,
+  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 27,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery: one battery, one row.
@@ -1553,7 +1567,7 @@ export async function selfTest() {
       const bare = { verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: 'q', pull: 21 } };
       t('⛔ a pull mutation whose descriptor declares no landed state is never judged landed', requestLanded(bare, { status: 200, json: { data: { enablePullRequestAutoMerge: { pullRequest: { number: 21, autoMergeRequest: { mergeMethod: 'SQUASH' } } } } } }).ok, false);
       // The table half: every pull mutation the op table can issue carries its entry, and selects every field that entry reads.
-      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft' }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
+      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft', packages: ['p'] }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
       const selects = (query, field) => new RegExp(`\\b${field}\\b`).test(query.slice(query.indexOf('pullRequest {')));
       t('every pull mutation in the op table carries its PR_LANDED_STATE entry, and its query selects every field that entry reads', [pullRows.map(([op]) => op).sort(), pullRows.every(([op, g]) => g.landed === PR_LANDED_STATE[op] && g.landed.fields.every((f) => selects(g.query, f)))], [Object.keys(PR_LANDED_STATE).sort(), true]);
     }
@@ -2203,8 +2217,8 @@ export async function selfTest() {
       t('⛔ the parser is the reader\'s, imported — this file spells no pattern for the message of its own', [readReal(SELF_PATH, 'utf8').includes(['number=', '(['].join('')), typeof parseRelayAnnotation], [false, 'function']);
     }
 
-    // ── the three advisory rows ─────────────────────────────────────────────
-    battery("the advisory rows: advisory_report is ONE POST of its body, landed on a 2xx carrying an id that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's summary and description and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation");
+    // ── the four advisory rows ──────────────────────────────────────────────
+    battery("the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation");
     {
       // A made-up id: the fixture names no real advisory.
       const GHSA = 'GHSA-abcd-2345-wxyz';
@@ -2232,6 +2246,9 @@ export async function selfTest() {
       });
       const refusal = (status, message) => ({ status, json: { message, errors: [{ message: MARKER, value: MARKER }], documentation_url: `https://docs.github.test/${MARKER}` } });
       const report = (extra = {}) => ({ op: 'advisory_report', summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, ...extra });
+      // A package NAME cannot carry the marker (its shape refuses spaces), so the draft's marker rides its prose alone.
+      const draft = (extra = {}) => ({ op: 'advisory_create', summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, packages: ['@objectstack/rest'], ...extra });
+      const CREATE = `POST /repos/${REPO}/security-advisories`;
       const add = (collaborators = ['os-dev-b'], extra = {}) => ({ op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators, ...extra });
       const move = (to, extra = {}) => ({ op: 'advisory_state', ghsa_id: GHSA, advisory_state: to, ...extra });
       // Every run of this battery feeds the marker sweep at its end, with its pace log captured.
@@ -2256,6 +2273,19 @@ export async function selfTest() {
       const reportRefused = await advRun([report()], { ...allowed, [REPORTS]: refusal(422, 'Validation Failed') });
       const reportForbidden = await advRun([report()], { ...allowed, [REPORTS]: refusal(403, MARKER) });
       t('⛔ a refused report is a FAILED action: its status, a platform message only when the relay names it, and the remedy — never a wider token', [reportRefused.exit, reportRefused.rows[0]?.result, reportForbidden.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 422 (the platform: Validation Failed); ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 403; ${ADVISORY_ACCESS_REMEDY}`]);
+
+      // ── advisory_create
+      const drafted = await advRun([draft({ severity: 'high', cwe_ids: ['CWE-863'] })], { ...allowed, [CREATE]: advisory({}, 201) });
+      t('⭐ draft: the sender gate, then ONE POST to the bare collection — nothing read first — whose body is exactly the summary, description, one npm vulnerabilities entry per package, severity and cwe_ids sent; exit 0', [drafted.exit, drafted.seen.map((s) => s.call), writes(drafted.seen)[0]?.body], [EXIT_OK, [PERM, CREATE], { summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, vulnerabilities: [{ package: { ecosystem: 'npm', name: '@objectstack/rest' } }], severity: 'high', cwe_ids: ['CWE-863'] }], drafted.logs.join(' | '));
+      const CREATED = `created ${GHSA} · state draft — add whoever works it with advisory_collaborators_add`;
+      t('…its row names the id the platform gave and the state, and nothing else of the answer; the summary row carries it', [drafted.rows.map((r) => [r.call, r.status, r.result]), drafted.summary.includes(`| 1 | \`advisory_create\` | \`${CREATE}\` | 201 | ${CREATED} |`)], [[[CREATE, 201, CREATED]], true], drafted.summary);
+      t('…and ONE notice annotation names that id for the seat, which the reader\'s own parser reads back', [drafted.annotations, drafted.logs.filter((l) => l.startsWith('::')), parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage(drafted.annotations[0] ?? {}))], [[{ action: 1, op: 'advisory_create', ghsaId: GHSA }], [`::notice title=fleet-write advisory_create::fleet-write action=1 op=advisory_create ghsa_id=${GHSA}`], { action: 1, op: 'advisory_create', ghsaId: GHSA }]);
+      const draftNoId = await advRun([draft()], { ...allowed, [CREATE]: advisory({ ghsa_id: MARKER }, 201) });
+      const draftTriage = await advRun([draft()], { ...allowed, [CREATE]: advisory({ state: 'triage' }, 201) });
+      t('⛔ a 2xx carrying no id in its shape is UNCONFIRMED, and one whose id reads another state than draft FAILED — never landed: exit 5, ONE write, no annotation, and each sentence says do not re-send', [draftNoId.exit, writes(draftNoId.seen).length, draftNoId.annotations, /UNCONFIRMED: a draft advisory may have been created; ⛔ do not re-send/.test(draftNoId.rows[0]?.result ?? ''), draftTriage.exit, writes(draftTriage.seen).length, draftTriage.annotations, draftTriage.rows[0]?.result], [EXIT_ACTION_FAILED, 1, [], true, EXIT_ACTION_FAILED, 1, [], `FAILED: HTTP 201, but ${GHSA} reads state triage, not draft — ⛔ do not re-send, put the id to the maintainer`], draftNoId.rows[0]?.result);
+      const draftRefused = await advRun([draft()], { ...allowed, [CREATE]: refusal(403, 'Resource not accessible by integration') });
+      const draftInvalid = await advRun([draft()], { ...allowed, [CREATE]: refusal(422, MARKER) });
+      t('⛔ a refused draft is a FAILED action: its status, a platform message only when the relay names it, and the remedy — never a wider token', [draftRefused.exit, draftRefused.rows[0]?.result, draftInvalid.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 403 (the platform: Resource not accessible by integration); ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 422; ${ADVISORY_ACCESS_REMEDY}`]);
 
       // ── advisory_collaborators_add
       const added = await advRun([add(['OS-DEV-A', 'os-dev-b'])], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ collaborating_users: logins('os-dev-a', 'os-dev-b') }) });
@@ -2297,18 +2327,18 @@ export async function selfTest() {
 
       // ── the validator's gate, inside the executor: zero requests
       const gated = [];
-      for (const actions of [[add(['os-dev-b'], { ghsa_id: `${GHSA}/cve` })], [move('published')], [report(), { op: 'comment', issue: 1, body: 'x' }], [report({ vulnerabilities: [MARKER] })], [report({ description: `${MARKER} ${'x'.repeat(60_000)}` })]]) {
+      for (const actions of [[add(['os-dev-b'], { ghsa_id: `${GHSA}/cve` })], [move('published')], [report(), { op: 'comment', issue: 1, body: 'x' }], [report({ vulnerabilities: [MARKER] })], [report({ description: `${MARKER} ${'x'.repeat(60_000)}` })], [draft({ packages: [MARKER] })], [draft({ vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }] })], [draft({ state: 'published' })], [draft(), report()]]) {
         const r = await advRun(actions, { ...allowed });
         gated.push([r.exit, r.seen.length]);
       }
-      t('⛔ refused before ANY request, the sender gate included: a malformed id, published, a report beside another action, an unknown vulnerabilities key and an over-cap description — exit 2', gated, [0, 1, 2, 3, 4].map(() => [EXIT_REFUSED, 0]));
+      t('⛔ refused before ANY request, the sender gate included: a malformed id, published, a report beside another action, an unknown vulnerabilities key, an over-cap description, a package that is no npm name, a draft carrying its own vulnerabilities or a state, and a draft beside a report — exit 2', gated, [0, 1, 2, 3, 4, 5, 6, 7, 8].map(() => [EXIT_REFUSED, 0]));
 
       // ── ⛔ the marker sweep: every run above, every channel this file emits on
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), JSON.stringify(r.annotations ?? []), ...paceLines].join('\n'));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
-      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [32, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [41, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
       // Positive controls: the marker was there to leak, and the needle finds it where it is.
-      t('…positive control: every answer served carried the marker, the report\'s POST carried it to the platform — where it belongs — and the fenced runs made their GET', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') || Object.keys(answers).length === 1), JSON.stringify(writes(filed.seen)[0]?.body).includes('ADVISORY MARKER'), [other, unread, ...[added, kept, present]].every((r) => r.seen.some((s) => s.call === A_GET))], [true, true, true]);
+      t('…positive control: every answer served carried the marker, the report\'s and the draft\'s POST carried it to the platform — where it belongs — and the fenced runs made their GET', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') || Object.keys(answers).length === 1), JSON.stringify(writes(filed.seen)[0]?.body).includes('ADVISORY MARKER') && JSON.stringify(writes(drafted.seen)[0]?.body).includes('ADVISORY MARKER'), [other, unread, ...[added, kept, present]].every((r) => r.seen.some((s) => s.call === A_GET))], [true, true, true]);
       t('…positive control: the generic row printer, given the same answer, WOULD print it — the advisory rows never reach it', resultOf({}, advisory().json).includes('ADVISORY MARKER'), true);
       // The CLI: the real processes, the payload from an event file, every byte of their output read.
       const markerEvent = (name, payload) => {
@@ -2405,7 +2435,7 @@ export async function selfTest() {
       'a governed-review follow-up after pr_ready alone (the draft open summons nobody — a human is asked at the seat\'s hand-off) that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, ' +
       "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, " +
       "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, " +
-      "the payload read from the event file, three advisory rows — a report landed on the id it was given, collaborators and a state fenced on the advisory's own read and landed on the PATCH answer — " +
+      "the payload read from the event file, four advisory rows — a report landed on the id it was given, a draft on its id reading state draft, collaborators and a state fenced on the advisory's own read and landed on the PATCH answer — " +
       'whose marker in a summary, a description and a vulnerability reached no log line, row, summary or annotation, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +

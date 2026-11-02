@@ -1011,6 +1011,9 @@ export {
 export { lintFlowCredentialLiterals, FLOW_CREDENTIAL_LITERAL } from './lint-flow-credential-literals.js';
 export type { FlowCredentialLiteralFinding } from './lint-flow-credential-literals.js';
 export { isCredentialShapedLiteral } from './credential-literal.js';
+// The same predicate over a declarative connector's four header/env maps.
+export { lintConnectorCredentialLiterals, CONNECTOR_CREDENTIAL_LITERAL } from './lint-connector-credential-literals.js';
+export type { ConnectorCredentialLiteralFinding } from './lint-connector-credential-literals.js';
 
 export { lintLivenessProperties } from './lint-liveness-properties.js';
 // #11624 — the ledger's warn set, as a decision procedure. `os lint` runs the
