@@ -1028,6 +1028,17 @@ describe('[#28904] the ceremony moves a row of a member the package does not shi
         expect((await sentMember(raw, DIGEST, 'zh-CN'))?.subject).toBe(`ADMIN ${DIGEST} zh-CN`);
     });
 
+    it('READ BACK FIRST: a save that leaves no row of that member in the pair keeps the unbound row, and the row is reported failed', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST);
+        // A save door that answers and writes nothing.
+        (raw as any).saveMetaItem = async () => ({ success: true });
+        const result = await migrate(raw);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['failed']);
+        expect(result.outcomes[0].error).toContain("does not read back as its own member 'zh-CN'");
+        expect(rowsOf(stores, DIGEST).map((r) => [r.packageId, r.member])).toEqual([[null, 'zh-CN']]);
+        expect(result.bases[0]).toMatchObject({ moved: 0, failed: 1 });
+    });
+
     it('CONTROL a shipped locale: moved as the declared override of the package, as before', async () => {
         const { stores, raw } = await withUnboundZh(NAME);
         const listed = await census(raw);
