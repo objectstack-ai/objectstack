@@ -528,6 +528,44 @@ const sheetHideOverlayPatches = [
 ];
 
 /**
+ * The sheet close-button touch-target patch (objectstack#29078).
+ *
+ * The Console runs inside the mobile app's WebView, and its phone-width audit
+ * (objectstack#29040) holds every control to a 44 px touch target. Upstream's
+ * Sheet close button is its 16 px glyph and nothing more, so every drawer in
+ * the Console closed from a 16 px box at 375 and 390 px. Below `sm` the button
+ * becomes a 44 px box, its glyph centred where it was; from `sm` up the class
+ * list is upstream's, unchanged.
+ *
+ * The payload is the class list itself, so it is inline, for the reason the
+ * sidebar offcanvas family gives. One anchor, the button's own line, written
+ * from `scripts/__tests__/fixtures/shadcn-registry/sheet.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const SHEET_CLOSE_UPSTREAM_CLASSES =
+  'absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 ' +
+  'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none ' +
+  'data-[state=open]:bg-secondary';
+const SHEET_CLOSE_PHONE_CLASSES =
+  'max-sm:right-1 max-sm:top-1 max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center';
+const sheetCloseTouchTargetPatches = [
+  {
+    id: 'sheet-close-phone-touch-target',
+    issue: 'objectstack#29078',
+    reason:
+      'Makes the Sheet close button a 44 px touch target below `sm` (the ' +
+      'phone-width floor of objectstack#29040). Upstream draws only the 16 px ' +
+      'glyph; a sync that dropped this would shrink every drawer close back ' +
+      'to 16 px at phone width, silently and compilably.',
+    find: `      <SheetPrimitive.Close className="${SHEET_CLOSE_UPSTREAM_CLASSES}">`,
+    replace: `      <SheetPrimitive.Close className="${SHEET_CLOSE_UPSTREAM_CLASSES} ${SHEET_CLOSE_PHONE_CLASSES}">`,
+    marker: SHEET_CLOSE_PHONE_CLASSES,
+    occurrences: 1,
+  },
+];
+
+/**
  * The calendar display-locale patch (objectui#10722).
  *
  * `Calendar` mounts react-day-picker's `DayPicker`, which spells its month
@@ -616,7 +654,7 @@ const calendarDisplayLocalePatches = [
  * @type {Record<string, LocalPatch[]>}
  */
 export const LOCAL_PATCHES = {
-  sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches],
+  sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches, ...sheetCloseTouchTargetPatches],
   dialog: i18nCloseLabelPatches('Dialog'),
   sidebar: [
     ...sidebarCookieReadPatches,
