@@ -1,7 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectui#12171 — the Studio landing names the overlay axis that exists.
+ * objectui#12171 — the Studio landing names the overlay axis that exists;
+ * objectstack#29489 — and the landing no longer offers that overlay at all.
  *
  * ADR-0131 D6 (objectstack) retired ADR-0005's per-organization overlay axis.
  * The registry flag the landing points at is `allowEnvironmentOverlay`: may an
@@ -11,6 +12,12 @@
  * A fourth string, the permission matrix's hint on a set a code package ships
  * (`perm.readOnly.artifact.hint`), said "per-org overlay" (zh 「按组织覆盖」)
  * in its parenthetical; the card's claim amendment added it to this pin.
+ *
+ * objectstack ADR-0146 D11 then closed the package-less write onto a packaged
+ * item (403 NOT_OVERRIDABLE, naming the base's `.custom` pair). The landing's
+ * two strings now teach the route that is open: Customize or New similar,
+ * saved in the package's `.custom` customization package. The permission hint
+ * still names the environment overlay, because it says that overlay is refused.
  *
  * ## The population
  *
@@ -23,10 +30,14 @@
  *
  * 1. No value of these keys, in any table that carries them, names the
  *    organization axis.
- * 2. Lit control on the matcher: every one of those values names the
- *    environment overlay. A table in a language neither pattern speaks fails
- *    here, so pin 1 cannot pass on it by matching nothing.
- * 3. Lit control on the reader: for every locale the module's own
+ * 2. No landing value names the environment overlay, and every landing value
+ *    names the route that exists: the `.custom` package and the table's own
+ *    Customize label, read from the same table, so the check speaks every
+ *    language a table is written in.
+ * 3. Lit control on the matchers: the permission hint names the environment
+ *    overlay in every table. A table in a language neither pattern speaks
+ *    fails here, so pins 1 and 2 cannot pass on it by matching nothing.
+ * 4. Lit control on the reader: for every locale the module's own
  *    `SupportedLocale` union declares, the value `t()` serves is the one the
  *    extractor read, so an extractor that read some other table cannot pass.
  */
@@ -49,21 +60,27 @@ const readTables: (root: string) => Map<string, Map<string, string>> = readDesig
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 
 /**
- * The keys that name the overlay axis: the two `BuilderLanding` renders, and
- * the hint `PermissionMatrixEditor` shows on a set a code package ships. The
- * third landing string, the overlay link's tooltip, retired with the link: the
+ * The two strings `BuilderLanding` renders about a read-only package. The third
+ * landing string, the overlay link's tooltip, retired with the link: the
  * landing no longer links into Setup (objectstack ADR-0146 D1, N-28).
  */
-const KEYS = [
-  'engine.studio.landing.description',
-  'engine.studio.landing.readonlyHint',
-  'perm.readOnly.artifact.hint',
-] as const;
+const LANDING_KEYS = ['engine.studio.landing.description', 'engine.studio.landing.readonlyHint'] as const;
+
+/** The hint `PermissionMatrixEditor` shows on a set a code package ships: it names the overlay it refuses. */
+const PERMISSION_HINT = 'perm.readOnly.artifact.hint';
+
+const KEYS = [...LANDING_KEYS, PERMISSION_HINT] as const;
+
+/** The Customize action's own label, read from each table beside the landing strings. */
+const CUSTOMIZE_ACTION = 'engine.studio.customize.action';
+
+/** The customization package a read-only package is paired with (objectstack ADR-0146 D3). */
+const CUSTOM_PAIR = /\.custom\b/u;
 
 /** The retired axis, in the languages the tables speak: "org", "per-org", "organization", 组织. */
 const ORGANIZATION_AXIS = /\borg(?:ani[sz]ation)?s?\b|组织/iu;
 
-/** The axis that exists, in the same languages. */
+/** The overlay axis, in the same languages: refused on a packaged item since objectstack ADR-0146 D11. */
 const ENVIRONMENT_OVERLAY = /\benvironment overlay\b|环境覆盖/iu;
 
 /**
@@ -77,7 +94,7 @@ function tablesCarryingKeys(): Array<[string, Map<string, string>]> {
   return [...readTables(REPO_ROOT)].filter(([, table]) => KEYS.some((key) => table.has(key)));
 }
 
-describe('the overlay copy names the environment overlay, not the organization axis (objectui#12171)', () => {
+describe('the read-only copy names no organization axis, and the landing offers no overlay (objectui#12171, objectstack#29489)', () => {
   it('reads the tables t() serves', () => {
     const read = tablesCarryingKeys();
     for (const locale of Object.keys(DECLARED_LOCALES)) {
@@ -104,13 +121,29 @@ describe('the overlay copy names the environment overlay, not the organization a
     expect(offenders).toEqual([]);
   });
 
-  it('every value of these keys names the environment overlay', () => {
+  it('no landing value offers the environment overlay; each names Customize and the .custom package', () => {
+    const offenders: string[] = [];
+    for (const [name, table] of tablesCarryingKeys()) {
+      const customize = table.get(CUSTOMIZE_ACTION);
+      if (!customize) {
+        offenders.push(`${name} ${CUSTOMIZE_ACTION}: missing`);
+        continue;
+      }
+      for (const key of LANDING_KEYS) {
+        const value = table.get(key) ?? '';
+        if (ENVIRONMENT_OVERLAY.test(value)) offenders.push(`${name} ${key} offers the overlay: ${value}`);
+        if (!CUSTOM_PAIR.test(value)) offenders.push(`${name} ${key} names no .custom package: ${value}`);
+        if (!value.includes(customize)) offenders.push(`${name} ${key} names no "${customize}": ${value}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('lit control: the permission hint names the environment overlay in every table', () => {
     const silent: string[] = [];
     for (const [name, table] of tablesCarryingKeys()) {
-      for (const key of KEYS) {
-        const value = table.get(key) ?? '';
-        if (!ENVIRONMENT_OVERLAY.test(value)) silent.push(`${name} ${key}: ${value}`);
-      }
+      const value = table.get(PERMISSION_HINT) ?? '';
+      if (!ENVIRONMENT_OVERLAY.test(value)) silent.push(`${name}: ${value}`);
     }
     expect(silent).toEqual([]);
   });
