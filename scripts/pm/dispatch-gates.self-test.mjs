@@ -7544,7 +7544,7 @@ export function selfTest({ tier = 'full' } = {}) {
   }
   const censusRows = liveMarkerCensus.map((r) => `${r.file}:${r.line} ${r.key}`).sort();
   t(
-    `the live tree carries the nine declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
+    `the live tree carries the ten declarations measured for this census, and no others (${censusRows.join(' · ') || 'none'})`,
     censusRows.join(' · ') === [
       // Seventh row, added with the declaration it names: `checklist-status.yml`
       // is paths-filtered (its `pull_request:` trigger is filtered to itself) and
@@ -7557,6 +7557,10 @@ export function selfTest({ tier = 'full' } = {}) {
       '.github/workflows/merged-branch-reaper.yml:212 no-check-families',
       '.github/workflows/os-create-smoke.yml:48 no-check-families',
       '.github/workflows/scaffold-e2e.yml:23 no-check-families',
+      // Tenth row, added with the declaration it names: `ui-test-timings-refresh.yml`
+      // is paths-filtered (its own file and the three ui scripts it loads) and
+      // runs a generator's select and merge, so it discovers no `check:` family.
+      '.github/workflows/ui-test-timings-refresh.yml:64 no-check-families',
       // Eighth row, added with the declaration it names (#20278): the checker's
       // bare diff-scoped run declares the two step-`env:` values it does not need.
       'scripts/check-issue-citations.mjs:204 local-env',
@@ -7577,7 +7581,7 @@ export function selfTest({ tier = 'full' } = {}) {
   const censusCut = liveMarkerCensus.filter((r) => !r.whole).map((r) => `${r.file}:${r.line} ${r.key}`);
   t(
     `every live reason on those markers ENDS on its own marker line (cut: ${censusCut.join(', ') || 'none'})`,
-    censusCut.length === 0 && liveMarkerCensus.length === 9,
+    censusCut.length === 0 && liveMarkerCensus.length === 10,
   );
   t(
     'and every one of them carries a non-empty reason — whole is not the same claim as present, and both are owed',
