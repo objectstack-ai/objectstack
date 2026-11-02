@@ -123,8 +123,8 @@ export interface UseNativeHostRoutingOptions {
  *   the shell's own full-load fallback runs;
  * - answers the shell's `objectstack-native:connectionRemoved` event: calls
  *   `event.waitUntil()` with the promise `onConnectionRemoved` returns, or with
- *   one already resolved when it is omitted. A failed unregister settles the
- *   promise too; the shell then records the token as left registered.
+ *   one already resolved when it is omitted. An unregister that fails rejects
+ *   that promise, so the shell is never held past the step itself.
  *
  * Outside the shell it does nothing and installs no listener. Returns the
  * bridge, or `null`.
