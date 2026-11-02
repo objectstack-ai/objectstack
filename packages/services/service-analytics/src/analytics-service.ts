@@ -5010,6 +5010,36 @@ export function inferredCallerMeasureSql(measure: string, cubeName: string): str
 }
 
 /**
+ * [#29364] The service's date-bucket door (`dataset-date-bucket-door.ts`) in
+ * front of the delegated service, on both the query and the dry run.
+ *
+ * The delegate (`MemoryAnalyticsService` is the in-repo one) folds a bucketed
+ * time dimension itself and reads no field type, so on `origin/main` `aca58cdb`
+ * a month bucket over a `formula` answered 200 with one `null` group holding
+ * every row, and over a `text` column one `null` group beside whatever text
+ * happened to parse as a date — while the engine face refused both. It is
+ * judged here with the keys the ObjectQL strategy's direct path would build
+ * and the context's `declaredFieldType` (the host's `sourceFieldMeta`), so this
+ * face answers the engine's refusal field for field. A host that wired no
+ * field types is not judged, as on the preview and the dry run.
+ *
+ * Reached by no shipped composition (the auto-mounted plugin always bridges
+ * `executeAggregate`, so every bucketed query goes to the engine); reached by
+ * a host composing `new AnalyticsService({ fallbackService })`, or a
+ * `queryCapabilities` override with `objectqlAggregate: false`.
+ */
+function assertDelegatedDateBucketsTemporal(query: AnalyticsQuery, ctx: StrategyContext): void {
+  const cube = ctx.getCube(query.cube!);
+  if (!cube) return;
+  const object = aggregateObjectOf(cube);
+  assertDatasetDateBucketsTemporal(
+    object,
+    aggregateGroupKeys(query, cube),
+    (field) => (ctx as DatasetScopedStrategyContext).declaredFieldType?.(object, field),
+  );
+}
+
+/**
  * FallbackDelegateStrategy — Internal strategy for fallback service delegation.
  *
  * Automatically added to the strategy chain when `fallbackService` is configured.
@@ -5026,10 +5056,12 @@ class FallbackDelegateStrategy implements AnalyticsStrategy {
   }
 
   async execute(query: AnalyticsQuery, ctx: StrategyContext): Promise<AnalyticsResult> {
+    assertDelegatedDateBucketsTemporal(query, ctx);
     return ctx.fallbackService!.query(query);
   }
 
   async generateSql(query: AnalyticsQuery, ctx: StrategyContext): Promise<{ sql: string; params: unknown[] }> {
+    assertDelegatedDateBucketsTemporal(query, ctx);
     if (ctx.fallbackService?.generateSql) {
       return ctx.fallbackService.generateSql(query);
     }

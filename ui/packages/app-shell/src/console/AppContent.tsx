@@ -69,6 +69,7 @@ import {
 import { resolveSetupAppPath } from './ConsoleShell.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, type LazyMetadataType } from './appRouteMetadataReads.js';
 import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
+import { preferLocal } from '../utils/preferLocal.js';
 import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
@@ -507,6 +508,19 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         settled: status === undefined || status === 'ready' || status === 'error',
       };
     },
+    // objectstack#28784 — a dashboard route reads the objects its widgets
+    // require: the bundle's dashboard when it holds this package's; the
+    // `/meta/dashboard` list, prefer-local, for one it does not hold.
+    (dashboardName) => {
+      const bundled = bundledReads?.item('dashboard', dashboardName, (activeApp as any)?._packageId);
+      if (bundled?.state === 'hit') return { dashboard: bundled.value, settled: true };
+      if (bundled?.state === 'pending') return { dashboard: undefined, settled: false };
+      const status = getTypeStatus?.('dashboard');
+      return {
+        dashboard: preferLocal(metadata.dashboards as any[], dashboardName, (activeApp as any)?._packageId),
+        settled: status === undefined || status === 'ready' || status === 'error',
+      };
+    },
   );
   // Until the app list has loaded, a scope candidate does not know its package
   // yet, and reads nothing (the splash is up).
@@ -532,11 +546,16 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#28645 — a page route reads its page bundle-first (`PageView`,
   // the page scope above), so it does not wait for the `/meta/page` list: a
   // page outside the bundle is read from the list by those readers, which
-  // wait for it themselves.
+  // wait for it themselves. objectstack#28784 — a dashboard route reads its
+  // dashboard the same way (`DashboardView`, the dashboard scope above).
   const pageRouteReadsBundle = !!bundledReads && /^page\/[^/]+$/.test(appSubPath);
+  const dashboardRouteReadsBundle = !!bundledReads && /^dashboard\/[^/]+$/.test(appSubPath);
   const routeReadsKey = [
     ...routeReads.filter(
-      (type) => (type !== 'object' || readsWholeRegistry) && !(type === 'page' && pageRouteReadsBundle),
+      (type) =>
+        (type !== 'object' || readsWholeRegistry) &&
+        !(type === 'page' && pageRouteReadsBundle) &&
+        !(type === 'dashboard' && dashboardRouteReadsBundle),
     ),
     ...(searchParamsHasRecordForm(location.search) && !routeReads.includes('object') ? ['object'] : []),
   ].join(',');

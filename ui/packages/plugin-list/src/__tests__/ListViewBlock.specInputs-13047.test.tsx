@@ -760,10 +760,10 @@ describe('objectui#13047 — measured NOT honoured on a page `list-view` node (h
     expect(container.textContent ?? '').not.toContain('open_tasks');
   });
 
-  it('`sharing`: draws a Share button that carries no click handler — the sharing config is enforced nowhere here', async () => {
-    const { dataSource } = mount({ sharing: { type: 'personal' } });
+  it('`sharing`: draws a lock indicator that carries no click handler — the sharing config is enforced nowhere here', async () => {
+    const { dataSource } = mount({ sharing: { lockedBy: 'admin' } });
     await loaded(dataSource);
-    const share = screen.getByTestId('share-button');
+    const share = screen.getByTestId('sharing-locked-by');
     // React attaches no handler: a click changes nothing on the page.
     const before = document.body.innerHTML;
     fireEvent.click(share);

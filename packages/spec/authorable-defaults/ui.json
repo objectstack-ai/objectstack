@@ -113,7 +113,6 @@
     "ui/UserActionsConfig:search = true",
     "ui/UserActionsConfig:sort = true",
     "ui/UserFilters:element = \"dropdown\"",
-    "ui/ViewSharing:type = \"collaborative\"",
     "ui/ViewTab:isDefault = false",
     "ui/ViewTab:pinned = false",
     "ui/ViewTab:visible = true"
