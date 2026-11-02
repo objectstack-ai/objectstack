@@ -151,6 +151,7 @@ import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
 import { validateFlowRegionShape } from './validate-flow-region-shape.js';
+import { lintConnectorCredentialLiterals } from './lint-connector-credential-literals.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
@@ -1986,6 +1987,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       + 'publish is the server lane\'s open question for the metadata write path, decided there; this entry '
       + 'brings the three authoring commands to the engine\'s registration verdict.',
     run: (stack) => validateFlowRegionShape(stack),
+  },
+  // The same predicate over a declarative connector's four header/env maps
+  // (`providerConfig.headers`, `defaultHeaders`, `transport.headers`,
+  // `transport.env`) — the maps the connector read path withholds whole, which
+  // still keep a literal in metadata (ruling 6566912252, letter ①A). Advisory
+  // for the same reason as the flow entry above, and on the fourth door for
+  // `connector`: `PUT /meta/connector/:name` is the door a Studio / REST / MCP
+  // author of a connector has.
+  {
+    name: 'lintConnectorCredentialLiterals',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/lint-connector-credential-literals.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['connector'],
+    run: (stack) =>
+      lintConnectorCredentialLiterals(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.hint,
+      })),
   },
   // The spec-liveness loop on the author side: a property the ledger marks
   // dead, live-elsewhere or experimental is set hopefully and does nothing
