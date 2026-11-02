@@ -53,6 +53,7 @@ import {
   BASE_FIELD_DISPLAY_WHITELIST,
   EXTENSION_FIELD_SUFFIX,
   isExtensionFieldName,
+  isPlainRecord,
 } from '@objectstack/spec/data';
 import { Layers, Pencil, RotateCcw } from 'lucide-react';
 import { postureHasOrgWall, useTenancyPosture } from '../../hooks/useTenancyPosture.js';
@@ -390,9 +391,6 @@ export const OBJECT_EXTENSION_TYPE = 'object_extension';
 
 /** The pair's extension of one base object: `extend` names the object. */
 export type ObjectExtensionBody = Record<string, unknown> & { extend: string };
-
-const isPlainRecord = (v: unknown): v is Record<string, unknown> =>
-  v !== null && typeof v === 'object' && !Array.isArray(v);
 
 /**
  * `name` spelled as a customer extension field: the spec's suffix appended
