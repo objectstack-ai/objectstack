@@ -167,9 +167,9 @@
  * `/contents/**` and `/git/**`; `REFUSED_PATH_FAMILIES` refuses both for every
  * row. The workflow-run dispatch (`workflow_dispatch`) and the failed-jobs
  * re-run (`run_rerun_failed`), both below, are `actions: write`, the two rows
- * spending it; the three advisory rows (`advisory_report`,
+ * spending it; the four advisory rows (`advisory_report`, `advisory_create`,
  * `advisory_collaborators_add` and `advisory_state`, below) are
- * `repository-advisories: write`, the three rows spending it; the sender gate's
+ * `repository-advisories: write`, the four rows spending it; the sender gate's
  * `GET /repos/{o}/{r}/collaborators/{login}/permission` is `metadata: read`.
  * `PERMISSIONS` is that set and nothing wider. The workflow declares the five
  * grants every stroke gets as literal `permission-*` inputs on
@@ -371,7 +371,7 @@
  * judgment; `execute.mjs --self-test` pins the reads, the one write, every
  * refusal and the landing.
  *
- * ## The three rows that touch a security advisory — no advisory text on a public surface
+ * ## The four rows that touch a security advisory — no advisory text on a public surface
  *
  * Private vulnerability reporting is on for this repository, and GitHub lets
  * only an administrator, a security manager or an advisory's own
@@ -384,26 +384,45 @@
  *
  *   row                          request                                         the payload carries
  *   `advisory_report`            `POST …/security-advisories/reports`            `summary`, `description`; optional `severity`, `cwe_ids`
+ *   `advisory_create`            `POST …/security-advisories`                    the report's keys, and `packages`
  *   `advisory_collaborators_add` `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and logins
  *   `advisory_state`             `GET`, then `PATCH …/security-advisories/{id}`  `ghsa_id` and `draft` or `closed`
  *
+ * `advisory_create` is the maintainer's naming of a second way in, verbatim
+ * as the body of issue 29410 records it: 「立一张 skills 卡，我现在就派发，然后你再试」.
+ * GitHub caps the NEW private reports an account files per day, and every
+ * relay report is filed as the one App, so the whole fleet's reports share
+ * one quota. Creating an advisory is the repository's own act, not a report:
+ * the endpoint takes the same `repository-advisories: write` grant and
+ * creates the advisory in `draft` directly — the state a report reaches only
+ * once accepted. That the App's token may create one, and that the cap on
+ * reports does not reach it, are documentation readings the first live run
+ * confirms (below).
+ *
  * Publishing stays with the maintainer, by hand: `published` is refused BY
  * NAME as a value (`ADVISORY_REFUSED_STATES`), and no body can carry it — the
- * report's body is the row's, holding no state, and the two PATCH bodies are
- * the executor's (`validate.mjs --self-test` pins all three). Creating a draft
- * advisory, reading or editing an advisory's text, removing a collaborator,
- * the CVE request and the temporary fork are out of reach of every row:
+ * report's and the draft's bodies are the row's, holding no state (the
+ * endpoint creates a draft and takes none), and the two PATCH bodies are the
+ * executor's (`validate.mjs --self-test` pins all four). Listing advisories,
+ * reading or editing an advisory's text, removing a collaborator, the CVE
+ * request and the temporary fork are out of reach of every row:
  * `REFUSED_PATH_FAMILIES` refuses each `security-advisories` path but one
- * advisory's (`ADVISORY_PATH_SHAPE`) and the reports endpoint
- * (`ADVISORY_REPORTS_PATH_SHAPE`).
+ * advisory's (`ADVISORY_PATH_SHAPE`), the reports endpoint
+ * (`ADVISORY_REPORTS_PATH_SHAPE`) and the bare collection
+ * (`ADVISORY_CREATE_PATH_SHAPE`), and the self-test pins that the
+ * collection is reached by `advisory_create`'s `POST` alone, never a `GET`.
+ * A draft names its affected packages and nothing else of them: each is one
+ * `vulnerabilities` entry, the npm ecosystem and the name
+ * (`ADVISORY_CREATE_ECOSYSTEM`, `NPM_PACKAGE_SHAPE`), with no version range,
+ * vulnerable function, credit, CVSS vector, CVE id or private fork.
  *
  * What may NOT cross. The relay's run log and step summary are public, so:
  *
  *   - the payload never rides a step's `env:` — GitHub prints a step's
  *     environment into the log — and `validate.mjs` and `execute.mjs` read
  *     `client_payload` from the event file (`$GITHUB_EVENT_PATH`) for EVERY
- *     op, so a report's `summary` and `description` travel in the payload and
- *     are printed nowhere;
+ *     op, so a report's or a draft's `summary` and `description` travel in the
+ *     payload and are printed nowhere;
  *   - a refusal names the key and the byte count and ⛔ never echoes a value:
  *     `summary` and `description` are `str` fields, which never echo, and the
  *     other advisory fields are `quiet` (`FIELDS`), so a value that fails is
@@ -414,17 +433,25 @@
  *     shape (`advisoryPrintable`), and the platform's `message` only when it
  *     is one the relay knows (`ADVISORY_PLATFORM_MESSAGES`) — never a
  *     summary, a description, a vulnerability, a credit, a CVE or CWE, a URL
- *     or the answer's body. `advisoryReportLandedText`, `advisoryLandedText`,
+ *     or the answer's body. `advisoryReportLandedText`,
+ *     `advisoryCreateLandedText`, `advisoryLandedText`,
  *     `advisoryStateLandedText` and `advisoryFenceText` are the only spellings
  *     of an advisory row. An id exposes no content, but it is public in the log.
+ *     A draft's package names are `quiet` too: a refusal never echoes one.
  *
- * The executor's three paths (`execute.mjs`, in the shape of the hierarchy rows'):
+ * The executor's four paths (`execute.mjs`, in the shape of the hierarchy rows'):
  *
  *   - `advisory_report` is one POST of the row's body. It LANDS on a 2xx
  *     whose answer carries a `ghsa_id` (`advisoryReportReadBack`); the row and
  *     a notice annotation name that id, so the seat follows with
  *     `advisory_collaborators_add` — the App is the submitter, so the finding
  *     seat is not a collaborator on its own;
+ *   - `advisory_create` is one POST of the row's body to the collection, and
+ *     nothing is read first. It LANDS on a 2xx whose answer carries a
+ *     `ghsa_id` and reads state `draft` (`advisoryCreateReadBack`); a 2xx
+ *     without an id is UNCONFIRMED and one in another state FAILED, neither
+ *     ever re-sent. The row and a notice annotation name the id, so the seat
+ *     follows with `advisory_collaborators_add` exactly as after a report;
  *   - `advisory_collaborators_add` reads the advisory first (`ADVISORY_FENCES`,
  *     judged by `advisoryPreflight` on the executor's own `GET`) and refuses
  *     with nothing sent unless the read answers 200 with the advisory the
@@ -454,9 +481,12 @@
  * rest: a valid report filed by the App and whom it records as the reporter,
  * a real account added and whether the PATCH replaces the list, the two
  * transitions by the App, and whether a report needs the grant at all (both
- * tokens reached the reports endpoint's 422). A refusal on any of them is a
- * FAILED action carrying `ADVISORY_ACCESS_REMEDY`, and ⛔ never a retry under
- * an un-narrowed token: the reading goes to the maintainer.
+ * tokens reached the reports endpoint's 422); for `advisory_create`, whether
+ * the App's token creates a draft at all, whether one `vulnerabilities` entry
+ * of an ecosystem and a name is the least the endpoint accepts, and whether
+ * three drafts land in one hour where reports stop at one a day. A refusal
+ * on any of them is a FAILED action carrying `ADVISORY_ACCESS_REMEDY`, and ⛔
+ * never a retry under an un-narrowed token: the reading goes to the maintainer.
  *
  * The sender gate does NOT change for these rows: write, maintain or admin on
  * the target passes, by the maintainer's ruling, verbatim as the body of issue
@@ -814,14 +844,23 @@ export function subIssueLandedText({ mode, parentNumber, childNumber, childId, c
 }
 
 /**
- * One repository advisory's id (header: "The three rows that touch a security advisory"): `GHSA` and three groups
+ * One repository advisory's id (header: "The four rows that touch a security advisory"): `GHSA` and three groups
  * of four lowercase letters or digits. It is spelled into a path, so the field kind `ghsa` admits this and nothing else.
  */
 export const GHSA_ID_SHAPE = /^GHSA(-[0-9a-z]{4}){3}$/;
-/** The path of ONE advisory — one of the two `security-advisories` paths a row reaches (`REFUSED_PATH_FAMILIES`). */
+/** The path of ONE advisory — one of the three `security-advisories` paths a row reaches (`REFUSED_PATH_FAMILIES`). */
 export const ADVISORY_PATH_SHAPE = /\/security-advisories\/GHSA(-[0-9a-z]{4}){3}$/;
-/** The private-report endpoint — the other one, `advisory_report`'s POST. */
+/** The private-report endpoint — the second, `advisory_report`'s POST. */
 export const ADVISORY_REPORTS_PATH_SHAPE = /\/security-advisories\/reports$/;
+/**
+ * The collection itself — the third, `advisory_create`'s POST, which creates a DRAFT. The same path answers the list
+ * to a `GET`; no row spells that verb on it (`validate.mjs --self-test` pins the verbs every row sends here).
+ */
+export const ADVISORY_CREATE_PATH_SHAPE = /^\/repos\/[^/]+\/[^/]+\/security-advisories$/;
+/** The one ecosystem a draft's `vulnerabilities` entry names: every package this fleet ships is an npm package. */
+export const ADVISORY_CREATE_ECOSYSTEM = 'npm';
+/** An npm package name, scoped or not, as the registry spells one — the only shape a draft's package takes. */
+export const NPM_PACKAGE_SHAPE = /^(?:@[a-z0-9][a-z0-9._~-]*\/)?[a-z0-9][a-z0-9._~-]*$/;
 /** The states an advisory takes a collaborator in through the relay: an unpublished, open advisory's. */
 export const ADVISORY_OPEN_STATES = Object.freeze(['triage', 'draft']);
 /**
@@ -833,9 +872,9 @@ export const ADVISORY_TRANSITIONS = Object.freeze({ draft: Object.freeze(['triag
 export const ADVISORY_SETTABLE_STATES = Object.freeze(Object.keys(ADVISORY_TRANSITIONS));
 /** A state refused BY NAME, with why — never reachable by any row, as a value or through a body (header). */
 export const ADVISORY_REFUSED_STATES = Object.freeze({ published: 'publishing stays with the maintainer, by hand, and no relay row reaches it' });
-/** The severities a report may carry — GitHub's own enum for a private report. */
+/** The severities a report or a draft may carry — GitHub's own enum for both. */
 export const ADVISORY_SEVERITIES = Object.freeze(['critical', 'high', 'medium', 'low']);
-/** A weakness id as a report carries one, `CWE-` and a number. */
+/** A weakness id as a report or a draft carries one, `CWE-` and a number. */
 export const CWE_ID_SHAPE = /^CWE-[1-9][0-9]{0,4}$/;
 /** GitHub's own login shape: what an advisory row prints of a login, and the only shape it prints one in. */
 export const LOGIN_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -873,7 +912,7 @@ export function advisoryCollaboratorLogins(json) {
 /** What a refused advisory request prints after its status (header): the reading goes to the maintainer, ⛔ never a wider token. */
 export const ADVISORY_ACCESS_REMEDY =
   'the relay token carries repository-advisories write for this stroke alone, and what the App may do to a report, ' +
-  'its collaborators and its state is decided by the first live run — put this reading to the maintainer; ⛔ never ' +
+  'a draft, its collaborators and its state is decided by the first live run — put this reading to the maintainer; ⛔ never ' +
   're-send it under a wider or un-narrowed token';
 
 /**
@@ -1006,6 +1045,30 @@ export function advisoryReportLandedText({ ghsaId, state }) {
   return `reported ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
 }
 
+/** The one state a created advisory may answer in — the endpoint's default, and the only one a draft has. */
+export const ADVISORY_CREATED_STATE = 'draft';
+
+/**
+ * What LANDED means for `advisory_create` (the header's section): a 2xx whose answer carries a `ghsa_id` in its shape
+ * AND reads state `draft`. Answers `{ ok, ghsaId, state, why }`. A 2xx without an id is UNCONFIRMED — a draft may
+ * have been created, so ⛔ never re-sent; a 2xx whose id reads any other state is a FAILED action naming the id and
+ * that state, in their shapes alone. Pure.
+ */
+export function advisoryCreateReadBack(answer) {
+  const json = answer?.json;
+  const ghsaId = advisoryShaped(json) && typeof json.ghsa_id === 'string' && GHSA_ID_SHAPE.test(json.ghsa_id) ? json.ghsa_id : null;
+  const state = advisoryShaped(json) ? json.state : null;
+  if (!twoXX(answer)) return { ok: false, ghsaId: null, state: null, why: `HTTP ${answer?.status ?? 'none'}` };
+  if (!ghsaId) return { ok: false, ghsaId, state, why: `HTTP ${answer.status}, but the answer carries no advisory id — UNCONFIRMED: a draft advisory may have been created; ⛔ do not re-send, ask the maintainer to read the repository's draft advisories` };
+  if (state !== ADVISORY_CREATED_STATE) return { ok: false, ghsaId, state, why: `HTTP ${answer.status}, but ${ghsaId} reads state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')}, not ${ADVISORY_CREATED_STATE} — ⛔ do not re-send, put the id to the maintainer` };
+  return { ok: true, ghsaId, state, why: '' };
+}
+
+/** The row a landed `advisory_create` prints: the id the platform gave it and its state, and the next stroke. Pure. */
+export function advisoryCreateLandedText({ ghsaId, state }) {
+  return `created ${advisoryPrintable(ghsaId, GHSA_ID_SHAPE, 'advisory id')} · state ${advisoryPrintable(state, ADVISORY_STATE_SHAPE, 'advisory state')} — add whoever works it with advisory_collaborators_add`;
+}
+
 /** The seat-side transport selector and its three values. */
 export const TRANSPORT_ENV = 'OS_FLEET_TRANSPORT';
 export const TRANSPORTS = Object.freeze(['direct', 'dispatch', 'auto']);
@@ -1049,6 +1112,9 @@ export const MAX_ADVISORY_DESCRIPTION_BYTES = MAX_BODY_BYTES;
 /** Weakness ids per report, and the longest one (`CWE-` and five digits). */
 export const MAX_CWE_IDS = 10;
 export const MAX_CWE_ID_CHARS = 9;
+/** Packages per draft advisory — one `vulnerabilities` entry each — and the registry's own cap on a name. */
+export const MAX_ADVISORY_PACKAGES = 10;
+export const MAX_NPM_PACKAGE_CHARS = 214;
 
 /** The platform's ceilings on `client_payload`, quoted in the header. */
 export const CLIENT_PAYLOAD_MAX_TOP_LEVEL = 10;
@@ -1081,7 +1147,7 @@ export const TARGET_REPO_SHAPE = new RegExp(`^${TARGET_OWNER}/[A-Za-z0-9_.-]+$`)
  *           spelled into a path; a refusal names the shape and never echoes
  *           the value, which a public run log would otherwise carry.
  *
- * Two modifiers, both for the advisory rows (header: "The three rows that
+ * Two modifiers, both for the advisory rows (header: "The four rows that
  * touch a security advisory"): `shape` holds each item of a `list` to a
  * pattern, named by `itemWhat`; `quiet` makes an `enum` or `list` refusal
  * describe a failing value by its type and size, ⛔ never echo it — a value in
@@ -1112,12 +1178,14 @@ export const FIELDS = Object.freeze({
   inputs: Object.freeze({ kind: 'inputs' }),
   // The child of a hierarchy link, by NUMBER — the executor resolves its REST id (header: "The two rows that write an issue's hierarchy").
   sub_issue: Object.freeze({ kind: 'int' }),
-  // The advisory rows' keys (header: "The three rows that touch a security advisory"). A report's prose is
+  // The advisory rows' keys (header: "The four rows that touch a security advisory"). A report's or a draft's prose is
   // `summary` and `description`, read from the event file and printed nowhere; every other key is quiet.
   summary: Object.freeze({ kind: 'str', max: MAX_ADVISORY_SUMMARY_BYTES }),
   description: Object.freeze({ kind: 'str', max: MAX_ADVISORY_DESCRIPTION_BYTES }),
   severity: Object.freeze({ kind: 'enum', values: ADVISORY_SEVERITIES, quiet: true }),
   cwe_ids: Object.freeze({ kind: 'list', max: MAX_CWE_IDS, itemMax: MAX_CWE_ID_CHARS, shape: CWE_ID_SHAPE, itemWhat: 'a weakness id, CWE- and a number', quiet: true }),
+  // A draft's affected packages, by npm name alone — each one `vulnerabilities` entry, never a version range.
+  packages: Object.freeze({ kind: 'list', max: MAX_ADVISORY_PACKAGES, itemMax: MAX_NPM_PACKAGE_CHARS, shape: NPM_PACKAGE_SHAPE, itemWhat: 'an npm package name', quiet: true }),
   ghsa_id: Object.freeze({ kind: 'ghsa' }),
   collaborators: Object.freeze({ kind: 'list', max: MAX_LOGINS_PER_ACTION, itemMax: MAX_LOGIN_CHARS, shape: LOGIN_SHAPE, itemWhat: 'a GitHub login', quiet: true }),
   advisory_state: Object.freeze({ kind: 'enum', values: ADVISORY_SETTABLE_STATES, quiet: true, named: ADVISORY_REFUSED_STATES }),
@@ -1135,7 +1203,7 @@ export const FIELDS = Object.freeze({
  * maintainer's ruling, comment 6104822731 (header). `actions: write` is spent
  * by the `workflow_dispatch` and `run_rerun_failed` rows alone, and minted
  * only for a stroke carrying one of them (`STROKE_SCOPED_PERMISSIONS`).
- * `repository-advisories: write` is spent by the three advisory rows alone,
+ * `repository-advisories: write` is spent by the four advisory rows alone,
  * and minted only for a stroke carrying one of them, the same way.
  */
 export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'write', contents: 'write', workflows: 'write', metadata: 'read', actions: 'write', 'repository-advisories': 'write' });
@@ -1143,7 +1211,7 @@ export const PERMISSIONS = Object.freeze({ issues: 'write', 'pull-requests': 'wr
 /**
  * The permissions minted ONLY for a stroke carrying an op that spends them —
  * `actions: write`, the `workflow_dispatch` and `run_rerun_failed` rows'
- * alone, and `repository-advisories: write`, the three advisory rows' alone;
+ * alone, and `repository-advisories: write`, the four advisory rows' alone;
  * each of those rows travels alone in its stroke. `validate.mjs`
  * computes a stroke's permission set (`tokenPermissionsOf`) and writes each of
  * these to `$GITHUB_OUTPUT` as `permission_<name>=<level>` or empty (a hyphen
@@ -1497,7 +1565,7 @@ export const OPS = Object.freeze({
     alone: true,
     requests: (a, repo) => [{ verb: 'POST', path: `/repos/${repo}/actions/runs/${a.run_id}/rerun-failed-jobs`, rerunFailed: { runId: a.run_id } }],
   }),
-  // The three rows that touch a security advisory — see the header. Each travels alone, and its token alone carries
+  // The four rows that touch a security advisory — see the header. Each travels alone, and its token alone carries
   // `repository-advisories: write`, minted for that stroke only. The sender gate is unchanged, by the maintainer's
   // ruling (the body of issue 29160): 「所有车队账户都能发这个操作」 — so any fleet account with write on the target
   // can add itself to an advisory whose id it holds; an id exposes no content, but it is in the public run log.
@@ -1514,6 +1582,30 @@ export const OPS = Object.freeze({
         path: `/repos/${repo}/security-advisories/reports`,
         body: { summary: a.summary, description: a.description, ...(a.severity !== undefined ? { severity: a.severity } : {}), ...(a.cwe_ids !== undefined ? { cwe_ids: [...a.cwe_ids] } : {}) },
         advisoryReport: true,
+      },
+    ],
+  }),
+  // The draft: ONE POST of its body to the collection, which creates an advisory in `draft` — the endpoint's default
+  // and the only state it creates in, so the body names no state. Its prose rides the event file like a report's;
+  // each package is one `vulnerabilities` entry naming the npm ecosystem and the name, with no version range, credit,
+  // CVSS vector, CVE id or private fork. The row and the annotation name the id the platform gave it.
+  advisory_create: Object.freeze({
+    permission: 'repository-advisories',
+    required: Object.freeze(['summary', 'description', 'packages']),
+    optional: Object.freeze(['severity', 'cwe_ids']),
+    alone: true,
+    requests: (a, repo) => [
+      {
+        verb: 'POST',
+        path: `/repos/${repo}/security-advisories`,
+        body: {
+          summary: a.summary,
+          description: a.description,
+          vulnerabilities: a.packages.map((name) => ({ package: { ecosystem: ADVISORY_CREATE_ECOSYSTEM, name } })),
+          ...(a.severity !== undefined ? { severity: a.severity } : {}),
+          ...(a.cwe_ids !== undefined ? { cwe_ids: [...a.cwe_ids] } : {}),
+        },
+        advisoryCreate: true,
       },
     ],
   }),
@@ -1582,10 +1674,11 @@ export const REFUSED_PATH_FAMILIES = Object.freeze([
   /\/actions\/workflows\/[^/]+\/(enable|disable)$/,
   /\/actions\/(secrets|variables|permissions|runners|oidc)/,
   /\/releases/,
-  // Every `security-advisories` path but exactly ONE advisory's (`ADVISORY_PATH_SHAPE`) and the private-report
-  // endpoint (`ADVISORY_REPORTS_PATH_SHAPE`): the list and the create of a draft, an advisory's CVE request and its
-  // temporary fork stay out of reach of any row.
-  /\/security-advisories(?!\/(?:GHSA(-[0-9a-z]{4}){3}|reports)$)/,
+  // Every `security-advisories` path but exactly ONE advisory's (`ADVISORY_PATH_SHAPE`), the private-report endpoint
+  // (`ADVISORY_REPORTS_PATH_SHAPE`) and the bare collection (`ADVISORY_CREATE_PATH_SHAPE`, the create of a draft):
+  // anything after the collection but those two, an advisory's CVE request and its temporary fork stay out of reach
+  // of any row. The collection's list is the same path under `GET`, which no row sends (the self-test pins the verbs).
+  /\/security-advisories(?!\/(?:GHSA(-[0-9a-z]{4}){3}|reports)$|$)/,
   /^\/orgs\//,
   /^\/admin\//,
   /\/collaborators\//,

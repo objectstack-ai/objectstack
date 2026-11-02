@@ -134,6 +134,9 @@ describe('resolveEmailCapabilityArg — defaultTemplateContext.appName precedenc
     );
     expect(options.defaultTemplateContext).toEqual({
       appName: 'Acme Prod',
+      // The deployment address, resolved beside appName (no env or config link
+      // here, so the local default).
+      baseUrl: 'http://localhost:3000',
       supportEmail: 'help@acme.test',
       brandColor: '#0af',
       provider: 'this is template data, not the transport',
@@ -145,11 +148,11 @@ describe('resolveEmailCapabilityArg — defaultTemplateContext.appName precedenc
     expect(options.provider).toBe('log');
   });
 
-  it('still emits a context with only appName when no context was configured', () => {
+  it('still emits a context with only the resolved keys when no context was configured', () => {
     // The shape existing deployments get. Absent config must not start
     // producing an empty or missing context object.
     expect(resolveEmailCapabilityArg({}, { OS_APP_NAME: 'Solo' }).options.defaultTemplateContext)
-      .toEqual({ appName: 'Solo' });
+      .toEqual({ appName: 'Solo', baseUrl: 'http://localhost:3000' });
   });
 });
 
@@ -215,7 +218,7 @@ describe('the resolved appName reaches the service that renders templates (#5448
       { defaultTemplateContext: { appName: 'Acme Dev', supportEmail: 'help@acme.test' } },
       { OS_APP_NAME: 'Acme' },
     );
-    expect(context).toEqual({ appName: 'Acme', supportEmail: 'help@acme.test' });
+    expect(context).toEqual({ appName: 'Acme', baseUrl: 'http://localhost:3000', supportEmail: 'help@acme.test' });
   }, 60_000);
 
   it('carries the context-only appName when no env or dedicated key exists', async () => {
@@ -223,6 +226,6 @@ describe('the resolved appName reaches the service that renders templates (#5448
       { defaultTemplateContext: { appName: 'Context Only' } },
       {},
     );
-    expect(context).toEqual({ appName: 'Context Only' });
+    expect(context).toEqual({ appName: 'Context Only', baseUrl: 'http://localhost:3000' });
   }, 60_000);
 });

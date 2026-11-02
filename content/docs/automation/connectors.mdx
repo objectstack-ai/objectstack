@@ -558,7 +558,11 @@ What the publish door checks, each refusal located at its key under `auth`:
   `authorization_code`. The one exception is `provider: 'mcp'` over an `http`
   transport, which may omit the endpoints and the client id: the MCP
   authorization flow discovers the server's metadata and can register the
-  client. `client_credentials` has no authorization step, so
+  client. An `authorization_code` instance may instead declare
+  `clientSource: 'installer'` and name no `clientId` and no `credentialRef`:
+  the administrator of each deployment registers their own client with the
+  vendor and enters it when they connect (below); a `clientId` beside it is
+  refused. `client_credentials` has no authorization step, so
   `authorizationUrl` is refused there, and it requires `credentialRef`.
   A `credentialRef` without its `clientId` is refused. An inline
   `clientSecret`, `refreshToken` or `accessToken` is refused by name, pointing
@@ -639,6 +643,17 @@ a rotating refresh token is never spent twice.
   GET  /api/v1/automation/connectors/oauth/callback?code=…&state=…   (the vendor redirects here)
   DELETE /api/v1/automation/connectors/:name/connection   → revoke
   ```
+
+  An instance declaring `clientSource: 'installer'` takes its client in the
+  connect's body, `{ "clientId": "…", "clientSecret": "…" }` (omit
+  `clientSecret` for a public client). Register that client with the vendor
+  first, with the redirect URI `<origin>/api/v1/automation/connectors/oauth/callback`.
+  The authorization request, the code exchange and every refresh of that
+  organization's connection then go out as that client, and a reconnect may
+  bring a new one. The connection keeps it encrypted; the status read shows
+  `client: { source: 'installer', clientId, hasSecret }`, never the secret. A
+  connect of such an instance without a client, a client offered to any other
+  instance, and any other body key are refused `400 VALIDATION_ERROR`.
 
   **In the Console**, **Setup → Integrations → Connector Connections** drives
   these calls; the entry is shown to holders of `manage_connector_connections`.

@@ -386,7 +386,7 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     // A bracketed `package` key (`?package[]=`) is read by no
                     // binding below, so it scoped nothing: refused here, by the
                     // decision the dispatcher's twin asks too.
-                    const bracketedPackage = metaReadGate.metaBracketedPackageRefusal('book-tree', req.query);
+                    const bracketedPackage = metaReadGate.metaBracketedFilterRefusal('book-tree', req.query);
                     if (bracketedPackage) {
                         res.status(bracketedPackage.status).json({
                             error: { code: bracketedPackage.code, message: bracketedPackage.message },

@@ -63,7 +63,7 @@ import type { RecentItem } from '../context/RecentItemsProvider.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
 import { findByName, metadataText, useNavTargetLabel, type LabelledRecord, type NavTargetLabelOptions } from './useNavTargetLabel.js';
-import { readObjectsByName } from './useObjectPresence.js';
+import { readObjectsByName, useReadItemsByName } from './useObjectPresence.js';
 
 const BY_NAME: NavTargetLabelOptions = { byName: true };
 
@@ -86,6 +86,9 @@ export function useRecentItemLabel(
   // whole registry: a few recent entries, on Home before anything else asks it.
   const targetLabel = useNavTargetLabel(BY_NAME);
   const metadata = useMetadata();
+  // objectstack#29235 — a page or report row reads its item by name, never its
+  // type's whole list (a dashboard row does too, through `targetLabel`).
+  const readItemsByName = useReadItemsByName(metadata);
   const bundledReads = useBundledReads();
   const { objectPluralLabel, pageLabel, reportLabel } = useObjectLabel();
   const { language } = useObjectTranslation();
@@ -109,11 +112,13 @@ export function useRecentItemLabel(
         case 'dashboard':
           return targetLabel({ kind: 'dashboard', dashboardName: item.name }) ?? item.name;
         case 'page': {
-          const text = metadataText(bundledFirst(bundledReads, 'page', item.name, () => metadata.pages)?.label, language);
+          const pages = () => readItemsByName('page', [item.name], () => metadata.pages);
+          const text = metadataText(bundledFirst(bundledReads, 'page', item.name, pages)?.label, language);
           return nonEmpty(pageLabel({ name: item.name, label: text ?? '' })) ?? item.name;
         }
         case 'report': {
-          const text = metadataText(findByName(metadata.reports, item.name)?.label, language);
+          const reports = readItemsByName('report', [item.name], () => metadata.reports);
+          const text = metadataText(findByName(reports, item.name)?.label, language);
           return nonEmpty(reportLabel({ name: item.name, label: text ?? '' })) ?? item.name;
         }
         case 'package':
@@ -122,6 +127,6 @@ export function useRecentItemLabel(
           return item.label;
       }
     },
-    [targetLabel, metadata, bundledReads, objectPluralLabel, pageLabel, reportLabel, language, packages],
+    [targetLabel, metadata, readItemsByName, bundledReads, objectPluralLabel, pageLabel, reportLabel, language, packages],
   );
 }

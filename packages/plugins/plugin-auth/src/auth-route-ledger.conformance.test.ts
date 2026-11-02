@@ -222,6 +222,11 @@ describe('auth route ledger hygiene', () => {
       // `/organization/get-invitation`, a different path.
       'GET /api/v1/auth/organization/invitation-preview',
       'POST /api/v1/auth/admin/import-users',
+      // On this pin's own terms: `auth-plugin.ts` mounts it itself (a
+      // `rawApp.post` on the `${basePath}/admin/list-platform-admins`
+      // template, ahead of the catch-all), and the `live.has(route)` loop
+      // below holds it to the same proof — better-auth serves no roster.
+      'POST /api/v1/auth/admin/list-platform-admins',
       'POST /api/v1/auth/admin/oauth2/toggle-disabled',
       // [#16678] The thirteenth, added on this pin's own terms exactly as the
       // set-initial-password row below was: `auth-plugin.ts` mounts it itself

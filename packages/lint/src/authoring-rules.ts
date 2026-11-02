@@ -150,6 +150,7 @@ import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
+import { lintConnectorCredentialLiterals } from './lint-connector-credential-literals.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
 import { lintViewRefs } from './lint-view-refs.js';
@@ -1628,14 +1629,28 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `validate-form-layout.ts`'s module note carries the measurement.
   // Pure structured-metadata walk (no lazy dependency), so wiring it to all
   // three costs nothing measurable.
+  //
+  // [#29309] Runtime publish gate: a `view` write's snapshot carries `objects`
+  // as context, and the rule reads nothing else beside the written view — the
+  // bound object's fields and its `fieldGroups`. Measured at the two doors
+  // that run this registry (an active save, a publish): the universe is the
+  // registry's merged objects (`getAllObjects`, the overlay and every extender
+  // folded on, the shape `getObject` serves) with the stored rows folded on by
+  // the read API's own merge, so an extension field is known and no phantom is
+  // reported. So RUNTIME_NEEDS_FULL_SNAPSHOT no longer held here. Advisory,
+  // so both findings ride back on the 2xx `advisories` and nothing is refused.
+  // An object outside the write's package closure is not in the snapshot and
+  // the rule then judges that form not at all (both checks skip an unknown
+  // object), never reports it. `object` is not declared, for the reason the
+  // file-field rule below gives.
   {
     name: 'validateFormLayout',
     tier: 'advisory',
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-form-layout.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['view'],
     run: (stack) => validateFormLayout(stack),
   },
   // Ruling C on #25572 (#25650) — a form open to anonymous intake that
@@ -1965,6 +1980,31 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['flow'],
     run: (stack) =>
       lintFlowCredentialLiterals(stack).map((f) => ({
+        severity: f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.hint,
+      })),
+  },
+  // The same predicate over a declarative connector's four header/env maps
+  // (`providerConfig.headers`, `defaultHeaders`, `transport.headers`,
+  // `transport.env`) — the maps the connector read path withholds whole, which
+  // still keep a literal in metadata (ruling 6566912252, letter ①A). Advisory
+  // for the same reason as the flow entry above, and on the fourth door for
+  // `connector`: `PUT /meta/connector/:name` is the door a Studio / REST / MCP
+  // author of a connector has.
+  {
+    name: 'lintConnectorCredentialLiterals',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/lint-connector-credential-literals.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['connector'],
+    run: (stack) =>
+      lintConnectorCredentialLiterals(stack).map((f) => ({
         severity: f.severity,
         rule: f.rule,
         where: f.where,
