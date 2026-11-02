@@ -7,9 +7,9 @@
  * the chrome around it read the app's object scope instead
  * (`MetadataContextValue.readObjectScope`): the package's objects, plus by
  * name the route's object and its lookup targets when the package does not
- * hold them, the objects the app's navigation and area entries require
- * (`requiresObject`), and the navigation's objects while the command palette
- * is open.
+ * hold them (the lookup targets without views, objectstack#29551), the objects
+ * the app's navigation and area entries require (`requiresObject`), and the
+ * navigation's objects while the command palette is open.
  *
  * A page (`page/:pageName`, objectui#12980) reads only the objects its page
  * definition binds ({@link pageObjectNames}), by name, beside the app's
@@ -565,13 +565,14 @@ function readObjectRouteNames(
   const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
   const lookups = routeDef ? lookupTargetNames(routeDef) : [];
   if (lookups.length === 0) return { scope: first, ready, ...routeOutcome };
-  if (packageId) return { scope: read([...names, ...lookups]), ready, ...routeOutcome };
-  // In an app with no package the lookup targets are asked without views: a
-  // lookup cell links and names its target and reads none of its views, and a
-  // target outside the app bundle (`sys_user`) composed with them read the
-  // whole `/meta/view` list. They join the names-only scope's objects as they
-  // land.
-  (readObjectScope as ReadNamesWithoutViews)({ names: lookups, views: false });
+  // The lookup targets are asked without views, through the same scope as the
+  // route's names: a lookup cell links and names its target and reads none of
+  // its views, and a target outside the app bundle (`sys_user`) composed with
+  // them read the whole `/meta/view` list (objectstack#29551). They join the
+  // scope's objects as they land; the route's names keep their views.
+  const readWithoutViews = readObjectScope as ReadNamesWithoutViews;
+  if (packageId) readWithoutViews({ packageId, names: lookups, views: false });
+  else readWithoutViews({ names: lookups, views: false });
   return { scope: first, ready, ...routeOutcome };
 }
 
