@@ -633,6 +633,9 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // correspondent address for inbound-mail matching (#22870) and names no
     // field.
     mailAssociation: keep,
+    // A boolean facet of this lookup: it declares the target's name readable
+    // by every reader of this record (#29171) and names no field.
+    referenceNameVisible: keep,
     // Names of ANOTHER object's fields — that object's projection governs them.
     // `displayField` / `descriptionField` / `lookupColumns` / `lookupFilters`
     // name fields of the `reference` target (the lookup picker reads them);
