@@ -13,7 +13,14 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   - the refresh token (`refresh_token`, `Field.secret()`), replaced
  *     atomically when the authorization server rotates it (D2.1, D4);
  *   - the grant's status, scopes and expiry, for the Console and for the
- *     `degraded` reason D4 names ("not connected", "reconnect required").
+ *     `degraded` reason D4 names ("not connected", "reconnect required");
+ *   - the client the connection authorizes with when the instance does not
+ *     declare one: a client the MCP authorization flow discovered or
+ *     registered, or the client the administrator entered on an instance
+ *     declaring `clientSource: 'installer'` (D2.1, 2026-11-02 amendment), in
+ *     `registered_client` (`Field.secret()`), with the installer's client id
+ *     repeated in plain `client_id` so a read can show which client is set
+ *     without decrypting anything.
  *
  * ⛔ Not here: the access token. It lives in the automation plugin's
  * in-process cache only (D3, last bullet), as does every `client_credentials`
@@ -87,7 +94,23 @@ export const SysConnectorConnection = ObjectSchema.create({
     registered_client: Field.secret({
       label: 'Registered Client',
       description:
-        "The OAuth client a `provider: 'mcp'` instance's connection authorizes with, when the MCP authorization flow discovered its endpoints or registered it (ADR-0143 D2.1): the issuer, the two endpoints, the resource indicator, the client id and any client secret the registration issued. Encrypted at rest and masked on every read; absent when the instance declares its endpoints and client.",
+        "The OAuth client this connection authorizes with when the instance does not declare one (ADR-0143 D2.1): the client a `provider: 'mcp'` instance's MCP authorization flow discovered or registered (the issuer, the two endpoints, the resource indicator, the client id and any client secret the registration issued), or the client the administrator entered on an instance declaring `clientSource: 'installer'` (its id and secret, and the endpoints when they were discovered). Encrypted at rest and masked on every read; absent when the instance declares its endpoints and client.",
+    }),
+
+    client_id: Field.text({
+      label: 'Client ID',
+      readonly: true,
+      maxLength: 512,
+      description:
+        "The id of the OAuth client the administrator entered on this connection, for an instance declaring `clientSource: 'installer'` (ADR-0143 D2.1). Not a secret: it is what a read shows to say which client is set. The client itself, with its secret, is kept in `registered_client`. Empty for any other instance.",
+    }),
+
+    client_has_secret: Field.boolean({
+      label: 'Client Secret Set',
+      readonly: true,
+      defaultValue: false,
+      description:
+        "Whether the administrator's client (`client_id`) came with a client secret, which is kept encrypted in `registered_client` and never read back here. `false` for a public client and for any instance whose client is not the installer's.",
     }),
 
     status: Field.select(['connected', 'reconnect_required'], {

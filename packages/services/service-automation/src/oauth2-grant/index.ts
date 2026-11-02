@@ -14,3 +14,4 @@ export * from './authorization.js';
 export * from './endpoint-transport.js';
 export * from './app-credential.js';
 export * from './mcp-authorization.js';
+export * from './installer-client.js';
