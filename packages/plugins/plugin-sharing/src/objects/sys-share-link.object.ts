@@ -50,12 +50,11 @@ export const SysShareLink = ObjectSchema.create({
   description: 'Opaque capability token granting access to a single record. Notion/Figma-style public link sharing.',
   // [#24611] The record title is the link's own label, the free text its
   // creator gave it. Declared rather than left to the registry's designation,
-  // which derives the same field today. A link created without a label is
-  // titled by `titleFormat`: what the link grants and to whom, each value drawn
-  // as its option label on the record page. Neither title names the shared
+  // which derives the same field today. The retired `titleFormat` template that
+  // titled a link created without a label (what it grants and to whom) is gone
+  // (refused at save and by `os validate`). The title never names the shared
   // record's object; the Details tab's pointer card names it by its label.
   nameField: 'label',
-  titleFormat: '{permission} · {audience}',
   // Neither half of the pointer pair is listed, as on `sys_record_share`: the
   // strip would draw the type half as an API name and the id half as a raw id,
   // and would hide `record_id` from the Details tab, where it draws as the

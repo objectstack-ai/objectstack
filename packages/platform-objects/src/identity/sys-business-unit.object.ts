@@ -34,7 +34,6 @@ export const SysBusinessUnit = ObjectSchema.create({
   description: 'Your company structure — divisions, departments, regions and offices — used to scope data and reports.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{name}',
   highlightFields: ['name', 'kind', 'parent_business_unit_id', 'manager_user_id'],
 
   listViews: {

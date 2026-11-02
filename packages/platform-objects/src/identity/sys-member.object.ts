@@ -35,21 +35,20 @@ export const SysMember = ObjectSchema.create({
   },
   description: 'Organization membership records',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // columns `titleFormat` names. With no pointer declared, the registry's
+  // columns `titleFormat` named. With no pointer declared, the registry's
   // designate-only pass stamped `nameField: 'id'` (the first title-eligible
   // field), so a renderer honouring ADR-0079's order (an explicit `nameField`
-  // wins over `titleFormat`) drew the raw id as the record page's H1.
-  // `titleFormat` stays for renderers that still read it first;
-  // `identity-display-title.test.ts` holds the two to the same text.
-  // `user_id` is a lookup, so the formula reads its stored id: a formula
-  // is evaluated on the stored row, before `$expand`, and cannot reach the
-  // related record's own title.
+  // wins over `titleFormat`) drew the raw id as the record page's H1. The
+  // retired `titleFormat` template beside it is gone (refused at save and by
+  // `os validate`); `identity-display-title.test.ts` holds the formula to the
+  // text that template drew. `user_id` is a lookup, so the formula reads its
+  // stored id: a formula is evaluated on the stored row, before `$expand`, and
+  // cannot reach the related record's own title.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   // Org-independent title: organization_id is null in single-org mode, so a
   // '{user_id} in {organization_id}' format renders "… in null". User + role
   // identifies the membership in both single- and multi-org deployments.
-  titleFormat: '{user_id} ({role})',
   highlightFields: ['user_id', 'organization_id', 'role'],
 
   // Row-level actions: better-auth `organization/update-member-role` and

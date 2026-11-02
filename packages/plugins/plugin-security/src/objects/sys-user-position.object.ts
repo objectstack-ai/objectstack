@@ -46,15 +46,15 @@ export const SysUserPosition = ObjectSchema.create({
   // words Setup shows.
   description: 'Which positions each user holds, one row per assignment.',
   // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` names. With no pointer declared, the
+  // same two columns `titleFormat` named. With no pointer declared, the
   // registry's designate-only pass stamped `nameField: 'id'` (the first
   // title-eligible field), so a renderer honouring ADR-0079's order (an
   // explicit `nameField` wins over `titleFormat`) drew the raw id as the record
-  // page's H1. `titleFormat` stays for renderers that still read it first;
-  // `sys-security-assignment-display-title.test.ts` holds the two to the same text.
+  // page's H1. The retired `titleFormat` template beside it is gone (refused at
+  // save and by `os validate`); `sys-security-assignment-display-title.test.ts`
+  // holds the formula to the text that template drew.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{user_id} → {position}',
   highlightFields: ['user_id', 'position', 'business_unit_id', 'organization_id'],
 
   fields: {

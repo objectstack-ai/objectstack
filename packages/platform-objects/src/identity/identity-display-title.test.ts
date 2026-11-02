@@ -56,6 +56,26 @@ import { SysTeamMember } from './sys-team-member.object.js';
 import { SysTwoFactor } from './sys-two-factor.object.js';
 import { SysVerification } from './sys-verification.object.js';
 
+/**
+ * The `titleFormat` template each object declared before the ruling of record
+ * on #29007 (6574393684, letter B) retired it: an object definition that
+ * declares one is refused at the metadata save gate and by `os validate`, so
+ * the object no longer carries it. Kept here as the reference text the title
+ * has to reproduce — the text the template drew — not as a title resolver.
+ */
+const RETIRED_TITLE_TEMPLATES: Readonly<Record<string, string>> = {
+  sys_account: '{provider_id} - {account_id}',
+  sys_business_unit_member: '{user_id} in {business_unit_id}',
+  sys_invitation: 'Invitation for {email}',
+  sys_member: '{user_id} ({role})',
+  sys_scim_group_member: '{scim_user_id} in {group_id}',
+  sys_scim_projection_grant: '{role} → {user_id}',
+  sys_scim_subject: '{user_id}',
+  sys_team_member: '{user_id} in {team_id}',
+  sys_two_factor: 'Two-factor for {user_id}',
+  sys_verification: 'Verification',
+};
+
 type Row = Record<string, unknown>;
 type Schema = { name: string; nameField?: string; displayNameField?: string; titleFormat?: unknown; fields: Record<string, any> };
 
@@ -178,7 +198,7 @@ describe('[#20059] identity objects resolve a real record title under ADR-0079 o
     it('renders the `titleFormat` text for a stored row, never the id', () => {
       const title = evaluateDisplayTitle(c.schema, c.row);
       expect(title).toBe(c.title);
-      expect(title).toBe(renderTitleFormat(c.schema.titleFormat, c.row));
+      expect(title).toBe(renderTitleFormat(RETIRED_TITLE_TEMPLATES[c.schema.name], c.row));
       expect(title).not.toBe(c.row.id);
       expect(String(title)).not.toContain(String(c.row.id));
     });
@@ -196,7 +216,7 @@ describe('[#20059] identity objects resolve a real record title under ADR-0079 o
     const row = { id: 'ver_7Rk2', identifier: 'credential-shaped-identifier', value: 'credential-shaped-value' };
     const title = String(evaluateDisplayTitle(schema, row));
     for (const name of internal) expect(title).not.toContain(String(row[name as 'identifier' | 'value']));
-    for (const name of internal) expect(renderTitleFormat(schema.titleFormat, row)).not.toContain(String(row[name as 'identifier' | 'value']));
+    for (const name of internal) expect(renderTitleFormat(RETIRED_TITLE_TEMPLATES[schema.name], row)).not.toContain(String(row[name as 'identifier' | 'value']));
     for (const name of internal) expect(schema.highlightFields ?? []).not.toContain(name);
   });
 
@@ -210,6 +230,6 @@ describe('[#20059] identity objects resolve a real record title under ADR-0079 o
     expect(servedPointers(schema)).toEqual({ nameField: 'user_id', displayNameField: 'user_id' });
     expect(schema.fields.display_title).toBeUndefined();
     const row = { id: 'scs_0Wy2', user_id: 'usr_Ab12', revision: 3 };
-    expect(row[resolveDisplayField(schema as any) as 'user_id']).toBe(renderTitleFormat(schema.titleFormat, row));
+    expect(row[resolveDisplayField(schema as any) as 'user_id']).toBe(renderTitleFormat(RETIRED_TITLE_TEMPLATES[schema.name], row));
   });
 });
