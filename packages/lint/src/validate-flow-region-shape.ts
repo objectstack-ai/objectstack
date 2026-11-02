@@ -32,6 +32,12 @@
  * register it too. Either way the finding says the flow could not be judged
  * and carries the schema's issues.
  *
+ * An entry that is not a record at all (an empty YAML list item, a string) is
+ * skipped, as every registry reader skips it (`non-record-object-entry.test.ts`):
+ * no author wrote a flow there, and `os validate` refuses the collection with
+ * the stack schema's own sentence. Its index is kept, so the paths of the
+ * flows around it stay the author's.
+ *
  * ## Not judged here
  *
  * A cycle in the flow's TOP-LEVEL graph. The engine refuses it with
@@ -42,6 +48,8 @@
 import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
 
 type AnyRec = Record<string, unknown>;
+
+const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
 
 /** The rule id every finding of this rule carries. */
 export const FLOW_REGION_SHAPE_INVALID = 'flow-region-shape-invalid';
@@ -77,10 +85,11 @@ export function validateFlowRegionShape(stack: AnyRec): FlowRegionShapeFinding[]
   if (!Array.isArray(flows)) return [];
   const findings: FlowRegionShapeFinding[] = [];
   flows.forEach((raw, i) => {
+    if (!isRec(raw)) return;
     const path = `flows[${i}]`;
     const result = FlowSchema.safeParse(raw);
     if (!result.success) {
-      const declared = (raw as { name?: unknown } | null)?.name;
+      const declared = raw.name;
       const name = typeof declared === 'string' && declared !== '' ? declared : path;
       const issues = result.error.issues
         .map((issue) => `${issue.path.length > 0 ? issue.path.join('.') : '(root)'}: ${issue.message}`)

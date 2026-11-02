@@ -81,6 +81,12 @@ describe('[#29049] flow-region-shape-invalid', () => {
       expect(finding!.message).toContain('nodes');
     });
 
+    it('a non-record entry is no flow and draws nothing; the flow after it keeps its own index', () => {
+      const bad = flow('rgn_lead_time', guard(fanOut(false)));
+      const findings = validateFlowRegionShape({ flows: [null, 'x', bad] });
+      expect(findings.map(({ path }) => path)).toEqual(['flows[2]']);
+    });
+
     it('a body with no string name is named by its path', () => {
       const [finding] = validateFlowRegionShape({ flows: [unparseable()] });
       expect(finding).toMatchObject({ where: "flow 'flows[0]'", path: 'flows[0]' });
