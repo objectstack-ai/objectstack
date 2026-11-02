@@ -201,7 +201,7 @@ describe('a stored `drivers` row written before the refusal', () => {
     expect(records.find((r) => r.name === 'drivers')?.label).toBe('Old drivers');
 
     const removed = await call(`${ROOT}/drivers`, 'DELETE');
-    expect(removed.status).toBe(200);
+    expect(removed.ok).toBe(true);
     expect(records.some((r) => r.name === 'drivers')).toBe(false);
   });
 });

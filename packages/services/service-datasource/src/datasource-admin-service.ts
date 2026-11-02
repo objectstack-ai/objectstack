@@ -43,6 +43,7 @@ import { datasourceConnectivityChanged } from './datasource-connectivity-change.
 import { redactDatasourceConfig, restoreRedactedConfig } from './datasource-config-redaction.js';
 import { planCredentialMigration } from './datasource-credential-migration.js';
 import { borrowedConnectorOf } from './datasource-connector-credential.js';
+import { ROUTE_SHADOWED_DATASOURCE_NAMES } from './datasource-route-reserved-names.js';
 import type {
   IDatasourceAdminService,
   DatasourceDraft,
@@ -1384,6 +1385,16 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     if (name === 'default') {
       throw new Error(
         `Datasource name 'default' is reserved for the host's primary datasource. Pick another name.`,
+      );
+    }    // Route-shadowed names (#29164): a literal the admin registrar mounts beside
+    // a same-method `/datasources/:name` route captures that path first, so a
+    // datasource of that name could never be read through its by-name door
+    // (`GET /datasources/drivers` is the driver catalog, not the edit form's
+    // detail read). The list is the one the registrar mounts from.
+    if (ROUTE_SHADOWED_DATASOURCE_NAMES.includes(name)) {
+      throw new Error(
+        `Datasource name '${name}' is reserved: the datasource admin API serves its own route at `
+          + `'/datasources/${name}', so a datasource of that name could never be read by name. Pick another name.`,
       );
     }
   }
