@@ -203,12 +203,10 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
  * dispatcher, enveloped like its lifecycle siblings (`{ success, data }`), and
  * answers this schema as the `data`. Until it does, the describe carries
  * `[PLANNED — not yet served]`. The house has no other planned channel for an
- * API response: the liveness ledgers are per metadata type, the runtime route
- * ledger records only what the dispatcher serves, and `PackageApiContracts`
- * binds a route only in the change that mounts it. So the server slice drops
- * the marker in the same change that mounts the route, adds its route-ledger
- * row and its `PackageApiContracts` entry, and flips the test that pins the
- * marker.
+ * API response: the liveness ledgers are per metadata type, and the runtime
+ * route ledger records only what the dispatcher serves. So the change that
+ * mounts the route drops the marker, adds the route's ledger row and flips the
+ * test that pins the marker.
  *
  * Everything below is what that door MUST do. None of it is served today.
  *
@@ -229,11 +227,23 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
  *
  * ## Which packages, in which order
  *
- * Every package the deployment holds, enabled or not, each once, except the
- * platform's own: a package whose manifest `scope` is `system` is shipped by
- * every runtime for itself, so an install of the bundle never re-installs it.
- * A pair of such a base is still exported. A metadata item bound to no package
- * is in no entry; ADR-0146 D11's migration binds it to one first.
+ * Every package whose registry row's `source` (`InstalledPackageSourceSchema`,
+ * kernel/package-registry.zod.ts) is not `code`, each once: the marketplace
+ * and authored packages, a `.custom` pair among them. A `code` package is
+ * registered by the running deployment's own code (a `defineStack()` host's
+ * packages, a plugin's bundled manifest, a platform package), so it travels
+ * with that code and not with the bundle: an install of the bundle never
+ * re-installs it. The row's `source` is the one key that says so: the
+ * registry's own ⛔ forbids deriving it from `manifest.scope` or `writable`,
+ * and the per-package export already reads the row that carries it. A pair of
+ * a `code` base is still exported. A metadata item bound to no package is in
+ * no entry; ADR-0146 D11's migration binds it to one first.
+ *
+ * Enabled or not, every such package is exported, and the bundle carries no
+ * enabled state: the per-package export has no `enabled` or `status` key, so an
+ * install of the bundle installs every entry enabled. A package the tenant
+ * switched off comes back on, and the consumer disables it again if it wants it
+ * off.
  *
  * The order must be ADR-0141 D5's, the order a boot hydrates installed
  * packages in: dependencies first. An entry comes after every entry its
@@ -260,18 +270,20 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
  */
 export const PackageExportBundleSchema = lazySchema(() => z.object({
   packages: z.array(PackageExportManifestSchema).describe(
-    'Every package of the deployment but the platform\'s own (manifest `scope` `system`), each once and each as '
-    + '`GET /packages/:id/export` answers it, dependencies first: an entry comes after every entry its package\'s '
-    + '`manifest.dependencies` names, so a `.custom` pair comes after its base. Install the entries in this order; '
-    + 'never re-sort them. Empty when the deployment holds only platform packages.',
+    'Every package whose registry row\'s `source` is not `code` (the marketplace and authored packages, a `.custom` '
+    + 'pair among them), enabled or not, each once and each as `GET /packages/:id/export` answers it, dependencies '
+    + 'first: an entry comes after every entry its package\'s `manifest.dependencies` names, so a `.custom` pair '
+    + 'comes after its base. Install the entries in this order; never re-sort them. No entry carries an enabled '
+    + 'state, so every entry installs enabled. Empty when every package of the deployment is registered by its '
+    + 'own code.',
   ),
   // Declared before it is served (ADR-0049): the marker comes off when the
-  // server slice of #28914 mounts `GET /packages/export` in
-  // packages/runtime/src/domains/packages.ts, in the same change as its
-  // route-ledger row and its `PackageApiContracts` entry.
+  // server slice of #28914 mounts `GET /packages/export`, in the same change
+  // as the route's ledger row.
 }).strict().describe(
-  '[PLANNED — not yet served] Whole-deployment export: every installed package but the platform\'s own, as '
-  + 'installable packages in dependency order. Carries no credential value. Declared ahead of its producer '
+  '[PLANNED — not yet served] Whole-deployment export: every installed package the deployment\'s own code does '
+  + 'not register (registry `source` other than `code`), as installable packages in dependency order. Carries no '
+  + 'credential value and no enabled state. Declared ahead of its producer '
   + '(ADR-0049): no runtime serves `GET /packages/export` yet. The server half of the whole-deployment package '
   + 'export mounts it, together with a future CLI command that calls it; until then this is the contract that '
   + 'door must answer, not a read a client can make.',

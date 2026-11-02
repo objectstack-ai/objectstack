@@ -24,6 +24,7 @@ import {
   EnsureCustomizationPackageResponseSchema,
 } from './package-lifecycle.zod';
 import { PackagePublishResultSchema as SystemPackagePublishResultSchema } from '../system/metadata-persistence.zod';
+import { InstalledPackageSourceSchema } from '../kernel/package-registry.zod';
 
 describe('the ruled re-export of PackagePublishResultSchema into the `/api` namespace', () => {
   it('is the SAME declaration as the `/system` original — a re-export, never a second copy', () => {
@@ -318,8 +319,7 @@ describe('PackageExportBundleSchema declares the whole-deployment export as comp
 
   // Declared before it is served (ADR-0049): no runtime mounts
   // `GET /packages/export` until the server slice of #28914 lands. That
-  // change drops the marker, adds the route-ledger row and the
-  // `PackageApiContracts` entry, and flips this test.
+  // change drops the marker, adds the route's ledger row and flips this test.
   it('is PLANNED until a runtime serves the route: the describe says so, naming no tracker id', () => {
     const description = PackageExportBundleSchema.description ?? '';
     expect(description).toMatch(/^\[PLANNED — not yet served\] /);
@@ -327,6 +327,22 @@ describe('PackageExportBundleSchema declares the whole-deployment export as comp
     expect(description).toContain('no runtime serves `GET /packages/export` yet');
     // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the comments.
     expect(description).not.toMatch(/#\d{3,}/);
+  });
+
+  // Which packages the door selects is read off the registry row's `source`
+  // (InstalledPackageSourceSchema), never derived from `manifest.scope`: the
+  // registry's own rule, and the runtime's #14375 correction of the same
+  // derivation. Both describes state the selection and the missing enabled state.
+  it('selects by the registry row\'s `source`, never by `manifest.scope`, and says it carries no enabled state', () => {
+    const packagesDescription = PackageExportBundleSchema.shape.packages.description ?? '';
+    const description = PackageExportBundleSchema.description ?? '';
+    for (const text of [packagesDescription, description]) {
+      expect(text).toContain('`source`');
+      expect(text).toContain('`code`');
+      expect(text).not.toMatch(/scope/);
+      expect(text).toContain('enabled');
+    }
+    expect(InstalledPackageSourceSchema.options).toContain('code');
   });
 });
 
