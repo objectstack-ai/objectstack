@@ -311,8 +311,9 @@ describe('a virtual field declared in searchableFields — not admitted, since n
     // The dividing line is STORAGE, not search quality. `lookup` and `json` are
     // auto-EXCLUDED types, and declaring them is still the author's choice, so
     // both are ADMITTED here. What each then contributes is the expansion's call
-    // (`expandSearchToFilter`, `@objectstack/objectql`): `lookup` becomes an
-    // `$icontains` over the stored foreign key, a narrow scan that can match;
+    // (`expandSearchToFilter`, `@objectstack/objectql`): a single-valued
+    // `lookup` becomes an `$icontains` over the stored foreign key, a narrow scan
+    // that can match;
     // [#29394] `json` can never hold a string (the text-operator door's
     // `door-refusal` verdict), so it contributes NO clause, and a set made only
     // of such columns answers no rows. Neither is swept up by the virtual
