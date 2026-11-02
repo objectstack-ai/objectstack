@@ -1256,7 +1256,6 @@ const ar = {
     undo: "تراجع",
     redo: "إعادة",
     canvasMinimap: "الخريطة المصغرة للوحة",
-    versionHistory: "سجل الإصدارات",
   },
   detail: {
     editInlineHint: "انقر نقرًا مزدوجًا للتحرير",

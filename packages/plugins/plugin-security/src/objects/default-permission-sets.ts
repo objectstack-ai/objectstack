@@ -433,6 +433,19 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // `auditLedgerRowScope`) and read every organization's rows. Read only:
       // the ledger is append-only and written under system context.
       sys_audit_log: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },
+      // A reader's own named list views, WITHOUT the superuser bits (ruling
+      // 6570568131 on #28971, letter C): the first version has no admin
+      // management, so an organization administrator reads and writes only
+      // their OWN views, exactly as a member does. The wildcard's
+      // `viewAllRecords`/`modifyAllRecords` would skip the object's owner-only
+      // default row scope and hand the admin every member's saved lists. The
+      // same grant as `member_default`'s, so the admin loses nothing of their
+      // own; the derived no-bypass variant inherits this line. ⛔ No
+      // `allowDelete`: an owner removes their own view through plugin-auth's
+      // own-row door (`DELETE /api/v1/personal-views/:id`), which grants
+      // nothing, and an admin-only delete would be the admin management the
+      // ruling leaves out.
+      sys_personal_view: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     },
     // `manage_mailboxes` (ruling 6116489638, Q4 → A): an organization
     // administrator reads its organization's mailboxes and their unassociated
@@ -759,6 +772,18 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // implicit; making it explicit is the migration, not a widening — the
       // effective access for a member is byte-identical.
       sys_user_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
+      // A reader's own named list views (ruling 6570568131 on #28971, letter
+      // C): save and rename their own views, on the preference template.
+      // The object's own owner-only default row scope (`sys_personal_view_self`,
+      // declared on the object, `operation: 'all'`) decides WHICH rows, so the
+      // grant reaches the holder's own views only. The object is `private`
+      // posture, so this explicit line is the only way a member reaches it.
+      // ⛔ No `allowDelete`, for the anchor reason above: the owner removes
+      // their own view through plugin-auth's own-row door
+      // (`DELETE /api/v1/personal-views/:id`, seat ruling 6583289013 on
+      // #29443), whose authorization is structural (owner == caller), not a
+      // bit this set carries.
+      sys_personal_view: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
       // [#7344] The personal inbox, READ-ONLY. Same reasoning as the line above,
       // applied to the other pair of platform objects a platform app points every
       // authenticated member at: the Account app's `Inbox` group declares a
