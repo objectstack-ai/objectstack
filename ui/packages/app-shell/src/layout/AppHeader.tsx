@@ -89,7 +89,8 @@ import type { BreadcrumbItem as BreadcrumbItemType } from '@object-ui/types';
 import { useAuth, getUserInitials } from '@object-ui/auth';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useBundledReads } from '../providers/bundledReads.js';
-import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appRouteSegment, appStudioRoutePath } from '../utils/index.js';
+import { resolveKeyedI18nLabel, preferLocal, matchAppBySegment, appStudioRoutePath } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { getIcon } from '../utils/getIcon.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { useCommandPalette, useCommandPaletteProviderMounted } from '../context/CommandPaletteProvider.js';
@@ -1290,6 +1291,11 @@ export function AppHeader({
                * next to business apps — Personal Settings, etc. The `account`
                * app is represented by the explicit Profile link above, so it
                * is filtered out here to avoid a duplicate (dead) entry.
+               *
+               * Each entry links to the app's one address (`appAddressSegment`),
+               * never its bare package id: a hidden app that shares its package
+               * with the package's first app is reached by its name alone, and
+               * the package id would open that first app instead.
                */}
               {(metadataApps || [])
                 .filter((a: any) => a.active !== false && a.hidden === true && a.name !== 'account')
@@ -1299,7 +1305,7 @@ export function AppHeader({
                   return (
                     <DropdownMenuItem
                       key={`hidden_app_${app.name}`}
-                      onClick={() => leaveTo(`/apps/${appRouteSegment(app) ?? app.name}`)}
+                      onClick={() => leaveTo(`/apps/${appAddressSegment(metadataApps, app)}`)}
                       className="cursor-pointer"
                     >
                       <AppIcon className="mr-2 h-4 w-4" />
