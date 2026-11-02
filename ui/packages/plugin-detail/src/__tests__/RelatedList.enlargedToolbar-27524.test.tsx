@@ -22,11 +22,29 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import '@testing-library/jest-dom';
 import React from 'react';
 import { FilterScopeProvider } from '@object-ui/react';
+import { ComponentRegistry } from '@object-ui/core';
 import { RelatedList } from '../RelatedList';
 import { RelatedListEnlargedContext } from '../relatedListCompact';
 
+/**
+ * The enlarged face draws `object-grid` (objectstack#28865), which
+ * `plugin-grid` registers and this package cannot import (`plugin-grid`
+ * depends on it). A stand-in draws the rows it is handed, as a table.
+ */
+function ObjectGridStandIn({ schema }: { schema: any }) {
+  const rows: any[] = schema?.data?.items ?? [];
+  const columns: string[] = schema?.columns ?? [];
+  return (
+    <table data-object-grid-stand-in="">
+      <thead><tr>{columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+      <tbody>{rows.map((row) => <tr key={row.id}>{columns.map((c) => <td key={c}>{String(row[c] ?? '')}</td>)}</tr>)}</tbody>
+    </table>
+  );
+}
+
 beforeAll(() => {
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1280 });
+  ComponentRegistry.register('object-grid', ObjectGridStandIn as never);
 });
 
 const TASK_FIELDS = {
@@ -94,12 +112,13 @@ describe('the enlarged related list draws the board toolbar (objectstack#27524)'
     fireEvent.click(within(bar).getByTestId('related-list-new'));
     expect(onNew).toHaveBeenCalledTimes(1);
     expect(bar.querySelector('[data-related-enlarged-export]')).not.toBeNull();
-    // The count and page line sits between the toolbar and the table.
-    expect(document.querySelector('[data-related-enlarged-status]')?.textContent).toBe('2 rows');
+    // The count shows once (objectstack#28865): the 全部 chip says 2, so the
+    // line under the toolbar, which holds no page either, is not drawn.
+    expect(document.querySelector('[data-related-enlarged-status]')).toBeNull();
     // No card: no header title, no count badge, no View all.
     expect(screen.queryByLabelText('2 records')).toBeNull();
     expect(document.querySelector('.rounded-xl, [class*="card"]')).toBeNull();
-    expect(document.querySelector('thead')).not.toBeNull();
+    expect(document.querySelector('[data-object-grid-stand-in] thead')).not.toBeNull();
   });
 
   it('我的 and 逾期 narrow the list\'s own read, beside the parent', async () => {
