@@ -483,13 +483,16 @@ gh label create repo:hotcrm   -R objectstack-ai/objectstack -c fbca04 -d "Seam c
 # object keeps its current colour and description until `--reconcile` runs
 # (measured 2026-08-20: the colour already matches; the description had drifted
 # to an older wording).
-gh label create pm:seat -R objectstack-ai/objectstack -c 1d76db -d "Seat registry post — protocol carrier, not dispatchable work; the label page is the fleet board" 2>/dev/null || true
 # A sister-repo seat keeps its post in its own repository — hotcrm's posts
 # live in hotcrm and fleet-roster.mjs reads that repo by default — so the
 # "main repo only" sentence above holds for the domain:* lanes, not for repo
 # lanes. mobile's charter (lanes/mobile.md) puts its seat post in mobile, so
-# the label is created there too; fleet-roster's DEFAULT_REPOS lists mobile.
-gh label create pm:seat -R objectstack-ai/mobile -c 1d76db -d "Seat registry post — protocol carrier, not dispatchable work; the label page is the fleet board" 2>/dev/null || true
+# the label is created there too (one invocation per repo, one parsed line —
+# check-label-desc-cap measures distinct descriptions per line); fleet-roster's
+# DEFAULT_REPOS lists mobile.
+for R in objectstack-ai/objectstack objectstack-ai/mobile; do
+  gh label create pm:seat -R "$R" -c 1d76db -d "Seat registry post — protocol carrier, not dispatchable work; the label page is the fleet board" 2>/dev/null || true
+done
 
 # Domain lanes — the roster lives in SKILL.md's domain table; keep both in sync
 # BY PR whenever a lane is added or retired.
