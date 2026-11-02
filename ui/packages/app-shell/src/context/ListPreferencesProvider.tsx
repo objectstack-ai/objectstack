@@ -210,8 +210,11 @@ export function sanitizeObjectListPreference(v: unknown): ObjectListPreference {
  * with no order and no width. An empty sort is NOT a clear: `sort: []` is kept,
  * because a user who removed every sort level (the Sort builder emits `[]`)
  * chose "no sort", which is not the view's authored sort. The same holds for
- * `hiddenFields: []` ("show every column"). "Reset view" is the way back to
- * the view's own. A view left with nothing is removed.
+ * `hiddenFields: []` ("show every column"). The ways back to the view's own
+ * are "Reset view" (the whole entry, `resetViewPreference`) and the list's
+ * "Reset to view default" for one part, which patches that part to `null`
+ * (objectstack#28948) instead of storing the view's value as a choice. A view
+ * left with nothing is removed.
  */
 export type ListViewPreferencePatch = {
   sort?: ReadonlyArray<{ field: string; order?: string }> | null;

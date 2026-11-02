@@ -11,7 +11,7 @@
 import { useCallback, useRef, lazy, Suspense, type ReactNode } from 'react';
 import { DENSITY_MODE_TO_ROW_HEIGHT, normalizeListViewSchema, type FilterTokenScope } from '@object-ui/core';
 import { buildListFilterKey, writeListFilterState } from './listFilterStorage.js';
-import type { useObjectListPreferences, ListViewPreference } from '../context/ListPreferencesProvider.js';
+import type { useObjectListPreferences, ListViewPreference, ListViewPreferencePatch } from '../context/ListPreferencesProvider.js';
 const ObjectChart = lazy(() =>
   import('@object-ui/plugin-charts').then((m) => ({ default: m.ObjectChart })),
 );
@@ -391,6 +391,27 @@ export function useObjectViewListRenderer({
         const viewHiddenFields: ListViewSchema['hiddenFields'] = activeViewDeclaresColumns
             ? ((viewDef as any).hiddenFields ?? listSchema.hiddenFields)
             : undefined;
+        // objectstack#28948 — and the view's own sort, under the user's (the
+        // `sort` rung below lays a link's or the user's stored sort over it).
+        const viewSort: ListViewSchema['sort'] = (viewDef as any).sort ?? listSchema.sort;
+
+        /**
+         * objectstack#28948 — a reset to the view's own is not a choice. The
+         * list's "Reset to view default" (the Display control's, the sort
+         * popover's) names the parts it put back, and they are CLEARED from
+         * this user's stored state rather than stored as the view's values, so
+         * a later change to the view reaches them. A view left with nothing is
+         * removed (`patchViewPreference`), and with it the ⋯ "Reset view".
+         * The sort leaves the URL too, which would otherwise seed it again.
+         * A deliberate `sort: []` or `hiddenFields: []` still arrives through
+         * `persistListSort` / `persistHiddenFields` and stays stored.
+         */
+        const restoreViewDefaults = (parts: ReadonlyArray<'sort' | 'hiddenFields' | 'rowHeight'>) => {
+            const patch: ListViewPreferencePatch = {};
+            for (const part of parts) patch[part] = null;
+            listPrefs.patchView(viewDef.id, patch);
+            if (parts.includes('sort')) writeListUrlState({ sort: null });
+        };
 
 
         /**
@@ -483,9 +504,9 @@ export function useObjectViewListRenderer({
             // objectui#11860 — a sort the URL carries is applied over the
             // view's: an opened link sorts as it was sorted. Without a link,
             // the seed carries the sort this user left the view with
-            // (objectui#12418). `ListView` reads this as the list's declared
-            // sort too, so its "reset to default" returns to the sort the list
-            // opened with; "Reset view" returns to the view's own.
+            // (objectui#12418). The view's own is `viewDefaults.sort`
+            // (objectstack#28948): the sort popover's "reset to default"
+            // returns there and clears the stored sort, as "Reset view" does.
             sort: listSeed?.sort ?? (viewDef as any).sort ?? listSchema.sort,
             // objectui#11860 — and a grouping the URL carries is laid over the
             // view's, which the caller composed into `listSchema` (the census
@@ -850,8 +871,11 @@ export function useObjectViewListRenderer({
                 key={identityKey}
                 schema={fullSchema}
                 // objectui#12949 — the view's own values under the user's
-                // preference, for the Display control's reset and count.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight }}
+                // preference, for the Display control's reset and count, and
+                // (objectstack#28948) the sort popover's reset.
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort }}
+                // objectstack#28948 — those resets clear the user's state.
+                onRestoreViewDefaults={restoreViewDefaults}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
