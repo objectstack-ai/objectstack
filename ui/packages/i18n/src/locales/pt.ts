@@ -785,6 +785,7 @@ const pt = {
     noMatches: "Nenhum registro correspondente",
     noMatchesMessage: "Nenhum registro corresponde aos seus filtros ou à sua busca atuais. Tente ajustá-los ou limpá-los.",
     clearSearch: "Limpar pesquisa",
+    clearFilters: "Limpar filtros",
     viewFilterNoMatchesMessage: "Nenhum registro corresponde ao filtro desta visualização.",
     ownedNoneTitle: "Ainda não há nada seu",
     ownedNoneMessage: "Esta visualização lista apenas os seus registros, e você ainda não tem nenhum.",

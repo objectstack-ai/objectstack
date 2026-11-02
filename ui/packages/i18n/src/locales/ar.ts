@@ -854,6 +854,7 @@ const ar = {
     noMatches: "لا توجد سجلات مطابقة",
     noMatchesMessage: "لا توجد سجلات تطابق عوامل التصفية أو البحث الحالية. حاول تعديلها أو مسحها.",
     clearSearch: "مسح البحث",
+    clearFilters: "مسح عوامل التصفية",
     viewFilterNoMatchesMessage: "لا توجد سجلات تطابق عامل التصفية لطريقة العرض هذه.",
     ownedNoneTitle: "لا يوجد شيء يخصك بعد",
     ownedNoneMessage: "تعرض طريقة العرض هذه سجلاتك فقط، وليس لديك أي سجل بعد.",

@@ -764,6 +764,7 @@ const de = {
     noMatches: "Keine passenden Datensätze",
     noMatchesMessage: "Keine Datensätze entsprechen Ihren aktuellen Filtern oder Ihrer Suche. Passen Sie sie an oder setzen Sie sie zurück.",
     clearSearch: "Suche löschen",
+    clearFilters: "Filter zurücksetzen",
     viewFilterNoMatchesMessage: "Keine Datensätze entsprechen dem Filter dieser Ansicht.",
     ownedNoneTitle: "Noch nichts von Ihnen",
     ownedNoneMessage: "Diese Ansicht listet nur Ihre eigenen Datensätze auf, und Sie haben noch keine.",

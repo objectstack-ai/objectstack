@@ -790,6 +790,7 @@ const es = {
     noMatches: "No hay registros coincidentes",
     noMatchesMessage: "Ningún registro coincide con sus filtros o su búsqueda actuales. Pruebe a ajustarlos o borrarlos.",
     clearSearch: "Borrar búsqueda",
+    clearFilters: "Borrar filtros",
     viewFilterNoMatchesMessage: "Ningún registro coincide con el filtro de esta vista.",
     ownedNoneTitle: "Aún no tiene nada propio",
     ownedNoneMessage: "Esta vista solo muestra sus propios registros, y todavía no tiene ninguno.",

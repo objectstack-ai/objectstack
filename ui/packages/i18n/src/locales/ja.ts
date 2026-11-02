@@ -764,6 +764,7 @@ const ja = {
     noMatches: "該当するレコードがありません",
     noMatchesMessage: "現在のフィルターや検索条件に一致するレコードはありません。条件を調整するか解除してください。",
     clearSearch: "検索をクリア",
+    clearFilters: "フィルターをクリア",
     viewFilterNoMatchesMessage: "このビューのフィルターに一致するレコードはありません。",
     ownedNoneTitle: "あなたのレコードはまだありません",
     ownedNoneMessage: "このビューにはあなたのレコードだけが表示されますが、まだ1件もありません。",

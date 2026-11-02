@@ -183,18 +183,19 @@ import { deriveNamespaceFromPackageId } from '@objectstack/spec/kernel';
 // [#28409, ADR-0146 D3 / D8 item 2] The pair's id, the one spelling N-08 owns,
 // and the one predicate that says a stored row is the served override of a
 // base's name.
-import { customizationPackageId } from '@objectstack/spec/kernel';
+import { customizationPackageId, isCustomizationPairOf } from '@objectstack/spec/kernel';
 import { isServedOverrideRowOf, type ServedOverrideRow } from './served-override.js';
 import { bindStoredRow } from './stored-row-binding.js';
 import { incomingTakesStoredFlowSlot } from './stored-flow-slot.js';
 import { listServedOverrides, type ServedOverrideEntry } from './protocol-served-overrides.js';
 // [#28413, ADR-0146 D11] The package-less overlay migration (`os migrate
-// packageless-overlays`), and the save's landing on a migrated row.
+// packageless-overlays`).
 import {
     listPackagelessOverlays,
     migratePackagelessOverlays,
-    packagelessPairLanding,
+    packagelessCloseSubject,
     type PackagelessOverlayCensus,
+    type PackagelessWriteSubject,
     type PackagelessOverlayMigration,
 } from './protocol-packageless-overlay-migration.js';
 // [#19417] The package-id declaration and its remedy text, imported to be
@@ -398,9 +399,10 @@ import {
     originGatedRemovalRefusal,
     overrideWriteRefusalError,
     overrideWriteVerdict,
+    packagelessOverlayWriteRefusal,
     refusePackagedBaseOverride,
 } from './protocol-packaged-base-refusal.js';
-import type { OverrideWriteSubject, OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+import type { OverrideWriteSubject, OverrideWriteVerdict, PackagelessWriteOperation } from './protocol-packaged-base-refusal.js';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge.
 import {
     extensionFieldSuffixRefusalError,
@@ -475,7 +477,7 @@ import { refuseUnmintableMetaType } from './protocol-unmintable-meta-type.js';
 // [#25467 cut 33] The deployment's SDUI component manifest, and the load-time page `requires` report against it.
 import { reportPageRequiresAbsentAtLoad, resolveSduiManifest } from './protocol-sdui-manifest.js';
 // [#25467 cut 35] The environment's own `sys_metadata` rows: the family read, the one-row read, the served row and the package-less address.
-import { baseAddressServesMember, findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage, shippingPackageIds, soleShippingPackage } from './protocol-environment-rows.js';
+import { baseAddressServesMember, findEnvironmentRow, findEnvironmentRows, findServedOverlayRow, packagelessAddress, packagelessContentPackage, readOnlyShippingPackages, shippingPackageIds, soleShippingPackage } from './protocol-environment-rows.js';
 // [#25467 cut 35] The stored rows of a collection, folded over the registered ones.
 import { foldStoredCollection } from './protocol-stored-collection-fold.js';
 // [#25467 cut 35] The environment-wide package uninstall verb.
@@ -10055,38 +10057,6 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [#28413] Whether a save is a package-less AUTHORING save — the one
-     * {@link packagelessPairLanding} may find a pair row for: it names no
-     * package, is no runtime-source write or package duplicate, and carries a
-     * body object.
-     */
-    private isPackagelessAuthoringSave(request: SaveMetaItemRequest): boolean {
-        return request.packageId == null
-            && request.source === undefined
-            && request.writeFace !== 'package-duplicate'
-            && request.item !== null && typeof request.item === 'object' && !Array.isArray(request.item);
-    }
-
-    /**
-     * [#28413] The declared override a package-less save of an overlay type
-     * lands on, or `undefined` — see `packagelessPairLanding` in
-     * `protocol-packageless-overlay-migration.ts`. Asked by
-     * {@link saveMetaItem} before the override write gate.
-     */
-    private packagelessPairLanding(
-        request: { type: string; name: string; mode?: string },
-        member: string | undefined,
-    ): Promise<{ pair: string; base: string; declaration: Record<string, unknown> } | undefined> {
-        const host: ThisParameterType<typeof packagelessPairLanding> = {
-            overlayTypes: ObjectStackProtocolImplementation.OVERLAY_ALLOWED_TYPES,
-            packagelessAddress: (...a) => this.packagelessAddress(...a),
-            packagelessDraftAddress: (...a) => this.packagelessDraftAddress(...a),
-            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
-        };
-        return packagelessPairLanding.call(host, request, member);
-    }
-
-    /**
      * The one body behind {@link getMetaItems},
      * {@link getMetaItemsForExecution} and {@link getMetaItemsPerPackage}.
      * `audience` decides ONLY whether the serving decorations are applied at
@@ -16440,6 +16410,24 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [ADR-0146 D11] The bases of an item of one of the five overlay types
+     * ({@link registryAllowsOverlay}: the `allowEnvironmentOverlay` types): the
+     * READ-ONLY code packages that ship the name ({@link shippedArtifactsOf}
+     * less {@link isWritablePackage}), sorted — `[]` for every other type, and
+     * for a name no read-only package ships. The reading
+     * `os migrate packageless-overlays` classifies a package-less row by
+     * (`readOnlyShippingPackages`), so the close
+     * ({@link packagelessOverlayWriteRefusal}) and the ceremony agree on what
+     * is a packaged item. The flag no longer opens a package-less write onto
+     * one; it stays the predicate the migration reads and the read of a row not
+     * migrated yet honours.
+     */
+    private overlayBaseShippers(type: string, name: string): string[] {
+        if (!ObjectStackProtocolImplementation.registryAllowsOverlay(type)) return [];
+        return readOnlyShippingPackages(this.shippedArtifactsOf(type, name), (id) => this.isWritablePackage(id));
+    }
+
+    /**
      * [#7743] Is `(field, '<object>.<field>')` a field a code package ships?
      *
      * ## Why this predicate needs a second resolver at all
@@ -17281,6 +17269,60 @@ export class ObjectStackProtocolImplementation implements
             packagedArtifactOwner: (...a) => this.packagedArtifactOwner(...a),
         };
         return refusePackagedBaseOverride.call(host, request);
+    }
+
+    /**
+     * [ADR-0146 D11, #28576 ruling 2] The package-less write onto a packaged
+     * item, closed where `os migrate packageless-overlays` would move it: the
+     * refusal of a save, a publish, a delete or a rollback that names no
+     * package, of an item of one of the five overlay types that ONE read-only
+     * code package ships ({@link overlayBaseShippers}), whose row the
+     * ceremony's census classifies `movable` and whose move can succeed
+     * (`packagelessCloseSubject` in `protocol-packageless-overlay-migration.ts`,
+     * the census's own classification and the ceremony's own steps).
+     *
+     * `null` — the write stays open, as on `main` — when it names a package
+     * (`?package=<base>.custom` stays open, as does every other package's own
+     * door); when no read-only package ships the name (environment metadata);
+     * and for every row the ceremony lists and does not move: a name several
+     * packages ship (`multi_shipped`), a base with no pair id (`no_pair`), a
+     * stored row whose `overrides` names another package
+     * (`foreign_declaration`) or whose pair already holds the item
+     * (`shadowed`), and a move that would fail (the ensure door would refuse
+     * the pair, the base records no version, or the override write gate
+     * refuses the declared body — an `email_template` locale the base does not
+     * ship). Each such row keeps a write door after the upgrade: its own.
+     *
+     * The refusal names the base's paired `.custom` and the ceremony; a row
+     * stored before the close stays served until the ceremony moves it, and
+     * its package-less write is refused by the same sentence. Registry reads
+     * first; the one store read (the item's rows) only when the registry has
+     * not left the write open.
+     *
+     * Asked by {@link saveMetaItem} and {@link publishMetaItem} (authoring
+     * writes only: the server-stated rewrites name the row they rewrite),
+     * {@link deleteMetaItem}, and {@link rollbackMetaItem} (whose address is the
+     * restored row's own binding: package-less when that row is). The
+     * sentence is `packagelessOverlayWriteRefusal` in
+     * `protocol-packaged-base-refusal.ts`.
+     *
+     * Not the read envelope's `editable` / `deletable` ({@link packagedBaseRefusal}
+     * keeps its answer): those describe the item, which the pair's write still
+     * changes.
+     */
+    private async packagelessOverlayWriteRefusal(
+        request: PackagelessWriteSubject,
+        operation: PackagelessWriteOperation,
+    ): Promise<Error | null> {
+        const host: ThisParameterType<typeof packagelessCloseSubject> = {
+            engine: this.engine,
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
+            overlayBaseShippers: (...a) => this.overlayBaseShippers(...a),
+            overrideWriteVerdict: (...a) => this.overrideWriteVerdict(...a),
+        };
+        const closed = await packagelessCloseSubject.call(host, request);
+        return closed ? packagelessOverlayWriteRefusal(request, closed, operation) : null;
     }
 
     /**
@@ -21462,32 +21504,41 @@ export class ObjectStackProtocolImplementation implements
         // or status changes (a view container's name collision keeps its
         // 400, a lock its ITEM_LOCKED).
         //
-        // [#28413] Until #28576 closes the package-less write: a package-less
-        // authoring save whose address is a pair row declaring the override of
-        // its base (a row `os migrate packageless-overlays` moved there) is the
-        // write into the pair it is — so Setup's save of a migrated item, which
-        // sends the item as it read it, is not refused. Carrying the
-        // declaration, it is judged here as the write into that pair; carrying
-        // none, the late re-judgement below keeps the row's `overrides` block
-        // (see `packagelessPairLanding`). The landing is read ONLY where the
-        // save would otherwise be refused, so no admitted save, and no refusal
-        // ranked before these, reads one row more (#5706's lock gate stays the
-        // first reader).
-        let overrideVerdict = this.overrideWriteVerdict(request);
-        if (
-            overrideVerdict.verdict === 'refuse'
-            && overrideVerdict.rule === 'declared_outside_pair'
-            && this.isPackagelessAuthoringSave(request)
-        ) {
-            const landing = await this.packagelessPairLanding(
-                request, itemDiscriminator(PLURAL_TO_SINGULAR[request.type] ?? request.type, request.item),
-            );
-            if (landing !== undefined) overrideVerdict = this.overrideWriteVerdict({ ...request, packageId: landing.pair });
+        // [ADR-0146 D11] …and AHEAD of it, the package-less write onto a
+        // packaged item, closed: an authoring save naming no package, of an
+        // item a code package ships, on one of the five overlay types, whose
+        // row `os migrate packageless-overlays` would move (#28576 ruling 2:
+        // every row it leaves keeps this write), is refused naming the base's
+        // paired `.custom` and the ceremony
+        // ({@link packagelessOverlayWriteRefusal}). Ahead of the gate so the
+        // writer reads that fix, not the gate's "a row bound to no package
+        // carries `overrides`… rename" for the body Setup sends as it read
+        // it. Every other type's packaged item is sealed further down
+        // ({@link refusePackagedBaseOverride}). Registry reads first: the
+        // close's one store read (the item's rows) happens only for a name
+        // one read-only package ships with an ensurable pair, so #5706's lock
+        // gate stays the first store reader of every other name. The
+        // server-stated rewrites (`source` set, `package-duplicate`) name the
+        // row they rewrite and are not asked.
+        //
+        // This retires the migration window's allowance (a package-less save
+        // landing on a pair row the ceremony moved kept that row's
+        // declaration): such a save is this refusal now.
+        if (request.source === undefined && request.writeFace !== 'package-duplicate') {
+            const closed = await this.packagelessOverlayWriteRefusal({
+                type: request.type,
+                name: request.name,
+                packageId: request.packageId,
+                state: request.mode === 'draft' ? 'draft' : 'active',
+                item: request.item,
+            }, 'save');
+            if (closed) throw closed;
         }
+        const overrideVerdict = this.overrideWriteVerdict(request);
         if (overrideVerdict.verdict === 'refuse' && overrideVerdict.rule !== 'undeclared_same_name') {
             throw overrideWriteRefusalError(overrideVerdict);
         }
-        let declaredOverride = overrideVerdict.verdict === 'admit';
+        const declaredOverride = overrideVerdict.verdict === 'admit';
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const authored = await this.tenantAuthoredWriteRefusal({
                 type: request.type,
@@ -22708,31 +22759,6 @@ export class ObjectStackProtocolImplementation implements
                 lateOverrideVerdict = this.overrideWriteVerdict({ ...request, packageId: inheritedPackage });
             }
         }
-        // [#28413] …and a package-less save carrying no declaration whose
-        // address is a pair row declaring the override (the early gate's
-        // comment above) keeps that row's `overrides` block: the body as
-        // persisted is the declared override it replaces, judged again.
-        if (
-            lateOverrideVerdict.verdict === 'refuse'
-            && lateOverrideVerdict.rule === 'undeclared_same_name'
-            && namedNoPackage
-            // (its address may have named the pair on the request since: `namedNoPackage` is what it named)
-            && this.isPackagelessAuthoringSave({ ...request, packageId: null })
-            && !('overrides' in (request.item as Record<string, unknown>))
-        ) {
-            const landing = await this.packagelessPairLanding(
-                request, itemDiscriminator(PLURAL_TO_SINGULAR[request.type] ?? request.type, request.item),
-            );
-            if (landing !== undefined) {
-                const declared = { ...request, item: { ...(request.item as Record<string, unknown>), overrides: landing.declaration } };
-                const verdict = this.overrideWriteVerdict({ ...declared, packageId: landing.pair });
-                if (verdict.verdict === 'admit') {
-                    request = declared;
-                    lateOverrideVerdict = verdict;
-                    declaredOverride = true;
-                }
-            }
-        }
         if (lateOverrideVerdict.verdict === 'refuse') throw overrideWriteRefusalError(lateOverrideVerdict);
         const singularTypeForRepo = PLURAL_TO_SINGULAR[request.type] ?? request.type;
         const artifactBacked = this.isArtifactBacked(singularTypeForRepo, request.name);
@@ -23890,6 +23916,20 @@ export class ObjectStackProtocolImplementation implements
         // residue drafts the refusal (rather than a promotion) is the ruled
         // direction, and `deleteMetaItem` stays open to clear them.
         this.refuseUngrammaticalMetaItemName(request);
+        // [ADR-0146 D11] A publish naming no package of a packaged item of an
+        // overlay type writes the active row a package-less save writes, and
+        // is closed with it ({@link packagelessOverlayWriteRefusal}): publish
+        // the draft by naming its package (`?package=<base>.custom`).
+        {
+            const closed = await this.packagelessOverlayWriteRefusal({
+                type: request.type,
+                name: request.name,
+                packageId: request.packageId,
+                state: 'draft',
+                ...memberOption(member),
+            }, 'publish');
+            if (closed) throw closed;
+        }
         // [#8594] The refusal's own row is written HERE, by the route that owns
         // the (absent) transaction — see `promoteDraftForPublish`'s header. This
         // site has no transaction of its own, so recording it in the `catch` is
@@ -28422,8 +28462,6 @@ export class ObjectStackProtocolImplementation implements
         // request was refused above.
         const repo = this.getOverlayRepo();
         const artifactBacked = this.isArtifactBacked(singularType, request.name);
-        const intent: 'override-artifact' | 'runtime-only' = artifactBacked
-            ? 'override-artifact' : 'runtime-only';
         const ref = {
             type: singularType,
             name: request.name,
@@ -28442,6 +28480,43 @@ export class ObjectStackProtocolImplementation implements
         // already succeeded — the shape that ends in a `catch {}` swallowing a
         // real outage (#4867).
         const rollbackPackageId = await this.resolveOverlayPackageBinding(singularType, request.name, member);
+        // [ADR-0146 D11, D1] A rollback writes the row its binding names, so
+        // a rollback of a packaged item's package-less row (an overlay type's
+        // row the ceremony has not moved, or none stored, whose restore writes
+        // the package-unbound row) is the package-less write, closed
+        // ({@link packagelessOverlayWriteRefusal}): rollback, like source save
+        // and reset, is offered on the writable package — the base's paired
+        // `.custom`, where `os migrate packageless-overlays` moves the row.
+        {
+            const closed = await this.packagelessOverlayWriteRefusal(
+                { type: singularType, name: request.name, packageId: rollbackPackageId, state: 'active', ...memberOption(member) },
+                'rollback',
+            );
+            if (closed) throw closed;
+        }
+        // [ADR-0146 D2] A rollback of the base's paired `.custom` row is the
+        // pair's declared override, as its save is: it edits no managed item,
+        // so the store is told a runtime-only write — never judged an artifact
+        // override from `isArtifactBacked` alone, which seals it on a type with
+        // no overlay channel (a page, a flow). The restored body is judged by
+        // the override write gate as that save is ({@link overrideWriteVerdict}
+        // into the pair): a version that declares no override is refused as
+        // the save is, with nothing written.
+        const owner = artifactBacked ? this.packagedArtifactOwner({ type: singularType, name: request.name }) : undefined;
+        const pairRowRollback = owner !== undefined && isCustomizationPairOf(rollbackPackageId, owner);
+        const intent: 'override-artifact' | 'runtime-only' = artifactBacked && !pairRowRollback
+            ? 'override-artifact' : 'runtime-only';
+        const writeRestored = this.restoredBodyWriter(singularType, request.name, rollbackPackageId, 'protocol.rollbackMetaItem');
+        const deriveRestoredBody = pairRowRollback
+            ? async (historyBody: unknown): Promise<unknown> => {
+                const body = await writeRestored(historyBody);
+                const verdict = this.overrideWriteVerdict({
+                    type: singularType, name: request.name, packageId: rollbackPackageId, item: body,
+                });
+                if (verdict.verdict === 'refuse') throw overrideWriteRefusalError(verdict);
+                return body;
+            }
+            : writeRestored;
         try {
             const result = await repo.restoreVersion(ref, request.toVersion, {
                 // #4556 — NULL, not 'system', for an actor-less rollback.
@@ -28455,7 +28530,8 @@ export class ObjectStackProtocolImplementation implements
                 // rethrown below with nothing written; then [#20790] R2 — a rollback past the
                 // credential move keeps the write-only channel's current
                 // credential and stores none. See {@link restoredBodyWriter}.
-                deriveRestoredBody: this.restoredBodyWriter(singularType, request.name, rollbackPackageId, 'protocol.rollbackMetaItem'),
+                // [ADR-0146 D2] …and, for the pair's row, the override write gate.
+                deriveRestoredBody,
                 // [#22877] The member whose lineage `toVersion` is taken from.
                 ...memberOption(member),
             });
@@ -29042,6 +29118,30 @@ export class ObjectStackProtocolImplementation implements
                 (err as any).status = 403;
                 throw err;
             }
+        }
+
+        // [ADR-0146 D11] The package-less removal of a packaged item's active
+        // row, closed with the package-less write
+        // ({@link packagelessOverlayWriteRefusal}): a delete naming no package,
+        // of an item a code package ships, on one of the five overlay types,
+        // whose row the ceremony would move (Setup's "Reset overlay"). Its
+        // customization lives in the base's paired `.custom` once moved, and
+        // `?package=<base>.custom` removes it there. On every topology, as
+        // the save door's is, and ahead of the `_lock` gate's store read.
+        //
+        // ⛔ Not a draft discard: it changes nothing any read serves, and it is
+        // how a package-less draft stored before the close is cleared (the
+        // draft cannot be published package-less any more), including by the
+        // discard-all walk, which names the package each draft is listed under.
+        if (request.state !== 'draft') {
+            const closed = await this.packagelessOverlayWriteRefusal({
+                type: request.type,
+                name: request.name,
+                packageId: request.packageId,
+                state: 'active',
+                ...memberOption(member),
+            }, 'delete');
+            if (closed) throw closed;
         }
 
         // ADR-0010 L3 — lock blocks delete. [#21694] On EVERY topology, ranked
