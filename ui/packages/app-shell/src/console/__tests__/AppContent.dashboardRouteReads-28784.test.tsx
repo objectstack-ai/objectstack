@@ -99,6 +99,8 @@ vi.mock('@object-ui/react', async (importOriginal) => {
 });
 
 import { AppContent } from '../AppContent';
+// The route's lazy element, loaded at import so the first open does not race its chunk.
+import '../../views/DashboardView';
 import { MetadataProvider } from '../../providers/MetadataProvider';
 
 const CRM = 'app.crm';
