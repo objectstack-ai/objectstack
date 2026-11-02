@@ -14213,6 +14213,12 @@ export class ObjectQL implements IObjectQLEngine {
    * allowed set, never widened. All drivers already execute `$or`/`$icontains`,
    * so this needs no driver changes.
    *
+   * [#29394] A resolved field whose declared type can never hold a string (the
+   * #15661 door's verdict) gets no clause — `expandSearchToFilter` skips it —
+   * because that door judges only the caller's `where`, above, and never this
+   * expansion. The set itself is not narrowed, so the refusals below judge it
+   * as before, and a set of only such fields answers no rows.
+   *
    * The keys are deleted whether or not anything expanded — leaving them on
    * would hand the driver a key it does not read, which is the same silent drop
    * one layer down.
