@@ -34,15 +34,32 @@
  * function the class member delegates to and that member's two calls; the
  * class member keeps its signature in `protocol.ts`, and `shippedArtifactsOf`'s
  * stub there hands the moved body the lookup as a closure, one more site.
+ *
+ * [#25467 E1] …and every other `protocol-*.ts` module of the split, once: a
+ * member's body that moves out of `protocol.ts` (ruling E's host split, or the
+ * per-member series before it) takes its calls with it, so the scan reads every
+ * module the split can move a body to, by the same rule. A site in a moved body
+ * is keyed by its module and the function it sits in. Comments are blanked
+ * before the scan in every file, so a docblock that names the callee (two
+ * modules' do) is not a site.
  */
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 const SOURCE = readFileSync(fileURLToPath(new URL('./protocol.ts', import.meta.url)), 'utf8');
 /** [#25467 cut 15] The seam module the lookup's body moved to; scanned with its own header shape. */
 const SEAM_FILE = 'protocol-artifact-lookup.ts';
-const SEAM = readFileSync(fileURLToPath(new URL(`./${SEAM_FILE}`, import.meta.url)), 'utf8');
+/**
+ * [#25467 E1] Every module of the split: `protocol-*.ts` beside `protocol.ts`,
+ * tests excluded — the census's own module pattern (`HOST_SPLIT.module` in
+ * `scripts/check-durability-degradation-log-level.mjs`).
+ */
+const SPLIT_MODULES = readdirSync(fileURLToPath(new URL('.', import.meta.url)))
+    .filter((file) => /^protocol-[a-z0-9-]+\.ts$/.test(file))
+    .sort();
+const MODULE_SOURCES = new Map(SPLIT_MODULES.map((file) => [file, readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8')]));
 const CALLEE = 'lookupArtifactItem(';
 /**
  * [#25467 E0] The module the protocol.ts preamble's package-binding helpers moved
@@ -53,16 +70,37 @@ const BINDINGS = readFileSync(fileURLToPath(new URL(`./${BINDINGS_FILE}`, import
 
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
 const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
-/** A module function's header in the seam module: `export`, optional `async`, `function`, its name, its parameter list. */
-const FUNCTION_HEADER = /^export (?:async )?function ([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
+/** A module function's header in a split module: optional `export` and `async`, `function`, its name, its parameter list. */
+const FUNCTION_HEADER = /^(?:export )?(?:async )?function ([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
+
+/**
+ * [#25467 E1] The source with every comment blanked to spaces (newlines kept), so
+ * offsets and line numbers are the file's own and a docblock that names the
+ * callee is not read as a call. Comment ranges come from the TypeScript parser,
+ * so a `//` inside a string or a template is not a comment.
+ */
+function withoutComments(source: string): string {
+    const sf = ts.createSourceFile('x.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+    const chars = source.split('');
+    const blank = (ranges: ts.CommentRange[] | undefined) => {
+        for (const r of ranges ?? []) for (let i = r.pos; i < r.end; i++) if (chars[i] !== '\n') chars[i] = ' ';
+    };
+    const visit = (node: ts.Node) => {
+        blank(ts.getLeadingCommentRanges(source, node.getFullStart()));
+        blank(ts.getTrailingCommentRanges(source, node.getEnd()));
+        for (const child of node.getChildren(sf)) visit(child);
+    };
+    visit(sf);
+    return chars.join('');
+}
 
 interface Site { readonly file?: string; readonly member: string; readonly args: string }
 
-/** Every `lookupArtifactItem(` in `protocol.ts` and the seam module: the file, the member it sits in and its argument text, whitespace-normalised. */
+/** Every `lookupArtifactItem(` in `protocol.ts` and every split module: the file, the member it sits in and its argument text, whitespace-normalised. */
 function sitesIn(): Site[] {
     return [
-        ...sitesOf(SOURCE, MEMBER_HEADER),
-        ...sitesOf(SEAM, FUNCTION_HEADER).map((site) => ({ ...site, file: SEAM_FILE })),
+        ...sitesOf(withoutComments(SOURCE), MEMBER_HEADER),
+        ...SPLIT_MODULES.flatMap((file) => sitesOf(withoutComments(MODULE_SOURCES.get(file)!), FUNCTION_HEADER).map((site) => ({ ...site, file }))),
     ];
 }
 
@@ -171,6 +209,19 @@ describe('[#22024] every lookupArtifactItem( in protocol.ts has a recorded dispo
             SITES.filter((site) => site.file === SEAM_FILE).map(keyOf).sort(),
         );
         expect(found.filter((site) => site.file === SEAM_FILE)).toHaveLength(3);
+    });
+
+    it('[#25467 E1] every module of the split is scanned, the host split\'s own included', () => {
+        // Non-vacuity for the population of files: the E0 preamble modules, the
+        // per-member series' modules and the host split's are all read.
+        expect(SPLIT_MODULES.length).toBeGreaterThan(40);
+        expect(SPLIT_MODULES).toContain(SEAM_FILE);
+        expect(SPLIT_MODULES).toContain('protocol-host.ts');
+        expect(SPLIT_MODULES).toContain('protocol-tenant-authored-write.ts');
+        expect(SPLIT_MODULES.some((file) => file.endsWith('.test.ts'))).toBe(false);
+        // A docblock naming the callee is not a site: two modules carry one.
+        expect(MODULE_SOURCES.get('protocol-credential-carry-forward.ts')).toContain('`' + CALLEE);
+        expect(found.filter((site) => site.file === 'protocol-credential-carry-forward.ts')).toEqual([]);
     });
 
     it('a site passing fewer than three arguments is recorded as passing no package', () => {
