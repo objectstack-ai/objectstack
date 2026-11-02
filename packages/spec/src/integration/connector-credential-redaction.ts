@@ -130,6 +130,7 @@ import { ConnectorActionSchema, DeclarativeConnectorEntrySchema, RetryConfigSche
 import { METADATA_READ_DECORATIONS } from '../kernel/metadata-read-decorations';
 import { redactUrlCredentialQueryParams } from '../data/datasource-credential-redaction';
 import {
+  CONNECTOR_CREDENTIAL_MAP_PATHS,
   CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES,
   CONNECTOR_URL_ROOTS,
   URL_USERINFO_RE,
@@ -140,12 +141,7 @@ import { objectShapeOf, wrapperChainOf, zodDefOf } from '../kernel/metadata-cred
 import type { MetadataRedactionResult } from '../kernel/metadata-type-redaction';
 
 /** The map positions under `providerConfig` withheld whole (see the module note, item 3). */
-export const CONNECTOR_CREDENTIAL_MAP_PATHS: readonly (readonly string[])[] = Object.freeze([
-  ['providerConfig', 'headers'],
-  ['providerConfig', 'defaultHeaders'],
-  ['providerConfig', 'transport', 'headers'],
-  ['providerConfig', 'transport', 'env'],
-]);
+export { CONNECTOR_CREDENTIAL_MAP_PATHS };
 
 /**
  * The query parameters whose value a connector URL is read as carrying a

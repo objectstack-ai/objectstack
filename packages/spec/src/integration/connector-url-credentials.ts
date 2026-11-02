@@ -36,10 +36,25 @@
  *
  * The write door refuses a URL holding either part; the read redactor removes
  * exactly these parts from a stored one. One definition, so the two cannot
- * disagree about what a credential in a URL is.
+ * disagree about what a credential in a URL is. Neither judges a URL inside a
+ * header or environment map ({@link CONNECTOR_CREDENTIAL_MAP_PATHS}): the read
+ * withholds such a map whole.
  */
 
 import { CREDENTIAL_URL_QUERY_PARAM_NAMES, urlCredentialQueryParams } from '../data/driver/common.zod';
+
+/**
+ * The header and environment maps a provider sends upstream — withheld WHOLE by
+ * the read redactor (a map's entries cannot be told apart), so neither door
+ * judges the URLs inside one: the read never rewrites inside a map, and the
+ * write leaves a map's entries to the authoring lint that judges them.
+ */
+export const CONNECTOR_CREDENTIAL_MAP_PATHS: readonly (readonly string[])[] = Object.freeze([
+  ['providerConfig', 'headers'],
+  ['providerConfig', 'defaultHeaders'],
+  ['providerConfig', 'transport', 'headers'],
+  ['providerConfig', 'transport', 'env'],
+]);
 
 /** The entry keys under which a connector keeps URLs (see the module note). */
 export const CONNECTOR_URL_ROOTS: readonly string[] = Object.freeze(['providerConfig', 'auth']);
@@ -91,6 +106,13 @@ export function connectorCredentialQueryParamsOf(item: Record<string, unknown>):
   return own === undefined ? CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES : [...CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES, own];
 }
 
+/** Whether `path` is one of {@link CONNECTOR_CREDENTIAL_MAP_PATHS}. */
+function isCredentialMapPath(path: ReadonlyArray<string | number>): boolean {
+  return CONNECTOR_CREDENTIAL_MAP_PATHS.some(
+    (mapPath) => mapPath.length === path.length && mapPath.every((segment, i) => segment === path[i]),
+  );
+}
+
 /** What credential parts one URL holds. */
 export interface ConnectorUrlCredentialParts {
   /** The URL carries a userinfo (`user@`, `user:password@`). */
@@ -118,9 +140,10 @@ export interface ConnectorUrlCredential extends ConnectorUrlCredentialParts {
 
 /**
  * Every URL under {@link CONNECTOR_URL_ROOTS} that holds a credential part, at
- * any depth — inside arrays and under keys whose own name carries a dot too.
- * The write door's walk: it reports every position, where the read redactor
- * rewrites what it can address and withholds the rest whole.
+ * any depth — inside arrays and under keys whose own name carries a dot too —
+ * except inside the maps of {@link CONNECTOR_CREDENTIAL_MAP_PATHS}. The write
+ * door's walk: it reports every position, where the read redactor rewrites
+ * what it can address and withholds the rest whole.
  */
 export function findConnectorUrlCredentials(item: Record<string, unknown>): ConnectorUrlCredential[] {
   const params = connectorCredentialQueryParamsOf(item);
@@ -132,6 +155,7 @@ export function findConnectorUrlCredentials(item: Record<string, unknown>): Conn
     } else if (Array.isArray(value)) {
       value.forEach((element, index) => walk(element, [...path, index]));
     } else if (isPlainRecord(value)) {
+      if (isCredentialMapPath(path)) return;
       for (const [key, child] of Object.entries(value)) walk(child, [...path, key]);
     }
   };

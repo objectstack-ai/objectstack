@@ -265,6 +265,43 @@ describe('the connector redactor — credentials inside a URL under `providerCon
   });
 });
 
+describe('the connector redactor — credentials inside a URL under `auth`', () => {
+  const oauth2 = (over: Record<string, unknown>) => ({
+    type: 'oauth2', grant: 'authorization_code', clientId: 'client-1', credentialRef: 'V_CLIENT_SECRET',
+    authorizationUrl: 'https://auth.vendor.example/authorize', tokenUrl: 'https://auth.vendor.example/token', ...over,
+  });
+
+  it('rewrites the userinfo out of `auth.tokenUrl` and `auth.authorizationUrl`, keeping the rest byte for byte', () => {
+    const { item: served, redactedKeys } = redactConnectorItem({
+      ...base,
+      auth: oauth2({
+        tokenUrl: `https://c:${P(60)}@auth.vendor.example:8443/oauth/token?region=eu`,
+        authorizationUrl: `https://${P(61)}@auth.vendor.example/authorize`,
+      }),
+    });
+    expect(redactedKeys).toEqual(['auth.authorizationUrl', 'auth.tokenUrl']);
+    expect(served.auth).toEqual(oauth2({
+      tokenUrl: 'https://auth.vendor.example:8443/oauth/token?region=eu',
+      authorizationUrl: 'https://auth.vendor.example/authorize',
+    }));
+    expect(holds(served, P(60), P(61))).toBe(false);
+  });
+
+  it('strips a credential query parameter from `auth.resource`', () => {
+    const { item: served, redactedKeys } = redactConnectorItem({
+      ...base,
+      auth: oauth2({ resource: `https://api.vendor.example/?audience=v1&token=${P(62)}` }),
+    });
+    expect(redactedKeys).toEqual(['auth.resource']);
+    expect((served.auth as Record<string, unknown>).resource).toBe('https://api.vendor.example/?audience=v1');
+  });
+
+  it('declared `auth` URLs with no credential part are untouched', () => {
+    const item = { ...base, auth: oauth2({ resource: 'https://api.vendor.example/' }) };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+});
+
 describe('the connector redactor — top-level keys the entry does not declare', () => {
   it.each([
     ['a credential-shaped scalar', { apiKey: P(50) }, ['apiKey']],
