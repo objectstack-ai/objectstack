@@ -62,6 +62,8 @@ const idp = {
     requests: [] as TokenRequest[],
     /** Answer to a refresh_token grant; default rotate. */
     refresh: 'rotate' as 'rotate' | 'invalid_grant' | 'down' | 'no_rotate',
+    /** Whether the code exchange issues a refresh token; default yes. */
+    exchangeIssuesRefreshToken: true,
     issued: 0,
 };
 
@@ -86,7 +88,11 @@ beforeAll(async () => {
         if (form.grant_type === 'authorization_code') {
             if (form.code !== GOOD_CODE) return answer(400, { error: 'invalid_grant' });
             return answer(200, {
-                access_token: `dummy-at-exchange-${n}`, token_type: 'Bearer', expires_in: 3600, refresh_token: `dummy-rt-${n}`, scope: 'crm.read',
+                access_token: `dummy-at-exchange-${n}`,
+                token_type: 'Bearer',
+                expires_in: 3600,
+                ...(idp.exchangeIssuesRefreshToken ? { refresh_token: `dummy-rt-${n}` } : {}),
+                scope: 'crm.read',
             });
         }
         if (form.grant_type === 'refresh_token') {
@@ -200,6 +206,7 @@ afterEach(async () => {
     }
     idp.requests.length = 0;
     idp.refresh = 'rotate';
+    idp.exchangeIssuesRefreshToken = true;
     idp.issued = 0;
     vi.restoreAllMocks();
 });
@@ -490,6 +497,25 @@ describe('ADR-0143 D4 — dispatch with the connection', () => {
         expect((await rowsOf(ql))[0]).toMatchObject({ status: 'connected', revision: 2 });
     });
 
+    it('[#28963] a connection marked because no refresh token was issued: the log and the hold name that cause, not a refusal', async () => {
+        const out = captureOutput();
+        const { call, connect, provider, engine, ql } = await boot();
+        idp.exchangeIssuesRefreshToken = false;
+        await (await connect()).done();
+        provider.state.accepted = new Set();
+        const refused = await call('org_a').catch((e) => e);
+        expect(refused).toMatchObject({ status: 503, message: expect.stringContaining('issued no refresh token') });
+        const [row] = await rowsOf(ql);
+        expect(row).toMatchObject({ status: 'reconnect_required', status_reason: refused.message });
+        // The log line is the stored reason, whose cause is the one that happened.
+        await vi.waitFor(() => expect(out.text()).toContain(`[Automation] ${refused.message}.`));
+        expect(out.text()).not.toContain('refused the grant');
+        // The instance is held with the cause the row stores.
+        await vi.waitFor(() => expect(engine.getConnectorDegradedReason('crm')).toContain('issued no refresh token'));
+        expect(engine.getConnectorDegradedReason('crm')).not.toContain('refused the grant');
+        expect(idp.requests.filter((r) => r.form.grant_type === 'refresh_token')).toHaveLength(0);
+    });
+
     it("the run's organization selects the connection; a run with none is refused when several exist", async () => {
         const { call, connect, provider } = await boot();
         await (await connect(ADMIN_A)).done();
@@ -573,7 +599,9 @@ describe('ADR-0143 D3/D6 — what a grant leaves behind', () => {
         }
         // The logs did record the connect — the pin is not passing on silence.
         expect(out.text()).toContain("connector instance 'crm' connected for organization 'org_a' by user 'usr_admin'");
-        expect(out.text()).toContain("refused the grant of organization 'org_a'");
+        expect(out.text()).toContain(
+            "connector instance 'crm' needs to be reconnected for organization 'org_a': its authorization server refused the grant",
+        );
     });
 
     it('⛔ writes only its own record — never sys_metadata, never a sign-in account (D6) — and reads no account either', async () => {
