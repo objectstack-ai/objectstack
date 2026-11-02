@@ -1403,7 +1403,21 @@ export const FieldSchema = lazySchema(() => {
     notNull: z.boolean().optional().describe('Emit a physical NOT NULL on the column (ADR-0113). Absent = the column stays nullable even under `required: true` — the write contract is enforced at the engine, the only sanctioned write path, not by the database. Declaring this over existing null rows is a destructive migration gated by the schema-drift ceremony. Incompatible with `requiredWhen` (a conditional contract cannot be an unconditional column constraint).'),
   }).strict().optional().describe('Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested.'),
 
-  searchable: z.boolean().default(false).describe('Is searchable'),
+  /**
+   * The field's own search opt-in, read by `resolveSearchFieldResolution`
+   * (`search-fields.ts`) on its auto branch only — ruling record 6573569376,
+   * letter A: honoured, not retired (ADR-0049). The `$searchFields`
+   * ingress allow-list is the same resolved set, so it admits what this key
+   * admits.
+   */
+  searchable: z.boolean().default(false).describe(
+    'Search this field when its object declares no `searchableFields`. The set `search` scans, and the '
+    + 'set a `$searchFields` override may name, is then the type-based default (the text-like and '
+    + 'select columns) plus every field marked `searchable: true`, of any type except '
+    + '`secret`, `password` and `vector`, which stay excluded (a virtual `formula` field has no stored '
+    + 'column, so it is never scanned either). When the object declares `searchableFields`, that list '
+    + 'is the whole search set and this flag is not read (ADR-0061).',
+  ),
   /**
    * Multi-value empty representation (#9447, maintainer ruling 2026-08-18):
    * an emptied multi-value lookup reads back as `[]`, never `null`. This
