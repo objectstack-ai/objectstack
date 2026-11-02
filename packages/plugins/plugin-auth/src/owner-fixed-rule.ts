@@ -12,14 +12,11 @@
  * organization administrator and a platform administrator alike. An echo of
  * the stored owner is no change, and saves.
  *
- * The row scope alone does not hold this. For an organization member,
+ * The row scope alone does not hold this: for an organization member,
  * `member_default`'s `'*'` update floor (`created_by == current_user.id`) is a
- * held update policy for every object, and the row policies held for one
- * object and operation are OR-combined: the pre-image and the post-image of a
- * re-parent both still carry the member's own `created_by`, so the floor
- * admits a write that moves the row out of the owner's `user_id` scope. An
- * administrator whose set opens every row of the object is bound by no row
- * policy at all. A save rule is the one place that judges the CHANGE.
+ * held update policy for every object, beside the object's own row scope, and
+ * the post-image of a re-parent still carries the member's own `created_by`.
+ * A save rule is the one place that judges the CHANGE of owner.
  *
  * The refusal names the row and the owner column, and never the id the write
  * sent.
