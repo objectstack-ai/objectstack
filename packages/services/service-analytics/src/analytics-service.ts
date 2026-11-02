@@ -5035,7 +5035,7 @@ function assertDelegatedDateBucketsTemporal(query: AnalyticsQuery, ctx: Strategy
   assertDatasetDateBucketsTemporal(
     object,
     aggregateGroupKeys(query, cube),
-    (field) => ctx.declaredFieldType?.(object, field),
+    (field) => (ctx as DatasetScopedStrategyContext).declaredFieldType?.(object, field),
   );
 }
 
