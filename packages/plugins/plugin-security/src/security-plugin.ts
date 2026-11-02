@@ -1630,10 +1630,11 @@ export class SecurityPlugin implements Plugin {
       // `metadata.list('permissions')`.
       permissions: this.bootstrapPermissionSets,
       // [ADR-0146 D1] No catalog entries: Setup carries no metadata catalog.
-      // Positions, capabilities and permission sets are listed and switched
-      // on and off in Studio's "All metadata" area (`/studio/~all/metadata`),
-      // and an old Setup link to them redirects there. Setup keeps the people
-      // pages below (D7).
+      // Positions, capabilities and permission sets are listed in Studio's
+      // "All metadata" area (`/studio/~all/metadata`), where a position or a
+      // permission set is switched on and off on its own page (a capability
+      // has no switch), and an old Setup link to them redirects there. Setup
+      // keeps the people pages below (D7).
       navigationContributions: [
         {
           // [ADR-0146 D7] The two ASSIGNMENT pages — who holds a position, and
