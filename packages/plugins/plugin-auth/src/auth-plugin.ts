@@ -3456,6 +3456,31 @@ export class AuthPlugin implements Plugin {
     });
 
     // ────────────────────────────────────────────────────────────────────
+    // ADR-0095 D3 — admin: who holds platform-admin standing (the sys_user
+    // `list_platform_admins` action). A read with no stored column behind it:
+    // the last-admin guard's own enumerator names the candidates and
+    // `hasPlatformAdminStanding` confirms each one, so the Users list itself
+    // stays one read per page. Same family as `set-user-manager` above: the
+    // shared gate first, then the handler, which confirms the caller's own
+    // standing before it names any platform operator. No body is read.
+    rawApp.post(`${basePath}/admin/list-platform-admins`, async (c: any) => {
+      try {
+        const actor = await gateAdmin(c);
+        if (actor instanceof Response) return actor;
+        const { runPlatformAdminRoster } = await import('./platform-admin-roster.js');
+        const { status, body } = await runPlatformAdminRoster(
+          { getDataEngine: () => this.authManager!.getDataEngine() as any },
+          actor,
+        );
+        return c.json(body, status as any);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        ctx.logger.error('[AuthPlugin] list-platform-admins failed', err);
+        return c.json({ success: false, error: { code: 'INTERNAL_ERROR', message: err.message } }, 500);
+      }
+    });
+
+    // ────────────────────────────────────────────────────────────────────
     // #2766 V1 — admin direct user management. `sys_user` CRUD is suppressed
     // (managedBy better-auth), and until now the only add-a-teammate path was
     // the email-dependent invite flow. These routes let a platform admin

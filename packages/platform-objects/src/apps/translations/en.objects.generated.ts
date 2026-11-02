@@ -244,6 +244,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      list_platform_admins: {
+        label: "Platform Administrators",
+        resultDialog: {
+          title: "Platform Administrators",
+          description: "Everyone who holds platform-admin standing now: an in-window admin_full_access grant owned by the Default Organization, or a verified address on the deployment's owner list.",
+          acknowledge: "Close",
+          fields: {
+            entries: "Platform administrators"
+          }
+        }
+      },
       update_my_profile: {
         label: "Update Profile",
         successMessage: "Profile updated"

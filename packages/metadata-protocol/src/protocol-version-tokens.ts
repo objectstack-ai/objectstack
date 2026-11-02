@@ -5,7 +5,8 @@
 //
 // A MOVE, not a redesign: every declaration below is byte-identical to the text that stood
 // above `ObjectStackProtocolImplementation`; only the imports and the export list at the foot
-// are new. `protocol.ts` re-exports what it exported.
+// are new. `protocol.ts` re-exports what it exported. One docblock has changed since the move:
+// `ConcurrentUpdateError`'s sentence on a row the caller does not read (see `assertVersionOf`).
 
 /**
  * Simple hash function for ETag generation (browser-compatible)
@@ -29,8 +30,10 @@ function simpleHash(str: string): string {
  * and includes both the current server-side version and the current record
  * payload so the client can render an informed conflict-resolution UI
  * ("Reload latest" vs. "Overwrite anyway"). The record is the row as the
- * caller reads it, and a row the caller cannot read is never a conflict: it
- * answers not-found instead (#23586, see `assertVersionOf`).
+ * caller reads it, and a row the caller's read returns no row for is never a
+ * conflict: the write door answers it, as it answers the same request without
+ * a token; a caller read that is refused propagates as that refusal (#23586,
+ * see `assertVersionOf`).
  *
  * NOTE: This is an *application-level* compare-and-set — not an atomic
  * storage-layer CAS. There is a small TOCTOU window between the version

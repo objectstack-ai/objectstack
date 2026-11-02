@@ -38,6 +38,11 @@ import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { validateExpression, nearestName } from '@objectstack/formula';
+// [#29025] The one judge of an undeclared top-level cycle (ADR-0044), shared
+// with the runtime authoring gate (`@objectstack/metadata-protocol`) that the
+// metadata draft verdict and every publish door run, so a flow this engine
+// refuses to register is refused at publish, in the same words.
+import { findUndeclaredFlowCycle } from '@objectstack/metadata-core';
 import type { AutomationEngine } from './engine.js';
 
 /**
@@ -734,57 +739,13 @@ export function validateFlowExpressions(
     };
 }
 
-/** The body of {@link AutomationEngine.detectCycles}, moved unedited; that method's docblock is its contract. */
+/**
+ * The body of {@link AutomationEngine.detectCycles}; that method's docblock is
+ * its contract. [#29025] The walk itself moved to `findUndeclaredFlowCycle`
+ * (`@objectstack/metadata-core`), the judge the publish gate asks too: this
+ * throws its sentence, unchanged.
+ */
 export function detectCycles(flow: FlowParsed): void {
-    const WHITE = 0, GRAY = 1, BLACK = 2;
-    const color = new Map<string, number>();
-    const parent = new Map<string, string>();
-
-    // Build adjacency list from edges
-    const adj = new Map<string, string[]>();
-    for (const node of flow.nodes) {
-        color.set(node.id, WHITE);
-        adj.set(node.id, []);
-    }
-    for (const edge of flow.edges) {
-        if (edge.type === 'back') continue; // ADR-0044 declared back-edge
-        const targets = adj.get(edge.source);
-        if (targets) targets.push(edge.target);
-    }
-
-    const dfs = (nodeId: string): string[] | null => {
-        color.set(nodeId, GRAY);
-        for (const neighbor of adj.get(nodeId) ?? []) {
-            if (color.get(neighbor) === GRAY) {
-                // Back edge found — reconstruct cycle
-                const cycle = [neighbor, nodeId];
-                let cur = nodeId;
-                while (cur !== neighbor) {
-                    cur = parent.get(cur)!;
-                    if (cur) cycle.push(cur);
-                    else break;
-                }
-                return cycle.reverse();
-            }
-            if (color.get(neighbor) === WHITE) {
-                parent.set(neighbor, nodeId);
-                const result = dfs(neighbor);
-                if (result) return result;
-            }
-        }
-        color.set(nodeId, BLACK);
-        return null;
-    };
-
-    for (const node of flow.nodes) {
-        if (color.get(node.id) === WHITE) {
-            const cycle = dfs(node.id);
-            if (cycle) {
-                throw new Error(
-                    `Flow contains a cycle: ${cycle.join(' → ')}. Only DAG flows are allowed — ` +
-                    `to author an intentional rework loop, mark the cycle-closing edge with type: 'back' (ADR-0044).`,
-                );
-            }
-        }
-    }
+    const cycle = findUndeclaredFlowCycle(flow);
+    if (cycle) throw new Error(cycle.message);
 }

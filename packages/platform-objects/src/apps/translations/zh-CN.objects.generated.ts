@@ -244,6 +244,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      list_platform_admins: {
+        label: "平台管理员",
+        resultDialog: {
+          title: "平台管理员",
+          description: "当前持有平台管理员资格的所有人：持有默认组织所有、仍在有效期内的 admin_full_access 授权，或其已验证邮箱在部署的所有者名单上。",
+          acknowledge: "关闭",
+          fields: {
+            entries: "平台管理员"
+          }
+        }
+      },
       update_my_profile: {
         label: "更新资料",
         successMessage: "已更新资料"

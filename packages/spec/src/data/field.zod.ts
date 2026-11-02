@@ -1336,7 +1336,23 @@ export const FieldSchema = lazySchema(() => {
     notNull: z.boolean().optional().describe('Emit a physical NOT NULL on the column (ADR-0113). Absent = the column stays nullable even under `required: true` — the write contract is enforced at the engine, the only sanctioned write path, not by the database. Declaring this over existing null rows is a destructive migration gated by the schema-drift ceremony. Incompatible with `requiredWhen` (a conditional contract cannot be an unconditional column constraint).'),
   }).strict().optional().describe('Physical storage constraints (ADR-0113). Owns the DDL the write contract deliberately does not imply. Absent = no storage-level constraint requested.'),
 
-  searchable: z.boolean().default(false).describe('Is searchable'),
+  /**
+   * The field's own search opt-in, read by `resolveSearchFieldResolution`
+   * (`search-fields.ts`) on its auto branch only — ruling record 6573569376,
+   * letter A: honoured, not retired (ADR-0049). The `$searchFields`
+   * ingress allow-list is the same resolved set, so it admits what this key
+   * admits.
+   */
+  searchable: z.boolean().default(false).describe(
+    'Search this field when its object declares no `searchableFields`. The set `search` scans, and the '
+    + 'set a `$searchFields` override may name, is then the type-based default (the text-like and '
+    + 'select columns) plus every field marked `searchable: true`, of any type except '
+    + '`secret`, `password` and `vector`, which stay excluded (a virtual `formula` field has no stored '
+    + 'column, so it is never scanned either). `false`, the default, does not remove a field the '
+    + 'type-based default already scans; to choose the set, declare `searchableFields`. '
+    + 'When the object declares `searchableFields`, that list '
+    + 'is the whole search set and this flag is not read (ADR-0061).',
+  ),
   /**
    * Multi-value empty representation (#9447, maintainer ruling 2026-08-18):
    * an emptied multi-value lookup reads back as `[]`, never `null`. This
@@ -1701,6 +1717,43 @@ export const FieldSchema = lazySchema(() => {
     + 'and links nothing. Valid only beside `referenceVia`; `field` must be a single-value `select` on the '
     + 'same object declaring inline `options`, and `value` one of its option values — any other shape is '
     + 'refused at parse.'
+  ),
+  // #29171 (director ruling 6574398310, letter B): `referenceNameVisible`.
+  // Its read and expand branch is the server lane's follow-up card and its
+  // text-only rendering the ui lane's; both are filed once this key lands.
+  /**
+   * Declared name exposure for a relationship whose target the reader may not
+   * be able to read. DECLARED AHEAD OF ITS PRODUCER (ADR-0049): no runtime
+   * read or `$expand` serves the name yet, so setting the key changes no read
+   * today; the describe carries the `[PLANNED — not yet served]` marker until
+   * the server lane's read and expand branch lands and drops it.
+   *
+   * Declared per referencing field by the application author, never on the
+   * target object: the application decides whose names its own pages reveal.
+   * `true` declares that a principal who can read the record carrying this
+   * field MAY see, for the record this field points at, its display name (the
+   * target object's `nameField` value, ADR-0079) and its id, even when that
+   * principal cannot read the target record. Nothing else of the target:
+   * `$expand` on this field MUST return the same name and id only, the field's
+   * own `displayField` MUST NOT widen what is shown, and the renderer shows the
+   * name as text with no link to the target record. A principal who can read
+   * the target is served exactly what it is served without the key.
+   *
+   * Absent or `false` keeps the restricted-reference posture: a lookup whose
+   * target the reader cannot read shows no name. Valid on `lookup` and on
+   * `user` (the `sys_user` reference, which the same key covers); refused at
+   * parse on every other type (this schema's superRefine), `false` included.
+   */
+  referenceNameVisible: z.boolean().optional().describe(
+    '[PLANNED — not yet served] Declared name exposure (`lookup` and `user` fields only). TRUE declares '
+    + 'that a principal who can read the record carrying this field may see the referenced record\'s '
+    + 'display name (the target object\'s `nameField` value) and id even when that principal cannot read '
+    + 'the referenced record. Nothing else of the target: `$expand` on this field returns the same name '
+    + 'and id only, the field\'s `displayField` does not widen it, and the name renders as text with no '
+    + 'link to the target. Absent or false keeps the restricted-reference posture for a target the reader '
+    + 'cannot read. Declared on the referencing field only; there is no target-object switch. Refused on '
+    + 'any other type. Declared ahead of its producer (ADR-0049): no runtime serves the name yet, so '
+    + 'setting it changes no read today.'
   ),
   /**
    * Inbound mail association — `email` fields only (#22870; ruling
@@ -2551,6 +2604,29 @@ export const FieldSchema = lazySchema(() => {
         `holds \`${field.referenceDeletedWhen.value}\`, and this field declares no pointer. Add ` +
         '`referenceVia` (naming the sibling that holds the target object name) if this field is the id ' +
         'half of a pointer pair, or drop the key.',
+    });
+  }
+  // [#29171, ruling 6574398310 letter B] `referenceNameVisible` exposes the
+  // name of the record a relationship points at. Only a `lookup` or a `user`
+  // field (the `sys_user` reference the ruling covers) points at one record
+  // of a fixed target whose name the engine can read; on any other type the
+  // flag would parse and expose nothing. `master_detail` is refused too: the
+  // ruling places the key on the referencing lookup. An authored `false`
+  // off-type is refused as well, the `mailAssociation` precedent below.
+  if (
+    field.referenceNameVisible !== undefined
+    && field.type !== 'lookup'
+    && field.type !== 'user'
+  ) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['referenceNameVisible'],
+      message:
+        "`referenceNameVisible` is only valid on `type: 'lookup'` or `type: 'user'` (this field is " +
+        `\`${field.type}\`): it lets a reader of this record see the name of the record a lookup points ` +
+        'at when that reader cannot read the target, and only a lookup (or a `user` field, the lookup to ' +
+        '`sys_user`) points at such a record. Declare it on the lookup field whose target name should ' +
+        'show, or drop the key.',
     });
   }
   // [#22870] `mailAssociation` marks a field as holding a correspondent's
