@@ -441,6 +441,9 @@ export const DeclarativeConnectorEntryRetryConfigSchema = lazySchema(() => stric
 export type RetryConfig = z.input<typeof RetryConfigSchema>;
 /** Post-parse shape of {@link RetryConfig} — defaults applied, transforms run (ADR-0122). */
 export type RetryConfigParsed = z.infer<typeof RetryConfigSchema>;
+export type DeclarativeConnectorEntryRetryConfig = z.input<typeof DeclarativeConnectorEntryRetryConfigSchema>;
+/** Post-parse shape of {@link DeclarativeConnectorEntryRetryConfig} — defaults applied, transforms run (ADR-0122). */
+export type DeclarativeConnectorEntryRetryConfigParsed = z.infer<typeof DeclarativeConnectorEntryRetryConfigSchema>;
 
 // ============================================================================
 // Error Mapping Configuration — RETIRED (ADR-0049 enforce-or-remove)
@@ -925,6 +928,9 @@ export const DeclarativeConnectorEntryActionSchema = lazySchema(() => strictObje
   },
 }, connectorActionShape()));
 export type ConnectorAction = z.input<typeof ConnectorActionSchema>;
+export type DeclarativeConnectorEntryAction = z.input<typeof DeclarativeConnectorEntryActionSchema>;
+/** Post-parse shape of {@link DeclarativeConnectorEntryAction} (ADR-0122). */
+export type DeclarativeConnectorEntryActionParsed = z.infer<typeof DeclarativeConnectorEntryActionSchema>;
 
 // `ConnectorTriggerSchema` / `ConnectorTrigger` (`key`, `label`, `description`,
 // `type: 'polling' | 'webhook'`, `intervalSeconds`, and the `interval` tombstone
