@@ -46,14 +46,14 @@ export const HttpDelivery = ObjectSchema.create({
     // written only by this package — lives in the docblock above.
     description: 'Outgoing HTTP calls made by webhooks and flows, one row per call, with its delivery status.',
     // [ADR-0079] The record title is `display_title`, a text formula over the
-    // same two columns `titleFormat` names. The pointer used to be `id`: once a
+    // same two columns `titleFormat` named. The pointer used to be `id`: once a
     // renderer honours ADR-0079's order (an explicit `nameField` wins over
-    // `titleFormat`), that made the record page's H1 the raw delivery UUID.
-    // `titleFormat` stays for renderers that still read it first;
-    // `http-delivery-display-title.test.ts` holds the two to the same text.
+    // `titleFormat`), that made the record page's H1 the raw delivery UUID. The
+    // retired `titleFormat` template beside it is gone (refused at save and by
+    // `os validate`); `http-delivery-display-title.test.ts` holds the formula
+    // to the text that template drew.
     displayNameField: 'display_title',
     nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-    titleFormat: '{label} → {url}',
     highlightFields: ['source', 'url', 'status', 'attempts', 'next_retry_at'],
 
     listViews: {

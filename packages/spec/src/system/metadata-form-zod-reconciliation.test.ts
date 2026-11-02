@@ -354,6 +354,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'record',
     why: "planned, not yet rendered — the binding's one-row query is validated at parse and refused on every page that is not `type: 'app'`, but no renderer mounts it as the page's `record` until the console's page-root binding lands. A form control offered today would let an author bind a row no predicate can read yet",
   },
+  // #28979 — a record page's app scope lands spec-first the same way:
+  // `planned` in the liveness ledger, read by no console until the ui card
+  // that makes the page assignment read the route's app.
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'apps',
+    why: "planned, not yet rendered — the app scope is validated at parse, refused off a record page bound to an object, and a second page for one object in one app is refused at every door, but no console opens the scoped page in its app until the page assignment reads the route's app. A form control offered today would let an author scope a page no route opens yet",
+  },
   // #28022 — an app's per-audience landing list lands spec-first the same way:
   // `planned` in the liveness ledger, read by no console until the landing
   // redirect card. Offering it in the app form first would be the UI half of

@@ -144,6 +144,10 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // leaving the object door is caught by something even though this exact
       // list cannot move.
       'validateReferenceIntegrity',
+      // [#29007] A ruled join (6574393684, letter B): `titleFormat` is refused
+      // at the metadata save gate and by `os validate`. Its refusal and the
+      // re-save of a stored row that carries it are in the cases below.
+      'validateTitleFormatRetired',
       'lintAutonumberFormats',
       // A ruled join: the card's acceptance names this door. R13 judges a
       // roll-up's aggregand against the child objects the snapshot carries
@@ -454,6 +458,32 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
     );
   });
 
+  it('REFUSES an object that declares a titleFormat (validateTitleFormatRetired)', () => {
+    // [#29007] Ruling of record 6574393684, letter B: the stamped or explicit
+    // `nameField` outranks the template, so a save that accepted it was a
+    // silent no-op. The refusal carries the describe's prescription.
+    const result = expectSingleRefusal(cleanObject({ titleFormat: '{owner} @ {owner}' }), 'title-format-retired');
+    const f = result.errors.find((e) => e.rule === 'title-format-retired')!;
+    expect(f.message).toContain('migrate to nameField');
+    expect(result.errors.map((e) => e.rule)).toEqual(['title-format-retired']);
+  });
+
+  it('REFUSES the re-save of a stored object that already carries a titleFormat — "Re-saving a row is writing it"', () => {
+    // [#29007] The stored row keeps parsing and reading; it is refused when it
+    // is next saved. The differential charges a finding on the written item
+    // to the write whatever the stored row held.
+    const stored = [{ ...STORED[0], titleFormat: '{owner}' }];
+    const result = runRuntimeAuthoringRules({
+      type: 'object',
+      item: cleanObject({ titleFormat: '{owner}' }),
+      context: { objects: stored },
+    });
+    expect(result.errors.map((e) => e.rule)).toEqual(['title-format-retired']);
+    // …and the same re-save without the key publishes (the control).
+    const healed = runRuntimeAuthoringRules({ type: 'object', item: cleanObject(), context: { objects: stored } });
+    expect(healed.errors, JSON.stringify(healed.errors)).toEqual([]);
+  });
+
   // ── What must NOT change ─────────────────────────────────────────────
 
   it('publishes a clean object write with every rule having RUN', () => {
@@ -467,6 +497,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validateManagedApiMethods',
       'validatePresetComparands',
       'validateReferenceIntegrity', // [#15254]
+      'validateTitleFormatRetired', // [#29007] — see the roster pin above
       'lintAutonumberFormats',
       'lintSummaryRollups', // see the roster pin above
       'validateSecurityPosture',

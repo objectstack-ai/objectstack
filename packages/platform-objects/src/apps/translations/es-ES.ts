@@ -36,9 +36,6 @@ export const esES: TranslationData = {
       navigation: {
         group_overview: { label: 'Resumen' },
         group_apps: { label: 'Aplicaciones' },
-        // Setup's own `nav_packages` — distinct from the same id under
-        // `apps.studio.navigation`, which does not answer for this app (#5750).
-        nav_packages: { label: 'Paquetes' },
         nav_packaged_actions: { label: 'Acciones empaquetadas' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
         nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
