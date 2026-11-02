@@ -104,8 +104,13 @@ function makeStubEngine() {
         for (const [k, r] of rows) if (matchesWhere(r, w)) return { key: k, row: r };
         return null;
     };
+    // Field equality only: a combinator this double does not implement is
+    // refused, never read as a field name.
     const matchesHistory = (h: Record<string, unknown>, w: Record<string, unknown>) =>
-        Object.entries(w).every(([k, v]) => v === undefined || h[k] === v);
+        Object.entries(w).every(([k, v]) => {
+            if (k.startsWith('$')) throw new Error(`history double: '${k}' is not implemented`);
+            return v === undefined || h[k] === v;
+        });
     const engine: any = {
         async findOne(table: string, opts: { where: Record<string, unknown> }) {
             assertEngineFindOnePredicate(table, opts);
