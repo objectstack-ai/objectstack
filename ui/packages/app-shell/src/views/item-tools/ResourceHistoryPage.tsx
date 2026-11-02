@@ -95,9 +95,13 @@ export function MetadataResourceHistoryPage({
   // item page with the query it came with (its `?package=` and scope).
   const areaHost = useMetadataAreaHost();
   const { search } = useLocation();
-  const backToItem = areaHost
-    ? `${areaHost.basePath}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${search}`
-    : `../${encodeURIComponent(name)}`;
+  // Anywhere else the item page is this URL minus its `history` segment,
+  // with the same query, under whatever route nesting mounted the page: a
+  // `..` resolved against the URL path, never against the matched route.
+  const goBackToItem = () =>
+    areaHost
+      ? navigate(`${areaHost.basePath}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${search}`)
+      : navigate({ pathname: '..', search }, { relative: 'path' });
 
   return (
     <PageShell
@@ -110,7 +114,7 @@ export function MetadataResourceHistoryPage({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => navigate(backToItem)}
+            onClick={goBackToItem}
           >
             <ArrowLeft className="h-4 w-4 mr-1" />
             Back to item
