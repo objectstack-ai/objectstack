@@ -867,7 +867,6 @@ const ja = {
     resetToViewDefault: "ビューの既定に戻す",
     recordOpen: "レコードを開く",
     recordOpenDrawer: "ドロワー",
-    recordOpenSplit: "分割",
     recordOpenPage: "フルページ",
     recordOpenNote: "個人の設定で、オブジェクトの宣言には含まれません。レコードの ↗ はいつでもフルページを開きます。",
     recordOpenDeclaredPage: "このオブジェクトはフルページで開くよう宣言されています",

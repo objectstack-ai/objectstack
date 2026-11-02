@@ -348,6 +348,7 @@ import {
     permissionSetNameCollisionRefusal,
     refuseUngrammaticalMetaItemName,
     saveWriteBinding,
+    seedExternalIdSaveRefusal,
     unknownDatasourceSaveRefusal,
 } from './protocol-save-door-refusals.js';
 // [#25467 cut 7] Package install and update.
@@ -7541,6 +7542,7 @@ export class ObjectStackProtocolImplementation implements
             permissionSetNameCollisionRefusal: (...a) => this.permissionSetNameCollisionRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
             unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
+            seedExternalIdSaveRefusal: (...a) => this.seedExternalIdSaveRefusal(...a),
         };
         return refuseRestoredBodyTheSaveDoorRefuses.call(host, type, name, body, binding, source);
     }
@@ -20886,6 +20888,54 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#28952] The refusal of a `seed` whose `externalId` names no field of
+     * the seed's object: a load in a keyed mode (`upsert`, `update`,
+     * `ignore`) keys each existing row and each incoming record by that
+     * field, and a field the object lacks keys every one of them empty, so
+     * nothing ever matches and every publish and every replay inserts each
+     * record again (or, in `update` mode, skips it) with a success receipt.
+     * Each member of a composite `externalId` is judged; an undeclared one is
+     * `SeedSchema`'s default, `name`. `insert` and `replace` never match, so
+     * they are not judged.
+     *
+     * The object is judged as the publish will have it: a draft of it in the
+     * same package batch (`pending` as the batch's object declarations), else
+     * the engine's registered definition, whose fields include extension
+     * fields; the columns the registry injects (`id`, the audit and tenant
+     * columns) count. Not refused when the object cannot be resolved: on a
+     * draft save, an object that is itself still a draft (`pending` as
+     * `'drafts'`) is judged at the seed's publish; an object resolved by
+     * neither is reported by the load.
+     *
+     * Asked in draft and in publish mode by {@link saveMetaItem} after the
+     * schema gate (except a `migrate-stored` re-save, the platform healing
+     * its own storage), again by {@link promoteDraftForPublish} on the draft
+     * body, so a seed stored before this refusal or whose object lost the
+     * field is refused when it is published and a batch publish aborts on
+     * it, and by the restore doors ({@link refuseRestoredBodyTheSaveDoorRefuses}).
+     * Answered as the schema gate answers, with the envelope of
+     * {@link unknownDatasourceSaveRefusal}: `422 INVALID_METADATA`, one finding
+     * per missing member at `externalId` (`externalId.N` for a composite
+     * member), naming the field and the object. The boot loader
+     * never refuses; it warns once for a keyed dataset whose every record
+     * keys empty ({@link SeedLoaderService}).
+     */
+    private seedExternalIdSaveRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+        pending?: 'drafts' | ReadonlyArray<unknown>,
+        writeFace?: MetadataWriteFace,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof seedExternalIdSaveRefusal> = {
+            get engine() { return readEngine(); },
+            listDrafts: (...a) => this.listDrafts(...a),
+        };
+        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+    }
+
+    /**
      * [#25211] Every object this environment holds that binds `datasource`
      * with `external`, for {@link externalBindingSaveRefusal}'s datasource
      * half: the environment's stored active rows ({@link readActiveOverlayRows},
@@ -22563,6 +22613,19 @@ export class ObjectStackProtocolImplementation implements
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
             );
             if (datasourceRefusal) throw datasourceRefusal;
+        }
+
+        // [#28952] A keyed `seed` whose `externalId` names no field of its
+        // object is refused, in draft and in publish mode, after the schema and
+        // before the authoring gate and every write: every load of it would
+        // insert each record again. A draft seed whose object is itself still a
+        // draft is judged at its publish. A `migrate-stored` re-save rewrites an
+        // existing row and is not judged. See {@link seedExternalIdSaveRefusal}.
+        if (writeSource !== 'migrate-stored') {
+            const seedKeyRefusal = await this.seedExternalIdSaveRefusal(
+                singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
+            );
+            if (seedKeyRefusal) throw seedKeyRefusal;
         }
 
         // [#27762] A `datasource` body may name, in `external.credentialsRef`, only the reference its own stored row
@@ -24415,6 +24478,19 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, request.batchDatasources,
             );
             if (datasourceRefusal) throw datasourceRefusal;
+        }
+        // [#28952] …and a seed draft whose `externalId` names no field of its
+        // object by the time it is published: a draft saved before this
+        // refusal, one whose object was still a draft at its save, or one whose
+        // object has since lost the field. Judged on the draft body, before
+        // `repo.promoteDraft` writes and before any seed row is loaded, so a
+        // batch publish aborts on it too; an object draft of the same batch is
+        // judged as it will be published. See {@link seedExternalIdSaveRefusal}.
+        if (draftForGate) {
+            const seedKeyRefusal = await this.seedExternalIdSaveRefusal(
+                singularType, draftForGate.body, request.name, request.pending?.objects,
+            );
+            if (seedKeyRefusal) throw seedKeyRefusal;
         }
         // [#27818] …and a datasource draft whose `external.credentialsRef` the active row it is promoted into
         // (`promoteInto`) does not hold now: refused before `repo.promoteDraft` writes. See {@link datasourceCredentialsRefSaveRefusal}.
