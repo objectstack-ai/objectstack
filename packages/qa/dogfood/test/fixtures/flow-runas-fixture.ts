@@ -34,6 +34,18 @@
 // through a `runAs: 'user'` PARENT whose `subflow` node calls the elevated child
 // (`runas_system_touch_via_parent` / `runas_system_read_via_parent`). The
 // elevation the proof is about still belongs to the child; the parent adds none.
+//
+// Flow start admission's third question (#29365) judges every start input a
+// flow's definition reads as a record id (a CRUD node's `filter.id`, handed on
+// through `subflow`) in the CALLER's own scope, for every `runAs`, before the
+// run exists: an input the caller cannot read is refused 404 RECORD_NOT_FOUND.
+// So the proofs pick rows the rule admits:
+//   • WRITE — an admin note marked `status: 'shared'`, which the member may
+//     READ (a select-only policy) but still not WRITE (the owner policy): the
+//     id passes the door, and the write is where the two `runAs` part ways.
+//   • READ — `runas_<mode>_read_sealed`, whose definition fixes the row by a
+//     literal (`SEALED_NOTE_NAME`), with no start input at all: the elevated
+//     read sees an admin note the member cannot, the user-mode read does not.
 
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
@@ -117,10 +129,48 @@ function readFlow(name: string, runAs: 'system' | 'user'): Flow {
   };
 }
 
+/** The `name` of the admin note the sealed read flows fix by a literal. */
+export const SEALED_NOTE_NAME = 'runas-sealed-note';
+
+/** The `status` that makes an admin note readable (never writable) to a member. */
+export const SHARED_STATUS = 'shared';
+
+/**
+ * `runas_<mode>_read_sealed` — start → get_record → end, where the DEFINITION
+ * names the row (a literal `name` filter) and the start hands it nothing. The
+ * read is the run's own choice of row, so it shows what the run's identity can
+ * see, with no caller input for flow start admission to judge.
+ */
+function sealedReadFlow(name: string, runAs: 'system' | 'user'): Flow {
+  return {
+    name,
+    label: `RunAs ${runAs} sealed read`,
+    type: 'autolaunched',
+    runAs,
+    variables: [{ name: 'found', type: 'text', isOutput: true }],
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      {
+        id: 'get',
+        type: 'get_record',
+        label: 'Get the sealed note',
+        config: { objectName: 'runas_note', filter: { name: SEALED_NOTE_NAME }, outputVariable: 'found' },
+      },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [
+      { id: 'e1', source: 'start', target: 'get' },
+      { id: 'e2', source: 'get', target: 'end' },
+    ],
+  };
+}
+
 export const runasSystemTouch = touchFlow('runas_system_touch', 'system', 'touched-system');
 export const runasUserTouch = touchFlow('runas_user_touch', 'user', 'touched-user');
 export const runasSystemRead = readFlow('runas_system_read', 'system');
 export const runasUserRead = readFlow('runas_user_read', 'user');
+export const runasSystemReadSealed = sealedReadFlow('runas_system_read_sealed', 'system');
+export const runasUserReadSealed = sealedReadFlow('runas_user_read_sealed', 'user');
 
 /**
  * `<child>_via_parent` — start → subflow(child) → end, under `runAs: 'user'`:
@@ -129,14 +179,14 @@ export const runasUserRead = readFlow('runas_user_read', 'user');
  * land on the parent's `found` output (so a read child's own `found` arrives as
  * `output.found.found` on the trigger response).
  */
-function viaParent(child: Flow, withOutput: boolean): Flow {
+function viaParent(child: Flow, withOutput: boolean, handsNoteId = true): Flow {
   return {
     name: `${child.name}_via_parent`,
     label: `${child.label} (via a user-mode parent)`,
     type: 'autolaunched',
     runAs: 'user',
     variables: [
-      { name: 'noteId', type: 'text', isInput: true },
+      ...(handsNoteId ? [{ name: 'noteId', type: 'text', isInput: true }] : []),
       ...(withOutput ? [{ name: 'found', type: 'object', isOutput: true }] : []),
     ],
     nodes: [
@@ -148,7 +198,7 @@ function viaParent(child: Flow, withOutput: boolean): Flow {
         config: {
           flowName: child.name,
           // `input.*` is a value slot (#19939): the parent's own input, as a CEL envelope.
-          input: { noteId: { dialect: 'cel', source: 'noteId' } },
+          input: handsNoteId ? { noteId: { dialect: 'cel', source: 'noteId' } } : {},
           ...(withOutput ? { outputVariable: 'found' } : {}),
         },
       },
@@ -163,6 +213,7 @@ function viaParent(child: Flow, withOutput: boolean): Flow {
 
 export const runasSystemTouchViaParent = viaParent(runasSystemTouch, false);
 export const runasSystemReadViaParent = viaParent(runasSystemRead, true);
+export const runasSystemReadSealedViaParent = viaParent(runasSystemReadSealed, true, false);
 
 /** A minimal, self-contained app config the dogfood harness can boot. */
 export const runasFixtureStack = defineStack({
@@ -182,6 +233,9 @@ export const runasFixtureStack = defineStack({
     runasUserRead,
     runasSystemTouchViaParent,
     runasSystemReadViaParent,
+    runasSystemReadSealed,
+    runasUserReadSealed,
+    runasSystemReadSealedViaParent,
   ],
 });
 
@@ -191,6 +245,11 @@ export const runasFixtureStack = defineStack({
  * owner RLS policy on ALL operations keyed on `created_by`. A member can read
  * and write their OWN notes, but neither read nor write the admin's — the exact
  * cross-owner isolation the runAs proof needs on both directions.
+ *
+ * One select-only policy widens READS alone: an admin note whose `status` is
+ * `SHARED_STATUS` is readable to the member (read policies OR-combine), and
+ * stays unwritable (no write policy admits it). That is the row the write
+ * proof hands a flow: one the caller can show it reads, and cannot touch.
  */
 const FIXTURE_MEMBER_SET = 'runas_fixture_member';
 
@@ -200,7 +259,10 @@ export const runasMemberSet: PermissionSet = PermissionSetSchema.parse({
   objects: {
     runas_note: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
   },
-  rowLevelSecurity: [RLS.ownerPolicy('runas_note', 'created_by')],
+  rowLevelSecurity: [
+    RLS.ownerPolicy('runas_note', 'created_by'),
+    { name: 'runas_note_shared_read', object: 'runas_note', operation: 'select', using: `status == '${SHARED_STATUS}'` },
+  ],
 });
 
 /**

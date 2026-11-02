@@ -579,10 +579,11 @@ contradicts it, and correct it here when it does.
 
 - **An `automated.ref` that names an `objectui` path resolves under `ui/` in this
   checkout.** objectui was imported into this repository: its specs and unit suites live at
-  `ui/<path>` (`ui/e2e/live/*.spec.ts`, `ui/e2e/import-console/*`, `ui/e2e/import-harness/*`,
+  `ui/<path>` (`ui/e2e/live/*.spec.ts`, `ui/e2e/import-console/*`,
   and unit suites under `ui/packages/plugin-grid`, `plugin-gantt`, `plugin-calendar`,
-  `plugin-form`, `fields`, `core`, `app-shell`), and the console builds from this tree with
-  `pnpm console:build`. There is no pinned objectui revision any more. Some refs and
+  `plugin-form`, `fields`, `core`, `app-shell`; the import harness twin was retired on
+  #25921), and the console builds from this tree with `pnpm console:build`.
+  There is no pinned objectui revision any more. Some refs and
   `fixtures.knownGaps` written before the import still spell the path without `ui/`, or
   still say such a pin is not runnable from this checkout; read the first as `ui/<path>`
   and the second as stale. A jsdom unit suite runs from `ui/`, the objectui root, with

@@ -46,6 +46,32 @@
  * are never in the population (ADR-0146 D6; their own ceremony is
  * `os migrate security-catalog-overlays`).
  *
+ * ## …and the rows bound to a read-only base (#29392)
+ *
+ * Before #28905 closed it, a save naming the read-only code package itself
+ * (`?package=<base>`) stored the customization as a row bound to the base,
+ * declaring nothing, served at the base's address in place of its document.
+ * Such a row is in the population too: a row of one of the five overlay types
+ * whose `package_id` is a READ-ONLY code package that ships the name — the
+ * reading the #28905 close names "packaged" (`readOnlyShippingPackages` over
+ * `shippedArtifactsOf`, its `overlayBaseShippers`), the one this census reads
+ * for a package-less row too. The binding names the base, so a name several
+ * packages ship is never `multi_shipped` here: the row is classified by the
+ * same {@link classifyPackagelessRow} with its binding as the one shipper,
+ * and carries `boundToBase`. It moves as a package-less row does, with the
+ * same outcomes (`moved`, or `moved` + `addedMember`), the delete of step 4
+ * addressing it by its own binding. A row bound to a writable package (the
+ * pair included) is that package's own item, edited in place (ADR-0070), and
+ * a row bound to a read-only package that does not ship the name is not a
+ * customization of it: neither is listed.
+ *
+ * Two rows of one item from different bindings — a package-less one and one
+ * bound to the base — would both land on the pair's one row. The move takes
+ * the package-less rows first; a row of an item this run has already moved a
+ * row of another binding into the pair is kept, its outcome `failed`, and the
+ * next run lists it `shadowed` (the pair holds the item now), with that
+ * disposition's two ways out. Nothing is overwritten.
+ *
  * ## The move, one row at a time
  *
  *  1. The pair is ensured through the ensure door,
@@ -162,6 +188,13 @@ export interface PackagelessOverlayRow {
      * override (module header, "a bundle member the base does not ship").
      */
     readonly addedMember?: string;
+    /**
+     * [#29392] The row is bound to `base`, a read-only code package that ships
+     * the name — stored by a save naming the base before the #28905 close —
+     * rather than to no package (module header, "the rows bound to a read-only
+     * base"). Absent for a package-less row.
+     */
+    readonly boundToBase?: true;
 }
 
 /** One pair row whose declaration lacks `basedOn` (module header, last section). */
@@ -371,7 +404,6 @@ export async function listPackagelessOverlays(
     const listed: PackagelessOverlayRow[] = [];
     let environmentRows = 0;
     for (const row of rows) {
-        if (!isUnbound(row)) continue;
         const type = PLURAL_TO_SINGULAR[row.type] ?? row.type;
         const name = String(row.name);
         const state = stateOf(row)!;
@@ -380,6 +412,10 @@ export async function listPackagelessOverlays(
         // item is edited in place (ADR-0070) and has no pair (ADR-0146 D3), and
         // the pair itself is writable — the write gate's own narrowing.
         const shippers = readOnlyShippingPackages(this.shippedArtifactsOf(type, name), (id) => this.isWritablePackage(id));
+        // [#29392] A bound row is in the population only when its binding is
+        // one of those read-only shippers: a row bound to the base itself.
+        const binding = isUnbound(row) ? undefined : String(row.package_id);
+        if (binding !== undefined && !shippers.includes(binding)) continue;
         if (shippers.length === 0) {
             environmentRows += 1;
             continue;
@@ -394,11 +430,18 @@ export async function listPackagelessOverlays(
             shippers,
         };
         const body = bodyOf(row);
-        const classified = classifyPackagelessRow(shippers, body, (pair) => shadowOf(pair, type, name, member, state));
+        // A row bound to the base names its base: the binding is its one shipper.
+        const classified = classifyPackagelessRow(binding !== undefined ? [binding] : shippers, body,
+            (pair) => shadowOf(pair, type, name, member, state));
         const addedMember = classified.disposition === 'movable' && classified.base !== undefined
             ? addedMemberOf(this, type, name, classified.base, body)
             : undefined;
-        listed.push({ ...common, ...classified, ...(addedMember !== undefined ? { addedMember } : {}) });
+        listed.push({
+            ...common,
+            ...classified,
+            ...(addedMember !== undefined ? { addedMember } : {}),
+            ...(binding !== undefined ? { boundToBase: true as const } : {}),
+        });
     }
 
     // Every type a declaration applies to, not only the five the move acts on.
@@ -500,13 +543,25 @@ export async function migratePackagelessOverlays(
         for (const row of await environmentRowsOfTypes.call(this, OVERRIDABLE_TYPE_SPELLINGS)) rowsById.set(String(row.id), row);
     }
 
-    for (const row of census.rows) {
-        if (row.disposition !== 'movable' || row.base === undefined || row.pair === undefined) continue;
+    // [#29392] The package-less rows first, then the rows bound to a base; an
+    // item this run moved a row of one binding into keeps a row of the other
+    // (module header, "the rows bound to a read-only base").
+    const movedFrom = new Map<string, boolean>();
+    const toMove = census.rows.filter((row) => row.disposition === 'movable' && row.base !== undefined && row.pair !== undefined);
+    for (const row of [...toMove.filter((r) => !r.boundToBase), ...toMove.filter((r) => r.boundToBase)]) {
+        if (row.base === undefined || row.pair === undefined) continue;
         const line = lineOf(row.base, row.pair);
         const fail = (error: string) => {
             line.failed += 1;
             outcomes.push({ id: row.id, outcome: 'failed', error });
         };
+        const itemKey = `${row.pair}\u0000${row.type}\u0000${row.name}\u0000${row.member ?? ''}`;
+        const bound = row.boundToBase === true;
+        if (movedFrom.has(itemKey) && movedFrom.get(itemKey) !== bound) {
+            fail(`'${row.pair}' now holds this item: this run moved its ${bound ? 'package-less row' : `row bound to '${row.base}'`} `
+                + 'there, and the row is kept beside it, never merged. Re-run the preview for the ways out.');
+            continue;
+        }
         const ensuredPair = await ensure(row.base, row.pair);
         if (!ensuredPair.ok) { fail(ensuredPair.error); continue; }
         // [#28904] A member the base does not ship is the pair's own: no
@@ -533,12 +588,14 @@ export async function migratePackagelessOverlays(
             // or, for an added member, that member's own row declaring nothing.
             const written = await storedPairRow(this, row, row.pair);
             if (addedMember === undefined ? !isServedOverrideRowOf(written, row.base) : !isOwnMemberRow(written)) {
+                const kept = bound ? `the row bound to '${row.base}' is kept` : 'the unbound row is kept';
                 fail(addedMember === undefined
-                    ? `The row saved into '${row.pair}' does not read back as the declared override of '${row.base}'; the unbound row is kept.`
-                    : `The row saved into '${row.pair}' does not read back as its own member '${addedMember}', declaring no override; the unbound row is kept.`);
+                    ? `The row saved into '${row.pair}' does not read back as the declared override of '${row.base}'; ${kept}.`
+                    : `The row saved into '${row.pair}' does not read back as its own member '${addedMember}', declaring no override; ${kept}.`);
                 continue;
             }
-            // Step 4: only now, the unbound row, by its own address.
+            // Step 4: only now, the unbound row (or the row bound to the
+            // base), by its own address.
             await repository.delete(
                 { type: row.storedType, name: row.name, org: 'env' } as never,
                 {
@@ -550,10 +607,12 @@ export async function migratePackagelessOverlays(
                         : `Moved into '${row.pair}' as its own member '${addedMember}', which '${row.base}' does not ship (ADR-0146 D2, D11)`,
                     intent: 'override-artifact',
                     state: row.state,
-                    packageId: null,
+                    // [#29392] A row bound to the base is deleted by that binding.
+                    packageId: bound ? row.base : null,
                     ...(row.member !== undefined ? { member: row.member } : {}),
                 } as never,
             );
+            movedFrom.set(itemKey, bound);
             line.moved += 1;
             outcomes.push(addedMember === undefined
                 ? { id: row.id, outcome: 'moved', packageId: row.pair, basedOn: basedOn! }
