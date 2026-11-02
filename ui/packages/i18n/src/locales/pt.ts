@@ -2736,6 +2736,7 @@ const pt = {
       orText: "ou continue com e-mail",
       ssoButton: "Entrar com SSO",
       ssoOnlyDescription: "Entre com o logon único da sua organização",
+      noSignInMethodText: "Nenhum método de login está disponível. Entre em contato com o administrador.",
       usePasswordText: "Usar uma senha em vez disso",
       backToSsoText: "Voltar ao logon único",
       // objectui#12600 — the console login card's own header, the password

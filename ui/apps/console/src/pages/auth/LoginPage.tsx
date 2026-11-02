@@ -591,6 +591,10 @@ function LoginFormCard({
         }),
         usePasswordText: t('auth.login.usePasswordText', { defaultValue: 'Use a password instead' }),
         backToSsoText: t('auth.login.backToSsoText', { defaultValue: 'Back to single sign-on' }),
+        // Drawn in place of the form when the server offers no sign-in method.
+        noSignInMethodText: t('auth.login.noSignInMethodText', {
+          defaultValue: 'No sign-in method is available. Contact your administrator.',
+        }),
       }}
     />
   );
