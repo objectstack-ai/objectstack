@@ -63,10 +63,17 @@ const DESCRIPTION = {
  */
 function ParamHost({ action }: { action: Record<string, unknown> }) {
   const { t } = useObjectTranslation();
-  const [dialog, setDialog] = React.useState<{ title?: unknown; description?: unknown } | null>(null);
+  const [dialog, setDialog] = React.useState<{ title: string; description: string } | null>(null);
   const onParamCollection = React.useCallback<ParamCollectionHandler>((_params, dispatched) => {
     handed.push(dispatched);
-    setDialog({ title: dispatched?.label, description: dispatched?.description });
+    // A non-string reaching the host is drawn as nothing, so the assertions
+    // below see the gap instead of React refusing an object child.
+    const title = dispatched?.label;
+    const description = dispatched?.description;
+    setDialog({
+      title: typeof title === 'string' ? title : '',
+      description: typeof description === 'string' ? description : '',
+    });
     return new Promise(() => {});
   }, []);
   const C = ComponentRegistry.get('element:button');
@@ -77,15 +84,13 @@ function ParamHost({ action }: { action: Record<string, unknown> }) {
         schema={{
           type: 'element:button',
           properties: { label: { en: 'Invite member', 'zh-CN': '邀请成员' }, action },
-        } as never}
+        }}
       />
       {dialog && (
         <Dialog open>
           <DialogContent>
-            <DialogTitle>{dialog.title as string}</DialogTitle>
-            <DialogDescription>
-              {(dialog.description as string) || t('actionDialog.description')}
-            </DialogDescription>
+            <DialogTitle>{dialog.title}</DialogTitle>
+            <DialogDescription>{dialog.description || t('actionDialog.description')}</DialogDescription>
           </DialogContent>
         </Dialog>
       )}
