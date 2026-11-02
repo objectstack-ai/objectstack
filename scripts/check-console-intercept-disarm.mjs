@@ -133,12 +133,14 @@ const VITEST_CONFIG_NAMES = [
 // at the first comment line in the `packages:` list, so the `ui` members below
 // it are not in this gate's population, and are not declared here either.
 //
-// ⛔ Hand-kept, and `scan()` holds it to the workspace file: a glob in
+// ⛔ A literal array, never computed from the globs (`check:watch-hint-literal`):
+// the derivation reads source text, so a computed list contributes no hint.
+// Hand-kept, and `main()` holds it to the workspace file: a glob in
 // `pnpm-workspace.yaml` with no pair here, or a pair here for a glob that file
 // no longer lists, is a finding (`watchHintDrift`). Not readable from the
 // repo-root files themselves — `pnpm-workspace.yaml` and `vitest.preset.mts`
 // carry no separator, so no spelling of them is a hint the derivation admits.
-export const ROOT_DIR_WATCH_HINTS = Object.freeze([
+export const ROOT_DIR_WATCH_HINTS = [
   'packages/*/package.json',
   'packages/*/vitest.config.*',
   'packages/apps/*/package.json',
@@ -161,7 +163,7 @@ export const ROOT_DIR_WATCH_HINTS = Object.freeze([
   'apps/*/vitest.config.*',
   'examples/*/package.json',
   'examples/*/vitest.config.*',
-]);
+];
 
 const DISARM_RE = /\bdisableConsoleIntercept\s*:\s*true\b/;
 const REARM_RE = /\bdisableConsoleIntercept\s*:\s*false\b/;
