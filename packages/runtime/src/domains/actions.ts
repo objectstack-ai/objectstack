@@ -1071,7 +1071,14 @@ async function dispatchAdmittedRestAction(
         // [#28856] An action whose write landed under a failing roll-up answers
         // the result the runtime composed and attached (`executeDeclarativeUpdateAction`),
         // as when the recompute succeeds; the stale column is logged once.
-        const earned = earnedAnswerOf(err);
+        //
+        // [#28861] Read on the declarative-update arm only: that arm's refusal
+        // carries the ACTION's result. Any other arm's can carry only a WRITE's
+        // data answer — a handler that let out a refusal a data door attached
+        // its answer to — and the action that threw has no result, so it is
+        // answered below as the failure it is. (A handler's own `ctx.engine` /
+        // `ctx.api` writes answer a landed write's success and never throw it.)
+        const earned = actionExec.isDeclarativeUpdateAction(actionDef) ? earnedAnswerOf(err) : undefined;
         if (earned) {
             const log = deps.logger && typeof deps.logger.error === 'function'
                 ? (line: string) => deps.logger.error(`[HttpDispatcher] ${line}`)

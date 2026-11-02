@@ -2416,13 +2416,14 @@ const LAYERED_VIEW_MEMBER_MESSAGE =
  * VALIDATION_ERROR`, the code the recognition and arity rules answer
  * everywhere; `rule` names which of the three refused, because `RestServer`'s
  * item read answers the third at a different point (see
- * {@link metaItemQueryRefusal}).
+ * {@link metaItemQueryRefusal}). The arity doors answer a fourth,
+ * `bracketed-parameter` ({@link metaBracketedPackageRefusal}).
  */
 export interface MetaItemQueryRefusal {
     readonly status: 400;
     readonly code: 'VALIDATION_ERROR';
     readonly message: string;
-    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member';
+    readonly rule: 'unknown-parameter' | 'repeated-parameter' | 'layered-member' | 'bracketed-parameter';
 }
 
 /**
@@ -2556,13 +2557,51 @@ export const META_QUERY_ARITY_DOORS: Readonly<Record<MetaQueryArityDoor, readonl
  * each transport writes in its own envelope. It returns the first name of the
  * door's {@link META_QUERY_ARITY_DOORS} entry that was supplied more than once,
  * as `400 VALIDATION_ERROR` with `repeatedQueryParamMessage`'s sentence, which
- * is the answer `RestServer`'s door gives through `refuseRepeatedQueryParams`.
- * It returns `undefined` otherwise, and has then unwrapped a one-element array
- * in place. ⛔ Ask it before any read of the door's query.
+ * is the answer `RestServer`'s door gives through `refuseRepeatedQueryParams`;
+ * then a bracketed `package` key ({@link metaBracketedPackageRefusal}), which
+ * `RestServer`'s door asks right after its multiplicity gate. It returns
+ * `undefined` otherwise, and has then unwrapped a one-element array in place.
+ * ⛔ Ask it before any read of the door's query.
  */
 export function metaQueryArityRefusal(door: MetaQueryArityDoor, query: unknown): MetaItemQueryRefusal | undefined {
     if (!query || typeof query !== 'object') return undefined;
-    return repeatedOnceRefusal(query as Record<string, unknown>, META_QUERY_ARITY_DOORS[door]);
+    return repeatedOnceRefusal(query as Record<string, unknown>, META_QUERY_ARITY_DOORS[door])
+        ?? metaBracketedPackageRefusal(door, query);
+}
+
+/**
+ * The answer of the two arity doors that read `?package=` — the list and the
+ * book tree — to a BRACKETED spelling of it: `?package[]=ID`, `?package[0]=ID`,
+ * any key that opens `package[`. A client that serialises arrays qs-style sends
+ * it; every adapter hands the key through as spelled, so the door's
+ * `metaItemPackageBinding(query.package)` read no package, and a caller who
+ * named ONE package was answered across every package. `400
+ * VALIDATION_ERROR`, in the list chain's narrowing-filter frame
+ * ({@link listFilterRefusalMessage}), naming the key as sent; beside a plain
+ * `?package=` too (two spellings of one scope). Asked at the door's entry,
+ * before any read — where the binding is read — by both transports:
+ * {@link metaQueryArityRefusal} for the dispatcher, after
+ * `refuseRepeatedQueryParams` for `RestServer`.
+ *
+ * Every by-name `/meta` door (the item read, `/layers`, the save, the reset,
+ * `/publish`) and the diagnostics sweep already refuse the key: it is not in
+ * their closed set (route rule 5). `_drafts` and `state` read no `package`.
+ */
+export function metaBracketedPackageRefusal(door: MetaQueryArityDoor, query: unknown): MetaItemQueryRefusal | undefined {
+    if (!META_QUERY_ARITY_DOORS[door].includes('package')) return undefined;
+    const key = bracketedKeyOf(query, 'package');
+    if (key === undefined) return undefined;
+    const tree = door === 'book-tree';
+    return {
+        status: 400,
+        code: 'VALIDATION_ERROR',
+        message: listFilterRefusalMessage(
+            key, 'package', "the 'package' filter takes exactly one package id, spelled ?package=ID",
+            "a bracketed 'package' key", tree ? 'tree' : 'list',
+            tree ? 'read the tree across every package' : 'list across every package',
+        ),
+        rule: 'bracketed-parameter',
+    };
 }
 
 /**
@@ -3422,31 +3461,56 @@ function refuseEmptyListFilter(param: 'id' | 'object', names: 'app' | 'object', 
 }
 
 /**
- * The app list's answer to a BRACKETED spelling of its one-app filter —
- * `?id[]=NAME`, `?id[0]=NAME`, any key that opens `id[`. A client that
- * serialises arrays qs-style sends it; every adapter hands the key through as
- * spelled (`readQuery` in `plugin-hono-server`, `readDispatchQuery` in
- * `@objectstack/hono`), so step 3 of {@link createMetaListAnswer}, which reads
- * `query.id`, never saw it, and the caller who asked for one app was answered
- * every app it may see. Refused with {@link refuseEmptyListFilter}'s answer —
- * one sentence frame, `400 VALIDATION_ERROR` — naming the key as sent: the
- * filter takes exactly one name, spelled `?id=NAME`. A bracketed key beside a
- * plain `?id=` is refused too: the request carries two spellings of one filter.
+ * The list chain's answer to a BRACKETED spelling of a one-name filter —
+ * `?id[]=NAME` or `?id[0]=NAME` on the app list (step 3), `?object[]=NAME` or
+ * `?object[0]=NAME` on the view list (step 4): any key that opens `param[`. A
+ * client that serialises arrays qs-style sends it; every adapter hands the key
+ * through as spelled (`readQuery` in `plugin-hono-server`, `readDispatchQuery`
+ * in `@objectstack/hono`), so the step, which reads `query[param]`, never saw
+ * it, and the caller who asked for one app, or for one object's views, was
+ * answered every item it may see. Refused with {@link refuseEmptyListFilter}'s
+ * answer — one sentence frame, `400 VALIDATION_ERROR` — naming the key as
+ * sent: the filter takes exactly one name, spelled `?param=NAME`. A bracketed
+ * key beside a plain one is refused too: the request carries two spellings of
+ * one filter.
  *
- * Only the app list reads `id`, so only it judges the bracketed spelling; on
- * every other type the key is not read, as no other `id` spelling is.
+ * Only the type whose step reads `param` judges its bracketed spelling; on
+ * every other type the key is not read, as no other spelling of it is.
  */
-function refuseBracketedAppIdFilter(query: Readonly<Record<string, unknown>> | undefined): void {
-    if (!query || typeof query !== 'object') return;
-    const key = Object.keys(query).find((k) => k.startsWith('id['));
+function refuseBracketedListFilter(
+    query: Readonly<Record<string, unknown>> | undefined,
+    param: 'id' | 'object',
+    names: 'app' | 'object',
+    lists: 'app' | 'view',
+): void {
+    const key = bracketedKeyOf(query, param);
     if (key === undefined) return;
     throwListFilterRefusal(
-        'id', key, 'app', 'app',
-        "the 'id' filter takes exactly one app name, spelled ?id=NAME", "a bracketed 'id' key",
+        param, key, names, lists,
+        `the '${param}' filter takes exactly one ${names} name, spelled ?${param}=NAME`, `a bracketed '${param}' key`,
     );
 }
 
-/** The one sentence frame of the list chain's narrowing-filter refusals. */
+/** The first query key that opens `param[` (a qs-style array spelling of `param`), or `undefined`. */
+function bracketedKeyOf(query: unknown, param: string): string | undefined {
+    if (!query || typeof query !== 'object') return undefined;
+    return Object.keys(query).find((k) => k.startsWith(`${param}[`));
+}
+
+/** The one sentence frame of the `/meta` list doors' narrowing-filter refusals. */
+function listFilterRefusalMessage(
+    key: string,
+    names: string,
+    got: string,
+    notAFilter: string,
+    served: 'list' | 'tree',
+    unscoped: string,
+): string {
+    return `Query parameter '${key}' names no ${names}; ${got}. The ${served} was not served: ${notAFilter} `
+        + `is not a filter. Name one ${names}, or leave the parameter out to ${unscoped}.`;
+}
+
+/** {@link listFilterRefusalMessage}, thrown, so each transport's own `catch` shapes it. */
 function throwListFilterRefusal(
     param: 'id' | 'object',
     key: string,
@@ -3456,8 +3520,7 @@ function throwListFilterRefusal(
     notAFilter: string,
 ): never {
     const err: any = new Error(
-        `Query parameter '${key}' names no ${names}; ${got}. The list was not served: ${notAFilter} `
-        + `is not a filter. Name one ${names}, or leave the parameter out to list every ${lists} you can see.`,
+        listFilterRefusalMessage(key, names, got, notAFilter, 'list', `list every ${lists} you can see`),
     );
     err.status = 400;
     err.code = 'VALIDATION_ERROR';
@@ -3558,7 +3621,8 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     list, never a 404.
  *  4. `view` — `?object=<object>` keeps the independent views bound to that
  *     object, sorted by `order` then `name` (the switcher); [#28548] an EMPTY
- *     value is refused (`400 VALIDATION_ERROR`), never read as absent.
+ *     value is refused (`400 VALIDATION_ERROR`), never read as absent, as is a
+ *     bracketed key (`?object[]=`, `?object[0]=`), never read as no filter.
  *  5. `doc` — the ADR-0046 locale collapse (the request's own preference; the
  *     `translations` map is dropped whatever the locale).
  *  6. `doc` — the ADR-0046 content slim, unless `?include=content`.
@@ -3614,8 +3678,8 @@ export function createMetaListAnswer(
 
         // 3. [#7566] `?id=<app>`. [#28548] An EMPTY one is refused, never
         // read as absent (see {@link refuseEmptyListFilter}), and so is a
-        // bracketed spelling of the key (see {@link refuseBracketedAppIdFilter}).
-        if (metaType === 'app') refuseBracketedAppIdFilter(query);
+        // bracketed spelling of the key (see {@link refuseBracketedListFilter}).
+        if (metaType === 'app') refuseBracketedListFilter(query, 'id', 'app', 'app');
         const appIdFilter = metaType === 'app' ? query?.id : undefined;
         if (appIdFilter === '') refuseEmptyListFilter('id', 'app', 'app');
         if (typeof appIdFilter === 'string') {
@@ -3628,7 +3692,9 @@ export function createMetaListAnswer(
         }
 
         // 4. `?object=<object>` — the view switcher. [#28548] An EMPTY one is
-        // refused, never read as absent (see {@link refuseEmptyListFilter}).
+        // refused, never read as absent (see {@link refuseEmptyListFilter}),
+        // and so is a bracketed spelling of the key, as step 3's is.
+        if (metaType === 'view') refuseBracketedListFilter(query, 'object', 'object', 'view');
         if (metaType === 'view' && query?.object === '') refuseEmptyListFilter('object', 'object', 'view');
         if (metaType === 'view' && query?.object) {
             const obj = String(query.object);

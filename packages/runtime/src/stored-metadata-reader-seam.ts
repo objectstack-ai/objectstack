@@ -229,8 +229,11 @@ async function serveStoredMetadataWriteReturn<A>(object: string, answer: A, engi
 const ROW_SERVING_READS: ReadonlySet<PropertyKey> = new Set(['find', 'findOne', 'aggregate']);
 /** The verb whose answer is a number: guarded against the evaluate oracle, nothing to serve. */
 const COUNT_READ: PropertyKey = 'count';
-/** The write verbs whose RETURN can carry family content (every alias ObjectRepository exposes). */
-const WRITE_RETURN_VERBS: ReadonlySet<PropertyKey> = new Set([
+/**
+ * The write verbs whose RETURN can carry family content (every alias ObjectRepository exposes).
+ * [#28861] Also the verbs whose landed write `landed-write-answer.ts` answers: one list of what a write is.
+ */
+export const WRITE_RETURN_VERBS: ReadonlySet<PropertyKey> = new Set([
   'insert', 'create', 'update', 'updateById', 'upsert', 'delete', 'deleteById', 'updateMany', 'deleteMany',
 ]);
 
@@ -401,9 +404,10 @@ export function refuseStoredMetadataBodyReads<T>(api: T): T {
  * `object(name)`, `sudo()`, `withRunAs(...)`, the context a `transaction(fn)`
  * callback receives, and the `ctx` `beginTransaction()` returns — with each
  * repository passed through `wrapRepository`. One definition of what a scoped
- * API can derive, so neither layer can leave a route around it.
+ * API can derive, so neither layer can leave a route around it. [#28861] The
+ * landed-write layer (`landed-write-answer.ts`) walks it too.
  */
-function deriveThroughSeam<T>(
+export function deriveThroughSeam<T>(
   api: T,
   marker: symbol,
   wrapRepository: (name: string, repo: unknown) => unknown,

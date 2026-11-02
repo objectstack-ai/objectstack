@@ -36,6 +36,7 @@ import {
 import { ChevronDown, Check, Eye, Home, LayoutGrid, Pencil, Settings } from 'lucide-react';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { resolveKeyedI18nLabel, matchAppBySegment, appRouteSegment } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
@@ -166,7 +167,7 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, st
           return (
             <DropdownMenuItem
               key={app.name}
-              onClick={() => onAppChange(appRouteSegment(app) ?? app.name)}
+              onClick={() => onAppChange(appAddressSegment(apps, app) ?? app.name)}
               className="flex items-center gap-2.5 py-2"
               data-testid={`app-switcher-row-${app.name}`}
             >

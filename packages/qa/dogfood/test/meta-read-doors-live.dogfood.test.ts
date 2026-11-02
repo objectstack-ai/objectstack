@@ -218,4 +218,50 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
       expect(memberApps, 'a member never sees setup').not.toContain('setup');
     });
   });
+
+  // The same class on the view switcher's `object` and on the list's
+  // `package` scope: a bracketed key (`?object[]=`, `?package[]=`) reached the
+  // door under the key as spelled, so the filter never read it, and a caller
+  // who asked for one object's views (or one package's items) got every view
+  // (or every package's items). Each is refused: 400 VALIDATION_ERROR naming
+  // the key, no list.
+  describe('GET /meta/view with a bracketed `object` key, and a list with a bracketed `package` key, are refused', () => {
+    const itemsOf = (body: any): any[] => (Array.isArray(body) ? body : body?.items) ?? [];
+    const OBJ = 'showcase_task';
+
+    for (const [path, key] of [
+      ['/meta/view', 'object[]'], ['/meta/view', 'object[0]'],
+      ['/meta/object', 'package[]'], ['/meta/object', 'package[0]'],
+    ] as const) {
+      it(`${path}?${key}=…: 400 VALIDATION_ERROR naming the key, for the admin and for a member`, async () => {
+        const value = key.startsWith('object') ? OBJ : PKG;
+        const names = key.startsWith('object') ? 'object' : 'package';
+        for (const [who, token] of [['admin', admin], ['member', liaison]] as const) {
+          const res = await stack.apiAs(token, 'GET', `${path}?${key}=${encodeURIComponent(value)}`);
+          const body: any = await res.json();
+          expect({ who, status: res.status, code: codeOf(body) }, JSON.stringify(body).slice(0, 400))
+            .toEqual({ who, status: 400, code: 'VALIDATION_ERROR' });
+          expect(messageOf(body)).toMatch(new RegExp(`^Query parameter '${key.replace(/[[\]]/g, '\\$&')}' names no ${names}`));
+          expect(itemsOf(body)).toEqual([]);
+        }
+      });
+    }
+
+    it('CONTROLS — ?object=NAME is that object\'s views and ?package=ID that package\'s items, each narrower than no filter', async () => {
+      const all = itemsOf(await (await stack.apiAs(admin, 'GET', '/meta/view')).json());
+      const switched = await stack.apiAs(admin, 'GET', `/meta/view?object=${OBJ}`);
+      expect(switched.status).toBe(200);
+      const views = itemsOf(await switched.json());
+      expect(views.length, 'the showcase ships views of showcase_task').toBeGreaterThan(0);
+      expect(views.every((v: any) => v?.object === OBJ), JSON.stringify(views.map((v: any) => v?.object))).toBe(true);
+      expect(views.length).toBeLessThan(all.length);
+
+      const everyPackage = itemsOf(await (await stack.apiAs(admin, 'GET', '/meta/object')).json());
+      const scoped = await stack.apiAs(admin, 'GET', `/meta/object?package=${encodeURIComponent(PKG)}`);
+      expect(scoped.status).toBe(200);
+      const objects = itemsOf(await scoped.json());
+      expect(objects.length, 'the showcase package declares objects').toBeGreaterThan(0);
+      expect(objects.length).toBeLessThan(everyPackage.length);
+    });
+  });
 });

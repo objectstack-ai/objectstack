@@ -233,6 +233,12 @@ const en = {
     // allows it: sharing, ownership or row-level security (objectstack#27138).
     noPermissionToEditRecord: "You don't have permission to edit this record. The fields are read-only.",
     submitFailed: 'Could not save. Please try again.',
+    // The banner an edit form shows when its record read is refused: a
+    // denial, a not-found (which row-level security answers for a hidden row,
+    // so the line never tells the two apart), and any other failure.
+    noPermissionToOpenRecord: "You don't have access to this record.",
+    recordNotFoundOrHidden: "This record doesn't exist, or you don't have access to it.",
+    openRecordFailed: 'Could not open this record. Please try again.',
     uploadInFlight: 'Wait for the upload to finish before saving.',
     // The notice the record form raises when a field's own `visibleWhen` turns
     // it invisible and the form clears the value it held (objectui#8070 names
@@ -3214,6 +3220,19 @@ const en = {
       noSignInMethodText: 'No sign-in method is available. Contact your administrator.',
       usePasswordText: 'Use a password instead',
       backToSsoText: 'Back to single sign-on',
+      // objectstack#29105 — the second step of a password sign-in for an account
+      // with two-factor sign-in on: the code from the authenticator app, or a
+      // backup code. Each English value is `LoginForm`'s own default.
+      twoFactorTitle: 'Two-factor authentication',
+      twoFactorDescription: 'Enter the 6-digit code from your authenticator app.',
+      twoFactorBackupDescription: 'Enter one of the backup codes you saved when you set up two-factor authentication.',
+      twoFactorCodeLabel: 'Authentication code',
+      twoFactorBackupCodeLabel: 'Backup code',
+      twoFactorVerifyButton: 'Verify',
+      twoFactorVerifyingButton: 'Verifying…',
+      twoFactorUseBackupCodeText: 'Use a backup code instead',
+      twoFactorUseAuthenticatorText: 'Use your authenticator app instead',
+      twoFactorBackText: 'Back to sign in',
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: 'Welcome back',
@@ -3251,6 +3270,13 @@ const en = {
         invalidCredentials: 'Invalid email or password. Please try again.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
+        // objectstack#29105 — refusals of the two-factor sign-in step, by the
+        // server's code (`signInRefusalMessages`).
+        twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',
+        twoFactorInvalidBackupCode: 'That backup code is not valid or has already been used.',
+        twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
+        twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
+        twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
       },
     },
     register: {
