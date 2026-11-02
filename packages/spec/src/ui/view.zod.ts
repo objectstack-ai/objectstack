@@ -1163,16 +1163,16 @@ export function isViewFilterOrGroup(value: unknown): value is { [VIEW_FILTER_OR_
  * rule never carries `or`, so it is routed to {@link ViewFilterRuleSchema}
  * exactly as before.
  *
- * ## [PLANNED — not yet rendered]
+ * ## Applied by the console
  *
- * No reader applies the group yet. The query a list view runs is built by the
- * console (`ui/packages/core/src/utils/filter-converter.ts#toFilterNode`), which
- * lowers flat rules only and passes a group through untouched, so the server
- * refuses the query as a malformed filter (400 `INVALID_FILTER`) and the list
- * shows that error and no rows. It fails closed: a stored group never widens
- * what a view, a related list or a picker shows. The describe below says so,
- * so no author is told it works.
- * The console half is #28370; the marker leaves when it lands.
+ * The query a list view runs is built by the console
+ * (`ui/packages/core/src/utils/filter-converter.ts#toFilterNode`), which lowers
+ * a group to one `or` node of its rules, a child of the list's AND like any
+ * rule, so a group is ANDed with its sibling elements. The console's filter
+ * builder edits a filter that is exactly one group as its OR logic, and saves
+ * its OR logic over two or more rules as one group; a filter holding a group
+ * beside other elements is applied, and shown read-only in the builder rather
+ * than flattened on save (`builderRulesOfSpecFilter`).
  *
  * @example
  * ```ts
@@ -1214,13 +1214,12 @@ export const ViewFilterOrGroupSchema = lazySchema(() => strictObject({
       + 'each judged exactly as a rule at the top level of the filter. A group cannot hold a group.',
     ),
 }).describe(
-  '[PLANNED — not yet rendered] An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its '
+  'An any-of group: `{ or: [rule, ...] }` matches a record when ANY of its '
   + 'rules matches. It sits in the filter list beside plain rules, and the list still ANDs every element, '
   + 'so `[{ or: [{ field: "status", operator: "equals", value: "open" }, { field: "completed_at", '
   + 'operator: "after", value: "{7_days_ago}" }] }]` selects the open records and the ones completed in the '
-  + 'last 7 days. One level only: its members are flat rules. No console reads it yet: until the list '
-  + 'query build reads the group, a view that stores one is refused when it loads (the list reports a '
-  + 'malformed filter and shows no rows).',
+  + 'last 7 days. One level only: its members are flat rules. The console applies it, ANDed with its '
+  + 'sibling elements, and its filter builder edits a filter that is exactly one group.',
 ));
 
 export type ViewFilterOrGroup = z.input<typeof ViewFilterOrGroupSchema>;
