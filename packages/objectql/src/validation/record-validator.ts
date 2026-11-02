@@ -95,15 +95,10 @@ import {
   BOUNDED_STRING_FIELD_TYPES,
   VALUE_DOMAIN_FIELD_TYPES,
   REFERENCE_VALUE_TYPES,
-  SINGLE_OPTION_TYPES,
-  expandEmptyOperator,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
   NUMERIC_VALUE_TYPES,
   COMPUTED_VALUE_TYPES,
-  NON_TEXT_STORED_VALUE_TYPES,
-  STRING_VALUE_TYPES,
-  isUniqueDeclared,
   percentScaleOf,
   parseNumericString,
   classifyFilterToken,
@@ -112,7 +107,7 @@ import type { FieldErrorCode } from '@objectstack/spec/api';
 // [#24131] `isMissing` / `isEmptyForRequired` — the emptiness rule `required`
 // is judged by — live in core, so the public-form submit door in
 // `@objectstack/rest` judges a form's `required` by the same rule.
-import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand, multiValueStorageForm, isMissing, isEmptyForRequired } from '@objectstack/core';
+import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand, multiValueStorageForm, isMissing, isEmptyForRequired, ENGINE_LIFECYCLE_COLUMNS, blankAsNullColumns, blankStorageForm, type BlankAsNullReach } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -128,9 +123,7 @@ import {
 // business field (e.g. `sys_team`, a `managedBy: 'better-auth'` table where the
 // column is not injected) must get a normal required-check instead of silently
 // passing NULL through to the driver.
-const SKIP_FIELDS = new Set<string>([
-  'id', 'created_at', 'created_by', 'updated_at', 'updated_by',
-]);
+const SKIP_FIELDS = new Set<string>(ENGINE_LIFECYCLE_COLUMNS);
 
 // Linear-time email check. Domain labels exclude '.', so the quantifiers on
 // either side of each '.' can't overlap — this avoids the polynomial
@@ -741,7 +734,7 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * ## [#29176] The one string-stored arm: an optional column a unique constraint covers
  *
  * Exactly `''` on a column that is ALL of: text-like
- * ({@link UNIQUE_BLANK_TEXT_TYPES}), not `required: true`, and covered by a
+ * (`STRING_VALUE_TYPES` minus `password` / `secret`), not `required: true`, and covered by a
  * unique constraint — its own `unique`, or membership in a declared
  * `indexes[]` entry whose `unique` asks for one (`isUniqueDeclared`, the
  * predicate the drivers build their constraints by) — is `null` from the door
@@ -764,9 +757,9 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * Exactly `''` on a column that is ALL of: on the `$empty` table's
  * `null_only` row (`expandEmptyOperator`, the table's own answer — so a
  * `multiple: true` column, the `multi_value` row, is out), storing ONE string
- * ({@link ONE_STRING_STORED_TYPES}), and not `required: true` — is `null` from
+ * (`ONE_STRING_STORED_TYPES`: option, reference and file types), and not `required: true` — is `null` from
  * the door on, unique or not (maintainer ruling B on #29346, record
- * 6579813296; {@link isOneStringNullOnlyColumn}). `''` is neither an option
+ * 6579813296). `''` is neither an option
  * code, a record id nor a file id, so it holds no value there; the ruled table
  * reads only `null` as empty on that row, and is unchanged — a row that
  * already stores `''` keeps answering as a value until a data step cleans it.
@@ -779,11 +772,21 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * ⛔ Every other string-stored column — text no unique constraint covers, a
  * `multiple: true` option, reference or file column (the table's
  * `multi_value` row), and the `null_only` types that do not store one string
- * (see {@link ONE_STRING_STORED_TYPES}). There `''` is a value, and the
+ * (object/array-stored and engine-owned; `@objectstack/core`'s
+ * `blank-storage-form.ts` says why each is out). There `''` is a value, and the
  * spec's value round-trip fixture pins it on text (`str_empty`: an empty
  * string must not become null). ⛔ A non-blank value, and every non-string value, of any
  * type: `null`, `0`, `false`, `'abc'` pass through untouched, so every type
  * check and refusal downstream sees what it saw.
+ *
+ * ## One rule, two readers
+ *
+ * Which columns, and which blanks, is `blankAsNullColumns` /
+ * `blankStorageForm` in `@objectstack/core` (`blank-storage-form.ts`) — the
+ * one spelling of all three arms. This door applies it; the seed loader's
+ * replay (`@objectstack/metadata-protocol`, the `blankAsNull` replay
+ * comparand) compares a seed value in the form it stores, so a seed `''` the
+ * door stores as `null` is not a change on every replay.
  *
  * ## Where it runs, and why there
  *
@@ -811,126 +814,32 @@ export function normalizeBlankTypedValues<T>(
 ): T {
   const fields = objectSchema?.fields;
   if (!fields || !data || typeof data !== 'object') return data;
-  // Read once per call, and only when a row carries an `''` at all.
-  let blankNull: ReadonlySet<string> | undefined;
-  const blankNullColumns = () => (blankNull ??= blankAsNullColumns(fields, objectSchema?.indexes));
+  // Read once per call, and only when a row carries a blank at all.
+  let columns: ReadonlyMap<string, BlankAsNullReach> | undefined;
+  const reachOf = (name: string) => (columns ??= blankAsNullColumns(objectSchema)).get(name);
   if (Array.isArray(data)) {
     let rows: unknown[] | undefined;
     for (let i = 0; i < data.length; i++) {
-      const row = normalizeBlankTypedRow(fields, blankNullColumns, data[i]);
+      const row = normalizeBlankTypedRow(reachOf, data[i]);
       if (row !== data[i]) (rows ??= data.slice())[i] = row;
     }
     return (rows ?? data) as T;
   }
-  return normalizeBlankTypedRow(fields, blankNullColumns, data) as T;
+  return normalizeBlankTypedRow(reachOf, data) as T;
 }
 
 function normalizeBlankTypedRow(
-  fields: Record<string, FieldDef>,
-  blankNullColumns: () => ReadonlySet<string>,
+  reachOf: (name: string) => BlankAsNullReach | undefined,
   row: unknown,
 ): unknown {
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
   for (const [name, value] of Object.entries(row)) {
     if (typeof value !== 'string' || !isMissing(value)) continue;
-    // Own-property: a field name may be `constructor` / `valueOf`.
-    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
-    if (!def) continue;
-    if (!NON_TEXT_STORED_VALUE_TYPES.has(def.type) && !(value === '' && blankNullColumns().has(name))) continue;
+    if (blankStorageForm(value, reachOf(name)) !== null) continue;
     (out ??= { ...row })[name] = null;
   }
   return out ?? row;
-}
-
-/**
- * [#29176] The text-like types whose `''` the write door stores as `null` on
- * an optional column a unique constraint covers ({@link normalizeBlankTypedValues}).
- *
- * The spec's `STRING_VALUE_TYPES` — exactly the "text-like" row of the
- * `$empty` operator's ruled table, where `''` and `null` already answer as one
- * — read as the constant, never re-listed, minus the two credential types.
- * ⛔ `password` and `secret` stay out: a maintainer ruling refuses `''` on them
- * (`EmptyCredentialWriteError`) while `null` means "clear", so rewriting the
- * blank here would turn that refusal into a silent clear.
- *
- * The single-value option and reference types are not text-like: their arm
- * is {@link isOneStringNullOnlyColumn} (#29277), which needs no unique
- * constraint.
- */
-const UNIQUE_BLANK_TEXT_TYPES: ReadonlySet<string> = new Set(
-  [...STRING_VALUE_TYPES].filter((t) => t !== 'password' && t !== 'secret'),
-);
-
-/**
- * [#29277] The storage-shape half of the arm: the spec's value classes whose
- * single value IS one string — an option code (`SINGLE_OPTION_TYPES`), a
- * record id (`REFERENCE_VALUE_TYPES`), an opaque `sys_file` id
- * (`FILE_REFERENCE_TYPES`; SQL stores it JSON-encoded, still one string to
- * every reader). Read as the spec's constants, never re-listed. The spec has
- * no predicate for "stores one string", so this set is stated here, and
- * `record-validator.single-value-blank.test.ts` ties it to the table: every
- * type on the `null_only` row that is not typed (`NON_TEXT_STORED_VALUE_TYPES`)
- * must be in this set or in one of the two classes left out below, so a type
- * that joins the row unclassified turns that pin red.
- *
- * Left out, each measured on SQLite through the engine:
- *
- *  - `STRUCTURED_JSON_TYPES` (`json`, `composite`, `record`, `location`,
- *    `address`, `repeater`, `vector`): the value is an object or an array, so
- *    `''` is not a blank of its shape. What empty means for them is a
- *    separate question.
- *  - `COMPUTED_VALUE_TYPES` (`formula`, `autonumber`; `summary` is typed): the
- *    engine owns the value — a formula is never stored, an autonumber is
- *    issued on insert whatever the caller sent, `''` included.
- */
-const ONE_STRING_STORED_TYPES: ReadonlySet<string> = new Set([
-  ...SINGLE_OPTION_TYPES,
-  ...REFERENCE_VALUE_TYPES,
-  ...FILE_REFERENCE_TYPES,
-]);
-
-/**
- * [#29277] Is `def` on the `$empty` table's `null_only` row, storing one
- * string? The row is the table's own answer (`expandEmptyOperator`), read
- * first: a `multiple: true` column — the `multi_value` row — is never one,
- * and a type the table moves off the row is followed without an edit.
- */
-function isOneStringNullOnlyColumn(def: FieldDef): boolean {
-  return expandEmptyOperator(def).arm === 'null_only' && ONE_STRING_STORED_TYPES.has(def.type);
-}
-
-/**
- * The columns of one object whose `''` the write door stores as `null`. Each
- * is not `required: true` and not a lifecycle column the engine owns, and is
- * ONE of:
- *
- *  - [#29176] text-like ({@link UNIQUE_BLANK_TEXT_TYPES}) and covered by a
- *    unique constraint on either surface the drivers build one from — a
- *    field's own `unique`, or a declared `indexes[]` entry whose `unique` asks
- *    for one. Both surfaces are read through `isUniqueDeclared`, the drivers'
- *    own predicate, so a text column the store does not constrain is never
- *    rewritten;
- *  - [#29277] a one-string column on the `$empty` table's `null_only` row
- *    ({@link isOneStringNullOnlyColumn}), unique or not.
- */
-function blankAsNullColumns(fields: Record<string, FieldDef>, indexes: unknown): ReadonlySet<string> {
-  const covered = new Set<string>();
-  for (const [name, def] of Object.entries(fields)) {
-    if (def && isUniqueDeclared(def.unique)) covered.add(name);
-  }
-  if (Array.isArray(indexes)) {
-    for (const idx of indexes) {
-      if (!isPlainRecord(idx) || !isUniqueDeclared(idx.unique) || !Array.isArray(idx.fields)) continue;
-      for (const name of idx.fields) if (typeof name === 'string') covered.add(name);
-    }
-  }
-  const out = new Set<string>();
-  for (const [name, def] of Object.entries(fields)) {
-    if (!def || SKIP_FIELDS.has(name) || def.required === true) continue;
-    if (UNIQUE_BLANK_TEXT_TYPES.has(def.type) ? covered.has(name) : isOneStringNullOnlyColumn(def)) out.add(name);
-  }
-  return out;
 }
 
 /**
