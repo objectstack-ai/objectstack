@@ -36,7 +36,6 @@ export const SysScimConnectionBinding = ObjectSchema.create({
   description: 'Lifecycle state for a SCIM provisioning connection, including its decommission state machine',
   displayNameField: 'connection_id',
   nameField: 'connection_id', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{connection_id}',
   highlightFields: ['connection_id', 'provisioning_domain_id', 'decommission_status'],
 
   listViews: {

@@ -49,7 +49,6 @@ export const SysSetting = ObjectSchema.create({
   description: 'Generic K/V store backing the SettingsManifest contract.',
   displayNameField: 'key',
   nameField: 'key', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{namespace}.{key}',
   highlightFields: ['namespace', 'key', 'scope', 'updated_at'],
 
   listViews: {
