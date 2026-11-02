@@ -318,7 +318,7 @@ describe('ActionActivationProjection — absence means ACTIVE', () => {
         // What happened, who can undo it and where, and what to do meanwhile.
         expect(message).toBe(
             'This action is turned off for this deployment. An administrator can turn it on again under '
-            + 'Setup › Packaged automation, or you can use another action.',
+            + 'Setup › Packaged Actions, or you can use another action.',
         );
         // The machine half (the ledger table, the ADR) belongs to the log line
         // and the envelope's code, never to what an end user reads.
