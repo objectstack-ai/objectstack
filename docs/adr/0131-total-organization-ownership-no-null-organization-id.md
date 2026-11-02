@@ -912,6 +912,17 @@ user-owned D3 object, not as this table. ADR-0017 carries the amendment note.
 D6/D7; only its reserved organization column goes (C0, before 17.3). Each retirement of an authorable
 shape is an [ADR-0087](./0087-metadata-protocol-upgrade-contract.md) entry.
 
+> **Note (2026-11-02, ruling of record `6570568131` on [#28971](https://github.com/objectstack-ai/objectstack/issues/28971),
+> letter C, 「同意」) — named personal views are a user-owned D3 object; the direction is ruled, no longer
+> parked.** The paragraph above keeps a per-user "personal view" scope as "the parked v18 direction" and
+> says that, if pulled, it "returns as a user-owned D3 object, not as this table". The maintainer pulled
+> it: a reader's named personal view is a row of a user-owned data object, as this paragraph anticipated.
+> It is not a view item (ADR-0017's `ViewItem`), and it does not reuse `scope: 'personal'`;
+> `sys_view_definition` stays retired. The first version follows #28949, #28948, #28950 and #28912 and
+> gets its own execution card once the four cards above have landed. Retiring the inert `scope: 'personal'` and `sharing.type: 'personal'`
+> declarations is #29037's, not this note's. The paragraph stays as written, and this note governs how its
+> "parked" clause is read; ADR-0017 carries the matching note beside its `personal` layer.
+
 ### D14 — Staging: one pre-17.3 column fix, everything else on the v18 line
 
 Maintainer, 2026-09-04: 「我发 17.3，然后后续这么大的改动应该放到 v18」. Two consequences:

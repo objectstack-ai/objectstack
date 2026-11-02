@@ -753,6 +753,12 @@ each row of `updateMany` and of `batch` with `operation: "update"`. A caller who
 update the object gets `404 RECORD_NOT_FOUND` for an id that names no record, and for
 a record its row-level access hides.
 
+A version token (`If-Match`, or `expectedVersion`) is compared only against a record the
+caller can read: a stale token on such a record is answered `409 CONCURRENT_UPDATE`,
+whether or not the caller may write it. For a record the caller's read does not return,
+and for an id that names no record, a stale token changes none of the answers above. A
+caller refused reading the object gets that read refusal.
+
 ### Delete Record
 
 Delete a record by ID.
