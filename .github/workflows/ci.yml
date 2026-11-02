@@ -3918,10 +3918,12 @@ jobs:
       # a missing report is a warning, not an error (the refresh's selector
       # then skips this run by name). Uploaded on the full battery's events
       # only, the deny-list of THE TWO SPEEDS above `jobs:`; a pull request that
-      # failed open to the whole suite writes a report and uploads nothing. The
-      # refresh reads the newest fifty completed runs of this workflow on
-      # `main`, so a push run's report needs two days and a scheduled run's a
-      # week, which also covers a quiet weekend of scheduled runs alone.
+      # failed open to the whole suite writes a report and uploads nothing.
+      # `overwrite: true` so a re-run shard replaces its report, as the
+      # shard-attestation uploads do. The refresh reads only the newest
+      # completed `push` / `schedule` runs of this workflow on `main`, as many
+      # as its selector's own cap examines, so the retention below is
+      # deliberately more than that window needs; it is not a measurement of it.
       - name: Publish this shard's per-file test timings
         if: ${{ always() && github.event_name != 'pull_request' && github.event_name != 'merge_group' }}
         continue-on-error: true
@@ -3931,6 +3933,7 @@ jobs:
           path: ${{ runner.temp }}/test-file-timings/
           if-no-files-found: warn
           retention-days: ${{ github.event_name == 'schedule' && 7 || 2 }}
+          overwrite: true
 
   test-ui-gate:
     # Stable required-check name for the sharded Test UI matrix (#26460, ruling

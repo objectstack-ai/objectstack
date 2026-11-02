@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Plain-JS CI helpers; their types are INFERRED from the .mjs source by
 // `tsconfig.scripts.json` (`allowJs`), so no `@ts-expect-error` here.
@@ -23,6 +26,7 @@ import { TIMINGS_SCHEMA, datasetWeights, pathKey } from '../test-shard-partition
 import { parse as parseYaml } from 'yaml';
 import { shardTotal } from '../../../scripts/ci-shard-matrix.mjs';
 import { UI_JOBS, rootCi, rootWorkflow, rootWorkflowsDir } from './helpers/root-ci';
+import { childVitestEnv } from './helpers/child-vitest-env';
 
 /**
  * The per-file timing pipeline (objectui#12208): the reporter that measures on
@@ -92,6 +96,44 @@ describe('the writer', () => {
     expect(() => reporter.onTestRunEnd([testModule('a.test.ts', { duration: 5 })])).not.toThrow();
     expect(fs.readdirSync(dir)).toEqual([]);
   });
+});
+
+/**
+ * The writer as the real vitest CLI loads it: by ABSOLUTE path, the spelling
+ * the root `ci.yml` passes. A pull request runs Test UI at the affected speed,
+ * which passes no reporter, so nothing else on a PR proves the load; a load
+ * failure would red every full-battery Test UI shard on `main`. One fixture
+ * test in a scratch root with its own empty config (never this tree's, whose
+ * projects and invocation guard are not what is under test).
+ */
+describe('the writer, loaded by the vitest CLI from an absolute path', () => {
+  const reporterPath = fileURLToPath(new URL('../test-file-timings.mjs', import.meta.url));
+  const vitestCli = (() => {
+    const require = createRequire(import.meta.url);
+    const pkgPath = require.resolve('vitest/package.json');
+    const bin = (JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { bin: { vitest: string } }).bin.vitest;
+    return path.resolve(path.dirname(pkgPath), bin);
+  })();
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'file-timings-load-'));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('exits 0 and writes a schema-tagged report naming the fixture file', () => {
+    fs.writeFileSync(path.join(dir, 'vitest.config.mjs'), 'export default {};\n');
+    fs.writeFileSync(path.join(dir, 'smoke.test.mjs'), "test('runs', () => { expect(1).toBe(1); });\n");
+    const out = path.join(dir, 'report', 'shard-1.json');
+    const child = spawnSync(
+      process.execPath,
+      [vitestCli, 'run', '--root', dir, '--config', path.join(dir, 'vitest.config.mjs'), '--globals', '--reporter=default', `--reporter=${reporterPath}`],
+      { cwd: dir, encoding: 'utf8', env: childVitestEnv({ [OUT_ENV]: out }), timeout: 120_000 },
+    );
+    expect(child.status, `${child.stdout ?? ''}${child.stderr ?? ''}`).toBe(0);
+    const report = JSON.parse(fs.readFileSync(out, 'utf8'));
+    expect(report.schema).toBe(REPORT_SCHEMA);
+    expect(report.files.map((f: { file: string }) => f.file)).toEqual(['smoke.test.mjs']);
+  }, 180_000);
 });
 
 describe('the generator', () => {

@@ -101,6 +101,17 @@ jobs:
       UI_TEST_SHARDS: '16'
       RUN_LIMIT: '6'
     steps:
+      # A dispatch from another branch would regenerate from that branch's
+      # scripts and open a PR against `main` from them; only `main` runs the
+      # write path. Refused before anything else runs.
+      - name: Refuse a dispatch on any ref but main
+        if: github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main'
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          echo "::error title=UI test timings refresh::workflow_dispatch runs only on refs/heads/main, not '$REF'. Nothing was regenerated or pushed."
+          exit 1
+
       - name: Checkout repository
         uses: actions/checkout@v7
         with:
