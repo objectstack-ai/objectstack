@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { ITeamGraphService } from '@objectstack/spec/contracts';
+import { isMissingTableError, keysetWalk } from '@objectstack/types';
 import type { SharingEngine } from './sharing-service.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
@@ -129,6 +130,66 @@ function roleHolderPredicate(roleName: string, org: string | null | undefined): 
 }
 
 /**
+ * [#29362] Rows per page of the role-holder read — the bound the read always
+ * carried, so a role held by fewer people issues the one read it always did.
+ */
+const ROLE_HOLDER_PAGE_ROWS = 10000;
+
+/**
+ * [#29362] Every holder of `roleName` (in `org`, when given), read to
+ * completion — or a refusal, never a shortened or an invented empty set.
+ *
+ * Pages of {@link ROLE_HOLDER_PAGE_ROWS} through the platform's one keyset
+ * walk (`keysetWalk`, `@objectstack/types`): ordered by `id`, each page
+ * resuming after the last id the one before it returned, so a role held past
+ * the bound is read whole rather than cut at an arbitrary 10,000 rows.
+ *
+ * Loud, never short. The set feeds sharing GRANTS, and the reconcilers diff the
+ * grants a rule already holds against it — an answer missing a holder revokes
+ * that holder's access, and an invented `[]` revokes everyone's. So:
+ *
+ *   - a read that fails throws, carrying the driver's error as `cause`;
+ *   - a walk that cannot vouch for completion (a row without an `id` to resume
+ *     after, a page the driver returned without honouring the cursor) throws;
+ *   - a table that does not exist is the one failure that IS an answer — a
+ *     stack that never materialises `sys_member` has no role holders — and
+ *     answers `[]` as it always did, judged by the shared missing-table
+ *     predicate rather than by swallowing every error.
+ */
+async function readRoleHoldersToCompletion(
+  engine: SharingEngine,
+  roleName: string,
+  org: string | null | undefined,
+): Promise<string[]> {
+  const refusal = (reason: string, cause?: unknown) => new Error(
+    `[sharing] the holders of role '${roleName}'${org ? ` in organization '${org}'` : ''} could not be read: `
+      + `${reason}. A shortened or empty holder set would withhold or revoke the grants it confers, so the `
+      + 'expansion refuses instead.',
+    cause === undefined ? undefined : { cause },
+  );
+  const users = new Set<string>();
+  const walk = keysetWalk<Record<string, unknown>>(
+    (page) => engine.find('sys_member', { ...page, fields: ['id', 'user_id'], context: SYSTEM_CTX }),
+    { where: roleHolderPredicate(roleName, org), pageSize: ROLE_HOLDER_PAGE_ROWS },
+  );
+  try {
+    for await (const page of walk.pages()) {
+      for (const row of page) {
+        const uid = String(row?.user_id ?? '');
+        if (uid) users.add(uid);
+      }
+    }
+  } catch (err) {
+    if (isMissingTableError(err, 'sys_member')) return [];
+    throw refusal(err instanceof Error ? err.message : String(err), err);
+  }
+  if (walk.truncated) {
+    throw refusal('the read by id could not continue past a page (a row without an id, or a page that repeated the cursor)');
+  }
+  return Array.from(users);
+}
+
+/**
  * Is `userId` a member of `teamId`? The user-scoped twin of
  * {@link TeamGraphService.expandUsers}: the same table and the same predicate,
  * narrowed to one user, so the answer is `expandUsers(teamId).includes(userId)`
@@ -228,18 +289,9 @@ export class TeamGraphService implements ITeamGraphService {
     const cached = this.cache.expandRole!.get(key);
     if (cached) return cached;
     const org = organizationId ?? this.organizationId;
-    let rows: any[] = [];
-    try {
-      rows = await this.engine.find('sys_member', {
-        filter: roleHolderPredicate(roleName, org),
-        fields: ['user_id'],
-        limit: 10000,
-        context: SYSTEM_CTX,
-      });
-    } catch {
-      rows = [];
-    }
-    const users = Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+    // [#29362] Read to completion, and a failed read throws — so nothing is
+    // cached for it, and the next caller reads again.
+    const users = await readRoleHoldersToCompletion(this.engine, roleName, org);
     this.cache.expandRole!.set(key, users);
     return users;
   }
