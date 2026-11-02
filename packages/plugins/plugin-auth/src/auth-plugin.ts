@@ -1866,9 +1866,8 @@ export class AuthPlugin implements Plugin {
           packageId: 'com.objectstack.plugin-auth.api-key-restore-guard',
           logger: ctx.logger,
         });
-        // A reader's own named list views: the body is judged as a ListView on
-        // every save, and a new default clears the owner's previous one for
-        // the same object. See personal-view-hooks.ts.
+        // A reader's own named list views: the body is judged on every save as
+        // a ListView for the row's own object. See personal-view-hooks.ts.
         registerPersonalViewHooks(engine, {
           packageId: 'com.objectstack.plugin-auth.personal-view',
           logger: ctx.logger,
