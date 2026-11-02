@@ -79,6 +79,8 @@ function tokenBoundClient(): AuthClient {
   } as unknown as AuthClient;
 }
 
+const STOP_PATH = '/api/v1/auth/admin/stop-impersonating';
+
 /** The administrator's `sys_user` row, read by the banner to name them. */
 const ADMIN_READ_PATH = '/api/v1/data/sys_user/usr_admin';
 
@@ -217,10 +219,13 @@ describe('ImpersonationBanner (#4467)', () => {
 
   it('stop: calls the endpoint, adopts the restored token, refreshes identity, banner goes', async () => {
     TokenStorage.set(IMPERSONATED_TOKEN);
-    const seen = stubStopEndpoint(() =>
+    const seen = stubStopEndpoint((url) =>
       // The server hands the ADMINISTRATOR's session back the same way it
-      // handed the impersonated one out: a rotation on the response header.
-      new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } }),
+      // handed the impersonated one out: a rotation on the stop's response
+      // header, and on no other route.
+      url.endsWith(STOP_PATH)
+        ? new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } })
+        : new Response('{}'),
     );
     renderBanner();
 
@@ -228,10 +233,10 @@ describe('ImpersonationBanner (#4467)', () => {
     await userEvent.click(screen.getByTestId('impersonation-stop'));
 
     await waitFor(() => expect(screen.queryByTestId('impersonation-banner')).toBeNull());
-    expect(seen.urls.some((u) => u.endsWith('/api/v1/auth/admin/stop-impersonating'))).toBe(true);
+    expect(seen.urls.some((u) => u.endsWith(STOP_PATH))).toBe(true);
     // The request went out AS the impersonated user (that is the session we
     // hold); the administrator is restored from the `admin_session` cookie.
-    expect(seen.bearers[0]).toBe(`Bearer ${IMPERSONATED_TOKEN}`);
+    expect(seen.bearers[seen.urls.findIndex((u) => u.endsWith(STOP_PATH))]).toBe(`Bearer ${IMPERSONATED_TOKEN}`);
     // The rotation was adopted — this is the lane fix doing the work.
     expect(TokenStorage.get()).toBe(ADMIN_TOKEN);
   });
@@ -274,8 +279,10 @@ describe('ImpersonationBanner (#4467)', () => {
 
   it('a LATER impersonation, after a stop that worked, is not reported as a failed stop', async () => {
     TokenStorage.set(IMPERSONATED_TOKEN);
-    stubStopEndpoint(() =>
-      new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } }),
+    stubStopEndpoint((url) =>
+      url.endsWith(STOP_PATH)
+        ? new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } })
+        : new Response('{}'),
     );
     renderBanner();
 
