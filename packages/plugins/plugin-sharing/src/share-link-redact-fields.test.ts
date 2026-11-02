@@ -130,7 +130,7 @@ describe('[#29130] share-link mint — redactFields must name columns of the obj
 
     const resolved = await service.resolveToken(link.token, {});
     expect(resolved).not.toBeNull();
-    expect(resolved!.redactFields.sort()).toEqual(['notes', 'body']);
+    expect(resolved!.redactFields.sort()).toEqual(['body', 'notes']);
     const answer = buildShareLinkResolveAnswer(engine.tables.doc[0], resolved!, SCHEMAS.doc) as any;
     expect(answer.record).not.toHaveProperty('body');
     expect(answer.record.title).toBe('Plan');
