@@ -44,6 +44,12 @@ const SOURCE = readFileSync(fileURLToPath(new URL('./protocol.ts', import.meta.u
 const SEAM_FILE = 'protocol-artifact-lookup.ts';
 const SEAM = readFileSync(fileURLToPath(new URL(`./${SEAM_FILE}`, import.meta.url)), 'utf8');
 const CALLEE = 'lookupArtifactItem(';
+/**
+ * [#25467 E0] The module the protocol.ts preamble's package-binding helpers moved
+ * to, `envelopePackageId` among them; protocol.ts imports the one definition.
+ */
+const BINDINGS_FILE = 'protocol-package-bindings.ts';
+const BINDINGS = readFileSync(fileURLToPath(new URL(`./${BINDINGS_FILE}`, import.meta.url)), 'utf8');
 
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
 const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
@@ -183,7 +189,11 @@ describe('[#22024] every lookupArtifactItem( in protocol.ts has a recorded dispo
     });
 
     it('both read doors take their envelope from one rule, the served item\'s own package when none is named', () => {
-        expect(SOURCE).toMatch(/\nfunction envelopePackageId\(requestedPackageId: string \| undefined, served: unknown\): string \| undefined \{/);
+        // [#25467 E0] The rule is defined once, in the bindings module, and protocol.ts
+        // imports that definition rather than carrying a copy of its own.
+        expect(BINDINGS).toMatch(/\nfunction envelopePackageId\(requestedPackageId: string \| undefined, served: unknown\): string \| undefined \{/);
+        expect(SOURCE).not.toMatch(/\nfunction envelopePackageId\(/);
+        expect(SOURCE).toMatch(/\nimport \{[^}]*\benvelopePackageId,[^}]*\} from '\.\/protocol-package-bindings\.js';/);
         expect(SOURCE).toContain('const itemPackageId = envelopePackageId(packageId, it);');
         expect(SITES.filter((site) => site.disposition === 'served-package envelope').map((site) => site.member).sort())
             .toEqual(['readFlattenedMetaItems', 'readMetaItem']);
