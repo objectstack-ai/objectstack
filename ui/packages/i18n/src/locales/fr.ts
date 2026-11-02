@@ -1855,7 +1855,9 @@ const fr = {
       title: "Paramètres",
       subtitle: "Configurez votre système, vos intégrations et vos indicateurs de fonctionnalité.",
       loadError: "Échec du chargement des paramètres",
-      empty: "Aucun paramètre enregistré. Les plugins peuvent enregistrer des manifestes de paramètres via le SettingsService.",
+      empty: "Aucune page de paramètres n'est encore disponible. Elles apparaissent ici lorsqu'une application installée en fournit.",
+      adminManaged: "Les paramètres sont gérés par votre administrateur",
+      adminManagedDescription: "Votre compte ne peut ni afficher ni modifier ces paramètres. Adressez-vous à un administrateur si quelque chose doit changer.",
       settingsCount: "{{n}} paramètres",
       beta: "Bêta",
       categories: {
