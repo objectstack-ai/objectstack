@@ -169,6 +169,18 @@ describe('[#29130] share-link mint — redactFields must name columns of the obj
     expect(engine.tables.sys_share_link[0].redact_fields).toEqual(['anything']);
   });
 
+  it('refuses a malformed list with the request-shape checks, before any record is read', async () => {
+    const reads: string[] = [];
+    const find = engine.find.bind(engine);
+    engine.find = async (object: string, options?: any) => { reads.push(object); return find(object, options); };
+    const err = await refusal(
+      service.createLink({ object: 'doc', recordId: 'missing', redactFields: 'body' as any }, { userId: 'u1' } as any),
+    );
+    expect(err.status).toBe(400);
+    expect(err.code).toBe('VALIDATION_FAILED');
+    expect(reads).toEqual([]);
+  });
+
   it('answers a caller with no authority over the record 403 before judging the names', async () => {
     const err = await refusal(
       service.createLink({ object: 'doc', recordId: 'missing', redactFields: ['bdoy'] }, { userId: 'u1' } as any),

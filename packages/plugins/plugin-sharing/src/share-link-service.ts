@@ -345,19 +345,30 @@ function assertEligible(
 }
 
 /**
- * [#29130] The mint's `redactFields`, checked: an array of strings, each naming
- * a column a read of `object` serves. Refused with the door's request-shape
- * family (`400 VALIDATION_FAILED`), naming every unknown entry, so nothing is
- * minted. Returns the list to store (`[]` when none was sent).
+ * [#29130] The SHAPE of the mint's `redactFields`: absent, or an array of
+ * strings. A request-shape refusal (`400 VALIDATION_FAILED`), asked with the
+ * mint's other request-shape checks, before any record is read. Returns the
+ * list (`[]` when none was sent).
  */
-function assertRedactFields(raw: unknown, schema: unknown, object: string): string[] {
+function redactFieldsShape(raw: unknown): string[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw) || raw.some((name) => typeof name !== 'string')) {
     throw makeError(400, 'VALIDATION_FAILED', 'redactFields must be an array of field names');
   }
+  return raw;
+}
+
+/**
+ * [#29130] Every `redactFields` entry must name a column a read of `object`
+ * serves (`declaredColumnSet`). Refused with the door's request-shape family
+ * (`400 VALIDATION_FAILED`), naming every unknown entry, so nothing is minted.
+ * A schema with no checkable field map gives no verdict.
+ */
+function assertRedactFieldColumns(names: readonly string[], schema: unknown, object: string): void {
+  if (names.length === 0) return;
   const columns = declaredColumnSet(schema as { fields?: unknown } | undefined);
-  if (!columns) return raw;
-  const unknown = Array.from(new Set(raw.filter((name) => !columns.has(name))));
+  if (!columns) return;
+  const unknown = Array.from(new Set(names.filter((name) => !columns.has(name))));
   if (unknown.length > 0) {
     throw makeError(
       400,
@@ -366,7 +377,6 @@ function assertRedactFields(raw: unknown, schema: unknown, object: string): stri
         `${unknown.join(', ')} — a redaction that matches no field hides nothing, so no link was issued`,
     );
   }
-  return raw;
 }
 
 /**
@@ -590,6 +600,11 @@ export class ShareLinkService implements IShareLinkService {
       throw makeError(400, 'VALIDATION_FAILED', 'emailAllowlist is required when audience=email');
     }
 
+    // [#29130] The shape of `redactFields` is a request-shape check like the two
+    // above; whether each name is a column of the object is judged after the
+    // authority check below.
+    const redactFields = redactFieldsShape(input.redactFields);
+
     // Confirm the target record exists AND — for an HTTP caller — that the
     // caller holds authority over it. [Finding-2] Reading under the caller's
     // own context (positions/permissions/RLS) means a client can no longer
@@ -675,7 +690,7 @@ export class ShareLinkService implements IShareLinkService {
     // nothing about the object's columns from the refusal. A schema with no
     // checkable field map gives no verdict (the shared rule: a door that cannot
     // see the field map does not invent one), and the entries are kept as sent.
-    const redactFields = assertRedactFields(input.redactFields, schema, input.object);
+    assertRedactFieldColumns(redactFields, schema, input.object);
 
     // [#7861] The declared eligibility gate. Placed AFTER the authority check
     // (it needs the record, and a caller with no authority over the row must

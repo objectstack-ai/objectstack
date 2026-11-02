@@ -5,8 +5,12 @@
 
 fix(plugin-sharing): a share link whose `redactFields` names a field the object does not have is refused at mint, instead of being issued with a redaction that hides nothing
 
-Clause-②: yes (widening)
+Clause-②: yes (narrowing)
 Metadata-protocol: none
+
+<!-- adr-0087: not-required (no-migration-prescription) the narrowing is a REST request refusal at the share-link mint; no metadata key, spec schema or stored row changes, so there is nothing for objectstack migrate meta to rewrite and the caller is told at the request -->
+
+**BREAKING**: `POST /api/v1/share-links` (and `ShareLinkService.createLink`) now refuses a `redactFields` entry that names no column of the object with `400 VALIDATION_FAILED`, where it used to answer `201` and mint the link. FROM a request carrying a misspelt or unknown name in `redactFields` TO the same request with the name corrected to a real field of the object, or the entry dropped.
 
 The share-link mint (`POST /api/v1/share-links`, `ShareLinkService.createLink`) stored the per-link `redactFields` list as sent. At resolve the list is applied as field names, so an entry that matched no field stripped nothing, while the resolve answer still listed it among the hidden fields and the landing page said it was hidden. A misspelt redaction therefore served the very field it was meant to keep back.
 
