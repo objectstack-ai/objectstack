@@ -600,7 +600,7 @@ describe('ADR-0143 D3/D6 — what a grant leaves behind', () => {
         // The logs did record the connect — the pin is not passing on silence.
         expect(out.text()).toContain("connector instance 'crm' connected for organization 'org_a' by user 'usr_admin'");
         expect(out.text()).toContain(
-            "connector instance 'crm' needs to be reconnected for organization 'org_a': its authorization server refused the grant",
+            "[Automation] connector instance 'crm' needs to be reconnected for organization 'org_a': its authorization server refused the grant",
         );
     });
 

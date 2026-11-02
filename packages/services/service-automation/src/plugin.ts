@@ -3692,11 +3692,10 @@ export class AutomationServicePlugin implements Plugin {
             },
             connections: this.connectorConnectionStoreOrNone(),
             lock: () => this.clusterService(ctx)?.lock,
-            onGrantRefused: (organizationId) => {
-                ctx.logger.warn(
-                    `[Automation] connector instance '${name}': the authorization server refused the grant of organization `
-                        + `'${organizationId}'; it needs to be reconnected there (ADR-0143 D4).`,
-                );
+            onGrantRefused: (_organizationId, reason) => {
+                // The reason the connection stored: it names the instance, the
+                // organization and the cause that happened on that refresh path.
+                ctx.logger.warn(`[Automation] ${reason}.`);
                 void this.materializeDeclaredConnectors(ctx, { fatal: false }).catch(() => { /* logged by the reconcile */ });
             },
             ...(typeof entry.requestTimeoutMs === 'number' ? { timeoutMs: entry.requestTimeoutMs } : {}),
