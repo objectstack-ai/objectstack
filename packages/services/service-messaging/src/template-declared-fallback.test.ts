@@ -1,7 +1,12 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineFindOnePredicate,
+    assertEngineUpdateDispatch,
+    type EngineFindOneQueryInput,
+} from '@objectstack/metadata-core';
 import {
     NotificationTemplateStore,
     TEMPLATE_DECLARED_FALLBACK_LOCALE,
@@ -43,8 +48,8 @@ function fakeData(rows: any[]) {
             },
             async find() { return []; },
             async insert(_o: string, r: any) { return { id: 'x', ...r }; },
-            async update() { return {}; },
-            async delete() { return {}; },
+            async update(_o: string, data: any, options?: any) { assertEngineUpdateDispatch(data, options); return {}; },
+            async delete(_o: string, options?: any) { assertEngineDeleteDispatch(options); return {}; },
             async count() { return 0; },
             async aggregate() { return []; },
         } as any,
