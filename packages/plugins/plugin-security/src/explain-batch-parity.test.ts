@@ -281,15 +281,14 @@ describe('[#29112] security/explain: a batch reads the explained principal once,
   const PRINCIPAL_READS = ['find sys_user_permission_set', 'find sys_user_position', 'findOne sys_user'];
 
   const countReads = async (run: () => Promise<unknown>): Promise<Record<string, number>> => {
-    reads = new Map();
+    const counted = new Map<string, number>();
+    reads = counted;
     try {
       await run();
     } finally {
-      const counted = reads;
       reads = undefined;
-      // eslint-disable-next-line no-unsafe-finally
-      return Object.fromEntries(PRINCIPAL_READS.map((k) => [k, counted.get(k) ?? 0]));
     }
+    return Object.fromEntries(PRINCIPAL_READS.map((k) => [k, counted.get(k) ?? 0]));
   };
 
   // An administrator's explanation of a row the member cannot read runs the
