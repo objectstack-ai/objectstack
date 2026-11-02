@@ -87,8 +87,15 @@ export function isProjectableField(
  * and there is no way to tell without resolving. Authors are already directed
  * to the prefixed form on every surface (a bare field reference throws on the
  * record-header path), so this covers the documented spelling.
+ *
+ * The CEL optional-field spelling `record.?x` / `data.?x` reads the same key and
+ * is harvested the same way. It is exactly the spelling an author reaches for on
+ * a sparse row, so a harvest that skipped it would leave that predicate's
+ * operand outside `$select` with nothing pointing at the projection. The `?`
+ * belongs to the selector only: `record.?` with no name, `record.?.x` and the
+ * JavaScript `record?.x` name no CEL field here and yield nothing.
  */
-const RECORD_REF = /\b(?:record|data)\.([A-Za-z_][A-Za-z0-9_]*)/g;
+const RECORD_REF = /\b(?:record|data)\.\??([A-Za-z_][A-Za-z0-9_]*)/g;
 
 /**
  * A whole bare identifier — what a field name is, and the only shape that can be
