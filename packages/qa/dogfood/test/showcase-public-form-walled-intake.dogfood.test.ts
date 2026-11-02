@@ -18,13 +18,19 @@
 // The control (a form bound to a `tenancy: { enabled: false }` object on the
 // same walled posture is accepted, and its admin read carries no warning) is
 // `public-form-withdrawal-walled.dogfood.test.ts`.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the editor's save goes into the showcase's `.custom` pair, declaring the form
+// it overrides; the anonymous doors serve the pair's override.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 
 const VIEW = '/meta/view/showcase_inquiry.contact';
+const BASE = 'com.example.showcase';
 const SYS = { isSystem: true } as const;
 
 describe('showcase, walled posture: the public contact form is not offered, and the admin read says why', () => {
@@ -59,7 +65,7 @@ describe('showcase, walled posture: the public contact form is not offered, and 
   const saveAllowAnonymous = async (published: Record<string, any>, allowAnonymous: boolean) => {
     const body = structuredClone(published);
     body.config.sharing.allowAnonymous = allowAnonymous;
-    const res = await stack.apiAs(admin, 'PUT', VIEW, body);
+    const res = await stack.apiAs(admin, 'PUT', inPair(VIEW, BASE), declaredOverride(body, BASE, '0.1.0'));
     expect(res.status, await res.clone().text()).toBe(200);
   };
 
@@ -69,6 +75,7 @@ describe('showcase, walled posture: the public contact form is not offered, and 
       security: new SecurityPlugin({ defaultPermissionSets: [...securityDefaultPermissionSets] }),
     });
     admin = await stack.signIn();
+    await ensurePair(stack, admin, BASE);
     ql = await stack.kernel.getServiceAsync('objectql');
   }, 180_000);
 

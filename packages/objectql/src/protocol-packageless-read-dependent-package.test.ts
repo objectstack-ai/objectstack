@@ -22,9 +22,11 @@
  *
  *  - the card's three reads answer base / dependent / base, and the layered
  *    read's `effective` and the list scoped to the base agree with them;
- *  - the write address does not move: a save naming no package still
- *    addresses the dependent package's row, as {@link packagelessAddress}
- *    resolves it — and since #28410 that write is refused (ADR-0146 D2);
+ *  - the write address does not move to the dependent package: a save naming
+ *    no package is refused before any address is resolved — since #28576 a
+ *    write naming no package onto a name the base ships is closed, naming the
+ *    base's pair (ADR-0146 D11; #28410 refused it as the dependent's
+ *    same-named item before that);
  *  - CONTROL: a writable package's OWN item, a name no code package ships,
  *    is still served to the read naming no package (#23291);
  *  - CONTROL: a package-unbound row (the ADR-0005 overlay Setup writes) still
@@ -275,19 +277,19 @@ describe('[#28238] a dependent package\'s row under a name the base ships is not
         expect(listed.items.filter((i: any) => i.name === VIEW).map((i: any) => columnsOf(i))).toEqual([BASE_COLUMNS]);
     });
 
-    it('the write address does not move: a save naming no package still addresses the dependent package\'s row, which the override gate refuses', async () => {
+    it('the write address does not move: a save naming no package is refused, naming the base\'s pair, and the dependent package\'s row is untouched', async () => {
         const { protocol, rowsOf } = await boot();
         await installDependent(protocol);
         await saveIntoDependentBeforeTheGate(protocol, DEPENDENT_COLUMNS);
         expect((await (protocol as any).packagelessAddress('view', VIEW)).packageId).toBe(DEPENDENT);
 
-        // [#28410, ADR-0146 D2, ruling A on #28390] The save naming no package
-        // resolves to the dependent package's row — the address does not move
-        // — and that write is a dependent's same-named item, which the
-        // override write gate refuses (rename): the refusal names the
-        // dependent package, and the stored row is untouched.
+        // [#28576, ADR-0146 D11] The save naming no package is a write onto a
+        // name the base ships, which is closed: the refusal names the base's
+        // pair and the ceremony, ahead of the override write gate that refused
+        // it as the dependent's same-named item (#28410). The stored row is
+        // untouched.
         await expect(protocol.saveMetaItem({ type: 'view', name: VIEW, item: listBody(['title']) } as any))
-            .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, message: expect.stringContaining(`'${DEPENDENT}'`) });
+            .rejects.toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403, message: expect.stringContaining(`'${BASE}.custom' (?package=${BASE}.custom)`) });
 
         const rows = rowsOf(VIEW).filter((r) => r.state === 'active');
         expect(rows.map((r) => r.package_id)).toEqual([DEPENDENT]);

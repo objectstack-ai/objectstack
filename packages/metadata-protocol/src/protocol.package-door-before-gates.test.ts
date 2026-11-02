@@ -285,12 +285,16 @@ describe('[#22220] controls: the gates still judge what the door does not refuse
         }
     });
 
-    it('a packaged item of a type that allows overlays (view) with a body the spec parse refuses → 422 INVALID_METADATA (both kernels)', async () => {
+    it('[#28576, ADR-0146 D11] a packaged item of a type that allows overlays (view), saved naming no package, with a body the spec parse refuses → 403 NOT_OVERRIDABLE (both kernels)', async () => {
+        // Was a control (422 INVALID_METADATA): the overlay type's package-less
+        // write reached the gates. That write onto a packaged item is closed
+        // now, so the door answers first, whatever the body.
         for (const [kernel, environmentId] of KERNELS) {
             const result = await probe(environmentId, {
                 type: 'view', name: 'pkg_view', item: specRefused({ name: 'pkg_view', label: 'Pkg' }),
             });
-            expect(result.envelope, kernel).toEqual(INVALID_METADATA);
+            expect(result.envelope, kernel).toEqual(NOT_OVERRIDABLE);
+            expect(result.gateReached, kernel).toBe(false);
             expect(result.persistedRows, kernel).toBe(0);
         }
     });

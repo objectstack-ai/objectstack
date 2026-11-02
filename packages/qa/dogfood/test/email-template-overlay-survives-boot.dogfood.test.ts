@@ -43,10 +43,16 @@
 //     §6 Q1) — an edit and a create through `/data/sys_email_template` are
 //     refused 403 `PERMISSION_DENIED`, nothing is written, and the
 //     metadata-door wording still sends after the next cold boot.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the admin's edit goes into the showcase's `.custom` pair, declaring the
+// template it overrides. The pair's row is the one stored row, still
+// environment-wide, and it is what the mailer reads.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
 import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -59,6 +65,7 @@ const SYS = { isSystem: true, positions: [], permissions: [] };
 
 /** The one template the showcase package declares (`com.example.showcase`). */
 const NAME = 'showcase_task_done_email';
+const BASE = 'com.example.showcase';
 const PACKAGE_SUBJECT = '✅ Task done: {{title}}';
 const ADMIN_SUBJECT = 'Done (reworded by the admin): {{title}}';
 
@@ -118,6 +125,7 @@ describe('[#21785] a metadata-door email template edit survives a cold boot (sho
         dbFile = join(dir, 'showcase.db');
         stack = await boot(dbFile);
         token = await stack.signIn();
+        await ensurePair(stack, token, BASE);
     }, 180_000);
 
     afterAll(async () => {
@@ -140,7 +148,7 @@ describe('[#21785] a metadata-door email template edit survives a cold boot (sho
             if (!k.startsWith('_')) body[k] = v;
         }
         expect(body.subject).toBe(PACKAGE_SUBJECT);
-        const put = await call('PUT', `/meta/email_template/${NAME}`, { ...body, subject: ADMIN_SUBJECT });
+        const put = await call('PUT', inPair(`/meta/email_template/${NAME}`, BASE), declaredOverride({ ...body, subject: ADMIN_SUBJECT }, BASE, '0.1.0'));
         expect(put.status, JSON.stringify(put.json)).toBe(200);
 
         // [ADR-0131 D6] The door names no organization, whatever the admin's.

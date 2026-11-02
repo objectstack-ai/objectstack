@@ -174,7 +174,6 @@ import {
   Clock,
   MousePointerClick,
   CornerDownRight,
-  Layers,
   FileQuestion,
   PackageX,
   Library,
@@ -283,7 +282,7 @@ import {
   isStudioOrgScope,
   studioOrgScopePath,
 } from './studioScope.js';
-import { STUDIO_ALL_PACKAGES_SEGMENT, STUDIO_METADATA_AREA, studioMetadataAreaPath, studioPillarItemPath } from './metadataArea.js';
+import { STUDIO_METADATA_AREA, studioMetadataAreaPath, studioPillarItemPath } from './metadataArea.js';
 import { PermissionSetCloneDialog } from '../metadata-admin/PermissionSetCloneDialog.js';
 import type { PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
 import { useWalledCatalogReadOnly } from '../metadata-admin/catalog-scope.js';
@@ -871,17 +870,14 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
  * chip, and this mark at the right of the open item's header, in every
  * pillar. The pillar's read-only sentence (objectui#11781) is its title.
  *
- * It offers an environment overlay only where one exists: when the open
- * item's metadata type declares `allowEnvironmentOverlay` in the served
- * registry (ADR-0005), it is a link to that item's page in Studio's "All
- * metadata" area, where the overlay is edited: the page Setup's item route
- * drew, which ADR-0146 D1 moved into Studio, on its cross-package leg. Any
- * other item, no open item, or a registry not yet read draws a plain
- * "Read-only" mark that links nowhere.
- *
- * objectstack#28562 (ADR-0146 D2) — nor does a view, dashboard or report
- * (`isStudioCustomizeType`): Studio customizes those itself, into the base's
- * paired customization package, so Setup's overlay page is not their editor.
+ * objectstack#28576 (ADR-0146 D11) — a plain "Read-only" mark that links
+ * nowhere, for every item of a read-only package. It used to link an item of
+ * an `allowEnvironmentOverlay` type to its overlay page (Setup's item page,
+ * later that page in Studio's "All metadata" area), whose save names no
+ * package; the server refuses that write onto a packaged item now, and a customization lives in the base's paired
+ * `.custom` package instead (Studio customizes a view, dashboard or report
+ * there itself, objectstack#28562). So the mark offers no overlay, whatever
+ * the type's registry flag says. `item` stays in the props the pillars pass.
  *
  * objectui#12707 — at a tab row's end, the mark folds to its glyph when the
  * row cannot hold it whole (`useStudioTabRowFold`), rather than being cut
@@ -889,7 +885,6 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
  * and its title stays its tooltip.
  */
 export function StudioReadOnlyLink({
-  item,
   title,
   locale,
 }: {
@@ -898,50 +893,23 @@ export function StudioReadOnlyLink({
   title: string;
   locale: string;
 }): React.ReactElement {
-  const client = useMetadataClient();
-  const { entries } = useMetadataTypes(client);
-  const overlayable =
-    item !== null &&
-    !isStudioCustomizeType(item.type) &&
-    entries.some((e) => e.type === item.type && e.allowEnvironmentOverlay === true);
-  const ref = React.useRef<HTMLElement | null>(null);
-  const label = t(overlayable ? 'engine.studio.pkg.readonlyLink' : 'engine.studio.pkg.readonly', locale);
+  const ref = React.useRef<HTMLSpanElement | null>(null);
+  const label = t('engine.studio.pkg.readonly', locale);
   const folded = useStudioTabRowFold(ref, label);
   const className = cn(
     'inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md bg-amber-400/15 text-xs font-medium text-amber-700 dark:text-amber-300',
-    overlayable && 'hover:bg-amber-400/25',
     folded ? 'w-7 justify-center' : 'px-2.5',
   );
-  const body = (
-    <>
-      {overlayable ? (
-        <Layers className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      ) : (
-        <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-      )}
-      <span className={folded ? 'sr-only' : undefined}>{label}</span>
-    </>
-  );
-  return overlayable && item ? (
-    <Link
-      ref={ref as React.Ref<HTMLAnchorElement>}
-      to={`${studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)}/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`}
-      title={title}
-      data-testid="studio-readonly-link"
-      data-folded={folded || undefined}
-      className={className}
-    >
-      {body}
-    </Link>
-  ) : (
+  return (
     <span
-      ref={ref as React.Ref<HTMLSpanElement>}
+      ref={ref}
       title={title}
       data-testid="studio-readonly-link"
       data-folded={folded || undefined}
       className={className}
     >
-      {body}
+      <Lock className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+      <span className={folded ? 'sr-only' : undefined}>{label}</span>
     </span>
   );
 }
