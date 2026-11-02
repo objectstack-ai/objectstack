@@ -163,6 +163,7 @@ import {
   INSTANT_TYPES,
   STRUCTURED_JSON_TYPES,
   filterSubtreeProvenanceOf,
+  isListComparandOperator,
   isMultiValueField,
   markFilterSubtreeProvenance,
 } from '@objectstack/spec/data';
@@ -179,14 +180,13 @@ const NO_MULTI_VALUE_COLUMNS: DeclaredMultiValueColumns = new Set();
 /**
  * The operators whose comparand is a VALUE of the column, compared with the
  * stored value. The drivers put these comparands into the column's storage
- * form; every other operator's operand is left as written.
+ * form; every other operator's operand is left as written. Which of them take
+ * a LIST of values is the spec's answer ({@link isListComparandOperator}), not
+ * a copy kept here.
  */
 const VALUE_COMPARISON_OPERATORS: ReadonlySet<string> = new Set([
   '$eq', '$ne', '$gt', '$gte', '$lt', '$lte', '$in', '$nin', '$between',
 ]);
-
-/** The value-comparison operators whose comparand is a LIST of values. */
-const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$between']);
 
 /** The storage rule a declared type takes, or `undefined` for a non-temporal type. */
 function temporalKindOfDeclaredType(type: string): TemporalComparandKind | undefined {
@@ -412,7 +412,7 @@ function storedComparand(value: unknown, kind: TemporalComparandKind): unknown {
 
 /** A value-comparison operand in its column's storage form, a list member by member. */
 function storedOperand(op: string, value: unknown, kind: TemporalComparandKind): unknown {
-  if (!LIST_COMPARAND_OPERATORS.has(op) || !Array.isArray(value)) return storedComparand(value, kind);
+  if (!isListComparandOperator(op) || !Array.isArray(value)) return storedComparand(value, kind);
   let copy: unknown[] | undefined;
   value.forEach((member, index) => {
     const stored = storedComparand(member, kind);
