@@ -844,7 +844,8 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       cancel_invitation: {
         label: "Cancel Invitation",
         confirmText: "Cancel this invitation? The recipient will no longer be able to accept it.",
-        successMessage: "Invitation canceled"
+        successMessage: "Invitation canceled",
+        cancelText: "Keep invitation"
       },
       resend_invitation: {
         label: "Resend Invitation",

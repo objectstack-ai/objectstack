@@ -22,7 +22,7 @@ import { templateSlotSource } from '@objectstack/spec/automation';
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
-import type { IHttpServer, IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import type { IHttpServer, IObjectQLEngine, InternalFieldEvaluationQuery, QueryEvaluationGate, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { standardErrorCodeForHttpStatus, type MetadataProtocol } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
@@ -558,6 +558,19 @@ export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
     if (credentialRefusal) throw credentialRefusal;
 }
 
+/**
+ * Ask `engine` the `internal: true` evaluate refusal (`QueryEvaluationGate`
+ * on the `objectql` slot contract, `IObjectQLEngine`) for `object` and
+ * `query`, for every caller — or nothing, when the value handed in is not an
+ * engine that carries it (a test double, a foreign engine, the raw driver the
+ * MCP multi-env path threads through), which then answers for itself.
+ */
+function assertNoInternalFieldEvaluatedBy(engine: unknown, object: string, query: InternalFieldEvaluationQuery): void {
+    const gate = (engine as Partial<QueryEvaluationGate> | null | undefined)?.assertNoInternalFieldEvaluated;
+    if (typeof gate !== 'function') return;
+    gate.call(engine, object, query);
+}
+
 export async function callData(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: string,
@@ -846,6 +859,11 @@ export async function callData(deps: ActionExecutionDeps,
             if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, ql, params.object, bag.where, scopeId);
             }
+            // …and the `internal: true` evaluate refusal for every caller, as
+            // the protocol path asks it inside `findData` — the engine's one
+            // definition (see the `aggregate` arm). A raw driver on the MCP
+            // multi-env path carries no such member and is not an engine.
+            assertNoInternalFieldEvaluatedBy(ql, params.object, bag);
             let all = await ql.find(params.object, findOpts(bag));
             if (!Array.isArray(all) && all && (all as any).value) all = (all as any).value;
             if (!all) all = [];
@@ -880,22 +898,23 @@ export async function callData(deps: ActionExecutionDeps,
             if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
             }
-            // The data door's evaluate refusal for a field declared
-            // `internal: true` — a filter (`where`, an aggregation's own
-            // `filter`), a group key or an aggregation operand on it. The query
-            // arm meets it inside `findData`; this arm never reaches `findData`,
-            // so it asks the protocol's ONE gate itself, before the engine, and
-            // throws the door's `400 INVALID_FIELD` word for word. ⛔ Never a
-            // copy of the gate here (route-ownership rule 1). Every caller, as
-            // at the door; a host with no protocol has no door to agree with
-            // and is served as before.
-            if (protocol && typeof protocol.assertNoInternalFieldEvaluated === 'function') {
-                protocol.assertNoInternalFieldEvaluated(params.object, {
-                    where: params.where,
-                    groupBy: params.groupBy,
-                    aggregations: params.aggregations,
-                });
-            }
+            // The `internal: true` evaluate refusal — a filter (`where`, an
+            // aggregation's own `filter`), a group key or an aggregation operand
+            // on such a field — asked of the ENGINE's one definition
+            // (`QueryEvaluationGate` on the `objectql` slot contract), the one
+            // the data door asks too, so the refusal is the door's word for
+            // word whether or not this host registers a `protocol` service.
+            // `engine.aggregate` applies it itself to every non-system caller;
+            // it is asked here as well so a system context this arm admits is
+            // refused like every caller at the door. ⛔ Never a copy of the
+            // walk here (route-ownership rule 1). The probe tolerates a test
+            // double or foreign engine without the member, which then answers
+            // for itself.
+            assertNoInternalFieldEvaluatedBy(engine, params.object, {
+                where: params.where,
+                groupBy: params.groupBy,
+                aggregations: params.aggregations,
+            });
             const rows = await engine.aggregate(
                 params.object,
                 {
@@ -1332,6 +1351,31 @@ export function foldsApiDecisionOutputs(action: any): boolean {
 }
 
 /**
+ * Which record input does this partly built forward `path` still lack, by its
+ * `{field}` tokens? `recordId` when the caller named no record, otherwise the
+ * field the record has no value for; `undefined` when every token resolved.
+ * Read after `${…}` and `{{…}}` are refused, so a brace pair left here is a
+ * `{field}` token.
+ */
+function unresolvedApiTargetRecordInput(path: string, routedRecordId: unknown): string | undefined {
+    const match = /\{([a-z_][a-z0-9_]*)\}/i.exec(path);
+    if (!match) return undefined;
+    return routedRecordId === undefined ? 'recordId' : match[1];
+}
+
+/** The refusal for a `target` record token the dispatch inputs left unresolved: nothing is forwarded. */
+function unresolvedApiTargetRecordRefusal(name: string, target: string, missing: string): ApiActionRequestRefusal {
+    return {
+        status: 400,
+        message: missing === 'recordId'
+            ? `Action '${name}' has a \`target\` ('${target}') that names its record, and no \`recordId\` was given. ` +
+                `Pass the id of the record to run it on as \`recordId\`. The request was not sent.`
+            : `Action '${name}' has a \`target\` ('${target}') that reads \`${missing}\` from its record, and this ` +
+                `record has no value for it. The request was not sent.`,
+    };
+}
+
+/**
  * Assemble the request a same-origin `type: 'api'` action makes — method,
  * path and JSON body — from its DECLARATION and the dispatch inputs, by the
  * same rules the console's api handler applies at a click
@@ -1341,6 +1385,10 @@ export function foldsApiDecisionOutputs(action: any): boolean {
  *     the caller (`ctx.recordId`, `ctx.user.id`, `ctx.org.id`; `ctx.origin` /
  *     `ctx.apiBase` are `''` on the server, as they are for a same-origin
  *     console), values percent-encoded; then `{field}` from the subject row.
+ *     A record token neither can fill — no `recordId` given (an empty one is
+ *     none), or a row with no value for the field — is REFUSED naming the
+ *     missing input, never blanked or forwarded as written: that path reaches
+ *     no route, and its 404 would say the endpoint does not exist.
  *  2. The body: the params bag, flat or under `bodyShape.wrap`; the `outputs.*`
  *     fold (#3447); `recordIdParam` seeded from the subject row's
  *     `recordIdField` (default `id`) — or REFUSED when the row cannot supply it
@@ -1373,23 +1421,37 @@ export function buildApiActionRequest(
         : undefined;
 
     // ── 1. the path ──
+    // An empty id is no id: `${ctx.recordId}` and `{id}` stay unresolved, and
+    // are refused below by name, rather than blanked into a path naming no record.
+    const routedRecordId: unknown = input.recordId || (input.record as any)?.id || undefined;
     let path = substituteApiTargetTokens(target, {
         param: input.params,
         ctx: {
             origin: '',
             apiBase: '',
-            recordId: input.recordId ?? (input.record as any)?.id,
+            recordId: routedRecordId,
             user: { id: ec.userId, email: ec.email },
             org: { id: organizationId },
         },
     });
-    if (input.record && /\{[a-z_][a-z0-9_]*\}/i.test(path)) {
-        const row = input.record;
-        path = path.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (_m, k: string) => {
-            const v = row[k];
-            return v == null ? '' : encodeURIComponent(String(v));
+    if (/\{[a-z_][a-z0-9_]*\}/i.test(path)) {
+        // Without a row only `{id}` has a source: the routed `recordId`, as
+        // for `recordIdParam` below. A field with no value is LEFT IN PLACE,
+        // never blanked: the refusal below names it, and nothing is forwarded.
+        const row: Record<string, unknown> = input.record && typeof input.record === 'object' ? input.record : {};
+        path = path.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (m, k: string) => {
+            const v = row[k] ?? (k === 'id' ? routedRecordId : undefined);
+            return v == null || v === '' ? m : encodeURIComponent(String(v));
         });
     }
+    // A record token left unresolved — the caller named no record, or the
+    // record has no value for the field the path reads — is refused BEFORE the
+    // forward, naming the missing input: a forward with a hole in its path
+    // reaches no route, and its 404 would tell the caller the endpoint does
+    // not exist instead of what they did not send. `${ctx.recordId}` is read
+    // here, ahead of the browser-only refusal below, which would otherwise
+    // claim it; a `{field}` token after it, so a `{{page.x}}` keeps that one.
+    if (path.includes('${ctx.recordId}')) return unresolvedApiTargetRecordRefusal(name, target, 'recordId');
     if (/\$\{[\w.]+\}|\{\{/.test(path)) {
         return {
             status: 400,
@@ -1400,6 +1462,8 @@ export function buildApiActionRequest(
                 `exists only in the browser). Pass the value as a param, or call the target from the console.`,
         };
     }
+    const missingRecordInput = unresolvedApiTargetRecordInput(path, routedRecordId);
+    if (missingRecordInput) return unresolvedApiTargetRecordRefusal(name, target, missingRecordInput);
     if (!isSameOriginApiTarget(path)) {
         return { status: 400, message: `Action '${name}' interpolated its \`target\` to '${path}', which is not a same-origin path.` };
     }

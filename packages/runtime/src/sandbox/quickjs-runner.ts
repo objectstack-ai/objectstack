@@ -47,6 +47,7 @@ import type {
   ScriptRunOptions,
   ScriptRunner,
 } from './script-runner.js';
+import { installSandboxIntl } from './sandbox-intl.js';
 
 const DEFAULT_HOOK_TIMEOUT_MS = 250;
 const DEFAULT_ACTION_TIMEOUT_MS = 5000;
@@ -272,6 +273,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
 
     try {
       this.installCtx(vm, args.ctx, new Set(args.capabilities), args.origin, txState, deferreds);
+      // [#28898] `Intl.DateTimeFormat`, host-backed through plain values only.
+      // Every body kind runs through here, so hooks, actions and jobs share one
+      // global set (see `sandbox-intl.ts`).
+      installSandboxIntl(vm);
 
       // L1 expressions are pure-sync: evaluate and read __result.
       if (args.isExpression) {

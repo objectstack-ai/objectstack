@@ -10,7 +10,7 @@ import { judgePermissionSetOwnerBinding, type TenancyPosture } from '@objectstac
 // `DiscoverySchema` "System Identity" field — never a literal again.
 import { resolveDiscoveryVersion } from './discovery-version.js';
 import type { MetadataHostEngine } from './host-engine.js';
-import { collectInternalWriteResponseFields, omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
+import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 // [#17502] The served JSON Schema publishes what an author MAY write, so a
 // property no instance can satisfy — a `retiredKey()` tombstone, rendered
@@ -281,7 +281,7 @@ import {
 // the same name below hands the body the members it reads (`MetaDiagnosticsHost`).
 import { getMetaDiagnostics } from './protocol-meta-diagnostics.js';
 // [#25467 cut 3] The query validation (`assertObjectRegistered`, the `assert*FieldsExist`
-// family, the `refuseInternal*` walks, `servedExpand`); the methods of the same names
+// family, `refuseUnservedRelationTarget`, `servedExpand`); the methods of the same names
 // below hand each body the members it reads (`QueryValidationHost`).
 import {
     assertAggregationFieldsExist,
@@ -294,11 +294,6 @@ import {
     assertQueryParamsAreFields,
     assertSearchFieldsAreSearchable,
     assertSortFieldsExist,
-    groupByFieldNames,
-    orderByFieldNames,
-    refuseInternalInExpand,
-    refuseInternalInFilter,
-    refuseInternalNames,
     refuseUnservedRelationTarget,
     resolveQueryFields,
     servedExpand,
@@ -13671,67 +13666,30 @@ export class ObjectStackProtocolImplementation implements
     /**
      * [#22646] The data door's EVALUATE refusal for a field declared
      * `internal: true` — "the value is never returned on a generic data exit"
-     * (#21197), extended from the row position (where it is a withhold — the
-     * engine OMITS the column from every row) to every position that would
-     * reveal the stored value by EVALUATING it. A filter or sort on such a
-     * column is a confirmation oracle — a predicate matches the row only when
-     * the guess is right, an order leaks the comparative value — so it is
-     * REFUSED rather than withheld, the posture this door already takes for the
-     * stored-metadata body/hash family ({@link storedMetadataBodyPredicateRefusal},
-     * {@link storedMetadataHashEvaluateRefusal}) and the analytics door for an
-     * internal member. `INVALID_FIELD` / 400, the family's envelope, located at
-     * the object, the field and the offending position.
+     * (#21197): a filter, sort, group key, aggregation operand, per-aggregation
+     * filter, nested-relation condition or `expand` entry's own filter/sort on
+     * such a column reveals the stored value by evaluating it, so it is REFUSED,
+     * `INVALID_FIELD` / 400, located at the object, the field and the position.
      *
-     * It binds EVERY caller of this generic door, administrators included
-     * (#21197): there is no caller carve-out, the same stance the stored-body
-     * family takes here. The engine's privileged internal consumers (the
-     * API-key verifier's `where: { key }`, the share-link / SCIM / approval-token
-     * lookups) call the engine directly and never reach this door, so the
-     * flag's one legitimate use — a `where` match the engine resolves without
-     * ever returning the value — is untouched, exactly as #7823 kept the engine's
-     * write results whole while the generic-data-path ingress stripped them.
+     * The judgement is the ENGINE's, not this door's: the engine owns the flag
+     * (it omits the column from every row) and holds the one definition,
+     * `QueryEvaluationGate#assertNoInternalFieldEvaluated` on the `objectql`
+     * slot (`internal-field-evaluation-guard.ts` in `@objectstack/objectql`),
+     * which its own read path also applies to every non-system caller — so a
+     * host with no `protocol` service, or a protocol other than this one, still
+     * refuses. This door asks it, before the engine reads anything, for EVERY
+     * caller (administrators and system contexts included, the stored-body
+     * family's stance here), and hooks its own question in at each
+     * nested-relation hop: the RELATED object's API exposure
+     * ({@link refuseUnservedRelationTarget}, #22737) is asked before anything of
+     * that object is judged, so the order of refusals is the one this door has
+     * always given. ⛔ Never a copy of the walk here (route-ownership rule 1).
      *
-     * PUBLIC, and asked by the generic data mouths that hand a caller's query
-     * to the engine without passing through {@link findData}: the MCP stdio
-     * transport's `query_records` / `aggregate_records` and the HTTP MCP
-     * bridge's `aggregate_records` arm (`callData`'s `aggregate`). Each asks
-     * this method on the `protocol` service it already resolves, before the
-     * engine, so a filter, sort, group key or aggregation over an `internal`
-     * field gets this door's refusal, word for word, on every transport —
-     * one definition, never a copy beside it (route-ownership rule 1). The
-     * engine's privileged consumers above still never reach it.
-     *
-     * Positions, with the ONE flag reader ({@link collectInternalWriteResponseFields},
-     * `@objectstack/core`'s cross-package twin of objectql's
-     * `collectInternalReadFields` — identical rule, imported because this package
-     * sits below objectql, as the write-response strip and the analytics door do):
-     *
-     *  - `where` / `filter` and each `aggregations[i].filter` — every column a
-     *    filter READS, by the stricter collector that also walks a cross-field
-     *    `{ $field }` comparand ({@link collectFilterReads}).
-     *  - `orderBy` — the fields a sort names.
-     *  - `groupBy` and `aggregations[].field` — defence in depth; the engine's
-     *    `rejectCredentialAggregation` refuses these for every caller with the
-     *    same code, and this door answers first so the envelope is the door's.
-     *  - a NESTED-RELATION condition inside any of those filters
-     *    (`{ <lookup>: { <field of the related object>: … } }`), judged against
-     *    the RELATED object's own internal fields: the engine lowers it by
-     *    evaluating the condition on the related object
-     *    (`ObjectQL.lowerRelationConditions`) and keeps the rows whose related
-     *    record matched, so a related `internal` field there is the same
-     *    confirmation oracle one hop away. Judged here, at the door, rather than
-     *    in the engine's relation-site walk, so the engine's privileged callers
-     *    keep the #7823 split (none of them reaches this door). The RELATED
-     *    object's exposure is asked first, at the same hop
-     *    ({@link refuseUnservedRelationTarget}, #22737).
-     *  - every `expand` entry's own `where` / `orderBy`, at EVERY depth of the
-     *    expand tree, judged against that level's TARGET object: the nested
-     *    sub-read's row strip already withholds the column, but a nested filter
-     *    is a presence oracle on the related record (the expanded object appears
-     *    only when the guess matches), and a deeper level's sub-read is one more
-     *    `engine.find` that answers the same way. Target OBJECT exposure is a
-     *    different axis, judged before this walk ({@link servedExpand}, #22661):
-     *    an entry whose target the API does not serve never reaches it.
+     * An engine that does not carry the member (a test double, a metadata-only
+     * store) is judged on no field here: the flag is the engine's to honour, and
+     * an engine without the gate does not withhold the column either. The
+     * door's own exposure question is still asked at every hop on such an
+     * engine, by a walk that judges no field.
      *
      * Not judged here because the ingress already refuses them, measured: a
      * DOTTED sort or group-by path crossing a relation (the sort gate's
@@ -13741,34 +13699,14 @@ export class ObjectStackProtocolImplementation implements
      * batch the expansion re-keys by id with no `limit`, so it changes no answer.
      */
     assertNoInternalFieldEvaluated(object: string, options: Record<string, any>): void {
-        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
+        // [#25467 cut 3] The body lives in `protocol-query-validation.ts` (see `QueryValidationHost`).
+        const readEngine = () => this.engine;
         const host: ThisParameterType<typeof assertNoInternalFieldEvaluated> = {
-            groupByFieldNames: (...a) => this.groupByFieldNames(...a),
-            orderByFieldNames: (...a) => this.orderByFieldNames(...a),
-            refuseInternalInExpand: (...a) => this.refuseInternalInExpand(...a),
-            refuseInternalInFilter: (...a) => this.refuseInternalInFilter(...a),
-            refuseInternalNames: (...a) => this.refuseInternalNames(...a),
-            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
-        };
-        return assertNoInternalFieldEvaluated.call(host, object, options);
-    }
-
-    /**
-     * One filter's internal-field judgement: every column it reads on `object`
-     * ({@link collectFilterReads}), then each nested-relation condition it holds,
-     * recursively, on the related object, once that object's exposure serves the
-     * condition ({@link refuseUnservedRelationTarget}). `param` names the position, extended
-     * by the relation field at each hop (`filter.owner_id`).
-     */
-    private refuseInternalInFilter(object: string, where: unknown, param: string, depth: number): void {
-        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
-        const host: ThisParameterType<typeof refuseInternalInFilter> = {
-            refuseInternalInFilter: (...a) => this.refuseInternalInFilter(...a),
-            refuseInternalNames: (...a) => this.refuseInternalNames(...a),
+            get engine() { return readEngine(); },
             refuseUnservedRelationTarget: (...a) => this.refuseUnservedRelationTarget(...a),
             resolveQueryFields: (...a) => this.resolveQueryFields(...a),
         };
-        return refuseInternalInFilter.call(host, object, where, param, depth);
+        return assertNoInternalFieldEvaluated.call(host, object, options);
     }
 
     /**
@@ -13792,23 +13730,6 @@ export class ObjectStackProtocolImplementation implements
             get engine() { return readEngine(); },
         };
         return refuseUnservedRelationTarget.call(host, target, param);
-    }
-
-    /**
-     * Every level of an `expand` tree: each entry's own `where` (with its
-     * nested-relation conditions) and `orderBy`, judged against that entry's
-     * target object, then the entry's own `expand` with the target as source.
-     */
-    private refuseInternalInExpand(source: string, expand: unknown, prefix: string, depth: number): void {
-        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
-        const host: ThisParameterType<typeof refuseInternalInExpand> = {
-            orderByFieldNames: (...a) => this.orderByFieldNames(...a),
-            refuseInternalInExpand: (...a) => this.refuseInternalInExpand(...a),
-            refuseInternalInFilter: (...a) => this.refuseInternalInFilter(...a),
-            refuseInternalNames: (...a) => this.refuseInternalNames(...a),
-            resolveQueryFields: (...a) => this.resolveQueryFields(...a),
-        };
-        return refuseInternalInExpand.call(host, source, expand, prefix, depth);
     }
 
     /**
@@ -13863,24 +13784,6 @@ export class ObjectStackProtocolImplementation implements
             get engine() { return readEngine(); },
         };
         return servesExpansionTarget.call(host, target);
-    }
-
-    /** Field heads an `orderBy` names (string or `{ field }`), dotted head only. */
-    private orderByFieldNames(orderBy: unknown): string[] {
-        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
-        return orderByFieldNames(orderBy);
-    }
-
-    /** Field heads a `groupBy` names (string or `{ field }`), dotted head only. */
-    private groupByFieldNames(groupBy: unknown): string[] {
-        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
-        return groupByFieldNames(groupBy);
-    }
-
-    /** Refuse when any of `names` is an internal field of `object`. */
-    private refuseInternalNames(object: string, names: readonly string[], internal: ReadonlySet<string>, param: string): void {
-        // [#25467 cut 3] The body moved to `protocol-query-validation.ts` (see `QueryValidationHost`).
-        return refuseInternalNames(object, names, internal, param);
     }
 
     async findData(request: { object: string, query?: any, context?: any }) {

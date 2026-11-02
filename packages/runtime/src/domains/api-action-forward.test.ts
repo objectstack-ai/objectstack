@@ -99,6 +99,12 @@ const FLAG_BY_EMAIL = {
     ai: { exposed: true, description: 'Flag the lead by email.' },
 };
 
+/** An api action whose `target` carries no record token. */
+const PING_LOCAL = {
+    name: 'ping_local', label: 'Ping', objectName: OBJECT, type: 'api', method: 'POST',
+    target: '/api/v1/apps/showcase/ping', ai: { exposed: true, description: 'Ping the app.' },
+};
+
 type Injected = { url: string; init: RequestInit };
 
 function boot(opts: {
@@ -122,7 +128,7 @@ function boot(opts: {
     });
     const server = { getRawApp: () => ({ request }) };
     const executeAction = vi.fn(async () => ({ ran: 'script' }));
-    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD, NOTE_OWNER, FLAG_BY_EMAIL] };
+    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD, NOTE_OWNER, FLAG_BY_EMAIL, PING_LOCAL] };
     const ql: any = {
         executeAction,
         getSchema: (name: string) => (name === OBJECT ? objectDef : undefined),
@@ -1340,5 +1346,106 @@ describe('[#28657] a denied subject load forwards an api action whose request ne
         expect(apiForwardSubjectRecord(HIDDEN, leftover)).toEqual({ id: HIDDEN });
         const delivered = { record: { id: 'u_target', email: 'target@example.test' }, recordLoadDenied: false };
         expect(apiForwardSubjectRecord('u_target', delivered)).toBe(delivered.record);
+    });
+});
+
+// An api action whose `target` names its record (`{id}`, `${ctx.recordId}`,
+// `{field}`) called with no record id, or an empty one, used to be forwarded
+// with the token blanked or left as written: the path reached no route and the
+// door answered the router's 404 ENDPOINT_NOT_FOUND, telling the caller the
+// endpoint does not exist. It is refused 400 VALIDATION_ERROR naming the
+// missing input, before any forward. The real-stack half, on the real
+// approvals routes, is `packages/verify/src/action-door-api-forward-denied-subject.test.ts`.
+describe('an api action whose target names its record, called with no record id, is refused naming `recordId`', () => {
+    const runViaMcp = async (h: ReturnType<typeof boot>, name: string, input: any = {}) => {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+        return invokeBusinessAction(deps, CTX() as any, name, input, {
+            driver: h.ql,
+            ec: { userId: 'u_agent', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id, email: 'target@example.test' } }),
+        });
+    };
+
+    it('REST: the approve shape with no `recordId`, or an empty one, answers 400 VALIDATION_ERROR naming it, and nothing is forwarded', async () => {
+        for (const body of [{ params: {} }, { recordId: '', params: {} }]) {
+            const { dispatcher, request } = boot();
+
+            const res = await dispatcher.handleActions(`/${OBJECT}/${APPROVE_LEAD.name}`, 'POST', body, CTX());
+
+            expect(statusOf(res), JSON.stringify(body)).toBe(400);
+            expect(codeOf(res), JSON.stringify(body)).toBe(standardErrorCodeForHttpStatus(400));
+            expect(codeOf(res)).toBe('VALIDATION_ERROR');
+            expect(messageOf(res)).toContain('`recordId`');
+            expect(request, JSON.stringify(body)).not.toHaveBeenCalled();
+        }
+    });
+
+    it('REST: a `${ctx.recordId}` target and a `{field}` target are refused the same way with no record id', async () => {
+        for (const action of [DELETE_LEAD, NOTE_OWNER]) {
+            for (const body of [{}, { recordId: '' }]) {
+                const { dispatcher, request } = boot();
+
+                const res = await dispatcher.handleActions(`/${OBJECT}/${action.name}`, 'POST', body, CTX());
+
+                expect(statusOf(res), `${action.name} ${JSON.stringify(body)}`).toBe(400);
+                expect(codeOf(res)).toBe('VALIDATION_ERROR');
+                expect(messageOf(res)).toContain('`recordId`');
+                expect(request).not.toHaveBeenCalled();
+            }
+        }
+    });
+
+    it('REST, the controls: a real id is forwarded (200), an unknown id gets the target\'s 404 REQUEST_NOT_FOUND, a tokenless target is forwarded with no id', async () => {
+        const real = boot();
+        const ok = await real.dispatcher.handleActions(`/${OBJECT}/${APPROVE_LEAD.name}`, 'POST', { recordId: 'u_target', params: {} }, CTX());
+        expect(statusOf(ok), JSON.stringify(ok?.response?.body)).toBe(200);
+        expect(real.injected[0].url).toBe('http://app.example.test/api/v1/approvals/requests/u_target/approve');
+
+        const unknown = boot({ answer: { status: 404, body: { code: 'REQUEST_NOT_FOUND', error: "request 'areq_none' not found" } } });
+        const missing = await unknown.dispatcher.handleActions(`/${OBJECT}/${APPROVE_LEAD.name}`, 'POST', { recordId: 'areq_none', params: {} }, CTX());
+        expect(statusOf(missing)).toBe(404);
+        expect(codeOf(missing)).toBe('REQUEST_NOT_FOUND');
+        expect(unknown.injected[0].url).toBe('http://app.example.test/api/v1/approvals/requests/areq_none/approve');
+
+        const ping = boot();
+        const pinged = await ping.dispatcher.handleActions(`/${OBJECT}/${PING_LOCAL.name}`, 'POST', { params: {} }, CTX());
+        expect(statusOf(pinged), JSON.stringify(pinged?.response?.body)).toBe(200);
+        expect(ping.injected[0].url).toBe('http://app.example.test/api/v1/apps/showcase/ping');
+    });
+
+    it('MCP `run_action`: the approve shape with no `recordId`, or an empty one, is thrown 400 VALIDATION_ERROR naming it, and nothing is forwarded', async () => {
+        for (const input of [{ params: {} }, { recordId: '', params: {} }]) {
+            const h = boot();
+
+            const thrown = await runViaMcp(h, APPROVE_LEAD.name, input).catch((e) => e);
+
+            expect((thrown as any).status, JSON.stringify(input)).toBe(400);
+            expect((thrown as any).code).toBe('VALIDATION_ERROR');
+            expect(String((thrown as any).message)).toContain('`recordId`');
+            expect(h.request).not.toHaveBeenCalled();
+        }
+    });
+
+    it('buildApiActionRequest: a row with no value for a `{field}` token is refused naming that field, never blanked', () => {
+        const ec = { userId: 'u1', tenantId: 'org_9' };
+        for (const record of [{ id: 'r1' }, { id: 'r1', email: null }, { id: 'r1', email: '' }]) {
+            const refused = buildApiActionRequest(NOTE_OWNER, { recordId: 'r1', record, params: {}, ec });
+            expect((refused as any).status, JSON.stringify(record)).toBe(400);
+            expect((refused as any).message).toContain('`email`');
+        }
+        // No record at all: the caller named none, so the missing input is `recordId`.
+        const none = buildApiActionRequest(NOTE_OWNER, { record: {}, params: {}, ec });
+        expect((none as any).message).toContain('`recordId`');
+        // `{id}` without a row is filled from the routed id, as `recordIdParam` is.
+        const rowless = buildApiActionRequest(APPROVE_LEAD, { recordId: 'areq 1', params: {}, ec });
+        expect((rowless as any).path).toBe('/api/v1/approvals/requests/areq%201/approve');
     });
 });

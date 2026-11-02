@@ -637,7 +637,7 @@
       "pinned": 1
     },
     {
-      "file": "packages/metadata-protocol/src/protocol.data-door-internal-field-positions.test.ts",
+      "file": "packages/metadata-protocol/src/protocol.data-door-internal-field-delegation.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -2759,6 +2759,11 @@
     {
       "file": "packages/objectql/src/protocol-commit-history.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/objectql/src/protocol-data-door-internal-field-positions.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

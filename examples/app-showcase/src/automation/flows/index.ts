@@ -1419,6 +1419,22 @@ export const InvoiceDualSignoffFlow = defineFlow({
  * branch, converging edges) that single-construct flows don't — and runs
  * synchronously (no pause), so it completes in one pass and is fully visible in
  * the Runs panel with nested step folding.
+ *
+ * `budget` and `owner` are both optional on `showcase_project`, and the run's
+ * `record` carries every declared field, so a project with neither reads
+ * `budget: null, owner: null`. `has(record.budget)` is true on that row, so it
+ * guards nothing. The flow handles both fields itself:
+ *
+ *  - `critical` (e2) tests `record.budget != null` before it compares, because
+ *    CEL has no `null > int` and the run would fail at the decision. `normal`
+ *    (e3) is the decision's `isDefault` edge, the "otherwise" that also takes
+ *    a project with no budget.
+ *  - The owner alert in the critical branch sits behind its own `decision`, so
+ *    a project with no owner skips it: the Exec branch beside it already
+ *    alerts the organization's owners. The normal-path and converge notifies
+ *    fall back to those owners (`role:owner`), so the escalation still reaches
+ *    someone. A notify whose every recipient evaluates to nothing fails the
+ *    run, and is meant to.
  */
 export const ProjectEscalationFlow = defineFlow({
   name: 'showcase_project_escalation',
@@ -1446,8 +1462,13 @@ export const ProjectEscalationFlow = defineFlow({
         branches: [
           {
             name: 'Owner',
-            nodes: [{ id: 'alert_owner', type: 'notify', label: 'Alert Owner', config: { recipients: { dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }, title: '🔴 Critical: {{ record.name }}', severity: 'critical', sourceObject: 'showcase_project', sourceId: { dialect: 'cel', source: 'record.id' } } }],
-            edges: [],
+            // No owner, no owner alert: the Exec branch beside this one
+            // already alerts the organization's owners.
+            nodes: [
+              { id: 'has_owner', type: 'decision', label: 'Has an owner?' },
+              { id: 'alert_owner', type: 'notify', label: 'Alert Owner', config: { recipients: { dialect: 'cel', source: 'record.owner' }, title: '🔴 Critical: {{ record.name }}', severity: 'critical', sourceObject: 'showcase_project', sourceId: { dialect: 'cel', source: 'record.id' } } },
+            ],
+            edges: [{ id: 'owner_e1', source: 'has_owner', target: 'alert_owner', label: 'has owner', condition: '!isBlank(record.owner)' }],
           },
           {
             name: 'Exec',
@@ -1484,20 +1505,20 @@ export const ProjectEscalationFlow = defineFlow({
       id: 'notify_normal',
       type: 'notify',
       label: 'Notify Owner',
-      config: { topic: 'project.escalation', recipients: [{ dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }], channels: ['inbox'], severity: 'info', title: 'Project needs attention: {{ record.name }}', message: 'Health dropped to red — please review.' },
+      config: { topic: 'project.escalation', recipients: [{ dialect: 'cel', source: "isBlank(record.owner) ? 'role:owner' : record.owner" }], channels: ['inbox'], severity: 'info', title: 'Project needs attention: {{ record.name }}', message: 'Health dropped to red — please review.' },
     },
     {
       id: 'converge',
       type: 'notify',
       label: 'Escalation Handled',
-      config: { topic: 'project.escalation', recipients: [{ dialect: 'cel', source: 'has(record.owner) ? record.owner : null' }], channels: ['inbox'], severity: 'info', title: 'Escalation handled: {{ record.name }}', message: 'The red-health escalation has been processed.' },
+      config: { topic: 'project.escalation', recipients: [{ dialect: 'cel', source: "isBlank(record.owner) ? 'role:owner' : record.owner" }], channels: ['inbox'], severity: 'info', title: 'Escalation handled: {{ record.name }}', message: 'The red-health escalation has been processed.' },
     },
     { id: 'end', type: 'end', label: 'End' },
   ],
   edges: [
     { id: 'e1', source: 'start', target: 'triage' },
-    { id: 'e2', source: 'triage', target: 'alert', label: 'critical', condition: 'budget > 200000' },
-    { id: 'e3', source: 'triage', target: 'notify_normal', label: 'normal', condition: 'budget <= 200000' },
+    { id: 'e2', source: 'triage', target: 'alert', label: 'critical', condition: 'record.budget != null && record.budget > 200000' },
+    { id: 'e3', source: 'triage', target: 'notify_normal', label: 'normal', isDefault: true },
     { id: 'e4', source: 'alert', target: 'push_incident' },
     { id: 'e5', source: 'push_incident', target: 'converge' },
     { id: 'e6', source: 'notify_normal', target: 'converge' },

@@ -1361,19 +1361,45 @@ export const DeclarativeConnectorEntrySchema = lazySchema(() =>
     // authorization-server metadata, dynamic client registration) and keeps
     // the registered client in the connection record, never in metadata. The
     // rule needs the provider, so it lives here rather than on the auth shape.
-    if (entry.auth?.type === 'oauth2' && !isMcpHttpInstance(entry)) {
-      const missing: Array<[key: 'tokenUrl' | 'clientId' | 'authorizationUrl', why: string]> = [];
-      if (entry.auth.tokenUrl === undefined) missing.push(['tokenUrl', 'its token endpoint']);
-      if (entry.auth.clientId === undefined) missing.push(['clientId', 'its pre-registered client id']);
-      if (entry.auth.grant === 'authorization_code' && entry.auth.authorizationUrl === undefined) {
-        missing.push(['authorizationUrl', "its authorization endpoint (`grant: 'authorization_code'`)"]);
-      }
-      for (const [key, why] of missing) {
+    //
+    // ADR-0143 D2.1, amended 2026-11-02: an `authorization_code` instance
+    // that declares `clientSource: 'installer'` takes its client from the
+    // administrator of each deployment, entered on the instance's connection.
+    // It names no `clientId` on any provider, and a `clientId` beside it is
+    // refused, because the definition would then name two clients. The
+    // endpoints stay the definition's (or the MCP flow's): the installer owns
+    // the client, not the vendor's authorization server. This exclusion sits
+    // here with the other client-key rules and not on the auth shape, because
+    // the published JSON Schema has no form for a shape-level exclusion
+    // (`shared/refinement-projection.ts`), while this refinement is already one
+    // the published file marks as not stated.
+    if (entry.auth?.type === 'oauth2') {
+      const installerClient = entry.auth.grant === 'authorization_code' && entry.auth.clientSource === 'installer';
+      if (installerClient && entry.auth.clientId !== undefined) {
         ctx.addIssue({
           code: 'custom',
-          path: ['auth', key],
-          message: `Connector instance '${entry.name}' declares \`auth: { type: 'oauth2' }\` without \`${key}\`: name ${why}. Only \`provider: 'mcp'\` over an http transport may omit the endpoints and the client id, because that provider discovers them and registers a client itself (ADR-0143 D2.1).`,
+          path: ['auth', 'clientId'],
+          message: `Connector instance '${entry.name}' declares \`clientSource: 'installer'\` and a packaged \`clientId\`. An installer-supplied client is registered with the vendor by the administrator of each deployment, against that deployment's callback, and entered on the instance's connection, so the definition names no client. Delete \`clientId\` (and its \`credentialRef\`), or delete \`clientSource\` if the package's author registers the callback of every deployment that installs it, as for a private app (ADR-0143 D2.1).`,
         });
+      }
+      if (!isMcpHttpInstance(entry)) {
+        const missing: Array<[key: 'tokenUrl' | 'clientId' | 'authorizationUrl', why: string]> = [];
+        if (entry.auth.tokenUrl === undefined) missing.push(['tokenUrl', 'its token endpoint']);
+        if (entry.auth.clientId === undefined && !installerClient) {
+          missing.push(['clientId', entry.auth.grant === 'authorization_code'
+            ? "its pre-registered client id, or declare `clientSource: 'installer'` so the administrator of each deployment enters their own client on the connection"
+            : 'its pre-registered client id']);
+        }
+        if (entry.auth.grant === 'authorization_code' && entry.auth.authorizationUrl === undefined) {
+          missing.push(['authorizationUrl', "its authorization endpoint (`grant: 'authorization_code'`)"]);
+        }
+        for (const [key, why] of missing) {
+          ctx.addIssue({
+            code: 'custom',
+            path: ['auth', key],
+            message: `Connector instance '${entry.name}' declares \`auth: { type: 'oauth2' }\` without \`${key}\`: name ${why}. \`provider: 'mcp'\` over an http transport may omit the endpoints and the client id, because that provider discovers its endpoints and can register a client itself (ADR-0143 D2.1).`,
+          });
+        }
       }
     }
     // ADR-0143 D2.3 — a `signed` instance is signed by the HTTP providers

@@ -324,6 +324,77 @@ describe('the connector redactor — top-level keys the entry does not declare',
   });
 });
 
+describe('the connector redactor — keys `retryConfig` and `actions` elements do not declare', () => {
+  it('withholds an undeclared key inside `retryConfig`, keeping its declared keys', () => {
+    const retryConfig = { strategy: 'exponential_backoff', maxAttempts: 4, secret: P(30) };
+    const { item: served, redactedKeys } = redactConnectorItem({ ...base, retryConfig });
+    expect(redactedKeys).toEqual(['retryConfig.secret']);
+    expect(served.retryConfig).toEqual({ strategy: 'exponential_backoff', maxAttempts: 4 });
+    expect(holds(served, P(30))).toBe(false);
+  });
+
+  it('withholds an undeclared key inside each `actions` element, addressed by index, keeping the declared keys', () => {
+    const actions = [
+      { key: 'get_invoice', label: 'Get invoice', effect: 'read', inputSchema: { type: 'object' } },
+      { key: 'post_invoice', label: 'Post invoice', token: P(31), extra: { secret: P(32) } },
+    ];
+    const { item: served, redactedKeys } = redactConnectorItem({ ...base, actions });
+    expect(redactedKeys).toEqual(['actions.1.extra', 'actions.1.token']);
+    expect(served.actions).toEqual([actions[0], { key: 'post_invoice', label: 'Post invoice' }]);
+    expect((served.actions as unknown[])[0]).toBe(actions[0]);
+    expect(holds(served, P(31), P(32))).toBe(false);
+  });
+
+  it('withholds a cleared undeclared nested key too, as at the top level', () => {
+    const item = { ...base, retryConfig: { strategy: 'no_retry', note: null }, actions: [{ key: 'a', label: 'A', extra: {} }] };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(['actions.0.extra', 'retryConfig.note']);
+    expect(served.retryConfig).toEqual({ strategy: 'no_retry' });
+    expect(served.actions).toEqual([{ key: 'a', label: 'A' }]);
+  });
+
+  it('the declared nested keys are the schemas\' own', () => {
+    const retryConfig = {
+      strategy: 'exponential_backoff', maxAttempts: 3, initialDelayMs: 1000, maxDelayMs: 60000,
+      backoffMultiplier: 2, retryableStatusCodes: [429], retryOnNetworkError: true, jitter: true,
+    };
+    const action = { key: 'a', label: 'A', description: 'd', inputSchema: {}, outputSchema: {}, effect: 'write' };
+    const item = { ...base, retryConfig, actions: [action] };
+    const result = redactConnectorItem(item);
+    expect(result.redactedKeys).toEqual([]);
+    expect(result.item).toBe(item);
+  });
+
+  it.each([
+    ['a non-object `retryConfig`', { retryConfig: P(60) }, ['retryConfig']],
+    ['an `actions` element that is not an object', { actions: [{ key: 'a', label: 'A' }, P(61)] }, ['actions']],
+    ['a `null` `actions` element', { actions: [{ key: 'a', label: 'A', token: P(62) }, null] }, ['actions']],
+    ['an `actions` that is not an array', { actions: { key: 'a', token: P(63) } }, ['actions']],
+  ] as const)('withholds the container WHOLE when it is not the declared shape: %s', (_label, extra, keys) => {
+    const item = { ...base, ...extra };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(keys);
+    for (const key of keys) expect(served).not.toHaveProperty(key);
+    expect(holds(served, P(60), P(61), P(62), P(63))).toBe(false);
+  });
+
+  it('a cleared `retryConfig` or `actions`, and an empty `actions` list, are served as written', () => {
+    for (const extra of [{ retryConfig: null }, { retryConfig: '' }, { actions: null }, { actions: [] }]) {
+      const item = { ...base, ...extra };
+      const result = redactConnectorItem(item);
+      expect(result.redactedKeys).toEqual([]);
+      expect(result.item).toBe(item);
+    }
+  });
+
+  it('never mutates its input', () => {
+    const item = { ...base, retryConfig: { maxAttempts: 3, secret: P(33) }, actions: [{ key: 'a', label: 'A', token: P(34) }] };
+    const before = JSON.stringify(item);
+    redactConnectorItem(item);
+    expect(JSON.stringify(item)).toBe(before);
+  });
+});
+
 describe('the connector redactor — purity and the untouched remainder', () => {
   it('never mutates its input, and leaves every other key (`_diagnostics` included) byte for byte', () => {
     const item = {
@@ -355,7 +426,7 @@ describe('the connector redactor — purity and the untouched remainder', () => 
  * until it is confirmed to be a reference or not a secret, and listed.
  */
 const DECLARED_NOT_A_SECRET = [
-  'appId', 'authorizationUrl', 'clientId', 'credentialRef', 'grant', 'headerName', 'keyId',
+  'appId', 'authorizationUrl', 'clientId', 'clientSource', 'credentialRef', 'grant', 'headerName', 'keyId',
   'paramName', 'resource', 'scheme', 'scopes', 'tokenUrl', 'type', 'username', 'vendor',
   'vendorPublicKeyRef',
 ];
