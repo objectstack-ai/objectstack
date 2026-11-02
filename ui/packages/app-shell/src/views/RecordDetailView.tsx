@@ -4072,7 +4072,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
     const label = parent
       ? parent.t || shortRecordId(parent.i)
-      : phonePushed || (originFromState?.pathname && !originIsObjectList)
+      // A page a list pushed (objectstack#29074) still reads the object's
+      // plural, as Target 3 says; a page pushed from a record, of this
+      // object or another, reads that record's label.
+      : (phonePushed && !(originIsObjectList && !originPathOnly!.startsWith(`${objectListPath}/record/`)))
+        || (originFromState?.pathname && !originIsObjectList)
         ? originFromState?.label ?? plural
         : plural;
     const face = (
