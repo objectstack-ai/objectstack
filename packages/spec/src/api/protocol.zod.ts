@@ -752,7 +752,7 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   ),
   disabledActions: z.array(z.string()).optional().describe(
     'The names in `item.actions` that this deployment\'s activation ledger switches off (an administrator '
-    + 'turned them off under Setup › Packaged automation): a call to any of them is refused 409 '
+    + 'turned them off under Setup › Packaged Actions): a call to any of them is refused 409 '
     + '`ACTION_DISABLED`. Present only on an `object` read answered by a process whose data engine has an '
     + 'activation ledger attached, and then `[]` when none of this object\'s actions is switched off. '
     + 'Absent otherwise, and absence means no ledger answered, never that nothing is switched off. Unlike '
