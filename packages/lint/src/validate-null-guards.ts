@@ -731,7 +731,7 @@ export type NullGuardOutcome =
 
 const OUTCOME_CLAUSE: Record<NullGuardOutcome, string> = {
   'run-fails':
-    'so the flow run fails at this condition — the write that fired it still lands, and the work ' +
+    'so the flow run fails at this condition: the write that fired it still lands, and the work ' +
     'the flow exists to do is not done',
   'fail-closed':
     'so the rule enforces nothing and the write is rejected fail-closed (a predicate that cannot ' +
