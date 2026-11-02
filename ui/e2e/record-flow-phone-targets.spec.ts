@@ -63,6 +63,7 @@ const F = {
   related: 'packages/plugin-detail/src/RelatedList.tsx',
   cardMenu: 'packages/plugin-detail/src/RelatedCardMenu.tsx',
   section: 'packages/plugin-detail/src/DetailSection.tsx',
+  strip: 'packages/plugin-detail/src/HeaderHighlight.tsx',
   saveBar: 'packages/plugin-detail/src/InlineEditSaveBar.tsx',
   composer: 'packages/plugin-detail/src/RichTextCommentInput.tsx',
   header: 'packages/components/src/renderers/layout/containers.tsx',
@@ -86,6 +87,7 @@ const CLS = {
   cardMenu: g('cardMenu', /className="([^"]+)"\s*aria-label=\{t\('detail\.relatedCardMenu'/, ['h-11', 'w-11', 'sm:h-6']),
   cardHandle: g('cardMenu', /'(inline-flex h-11 w-11 [^']*)'/, ['h-11', 'w-11', 'sm:h-6']),
   pencil: g('section', /className="([^"]+)"\s*aria-label=\{t\('detail\.editInlineHint'\)\}/, ['min-h-[44px]', 'pointer-coarse:opacity-100', 'opacity-0']),
+  stripPencil: g('strip', /className="([^"]+)"\s*aria-label=\{t\('detail\.editInlineHint'\)\}/, ['min-h-[44px]', 'pointer-coarse:opacity-100', 'opacity-0']),
   saveCancel: g('saveBar', /disabled=\{inline\.saving\}\s*className="([^"]+)"/, ['h-11', 'sm:h-9']),
   saveSave: g('saveBar', /disabled=\{inline\.saving \|\| locked\}\s*className="([^"]+)"/, ['h-11', 'sm:h-9']),
   composerRow: g('composer', /<div className="(flex flex-wrap items-center gap-0\.5[^"]*)">/, ['flex-wrap']),
@@ -134,6 +136,7 @@ const fixture = () => {
       <div class="text-sm flex-1 min-w-0 py-1">Acme Corp</div>
       <button type="button" class="${CLS.buttonBase} ${CLS.pencil}" data-t="pencil" id="pencil"><svg width="12" height="12"></svg></button>
     </div>
+    <div class="group flex items-center gap-1"><span class="min-w-0 truncate text-sm">Atlas Construction</span><button type="button" class="${CLS.buttonBase} ${CLS.stripPencil}" data-t="strip pencil"><svg width="12" height="12"></svg></button></div>
     <section class="relative mt-4 rounded-[10px] border bg-card" id="card">
       <div class="${CLS.cardHead}">
         <button type="button" class="${CLS.cardOpen}" data-t="card open"><span class="min-w-0 truncate">Opportunities with an unusually long related list title</span><span>151</span></button>
@@ -267,6 +270,8 @@ test.describe('the record flow at phone width (objectstack#29071)', () => {
     expect(box('M').h).toBe(24);
     expect(box('Save').h).toBe(36);
     expect(box('pencil').opacity).toBe(0);
+    expect(box('strip pencil').opacity).toBe(0);
+    expect(box('strip pencil').h).toBe(20);
     expect(box('next record').h).toBe(28);
     await page.context().close();
   });
