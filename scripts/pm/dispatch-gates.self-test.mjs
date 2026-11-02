@@ -7992,6 +7992,70 @@ export function selfTest({ tier = 'full' } = {}) {
     );
   }
 
+  // ── A package-root config edit derives the console-intercept gate (#29353) ──
+  //
+  // The card's acceptance, held against the LIVE tree. The gate's scan opens a
+  // package-root `package.json` and vitest config under each workspace glob and
+  // nothing else, and it declares exactly that population in its own source, so
+  // BOTH invocations CI runs (scan and `--self-test`, one lint.yml step) are
+  // placed by every such file, while a test file under an existing package —
+  // tracked, or one a card adds — places neither. The rows it left in
+  // ROOT_WALK_RESIDUE_LEDGER are held gone by the stale limb above.
+  {
+    const gate = 'scripts/check-console-intercept-disarm.mjs';
+    const invocations = [gate, `${gate} --self-test`];
+    const entries = invocations.map((c) => liveDiscovery.byCheck.get(c));
+    t('both console-intercept invocations are discovered families', entries.every(Boolean));
+    const tracked = [...liveTree.files];
+    const trackedSet = new Set(tracked);
+    // Package roots read off the tree, not off a copy of the workspace globs:
+    // a tracked vitest config whose own directory carries a tracked manifest,
+    // under one of the three workspace top-level roots.
+    const rootConfigs = tracked.filter((f) => {
+      const m = /^((?:packages|apps|examples)\/(?:[^/]+\/)?[^/]+)\/vitest\.config\.[cm]?[jt]s$/.exec(f);
+      return m && trackedSet.has(`${m[1]}/package.json`);
+    });
+    t(
+      `control: the live tree carries package-root vitest configs to probe with (${rootConfigs.length})`,
+      rootConfigs.length >= 60,
+    );
+    const unplacedBy = (entry, probe) => placeFamily(entry, [probe]).verdict !== 'matched';
+    const missedConfigs = rootConfigs.filter((f) => entries.some((e) => e && unplacedBy(e, f)));
+    t(
+      'every package-root vitest config places both invocations — the card PR #29345 paid a CI round for' +
+        (missedConfigs.length ? ` — not placed by: ${missedConfigs.slice(0, 5).join(', ')}` : ''),
+      entries.every(Boolean) && missedConfigs.length === 0,
+    );
+    const manifests = rootConfigs.map((f) => f.replace(/\/[^/]+$/, '/package.json'));
+    const missedManifests = manifests.filter((f) => entries.some((e) => e && unplacedBy(e, f)));
+    t(
+      'and so does the package-root package.json beside each — the other file the scan opens' +
+        (missedManifests.length ? ` — not placed by: ${missedManifests.slice(0, 5).join(', ')}` : ''),
+      entries.every(Boolean) && missedManifests.length === 0,
+    );
+    // A card's file surface is often paths that do not exist yet: a NEW package.
+    const newPackage = ['packages', 'plugins', 'plugin-not-yet-written'].join('/');
+    t(
+      'a NEW package\'s root config and manifest place both invocations too',
+      entries.every((e) => e && !unplacedBy(e, `${newPackage}/vitest.config.ts`) && !unplacedBy(e, `${newPackage}/package.json`)),
+    );
+    const testFiles = tracked.filter((f) => /^(?:packages|apps|examples)\/.+\.(?:test|spec)\.[cm]?[jt]sx?$/.test(f));
+    t(
+      `control: the live tree carries test files under packages to probe with (${testFiles.length})`,
+      testFiles.length >= 1000,
+    );
+    t(
+      'no test file under an existing package places either invocation, tracked or brand new',
+      entries.every((e) => e
+        && placeFamily(e, testFiles).verdict !== 'matched'
+        && unplacedBy(e, ['packages', 'services', 'service-sms', 'src', 'not-yet-written.test.ts'].join('/'))),
+    );
+    t(
+      'nor does a vitest config BELOW a package root — the scan deliberately reads the root one only',
+      entries.every((e) => e && unplacedBy(e, ['packages', 'services', 'service-sms', 'test', 'fixtures', 'vitest.config.ts'].join('/'))),
+    );
+  }
+
   // ── The CI-MEASURED-ONLY shape (#14004) ───────────────────────────────────
   //
   // The two markers above are DECLARATIONS a gate carries. This one is the

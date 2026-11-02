@@ -60,6 +60,8 @@ line two \${k}\`;
     destructured({ a }: { a: number }) { return a + this.count; }
     hostAsPropertyName() { return { host: this.count }.host; }
     stubbed(k: string) { const self = { count: this.count }; return stubbedBody.call(self, k); }
+    private plainStub(k: string, n: number) { return plainStub(k, n); }
+    stubbedGeneric<R>(k: R) { const host = { count: this.count }; return (stubbedGenericBody<R>).call(host, k); }
 }
 `;
 
@@ -150,6 +152,11 @@ describe('host-split: the move', () => {
         expect(plan.fnText).toBeUndefined();
     });
 
+    it.each(['stubbed', 'stubbedGeneric', 'plainStub'])('refuses to move %s again: it is already a stub', (member) => {
+        const plan = planMove(BASE, member, 'protocol-target.ts');
+        expect(plan.refusals.map((r) => r.reason).join(' | ')).toContain('already a stub');
+    });
+
     it('does not refuse `host` as a property name', () => {
         expect(planMove(BASE, 'hostAsPropertyName', 'protocol-target.ts').refusals).toEqual([]);
     });
@@ -159,6 +166,11 @@ describe('host-split: the move', () => {
         const by = Object.fromEntries(rows.map((r) => [r.name, r]));
         expect(clashes).toEqual([]);
         expect(by.stubbed.stub).toBe('call');
+        // The per-member series' generic spelling `(fn<R>).call(host, …)` is a stub too,
+        // not a body that binds `host`.
+        expect(by.stubbedGeneric.stub).toBe('call');
+        // A body that read no member and moved as a plain function: `return fn(<params>)`.
+        expect(by.plainStub.stub).toBe('plain');
         expect(by.target.refusals).toEqual([]);
         expect(by.bareThis.refusals).toHaveLength(1);
         const { head } = move();

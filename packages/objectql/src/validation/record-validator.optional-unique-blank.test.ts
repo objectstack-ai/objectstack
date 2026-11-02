@@ -20,8 +20,10 @@ import { normalizeBlankTypedValues } from './record-validator.js';
 
 const CREDENTIAL = ['password', 'secret'];
 const textLike = [...STRING_VALUE_TYPES].filter((t) => !CREDENTIAL.includes(t));
-// Single-value string-stored types the `$empty` table reads `''` as a value on.
-const otherStringStored = ['select', 'radio', 'lookup', 'master_detail', 'user', 'autonumber'];
+// A string-stored type outside both string arms: `unique` alone never pulls it
+// in. (The single-value option and reference types have their own arm since
+// #29277, unique or not: `record-validator.single-value-blank.test.ts`.)
+const otherStringStored = ['autonumber'];
 
 type Def = Record<string, unknown>;
 function schemaOf(types: readonly string[], extra: Def = {}, indexes?: unknown[]) {

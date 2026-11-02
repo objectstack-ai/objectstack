@@ -1769,10 +1769,12 @@ export type SubmitBehavior =
  *
  * - **[spec-aligned]** — same name & semantics as `@objectstack/spec`
  *   `FormViewSchema` (`title`, `description`, `layout`, `columns`, `sections`,
- *   `defaultTab`, `tabPosition`, `allowSkip`, `showStepIndicator`, `drawerSide`/`drawerWidth`,
+ *   `defaultTab`, `tabPosition`, `allowSkip`, `showStepIndicator`,
  *   `modalSize`, `subforms`, `submitBehavior`; `formType` ↔ spec `type`).
  * - **[ObjectUI extension]** — serializable renderer extras with no spec
  *   backing yet (button visibility/labels, `className`, `initialValues`,
+ *   `drawerSide`/`drawerWidth` — tombstones on the spec form view, the React
+ *   `ObjectForm` block's own props,
  *   `fields`/`customFields`, …). Candidates for upstreaming are tracked in
  *   #2545; until then they are sanctioned, documented extensions.
  * - **[runtime-only]** — non-serializable runtime concerns that never belong
