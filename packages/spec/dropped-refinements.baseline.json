@@ -97,6 +97,7 @@
         "manifest.flows.element",
         "manifest.flows.element.errorHandling",
         "manifest.flows.element.nodes.element.in.waitEventConfig",
+        "manifest.flows.element.variables.element",
         "manifest.hooks.element",
         "manifest.hooks.element.object",
         "manifest.jobs.element",
@@ -150,21 +151,24 @@
       "sites": [
         "data.flow",
         "data.flow.errorHandling",
-        "data.flow.nodes.element.in.waitEventConfig"
+        "data.flow.nodes.element.in.waitEventConfig",
+        "data.flow.variables.element"
       ]
     },
     "api/CreateFlowRequest": {
       "sites": [
         "",
         "errorHandling",
-        "nodes.element.in.waitEventConfig"
+        "nodes.element.in.waitEventConfig",
+        "variables.element"
       ]
     },
     "api/CreateFlowResponse": {
       "sites": [
         "data",
         "data.errorHandling",
-        "data.nodes.element.in.waitEventConfig"
+        "data.nodes.element.in.waitEventConfig",
+        "data.variables.element"
       ]
     },
     "api/CreateImportJobRequest": {
@@ -208,7 +212,8 @@
       "sites": [
         "data",
         "data.errorHandling",
-        "data.nodes.element.in.waitEventConfig"
+        "data.nodes.element.in.waitEventConfig",
+        "data.variables.element"
       ]
     },
     "api/GetInstalledPackageResponse": {
@@ -243,6 +248,7 @@
         "data.options[1].manifest.flows.element",
         "data.options[1].manifest.flows.element.errorHandling",
         "data.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "data.options[1].manifest.flows.element.variables.element",
         "data.options[1].manifest.hooks.element",
         "data.options[1].manifest.hooks.element.object",
         "data.options[1].manifest.jobs.element",
@@ -382,6 +388,7 @@
         "options[1].manifest.flows.element",
         "options[1].manifest.flows.element.errorHandling",
         "options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "options[1].manifest.flows.element.variables.element",
         "options[1].manifest.hooks.element",
         "options[1].manifest.hooks.element.object",
         "options[1].manifest.jobs.element",
@@ -461,6 +468,7 @@
         "data.packages.element.options[1].manifest.flows.element",
         "data.packages.element.options[1].manifest.flows.element.errorHandling",
         "data.packages.element.options[1].manifest.flows.element.nodes.element.in.waitEventConfig",
+        "data.packages.element.options[1].manifest.flows.element.variables.element",
         "data.packages.element.options[1].manifest.hooks.element",
         "data.packages.element.options[1].manifest.hooks.element.object",
         "data.packages.element.options[1].manifest.jobs.element",
@@ -591,14 +599,16 @@
       "sites": [
         "definition",
         "definition.errorHandling",
-        "definition.nodes.element.in.waitEventConfig"
+        "definition.nodes.element.in.waitEventConfig",
+        "definition.variables.element"
       ]
     },
     "api/UpdateFlowResponse": {
       "sites": [
         "data",
         "data.errorHandling",
-        "data.nodes.element.in.waitEventConfig"
+        "data.nodes.element.in.waitEventConfig",
+        "data.variables.element"
       ]
     },
     "automation/ApprovalEscalation": {
@@ -666,7 +676,8 @@
       "sites": [
         "",
         "errorHandling",
-        "nodes.element.in.waitEventConfig"
+        "nodes.element.in.waitEventConfig",
+        "variables.element"
       ]
     },
     "automation/FlowNode": {
@@ -684,11 +695,17 @@
         ""
       ]
     },
+    "automation/FlowVariable": {
+      "sites": [
+        ""
+      ]
+    },
     "automation/FlowVersionHistory": {
       "sites": [
         "definition",
         "definition.errorHandling",
-        "definition.nodes.element.in.waitEventConfig"
+        "definition.nodes.element.in.waitEventConfig",
+        "definition.variables.element"
       ]
     },
     "automation/GetRecordConfig": {
@@ -1932,15 +1949,15 @@
         "list.timeline.groupByField"
       ]
     },
-    "ui/ViewFilterOrGroup": {
-      "sites": [
-        "or.element"
-      ]
-    },
     "ui/ViewFilterElement": {
       "sites": [
         "",
         "options[0]"
+      ]
+    },
+    "ui/ViewFilterOrGroup": {
+      "sites": [
+        "or.element"
       ]
     },
     "ui/ViewFilterRule": {
