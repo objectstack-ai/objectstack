@@ -88,7 +88,10 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
     why: "Home's command palette, mounted from its first open: the host app's scope over its navigation's objects (objectstack#29121)",
   },
   'packages/app-shell/src/console/home/HomePage.tsx': { kind: 'byName', why: "Home's recent record rows, each row's object by name (objectstack#29121)" },
-  'packages/app-shell/src/views/DashboardView.tsx': { kind: 'off', why: "a dashboard route: its widgets' objects" },
+  'packages/app-shell/src/views/DashboardView.tsx': {
+    kind: 'scope',
+    why: "a dashboard route asks its widgets' objects by name (readDashboardWidgetObjects); a context without readObjectScope reads objects",
+  },
   'packages/app-shell/src/views/ReportView.tsx': { kind: 'off', why: "a report route: its columns' objects" },
   'packages/app-shell/src/views/PageView.tsx': {
     kind: 'scope',
