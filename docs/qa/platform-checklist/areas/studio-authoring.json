@@ -3693,7 +3693,7 @@
       "title": "Permission sets are created, found and locked honestly in Studio's Access pillar: the New dialog derives the identifier and refuses one already taken — published or draft — the rail searches and shows its empty states, and on a read-only package New lands in its .custom pair while the packaged set offers no edit and the server refuses the forged write, and New similar on a packaged set copies it under a new name into that pair",
       "since": "v18",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3761,6 +3761,10 @@
         "automation-input",
         "stale-console-bundle"
       ],
+      "automated": {
+        "kind": "unit",
+        "ref": "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.accessNewSimilar-28573.test.tsx (jsdom, the real Access pillar against a mocked server: acceptance[5]'s console half — New similar posts exactly { name, label }, opens the copy where the answer says it landed, shows a 409 in the server's words, and draws no override gesture on a base set) + packages/runtime/src/domains/permission-set-clone.test.ts (the clone door through the HttpDispatcher in-process over a test security catalog: acceptance[5]'s server half — a packaged source with no target is copied whole into <X>.custom through the ensure door). Neither drives a booted deployment, so they score acceptance[5] partial at most (RUNNER rule 6) and its live leg is the run's. Acceptance[0]–[4] have no pin: they are the run's live leg. The live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not open the Access pillar"
+      },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Access pillar: the New set dialog, the taken-identifier check findTakenIdentifier and CreateTakenNotice before the create's If-None-Match: *, discardDraft, the rail search and empty states, openCreateSet offered on a read-only base when newInPair — ADR-0146 D3, #28572) + ui/packages/app-shell/src/views/studio-design/packages-io.ts#ensureCustomizationPackage (the ensure door the New save calls first on a read-only base)",
         "ui/packages/app-shell/src/views/metadata-admin/permission-set-clone.ts#clonePermissionSet (POST /api/v1/security/permission-sets/:name/clone with { name, label }; where the copy lands is read off the answer) + packages/runtime/src/domains/permission-set-clone.ts#clonePermissionSetDefinition (the whole copy, saved in the source package's pair) — #28573 (N-20b) landed by PR #28669; the door's pair placement #28563 (N-20a)",
@@ -3803,6 +3807,12 @@
           "revision": 6,
           "date": "2026-11-02",
           "change": "New similar on a packaged permission set joins the item (#28579 slice 2, ADR-0146 N-20b #28573 / PR #28669) instead of a twin item: steps[5] no longer defers it, new steps[6] drives it, new acceptance[5] scores the copy landing in com.example.showcase.custom with no override gesture on the base set, and a source row cites the client and the door. The title adds it. The other clauses are unchanged. Read at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 7,
+          "date": "2026-11-02",
+          "change": "an automated block is added (#28579 slice 3): New similar's two pins, StudioDesignSurface.accessNewSimilar-28573.test.tsx (jsdom) and permission-set-clone.test.ts (the door in-process), scoped to acceptance[5] and its layers; acceptance[0]–[4] keep no pin, and the slice 3 live spec does not open the Access pillar. kind unit. No clause or step changed",
           "ref": "#28579"
         }
       ]
@@ -4369,7 +4379,7 @@
       "title": "Customize a read-only base's view, dashboard or report in Studio: the edit lands in <base>.custom as a declared override, every read serves it, the pair's export carries the declaration, and 'Restore package original' brings the base back",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4458,8 +4468,8 @@
         "cache-staleness"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/InterfacesPillar.customize-28562.test.tsx + StudioCustomizeControls.customize-28562.test.tsx + StudioDesignSurface.customizePublish-28562.test.tsx (jsdom, the console's calls and states for acceptance[0], [3] and [5]'s client half) + packages/objectql/src/protocol-custom-override-effective-read.test.ts (protocol layer: the five reads agree and the pair's per-package read carries the declaration — corroborates acceptance[1] and [4], drives no HTTP door). None renders for an end user; the browser journey has no live spec yet: the e2e is owed by #28579 slice 3 (the card's Wanted 3), so until it lands every browser and api clause is the run's live leg"
+        "kind": "e2e",
+        "ref": "ui/e2e/live/studio-customize-journey.spec.ts (live Playwright against a booted showcase and a built console, in the required Live E2E UI job's test:e2e:live:ci allowlist; the VIEW variant only, on showcase_task.in_progress: acceptance[0] at the network layer — Customize, one ensure answering 200 or 201, the draft PUT naming package=com.example.showcase.custom with overrides { package: 'com.example.showcase', basedOn } and the edited column set; acceptance[1]'s read naming no package, the read naming the base and the list, at HTTP — not /layers; acceptance[3]'s studio-override-chip drawn — not its sentence or title; acceptance[5]'s two DELETEs at the pair answering 200 and the three reads back to the shipped columns — not Cancel and not the end user's render. It drives neither the dashboard nor the report variant, acceptance[2] or acceptance[4]) + ui/packages/app-shell/src/views/studio-design/InterfacesPillar.customize-28562.test.tsx + StudioCustomizeControls.customize-28562.test.tsx + StudioDesignSurface.customizePublish-28562.test.tsx (jsdom, the console's calls and states for acceptance[0], [3] and [5]'s client half) + packages/objectql/src/protocol-custom-override-effective-read.test.ts (protocol layer: the five reads agree and the pair's per-package read carries the declaration — corroborates acceptance[1] and [4], drives no HTTP door). The dashboard and report variants, the end user's render and both exports remain the run's live leg"
       },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#STUDIO_CUSTOMIZE_TYPES (view, dashboard, report), ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#overrideDraftBody (the pair's draft body and its declaration), ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioCustomizeButton, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioOverrideChip, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#StudioRestoreOriginalDialog",
@@ -4476,6 +4486,12 @@
           "date": "2026-11-02",
           "change": "new item (ADR-0146 N-17, #28562 / PR #28711, with N-10's one effective read): Customize → a declared override in com.example.showcase.custom, the four reads and the end user agree, the pair's export carries the declaration, Restore package original brings the base back; dashboard, view and report variants. Read from source at base eb123b7ccc. Replaces the retired studio-authoring.packaged-display-class-direct-edit",
           "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "automated now names the live spec ui/e2e/live/studio-customize-journey.spec.ts (#28579 slice 3) and says which clauses of the view variant it drives at which layer; kind e2e. The sentence that the e2e was still owed by slice 3 is gone. No clause, step or fixture changed",
+          "ref": "#28579"
         }
       ]
     },
@@ -4484,7 +4500,7 @@
       "title": "Add a field to a read-only base object in Studio: it is written as an extension in <base>.custom named xxx__c, a base field changes only within the display-property whitelist, and `__c` is refused outside a .custom pair",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -4510,7 +4526,7 @@
         "base-field patch: select a shipped text field, edit its label, and read the save; then read the field's `required` control and the sentence under it (data-testid field-base-patch-only)",
         "publish the pair (Pending / Publish → POST /api/v1/packages/com.example.showcase.custom/publish-drafts); GET /api/v1/meta/object/showcase_task and GET /api/v1/meta/object_extension/showcase_task?package=com.example.showcase.custom; create a showcase_task with region__c set through the data API and read it back",
         "reopen Add field and type 'Region' again: read the hint the popover gives for region__c",
-        "refusal legs over the API: PUT /api/v1/meta/object/qa_c_probe?package=QA_PKG (the run's writable package) with a field named note__c; and PUT /api/v1/meta/object_extension/showcase_task?mode=draft&package=com.example.showcase.custom with an unsuffixed field 'plain_note'; capture both answers",
+        "refusal legs over the API: PUT /api/v1/meta/object/NS_qa_c_probe?package=QA_PKG (the run's writable package; NS is QA_PKG's namespace, because an object name without it answers 422 NAMESPACE_PREFIX before the `__c` judge is asked) with a field named note__c; and PUT /api/v1/meta/object_extension/showcase_task?mode=draft&package=com.example.showcase.custom with an unsuffixed field 'plain_note'; capture both answers",
         "teardown: Restore package original on showcase_task's extension (or DELETE the pair's object_extension draft and row), delete QA_PKG"
       ],
       "acceptance": [
@@ -4554,8 +4570,8 @@
         "cache-staleness"
       ],
       "automated": {
-        "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/DataPillar.baseObjectExtension-28575.test.tsx + StudioCustomizeControls.objectExtension-28575.test.ts (jsdom: acceptance[0], [2]'s client half and [4], the console's calls against a mocked server) + packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts (protocol layer: both refusal cases of acceptance[3], no HTTP door). Acceptance[1] has no pin: it is the run's live leg; the browser journey has no live spec yet: the e2e is owed by #28579 slice 3 (the card's Wanted 3), so until it lands every browser and api clause is the run's live leg"
+        "kind": "e2e",
+        "ref": "ui/e2e/live/studio-customize-journey.spec.ts (live Playwright against a booted showcase and a built console, in the required Live E2E UI job's test:e2e:live:ci allowlist: acceptance[0] for region__c at the network layer — the API-name preview, the draft PUT naming package=com.example.showcase.custom with body { extend: 'showcase_task', fields: { region__c: { type: 'text', label: 'Region' } } } — not tier__c, not the absence of an object PUT; acceptance[1] at HTTP after publish — GET /meta/object/showcase_task lists region__c, the pair's object_extension read and the pair's export carry it — not the record round trip) + ui/packages/app-shell/src/views/studio-design/DataPillar.baseObjectExtension-28575.test.tsx + StudioCustomizeControls.objectExtension-28575.test.ts (jsdom: acceptance[0], [2]'s client half and [4], the console's calls against a mocked server) + packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts (protocol layer: both refusal cases of acceptance[3], no HTTP door). The record round trip, acceptance[2] and [3] at HTTP and acceptance[4] remain the run's live leg"
       },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#OBJECT_EXTENSION_TYPE, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#extensionFieldName, ui/packages/app-shell/src/views/studio-design/StudioCustomizeControls.tsx#routeFoldedFieldsEdit (a whitelisted change routed into fieldPatches) + ui/packages/app-shell/src/views/studio-design/AddFieldPopover.tsx#AddFieldPopover",
@@ -4571,6 +4587,12 @@
           "date": "2026-11-02",
           "change": "new item (ADR-0146 N-23c, #28575 / PR #28860, with the `__c` judge of PR #28724): Studio's Add field on the read-only showcase_task writes region__c into an object_extension of com.example.showcase.custom, a base field's label edit is a fieldPatches entry, `required` is outside the whitelist, and `__c` is refused outside the pair. Read from source at base eb123b7ccc",
           "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "steps[6]'s object outside the pair is named with QA_PKG's namespace prefix: measured in the slice 3 run (base 128681f4), PUT /api/v1/meta/object/qa_c_probe?package=QA_PKG answers 422 NAMESPACE_PREFIX before the `__c` judge runs, while the prefixed name answers the 400 VALIDATION_ERROR acceptance[3] scores. automated now names the live spec ui/e2e/live/studio-customize-journey.spec.ts and the clauses it drives; kind e2e, and the sentence that the e2e was owed by slice 3 is gone. No clause changed",
+          "ref": "#28579"
         }
       ]
     },
@@ -4579,7 +4601,7 @@
       "title": "The Studio landing says 'n customized, m switched off' for each read-only base, and the All metadata lists mark the pair's items 'Customized' or 'Added' with an 'only customizations' filter — every number read from GET /packages/:id/customizations",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -4601,7 +4623,7 @@
         "open /_console/studio and read the read-only showcase card's line (data-testid studio-landing-customizations, data-state read), its pair link (studio-landing-customizations-pair) and its switched-off link (studio-landing-customizations-switched-off)",
         "open /_console/studio/com.example.showcase/metadata: read the directory total (directory-customizations-total) and the per-type tile counts",
         "open the dashboard list of that area: read the mark on the overridden dashboard and on the pair's added item (customization-mark), then switch on the 'only customizations' filter (metadata-only-customizations) and read what remains",
-        "control: open a writable package's card and its All metadata area with the network panel recording — no line, no mark, no customizations request; and GET /api/v1/packages/com.example.showcase.custom/customizations"
+        "control: open the landing and a writable package's All metadata area with the network panel recording — the landing asks for no writable card, and the area's read of the writable package draws no line, no mark and no filter; and GET /api/v1/packages/com.example.showcase.custom/customizations"
       ],
       "acceptance": [
         {
@@ -4617,9 +4639,9 @@
           "evidence": "the directory and list DOM reads beside step 1"
         },
         {
-          "clause": "a failed read draws no number and no mark — never a '0' — and a writable package or a pair id is never asked",
+          "clause": "a failed read draws no number and no mark — never a '0' — the landing asks for read-only bases only, a package with nothing customized draws nothing, and a pair id is never asked",
           "oracle": "network",
-          "verify": "step 5: no customizations request for the writable package; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: BuilderLanding.customizationCounts-28566 and metadataAreaHost.customizations-28568 pin it",
+          "verify": "step 5: the landing sends no customizations request for a writable card; the All metadata area of a writable package reads its customizations (usePackageCustomizations asks every package but a pair; metadataAreaHost.customizations-28568 pins that read for a package with no pair) and, the counts being zero, draws no total, no mark and no filter; the pair id answers 400 VALIDATION_ERROR naming its base (the console refuses it before sending). A failed read shows the muted couldn't-read line with the server's sentence, never a count — not staged live: BuilderLanding.customizationCounts-28566 and metadataAreaHost.customizations-28568 pin it",
           "evidence": "the network trace + the pair-id refusal body"
         }
       ],
@@ -4633,7 +4655,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/BuilderLanding.customizationCounts-28566.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment; the browser journey has no live spec yet: the e2e is owed by #28579 slice 3 (the card's Wanted 3), so until it lands every browser and api clause is the run's live leg"
+        "ref": "ui/packages/app-shell/src/views/studio-design/BuilderLanding.customizationCounts-28566.test.tsx + customizationMarks.test.ts + ui/packages/app-shell/src/views/metadata-admin/metadataAreaHost.customizations-28568.test.tsx (jsdom against a mocked read: acceptance[0]–[2]'s console half) + packages/runtime/src/domains/packages-customizations.test.ts (the route's three lists and counts, and the AGREEMENT that every listed override is the layered read's overlay). No pin reads a live deployment, and the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) does not read the counts or the marks, so every browser and api clause is the run's live leg"
       },
       "source": [
         "ui/packages/app-shell/src/views/studio-design/packageCustomizations-io.ts#fetchPackageCustomizations (GET /api/v1/packages/:id/customizations, judged by GetPackageCustomizationsResponseSchema; a pair id refused before a request) + ui/packages/app-shell/src/views/studio-design/BuilderLanding.tsx#BuilderLanding (the card's line)",
@@ -4646,6 +4668,12 @@
           "revision": 1,
           "date": "2026-11-02",
           "change": "new item (ADR-0146 N-24 #28566 / PR #28634 and N-26b #28568 / PR #28667): the landing's 'n customized, m switched off' and the All metadata marks and filter, each number read from GET /packages/:id/customizations. Read from source at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "acceptance[2] and steps[4] corrected, an assertion defect measured in the slice 3 run (base 128681f4): the clause said a writable package is never asked, but the All metadata area asks every package except a pair (usePackageCustomizations; metadataAreaHost.customizations-28568's 'a base without a pair is unchanged' pins the read), and only the landing limits itself to read-only bases. The clause now scores what the console promises: the landing asks no writable card, a package with zero counts draws nothing, a pair id is refused. automated says the slice 3 live spec does not cover this item instead of saying the e2e is owed. The run scored acceptance[2] FAIL against revision 1",
           "ref": "#28579"
         }
       ]
