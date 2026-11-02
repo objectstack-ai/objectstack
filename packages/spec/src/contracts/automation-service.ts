@@ -949,6 +949,13 @@ export interface FlowRuntimeState {
  *   notice would be refused by name and strand the run. Author remedy: move the
  *   `save_notice` ahead of that node or use a `notify` node, or republish the
  *   child without a node that suspends, and the flow arms.
+ * - `suspending_subflow_in_region` — the arming gate declined the flow because
+ *   a `subflow` / `map` node inside one of its region bodies (a `loop` body, a
+ *   `parallel` branch, a `try_catch` slot) calls a child flow that can suspend
+ *   (#28897): a region body cannot carry a durable pause, so the run would fail
+ *   at the region boundary the first time that child suspends. Author remedy:
+ *   move the call onto the top-level graph, or republish the child without a
+ *   node that suspends, and the flow arms.
  * - `missing_trigger` — no trigger of the declared type is registered on this
  *   kernel. Author remedy: depend on the trigger package
  *   (`requires: ['triggers']`).
@@ -959,6 +966,7 @@ export const FLOW_UNBOUND_CAUSES = [
     'deployment_policy',
     'disabled_subflow',
     'notice_after_suspending_subflow',
+    'suspending_subflow_in_region',
     'missing_trigger',
     'binding_failure',
 ] as const;
