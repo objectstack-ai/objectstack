@@ -8070,9 +8070,9 @@ export function DataPillar({
    * a PRODUCER-side fix; ListView's by-identity dependency is correct for a genuine
    * column change and is left alone.
    */
-  const gridColumnsKey = React.useMemo(
+  const gridColumnsComputed = React.useMemo(
     () =>
-      JSON.stringify(readFields(shownDraft.fields)
+      readFields(shownDraft.fields)
         // objectui#11780 — a column the platform injects AND hides (`__search`,
         // `owning_business_unit_id`) is no column an author manages. Read off
         // the definition this memo already holds, so the key stays
@@ -8092,13 +8092,21 @@ export function DataPillar({
         // what the grid asks for. The new field is still selected in the
         // inspector, which is where it gets configured; it joins the grid once
         // it is published and therefore queryable.
-        .filter((n) => publishedFieldNames.has(n))),
+        .filter((n) => publishedFieldNames.has(n)),
     [shownDraft.fields, publishedFieldNames],
   );
-  // objectstack#28575 — keyed on the column NAMES: the folded object
-  // (`shownDraft`) is rebuilt on every extension edit, and a label typed into
-  // an extension field must not re-key this fetch input.
-  const gridColumns = React.useMemo(() => JSON.parse(gridColumnsKey) as string[], [gridColumnsKey]);
+  // objectstack#28575 — with a base object's extension open, the folded object
+  // (`shownDraft`) is rebuilt on every extension edit, so a label typed into an
+  // extension field would hand the grid a fresh columns array per keystroke:
+  // then the columns are keyed on their NAMES. Otherwise the array keeps the
+  // identity semantics above, which `StudioDesignSurface.gridColumns.test.tsx`'s
+  // identity-churn liveness case pins as a must-not-change.
+  const gridColumnsExtKey = extOpen ? JSON.stringify(gridColumnsComputed) : null;
+  const gridColumns = React.useMemo(
+    () => (gridColumnsExtKey === null ? gridColumnsComputed : (JSON.parse(gridColumnsExtKey) as string[])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- with an extension open, the names alone key it
+    [gridColumnsExtKey ?? gridColumnsComputed],
+  );
 
   /**
    * The design-mode FORM's fields: the object's own fields, dropping
@@ -8129,9 +8137,14 @@ export function DataPillar({
    * `fields` identical, so the looser key would churn (and re-run the form's
    * field-generation effect) on every unrelated draft edit (icon, label).
    */
-  // objectstack#28575 — keyed on the names, as `gridColumns` is.
-  const formFieldsKey = React.useMemo(() => JSON.stringify(formFieldNames(shownDraft.fields)), [shownDraft.fields]);
-  const formFields = React.useMemo(() => JSON.parse(formFieldsKey) as string[], [formFieldsKey]);
+  const formFieldsComputed = React.useMemo(() => formFieldNames(shownDraft.fields), [shownDraft.fields]);
+  // objectstack#28575 — with an extension open, keyed on the names, as `gridColumns` is.
+  const formFieldsExtKey = extOpen ? JSON.stringify(formFieldsComputed) : null;
+  const formFields = React.useMemo(
+    () => (formFieldsExtKey === null ? formFieldsComputed : (JSON.parse(formFieldsExtKey) as string[])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- with an extension open, the names alone key it
+    [formFieldsExtKey ?? formFieldsComputed],
+  );
 
   // objectui#12515 — what the Form tab's Preview renders. The draft differs
   // from the published definition when there is no published one, a pending
