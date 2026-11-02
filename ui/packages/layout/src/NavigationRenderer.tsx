@@ -1581,6 +1581,11 @@ function NavigationItemRenderer({
   // Decided once for the tree (`NavMobileSource`), not by a hook per row.
   const isMobile = React.useContext(NavIsMobileContext);
   const mobileBtnClass = isMobile ? 'min-h-[44px] text-[15px] gap-3 rounded-xl' : undefined;
+  // A row's tooltip names it in the icon rail. On a phone the primitive draws
+  // the tooltip `hidden`, so a row there skips the Tooltip it would never show:
+  // one Radix Tooltip per row was a measurable part of every drawer open
+  // (objectstack#29141).
+  const rowTooltip = (label: string) => (isMobile ? undefined : label);
   const navIconClass = cn('shrink-0', isMobile ? 'h-5 w-5' : 'h-4 w-4');
   // Resolve the initial open state (objectui#13336):
   //
@@ -1746,7 +1751,7 @@ function NavigationItemRenderer({
       <SidebarMenuItem ref={row?.ref} style={row?.style}>
         {row?.dropIndicator && <DropIndicator at={row.dropIndicator} />}
         <SidebarMenuButton
-          tooltip={actionLabel}
+          tooltip={rowTooltip(actionLabel)}
           onClick={() => onAction?.(item)}
           className={cn(mobileBtnClass, dragActivator && 'cursor-grab')}
           {...(dragActivator ? dragActivatorProps(dragActivator) : {})}
@@ -1815,7 +1820,7 @@ function NavigationItemRenderer({
       <SidebarMenuButton
         asChild
         isActive={isActive}
-        tooltip={itemLabel}
+        tooltip={rowTooltip(itemLabel)}
         className={cn(mobileBtnClass, dragActivator && 'cursor-grab')}
       >
         {external ? (
