@@ -136,6 +136,7 @@
     "data/QueryWithTransport",
     "data/RangeOperator",
     "data/ReferenceIdValue",
+    "data/ReferenceNameOnlyValue",
     "data/ReferenceResolution",
     "data/ReferenceResolutionError",
     "data/ReplicationConfig",

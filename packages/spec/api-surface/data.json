@@ -648,6 +648,8 @@
     "RedactedDatasourceConfig (interface)",
     "ReferenceIdValue (type)",
     "ReferenceIdValueSchema (const)",
+    "ReferenceNameOnlyValue (type)",
+    "ReferenceNameOnlyValueSchema (const)",
     "ReferenceResolution (type)",
     "ReferenceResolutionError (type)",
     "ReferenceResolutionErrorSchema (const)",

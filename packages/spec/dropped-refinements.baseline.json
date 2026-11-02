@@ -1083,6 +1083,11 @@
         ""
       ]
     },
+    "data/ReferenceNameOnlyValue": {
+      "sites": [
+        "id"
+      ]
+    },
     "data/SQLDriverConfig": {
       "sites": [
         ""
