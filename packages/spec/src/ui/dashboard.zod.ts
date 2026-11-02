@@ -1704,13 +1704,15 @@ function refuseDuplicateGlobalFilterNames(globalFilters: readonly unknown[], ctx
  * `dateRange` the key is free and the entry is an ordinary filter.
  *
  * Attached to the dashboard object, not to the `globalFilters` array, because
- * the verdict reads the sibling `dateRange`: a mirror that spreads
- * `DashboardSchema.shape.globalFilters` alone keeps the duplicate-key rule
- * above and not this one. Predicate and message:
+ * the verdict reads the sibling `dateRange`. Exported in the house shape of
+ * {@link checkDashboardWidgetStageOrder}, a named `(value, ctx)` check chained
+ * on with `.superRefine(…)`: a mirror that rebuilds the dashboard from
+ * `DashboardSchema.shape` drops every object-level check, and gets this one
+ * back only by importing it and chaining it (the console's
+ * `DashboardComponentSchema` does). Predicate and message:
  * `duplicate-global-filter-names.ts` ({@link reservedDateRangeGlobalFilters}).
- * Not exported: the schema is the door.
  */
-function refuseReservedDateRangeGlobalFilters(
+export function checkDashboardReservedDateRangeGlobalFilters(
   dashboard: { dateRange?: unknown; globalFilters?: unknown },
   ctx: z.RefinementCtx,
 ): void {
@@ -1827,7 +1829,7 @@ export const DashboardSchema = lazySchema(() => strictObject({
    * {@link refuseDuplicateGlobalFilterNames} (#29023). The built-in
    * `dateRange` is declared under the key `dateRange`, so an entry keyed
    * `dateRange` beside it is refused too, by the dashboard-level
-   * {@link refuseReservedDateRangeGlobalFilters} (#29213).
+   * {@link checkDashboardReservedDateRangeGlobalFilters} (#29213).
    */
   globalFilters: z.array(GlobalFilterSchema)
     .superRefine(refuseDuplicateGlobalFilterNames)
@@ -1864,7 +1866,7 @@ export const DashboardSchema = lazySchema(() => strictObject({
   // ADR-0146 D2 — the override declaration (authored; travels with the item).
   ...OverrideDeclarationFields,
 
-}).superRefine(refuseReservedDateRangeGlobalFilters));
+}).superRefine(checkDashboardReservedDateRangeGlobalFilters));
 
 export type Dashboard = z.input<typeof DashboardSchema>;
 /** Post-parse shape of {@link Dashboard} — defaults applied, transforms run (ADR-0122). */

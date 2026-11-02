@@ -20,6 +20,7 @@ import { z } from 'zod';
 import { agedOutSpecKeyRefusal, aliasKeyRefusal, durationKeyRenamedGuidance, handlerKeyRefusal, retiredNodeType, retirementTombstone } from './tombstone.zod.js';
 import {
   ChartTypeSchema as SpecChartTypeSchema,
+  checkDashboardReservedDateRangeGlobalFilters,
   checkDashboardWidgetChartMeasureArity,
   checkDashboardWidgetMetricMeasureArity,
   checkDashboardWidgetStageOrder,
@@ -1741,7 +1742,12 @@ export const DashboardComponentSchema = BaseSchema.extend(SpecDashboardFields.sh
     'dashboard', 'dashboard.performance', 'performance', '17.0.0',
     'No renderer or runtime read it; dashboard performance tuning was never implemented. Delete the key.',
   ),
-});
+})
+  // objectstack#29213: the spec's one object-level dashboard check, re-attached because
+  // rebuilding from `SpecDashboardFields.shape` drops it. On a dashboard that declares
+  // `dateRange`, a `globalFilters` entry keyed `dateRange` is refused here with the spec's
+  // own issue, instead of replacing the date range on the board.
+  .superRefine(checkDashboardReservedDateRangeGlobalFilters);
 
 /**
  * Dashboard Widget Config Schema (for DashboardConfigPanel)
