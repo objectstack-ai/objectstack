@@ -2295,8 +2295,10 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // its own refinements, so this refusal is structurally incapable of
   // reaching it; `action-confirm-params-guard.test.ts` pins that both ways.
   // The same holds for {@link InlineActionSchema}, which `.pick()`s from the
-  // field factory rather than deriving from this chain — and which does not
-  // pick `description`, so the remedy below has no slot there to move into.
+  // field factory rather than deriving from this chain, so this refusal does
+  // not reach an inline action. The inline pick does carry `description` now,
+  // so the remedy below has a slot there too; whether the inline door should
+  // also refuse the pair is a separate narrowing question, not decided here.
   if (data.confirmText != null && Array.isArray(data.params) && data.params.length > 0) {
     return false;
   }
@@ -2567,16 +2569,27 @@ export function normalizeInlineAction(value: unknown): unknown {
  * issue's option C names. The pick is therefore what makes the ruled direction
  * A reachable from a page, and it is deliberately taken before objectui's half.
  *
- * The divergence that buys, stated rather than hidden: objectui's
- * `element:button` renderer builds an explicit forward list
- * (`packages/components/src/renderers/basic/elements.tsx`) that does not yet
- * include `bodyExtra`, so between this landing and that follow-up an inline
- * `bodyExtra` validates, publishes, and is dropped one hop before the runner.
- * The runner and the console `apiHandler` below it already read the key — the
- * missing hop is the forward list alone. Direction of the window: spec accepts
- * ahead of the renderer, never the reverse. Tracked as the objectui card the
- * ruling splits out under `Blocked-by:` this change; the general rule above is
- * unchanged for every other field.
+ * That window has since closed: the `element:button` renderer's explicit
+ * forward list (`ui/packages/components/src/renderers/basic/elements.tsx`) now
+ * carries `bodyExtra` to the runner, and the console `apiHandler` below it reads
+ * the key. Direction of such a window: spec accepts ahead of the renderer, never
+ * the reverse.
+ *
+ * **`description` is picked because the renderer already forwards it.** The
+ * same forward list hands `action.description` to the runner, and the console's
+ * param-collection handler (`ui/packages/app-shell/src/hooks/useConsoleActionRuntime.tsx`)
+ * draws it as the line under the param dialog's title — the handler that draws
+ * a registered action's `description`, bundle lookup by the action's `name`
+ * first, the authored text as the fallback. Without the pick an inline action
+ * could not say what it does, and the dialog showed its generic line instead.
+ *
+ * One window remains, stated rather than hidden: the inline copy localizer
+ * (`ui/packages/react/src/hooks/useActionTextLocalizer.ts`) collapses to the
+ * user's language only the keys its `DECLARED_COPY_KEYS` lists — `confirmText`,
+ * `successMessage`, `errorMessage` — and `description` is not one of them. So
+ * until the renderer half lands, an inline locale map (`{ en, "zh-CN" }`) on
+ * `description` reaches the dialog unresolved. Same direction as above: spec
+ * accepts ahead of the renderer, never the reverse.
  */
 export const InlineActionSchema = lazySchema(() => z.preprocess(
   normalizeInlineAction,
@@ -2589,6 +2602,9 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
     method: true,
     params: true,
     bodyExtra: true,
+    // objectstack-ai/cloud#3281 (ruling A): the param dialog's explanatory
+    // line. The localizer half that resolves its locale map is #29249.
+    description: true,
     confirmText: true,
     successMessage: true,
     errorMessage: true,

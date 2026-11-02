@@ -361,3 +361,64 @@ describe('the region refusal still cancels the child run when its suspension cha
         expect(runs.map((r: any) => r.status)).toEqual(['cancelled']);
     });
 });
+
+describe('the region refusal cancels what it can read of a deeper suspension chain and names the link it cannot (#29333)', () => {
+    /** caller --loop--> deal_review --subflow--> deal_mid --subflow--> deal_ask (parks at `wait`). */
+    function threeRunRig(store: InMemorySuspendedRunStore) {
+        const r = rig();
+        r.engine.setSuspendedRunStore(store);
+        r.engine.registerFlow('deal_ask', pausingChild('deal_ask'));
+        r.engine.registerFlow('deal_mid', chain('deal_mid', [start(false), call('deal_ask', 'subflow', 'ask'), END]));
+        r.engine.registerFlow('deal_review', chain('deal_review', [start(false), call('deal_mid', 'subflow', 'mid'), END]));
+        r.engine.registerFlow('deal_submit', regionCaller('deal_submit', 'deal_review', 'loop', 'subflow', false));
+        const cancel = vi.spyOn(r.engine, 'cancelRun');
+        return { ...r, cancel };
+    }
+
+    const chainErrors = (logger: any): string[] =>
+        logger.error.mock.calls
+            .map((c: unknown[]) => String(c[0]))
+            .filter((m: string) => m.includes('could not be read while cancelling that chain'));
+
+    it('the middle link cannot be read: the child is cancelled, one `error` record names the middle run, and the refusal is still thrown', async () => {
+        const store = new ChildLoadFailingStore('deal_mid', 'always');
+        const { engine, logger, cancel } = threeRunRig(store);
+
+        const result: any = await engine.execute('deal_submit', {} as any);
+        // The refusal itself is unchanged.
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain(
+            `durable pause inside a structured region: node 'step' (sub-flow 'deal_review') suspended`,
+        );
+
+        expect((await engine.listRuns('deal_review')).map((r: any) => r.status), 'the readable link is cancelled').toEqual(['cancelled']);
+        const parked = await store.list();
+        // deal_mid cannot be read, and deal_ask is only reachable through deal_mid's row.
+        expect(parked.map((r) => r.flowName).sort()).toEqual(['deal_ask', 'deal_mid']);
+        const midRunId = parked.find((r) => r.flowName === 'deal_mid')!.runId;
+
+        const errors = chainErrors(logger);
+        expect(errors, 'one record names the unreadable link').toHaveLength(1);
+        expect(errors[0]).toContain(`the suspended run '${midRunId}'`);
+
+        // Deepest first: the unreadable link, then the child.
+        const childRunId = (await engine.listRuns('deal_review'))[0].id;
+        expect(cancel.mock.calls.map((c) => c[0])).toEqual([midRunId, childRunId]);
+    });
+
+    it('CONTROL: an all-readable three-run chain is cancelled whole, deepest first, with nothing at `error`', async () => {
+        const { engine, logger, cancel } = threeRunRig(new InMemorySuspendedRunStore());
+
+        const result: any = await engine.execute('deal_submit', {} as any);
+        expect(result.success).toBe(false);
+        expect(await engine.listSuspendedRunsDurable(), 'no run is left parked').toEqual([]);
+        const ids: string[] = [];
+        for (const name of ['deal_ask', 'deal_mid', 'deal_review']) {
+            const runs = await engine.listRuns(name);
+            expect(runs.map((r: any) => r.status), name).toEqual(['cancelled']);
+            ids.push(runs[0].id);
+        }
+        expect(cancel.mock.calls.map((c) => c[0])).toEqual(ids);
+        expect(logger.error).not.toHaveBeenCalled();
+    });
+});
