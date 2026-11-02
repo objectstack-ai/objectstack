@@ -10,13 +10,14 @@
  * an i18n bundle, one row per locale tag — and its header says a template
  * "is resolved by `(name, locale)`".
  *
- * That resolution is exact. `SendTemplateInput.template` in
- * `packages/spec/src/contracts/email-service.ts` rules out any best match and
- * any language-subtag folding, and `SendTemplateInput.locale` there is the
- * ladder of record: the named tag matched exactly, then the literal `en-US`,
- * then — only for a call that named no locale, and only when the bundle has
- * no `en-US` row — the bundle's lowest locale tag. Both are cited rather than
- * quoted, so a rewording on the spec side cannot strand a copy here.
+ * The pair stays the identity whichever row a send reads.
+ * `SendTemplateInput.template` in `packages/spec/src/contracts/email-service.ts`
+ * matches the name exactly and resolves only the locale member, by the ladder
+ * of record on `SendTemplateInput.locale` there. Every rung of it loads one row
+ * at one tag exactly, so `en` and `en-US` stay two distinct rows of the bundle:
+ * folding chooses which row is read, it never merges two. The ladder's rungs
+ * are cited rather than quoted, so a rewording on the spec side cannot strand
+ * a copy here.
  *
  * Every layer that keys metadata by `name` therefore has to agree on ONE
  * answer to "what else is part of this type's identity?", or a bundle survives
