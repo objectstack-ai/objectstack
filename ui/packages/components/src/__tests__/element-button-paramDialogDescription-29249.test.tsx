@@ -58,6 +58,18 @@ const DESCRIPTION = {
 };
 
 /**
+ * The registered renderer, read once at module scope (a component created
+ * during render remounts on every render). An unregistered `element:button`
+ * fails the whole file here, before any row runs.
+ */
+function registeredElementButton() {
+  const C = ComponentRegistry.get('element:button');
+  if (!C) throw new Error('element:button not registered');
+  return C;
+}
+const ElementButton = registeredElementButton();
+
+/**
  * The param-collection host: opens a dialog from what the runner hands it and
  * leaves the promise pending, as a dialog awaiting its Confirm does.
  */
@@ -76,11 +88,9 @@ function ParamHost({ action }: { action: Record<string, unknown> }) {
     });
     return new Promise(() => {});
   }, []);
-  const C = ComponentRegistry.get('element:button');
-  if (!C) throw new Error('element:button not registered');
   return (
     <ActionProvider handlers={{ api }} onParamCollection={onParamCollection}>
-      <C
+      <ElementButton
         schema={{
           type: 'element:button',
           properties: { label: { en: 'Invite member', 'zh-CN': '邀请成员' }, action },
