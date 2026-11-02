@@ -142,6 +142,53 @@ const CASES: ReadonlyArray<{ rule: string; blindTo: readonly AuthoringCommand[];
   },
 ];
 
+/**
+ * Checks `os validate` and `os build` gate on OUTSIDE the rule table, so
+ * `os lint`, which runs only the table, is blind to them. `blindTo` is the same
+ * documentation as above; the pin below asserts the blindness, so closing it
+ * (registering the check as an authoring rule) reds here and the case moves
+ * into `CASES`.
+ *
+ * - flow region shape (#28893): a `try_catch` region that is not single-exit.
+ *   validate and build refuse it with the automation engine's own registration
+ *   verdict (`utils/flow-region-shape.ts`, pinned by
+ *   `validate-flow-region-shape.test.ts`); `os lint` passes it.
+ */
+const OUTSIDE_THE_TABLE: ReadonlyArray<{ check: string; marker: string; blindTo: readonly AuthoringCommand[]; stack: Record<string, unknown> }> = [
+  {
+    check: 'flow region shape (#28893)',
+    marker: 'single-exit',
+    blindTo: ['lint'],
+    stack: withBaseline({
+      objects: [{ name: 'parity_task', label: 'Task', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' } } }],
+      flows: [{
+        name: 'parity_region', label: 'Region', type: 'record_change', runAs: 'system', status: 'active',
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start', config: { objectName: 'parity_task', triggerType: 'record-after-create' } },
+          {
+            id: 'guard', type: 'try_catch', label: 'Guard',
+            config: {
+              try: { nodes: [{ id: 'work', type: 'assignment', label: 'Work' }], edges: [] },
+              catch: {
+                nodes: ['d', 'x', 'y'].map((id) => ({ id, type: 'assignment', label: id })),
+                edges: [
+                  { id: 'dx', source: 'd', target: 'x', type: 'default' },
+                  { id: 'dy', source: 'd', target: 'y', type: 'default' },
+                ],
+              },
+            },
+          },
+          { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+          { id: 'e1', source: 'start', target: 'guard', type: 'default' },
+          { id: 'e2', source: 'guard', target: 'end', type: 'default' },
+        ],
+      }],
+    }),
+  },
+];
+
 describe('every authoring command reaches the same verdict (#4409)', () => {
   it.each(CASES.map((c) => [c.rule, c] as const))('%s gates on all three commands', (_rule, testCase) => {
     for (const command of AUTHORING_COMMANDS) {
@@ -157,6 +204,16 @@ describe('every authoring command reaches the same verdict (#4409)', () => {
         `os ${command} does not gate on ${testCase.rule} — it did not before #4409 either ` +
           `(blind: ${testCase.blindTo.join(', ')}), which is the drift this registry exists to end.`,
       ).toContain(testCase.rule);
+    }
+  });
+
+  it.each(OUTSIDE_THE_TABLE.map((c) => [c.check, c] as const))('%s: a known gap, os lint is still blind to it', (_check, testCase) => {
+    for (const command of testCase.blindTo) {
+      const findings = runAuthoringRules(command, {
+        normalized: testCase.stack,
+        ...(command === 'lint' ? {} : { parsed: testCase.stack }),
+      });
+      expect(findings.filter((f) => f.message.includes(testCase.marker))).toEqual([]);
     }
   });
 
