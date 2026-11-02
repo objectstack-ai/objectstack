@@ -7,7 +7,7 @@
 - 查重缓存住席内:新会话全量拉,其后 `since` 增量;⛔ 不建分支、不共享、不依赖备份。
 - 每日一 fire 跑两仓全量对账并归集日频职责;选层按 fire 时刻 ⛔ 不用计数器,简报写明层。
 - 每条枚举比对返回数与 `totalCount`,不等 ⇒ 报 `sweep INCOMPLETE` 点名缺口,⛔ 永不报干净。
-- 复审每轮先跑 `check-owed-reviews.mjs`,照 contract-review.md 接;本席也被配额拒 ⇒ PR 写一次留标。
+- 复审每轮先跑 `check-owed-reviews.mjs`,照 contract-review.md 接;配额拒 ⇒ PR 留标,⛔ 不降档审。
 - 每轮比对自审记录 `Head-sha` 与现 head,越过即过期,纯重生成/只动散文面例外(判已提交树)。
 - 自审 FAIL 过期 ⇒ 同轮达档重审新 head,逐条复查 must-fix,delta commit 当改动审。
 - 自审 PASS 过期 ⇒ PR 记一条 PASS 不再管辖、欠 delta 复审,归本席或新交接行。

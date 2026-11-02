@@ -1503,9 +1503,10 @@ export const CEILINGS = new Map([
   // 8 → 15 by the triage push-list card (#28921). Ruling of record: the card
   // body's maintainer words, verbatim and untranslated, 「由分诊每天出一次中文进度
   // 表，频率太低，而且有问题的时候要找我，没问题我也不需要看」, 「需要我协助的时候你
-  // 应该推送消息给我 os-zhuang，但是需要和我沟通哪些情况下」 and 「同意推送清单，立卡？」,
-  // which name this file, plus the addendum comment 6568980556 「pr 超过 6小时没更
-  // 新，如果不是带决策或者是被阻塞，应该都属于有问题吧」. The text is the push list:
+  // 应该推送消息给我 os-zhuang，但是需要和我沟通哪些情况下」 and 「立卡」 on the push
+  // list (「同意推送清单，立卡？」) whose card names this file, plus the addendum
+  // comment 6568980556 「pr 超过 6小时没更新，如果不是带决策或者是被阻塞，应该都属于
+  // 有问题吧」. The text is the push list:
   // no progress table, the seven cases split at-once / end-of-round, one push per
   // round, the 6 h stale-PR case and the not-pushed list. Eight lines landed, one
   // paid in place (the scope line, which cross-repo-coordination.md states for
