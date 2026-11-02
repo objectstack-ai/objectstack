@@ -4,7 +4,7 @@
 // `os validate` on a fresh project prints no `namespace-no-customization-pair`
 // warning about objects its author never wrote.
 //
-// The rule (ADR-0146 D3, `packages/lint/src/validate-customization-namespace.ts`)
+// The rule (ADR-0146 D3, `@objectstack/lint`'s `validateCustomizationNamespace`)
 // warns when `customizationNamespace(manifest.namespace)` answers
 // `base_namespace_too_long`. The verdict here is that same helper's, read from
 // the spec, so the scaffold is judged by the function the ensure door creates
