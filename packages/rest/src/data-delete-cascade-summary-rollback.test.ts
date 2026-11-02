@@ -31,7 +31,7 @@
  * publish gate refused it would be.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -86,12 +86,8 @@ function makeRes() {
 const dir = mkdtempSync(join(tmpdir(), 'os-cascade-rollup-'));
 let engine: ObjectQL;
 let call: (method: string, path: string, req: Record<string, unknown>) => Promise<any>;
-let warn: ReturnType<typeof vi.spyOn>;
-let errorLog: ReturnType<typeof vi.spyOn>;
 
 beforeAll(async () => {
-  warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
   engine = new ObjectQL();
   engine.registerDriver(
     new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'cascade.sqlite') }, useNullAsDefault: true }) as any,
@@ -127,14 +123,12 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  warn.mockRestore();
-  errorLog.mockRestore();
   try { await engine.destroy(); } catch { /* noop */ }
   rmSync(dir, { recursive: true, force: true });
 });
 
 const rowIds = async (object: string) =>
-  ((await engine.find(object, { fields: ['id'] } as any)) as Array<{ id: string }>).map((r) => r.id).sort();
+  ((await engine.find(object, { fields: ['id'] })) as Array<{ id: string }>).map((r) => r.id).sort();
 
 describe('a DELETE whose cascade a dependent\'s failing roll-up stops answers a refusal', () => {
   it('DELETE of the account answers 500 INTERNAL_ERROR, and nothing is deleted', async () => {

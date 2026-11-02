@@ -142,7 +142,7 @@ const ids = (rows: Row[]) => rows.map((r) => r.id).sort();
 describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a parent delete that did not land', () => {
   it('atomic plan: the parent delete refuses with another error, and nothing stored changes', async () => {
     const { engine, driver } = await makeEngine(true);
-    const err: any = await engine.delete('acct', { where: { id: 'a1' } } as any).then(() => null, (e: unknown) => e);
+    const err: any = await engine.delete('acct', { where: { id: 'a1' } }).then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBeUndefined();
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
@@ -154,7 +154,7 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
 
   it('a runtime that cannot roll back: the parent is still stored, and the caller is refused', async () => {
     const { engine, driver } = await makeEngine(false);
-    const err: any = await engine.delete('acct', { where: { id: 'a1' } } as any).then(() => null, (e: unknown) => e);
+    const err: any = await engine.delete('acct', { where: { id: 'a1' } }).then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBeUndefined();
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
@@ -165,7 +165,7 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
 
   it('a predicate delete (multi) on a runtime that cannot roll back: refused the same way, the parent still stored', async () => {
     const { engine, driver } = await makeEngine(false);
-    const err: any = await engine.delete('acct', { where: { name: 'A' }, multi: true } as any).then(() => null, (e: unknown) => e);
+    const err: any = await engine.delete('acct', { where: { name: 'A' }, multi: true }).then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBeUndefined();
     expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
@@ -175,7 +175,7 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
   it('a caller\'s own transaction that the refusal rolls back: refused with another error, nothing stored', async () => {
     const { engine, driver } = await makeEngine(true);
     const err: any = await engine
-      .transaction(async (trx: any) => engine.delete('line', { where: { id: 'l1' }, context: trx } as any))
+      .transaction(async (trx: any) => engine.delete('line', { where: { id: 'l1' }, context: trx }))
       .then(() => null, (e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err.code).toBeUndefined();
@@ -199,7 +199,7 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
 
   it('CONTROL the dependent\'s own delete landed: ERR_SUMMARY_RECOMPUTE, carrying its result', async () => {
     const { engine, driver } = await makeEngine(true);
-    const err: any = await engine.delete('line', { where: { id: 'l1' } } as any).then(() => null, (e: unknown) => e);
+    const err: any = await engine.delete('line', { where: { id: 'l1' } }).then(() => null, (e: unknown) => e);
     expect(err?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(err.written).toBe(true);
     expect(ids(driver.rowsOf('line'))).toEqual(['l2']);
@@ -209,7 +209,7 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
     const { engine, driver } = await makeEngine(true);
     let caught: any;
     await engine.transaction(async (trx: any) => {
-      await engine.delete('line', { where: { id: 'l1' }, context: trx } as any).catch((e: unknown) => { caught = e; });
+      await engine.delete('line', { where: { id: 'l1' }, context: trx }).catch((e: unknown) => { caught = e; });
     });
     expect(caught?.code).toBe('ERR_SUMMARY_RECOMPUTE');
     expect(driver.rolledBack).toHaveLength(0);
