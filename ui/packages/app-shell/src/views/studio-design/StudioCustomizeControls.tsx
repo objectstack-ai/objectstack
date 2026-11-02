@@ -506,8 +506,9 @@ const optionLabels = (options: unknown): Map<string, unknown> => {
  * the base's is the extension's, declared whole in `fields`, in the edited
  * order; on a base field, only a change to a whitelisted property
  * ({@link BASE_FIELD_DISPLAY_WHITELIST}, option labels by stored value) is
- * written, into its `fieldPatches` entry, and a property cleared drops from
- * the patch, so the base's own text shows again. Any other change to a base
+ * written, into its `fieldPatches` entry; a property cleared is held as ''
+ * until {@link extensionBodyForSave} drops it on save, so the base's own text
+ * comes back. Any other change to a base
  * field is not the extension's to make, and is not written.
  */
 export function routeFoldedFieldsEdit(input: {
@@ -536,7 +537,10 @@ export function routeFoldedFieldsEdit(input: {
     for (const key of BASE_FIELD_DISPLAY_WHITELIST.field) {
       const next = entry.def[key];
       if (next === prev[key]) continue;
-      if (next === undefined || next === '') delete patch[key];
+      // A cleared value stays in the edit buffer as '' (so the input can be
+      // emptied and retyped); `extensionBodyForSave` drops it on the wire,
+      // which restores the package's text.
+      if (next === undefined) delete patch[key];
       else patch[key] = next;
     }
     const prevLabels = optionLabels(prev.options);
@@ -545,7 +549,7 @@ export function routeFoldedFieldsEdit(input: {
     for (const [value, label] of nextLabels) {
       if (!prevLabels.has(value) || prevLabels.get(value) === label) continue;
       const entryPatch: Record<string, unknown> = isPlainRecord(optionPatch[value]) ? { ...optionPatch[value] } : {};
-      if (typeof label === 'string' && label !== '') entryPatch.label = label;
+      if (typeof label === 'string') entryPatch.label = label;
       else delete entryPatch.label;
       if (Object.keys(entryPatch).length > 0) optionPatch[value] = entryPatch;
       else delete optionPatch[value];
@@ -559,6 +563,39 @@ export function routeFoldedFieldsEdit(input: {
   delete out.fields;
   delete out.fieldPatches;
   if (Object.keys(fields).length > 0) out.fields = fields;
+  if (Object.keys(patches).length > 0) out.fieldPatches = patches;
+  return out;
+}
+
+/**
+ * The extension body as sent: every cleared ('') patch value dropped, and a
+ * field or option patch left empty by that dropped too, so clearing a base
+ * field's label (say) restores the package's own text rather than writing an
+ * empty one.
+ */
+export function extensionBodyForSave(body: ObjectExtensionBody): ObjectExtensionBody {
+  if (!isPlainRecord(body.fieldPatches)) return body;
+  const patches: Record<string, unknown> = {};
+  for (const [name, raw] of Object.entries(body.fieldPatches)) {
+    if (!isPlainRecord(raw)) continue;
+    const patch: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (key === 'options' || value === '' || value === undefined) continue;
+      patch[key] = value;
+    }
+    if (isPlainRecord(raw.options)) {
+      const options: Record<string, unknown> = {};
+      for (const [value, optionRaw] of Object.entries(raw.options)) {
+        if (!isPlainRecord(optionRaw)) continue;
+        const kept = Object.fromEntries(Object.entries(optionRaw).filter(([, v]) => v !== '' && v !== undefined));
+        if (Object.keys(kept).length > 0) options[value] = kept;
+      }
+      if (Object.keys(options).length > 0) patch.options = options;
+    }
+    if (Object.keys(patch).length > 0) patches[name] = patch;
+  }
+  const out: ObjectExtensionBody = { ...body };
+  delete out.fieldPatches;
   if (Object.keys(patches).length > 0) out.fieldPatches = patches;
   return out;
 }

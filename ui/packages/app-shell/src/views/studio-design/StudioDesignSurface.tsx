@@ -420,6 +420,7 @@ import {
   OBJECT_EXTENSION_TYPE,
   baseOwnedFieldNames,
   extensionFieldName,
+  extensionBodyForSave,
   extensionFieldNames,
   foldObjectExtension,
   objectExtensionBodyOf,
@@ -8302,7 +8303,7 @@ export function DataPillar({
       setError(null);
       try {
         const pair = await extPairFor(customization);
-        const outcome = await saveExtDraft(OBJECT_EXTENSION_TYPE, name, body, {
+        const outcome = await saveExtDraft(OBJECT_EXTENSION_TYPE, name, extensionBodyForSave(body), {
           mode: 'draft',
           packageId: pair,
           surface: 'studio',
