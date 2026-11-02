@@ -7045,10 +7045,49 @@ export class AutomationEngine implements IAutomationService {
      * walk starts, so a corrupt correlation cycle back to it ends the chain
      * there instead of listing the caller's run again as its own child.
      */
-    private async resolveSuspensionChain(runId: string): Promise<SuspendedRun[]> {
+    private resolveSuspensionChain(runId: string): Promise<SuspendedRun[]> {
+        return this.walkSuspensionChain(runId, (id) => this.loadSuspendedRun(id));
+    }
+
+    /**
+     * [#29333] {@link resolveSuspensionChain} for a caller that is about to
+     * CANCEL the chain, read through the STRICT loader
+     * ({@link loadSuspendedRunStrict}, the read {@link cancelRun} itself takes).
+     *
+     * The degrading walk answers a link it cannot read as "nothing suspended
+     * there" and stops, which is right for the incidental readers (the resume
+     * gate) and wrong for a cancel: the runs below that link are left parked
+     * and nothing at `error` says so. This walk stops at the same place but
+     * says WHY: `unreadable` names the link whose read threw, with the cause,
+     * so the caller can still cancel what it read and record the rest. A link
+     * that is simply not found ends the chain as it does in the degrading walk.
+     *
+     * Same walk, same bounds: only the loader differs.
+     */
+    private async resolveSuspensionChainForCancel(
+        runId: string,
+    ): Promise<{ chain: SuspendedRun[]; unreadable?: { runId: string; cause: unknown } }> {
+        let unreadable: { runId: string; cause: unknown } | undefined;
+        const chain = await this.walkSuspensionChain(runId, async (id) => {
+            try {
+                return await this.loadSuspendedRunStrict(id);
+            } catch (cause) {
+                unreadable = { runId: id, cause };
+                return null;
+            }
+        });
+        return unreadable ? { chain, unreadable } : { chain };
+    }
+
+    /** The one chain walk behind {@link resolveSuspensionChain} and
+     *  {@link resolveSuspensionChainForCancel}; `load` answers `null` to stop. */
+    private async walkSuspensionChain(
+        runId: string,
+        load: (runId: string) => Promise<SuspendedRun | null>,
+    ): Promise<SuspendedRun[]> {
         const seen = new Set<string>([runId]);
         const chain: SuspendedRun[] = [];
-        let run = await this.loadSuspendedRun(runId);
+        let run = await load(runId);
         for (let depth = 0; run && depth < AutomationEngine.MAX_SUSPENSION_CHAIN_DEPTH; depth++) {
             chain.push(run);
             const correlation = run.correlation;
@@ -7059,7 +7098,7 @@ export class AutomationEngine implements IAutomationService {
             const childRunId = correlation!.slice(prefix.length);
             if (!childRunId || seen.has(childRunId)) return chain;
             seen.add(childRunId);
-            run = await this.loadSuspendedRun(childRunId);
+            run = await load(childRunId);
         }
         // The depth bound stopped the walk on a run it loaded but never read.
         if (run) chain.push(run);
@@ -9357,7 +9396,7 @@ export class AutomationEngine implements IAutomationService {
         // The body lives in ./dag-traversal.ts (#25222).
         const host: ThisParameterType<typeof runRegion> = {
             executeNode: (...a) => this.executeNode(...a),
-            resolveSuspensionChain: (...a) => this.resolveSuspensionChain(...a),
+            resolveSuspensionChainForCancel: (...a) => this.resolveSuspensionChainForCancel(...a),
             cancelRun: (...a) => this.cancelRun(...a),
             logger: this.logger,
         };

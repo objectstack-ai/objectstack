@@ -126,10 +126,12 @@ import {
   isMissingForRequired,
   isRuntimeDefault,
   isServerOwnedValue,
+  resolveAffordance,
   resolveFieldRuleState,
   type FieldRuleFaults,
   type FieldRulePredicate,
 } from '@object-ui/core';
+import { usePermissions } from '@object-ui/permissions';
 import {
   omitServerResolvedDefaults,
   optionListDefault,
@@ -2547,6 +2549,15 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
    */
   const hostApiFetch = useContext(SchemaRendererContext)?.apiFetch;
   const channel = mode === 'internal' ? hostApiFetch : undefined;
+  /**
+   * The caller's permissions, for the up-front write refusal below
+   * (objectstack-ai/objectstack#29187): the `/auth/me/permissions` answer the
+   * console's permissions layout holds over BOTH internal routes —
+   * `/forms/:name` and `/apps/:appName/forms/:name` (`App.tsx`). With no
+   * provider above (the public `/f/:slug`, a bare test harness) every grant
+   * reads open, so nothing changes there and the server still enforces.
+   */
+  const perms = usePermissions();
 
   const [loading, setLoading] = useState(true);
   /** One string, or one line per reason a server refusal marked on no row. */
@@ -3115,6 +3126,36 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     );
   }
   if (!loaded) return null;
+
+  // A write this caller holds no grant for is refused BEFORE a field is drawn
+  // (objectstack-ai/objectstack#29187). The server refuses it at Submit anyway,
+  // and since #29019 says so in a sentence; but a create form offered to a
+  // member who may only read the object let them type the whole record first,
+  // and lose it. The verdict is the affordance map's form row, the one the
+  // app's own create and edit forms read (`createFormFields`, `editFormFields`):
+  // a create form asks the create grant, an edit form (`?recordId=`) the update
+  // grant, each intersected with the object's effective API operations. The sentence
+  // is the submit-time refusal's own (`refusalText`), so the two read alike.
+  // Internal mode only: `/f/:slug` is anonymous and has no grants to read.
+  if (
+    mode === 'internal' &&
+    !resolveAffordance(isCreateForm ? 'createFormFields' : 'editFormFields', {
+      objectName: loaded.object,
+      perms,
+    }).allowed
+  ) {
+    return (
+      <div className="mx-auto max-w-2xl p-6">
+        <div
+          role="alert"
+          className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+          data-testid="form-write-refused"
+        >
+          {t('form.noPermissionToSave')}
+        </div>
+      </div>
+    );
+  }
 
   // `created-record` reaches this branch only on the fallback path above (no
   // id in the response, or nowhere to land) — a successful redirect navigates
