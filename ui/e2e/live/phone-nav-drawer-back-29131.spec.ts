@@ -12,8 +12,7 @@ import { test, expect, type Page } from '@playwright/test';
  * browser's own, the close is an outside tap, and the reload is a real one,
  * which keeps `history.state`.
  *
- * Not in the required `:ci` allowlist: run it by name, or with every live spec
- * through `test:e2e:live`.
+ * In `test:e2e:live:nightly`, not the required `:ci` allowlist.
  */
 
 const APP = 'com.example.showcase';
