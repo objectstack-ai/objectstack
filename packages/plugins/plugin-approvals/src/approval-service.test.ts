@@ -800,7 +800,7 @@ describe('ApprovalService (node era)', () => {
     };
 
     const refusal = async (defs: unknown[], outputs: Record<string, unknown>, decision: 'approve' | 'reject' = 'approve') => {
-      const req = await svc.openNodeRequest(typedInput(defs), CTX);
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
       return svc.decideNode(req.id, { decision, actorId: 'u9', outputs }, SYS).then(
         () => { throw new Error('expected a refusal'); },
         (e: any) => String(e?.message ?? e),
@@ -866,7 +866,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('a valid user list is recorded and handed to the flow', async () => {
-      const req = await svc.openNodeRequest(typedInput([NEXT_REVIEWERS]), CTX);
+      const req: any = await svc.openNodeRequest(typedInput([NEXT_REVIEWERS]), CTX);
       const out = await svc.decideNode(req.id, {
         decision: 'approve', actorId: 'u9', outputs: { next_reviewers: ['u2', 'u3'] },
       }, SYS);
@@ -887,7 +887,7 @@ describe('ApprovalService (node era)', () => {
 
       engine._tables['sys_approval_request'] = [];
       engine._tables['sys_approval_action'] = [];
-      const req = await svc.openNodeRequest(typedInput(defs), CTX);
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
       const out = await svc.decideNode(req.id, {
         decision: 'approve', actorId: 'u9', outputs: { co_sign: ['sales_manager'] },
       }, SYS);
@@ -919,7 +919,7 @@ describe('ApprovalService (node era)', () => {
 
       engine._tables['sys_approval_request'] = [];
       engine._tables['sys_approval_action'] = [];
-      const req = await svc.openNodeRequest(typedInput(defs), CTX);
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
       const out = await svc.decideNode(req.id, {
         decision: 'approve', actorId: 'u9', outputs: { route_to: ['d1'] },
       }, SYS);
@@ -940,7 +940,7 @@ describe('ApprovalService (node era)', () => {
 
       engine._tables['sys_approval_request'] = [];
       engine._tables['sys_approval_action'] = [];
-      const req = await svc.openNodeRequest(typedInput(defs), CTX);
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
       const out = await svc.decideNode(req.id, {
         decision: 'approve', actorId: 'u9', outputs: { reviewers: ['tm1'] },
       }, SYS);
@@ -954,13 +954,13 @@ describe('ApprovalService (node era)', () => {
 
       engine._tables['sys_approval_request'] = [];
       engine._tables['sys_approval_action'] = [];
-      const req = await svc.openNodeRequest(typedInput([NEXT_REVIEWERS]), CTX);
+      const req: any = await svc.openNodeRequest(typedInput([NEXT_REVIEWERS]), CTX);
       const out = await svc.decideNode(req.id, { decision: 'reject', actorId: 'u9' }, SYS);
       expect(out.finalized).toBe(true);
     });
 
     it('a mid-tally co-sign vote is judged before it is counted', async () => {
-      const req = await svc.openNodeRequest(
+      const req: any = await svc.openNodeRequest(
         openInput(['u1', 'u2'], {}, { behavior: 'unanimous', decisionOutputs: [{ key: 'co_signer', type: 'user' }] }), CTX,
       );
       await expect(svc.decideNode(req.id, {
@@ -971,7 +971,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('text — declared or a bare key — keeps accepting any value', async () => {
-      const req = await svc.openNodeRequest(
+      const req: any = await svc.openNodeRequest(
         typedInput(['note', { key: 'reason', type: 'text' }, { key: 'tags', type: 'text', multiple: true }]), CTX,
       );
       const outputs = { note: ['a', 'a'], reason: 7, tags: 'one' };
@@ -980,7 +980,7 @@ describe('ApprovalService (node era)', () => {
     });
 
     it('a blank optional picker output is left to `required`, not judged', async () => {
-      const req = await svc.openNodeRequest(typedInput([{ key: 'co_signer', type: 'user', multiple: true }]), CTX);
+      const req: any = await svc.openNodeRequest(typedInput([{ key: 'co_signer', type: 'user', multiple: true }]), CTX);
       const out = await svc.decideNode(req.id, {
         decision: 'approve', actorId: 'u9', outputs: { co_signer: [] },
       }, SYS);
