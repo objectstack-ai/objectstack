@@ -8,7 +8,7 @@
  * (`buildDefaultPageSchema`).
  */
 
-import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef, type ReactElement } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
 import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
@@ -3769,12 +3769,91 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const [pageScrollerEl, setPageScrollerEl] = useState<HTMLDivElement | null>(null);
   useRecordPageScrollMemory(phonePage ? pageScrollerEl : null, pageRecordStatus === 'loaded');
 
+  // The trail and the way back the page's top bar is built from (objectstack#27524,
+  // Target 7; objectstack#27058, Target 3). They are read before the guard
+  // states below because on a phone those states draw the same 「‹」 bar.
+  const pageTrail = embedded ? [] : decodeRecordTrail(new URLSearchParams(location.search).get(RECORD_TRAIL_PARAM));
+  const objectListPath = appName && objectName ? `/apps/${appName}/${objectName}` : undefined;
+  const originPathOnly = originFromState?.pathname?.split('?')[0];
+  // An origin that is a list of this object's records (a view of it) is named
+  // by the object; any other origin (an inbox, a dashboard) by its own label.
+  const originIsObjectList = !!objectListPath && !!originPathOnly
+    && (originPathOnly === objectListPath || originPathOnly.startsWith(`${objectListPath}/`));
+  const withoutPaneParam = (href: string) => {
+    const [path, query = ''] = href.split('?');
+    const sp = new URLSearchParams(query);
+    sp.delete(RECORD_DRAWER_PARAM);
+    const qs = sp.toString();
+    return qs ? `${path}?${qs}` : path;
+  };
+  const crumbClass =
+    'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const shortRecordId = (id: string) => `#${id.length > 12 ? `${id.slice(0, 8)}…` : id}`;
+
+  // objectstack#27058, Target 3 — the top bar on a phone: one link that
+  // returns where the page came from. A top-level page reads
+  // 「‹ <object plural>」, the breadcrumb's object half (the record's name is
+  // the header title directly below), and returns to the list it was opened
+  // from, or to the object's list. A page one level down (Target 8) is named
+  // by where it returns, its parent record (「‹ Acme Corp」): pushed from a
+  // related row or a lookup it goes back in the history, so the parent comes
+  // back where it was scrolled; reached by a `?from=` link it follows the
+  // trail's way back.
+  // Right, the counter and ↓ ↑ when the page knows its siblings. No ⊟ (the
+  // stack has no right column), no ⤡ (there is no drawer to collapse to).
+  const phonePushed = phonePage && isRecordPagePushed(location.state);
+  const phoneBackClass =
+    'inline-flex min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const phoneBack = phonePage ? (() => {
+    const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
+    const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
+    const label = parent
+      ? parent.t || shortRecordId(parent.i)
+      : phonePushed || (originFromState?.pathname && !originIsObjectList)
+        ? originFromState?.label ?? plural
+        : plural;
+    const face = (
+      <>
+        <ChevronLeft className="h-5 w-5 shrink-0" aria-hidden="true" />
+        <span className="truncate">{label}</span>
+      </>
+    );
+    const goBack = t('detail.goBack', { defaultValue: 'Go back' });
+    if (phonePushed) {
+      return (
+        <button type="button" onClick={() => navigate(-1)} className={phoneBackClass} title={goBack} data-record-crumb-back="">
+          {face}
+        </button>
+      );
+    }
+    const to = pageTrail.length > 0
+      ? originFrom?.pathname
+      : originFromState?.pathname
+        ? (originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname)
+        : objectListPath;
+    return to ? (
+      <Link to={to} className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
+    ) : (
+      <span className={phoneBackClass}>{face}</span>
+    );
+  })() : null;
+  // objectstack#28483 — on a phone the console mounts no app bar on a record
+  // route, so the record page's 「‹」 bar is the only way off it. Every state
+  // the page returns early with (loading, not found, refused, missing, access
+  // ended, forbidden, failed) draws that bar above itself on a phone.
+  const withPhoneBar = (state: ReactElement): ReactElement => phonePage ? (
+    <div className="flex h-full flex-col bg-background" data-testid="record-page-phone-guard">
+      <RecordTopBar leadingTestId="record-page-leading" leading={phoneBack} />
+      <div className="min-h-0 flex-1 overflow-auto">{state}</div>
+    </div>
+  ) : state;
+
   if (isLoading) {
-    return <SkeletonDetail />;
+    return withPhoneBar(<SkeletonDetail />);
   }
 
   if (!objectDef) {
-    return (
+    return withPhoneBar(
       <div className="flex h-full items-center justify-center p-4">
         <Empty>
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -3794,10 +3873,10 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // page of this object shows the console's page-not-found state. Neither
   // stamps the print root, so a print driver never reads either as ready.
   if (namedPageState === 'pending') {
-    return <SkeletonDetail />;
+    return withPhoneBar(<SkeletonDetail />);
   }
   if (namedPageState === 'refused') {
-    return (
+    return withPhoneBar(
       <div className="flex h-full items-center justify-center p-4">
         <Empty data-testid="record-page-not-found">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -3817,7 +3896,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // record didn't exist, which made invalid links look like a partially-
   // broken page instead of a clean 404.
   if (pageRecordStatus === 'missing') {
-    return (
+    return withPhoneBar(
       <div className="flex h-full items-center justify-center p-4">
         <Empty>
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -3841,7 +3920,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // that the record does not exist. The read is not kept any longer; the
   // inbox link is the way on.
   if (pageRecordStatus === 'accessEnded') {
-    return (
+    return withPhoneBar(
       <div className="flex h-full items-center justify-center p-4">
         <Empty data-testid="record-access-ended">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -3874,7 +3953,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // No Retry: retrying a permission decision cannot change it — the same
   // reasoning as the app-level `appAccessDenied` screen in `AppContent`.
   if (pageRecordStatus === 'forbidden') {
-    return (
+    return withPhoneBar(
       <div className="flex h-full items-center justify-center p-4">
         <Empty data-testid="record-access-denied">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -3900,7 +3979,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // objectui#11902 — the read FAILED (a 5xx, a transport error, …): say so,
   // and offer Retry, which re-runs the page's own record load.
   if (pageRecordStatus === 'failed') {
-    return (
+    return withPhoneBar(
       <div className="flex h-full items-center justify-center p-4">
         <Empty data-testid="record-load-failed">
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
@@ -4276,23 +4355,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // ancestor returns to its page), else 「对象 › 记录名」, the object returning
   // to the list the page was opened from (or the object's list). Right, each
   // only where it applies: the counter and ↓ ↑ (a list context), ⊟, ⤡.
-  const pageTrail = embedded ? [] : decodeRecordTrail(new URLSearchParams(location.search).get(RECORD_TRAIL_PARAM));
-  const objectListPath = appName && objectName ? `/apps/${appName}/${objectName}` : undefined;
-  const originPathOnly = originFromState?.pathname?.split('?')[0];
-  // An origin that is a list of this object's records (a view of it) is named
-  // by the object; any other origin (an inbox, a dashboard) by its own label.
-  const originIsObjectList = !!objectListPath && !!originPathOnly
-    && (originPathOnly === objectListPath || originPathOnly.startsWith(`${objectListPath}/`));
-  const withoutPaneParam = (href: string) => {
-    const [path, query = ''] = href.split('?');
-    const sp = new URLSearchParams(query);
-    sp.delete(RECORD_DRAWER_PARAM);
-    const qs = sp.toString();
-    return qs ? `${path}?${qs}` : path;
-  };
-  const crumbClass =
-    'min-w-0 truncate rounded px-1 hover:bg-accent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-  const shortRecordId = (id: string) => `#${id.length > 12 ? `${id.slice(0, 8)}…` : id}`;
   const objectDefOf = (name: string) => objects.find((o: any) => o?.name === name);
   const pageLeading = embedded ? null : pageTrail.length > 0 ? (
     <>
@@ -4370,53 +4432,6 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       </span>
     </nav>
   );
-  // objectstack#27058, Target 3 — the top bar on a phone: one link that
-  // returns where the page came from. A top-level page reads
-  // 「‹ <object plural>」, the breadcrumb's object half (the record's name is
-  // the header title directly below), and returns to the list it was opened
-  // from, or to the object's list. A page one level down (Target 8) is named
-  // by where it returns, its parent record (「‹ Acme Corp」): pushed from a
-  // related row or a lookup it goes back in the history, so the parent comes
-  // back where it was scrolled; reached by a `?from=` link it follows the
-  // trail's way back.
-  // Right, the counter and ↓ ↑ when the page knows its siblings. No ⊟ (the
-  // stack has no right column), no ⤡ (there is no drawer to collapse to).
-  const phonePushed = phonePage && isRecordPagePushed(location.state);
-  const phoneBackClass =
-    'inline-flex min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
-  const phoneBack = phonePage ? (() => {
-    const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
-    const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
-    const label = parent
-      ? parent.t || shortRecordId(parent.i)
-      : phonePushed || (originFromState?.pathname && !originIsObjectList)
-        ? originFromState?.label ?? plural
-        : plural;
-    const face = (
-      <>
-        <ChevronLeft className="h-5 w-5 shrink-0" aria-hidden="true" />
-        <span className="truncate">{label}</span>
-      </>
-    );
-    const goBack = t('detail.goBack', { defaultValue: 'Go back' });
-    if (phonePushed) {
-      return (
-        <button type="button" onClick={() => navigate(-1)} className={phoneBackClass} title={goBack} data-record-crumb-back="">
-          {face}
-        </button>
-      );
-    }
-    const to = pageTrail.length > 0
-      ? originFrom?.pathname
-      : originFromState?.pathname
-        ? (originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname)
-        : objectListPath;
-    return to ? (
-      <Link to={to} className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
-    ) : (
-      <span className={phoneBackClass}>{face}</span>
-    );
-  })() : null;
   // objectstack#27058, Target 8 — the path row of a page one level down
   // (「线索 Mira Costa › 任务」): the `?from=` trail, each ancestor a link, the
   // parent going back in the history when the page was pushed from it.
