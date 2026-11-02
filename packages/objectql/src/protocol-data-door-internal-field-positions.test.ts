@@ -21,12 +21,20 @@
  *
  * The position enumeration is the load-bearing shape: a position added later
  * that does not pass through this door turns a case here red.
+ *
+ * The walk is the ENGINE's (`internal-field-evaluation-guard.ts`, the
+ * `QueryEvaluationGate` member the door asks), so this file lives beside it:
+ * the protocol double's engine carries that real gate over the same schemas,
+ * and every case below is the door and the engine's one definition together.
+ * (`@objectstack/metadata-protocol` cannot import this package even as a dev
+ * dependency — see `plugin.step2.test.ts`.)
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import type { ServiceObject } from '@objectstack/spec/data';
 import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
-import { ObjectStackProtocolImplementation } from './protocol.js';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { assertNoInternalFieldEvaluated } from './internal-field-evaluation-guard.js';
 
 const VAULT: ServiceObject = {
     name: 'pv_vault',
@@ -78,7 +86,13 @@ function makeProtocol() {
     });
     const aggregate = vi.fn(async () => [{ n: 1 }]);
     const count = vi.fn(async () => (ROWS.pv_vault?.length ?? 0));
-    const engine: any = { registry: { getObject: (n: string) => SCHEMAS[n] }, find, findOne, count, aggregate };
+    const engine: any = {
+        registry: { getObject: (n: string) => SCHEMAS[n] },
+        find, findOne, count, aggregate,
+        // The engine's one definition, over the same schemas the registry serves.
+        assertNoInternalFieldEvaluated: (object: string, query: any, options?: any) =>
+            assertNoInternalFieldEvaluated(object, query, (n) => SCHEMAS[n], options),
+    };
     return { p: new ObjectStackProtocolImplementation(engine), find, aggregate, count };
 }
 
