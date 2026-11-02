@@ -30,8 +30,9 @@
  * template is closed, so the administrator writes here go into the base's
  * pair (`inPair`, below), where the member semantics are the same row for
  * row; a package-less row is laid down as a release before the close stored
- * it (`seedPackagelessRow`), served until the ceremony moves it, and its
- * package-less write is refused.
+ * it (`seedPackagelessRow`), served until the ceremony moves it; a shipped
+ * member's package-less write is refused, and an unshipped member's, which
+ * the ceremony cannot move (#28904), stays open.
  *
  * ## The harness
  *
@@ -854,46 +855,54 @@ describe('[#23074] the artifact envelope is stamped only on the member the packa
     });
 
     /**
-     * A by-name reset of the `zh-CN` member of `name`, through the delete door,
-     * read back at once and after a restart: `after` is the `zh-CN` subject the
-     * registry and the by-name read then serve. Before the door, each of the
-     * registry's two heal verbs that the delete's heal
+     * A by-name reset of the `zh-CN` member of `name`, through the delete door
+     * naming no package, read back at once and after a restart. Before the
+     * door, each of the registry's two heal verbs that the delete's heal
      * (`restoreArtifactRegistryView`) calls is asked about the hydrated entry,
      * on a boot of its own.
+     *
+     * [#28576, ADR-0146 D11] `after` is the `zh-CN` subject the registry and
+     * the by-name read then serve, or `'closed'`: the ceremony moves a shipped
+     * member's unmigrated row, so its package-less reset is refused naming the
+     * ceremony and the row keeps serving its member. A member the base does
+     * not ship cannot be moved (the pair's save refuses it, #28777; #28904),
+     * so its package-less reset stays open, as before the close.
      */
-    async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }) {
+    async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }, after: string | undefined | 'closed') {
         const shadowBoot = (await bootWithOverlays(new Map(), name)).engine;
         expect(shadowBoot.registry.removeRuntimeShadow(T, name, 'zh-CN'), 'removeRuntimeShadow').toBe(verbs.shadow);
         const overlayEntryBoot = (await bootWithOverlays(new Map(), name)).engine;
         expect(overlayEntryBoot.registry.removeOverlayEntry(T, name, 'zh-CN'), 'removeOverlayEntry').toBe(verbs.overlayEntry);
 
-        // [#28576, ADR-0146 D11] The reset of that unmigrated row naming no
-        // package is refused, naming the ceremony that moves it, and the row
-        // keeps serving its member — before and after a restart. The registry
-        // verbs above are what the ceremony's move leaves to the next boot.
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { engine, protocol, raw } = await bootWithOverlays(stores, name);
-        const refused: any = await raw.deleteMetaItem({ type: T, name, member: 'zh-CN' }).then(() => undefined, (e: unknown) => e);
-        expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
-        expect(String(refused?.message)).toContain('os migrate packageless-overlays');
-        const kept = `ADMIN ${name} zh-CN`;
-        expect(engine.registry.getItem<any>(T, name, undefined, 'zh-CN')?.subject).toBe(kept);
+        const reset = raw.deleteMetaItem({ type: T, name, member: 'zh-CN' });
+        let served = after;
+        if (after === 'closed') {
+            const refused: any = await reset.then(() => undefined, (e: unknown) => e);
+            expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect(String(refused?.message)).toContain('os migrate packageless-overlays');
+            served = `ADMIN ${name} zh-CN`;
+        } else {
+            expect(await reset).toMatchObject({ success: true });
+        }
+        expect(engine.registry.getItem<any>(T, name, undefined, 'zh-CN')?.subject).toBe(served);
         expect(engine.registry.getItem<any>(T, name, undefined, 'en-US')?.subject).toBe(`ADMIN ${name} en-US`);
-        expect(((await protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(kept);
+        expect(((await protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(served);
         const restarted = await boot(stores);
-        expect(((await restarted.protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(kept);
+        expect(((await restarted.protocol.getMetaItem({ type: T, name, member: 'zh-CN' })) as any)?.item?.subject).toBe(served);
     }
 
-    it('the reset (?member=): an unshipped member is retired by the overlay-entry tier; its package-less reset door is closed', async () => {
+    it('the reset (?member=): an unshipped member is retired by the overlay-entry tier, and nothing is left serving it (its package-less reset stays open)', async () => {
         // No `zh-CN` artifact takes its place, so the shadow heal declines and
         // the overlay-entry retirement takes the tenant row.
-        await resetZh(DIGEST, { shadow: false, overlayEntry: true });
+        await resetZh(DIGEST, { shadow: false, overlayEntry: true }, undefined);
     });
 
-    it('CONTROL the reset (?member=): a shipped member is un-shadowed onto its artifact; its package-less reset door is closed', async () => {
-        // The shadow heal lifts the entry onto the `zh-CN` artifact, and the
-        // retirement refuses it as packaged code.
-        await resetZh(NAME, { shadow: true, overlayEntry: false });
+    it('CONTROL the reset (?member=): a shipped member\'s unmigrated row: its package-less reset door is closed', async () => {
+        // The shadow heal would lift the entry onto the `zh-CN` artifact, and
+        // the retirement refuses it as packaged code.
+        await resetZh(NAME, { shadow: true, overlayEntry: false }, 'closed');
     });
 
     it('a registry that answers another member\'s artifact: the graft keeps it off the body', async () => {

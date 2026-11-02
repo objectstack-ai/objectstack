@@ -50,7 +50,12 @@ import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
  * declares no dependencies, as an authored base does.
  */
 const INSTALLED_PACKAGES: ReadonlySet<string> = new Set(['com.example.pkg']);
-const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id) ? { manifest: { id } } : undefined);
+// [#28576] With a namespace and a SemVer version, so a base this file ships
+// from could have its pair ensured: the close of the package-less write
+// applies to its items (the ceremony could move their rows).
+const installedPackage = (id: string) => (INSTALLED_PACKAGES.has(id)
+    ? { manifest: { id, namespace: 'pkg', version: '1.0.0' } }
+    : undefined);
 
 
 const PACKAGE_ID = 'com.example.pkg';

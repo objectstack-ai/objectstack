@@ -193,7 +193,9 @@ import { listServedOverrides, type ServedOverrideEntry } from './protocol-served
 import {
     listPackagelessOverlays,
     migratePackagelessOverlays,
+    packagelessCloseSubject,
     type PackagelessOverlayCensus,
+    type PackagelessWriteSubject,
     type PackagelessOverlayMigration,
 } from './protocol-packageless-overlay-migration.js';
 // [#19417] The package-id declaration and its remedy text, imported to be
@@ -17339,44 +17341,57 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * [ADR-0146 D11] The package-less write onto a packaged item, closed: the
-     * refusal of a save, a publish, a delete (either state) or a rollback that
-     * names no package, of an item of one of the five overlay types a
-     * read-only code package ships ({@link overlayBaseShippers}).
-     * `null` when the write is not refused on that ground: it names a package
-     * (`?package=<base>.custom` stays open, as does every other package's own
-     * door), no read-only package ships the name (environment metadata), or no
-     * base that ships it can form a pair (the ceremony's `no_pair`: it cannot
-     * move that row, so D11 does not close its write).
+     * [ADR-0146 D11, #28576 ruling 2] The package-less write onto a packaged
+     * item, closed where `os migrate packageless-overlays` would move it: the
+     * refusal of a save, a publish, a delete or a rollback that names no
+     * package, of an item of one of the five overlay types that ONE read-only
+     * code package ships ({@link overlayBaseShippers}), whose row the
+     * ceremony's census classifies `movable` and whose move can succeed
+     * (`packagelessCloseSubject` in `protocol-packageless-overlay-migration.ts`,
+     * the census's own classification and the ceremony's own steps).
      *
-     * Every other type's packaged item is sealed already
-     * ({@link refusePackagedBaseOverride}, {@link refusePackagedBaseRemoval}),
-     * so with this no write naming no package reaches a packaged item. The
-     * refusal names the base's paired `.custom` and `os migrate
-     * packageless-overlays`, the ceremony that moves a package-less row stored
-     * before the close into that pair; such a row stays served until then, and
-     * its package-less write is refused by the same sentence.
+     * `null` — the write stays open, as on `main` — when it names a package
+     * (`?package=<base>.custom` stays open, as does every other package's own
+     * door); when no read-only package ships the name (environment metadata);
+     * and for every row the ceremony lists and does not move: a name several
+     * packages ship (`multi_shipped`), a base with no pair id (`no_pair`), a
+     * stored row whose `overrides` names another package
+     * (`foreign_declaration`) or whose pair already holds the item
+     * (`shadowed`), and a move that would fail (the ensure door would refuse
+     * the pair, the base records no version, or the override write gate
+     * refuses the declared body — an `email_template` locale the base does not
+     * ship). Each such row keeps a write door after the upgrade: its own.
+     *
+     * The refusal names the base's paired `.custom` and the ceremony; a row
+     * stored before the close stays served until the ceremony moves it, and
+     * its package-less write is refused by the same sentence. Registry reads
+     * first; the one store read (the item's rows) only when the registry has
+     * not left the write open.
      *
      * Asked by {@link saveMetaItem} and {@link publishMetaItem} (authoring
      * writes only: the server-stated rewrites name the row they rewrite),
      * {@link deleteMetaItem}, and {@link rollbackMetaItem} (whose address is the
-     * restored row's own binding: package-less when that row is). Registry
-     * reads only, so it reads no store row ahead of the ADR-0010 lock gate.
-     * The body is `packagelessOverlayWriteRefusal` in
+     * restored row's own binding: package-less when that row is). The
+     * sentence is `packagelessOverlayWriteRefusal` in
      * `protocol-packaged-base-refusal.ts`.
      *
      * Not the read envelope's `editable` / `deletable` ({@link packagedBaseRefusal}
      * keeps its answer): those describe the item, which the pair's write still
      * changes.
      */
-    private packagelessOverlayWriteRefusal(
-        request: { type: string; name: string; packageId?: string | null },
+    private async packagelessOverlayWriteRefusal(
+        request: PackagelessWriteSubject,
         operation: PackagelessWriteOperation,
-    ): Error | null {
-        const host: ThisParameterType<typeof packagelessOverlayWriteRefusal> = {
+    ): Promise<Error | null> {
+        const host: ThisParameterType<typeof packagelessCloseSubject> = {
+            engine: this.engine,
+            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
+            rethrowUnlessMetadataStoreUnprovisioned: (...a) => this.rethrowUnlessMetadataStoreUnprovisioned(...a),
             overlayBaseShippers: (...a) => this.overlayBaseShippers(...a),
+            overrideWriteVerdict: (...a) => this.overrideWriteVerdict(...a),
         };
-        return packagelessOverlayWriteRefusal.call(host, request, operation);
+        const closed = await packagelessCloseSubject.call(host, request);
+        return closed ? packagelessOverlayWriteRefusal(request, closed, operation) : null;
     }
 
     /**
@@ -21575,7 +21590,13 @@ export class ObjectStackProtocolImplementation implements
         // landing on a pair row the ceremony moved kept that row's
         // declaration): such a save is this refusal now.
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
-            const closed = this.packagelessOverlayWriteRefusal(request, 'save');
+            const closed = await this.packagelessOverlayWriteRefusal({
+                type: request.type,
+                name: request.name,
+                packageId: request.packageId,
+                state: request.mode === 'draft' ? 'draft' : 'active',
+                item: request.item,
+            }, 'save');
             if (closed) throw closed;
         }
         const overrideVerdict = this.overrideWriteVerdict(request);
@@ -23965,7 +23986,13 @@ export class ObjectStackProtocolImplementation implements
         // is closed with it ({@link packagelessOverlayWriteRefusal}): publish
         // the draft by naming its package (`?package=<base>.custom`).
         {
-            const closed = this.packagelessOverlayWriteRefusal(request, 'publish');
+            const closed = await this.packagelessOverlayWriteRefusal({
+                type: request.type,
+                name: request.name,
+                packageId: request.packageId,
+                state: 'draft',
+                ...memberOption(member),
+            }, 'publish');
             if (closed) throw closed;
         }
         // [#8594] The refusal's own row is written HERE, by the route that owns
@@ -28526,8 +28553,9 @@ export class ObjectStackProtocolImplementation implements
         // and reset, is offered on the writable package — the base's paired
         // `.custom`, where `os migrate packageless-overlays` moves the row.
         {
-            const closed = this.packagelessOverlayWriteRefusal(
-                { type: singularType, name: request.name, packageId: rollbackPackageId }, 'rollback',
+            const closed = await this.packagelessOverlayWriteRefusal(
+                { type: singularType, name: request.name, packageId: rollbackPackageId, state: 'active', ...memberOption(member) },
+                'rollback',
             );
             if (closed) throw closed;
         }
@@ -29171,7 +29199,13 @@ export class ObjectStackProtocolImplementation implements
         // draft cannot be published package-less any more), including by the
         // discard-all walk, which names the package each draft is listed under.
         if (request.state !== 'draft') {
-            const closed = this.packagelessOverlayWriteRefusal(request, 'delete');
+            const closed = await this.packagelessOverlayWriteRefusal({
+                type: request.type,
+                name: request.name,
+                packageId: request.packageId,
+                state: 'active',
+                ...memberOption(member),
+            }, 'delete');
             if (closed) throw closed;
         }
 

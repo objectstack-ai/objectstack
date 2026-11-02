@@ -491,9 +491,12 @@ describe('the override write gate — only the base\'s paired .custom declares a
     const PARTNER = 'com.acme.partner';
     const OTHER_PAIR = 'com.zeta.custom';
     const UNRELATED = 'com.other';
-    const MANIFESTS: Record<string, { dependencies: Record<string, string>; version: string }> = {
-        [BASE]: { dependencies: {}, version: '3.2.0' },
-        [PAIR]: { dependencies: { [BASE]: '^3' }, version: '0.1.0' },
+    // [#28576] The base and its pair declare the namespaces the ensure door
+    // reads, so the pair can be ensured and the package-less write the close
+    // judges is one `os migrate packageless-overlays` could move.
+    const MANIFESTS: Record<string, { dependencies: Record<string, string>; version: string; namespace?: string }> = {
+        [BASE]: { dependencies: {}, version: '3.2.0', namespace: 'acme' },
+        [PAIR]: { dependencies: { [BASE]: '^3' }, version: '0.1.0', namespace: 'acme_custom' },
         [PARTNER]: { dependencies: { [BASE]: '^3' }, version: '1.0.0' },
         // A pair of ANOTHER base that also depends on this one: the former
         // "second declarer" — not the base's pair, so it may not declare.

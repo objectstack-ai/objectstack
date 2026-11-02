@@ -159,9 +159,13 @@ function makeProtocol(artifacts: Array<{ type: string; item: Record<string, unkn
             // [#26708] Every package this file names is installed — an
             // authored base through the package door, the code package by its
             // boot — or a save naming it is refused before any rule here.
+            // [#28576] The code package declares a namespace and a SemVer
+            // version, so its pair can be ensured and `os migrate
+            // packageless-overlays` could move its rows: the close applies.
             getPackage: (id: string) => (id === INSTALLED_READ_ONLY
                 ? { manifest: { id, scope: 'cloud' } }
-                : [WRITABLE, OTHER_WRITABLE, 'com.qa.thirdapp', CODE_PACKAGE].includes(id) ? { manifest: { id } } : undefined),
+                : id === CODE_PACKAGE ? { manifest: { id, namespace: 'showcase', version: '0.1.0' } }
+                    : [WRITABLE, OTHER_WRITABLE, 'com.qa.thirdapp'].includes(id) ? { manifest: { id } } : undefined),
             isPackageDisabled: () => false,
             applyNavContributions: (app: unknown) => app,
         },

@@ -58,7 +58,8 @@ function reasonOf(row: CensusRow): string {
   switch (row.disposition) {
     case 'multi_shipped':
       return `several packages ship this name (${row.shippers.join(', ')}), so it overlays none of them for certain. `
-        + 'Left as it is: move it by hand into the pair of the package it customizes, or delete it.';
+        + 'Left as it is: delete it (a delete naming no package removes it while no package holds a row of '
+        + 'this name), then, to keep the customization, save it into the pair of the package it customizes.';
     case 'no_pair':
       return `'${row.base}' has no paired .custom package id, so there is nowhere to move it. Left as it is.`;
     case 'foreign_declaration':
@@ -66,9 +67,10 @@ function reasonOf(row: CensusRow): string {
         + 'correct or remove the key, then re-run.';
     case 'shadowed':
       return `'${row.pair}' already ${row.shadowDeclares ? 'overrides this item (a customization made in Studio)' : 'holds a row of this name'}, `
-        + 'and that row is the one served — this row is never merged into it. Two ways out: keep the Studio '
-        + `customization and delete this package-less row (id ${row.id}), or use "Restore package original" in `
-        + `Studio to delete '${row.pair}''s row and re-run this command to move this one.`;
+        + 'and that row is the one served — this row is never merged into it. Left as it is: to keep the Studio '
+        + 'customization, nothing is owed (this row is not served while that one stands); to make this row the '
+        + `customization instead, use "Restore package original" in Studio to delete '${row.pair}''s row, then `
+        + 're-run this command to move this one.';
     default:
       return '';
   }

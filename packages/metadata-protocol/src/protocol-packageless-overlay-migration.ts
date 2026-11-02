@@ -88,8 +88,10 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import { storedRowDocument } from './item-lock.js';
-import { OVERLAY_MEMBER_COLUMN } from './migrations/overlay-index.js';
+import { OVERLAY_MEMBER_COLUMN, overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
+import { customizationPairEnsureRefusal, type PairRegistry } from './protocol-customization-package.js';
+import type { OverrideWriteSubject, OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
 import { readOnlyShippingPackages } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
@@ -259,6 +261,37 @@ function baseVersionOf(host: Pick<PackagelessOverlayMigrationHost, 'engine'>, ba
 }
 
 /**
+ * [#28576] How the census classifies ONE package-less row of a name some
+ * read-only code package ships (module header, "The population"), from the
+ * shippers ({@link readOnlyShippingPackages}), the row's body and the pair's
+ * row of the same item, in either state (`shadowOf`). The one classification:
+ * {@link listPackagelessOverlays} lists by it, and the close of the
+ * package-less write ({@link packagelessCloseSubject}) refuses only a row it
+ * answers `movable` — ⛔ never a second copy.
+ */
+export function classifyPackagelessRow(
+    shippers: readonly string[],
+    body: Record<string, unknown> | undefined,
+    shadowOf: (pair: string) => unknown,
+): Pick<PackagelessOverlayRow, 'disposition' | 'base' | 'pair' | 'shadowDeclares'> {
+    if (shippers.length > 1) return { disposition: 'multi_shipped' };
+    const base = shippers[0]!;
+    const pairId = customizationPackageId(base);
+    if (!pairId.ok) return { base, disposition: 'no_pair' };
+    const pair = pairId.value;
+    const declared = (body as { overrides?: unknown } | undefined)?.overrides;
+    if (declared !== undefined && (declared === null || typeof declared !== 'object'
+        || (declared as { package?: unknown }).package !== base)) {
+        return { base, pair, disposition: 'foreign_declaration' };
+    }
+    const shadow = shadowOf(pair);
+    if (shadow !== undefined) {
+        return { base, pair, disposition: 'shadowed', shadowDeclares: isServedOverrideRowOf(shadow, base) };
+    }
+    return { base, pair, disposition: 'movable' };
+}
+
+/**
  * The census (module header, "The population"): every package-less overlay
  * row classified, and every pair row whose declaration lacks `basedOn`.
  * Writes nothing.
@@ -312,29 +345,8 @@ export async function listPackagelessOverlays(
             ...(member !== undefined ? { member } : {}),
             shippers,
         };
-        if (shippers.length > 1) {
-            listed.push({ ...common, disposition: 'multi_shipped' });
-            continue;
-        }
-        const base = shippers[0]!;
-        const pairId = customizationPackageId(base);
-        if (!pairId.ok) {
-            listed.push({ ...common, base, disposition: 'no_pair' });
-            continue;
-        }
-        const pair = pairId.value;
-        const declared = (bodyOf(row) as { overrides?: unknown } | undefined)?.overrides;
-        if (declared !== undefined && (declared === null || typeof declared !== 'object'
-            || (declared as { package?: unknown }).package !== base)) {
-            listed.push({ ...common, base, pair, disposition: 'foreign_declaration' });
-            continue;
-        }
-        const shadow = shadowOf(pair, type, name, member, state);
-        if (shadow !== undefined) {
-            listed.push({ ...common, base, pair, disposition: 'shadowed', shadowDeclares: isServedOverrideRowOf(shadow, base) });
-            continue;
-        }
-        listed.push({ ...common, base, pair, disposition: 'movable' });
+        const classified = classifyPackagelessRow(shippers, bodyOf(row), (pair) => shadowOf(pair, type, name, member, state));
+        listed.push({ ...common, ...classified });
     }
 
     // Every type a declaration applies to, not only the five the move acts on.
@@ -521,4 +533,115 @@ export async function migratePackagelessOverlays(
             .map(([base, line]) => ({ base, ...line }))
             .sort((a, b) => a.base.localeCompare(b.base)),
     };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// [#28576] The close reads this ceremony: only what it would move is closed
+// ─────────────────────────────────────────────────────────────────────────
+
+/** The class members {@link packagelessCloseSubject} reads, typed as the class declares them. */
+export interface PackagelessCloseHost {
+    readonly engine: ObjectStackProtocolImplementation['engine'];
+    readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
+    readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
+    /** The read-only code packages that ship a name of an overlay type ([] for any other type). */
+    readonly overlayBaseShippers: (type: string, name: string) => string[];
+    /** The override write gate, as the ceremony's step 2 meets it through the save door. */
+    readonly overrideWriteVerdict: (request: OverrideWriteSubject) => OverrideWriteVerdict;
+}
+
+/** The package-less write {@link packagelessCloseSubject} judges, and the row it would write. */
+export interface PackagelessWriteSubject {
+    readonly type: string;
+    readonly name: string;
+    /** The package the write names; a non-empty string means the write is not package-less. */
+    readonly packageId?: string | null;
+    /** The row's state: a draft save or a publish's draft is `draft`, everything else `active`. */
+    readonly state: 'active' | 'draft';
+    /** The bundle member as a caller names it (absent: the canonical one). */
+    readonly member?: string;
+    /** A save's body: the row a first write of the name would store. */
+    readonly item?: unknown;
+}
+
+/**
+ * [ADR-0146 D11, #28576 ruling 2] The base and pair a package-less write is
+ * closed onto, or `null` when it stays open. A package-less write is closed
+ * exactly where `os migrate packageless-overlays` would move its row and the
+ * move can succeed — so every customization the close reaches has a door
+ * after the upgrade (the ceremony, then `?package=<base>.custom`), and every
+ * one the ceremony leaves keeps the package-less write it has on `main`:
+ *
+ *  - the row the write addresses is the stored package-less row of that item,
+ *    member and state, or — when there is none — the row a save would store
+ *    (its body), or none at all (a delete or rollback of an unstored item);
+ *  - it is classified by the census's own {@link classifyPackagelessRow}:
+ *    only `movable` is closed (`multi_shipped`, `no_pair`,
+ *    `foreign_declaration` and `shadowed` stay open, and so does a name no
+ *    read-only package ships). `shadowed` applies to a stored row only: a
+ *    first write has nothing in the pair to be shadowed by;
+ *  - its move must be able to succeed, read from the steps the ceremony
+ *    takes: the ensure door would ensure the pair
+ *    ({@link customizationPairEnsureRefusal}), the base records a version
+ *    (`basedOn`), and the override write gate admits the declared body into
+ *    the pair (an `email_template` member at a locale the base does not ship
+ *    is refused there, #28777, and stays open: #28904).
+ *
+ * Registry reads first; the one store read (the item's rows) only for a name
+ * the registry has not already left open.
+ */
+export async function packagelessCloseSubject(
+    this: PackagelessCloseHost,
+    request: PackagelessWriteSubject,
+): Promise<{ base: string; pair: string } | null> {
+    if (typeof request.packageId === 'string' && request.packageId.length > 0) return null;
+    const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+    const shippers = this.overlayBaseShippers(request.type, request.name);
+    if (shippers.length !== 1) return null; // environment metadata, or `multi_shipped`
+    const base = shippers[0]!;
+    const pairId = customizationPackageId(base);
+    if (!pairId.ok) return null; // `no_pair`
+    const pair = pairId.value;
+    const registry = (this.engine as { registry?: PairRegistry } | undefined)?.registry;
+    if (!registry || typeof registry.getPackage !== 'function') return null;
+    if (customizationPairEnsureRefusal(this.engine, registry, base, pair) !== undefined) return null; // step 1 fails
+    const basedOn = baseVersionOf(this, base);
+    if (basedOn === undefined) return null; // no `basedOn` to record
+
+    // The item's stored rows, both spellings, every package: the census's read.
+    const spellings = [...new Set([type, SINGULAR_TO_PLURAL[type] ?? type])];
+    let rows: any[] = [];
+    try {
+        rows = (await this.findEnvironmentRows('sys_metadata', {
+            where: { type: { $in: spellings }, name: request.name },
+            context: SYSTEM,
+        })) ?? [];
+    } catch (error) {
+        this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+    }
+    const member = request.item !== undefined && request.member === undefined
+        ? overlayMemberOfBody(type, request.item)
+        : overlayMemberValue(type, request.member);
+    const sameMember = (row: any) => member === undefined || ((row?.[OVERLAY_MEMBER_COLUMN] ?? null) === member);
+    const ofItem = rows.filter((row) => sameMember(row) && stateOf(row) !== undefined);
+    const stored = ofItem.find((row) => isUnbound(row) && stateOf(row) === request.state);
+    const storedBody = stored === undefined ? undefined : bodyOf(stored);
+    const writtenBody = request.item !== null && typeof request.item === 'object' && !Array.isArray(request.item)
+        ? (request.item as Record<string, unknown>) : undefined;
+    const body = stored !== undefined ? storedBody : writtenBody;
+    const classified = classifyPackagelessRow(shippers, body, (p) => (stored === undefined
+        ? undefined
+        : ofItem.find((row) => row.package_id === p && stateOf(row) === request.state)
+            ?? ofItem.find((row) => row.package_id === p)));
+    if (classified.disposition !== 'movable') return null;
+
+    // Step 2's gate: the declared body, into the pair.
+    const disc = member === undefined ? undefined : overlayMemberField(type);
+    const declaredBody = {
+        ...(body ?? { name: request.name, ...(disc && member !== null ? { [disc]: member } : {}) }),
+        overrides: { package: base, basedOn },
+    };
+    const verdict = this.overrideWriteVerdict({ type, name: request.name, packageId: pair, item: declaredBody });
+    if (verdict.verdict === 'refuse') return null;
+    return { base, pair };
 }

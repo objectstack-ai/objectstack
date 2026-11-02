@@ -59,7 +59,6 @@ import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadat
  */
 export interface PackagedBaseRefusalHost {
     isSealedManagedItem: ObjectStackProtocolImplementation['isSealedManagedItem'];
-    overlayBaseShippers: ObjectStackProtocolImplementation['overlayBaseShippers'];
     isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
     packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
     packagedArtifactOwner: ObjectStackProtocolImplementation['packagedArtifactOwner'];
@@ -217,66 +216,44 @@ function sealedDeclareOrRenameClause(type: string, basePackageId: unknown, write
 export type PackagelessWriteOperation = 'save' | 'publish' | 'delete' | 'rollback';
 
 /**
- * The body of `ObjectStackProtocolImplementation#packagelessOverlayWriteRefusal`;
- * the method's docblock there is its contract.
+ * The refusal `ObjectStackProtocolImplementation#packagelessOverlayWriteRefusal`
+ * throws; the method's docblock there is its contract.
  *
- * [ADR-0146 D11] The closure of the package-less write onto a packaged item:
- * a write naming no package (`packageId` absent, `null` or empty) onto an item
- * of one of the five overlay types that a read-only code package ships
- * ({@link PackagedBaseRefusalHost.overlayBaseShippers}, the reading
- * `os migrate packageless-overlays` classifies by), is refused
- * `403 NOT_OVERRIDABLE` — the code and status the sealed write already
- * answers, so no door gains a code. Every other type's packaged item is
- * sealed already ({@link refusePackagedBaseOverride}).
- *
- * The sentence names the fix the writer has: the base's paired `.custom`
+ * [ADR-0146 D11] A write naming no package (`packageId` absent, `null` or
+ * empty) onto an item of one of the five overlay types that one read-only code
+ * package ships, whose row `os migrate packageless-overlays` would move into
+ * the base's pair (`packagelessCloseSubject`, the ceremony's own reading), is
+ * refused `403 NOT_OVERRIDABLE` — the code and status the sealed write already
+ * answers, so no door gains a code. Every row the ceremony leaves keeps its
+ * package-less write, so the sentence's two doors are always open: the pair
  * (`?package=<base>.custom`), where the customization is a declared override,
- * and `os migrate packageless-overlays`, the ceremony that moves a
- * package-less row stored before the close there. A row that ceremony has not
- * moved yet is still served (the read path is not this function's); only its
- * package-less write is refused, by this same sentence.
+ * and the ceremony, which moves a row stored before the close there. Such a
+ * row is still served until it is moved (the read path is not this
+ * function's); only its package-less write is refused.
  *
- * `null` when the write names a package; when no read-only code package ships
- * the name (environment metadata keeps its package-less write, ADR-0146 D11
- * "is not touched"); and when no base that ships it has a pair at all
- * (`customizationPackageId` refuses every one of their ids): the ceremony
- * lists such a row `no_pair` and cannot move it, and D11 closes only what it
- * has migrated — closing it would leave that customization no write door.
+ * The fix first, then the rule and the ceremony: the REST door bounds a
+ * refusal's text (`CLIENT_MESSAGE_MAX`, 500 characters, `@objectstack/types`),
+ * and the metadata item page shows that text as sent.
  */
 export function packagelessOverlayWriteRefusal(
-    this: Pick<PackagedBaseRefusalHost, 'overlayBaseShippers'>,
-    request: { type: string; name: string; packageId?: string | null },
+    request: { type: string; name: string },
+    closed: { base: string; pair: string },
     operation: PackagelessWriteOperation,
-): Error | null {
-    if (typeof request.packageId === 'string' && request.packageId.length > 0) return null;
-    const shippers = this.overlayBaseShippers(request.type, request.name);
-    const pairs = shippers.flatMap((base) => {
-        const derived = customizationPackageId(base);
-        return derived.ok ? [{ base, pair: derived.value }] : [];
-    });
-    if (pairs.length === 0) return null;
+): Error {
     const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
     const item = `'${type}/${request.name}'`;
-    const shipped = `ships in ${shippers.map((id) => `'${id}'`).join(' and ')}`;
-    const sole = pairs.length === 1 ? pairs[0]! : undefined;
-    // One base: its pair, by name. Several: the pair of the base the writer
-    // customizes, each named — never guessed (the ceremony lists such a row).
-    const pair = sole ? `'${sole.pair}' (?package=${sole.pair})` : `the pair of the package it customizes (${pairs.map((p) => `'${p.pair}'`).join(' or ')})`;
-    const declared = sole ? `overrides: { package: '${sole.base}', basedOn }` : 'overrides: { package: <that base>, basedOn }';
-    // The fix first, then the rule and the ceremony: the REST door bounds a
-    // refusal's text (`CLIENT_MESSAGE_MAX`, 500 characters, `@objectstack/types`),
-    // and Setup shows that text as sent.
-    const ceremony = sole
-        ? `\`os migrate packageless-overlays\` moves it into '${sole.pair}'`
-        : '`os migrate packageless-overlays` lists it for you to place';
-    const closed = 'A write naming no package onto a packaged item is closed (ADR-0146 D11); '
-        + `a package-less customization stored before it is still served until ${ceremony}.`;
+    const shipped = `ships in '${closed.base}'`;
+    const pair = `'${closed.pair}' (?package=${closed.pair})`;
+    const declared = `overrides: { package: '${closed.base}', basedOn }`;
+    const rule = 'A write naming no package onto a packaged item is closed (ADR-0146 D11); '
+        + 'a package-less customization stored before it is still served until '
+        + `\`os migrate packageless-overlays\` moves it into '${closed.pair}'.`;
     const message = operation === 'rollback'
         ? `${item} ${shipped}, and a rollback of its package-less row is closed (ADR-0146 D11): run `
             + `\`os migrate packageless-overlays\` to move the row into ${pair}, then roll it back there.`
         : operation === 'delete'
-            ? `${item} ${shipped}: remove its customization from ${pair}. ${closed}`
-            : `${item} ${shipped}: ${operation === 'publish' ? 'publish' : 'save'} it into ${pair}, declaring ${declared}. ${closed}`;
+            ? `${item} ${shipped}: remove its customization from ${pair}. ${rule}`
+            : `${item} ${shipped}: ${operation === 'publish' ? 'publish' : 'save'} it into ${pair}, declaring ${declared}. ${rule}`;
     const err = new Error(message);
     (err as any).code = 'NOT_OVERRIDABLE';
     (err as any).status = 403;
