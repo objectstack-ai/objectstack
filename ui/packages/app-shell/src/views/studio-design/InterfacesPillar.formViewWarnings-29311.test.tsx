@@ -141,7 +141,7 @@ afterEach(cleanup);
 function renderPillar() {
   render(
     <MemoryRouter
-      initialEntries={[`/studio/${PKG}/interfaces?surface=${encodeURIComponent(`view:${formView.name}`)}`]}
+      initialEntries={[`/studio/${PKG}/interfaces?surface=${encodeURIComponent('view:' + formView.name)}`]}
     >
       <InterfacesPillar packageId={PKG} packageLabel="Acme CRM" />
     </MemoryRouter>,
