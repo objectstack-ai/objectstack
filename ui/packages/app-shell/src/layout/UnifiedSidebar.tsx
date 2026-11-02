@@ -184,7 +184,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // An entry with no `label` shows its target's CURRENT label, read from the
   // metadata cache at render time (objectui#9868). `nav:menu` wires the same
   // hook, so the two surfaces cannot name one entry two ways.
-  const resolveNavTargetLabel = useNavTargetLabel();
+  const resolveNavTargetLabel = useNavTargetLabel({ byName: true });
   // Below the fold width the sidebar is the icon rail and expands over the
   // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
