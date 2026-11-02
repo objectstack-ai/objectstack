@@ -280,12 +280,15 @@ describe('ObjectFormDesigner — emits the one legal `FormField.type` spelling (
     expect(toFormFieldType('field:markdown')).not.toBe('field:text');
   });
 
-  it('spans a `repeater` field full-row — the drift the raw pass hid', () => {
-    // `repeater` is a spec `FieldType` that resolves to the WIDE `field:grid`
-    // widget, but bare `repeater` is not one of `WIDE_FIELD_TYPES`' bare
-    // members. Passing the raw object type in therefore matched nothing: the
-    // canvas laid a repeater out at normal width while the runtime form —
-    // which reaches the set through `mapFieldTypeToFormType` — spanned it.
+  it('lays a `repeater` field out the way the runtime form resolves it', () => {
+    // The canvas asks the width question through `mapFieldTypeToFormType`, the
+    // runtime form's own resolution, so the two cannot drift. `repeater` is an
+    // untyped JSON array in the spec and resolves to the JSON editor
+    // (`field:object`) beside `composite` and `record`; that widget is not
+    // wide, so the canvas lays it out at normal width, as the form does. (It
+    // resolved to the WIDE line-items grid until that grid was found drawing
+    // bare rows for a column-less repeater.)
+    expect(toFormFieldType('repeater')).toBe('field:object');
     render(
       <ObjectFormDesigner
         draft={{ fields: [...textFields(15), { name: 'line_items', type: 'repeater', label: 'Line Items' }] }}
@@ -296,7 +299,7 @@ describe('ObjectFormDesigner — emits the one legal `FormField.type` spelling (
     );
     const card = screen.getByText('Line Items').closest('.cursor-grab') as HTMLElement;
     expect(card).toBeTruthy();
-    expect(card.className).toContain('col-span-full');
+    expect(card.className).not.toContain('col-span-full');
   });
 
   it('keeps a bare rich-text field wide, and never shows the admin the widget id', () => {
