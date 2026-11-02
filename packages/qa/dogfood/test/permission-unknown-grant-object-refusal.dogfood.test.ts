@@ -29,6 +29,8 @@ import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 
 const PKG = 'app.grantprobe28990';
+/** The batch control's own package, so no other case's draft rides in its batch. */
+const BATCH_PKG = 'app.grantbatch28990';
 
 const set = (name: string, objectNames: string[], label = 'Grant probe') => ({
   name,
@@ -60,6 +62,10 @@ describe('dogfood: a permission-set grant on an object that does not exist is re
       manifest: { id: PKG, name: 'Grant probe', version: '0.1.0', type: 'app', namespace: 'grantprobe' },
     });
     expect(created.status, JSON.stringify(created.json)).toBe(201);
+    const batch = await call('POST', '/packages', {
+      manifest: { id: BATCH_PKG, name: 'Grant batch probe', version: '0.1.0', type: 'app', namespace: 'grantbatch' },
+    });
+    expect(batch.status, JSON.stringify(batch.json)).toBe(201);
   }, 180_000);
 
   afterAll(async () => {
@@ -101,12 +107,12 @@ describe('dogfood: a permission-set grant on an object that does not exist is re
   });
 
   it('control: an object and a set granting on it, drafted in one package, publish in one batch', async () => {
-    const obj = await call('PUT', `/meta/object/grantprobe_widget?mode=draft&package=${PKG}`, object('grantprobe_widget'));
+    const obj = await call('PUT', `/meta/object/grantbatch_widget?mode=draft&package=${BATCH_PKG}`, object('grantbatch_widget'));
     expect(obj.status, JSON.stringify(obj.json)).toBe(200);
-    const perm = await call('PUT', `/meta/permission/grantprobe_batch?mode=draft&package=${PKG}`, set('grantprobe_batch', ['grantprobe_widget']));
+    const perm = await call('PUT', `/meta/permission/grantbatch_set?mode=draft&package=${BATCH_PKG}`, set('grantbatch_set', ['grantbatch_widget']));
     expect(perm.status, JSON.stringify(perm.json)).toBe(200);
 
-    const published = await call('POST', `/packages/${PKG}/publish-drafts`, {});
+    const published = await call('POST', `/packages/${BATCH_PKG}/publish-drafts`, {});
     expect(published.status, JSON.stringify(published.json)).toBe(200);
     expect(published.json?.data, JSON.stringify(published.json)).toMatchObject({ outcome: 'published', publishedCount: 2 });
   });
