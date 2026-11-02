@@ -14,13 +14,18 @@
  * {@link applyConversionsToStoredItem} is the one primitive every stored-row
  * rehydration seam calls, and it encodes the policy for data at rest:
  *
- * - **The full chain replays, including `retiredFromLoadPath` entries.**
+ * - **The chain the installed release carries replays, including
+ *   `retiredFromLoadPath` entries.**
  *   Retirement is an *authoring-surface* event — the schema tombstones the
  *   key so a live author is taught the canonical spelling. A stored row has
  *   no author; refusing its historical shape would not teach anyone, it
- *   would only break data that once worked. D3 keeps every conversion
- *   forever precisely so any past major can replay forward — a row at rest
- *   is the perpetual "consumer arriving late".
+ *   would only break data that once worked. But a retirement kit ages out
+ *   one major after it retires (ADR-0087 as amended, ruling 6434038284), and
+ *   its conversion leaves with it: a row still in that shape is no longer
+ *   recognized here, so it must be canonicalized by the stored pass
+ *   (`os migrate meta --stored --apply`) on a release that still carries
+ *   the row's conversions, before the deployment moves to the release that
+ *   drops them.
  * - **Idempotent by construction.** Conversions only rewrite shapes they
  *   positively recognize, so re-converting an already-canonical item is a
  *   no-op — seams may safely stack (e.g. a row converted here and again at

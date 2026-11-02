@@ -8,7 +8,8 @@
  * family of shapes after its schema gate: a hook with no `body`, a second
  * default record page of an object, an `external` object binding on a managed
  * datasource (both halves of the pair), an object `datasource` that names no
- * datasource (#26724), a `runAs: 'system'` flow an anonymous
+ * datasource (#26724), a keyed seed whose `externalId` names no field of its
+ * object (#28952), a `runAs: 'system'` flow an anonymous
  * endpoint names, the shared runtime authoring rules, and the authoring gate a
  * domain plugin registers. Measured on `origin/main` `5801a4f2c` before this
  * file: each restore door wrote every one of those shapes back, so a version
@@ -95,6 +96,8 @@ function makeStubEngine() {
     const registered = new Map<string, Map<string, unknown>>();
     // [#26724] The drivers the engine has registered by name, with no datasource item.
     const drivers = new Set<string>();
+    /** The engine's registered objects, by name (empty unless a case stages one). */
+    const objects = new Map<string, unknown>();
     let nextId = 0;
     let commit: unknown = null;
 
@@ -188,7 +191,7 @@ function makeStubEngine() {
             listItems: (type: string) => Array.from(registered.get(type)?.values() ?? []),
             getItem: (type: string, name: string) => registered.get(type)?.get(name),
             getAllObjects: () => [],
-            getObject: () => undefined,
+            getObject: (name: string) => objects.get(name),
             getPackage: () => undefined,
             getArtifactItem: () => undefined,
             isPackageDisabled: () => false,
@@ -200,6 +203,7 @@ function makeStubEngine() {
         historyRows,
         registered,
         drivers,
+        objects,
         serveCommit: (c: unknown) => { commit = c; },
     };
 }
@@ -499,6 +503,31 @@ pinBothDoors({
     expectDetail: (error) => {
         expect(error.issues).toEqual([expect.objectContaining({ path: 'datasource', code: 'custom' })]);
         expect(error.issues[0].message.startsWith("Object 'wh_order' names datasource 'rt_store', and no datasource")).toBe(true);
+    },
+});
+
+pinBothDoors({
+    title: 'a seed restored keyed on a field its object no longer has (seedExternalIdSaveRefusal)',
+    type: 'seed',
+    name: 'wh_order_seed',
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        const seedOf = (externalId: string, label?: string) => ({
+            object: 'wh_order', mode: 'upsert', externalId, records: [{ name: 'O1', code: 'o1' }],
+            ...(label ? { label } : {}),
+        });
+        h.objects.set('wh_order', { name: 'wh_order', fields: { name: { type: 'text' }, code: { type: 'text' } } });
+        await h.protocol.saveMetaItem({ type: 'seed', name: 'wh_order_seed', item: seedOf('code'), mode: 'draft' });
+        await h.protocol.saveMetaItem({ type: 'seed', name: 'wh_order_seed', item: seedOf('name'), mode: 'draft' });
+        await h.protocol.publishMetaItem({ type: 'seed', name: 'wh_order_seed' });
+        // The object lost the field v1 is keyed on.
+        h.objects.set('wh_order', { name: 'wh_order', fields: { name: { type: 'text' } } });
+        return { refused: 1, accepted: 2 };
+    },
+    expectDetail: (error) => {
+        expect(error.issues).toEqual([expect.objectContaining({ path: 'externalId', code: 'custom' })]);
+        expect(error.issues[0].message.startsWith("Seed 'wh_order_seed' keys on externalId member 'code', which is not a field of object 'wh_order'")).toBe(true);
     },
 });
 

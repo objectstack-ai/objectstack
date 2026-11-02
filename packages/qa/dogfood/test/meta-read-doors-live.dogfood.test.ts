@@ -23,9 +23,15 @@
 //    (the CONTROL that the field is sortable for a caller who may read it).
 //
 // This file writes /meta (the zh-CN member), so it boots its own showcase.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the zh-CN member is authored into the showcase's `.custom` pair. The base
+// ships `en-US` only, so the member declares no `overrides`: it is the pair's
+// own member, and the by-name read serves it the same.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
+import { ensurePair, inPair } from './customization-pair.js';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
@@ -85,7 +91,8 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
       expect(read.status).toBe(200);
       const shipped: Record<string, unknown> = ((await read.json()) as any).item;
       const authored = Object.fromEntries(Object.entries(shipped).filter(([k]) => !k.startsWith('_')));
-      const res = await stack.apiAs(admin, 'PUT', `/meta/email_template/${TEMPLATE}`, {
+      await ensurePair(stack, admin, PKG);
+      const res = await stack.apiAs(admin, 'PUT', inPair(`/meta/email_template/${TEMPLATE}`, PKG), {
         ...authored, locale: 'zh-CN', subject: ZH_SUBJECT, bodyText: 'mrd-live zh-CN body', bodyHtml: '<p>mrd-live zh-CN body</p>',
       });
       expect(res.status, await res.clone().text()).toBe(200);
