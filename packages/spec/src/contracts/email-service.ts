@@ -191,14 +191,14 @@ export interface SendTemplateInput {
    *
    *  1. this locale, folded against the locale tags the template's bundle
    *     carries by `resolveBundleLocale` (`@objectstack/spec/system`, the
-   *     platform's one BCP-47 ladder): exact, then case-insensitive (`zh-cn`
-   *     → `zh-CN`), then base language (`en-GB` → `en`), then variant
-   *     expansion (`zh` and `zh-TW` → `zh-CN`), the first match in ascending
-   *     tag order;
-   *  2. the stack's declared fallback locale, as `II18nService.getFallbackLocale()`
-   *     answers it (`i18n.fallbackLocale`, else `defaultLocale`), folded the
-   *     same way. A host whose i18n service declares none, or that has no i18n
-   *     service, skips this rung;
+   *     BCP-47 fold plugin-email imports rather than copying): exact, then
+   *     case-insensitive (`zh-cn` → `zh-CN`), then base language (`en-GB` →
+   *     `en`), then variant expansion (`zh` and `zh-TW` → `zh-CN`), the first
+   *     match in ascending tag order;
+   *  2. the stack's declared fallback locale, as
+   *     `II18nService.getFallbackLocale()` answers it (`i18n.fallbackLocale`,
+   *     else `defaultLocale`), folded the same way. A host whose i18n service
+   *     declares none, or that has no i18n service, skips this rung;
    *  3. `'en-US'`, exactly;
    *  4. none of them lands on a row: `TEMPLATE_NOT_FOUND`, which is permanent.
    *
@@ -207,14 +207,14 @@ export interface SendTemplateInput {
    * `'en-US'`, then `TEMPLATE_NOT_FOUND`, with no fold and no declared
    * fallback.
    *
-   * A call that omits `locale` keeps its own ladder, with no fold and no
-   * declared fallback, over any loader:
-   *
-   *  1. `'en-US'`, exactly, so "no locale" means the default rather than an
-   *     arbitrary member;
-   *  2. only when the bundle has no `en-US` member at all: its lowest locale
-   *     tag, so a single-locale bundle keeps rendering and does so identically
-   *     on every boot.
+   * A call that omits `locale` keeps its own ladder. The service's part of it
+   * holds over any loader: no fold, no declared fallback, and `'en-US'` first,
+   * exactly, so "no locale" means the default rather than an arbitrary member.
+   * When that misses, the service asks the loader for its own no-locale
+   * answer. The built-in registry loader answers the bundle's `en-US` member,
+   * else its lowest locale tag, so a single-locale bundle keeps rendering and
+   * does so identically on every boot; a replacement `TemplateLoader` gives
+   * its own deterministic best answer for the name.
    */
   locale?: string;
   /**
@@ -301,8 +301,8 @@ export interface RenderTemplateInput {
   currency?: string;
   /**
    * Preferred BCP-47 locale. Resolution is the SAME ladder as
-   * {@link SendTemplateInput.locale} — exact match, then `'en-US'`, then
-   * (no-locale calls only) the bundle's deterministic single-locale answer.
+   * {@link SendTemplateInput.locale}, both the named-locale and the no-locale
+   * one.
    */
   locale?: string;
   /**

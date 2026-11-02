@@ -37,13 +37,14 @@ import { strictObject } from '../shared/strict-object';
  * as neither. Over the built-in registry template loader the resolver folds a
  * named locale against the bundle's own tags (exact, case-insensitive, base
  * language, variant expansion) and then tries the stack's declared fallback
- * (`i18n.fallbackLocale`, else `defaultLocale`) folded the same way, so an
- * `en` row is reached from `en-GB`, and from any tag on a stack whose declared
- * fallback is `en`. This literal is the one rung that depends on neither: a
- * replacement `TemplateLoader` matches the named tag exactly and retries only
- * this one, and a recipient tag that folds to no row, on a stack whose declared
- * fallback folds to none either, reaches only this one. A bundle without a row
- * at this tag has no fallback floor for those calls.
+ * (`i18n.fallbackLocale`, else `defaultLocale`) folded the same way, so an `en`
+ * row is reached, absent a row of their own, from `en-GB`, and from any tag on
+ * a stack whose declared fallback is `en`. This literal is the one rung that
+ * depends on neither: a replacement `TemplateLoader` matches the named tag
+ * exactly and retries only this one, and a recipient tag that folds to no row,
+ * on a stack whose declared fallback folds to none either, reaches only this
+ * one. A bundle without a row at this tag has no fallback floor for those
+ * calls.
  *
  * ⛔ That scope is the sentence, not a hedge on it. A call naming NO locale has
  * a rung BELOW this constant — the bundle's lowest locale tag — so the same
@@ -211,10 +212,10 @@ export const EmailTemplateDefinitionSchema = lazySchema(() => strictObject({
    * `defaultLocale: 'en'` and authors `locale: 'en'` reaches that row from
    * every recipient there, but behind a replacement loader only an exact `en`
    * request reaches it, and on a host whose i18n service declares no fallback
-   * (or that has none) only `en`-language tags fold to it. Author the English row at the `en-US` default so every
-   * loader has the floor, and add the other tags beside it; `defineStack`
-   * reports a bundle that carries `supportedLocales` rows without an `en-US`
-   * one.
+   * (or that has none) only `en`-language tags fold to it. Author the English
+   * row at the `en-US` default so every loader has the floor, and add the
+   * other tags beside it; `defineStack` reports a bundle that carries
+   * `supportedLocales` rows without an `en-US` one.
    */
   locale: z.string().default(EMAIL_TEMPLATE_FLOOR_LOCALE).describe(
     'BCP-47 locale (e.g. en-US, zh-CN) — the bundle key. Each rung of the resolver reads one row at '

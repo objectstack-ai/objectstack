@@ -5950,9 +5950,9 @@ const warnedEmailTemplateFloors = new Set<string>();
  * starts at `en-US` by name and, when the bundle carries no `en-US` row, drops
  * to that bundle's lowest locale tag and renders it silently. So one floorless
  * bundle dead-letters the recipients whose locale was named and quietly fills
- * for the ones whose was not. The full three-rung ladder is on
+ * for the ones whose was not. The full ladders are on
  * `SendTemplateInput.locale` in `packages/spec/src/contracts/email-service.ts`
- * and is not restated here.
+ * and are not restated here.
  *
  * ⭐ The CONSISTENT thing an author writes, a stack declaring
  * `defaultLocale: 'en'` whose English row says `locale: 'en'`, validates,
