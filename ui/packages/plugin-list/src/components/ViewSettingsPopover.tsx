@@ -6,6 +6,8 @@
  * here, in this order —
  *   - Layout (the visualization switcher; only when the list offers a choice)
  *   - Open records (how a row opens its record; only when the host passes it)
+ *   - Sort (below `sm` only, when the host passes it: the bar's Sort button
+ *     is not drawn there)
  *   - Group, Row color, Hide fields
  *   - Density
  *   - Row numbers (a session-only switch, grid only)
@@ -131,6 +133,15 @@ export interface ViewSettingsPopoverProps {
    * (`compactToolbar: false`), so the wide form has no twin of it.
    */
   recordOpen?: ViewSettingsRecordOpen;
+
+  /**
+   * The Sort block, drawn below `sm` only (objectstack#28911): there the bar
+   * keeps Filter and Display, and the host's Sort button is hidden. From `sm`
+   * up that button carries Sort, so the panel draws nothing for it. The host
+   * passes the same panel its Sort popover draws, so both write through one
+   * door; it is not a display setting and does not count in `changedCount`.
+   */
+  sort?: React.ReactNode;
 
   showGroup?: boolean;
   groupingConfig?: any;
@@ -441,6 +452,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
     allFields,
     layout,
     recordOpen,
+    sort,
     showGroup,
     groupingConfig,
     setGroupingConfig,
@@ -505,7 +517,9 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           )}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-0" data-testid="view-settings-content">
+      {/* Below `sm` the panel takes the phone's width, as Filter and Sort do, so
+          the Sort block's rows keep their words. */}
+      <PopoverContent align="end" className="w-[calc(100vw-2rem)] sm:w-80 p-0" data-testid="view-settings-content">
         <div className="max-h-[min(70vh,560px)] overflow-y-auto">
           {layout && (
             <div className="flex items-center justify-between gap-3 border-b px-3 py-2" data-testid="display-layout-row">
@@ -517,6 +531,12 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           )}
 
           {recordOpen && <RecordOpenSection t={t} recordOpen={recordOpen} />}
+
+          {sort && (
+            <div className="border-b px-3 py-2 sm:hidden" data-testid="display-sort">
+              {sort}
+            </div>
+          )}
 
           {showGroup && setGroupingConfig && (
             <Section
