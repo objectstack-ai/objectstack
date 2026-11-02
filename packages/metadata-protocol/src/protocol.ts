@@ -353,6 +353,7 @@ import {
     refuseUngrammaticalMetaItemName,
     saveWriteBinding,
     unknownDatasourceSaveRefusal,
+    unknownGrantObjectSaveRefusal,
 } from './protocol-save-door-refusals.js';
 // [#25467 cut 7] Package install and update.
 import {
@@ -7484,6 +7485,9 @@ export class ObjectStackProtocolImplementation implements
      *  - [#26724] an object restored with a `datasource` that names no
      *    datasource here, when that is not the binding it holds now
      *    ({@link unknownDatasourceSaveRefusal});
+     *  - [#28990] a permission set restored with a grant on an object that
+     *    does not exist here, when the set does not hold that grant now
+     *    ({@link unknownGrantObjectSaveRefusal});
      *  - [#27818] a datasource restored with an `external.credentialsRef` the
      *    active row it is restored into does not hold now
      *    ({@link datasourceCredentialsRefSaveRefusal}, in its restore words);
@@ -7544,6 +7548,7 @@ export class ObjectStackProtocolImplementation implements
             permissionSetNameCollisionRefusal: (...a) => this.permissionSetNameCollisionRefusal(...a),
             runAuthoringGate: (...a) => this.runAuthoringGate(...a),
             unknownDatasourceSaveRefusal: (...a) => this.unknownDatasourceSaveRefusal(...a),
+            unknownGrantObjectSaveRefusal: (...a) => this.unknownGrantObjectSaveRefusal(...a),
         };
         return refuseRestoredBodyTheSaveDoorRefuses.call(host, type, name, body, binding, source);
     }
@@ -20941,6 +20946,57 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
+     * [#28990] The save doors refuse a `permission` set whose `objects` map
+     * grants on an object that does not exist here. Before this, such a set
+     * was stored and published (200), and the grant applied to nothing: the
+     * permission evaluator keys a grant by the object's name, so a short `lead`
+     * where the object is `crm_lead` silently grants nothing — the case
+     * `defineStack`'s build rule refuses for a stack's own sets ("Fail loudly
+     * at build time"); this is the same judgement at the runtime door.
+     *
+     * A grant key is known when any of these holds, and the refusal fires on
+     * none:
+     *  - it is `'*'`, the wildcard the evaluator falls back to;
+     *  - the engine's registry registers an object of exactly that name — any
+     *    package's, the platform's (`sys_*`, the RBAC link tables) included,
+     *    since they are registered, so the build rule's platform-prefix
+     *    allowance needs no restating here. A registry that cannot look an
+     *    object up refuses nothing;
+     *  - an object of that name resolves through this door's by-name read
+     *    ({@link readMetaItem}: the environment's stored row, else the code
+     *    layer's definition);
+     *  - it is still pending: on a draft save, any object draft of that name;
+     *    on a package publish, an object draft of the same batch (`pending` as
+     *    a set), since the batch promotes as one unit in no type order;
+     *  - the set's current definition already grants on it: the grant is not
+     *    this write's. A re-save, a stored-row migration (`os migrate meta
+     *    --stored`) or a restore that keeps it is not judged, and neither is
+     *    an object that has gone since the grant was made.
+     *
+     * Asked in draft and in publish mode by {@link saveMetaItem} after the
+     * schema gate, again by {@link promoteDraftForPublish} on the draft body
+     * (the object can go between a draft's save and its publish), and by the
+     * restore doors ({@link refuseRestoredBodyTheSaveDoorRefuses}). Answered
+     * as the schema gate answers: `422 INVALID_METADATA`, one finding per
+     * unknown object at `objects.<name>`, naming it.
+     */
+    private unknownGrantObjectSaveRefusal(
+        singularType: string,
+        item: unknown,
+        name: string,
+        pending?: 'drafts' | ReadonlySet<string>,
+        writeFace?: MetadataWriteFace,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+        const readEngine = () => this.engine;
+        const host: ThisParameterType<typeof unknownGrantObjectSaveRefusal> = {
+            get engine() { return readEngine(); },
+            listDrafts: (...a) => this.listDrafts(...a),
+            readMetaItem: (...a) => this.readMetaItem(...a),
+        };
+        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+    }
+
+    /**
      * [#25211] Every object this environment holds that binds `datasource`
      * with `external`, for {@link externalBindingSaveRefusal}'s datasource
      * half: the environment's stored active rows ({@link readActiveOverlayRows},
@@ -22611,6 +22667,18 @@ export class ObjectStackProtocolImplementation implements
             if (datasourceRefusal) throw datasourceRefusal;
         }
 
+        // [#28990] A `permission` set granting on an object that does not exist
+        // here is refused, in draft and in publish mode, after the schema and
+        // before the authoring gate and every write: stored, the grant applies
+        // to nothing. A draft may grant on an object that is itself still a
+        // draft. See {@link unknownGrantObjectSaveRefusal}.
+        {
+            const grantRefusal = await this.unknownGrantObjectSaveRefusal(
+                singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
+            );
+            if (grantRefusal) throw grantRefusal;
+        }
+
         // [#27762] A `datasource` body may name, in `external.credentialsRef`, only the reference its own stored row
         // holds: refused 400 before the authoring gate and every write. See {@link datasourceCredentialsRefSaveRefusal}.
         {
@@ -24148,6 +24216,14 @@ export class ObjectStackProtocolImplementation implements
          */
         batchDatasources?: ReadonlySet<string>;
         /**
+         * [#28990] The names of the object drafts this promotion's batch
+         * publishes with it, for {@link unknownGrantObjectSaveRefusal}: a
+         * permission-set draft may grant on one. Stated by
+         * `publishPackageDrafts`; absent on the `publishMetaItem` path, where
+         * the object must exist already.
+         */
+        batchObjects?: ReadonlySet<string>;
+        /**
          * [#22877] The bundle member whose draft to promote; omitted, the
          * canonical one. The draft read, the gate's read and the promotion
          * all address it, so the body judged is the body that goes live.
@@ -24472,6 +24548,19 @@ export class ObjectStackProtocolImplementation implements
                 singularType, draftForGate.body, request.name, request.batchDatasources,
             );
             if (datasourceRefusal) throw datasourceRefusal;
+        }
+        // [#28990] …and a permission-set draft granting on an object that does
+        // not exist by the time it is published, or never did: a draft save
+        // accepts an object that is itself a draft, and that draft may not be
+        // published with it. Judged on the draft body, before
+        // `repo.promoteDraft` writes, so a batch publish aborts on it too; an
+        // object draft of the same batch counts. See
+        // {@link unknownGrantObjectSaveRefusal}.
+        if (draftForGate) {
+            const grantRefusal = await this.unknownGrantObjectSaveRefusal(
+                singularType, draftForGate.body, request.name, request.batchObjects,
+            );
+            if (grantRefusal) throw grantRefusal;
         }
         // [#27818] …and a datasource draft whose `external.credentialsRef` the active row it is promoted into
         // (`promoteInto`) does not hold now: refused before `repo.promoteDraft` writes. See {@link datasourceCredentialsRefSaveRefusal}.
@@ -25411,6 +25500,9 @@ export class ObjectStackProtocolImplementation implements
         const batchDatasources: ReadonlySet<string> = new Set(
             drafts.filter((d) => canonicalMetaType(d.type) === 'datasource').map((d) => d.name),
         );
+        const batchObjects: ReadonlySet<string> = new Set(
+            drafts.filter((d) => canonicalMetaType(d.type) === 'object').map((d) => d.name),
+        );
 
         // ADR-0067 — capture each artifact's PRE-publish state so this turn can
         // be recorded as ONE revertible commit. existedBefore=false → the commit
@@ -25602,6 +25694,9 @@ export class ObjectStackProtocolImplementation implements
                             // [#26724] …and the datasources it drafts, which
                             // an object draft beside them may name.
                             batchDatasources,
+                            // [#28990] …and the objects it drafts, which a
+                            // permission-set draft beside them may grant on.
+                            batchObjects,
                             ...(request.actor ? { actor: request.actor } : {}),
                             // [ADR-0146 D1] The author's change note, when the
                             // publish carries one, is what every history row
