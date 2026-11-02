@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 import { createMemoryCache, ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
+import { assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
 import { MessagingService, MemoryNotificationOutbox, createEmailChannel, NotificationTemplateStore } from '@objectstack/service-messaging';
 
 import { AutomationEngine } from '../engine.js';
@@ -46,9 +47,11 @@ function dataEngine() {
             return { ...row, id: row.id != null ? String(row.id) : `row_${++seq}` };
         },
         async find() { return []; },
-        async findOne(object: string, query?: { where?: Record<string, unknown> }) {
+        async findOne(object: string, query?: EngineFindOneQueryInput) {
+            assertEngineFindOnePredicate(object, query);
             if (object !== 'hr_applicant') return undefined;
-            return query?.where?.id === APPLICANT.id ? { ...APPLICANT } : undefined;
+            const where = (query as { where?: Record<string, unknown> } | undefined)?.where;
+            return where?.id === APPLICANT.id ? { ...APPLICANT } : undefined;
         },
     };
 }
