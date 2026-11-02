@@ -288,7 +288,7 @@ export function getFlowRuntimeStates(this: Pick<FlowDefinitionsHost, 'flows' | '
     });
 }
 
-/** The body of {@link AutomationEngine.describeUnboundReason}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.describeUnboundReason}; that method's docblock is its contract. */
 export function describeUnboundReason(
     this: Pick<FlowDefinitionsHost, 'isFlowEnabled' | 'boundFlowTriggers' | 'policyDisabledFlows' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'triggers'>,
     name: string,
@@ -422,7 +422,7 @@ export function unregisterConnectorProvider(this: Pick<FlowDefinitionsHost, 'con
     this.logger.info(`Connector provider unregistered: ${providerKey}`);
 }
 
-/** The body of {@link AutomationEngine.withdrawFlow}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.withdrawFlow}; that method's docblock is its contract. */
 export function withdrawFlow(this: Pick<FlowDefinitionsHost, 'deactivateFlowTrigger' | 'flows' | 'flowStatusDisabled' | 'flowVersionHistory' | 'policyDisabledFlows' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'flowRefusals' | 'logger'>, name: string): void {
     this.deactivateFlowTrigger(name);
     this.flows.delete(name);

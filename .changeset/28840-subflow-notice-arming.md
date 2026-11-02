@@ -5,7 +5,7 @@
 
 feat(service-automation)!: a flow whose `save_notice` runs after a `subflow` / `map` whose child can suspend is registered but not armed (#28840)
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 Metadata-protocol: none
 
 **BREAKING** for a record-triggered flow that places a `save_notice` node after a `subflow` or `map` node whose child flow can suspend the run.
