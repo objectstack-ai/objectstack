@@ -28,6 +28,50 @@ export const TEMPLATE_FILE_ALIASES = new Map<string, string>([
   ['_gitignore', '.gitignore'],
 ]);
 
+// The name a template entry lands under in the scaffolded project.
+function outputName(entry: fs.Dirent): string {
+  return entry.isFile()
+    ? (TEMPLATE_FILE_ALIASES.get(entry.name) ?? entry.name)
+    : entry.name;
+}
+
+/**
+ * The project-relative paths in `dest` that copying `src` onto it would
+ * overwrite, or that stand where the template needs a directory. Empty means
+ * `copyDir` can run without replacing anything the user already has.
+ *
+ * Read-only, and meant to run BEFORE the first write: a scaffold into a
+ * directory that already has contents (the current directory is the one path
+ * that allows that) must refuse with the directory byte-identical, not stop
+ * halfway through the copy. Files the template does not write — a `.git/`, a
+ * notes file — are not collisions and are left alone by `copyDir`.
+ */
+export function findTemplateCollisions(src: string, dest: string, rel = ''): string[] {
+  const collisions: string[] = [];
+  for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    const outName = outputName(entry);
+    const destPath = path.join(dest, outName);
+    const relPath = rel ? `${rel}/${outName}` : outName;
+    let existing: fs.Stats | undefined;
+    try {
+      existing = fs.lstatSync(destPath);
+    } catch {
+      existing = undefined;
+    }
+    if (entry.isDirectory()) {
+      if (!existing) continue;
+      if (existing.isDirectory()) {
+        collisions.push(...findTemplateCollisions(path.join(src, entry.name), destPath, relPath));
+      } else {
+        collisions.push(relPath);
+      }
+    } else if (entry.isFile() && existing) {
+      collisions.push(relPath);
+    }
+  }
+  return collisions;
+}
+
 /**
  * Recursively copy `src` onto `dest`, restoring aliased filenames, pushing the
  * project-relative path of every written file onto `collected`.
@@ -36,9 +80,7 @@ export function copyDir(src: string, dest: string, collected: string[], rel = ''
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
     const srcPath = path.join(src, entry.name);
-    const outName = entry.isFile()
-      ? (TEMPLATE_FILE_ALIASES.get(entry.name) ?? entry.name)
-      : entry.name;
+    const outName = outputName(entry);
     const destPath = path.join(dest, outName);
     const relPath = rel ? `${rel}/${outName}` : outName;
     if (entry.isDirectory()) {
