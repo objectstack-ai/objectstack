@@ -6,7 +6,7 @@
 
 feat(plugin-auth): a platform administrator sees who holds platform-admin standing from Setup → Users (#28793)
 
-Clause-②: no
+Clause-②: yes (widening)
 Metadata-protocol: none
 
 The Users list carries no column for platform-admin standing, because that standing is derived per user and is not stored on `sys_user`. The list toolbar now has one entry instead, **Platform Administrators**, which opens a list of every user who holds that standing right now.
