@@ -4660,7 +4660,7 @@ export class SchemaRegistry {
         list.push({ packageId, owner: false });
       }
     }
-    const named = (packageId: string | undefined) => (packageId ? `"${packageId}"` : 'a contribution with no package');
+    const named = (packageId: string | undefined) => (packageId ? `"${packageId}"` : '(no package)');
     for (const [field, list] of declarers) {
       if (list.length < 2) continue;
       const key = `${object}|${field}|${list.map((d) => d.packageId ?? '').join(',')}`;
