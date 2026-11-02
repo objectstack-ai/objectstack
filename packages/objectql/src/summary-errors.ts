@@ -119,7 +119,9 @@ function unlandedWriteRefusal(e: unknown, lead: string): unknown {
 export function cascadeStoppedRefusal(e: unknown, object: string): unknown {
   return unlandedWriteRefusal(
     e,
-    `The delete of '${object}' did not complete: its cascade stopped before the record was removed. ` +
+    // Double quotes: a quoted `'object'` beside a "not" reads as an unknown
+    // object to the data door's message heuristic, which answers it 404.
+    `The delete of "${object}" did not complete: its cascade stopped before the record was removed. ` +
       'Under a transaction that rolls back nothing was written; otherwise the dependents written before ' +
       'that point stay written.',
   );

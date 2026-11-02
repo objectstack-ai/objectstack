@@ -17,8 +17,9 @@
  *
  * ## What is pinned
  *
- * - `DELETE` of the account answers a 5xx refusal whose code is not the
- *   stale-roll-up one, and the account and its lines are all still stored;
+ * - `DELETE` of the account answers `500 INTERNAL_ERROR` (an unrecomputable
+ *   roll-up is an internal failure), and the account and its lines are all
+ *   still stored;
  * - CONTROL: `DELETE` of a line itself (its own write landed, only its
  *   recompute failed) still answers `200 { success: true }` and the line is
  *   gone.
@@ -136,12 +137,11 @@ const rowIds = async (object: string) =>
   ((await engine.find(object, { fields: ['id'] } as any)) as Array<{ id: string }>).map((r) => r.id).sort();
 
 describe('a DELETE whose cascade a dependent\'s failing roll-up stops answers a refusal', () => {
-  it('DELETE of the account answers a 5xx refusal that is not the stale-roll-up code, and nothing is deleted', async () => {
+  it('DELETE of the account answers 500 INTERNAL_ERROR, and nothing is deleted', async () => {
     const res = await call('DELETE', '/:object/:id', { params: { object: ACCOUNT, id: 'a1' } });
-    expect(res._status, JSON.stringify(res._json)).toBeGreaterThanOrEqual(500);
-    expect(res._json?.success, JSON.stringify(res._json)).not.toBe(true);
-    expect(res._json?.error?.code, JSON.stringify(res._json)).toBeDefined();
-    expect(res._json.error.code).not.toBe('ERR_SUMMARY_RECOMPUTE');
+    expect(res._status, JSON.stringify(res._json)).toBe(500);
+    expect(res._json?.code, JSON.stringify(res._json)).toBe('INTERNAL_ERROR');
+    expect(res._json.success).toBeUndefined();
     expect(await rowIds(ACCOUNT)).toEqual(['a1']);
     expect(await rowIds(LINE)).toEqual(['l1', 'l2', 'l3']);
   });
