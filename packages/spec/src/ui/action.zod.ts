@@ -2295,8 +2295,10 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
   // its own refinements, so this refusal is structurally incapable of
   // reaching it; `action-confirm-params-guard.test.ts` pins that both ways.
   // The same holds for {@link InlineActionSchema}, which `.pick()`s from the
-  // field factory rather than deriving from this chain — and which does not
-  // pick `description`, so the remedy below has no slot there to move into.
+  // field factory rather than deriving from this chain, so this refusal does
+  // not reach an inline action. The inline pick does carry `description` now,
+  // so the remedy below has a slot there too; whether the inline door should
+  // also refuse the pair is a separate narrowing question, not decided here.
   if (data.confirmText != null && Array.isArray(data.params) && data.params.length > 0) {
     return false;
   }
