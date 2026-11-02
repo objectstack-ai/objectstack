@@ -16,6 +16,9 @@
  * - the summary table's null row, a grouped summary's null group header, a
  *   matrix's null row header and null across-axis header read the label;
  * - the CSV export writes the same words as the screen;
+ * - the embedded chart names its null bucket the dashboard widget's way: the
+ *   x-axis dimension's label, and on a `seriesBy` pivot only when both
+ *   dimensions declare the same one, otherwise its own "(None)";
  * - a column that declares no `nullLabel` keeps "—", and a non-null value
  *   (an empty string included) is drawn exactly as before.
  */
@@ -23,6 +26,7 @@
 import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
+import { ComponentRegistry, NULL_CATEGORY_LABEL } from '@object-ui/core';
 import { I18nProvider } from '@object-ui/i18n';
 import { DatasetReportRenderer } from '../DatasetReportRenderer';
 
@@ -248,5 +252,69 @@ describe('report draws a dimension nullLabel for its null bucket (#29010)', () =
     const csv = await exportCsv();
     expect(csv).toEqual(drawn);
     expect(csv[0][1]).toBe(NO_REGION);
+  });
+});
+
+describe('report chart names its null bucket with the dimension nullLabel (#29010)', () => {
+  let captured: { schema: Record<string, any> } | null = null;
+  beforeEach(() => {
+    captured = null;
+    ComponentRegistry.register('chart', (props: any) => {
+      captured = props;
+      return null;
+    });
+  });
+
+  async function chartData(chart: Record<string, unknown>, rows: Array<Record<string, unknown>>, fields = FIELDS) {
+    const dataSource = { queryDataset: vi.fn(async () => ({ rows, fields })) };
+    render(
+      <I18nProvider>
+        <DatasetReportRenderer
+          report={{ name: 'chart', type: 'tabular', dataset: 'qa_ds', rows: [chart.xAxis], values: [chart.yAxis], chart } as never}
+          dataSource={dataSource as never}
+        />
+      </I18nProvider>,
+    );
+    await waitFor(() => expect(captured?.schema?.data?.length).toBeGreaterThan(0));
+    return captured!.schema;
+  }
+
+  it('the x-axis null bucket reads the declared label', async () => {
+    const schema = await chartData({ type: 'bar', xAxis: 'region', yAxis: 'total' }, [
+      { region: null, total: 30 },
+      { region: 'North', total: 10 },
+    ]);
+    expect(schema.data.map((r: any) => r.region)).toEqual([NO_REGION, 'North']);
+  });
+
+  it('an x-axis dimension without nullLabel keeps the chart default', async () => {
+    const schema = await chartData({ type: 'bar', xAxis: 'kind', yAxis: 'total' }, [
+      { kind: null, total: 30 },
+      { kind: 'A', total: 10 },
+    ]);
+    expect(schema.data.map((r: any) => r.kind)).toEqual([NULL_CATEGORY_LABEL, 'A']);
+  });
+
+  it('a seriesBy pivot takes the label only when both dimensions declare the same one', async () => {
+    const rows = [
+      { region: null, zone: null, total: 3 },
+      { region: 'North', zone: 'East', total: 4 },
+    ];
+    const both = [...FIELDS, { name: 'zone', type: 'string', label: 'Zone', nullLabel: NO_REGION }];
+    const schema = await chartData({ type: 'bar', xAxis: 'region', yAxis: 'total', seriesBy: 'zone' }, rows, both);
+    expect(schema.data.map((r: any) => r.region)).toContain(NO_REGION);
+    expect(schema.series.map((s: any) => s.label)).toContain(NO_REGION);
+    cleanup();
+    captured = null;
+    // `kind` declares none: the pivot keeps "(None)" for both of its null groups.
+    const mixed = await chartData(
+      { type: 'bar', xAxis: 'region', yAxis: 'total', seriesBy: 'kind' },
+      [
+        { region: null, kind: null, total: 3 },
+        { region: 'North', kind: 'A', total: 4 },
+      ],
+    );
+    expect(mixed.data.map((r: any) => r.region)).toContain(NULL_CATEGORY_LABEL);
+    expect(mixed.data.map((r: any) => r.region)).not.toContain(NO_REGION);
   });
 });

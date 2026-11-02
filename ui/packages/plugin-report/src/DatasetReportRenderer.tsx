@@ -1620,7 +1620,11 @@ function DatasetReportChart({
     categoryRank ? { [xAxis]: categoryRank } : null,
   );
   const plotRows = plotLayout ? plotLayout.map((i) => displayRows[i]) : displayRows;
-  const nullCategoryLabel = tt('chart.nullCategory', '(None)');
+  // The null bucket's name: the dataset's declared `nullLabel` when the answer
+  // carries one the chart can use (`declaredNullCategoryLabel`), else the
+  // chart's own default — as the dashboard widget names it.
+  const nullCategoryLabel =
+    declaredNullCategoryLabel(state.fields, queryDimensions, [yAxis]) ?? tt('chart.nullCategory', '(None)');
   const { data: chartData, xAxisKey, series: pivotOrDerivedSeries } = buildChartSeries(
     plotRows,
     queryDimensions,
@@ -1762,6 +1766,32 @@ function dimensionText(
     if (typeof declared === 'string') return declared;
   }
   return formatDimensionValue(value, locale);
+}
+
+/**
+ * The name the dataset DECLARES for a report chart's null bucket, or
+ * `undefined` when it declares none — the dashboard widget's rule
+ * (`DatasetWidget.tsx`, `declaredNullCategoryLabel`), read off the same
+ * answer as {@link dimensionText}.
+ *
+ * `buildChartSeries` draws every null bucket of one chart under ONE label: the
+ * x-axis dimension's, and on a `seriesBy` pivot (two dimensions, one measure)
+ * the series dimension's too. So a pivot takes a declared name only when both
+ * of its dimensions declare the same one; any other pivot keeps the default
+ * rather than naming one dimension's null group with the other's label.
+ */
+function declaredNullCategoryLabel(
+  fields: readonly DatasetResultField[] | undefined,
+  dimensions: readonly string[],
+  measures: readonly string[],
+): string | undefined {
+  const nullLabelOf = (dimension: string | undefined) =>
+    dimension === undefined ? undefined : fields?.find((f) => f.name === dimension)?.nullLabel;
+  const xLabel = nullLabelOf(dimensions[0]);
+  if (dimensions.length >= 2 && measures.length === 1) {
+    return xLabel !== undefined && xLabel === nullLabelOf(dimensions[1]) ? xLabel : undefined;
+  }
+  return xLabel;
 }
 
 /**
