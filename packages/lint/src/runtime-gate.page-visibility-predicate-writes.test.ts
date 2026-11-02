@@ -205,6 +205,7 @@ describe('#24491 — the page door gives the build\'s visibility-predicate verdi
       'validateStackExpressions',
       'validatePresetComparands',
       'validateReferenceIntegrity',
+      'validateFormLayout',
       'validatePublicFormFileFields',
       'validateThankYouRecordFields',
       ...FAMILY,

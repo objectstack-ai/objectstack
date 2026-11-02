@@ -320,6 +320,10 @@ export {
   // field-permission entry's vote under its row condition (`when`).
   buildEffectiveFieldPermissions,
   fieldPermissionVote,
+  // [ADR-0066 ⑧, ruling of record 6573563853] The one super-user predicate
+  // (row bypass and field vote alike) and the field merge's super-user vote.
+  holdsSuperuserBypass,
+  superuserFieldVote,
   type FieldConditionVerdict,
   type FieldPermissionEntryLike,
   type EffectiveFieldPermissionsInputSet,
@@ -444,10 +448,12 @@ export {
 export {
   ADMIN_STANDING_SURFACE,
   ADMIN_STANDING_NON_TABLE_INPUTS,
+  ADMIN_STANDING_PLATFORM_ENUMERATION,
   adminStandingTables,
   adminStandingColumns,
   type AdminStandingTable,
   type AdminStandingNonTableInput,
+  type AdminStandingPlatformEnumeration,
 } from './admin-standing-surface.js';
 
 // [#11663 L2] The DEPLOYMENT-CONFIG anchor for PLATFORM_ADMIN — parse,

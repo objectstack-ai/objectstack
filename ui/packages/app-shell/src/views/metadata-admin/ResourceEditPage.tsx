@@ -91,7 +91,7 @@ import type {
 // The ONE draft-envelope reader (objectui#8181). Its docblock carries the
 // read-decoration contract objectui#7603 established here; it was hoisted so
 // the three sibling copies could stop re-deriving it.
-import { extractDraftBody } from '@object-ui/data-objectstack';
+import { extractDraftBody, formatMetadataError } from '@object-ui/data-objectstack';
 import { PageShell } from './PageShell.js';
 import { MetadataTypeActions } from './MetadataTypeActions.js';
 import { LayeredDiff, countOverlaidFields } from '../item-tools/LayeredDiff.js';
@@ -122,6 +122,9 @@ import {
 } from './useMetadata.js';
 // objectui#11773 — the draft save's optimistic-concurrency guard and its dialog.
 import { readDraftForSave, useDraftSaveGuard } from './DraftConflictDialog.js';
+// objectstack#29148 — the one strip a Studio editor draws for a refused draft read.
+import { StudioRefusalStrip } from '../studio-design/StudioRefusalStrip.js';
+import type { StudioRefusal } from '../studio-design/metadataError.js';
 import {
   BUNDLE_MEMBER_PARAM,
   getMetadataResource,
@@ -625,6 +628,11 @@ function MetadataResourceEditPageImpl({
   // making a transport failure look like a structurally broken item. Set
   // in the load catch block, reset at the start of each load.
   const [loadFailed, setLoadFailed] = React.useState(false);
+  // objectstack#29148 — the pending draft's read was REFUSED (`403`), which is
+  // not "no draft": a draft nobody here may read still exists. No buffer is
+  // installed over it (the published body is not offered to edit), every write
+  // this page offers is withheld, and the page shows why instead of the editor.
+  const [draftRefused, setDraftRefused] = React.useState<StudioRefusal | null>(null);
   const [issues, setIssues] = React.useState<SchemaFormIssue[]>([]);
   // In create mode, hold back validation noise until the author has actually
   // edited a field. A blank new-item form firing 3 red "required" errors before
@@ -1326,6 +1334,7 @@ function MetadataResourceEditPageImpl({
     setLoading(true);
     setError(null);
     setLoadFailed(false);
+    setDraftRefused(null);
     (async () => {
       try {
         const scope = {
@@ -1344,6 +1353,18 @@ function MetadataResourceEditPageImpl({
           readDraftForSave<any>(client, type, name, draftPackage, bundleMember),
         ]);
         if (cancelled) return;
+        // objectstack#29148 — a refused draft read installs nothing: no
+        // buffer, no pin, so no save door has a body to send.
+        if ('refused' in draftRead) {
+          setLayered(lay);
+          setDraftRefused({
+            message: t('engine.studio.refusal.draftUnreadable', locale),
+            detail: formatMetadataError(draftRead.refused),
+          });
+          setLoadFailed(true);
+          setLoading(false);
+          return;
+        }
         const draftResp = draftRead.answer;
         setLayered(lay);
         // objectstack#26707 — a pending draft is judged by its own read, whose
@@ -1743,7 +1764,8 @@ function MetadataResourceEditPageImpl({
   // package's item of an overlay-allowed type. Outside the area, no change.
   const areaHost = useMetadataAreaHost();
   const hostReadOnly = !!areaHost?.readOnly;
-  const canWrite = itemWritable && canAuthor && !walled && !hostReadOnly;
+  // objectstack#29148 — and none while the pending draft's read is refused.
+  const canWrite = itemWritable && canAuthor && !walled && !hostReadOnly && !draftRefused;
   // Auto-enable design mode for designer-capable types. We do this once
   // per (type,name) navigation so the user lands in the productive
   // state instead of having to click "Edit". An item this caller cannot
@@ -2249,6 +2271,16 @@ function MetadataResourceEditPageImpl({
         client.layered<any>(type, name, layeredScope),
         readDraftForSave<any>(client, type, name, activePackage, bundleMember),
       ]);
+      // objectstack#29148 — a draft that remains after the publish and whose
+      // read is refused is not "no draft": nothing is installed over it.
+      if ('refused' in draftRead) {
+        setLayered(lay);
+        setDraftRefused({
+          message: t('engine.studio.refusal.draftUnreadable', locale),
+          detail: formatMetadataError(draftRead.refused),
+        });
+        return;
+      }
       const draftResp = draftRead.answer;
       setLayered(lay);
       // objectstack#28680 — a package-less page or dashboard published for the
@@ -2495,6 +2527,19 @@ function MetadataResourceEditPageImpl({
       <PageShell entry={entry} itemName={name}>
         <div className="p-6 text-sm text-muted-foreground flex items-center gap-2">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading {type}/{name}…
+        </div>
+      </PageShell>
+    );
+  }
+
+  // objectstack#29148 — a pending draft this caller may not read: the strip
+  // says why, with the server's sentence behind Details, and no editor opens
+  // over the published body.
+  if (draftRefused) {
+    return (
+      <PageShell entry={entry ?? { type, label: type }} itemName={name}>
+        <div className="p-6">
+          <StudioRefusalStrip refusal={draftRefused} locale={locale} className="px-3 py-2 text-sm" />
         </div>
       </PageShell>
     );

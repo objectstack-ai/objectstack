@@ -313,10 +313,18 @@ export const RecordPageStreamRowsSchema = lazySchema(() => z.object({
 export type RecordPageStreamRows = z.input<typeof RecordPageStreamRowsSchema>;
 export type RecordPageStreamRowsParsed = z.infer<typeof RecordPageStreamRowsSchema>;
 
-/** [#28737] The `timeline` part: how many entries the record's 动态 stream holds. */
+/**
+ * [#28737] The `timeline` part: the size of the record's 动态 stream, counted
+ * by the reads `RecordPageTimelineRequestSchema` names, as the caller. The
+ * total counts the sources' rows as that schema's table defines them, so it is
+ * an upper bound of the entries the 动态 panel draws, not their number. The
+ * panel draws fewer where its `showCompleted` / `types` configuration filters
+ * entries out, and where a ledger row has no displayable diff and so draws no
+ * entry.
+ */
 export const RecordPageTimelineCountSchema = lazySchema(() => z.object({
   total: z.number().int().min(0).describe(
-    'How many entries the record\'s timeline stream holds for this caller, over the sources the request named.',
+    'The rows of the sources the request named, counted as this caller may read them: an upper bound of the entries the timeline panel draws, not their number. The panel draws fewer where its `showCompleted` / `types` configuration filters entries out, and where a ledger row has no displayable diff.',
   ),
 }).strict());
 export type RecordPageTimelineCount = z.input<typeof RecordPageTimelineCountSchema>;

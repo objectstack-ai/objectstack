@@ -433,6 +433,7 @@ export function withPublishVerdict(
 
 // ---------------------------------------------------------------------------
 // [#29196] The lint's `form-field-unknown` on a served view's `_diagnostics`
+// [#29309] …and its sibling `form-section-group-unknown`
 // ---------------------------------------------------------------------------
 //
 // A form section naming a field its object does not have is Zod-valid, so the
@@ -440,7 +441,17 @@ export function withPublishVerdict(
 // `validateFormLayout` (`@objectstack/lint`) is the rule that says so, and it
 // ran only in the CLI. The view read now runs that rule on the body it serves
 // and puts each `form-field-unknown` finding in `_diagnostics.warnings`, with
-// the rule's own message: one spelling, no second rule.
+// the rule's own message: one spelling, no second rule. [#29309] The rule's
+// other finding, `form-section-group-unknown` (a section's `group` names a
+// field group the object does not declare, so the whole section renders
+// nothing), is the same silent skip and travels the same way. The objects the
+// lookup answers carry their `fieldGroups`, which is all that finding reads.
+//
+// Save and publish answer both findings as `advisories` on their own: the
+// rule is crossed to the runtime gate (`runtimeTypes: ['view']` in
+// `@objectstack/lint`'s `AUTHORING_RULES`). That is not a second report on
+// this read: the read carries no runtime advisory, only the publish verdict's
+// refusals (`withPublishVerdict`), and these findings are never refusals.
 //
 // A WARNING, never an error: the spec's `MetadataValidationResult` calls
 // warnings non-blocking, `valid` stays the schema's answer, and neither a save
@@ -458,17 +469,21 @@ export function withPublishVerdict(
 // rule: the kernel boot path reaches `@objectstack/lint` only through its
 // `/runtime` entry, and a view read is where this one is first needed.
 
-/** The two names this pass reads from `@objectstack/lint`. */
+/** The names this pass reads from `@objectstack/lint`. */
 interface FormLayoutLint {
     validateFormLayout: (stack: Record<string, unknown>) => ReadonlyArray<{ rule: string; path: string; message: string }>;
-    FORM_FIELD_UNKNOWN: string;
+    /** The rule ids served on the read: `form-field-unknown`, `form-section-group-unknown`. */
+    servedRules: ReadonlySet<string>;
 }
 
 let formLayoutLint: Promise<FormLayoutLint | undefined> | undefined;
 
 function loadFormLayoutLint(): Promise<FormLayoutLint | undefined> {
     formLayoutLint ??= import('@objectstack/lint').then(
-        (lint) => ({ validateFormLayout: lint.validateFormLayout, FORM_FIELD_UNKNOWN: lint.FORM_FIELD_UNKNOWN }),
+        (lint) => ({
+            validateFormLayout: lint.validateFormLayout,
+            servedRules: new Set([lint.FORM_FIELD_UNKNOWN, lint.FORM_SECTION_GROUP_UNKNOWN]),
+        }),
         () => undefined,
     );
     return formLayoutLint;
@@ -478,21 +493,6 @@ type Rec = Record<string, unknown>;
 
 function isRec(value: unknown): value is Rec {
     return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-/**
- * The record the lint's view walk reads for one served view body. A stored
- * form `ViewItem` (`viewKind: 'form'`) keeps its form under `config`, a rung
- * the walk does not descend (it reads `views[]` entries as authored), so it is
- * handed over as the container shape the walk does read: the item's `config`
- * as the default `form`, bound to the item's `object`. Every other shape (a
- * view container, a flattened form overlay) is the walk's own input already.
- */
-function formLayoutSubject(view: Rec): { subject: Rec; formKey: 'config' | 'form' } {
-    if (view.viewKind === 'form' && isRec(view.config)) {
-        return { subject: { name: view.name, object: view.object, form: view.config }, formKey: 'config' };
-    }
-    return { subject: view, formKey: 'form' };
 }
 
 /** Every object name the body spells (`object` / `objectName`), at any depth. */
@@ -510,8 +510,8 @@ function spelledObjectNames(value: unknown, into: Set<string>, depth = 0): Set<s
 }
 
 /**
- * Add the lint's `form-field-unknown` warnings to a served view's
- * `_diagnostics`. Returns `served` itself when there is nothing to add.
+ * Add the lint's `form-field-unknown` and `form-section-group-unknown`
+ * warnings to a served view's `_diagnostics`. Returns `served` itself when there is nothing to add.
  *
  * `getObject` is the door's own object lookup; an object it does not answer
  * is not judged.
@@ -524,18 +524,20 @@ export async function withFormLayoutWarnings<T>(
     if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view' || !isRec(served) || !getObject) return served;
     const lint = await loadFormLayoutLint();
     if (!lint) return served;
-    const { subject, formKey } = formLayoutSubject(served);
+    // [#29309] The served body is the rule's input as it is: the rule reads a
+    // form `ViewItem`'s `config` rung itself, the same walk the save and
+    // publish gate runs, so the read needs no adapter of its own.
     const objects: Rec[] = [];
-    for (const name of spelledObjectNames(subject, new Set())) {
+    for (const name of spelledObjectNames(served, new Set())) {
         const object = getObject(name);
         if (isRec(object)) objects.push({ ...object, name });
     }
     if (objects.length === 0) return served;
     const name = typeof served.name === 'string' ? served.name : '';
-    const warnings = lint.validateFormLayout({ objects, views: [subject] })
-        .filter((finding) => finding.rule === lint.FORM_FIELD_UNKNOWN)
+    const warnings = lint.validateFormLayout({ objects, views: [served] })
+        .filter((finding) => lint.servedRules.has(finding.rule))
         .map((finding) => ({
-            path: itemRelativeIssuePath('view', name, finding.path).replace(/^form(?=\.|$)/, formKey),
+            path: itemRelativeIssuePath('view', name, finding.path),
             message: finding.message,
         }));
     if (warnings.length === 0) return served;
