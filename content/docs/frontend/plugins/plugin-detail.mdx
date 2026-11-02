@@ -100,7 +100,12 @@ declare const items: FeedItem[];
 
 ### Console Integration
 
-In the Console app, `RecordChatterPanel` is integrated with record detail views. Comments are fetched from the `sys_comment` object using a thread ID pattern of `{objectName}:{recordId}`:
+In the Console app, `RecordChatterPanel` is integrated with record detail views. A record
+page that draws its feed when it opens takes the discussion from the one request it makes
+on open, `POST /api/v1/data/{object}/{id}/page` (the [record page payload](/docs/references/api/record-page)).
+That request asks `discussion` (the record's comment thread and those comments' reactions)
+and `activity` (its newest activity rows) beside the record, and the page reads neither
+`sys_comment` nor `sys_activity` on its own:
 
 ```tsx
 import type { DataSource, FeedItem } from '@object-ui/types';
@@ -110,25 +115,32 @@ declare const objectName: string;
 declare const recordId: string;
 declare const dataSource: DataSource;
 
-// Thread ID format
-const threadId = `${objectName}:${recordId}`;
-
-// Fetch comments — `find` resolves to a `QueryResult`, so the rows are `.data`.
-const comments = await dataSource.find('sys_comment', {
-  $filter: { threadId },
-  $orderby: 'createdAt asc',
+// The record page's one request; the discussion and the activity are two of its parts.
+const page = await dataSource.getRecordPage?.(objectName, recordId, {
+  discussion: true,
+  activity: { top: 200 },
 });
 
-// Map to FeedItem[]
-const feedItems: FeedItem[] = comments.data.map((c) => ({
-  id: c._id,
+// A part is its rows, or the refusal of the read it replaces.
+const discussion = page?.discussion;
+const comments = discussion && 'comments' in discussion ? discussion.comments : [];
+
+// Map to FeedItem[]: `sys_comment` columns are snake_case.
+const feedItems: FeedItem[] = comments.map((c) => ({
+  id: String(c.id),
   type: 'comment',
-  actor: c.author,
+  actor: c.author_name,
   body: c.body,
-  createdAt: c.createdAt,
-  reactions: c.reactions ?? [],
+  createdAt: c.created_at,
 }));
 ```
+
+A refused part is drawn as refused and is not asked again, and the other parts stay
+answered: a refused reaction read leaves the comments shown without reactions. Only a feed
+the open did not ask for is read on its own, from `sys_comment` by its `thread_id`
+(`{objectName}:{recordId}`), oldest first: for example a feed on a tab the page did not
+open on, or any feed on a data source without `getRecordPage`. The composer's mention list
+(`sys_user`, 50 rows) is read when the composer is first focused, not when the record opens.
 
 **Full-page detail view** renders the panel non-collapsible at the bottom:
 

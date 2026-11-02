@@ -111,6 +111,8 @@ export interface RecordActivityTimelineProps {
   collapseWhenEmpty?: boolean;
   /** Optional list of mention suggestions for the rich comment input. */
   mentionSuggestions?: Array<{ id: string; label: string; avatarUrl?: string }>;
+  /** Called on the comment input's focus, for the host to read {@link mentionSuggestions} (objectstack#28470). */
+  onMentionSuggestionsWanted?: () => void;
   /** Optional uploader for comment attachments. When provided, the composer
    *  exposes a drag-and-drop file panel. */
   onUploadAttachments?: (files: FileList) => Promise<Attachment[]>;
@@ -313,6 +315,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   onToggleSubscription,
   collapseWhenEmpty = false,
   mentionSuggestions,
+  onMentionSuggestionsWanted,
   onUploadAttachments,
   titleLabel,
   emptyLabel,
@@ -765,6 +768,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       onChange={setCommentText}
       onSubmit={handleAddComment}
       mentionSuggestions={mentionSuggestions}
+      onMentionSuggestionsWanted={onMentionSuggestionsWanted}
       placeholder={t('detail.leaveCommentPlaceholder')}
       disabled={isSubmitting}
       canSubmitEmpty={pendingAttachments.length > 0}
