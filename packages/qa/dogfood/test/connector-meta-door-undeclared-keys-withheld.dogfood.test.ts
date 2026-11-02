@@ -3,10 +3,10 @@
 // The connector metadata doors, booted on the showcase with its own connector
 // plugins — keys a connector does not declare are never served:
 //
-//  - READ: a stored row carrying top-level keys the connector does not declare
-//    (seeded through the system context, the only way such a row is written
-//    now), an instance whose `retryConfig` and a descriptor whose `actions`
-//    element carry an undeclared key (both accepted by the save door), are
+//  - READ: a stored row carrying top-level keys the connector does not declare,
+//    an instance whose `retryConfig` and a descriptor whose `actions` element
+//    carry an undeclared key (each seeded through the system context, the only
+//    way such a row is written now: the save door refuses all three), are
 //    served with those keys withheld and every declared key as stored — to a
 //    member and to an administrator, in the item, layered, published and list
 //    reads, and on the published read of a package published twice (whose
@@ -154,12 +154,21 @@ describe('connector metadata doors: keys a connector does not declare are withhe
       }),
     }, { context: SYSTEM });
 
-    const retry = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY}`, instance(RETRY, {
-      retryConfig: { strategy: 'exponential_backoff', maxAttempts: 2, secret: PLACEHOLDERS.retry },
-    }));
-    expect(retry.status, await retry.clone().text()).toBe(200);
-    const desc = await stack.apiAs(admin, 'PUT', `/meta/connector/${DESCRIPTOR}`, descriptor);
-    expect(desc.status, await desc.clone().text()).toBe(200);
+    // The nested rows: a clean save, then the system context writes the
+    // undeclared nested key over it (the save door refuses it now).
+    const seedOver = async (name: string, clean: Record<string, unknown>, seeded: Record<string, unknown>) => {
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${name}`, clean);
+      expect(res.status, await res.clone().text()).toBe(200);
+      const [seedRow] = await stored(name);
+      await ql.update('sys_metadata', { id: seedRow.id, metadata: JSON.stringify(seeded) }, { context: SYSTEM });
+    };
+    await seedOver(
+      RETRY,
+      instance(RETRY, { retryConfig: { strategy: 'exponential_backoff', maxAttempts: 2 } }),
+      instance(RETRY, { retryConfig: { strategy: 'exponential_backoff', maxAttempts: 2, secret: PLACEHOLDERS.retry } }),
+    );
+    const { token: _token, ...cleanAction } = descriptor.actions[0]!;
+    await seedOver(DESCRIPTOR, { ...descriptor, actions: [cleanAction, descriptor.actions[1]] }, descriptor);
   }, 180_000);
 
   afterAll(async () => {
