@@ -9,6 +9,7 @@ import path from 'path';
 import fs from 'fs';
 import zlib from 'node:zlib';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 // Relative specifiers carry their real file extension, and `__dirname` is
 // spelled `import.meta.dirname` throughout this file, so the config stays
 // loadable by Vite's `configLoader: 'native'` — which imports this file with
@@ -27,6 +28,7 @@ import {
 } from '../../scripts/vite-objectstack-workspace.ts';
 import { viteDeclaredLazyViews } from '../../scripts/vite-declared-lazy-views.ts';
 import { viteTypesZodLazy } from '../../scripts/vite-types-zod-lazy.ts';
+import { getServiceWorkerSource } from '../../packages/mobile/src/serviceWorkerSource.ts';
 import { compression } from 'vite-plugin-compression2';
 import { visualizer } from 'rollup-plugin-visualizer';
 
@@ -744,6 +746,70 @@ const LAZY_ONLY_INITIAL_ICONS: ReadonlySet<string> = new Set([
   'webhook',
 ]);
 
+/**
+ * Emits the Console's Service Worker, `service-worker.js`, at the root of the
+ * build beside `index.html` (objectstack#29155). Served from the base path, it
+ * is scoped to the Console (`/_console/`), never the site root.
+ *
+ * It is `@object-ui/mobile`'s `'app-shell'` worker: API requests network-only,
+ * the HTML entry network-first, hashed assets cache-first, push and
+ * notification-click handlers. Its cache is named after this build, so the
+ * next deploy's worker deletes this one's cache when it activates.
+ *
+ * Precache: the entry chunk, its static-import closure and their CSS (Vite's
+ * emitted entry assets). Lazy chunks are cached on fetch, and the page posts
+ * the files it loaded before the worker controlled it.
+ *
+ * Build identity: the console build name (`VITE_APP_VERSION` or the git sha)
+ * plus a digest of every emitted file name and the HTML entry. Hashed names
+ * change with their bytes, so any changed chunk gives a new worker.
+ */
+function emitServiceWorker(buildName: string): Plugin {
+  return {
+    name: 'emit-console-service-worker',
+    enforce: 'post',
+    generateBundle(_options, bundle) {
+      const fileNames = Object.keys(bundle).sort();
+      const digest = createHash('sha256');
+      for (const fileName of fileNames) {
+        digest.update(fileName).update('\0');
+        const output = bundle[fileName];
+        if (output.type === 'asset' && fileName.endsWith('.html')) digest.update(output.source);
+      }
+      const build = `${buildName || 'local'}-${digest.digest('hex').slice(0, 12)}`;
+
+      const chunks = new Map<string, Rollup.OutputChunk>();
+      for (const output of Object.values(bundle)) {
+        if (output.type === 'chunk') chunks.set(output.fileName, output);
+      }
+      const precache = new Set<string>();
+      const queue = [...chunks.values()].filter((c) => c.isEntry).map((c) => c.fileName);
+      if (queue.length === 0) this.error('[emit-console-service-worker] the bundle has no entry chunk to precache.');
+      while (queue.length > 0) {
+        const chunk = chunks.get(queue.pop() as string);
+        // `imports` also lists unresolved bare specifiers; only real chunks count.
+        if (!chunk || precache.has(chunk.fileName)) continue;
+        precache.add(chunk.fileName);
+        for (const css of chunk.viteMetadata?.importedCss ?? []) precache.add(css);
+        queue.push(...chunk.imports);
+      }
+
+      this.emitFile({
+        type: 'asset',
+        fileName: 'service-worker.js',
+        source: getServiceWorkerSource({
+          strategy: 'app-shell',
+          build,
+          cacheName: 'objectui-console',
+          precache: [...precache].sort().map((fileName) => `./${fileName}`),
+          apiPrefix: '/api/',
+          notifications: true,
+        }),
+      });
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   base: basePath,
@@ -810,6 +876,8 @@ export default defineConfig({
     // imports) must be copied into assets/ or every map page 404s
     // (objectui#3297). Asserts on drift; never silently skips.
     viteMaplibreWorker(),
+    // The Console's Service Worker (objectstack#29155), named after this build.
+    emitServiceWorker(consoleBuild),
     // Dev-only plugin: serve runtime assets (product logo/favicon) from the
     // host project's runtime/assets directory so branding URLs configured
     // via OS_LOGO_URL / OS_FAVICON_URL resolve without a fragile symlink.

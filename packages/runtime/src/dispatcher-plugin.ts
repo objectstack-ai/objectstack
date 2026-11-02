@@ -4,7 +4,6 @@ import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY
 import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, declaredRefusalMessage, demotedDeclaredCode, logServerFault, describeFaultRequest, inProcessSessionReadInput } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
-import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { HttpDispatcher, HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
 import { deferRequestBody } from './deferred-request-body.js';
@@ -21,6 +20,7 @@ import {
 } from './security/index.js';
 import { resolveSessionData, resolveSessionPrincipalId } from './security/resolve-session-principal.js';
 import { buildActorUser } from './security/actor-user.js';
+import { resolveKernelCache } from './security/kernel-cache.js';
 import {
     NoopMetricsRegistry,
     NoopErrorReporter,
@@ -911,7 +911,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         safeGetService<IAuthService>(ctx, 'auth'),
                         headers as Record<string, unknown>,
                     ),
-                resolveCache: async () => safeGetService<CounterStore>(ctx, 'cache'),
+                resolveCache: () => resolveKernelCache(ctx),
                 logger: ctx.logger,
             });
             // `null` = no budget declared, or declared disabled. Nothing is
@@ -2190,7 +2190,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // Same `resolveCache` the server-level limiter uses, so one
                 // deployment has one counter backend, not two.
                 const endpointLimiters = createEndpointRateLimiterRegistry({
-                    resolveCache: async () => safeGetService<CounterStore>(ctx, 'cache'),
+                    resolveCache: () => resolveKernelCache(ctx),
                     logger: ctx.logger,
                 });
 

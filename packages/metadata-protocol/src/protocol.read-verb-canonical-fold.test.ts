@@ -247,14 +247,22 @@ describe('#9157 — the population, re-derived from the code rather than from th
             return lines.slice(line, end === undefined || end < 0 ? lines.length : end).join('\n');
         };
         const METHOD_OR_PRIVATE = /^ {4}(?:private |protected )?(?:static )?(?:async )?[A-Za-z_][A-Za-z0-9_]*\s*\(/;
+        // [#25467 E0] The four door request aliases moved with the rest of the
+        // protocol.ts preamble to `protocol-door-requests.ts`; an alias is read
+        // there only when protocol.ts imports it from that module, so the
+        // signature judged is still the one the class names.
+        const doorRequests = readFileSync(fileURLToPath(new URL('./protocol-door-requests.ts', import.meta.url)), 'utf8');
+        const doorImport = /\nimport type \{([^}]*)\} from '\.\/protocol-door-requests\.js';/.exec(src)?.[1] ?? '';
         const aliasLiteral = (name: string): string | undefined => {
-            const at = src.indexOf(`\ntype ${name} = {`);
+            const home = src.includes(`\ntype ${name} = {`) ? src
+                : new RegExp(`\\b${name}\\b`).test(doorImport) ? doorRequests : src;
+            const at = home.indexOf(`\ntype ${name} = {`);
             if (at < 0) return undefined;
-            const open = src.indexOf('{', at);
+            const open = home.indexOf('{', at);
             let depth = 0;
-            for (let i = open; i < src.length; i++) {
-                if (src[i] === '{') depth++;
-                else if (src[i] === '}' && --depth === 0) return src.slice(open, i + 1);
+            for (let i = open; i < home.length; i++) {
+                if (home[i] === '{') depth++;
+                else if (home[i] === '}' && --depth === 0) return home.slice(open, i + 1);
             }
             return undefined;
         };

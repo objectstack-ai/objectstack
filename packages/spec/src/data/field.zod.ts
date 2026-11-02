@@ -18,7 +18,7 @@ import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/ide
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
 import { FilterConditionSchema } from './filter.zod';
-import { FIELD_KEY_GUIDANCE } from './authoring-key-lint';
+import { fieldKeyGuidanceAsStrictOptions, fieldSchemaAliases, SELECT_OPTION_ALIASES } from './field-key-aliases';
 import { DEFAULT_AUTONUMBER_FORMAT } from './autonumber-format';
 // #7127 — the `defaultValue` authoring gate: shape discrimination (literal /
 // runtime token / CEL envelope), the per-token × per-type table, and the
@@ -363,11 +363,13 @@ const FIELD_HISTORY =
 export const SelectOptionSchema = lazySchema(() => strictObject({
   surface: 'this select option',
   history: FIELD_HISTORY,
-  aliases: { text: 'label', name: 'label', title: 'label', key: 'value', id: 'value', isDefault: 'default', selected: 'default', colour: 'color', visible: 'visibleWhen', showWhen: 'visibleWhen' },
+  // The table lives in `field-key-aliases.ts`: an extension's option patch
+  // carries the rows whose target it admits (ADR-0146 D10).
+  aliases: SELECT_OPTION_ALIASES,
   // #8201. No alias row for the editability family, per the same red line the
   // mother ruling drew: an alias names a key the shape must then accept, and
   // this shape accepts none of them. The set consumes those spellings before
-  // the rename channel runs, and none of the alias keys above is a member, so
+  // the rename channel runs, and none of the table's alias keys is a member, so
   // no existing pointer is shadowed (`alias-integrity.test.ts`, #7889).
   guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
 }, {
@@ -1010,39 +1012,6 @@ export const FieldMaskingRuleSchema = lazySchema(() => z.union([
 export type FieldMaskingRule = FieldMaskingPreset | { keepHead: number; keepTail: number };
 
 /**
- * `FIELD_KEY_GUIDANCE`, re-expressed as `strictObject` options.
- *
- * That table is the curated list of near-misses and retirements on this exact
- * surface — twenty-odd entries, every one found in the wild, and already held
- * honest by `authoring-key-lint.test.ts` (every `to` must name a key this schema
- * really declares; no entry may exist for a key that is still live). Copying it
- * here would have made a second copy of the truth, which is the thing this
- * campaign keeps finding rotted.
- *
- * It also carries knowledge the fallback cannot rederive, and the proof is in
- * that file: `pii` is three edits from `min`, so an edit-distance suggester
- * offers "did you mean `min`?" — confident, wrong, and about an unrelated
- * concept. The lint suppressed that years ago. Closing this shape without
- * reusing the table reintroduced it verbatim, which is how this wiring got
- * written.
- *
- * `to` becomes an alias (the concept survives under another key); `why` becomes
- * guidance (a retirement with no successor, which also suppresses the rename).
- * The table's consumer changes here — the lint no longer reaches `field` now
- * that the parse rejects first — but the table itself is unchanged and still
- * tested.
- */
-function fieldKeyGuidanceAsStrictOptions() {
-  const aliases: Record<string, string> = {};
-  const guidance: Record<string, string> = {};
-  for (const [key, hint] of Object.entries(FIELD_KEY_GUIDANCE)) {
-    if (hint.to) aliases[key] = hint.to;
-    else if (hint.why) guidance[key] = hint.why;
-  }
-  return { aliases, guidance };
-}
-
-/**
  * The platform ceiling on decimal places — why a spec-valid `scale` may not
  * exceed 100 (#18972, the objectstack half of objectui#9808).
  *
@@ -1275,46 +1244,10 @@ export const FieldSchema = lazySchema(() => {
   const base = strictObject({
   surface: 'this field',
   history: FIELD_HISTORY,
-  aliases: {
-    ...fieldKeyGuidanceAsStrictOptions().aliases,
-    fieldName: 'name', key: 'name', column: 'name',
-    dataType: 'type', fieldType: 'type',
-    title: 'label', displayName: 'label',
-    help: 'inlineHelpText', helpText: 'inlineHelpText', hint: 'inlineHelpText', tooltip: 'inlineHelpText',
-    default: 'defaultValue', initialValue: 'defaultValue',
-    // `notNull` is NOT here, deliberately — see COLUMN_CONSTRAINT_FLAT_KEYS
-    // below. `isRequired` / `mandatory` stay: both are genuine spellings of the
-    // WRITE contract, and ADR-0113 moved neither.
-    isRequired: 'required', mandatory: 'required',
-    isUnique: 'unique',
-    // `picklist` is not here: it is a declared key — the reference to a shared
-    // option list, mutually exclusive with `options` (see the key below).
-    values: 'options', choices: 'options', selectOptions: 'options',
-    valueSet: 'picklist', globalValueSet: 'picklist', optionSet: 'picklist',
-    relatedTo: 'reference', referenceTo: 'reference', target: 'reference', targetObject: 'reference', lookupObject: 'reference',
-    onDelete: 'deleteBehavior', deleteRule: 'deleteBehavior', cascade: 'deleteBehavior',
-    formula: 'expression', calculation: 'expression', compute: 'expression',
-    // `rollup` alone covers `rollUp` / `roll_up` / `Roll-Up` — `aliasProbe`
-    // folds case and separators, so a second spelling was never reachable
-    // (#5481).
-    rollup: 'summaryOperations', summary: 'summaryOperations', aggregate: 'summaryOperations',
-    length: 'maxLength', size: 'maxLength',
-    decimals: 'scale', decimalPlaces: 'scale', digits: 'precision',
-    isReadonly: 'readonly', disabled: 'readonly',
-    isHidden: 'hidden', invisible: 'hidden',
-    // `showWhen` has only one reading — a predicate — so it renames. Its
-    // sibling `visible` has two on this surface and is answered in prose
-    // below; `disabled` already renames onto `readonly` above, which is the
-    // right target here because a field has `readonlyWhen`, not `disabledWhen`
-    // (#7832).
-    showWhen: 'visibleWhen',
-    section: 'group', category: 'group', fieldset: 'group',
-    component: 'widget', renderer: 'widget', control: 'widget',
-    mimeTypes: 'accept', allowedTypes: 'accept', fileTypes: 'accept',
-    maxFileSize: 'maxSize', maxBytes: 'maxSize',
-    trackChanges: 'trackHistory', feedTracked: 'trackHistory',
-    permissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
-  },
+  // `FIELD_KEY_GUIDANCE`'s renames and the field's own rows, in
+  // `field-key-aliases.ts`: an extension's field patch carries the rows whose
+  // target it admits (ADR-0146 D10).
+  aliases: fieldSchemaAliases(),
   guidance: {
     ...fieldKeyGuidanceAsStrictOptions().guidance,
     // Entries the lint's table does not carry, because the lint never had to:
