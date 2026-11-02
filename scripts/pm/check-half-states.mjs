@@ -15157,6 +15157,156 @@ export function h62DecisionCardWithoutFacetBlock(issue) {
 }
 
 // ---------------------------------------------------------------------------
+// H73 (#29386) — a RULED decision card still sitting in the decision box.
+//
+// The runbook declares this as 「旗一」 (dispatch-runbook.md, 巡查常设项): 「open
+// 卡标题带决策标记或线程含裁决记录,却仍挂 `needs-user-decision`」, report-only,
+// owned by this patrol. This row wires its body-record half.
+//
+// The shape. The director records a ruling as a `Ruling:` comment plus a
+// `Ruled: <comment id> · letter <X> · <UTC>` line on the card body, and by
+// charter writes no label (lanes/director.md). The exit out of the box
+// (`needs-user-decision` → `pm:queue` / `pm:blocked` / close) is the card's
+// LANE seat's, and the lane learns of the ruling from the `Notify: ruling` bell
+// the recorder rings in the same act. When that bell is skipped nothing else
+// moves the card: measured 2026-11-02, twelve cards ruled 01:14Z–10:06Z drew
+// zero bells and all twelve still carried the label at 12:08Z, the oldest
+// 10 h 54 min after its ruling.
+//
+// The reading. BODY ONLY, and free: `needs-user-decision` is not a label the
+// label loop pages, so the carriers are first visible on the unscoped open
+// listing (H62's reason), whose rows already hold the body. Fenced blocks are
+// stripped before the line is read (`stripMarkdownCode`, inline spans kept so a
+// backticked line still reads) — a card quoting another card's `Ruled:` line in
+// a fence is citing it, not carrying it. The line must lead (the directive
+// reader's anchoring, decoration tolerated) and its value must OPEN with a
+// numeric comment id: a line-leading `Ruled:` followed by prose is a sentence,
+// not a ruling record. The ruling that governs is the NEWEST readable stamp; a
+// card whose rulings carry no readable stamp reports with its age unreadable,
+// never as fresh (#4690).
+//
+// The one lawful carrier. A card may re-enter the box with a NEW question after
+// an earlier ruling; the box duty then writes a `Prior rulings on this card:`
+// line naming each earlier ruling id (lanes/director.md, 入箱勤务). A card whose
+// governing ruling id is named there is that re-entry and is clean here.
+//
+// Threshold `RULED_IN_BOX_STALE_HOURS` = one standing patrol cycle: a lane seat
+// patrols far more often than that, so a ruled card still in the box after it
+// has outlived at least one exit pass it should not have.
+//
+// ⛔ Report-only: no label, comment or body is written, and the remedy names
+// the lane seat (the exit) and the recorder (a missing bell) — never the
+// director writing the label. ⛔ Out of scope: the reverse direction (a card
+// moved OUT of the box with no retrievable ruling id), which the runbook
+// assigns to the dispatch-time 决策复读; and the TITLE half of 旗一, which H54
+// reads from the queue side. Band `stall`: the card's forward motion is
+// stopped and nothing else will move it.
+// ---------------------------------------------------------------------------
+
+/** H73's threshold — one standing patrol cycle (`PATROL_CADENCE_HOURS`). */
+export const RULED_IN_BOX_STALE_HOURS = 6;
+
+/** The body directive the director writes when a ruling is recorded. */
+export const RULED_LINE_KEY = 'Ruled';
+
+/** The box duty's line naming earlier rulings on a card that re-entered. */
+export const PRIOR_RULINGS_ON_CARD_KEY = 'Prior rulings on this card';
+
+const RULED_RECORD_ID = /^(\d{6,})(?!\d)/u;
+const RULED_RECORD_STAMP = /\b(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z)/u;
+
+/**
+ * Every ruling record a body carries, fences stripped: `{ id, at }` per
+ * line-leading `Ruled:` whose value opens with a comment id, `at` being the
+ * epoch-ms of the line's own UTC stamp or null when it has none readable.
+ *
+ * @param {string} body
+ * @returns {{ id: string, at: number|null }[]}
+ */
+export function ruledRecords(body) {
+  const text = stripMarkdownCode(body, { inline: false });
+  const out = [];
+  for (const value of directiveValues(text, RULED_LINE_KEY)) {
+    const id = RULED_RECORD_ID.exec(value);
+    if (!id) continue;
+    const stamp = RULED_RECORD_STAMP.exec(value);
+    const at = stamp ? Date.parse(stamp[1]) : NaN;
+    out.push({ id: id[1], at: Number.isFinite(at) ? at : null });
+  }
+  return out;
+}
+
+/**
+ * Is this ruling id named on the body's `Prior rulings on this card:` line, or
+ * on the list lines directly under it? Fences stripped, like the record itself.
+ */
+export function priorRulingNamesId(body, id) {
+  const lines = stripMarkdownCode(body, { inline: false }).split('\n');
+  const head = new RegExp(`^${DIRECTIVE_PREFIX}${directiveKey(PRIOR_RULINGS_ON_CARD_KEY)}`);
+  const named = new RegExp(`(?<!\\d)${id}(?!\\d)`);
+  for (let i = 0; i < lines.length; i++) {
+    if (!head.test(lines[i])) continue;
+    for (let j = i; j < lines.length && (j === i || lines[j].trim() !== ''); j++) {
+      if (named.test(lines[j])) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Does H73 speak about this card at all? ISSUES only, never a PR (a ruled
+ * governed PR is H48/H52's subject); a CLOSED card is out (the label on it is
+ * residue, H22/H39's reading); an unreadable `labels` is out and never read as
+ * unlabelled (#4690).
+ */
+export function h73SpeaksAbout(issue) {
+  if (!issue || issue.pull_request) return false;
+  if (issue.state === 'closed') return false;
+  if (!Array.isArray(issue.labels)) return false;
+  return labelNames(issue).includes(GOVERNED_PR_DECISION_LABEL);
+}
+
+/**
+ * H73 — null when clean, else the finding sentence naming the ruling id, its
+ * age and the `domain:*` seat that owes the exit.
+ *
+ * ⛔ No angle-bracket fragment and no tracker number in the sentence: it is
+ * rendered into a GitHub issue body, and the card it is about is the row's own
+ * link.
+ */
+export function h73RuledCardStillInBox(issue, nowMs = Date.now()) {
+  if (!h73SpeaksAbout(issue)) return null;
+  const records = ruledRecords(issue.body);
+  if (records.length === 0) return null;
+  const stamped = records.filter((r) => r.at !== null);
+  const governing = stamped.length > 0 ? stamped.reduce((a, r) => (r.at > a.at ? r : a)) : records[0];
+  if (priorRulingNamesId(issue.body, governing.id)) return null;
+  const ageHours = governing.at === null ? null : (nowMs - governing.at) / 3_600_000;
+  if (ageHours !== null && ageHours <= RULED_IN_BOX_STALE_HOURS) return null;
+  const age =
+    ageHours === null
+      ? 'its `Ruled:` line carries no readable UTC stamp (an unreadable age must not read as fresh)'
+      : `recorded ~${Math.round(ageHours)}h ago (threshold ${RULED_IN_BOX_STALE_HOURS}h)`;
+  const domains = labelNames(issue).filter((l) => typeof l === 'string' && l.startsWith('domain:'));
+  const owes =
+    domains.length > 0
+      ? `owed by the ${domains.map((d) => `\`${d}\``).join(' / ')} lane seat`
+      : 'owed by NO lane yet — the card carries no `domain:*` label, so the TRIAGE seat routes it first';
+  return (
+    `\`${GOVERNED_PR_DECISION_LABEL}\` still on a card whose BODY carries a ruling record: ` +
+    `\`${RULED_LINE_KEY}:\` ruling comment ${governing.id}, ${age}. The ruling is recorded and the exit ` +
+    `out of the decision box is not: ${owes}, which moves the card in one write as the ruled letter ` +
+    'says (`pm:queue`, `pm:blocked` or close) — nothing else will, because the director writes no label. ' +
+    'The likely cause is a skipped bell: the ruling, the `Ruled:` line and the `Notify: ruling` knock to ' +
+    'the lane seat land in ONE act (lanes/director.md), so a ruling recorded without its knock is a half ' +
+    'state the RECORDER owes — ring it in the shape 〈信箱 PR〉 spells (`record-recognisers.mjs ' +
+    '--mailbox-keys` prints it). Report-only: ⛔ never a label written from this script. Boundaries: a ' +
+    'card that re-entered the box naming this ruling on its `Prior rulings on this card:` line is clean ' +
+    'here; a card moved OUT of the box with no ruling id is the dispatch-time 决策复读\'s, not this row\'s.'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // The stale-`finding` screen — ONE rule, two readers (#16904)
 //
 // `finding` is defined by the state model as a TRANSIENT marker — 「观察类记录,
@@ -19615,6 +19765,15 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // board, by the seat that filed it.
   H62: 'state',
 
+  // H73 is a `stall` (#29386): a ruled card whose exit out of the decision box
+  // was never made. ⛔ Not `state`: the label and the body do not contradict a
+  // DEFINITION — a ruled card may lawfully sit in the box for a while — what is
+  // wrong is that it has stopped there, past a patrol cycle, and the one seat
+  // that moves it was never told. ⛔ Not `gate`: nothing was stripped. ⛔ Not
+  // `inventory`: it alarms about one card. What is left is `stall`'s definition:
+  // forward motion stopped, and nothing else will move it.
+  H73: 'stall',
+
   // H63 is a `state`, and the other three bands are refused on their own
   // criteria. ⛔ Not `gate`: that band exists for the row that can tell a
   // STRIPPED gate from an ungated card — an ABSENCE reading as a green light —
@@ -23973,6 +24132,12 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     // own rule (「落卡即带」), so it buys no thread.
     const facelessDecision = h62DecisionCardWithoutFacetBlock(issue);
     if (facelessDecision) findings.push([issue, 'H62', facelessDecision]);
+    // H73 (#29386) — the same decision card's EXIT, on this listing for H62's
+    // reason: `needs-user-decision` is not a label page, so a ruled card holding
+    // no `pm:*` state is first visible here. One label read and one body read on
+    // a row this listing already holds — no request, no thread.
+    const ruledInBox = h73RuledCardStillInBox(issue);
+    if (ruledInBox) findings.push([issue, 'H73', ruledInBox]);
     // H63 (#16904) — the same listing for the same reason: `finding` is not one
     // of the labels the label loop pages, so a carrier holding no `pm:*` state
     // is first visible HERE. One label read on a row this listing already
@@ -25179,6 +25344,11 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // through this predicate — lives in record-recognisers.mjs's doorbell battery,
   // because this self-test cannot import that module (H62's banner).
   'H72 mailbox off-table bells': 20,
+  // Registered with the ruled-card-in-the-box row (#29386), pin just under the
+  // count: the firing case, the label / fence / anchoring / id controls each
+  // beside its positive twin, the threshold boundary, the governing stamp, the
+  // re-entry line, the owing seat, the live record shapes, the text, the band.
+  'H73 ruled card in the decision box': 25,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28528,6 +28698,51 @@ async function selfTest() {
   b(BATTERY28675, '⛔ H72 summary: a reader that did not load renders NOT MEASURED, never `0 of N`', (() => { const c = saidBy('h72Mailbox', summaryLine({ mailboxReaderReason: 'the doorbell reader did not load (x)', mailboxCandidates: 0 }, 0)); return c.includes('NOT MEASURED — the doorbell reader did not load (x)') && !c.includes('0 of 0'); })(), true);
   b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
   b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
+
+  // -- H73 (#29386): a RULED decision card still sitting in the decision box.
+  //    Positive controls beside every negative one: the label, the fence, the
+  //    anchoring, the id, the threshold, the governing stamp, the re-entry line.
+  const BATTERY29386 = 'H73 ruled card in the decision box';
+  const NOW73 = Date.parse('2026-11-02T12:08:00Z');
+  const RULED73 = 'Ruled: 6566731522 · letter A · 2026-11-02T01:15Z';
+  const card73 = (extra = {}) => ({
+    number: 28658,
+    state: 'open',
+    labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:server' }, { name: 'priority:p2' }],
+    body: `director#1 · os-support-ai · session_x\n${RULED73}\n\n## 维护者速读\n\n- 问题:…`,
+    ...extra,
+  });
+  const h73 = (extra = {}, nowMs = NOW73) => h73RuledCardStillInBox(card73(extra), nowMs);
+  const row73 = (extra = {}, nowMs = NOW73) => String(h73(extra, nowMs) ?? '');
+  const at73 = (iso) => Date.parse(iso);
+  b(BATTERY29386, 'H73 fires: an open card carrying the decision label and a line-leading `Ruled:` record past the threshold', typeof h73(), 'string');
+  b(BATTERY29386, 'H73 row: names the ruling id, its age and the threshold', ['ruling comment 6566731522', 'recorded ~11h ago', `threshold ${RULED_IN_BOX_STALE_HOURS}h`].every((x) => row73().includes(x)), true);
+  b(BATTERY29386, 'H73 row: names the `domain:*` seat that owes the exit', row73().includes('owed by the `domain:server` lane seat'), true);
+  b(BATTERY29386, '⛔ H73: the SAME body without the decision label is clean', h73({ labels: [{ name: 'domain:server' }, { name: 'pm:queue' }] }), null);
+  b(BATTERY29386, '⛔ H73: a `Ruled:` line inside a backtick FENCE is a citation, not a record', h73({ body: `quoting the other card:\n\`\`\`\n${RULED73}\n\`\`\`\n` }), null);
+  b(BATTERY29386, 'H73 control: …and the identical line with the fence removed fires, so the silence is the fence\'s', typeof h73({ body: `quoting the other card:\n${RULED73}\n` }), 'string');
+  b(BATTERY29386, '⛔ H73: a tilde fence is a fence too', h73({ body: `~~~text\n${RULED73}\n~~~` }), null);
+  b(BATTERY29386, 'H73: a backticked line-leading record still reads (decoration tolerated, inline spans kept)', typeof h73({ body: `\`${RULED73}\`` }), 'string');
+  b(BATTERY29386, '⛔ H73: a mid-sentence mention is prose, not a record', h73({ body: `The director writes a ${RULED73} line on the body.\n| Cards ruled | \`Ruled:\` on the body | 12 |` }), null);
+  b(BATTERY29386, '⛔ H73: a line-leading `Ruled:` followed by prose carries no comment id and is not a record', h73({ body: 'Ruled: the repository variable is set by hand.' }), null);
+  b(BATTERY29386, '⭐ H73: the threshold boundary — 5h59m after the ruling is silent, 6h01m fires', [h73({}, at73('2026-11-02T07:14:00Z')), typeof h73({}, at73('2026-11-02T07:16:00Z'))].join(), ',string');
+  b(BATTERY29386, 'H73: a record with no readable UTC stamp reports, never reads as fresh', row73({ body: 'Ruled: 6566731522 · letter A' }).includes('no readable UTC stamp'), true);
+  b(BATTERY29386, 'H73: the NEWEST stamp governs — a fresh re-ruling silences an old one, and two old ones report the newer id', [h73({ body: `Ruled: 6400000001 · letter B · 2026-10-30T09:00Z\nRuled: 6566731522 · letter A · 2026-11-02T11:00Z` }), row73({ body: `Ruled: 6400000001 · letter B · 2026-10-30T09:00Z\n${RULED73}` }).includes('ruling comment 6566731522')].join(), ',true');
+  b(BATTERY29386, '⛔ H73: a card that re-entered the box naming this ruling on its `Prior rulings on this card:` line is clean', h73({ body: `${RULED73}\n\nPrior rulings on this card: 6566731522 — letter A ruled the old question; this is a new one.` }), null);
+  b(BATTERY29386, 'H73: …and the list form under that line is read too', h73({ body: `${RULED73}\n\n**Prior rulings on this card:**\n- 6566731522 — the old question\n` }), null);
+  b(BATTERY29386, 'H73 control: …while the same line naming a DIFFERENT ruling still fires', typeof h73({ body: `${RULED73}\n\nPrior rulings on this card: 6400000001 — another ruling.` }), 'string');
+  b(BATTERY29386, 'H73 control: …and an id after a blank line below it is not that line\'s', typeof h73({ body: `Prior rulings on this card: none\n\n${RULED73}` }), 'string');
+  b(BATTERY29386, 'H73: no `domain:*` label names the TRIAGE seat instead of inventing a lane', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }] }).includes('the TRIAGE seat routes it first'), true);
+  b(BATTERY29386, 'H73: two `domain:*` labels are both named', row73({ labels: [{ name: GOVERNED_PR_DECISION_LABEL }, { name: 'domain:spec' }, { name: 'domain:server' }] }).includes('`domain:spec` / `domain:server`'), true);
+  b(BATTERY29386, '⛔ H73 population: a closed card, a PR row, an unreadable `labels`, a missing row and an empty body are all silent, none a crash', [h73({ state: 'closed' }), h73({ pull_request: {} }), h73({ labels: undefined }), h73RuledCardStillInBox(undefined, NOW73), h73({ body: null })].every((v) => v === null), true);
+  b(BATTERY29386, 'H73 reader: the live shapes read — a parenthesised re-ruling note and a seconds stamp', JSON.stringify([...ruledRecords('Ruled: 6439314592 · letter A (re-ruled from B, 6435350063) · 2026-10-27T10:22Z'), ...ruledRecords('- Ruled: 6398569691 · letter A · 2026-10-25T13:58:53Z')]), JSON.stringify([{ id: '6439314592', at: at73('2026-10-27T10:22Z') }, { id: '6398569691', at: at73('2026-10-25T13:58:53Z') }]));
+  b(BATTERY29386, 'H73 text: no angle-bracket fragment and no tracker number — the row is written into a GitHub issue', /[<>]/.test(row73()) || /#[0-9]/.test(row73()), false);
+  b(BATTERY29386, 'H73 text: names the one-act rule, the bell, the shape\'s printout and the report-only boundary', ['ONE act (lanes/director.md)', '`Notify: ruling`', '--mailbox-keys', 'never a label written from this script'].every((x) => row73().includes(x)), true);
+  b(BATTERY29386, 'H73 text: the label is the constant H48/H52/H62 own, ⛔ never a re-typed literal', row73().startsWith(`\`${GOVERNED_PR_DECISION_LABEL}\``), true);
+  b(BATTERY29386, 'H73 constants: a six-hour threshold, one standing patrol cycle', `${RULED_IN_BOX_STALE_HOURS}/${PATROL_CADENCE_HOURS}`, '6/6');
+  b(BATTERY29386, 'H73 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H73')}/${familyRegistryCoverage().emitted.includes('H73')}`, 'stall/true');
+  b(BATTERY29386, 'H73: not a loud finding — it never escalates a sweep', isLoudFinding(row73()), false);
+  b(BATTERY29386, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY29386) && SELF_TEST_BATTERIES[BATTERY29386] > 0, true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
