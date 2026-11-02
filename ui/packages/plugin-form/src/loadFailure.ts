@@ -31,7 +31,14 @@
  *
  * Private to this package: no form's props or schema change.
  */
-import { createElement, type Dispatch, type MutableRefObject, type ReactElement, type SetStateAction } from 'react';
+import {
+  createElement,
+  type ComponentProps,
+  type Dispatch,
+  type MutableRefObject,
+  type ReactElement,
+  type SetStateAction,
+} from 'react';
 import { Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
 import { createSafeTranslation } from '@object-ui/i18n';
 
@@ -122,9 +129,12 @@ const useRecordNotFoundTranslation = createSafeTranslation(
  */
 export function RecordNotFoundState({ testId }: { testId: string }): ReactElement {
   const { t } = useRecordNotFoundTranslation();
+  // A `data-*` attribute is legal on the `div` that `Empty` renders, but only
+  // JSX spells it without a declared prop: named in the props type here.
+  const props: ComponentProps<typeof Empty> & { 'data-testid': string } = { 'data-testid': testId };
   return createElement(
     Empty,
-    { 'data-testid': testId },
+    props,
     createElement(EmptyTitle, null, t('empty.recordNotFound')),
     createElement(EmptyDescription, null, t('empty.recordNotFoundDescription')),
   );

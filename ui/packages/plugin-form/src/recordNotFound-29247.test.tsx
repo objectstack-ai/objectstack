@@ -100,6 +100,7 @@ describe.each(LAYOUTS)('%s — an edit read that finds no record (objectstack#29
 
     expect(await screen.findByText(NOT_FOUND_TITLE)).toBeInTheDocument();
     expect(screen.getByText(NOT_FOUND_DESCRIPTION)).toBeInTheDocument();
+    expect(screen.getByTestId(`${formType}-form-record-not-found`)).toBeInTheDocument();
     expect(ds.findOne).toHaveBeenCalledWith('task', 'NOPE_x');
     expect(titleBox()).toBeNull();
     expect(button('Update')).toBeNull();
