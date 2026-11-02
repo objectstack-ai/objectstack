@@ -311,19 +311,6 @@ export function App() {
               * layer too late for a capability whose declared meaning is
               * "Enter the Studio metadata-design surfaces". */}
             {studioRoutes}
-            {/* Internal authed form — same renderer as `/f/:slug`, different
-              * submit path, and (objectui#4109) rendered INSIDE the console
-              * shell instead of as a bare page. The route stays exactly where
-              * it is: per the 2026-08-10 ruling on objectstack#7245 the missing
-              * chrome was the defect, not the navigation, so deep links keep
-              * working. `InternalFormRoute` owns the chrome + the "land on the
-              * created record" target; the public path above stays chrome-less
-              * on purpose (an anonymous visitor has no console to be in). */}
-            <Route path="/forms/:name" element={
-              <ProtectedRoute>
-                <InternalFormRoute />
-              </ProtectedRoute>
-            } />
             {/* Package documentation (ADR-0046): a platform-level portal
               * lists every installed `doc` (grouped by package), and one
               * viewer route renders any item; cross-references between docs
@@ -361,6 +348,25 @@ export function App() {
             }>
               <Route path="/home" element={<HomeRoute />} />
               <Route path="/apps/:appName/*" element={<AppContent />} />
+              {/* Internal authed form — same renderer as `/f/:slug`, different
+                * submit path, and (objectui#4109) rendered INSIDE the console
+                * shell instead of as a bare page. The URL is unchanged: per the
+                * 2026-08-10 ruling on objectstack#7245 the missing chrome was
+                * the defect, not the navigation, so deep links keep working.
+                * `InternalFormRoute` owns the chrome + the "land on the created
+                * record" target; the public `/f/:slug` above stays chrome-less
+                * and outside this layout on purpose (an anonymous visitor has
+                * no console to be in, and no permissions to ask about).
+                *
+                * Under this layout rather than beside it (objectstack#29187):
+                * `FormPage` refuses a form whose write the caller holds no
+                * grant for BEFORE drawing a field, and it reads that grant
+                * from this layout's `/auth/me/permissions` answer — the one
+                * its in-app twin `/apps/:appName/forms/:name` already reads.
+                * One answer for both URLs, so one form never behaves
+                * differently by URL; a hop from `/home` or an app keeps the
+                * layout, so the answer is not asked again. */}
+              <Route path="/forms/:name" element={<InternalFormRoute />} />
             </Route>
             {/* Dev-only: ADR-0001 master-detail subform verification harness. */}
             <Route path="/dev/master-detail" element={
