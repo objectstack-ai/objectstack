@@ -1589,11 +1589,11 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
    * Stable filter name (framework#2501) — the dashboard-variable key under
    * which the filter's value is published (readable in widget expressions as
    * `page.<name>`) and the key widgets reference in `filterBindings`.
-   * Defaults to `field`. The name `"dateRange"` is reserved for the built-in
-   * dashboard date range: on a dashboard that declares `dateRange`, an entry
-   * keyed `dateRange` (by this name, or by `field` when unnamed) is refused,
-   * because it would replace the date range's control and binding. On a
-   * dashboard with no `dateRange` the key is free.
+   * Defaults to `field`. On a dashboard that declares `dateRange`, the name
+   * `"dateRange"` is reserved for that built-in date range: an entry keyed
+   * `dateRange` (by this name, or by `field` when unnamed) is refused, because
+   * it would replace the date range's control and binding. On a dashboard with
+   * no `dateRange` the name is free and the entry is an ordinary filter.
    */
   name: z.string().optional().describe('Stable filter name (variable key); defaults to field. Refused as dateRange when the dashboard declares dateRange (the built-in date range\'s reserved name)').meta({ title: 'Name' }),
 
