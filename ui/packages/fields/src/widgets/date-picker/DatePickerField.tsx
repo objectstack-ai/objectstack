@@ -9,6 +9,7 @@
 import React from 'react';
 import { CalendarDays, X } from 'lucide-react';
 import { Button, Calendar, Input, Popover, PopoverContent, PopoverTrigger, cn } from '@object-ui/components';
+import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from '../touchTarget.js';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { FieldWidgetComponentProps } from '../types.js';
 import { toDomProps } from '../toDomProps.js';
@@ -189,7 +190,9 @@ function TemporalPicker({
           type="text"
           inputMode="numeric"
           autoComplete="off"
-          className={cn('pr-16', domProps.className)}
+          // Below `sm` the two buttons inside grow to the touch floor, so the
+          // text stops short of both (2 x 44 px plus the gap).
+          className={cn(PHONE_TOUCH_HEIGHT, 'pr-24 sm:pr-16', domProps.className)}
           placeholder={pattern}
           value={text}
           onChange={(e) => setText(e.target.value)}
@@ -216,7 +219,7 @@ function TemporalPicker({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className={cn('h-7 w-7', PHONE_TOUCH_SQUARE)}
               aria-label={t('fields.datePicker.clear')}
               data-testid="date-picker-clear"
               onClick={() => write('')}
@@ -230,7 +233,7 @@ function TemporalPicker({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7"
+                className={cn('h-7 w-7', PHONE_TOUCH_SQUARE)}
                 disabled={disabled}
                 aria-label={t('fields.datePicker.openCalendar')}
                 data-testid="date-picker-trigger"
@@ -240,12 +243,20 @@ function TemporalPicker({
             </PopoverTrigger>
             <PopoverContent className="w-auto p-0" align="end">
               {/* Opens on the value's month, and on today's with no value. */}
-              <Calendar mode="single" defaultMonth={selected} selected={selected} onSelect={pickDay} autoFocus />
+              {/* Below `sm` each day and month arrow is a 44 px cell: seven fit a 375 px screen. */}
+              <Calendar
+                mode="single"
+                defaultMonth={selected}
+                selected={selected}
+                onSelect={pickDay}
+                autoFocus
+                className="[--cell-size:2.75rem] sm:[--cell-size:2rem]"
+              />
               <div className="flex items-center gap-2 border-t p-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => shortcut(0)}>
+                <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(0)}>
                   {t('fields.datePicker.today')}
                 </Button>
-                <Button type="button" variant="outline" size="sm" onClick={() => shortcut(1)}>
+                <Button type="button" variant="outline" size="sm" className={PHONE_TOUCH_HEIGHT} onClick={() => shortcut(1)}>
                   {t('fields.datePicker.tomorrow')}
                 </Button>
               </div>
