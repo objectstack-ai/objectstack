@@ -325,14 +325,14 @@ test('all assets load without 404', async ({ page }) => {
 
 ### A fetch double for API mocking
 
-Fake the wire, not the client: pass a `vi.fn` as the adapter's `fetch` (as in `packages/data-objectstack/src/aggregate-rows-post-unwrap-7028.test.ts`).
+Fake the wire, not the client, as `packages/data-objectstack/src/aggregate-rows-post-unwrap-7028.test.ts` does:
 
 ```typescript
-const fetch = vi.fn(async (url: unknown) => Response.json({
+const fetchImpl = vi.fn(async (url: unknown) => Response.json({
   success: true,
   data: String(url).includes('/discovery') ? { routes: {} } : { records: [{ id: '1' }], total: 1 },
 }));
-const adapter = new ObjectStackAdapter({ baseUrl: '', fetch });
+const adapter = new ObjectStackAdapter({ baseUrl: '', fetch: fetchImpl });
 ```
 
 ### Vitest mocks for unit tests
