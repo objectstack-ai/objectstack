@@ -658,14 +658,16 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
    * decision UI which picker to render and whether to collect one value or many.
    * The runtime treats `key` as the whitelist entry either way, and it ENFORCES
    * `type` and `multiple` at the decision (ADR-0104 as amended 2026-10-30;
-   * #28658 ruling A): a picker output is judged by record id (`user`,
-   * `department`, `team`) or by machine name (`position`), through the lookup
-   * the `expression` approver with the matching `resolveAs` expands it with.
-   * `multiple: true` takes a list, with no entry twice; `multiple` absent or
-   * false takes one value. A decision whose output does not match is refused
-   * with `400 VALIDATION_FAILED` naming `outputs.<key>`, before any write — no
-   * decision is recorded and the request stays pending. `text` (the default,
-   * and every bare-string entry) is free text and is not judged.
+   * #28658 ruling A). `multiple: true` takes a list, with no entry twice;
+   * `multiple` absent or false takes one value — for every type, `text`
+   * included. A picker output's values are also resolved, through the lookup
+   * the `expression` approver with the matching `resolveAs` expands them with:
+   * `user`, `department` and `team` by record id, `position` by the machine
+   * name of a position someone in the request's organization holds (a name
+   * nobody holds is refused). A `text` output is judged by shape only. A
+   * decision whose output does not match is refused with
+   * `400 VALIDATION_FAILED` naming `outputs.<key>`, before any write — no
+   * decision is recorded and the request stays pending.
    */
   {
     surface: 'this decision-output declaration',
@@ -1216,12 +1218,12 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * `department` / `team` → a record picker committing ids, `position` → the
    * position registry, committing machine names. `multiple: true` collects an
    * ARRAY of them (the natural fan-out shape for an `expression` approver
-   * downstream). The runtime enforces the declaration at the decision: a
-   * picker value must name a record id (`user` / `department` / `team`) or a
-   * position machine name (`position`), `multiple: true` takes a list with no
-   * entry twice and an absent or false `multiple` takes one value, and a
-   * mismatch is refused with `400 VALIDATION_FAILED` naming `outputs.<key>`
-   * before any write. Only `text` outputs reach the flow as whatever arrived.
+   * downstream). The runtime enforces the declaration at the decision:
+   * `multiple: true` takes a list with no entry twice and an absent or false
+   * `multiple` takes one value, for every type; a picker value must also name
+   * a record id (`user` / `department` / `team`) or the machine name of a
+   * position someone holds (`position`). A mismatch is refused with
+   * `400 VALIDATION_FAILED` naming `outputs.<key>` before any write.
    */
   decisionOutputs: z.array(z.union([
     z.string(),
