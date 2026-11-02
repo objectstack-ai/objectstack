@@ -9,10 +9,12 @@
  * here off `defaultPermissionSets`, never retyped.
  *
  * Four pins:
- *   1. The declarers are exactly the 23 objects the ruling names: every object
- *      `@objectstack/platform-objects` and `@objectstack/plugin-audit` register
- *      that declares a default is on the list, every listed object declares
- *      one, and the platform-global objects declare none (item 5).
+ *   1. The declarers are exactly the 23 objects the ruling names, plus the
+ *      objects added since that declare their scope from birth
+ *      (`DECLARED_AT_BIRTH`): every object `@objectstack/platform-objects` and
+ *      `@objectstack/plugin-audit` register that declares a default is on one
+ *      of the two lists, every listed object declares one, and the
+ *      platform-global objects declare none (item 5).
  *   2. Each declaration is the shipped literal with `object` dropped: same
  *      name, operation and predicate as the baseline set's policy for the
  *      object, and every shipped set that carries a policy for it carries the
@@ -112,6 +114,18 @@ const DROPPED_COPIES: Record<string, { name: string; operation: string; using: s
 /** The declarers whose literal the shipped sets still carry. */
 const KEPT_IN_SETS = DECLARERS.filter((n) => !(n in DROPPED_COPIES));
 
+/**
+ * Objects added AFTER the ruling that declare their scope from birth: the
+ * declaration is their only row scope, so no shipped set ever carried a copy
+ * and there is no undeclared "before" tree to compare against. Outside the
+ * ruling's 23 (and outside the byte-for-byte baseline below) on purpose.
+ *  - `sys_personal_view`: a reader's own named list views, on the
+ *    `sys_user_preference` template (ruling 6570568131 on #28971, letter C).
+ */
+const DECLARED_AT_BIRTH: Record<string, { name: string; operation: string; using: string }> = {
+  sys_personal_view: { name: 'sys_personal_view_self', operation: 'all', using: 'user_id == current_user.id' },
+};
+
 /** Ruling E′ item 5: the platform-global objects declare no default. */
 const PLATFORM_GLOBAL = /^(sys_metadata|sys_job|sys_migration)|^(sys_platform_setting|sys_presence|sys_flow_dispatch)$/;
 
@@ -159,7 +173,7 @@ describe('the platform identity objects declare their default row scope (ruling 
     const objects = await registeredObjects();
     const declaring = [...objects.values()].filter((o) => o.defaultRowScope !== undefined).map((o) => o.name);
 
-    expect([...declaring].sort()).toEqual([...DECLARERS].sort());
+    expect([...declaring].sort()).toEqual([...DECLARERS, ...Object.keys(DECLARED_AT_BIRTH)].sort());
     expect(DECLARERS).toHaveLength(23);
 
     const platformGlobal = [...objects.keys()].filter((n) => PLATFORM_GLOBAL.test(n));
@@ -197,6 +211,16 @@ describe('the platform identity objects declare their default row scope (ruling 
     async (object) => {
       const declared = (await registeredObjects()).get(object)!.defaultRowScope!;
       expect(asLiteral(object, declared)).toEqual({ ...DROPPED_COPIES[object], object, enabled: true });
+      expect('object' in declared).toBe(false);
+      for (const set of defaultPermissionSets) expect(policiesFor(set.name, object), set.name).toEqual([]);
+    },
+  );
+
+  it.each(Object.keys(DECLARED_AT_BIRTH))(
+    '%s declares its scope from birth, and no shipped set carries a copy of it',
+    async (object) => {
+      const declared = (await registeredObjects()).get(object)!.defaultRowScope!;
+      expect(asLiteral(object, declared)).toEqual({ ...DECLARED_AT_BIRTH[object], object, enabled: true });
       expect('object' in declared).toBe(false);
       for (const set of defaultPermissionSets) expect(policiesFor(set.name, object), set.name).toEqual([]);
     },

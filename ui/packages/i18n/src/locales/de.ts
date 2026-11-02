@@ -1135,7 +1135,6 @@ const de = {
     undo: "Rückgängig",
     redo: "Wiederholen",
     canvasMinimap: "Minikarte der Arbeitsfläche",
-    versionHistory: "Versionsverlauf",
   },
   detail: {
     editInlineHint: "Zum Bearbeiten doppelklicken",

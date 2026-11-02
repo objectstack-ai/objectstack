@@ -21,7 +21,10 @@ import type { Connector } from '@objectstack/spec/integration';
  * **Credentials live with the MCP server, not in `ConnectorSchema`** (ADR-0024
  * §3). The operator supplies `env` (stdio) / `headers` (http) which we pass
  * straight to the transport; they are never copied into the serialized `def`
- * (which is exposed via discovery) and must never be logged.
+ * (which is exposed via discovery) and must never be logged. A declarative
+ * instance's resolved `auth` reaches them through the `mcp` provider factory:
+ * as a header over http, and over stdio in the variable its
+ * `transport.credentialEnv` names.
  *
  * **Trust:** launching a stdio server runs a local process. Sandboxed,
  * multi-tenant execution and managed secrets are the enterprise tier (ADR-0024
