@@ -219,4 +219,29 @@ describe('a pending approver decides through the action door — the forward aut
     expect(await approveRows(requestId)).toEqual([]);
     expect(pendingOf(await requestRow(requestId))).toEqual([FIRST, SECOND]);
   });
+
+  it('Approve with no record id, or an empty one, is refused 400 naming `recordId` — never forwarded to a path with a hole in it', async () => {
+    const requestId = await openRequest('INV-3');
+
+    for (const body of [{ params: {} }, { recordId: '', params: {} }]) {
+      const answer = await call(first, 'POST', '/actions/sys_approval_request/approval_approve', body);
+
+      // The route's 404 ENDPOINT_NOT_FOUND would say the endpoint does not exist.
+      expect(answer.status, answer.text).toBe(400);
+      expect(answer.json?.error?.code, answer.text).toBe('VALIDATION_ERROR');
+      expect(answer.json?.error?.message, answer.text).toContain('`recordId`');
+    }
+    // Nothing reached the decision route.
+    expect(await approveRows(requestId)).toEqual([]);
+    expect(pendingOf(await requestRow(requestId))).toEqual([FIRST, SECOND]);
+  });
+
+  it('the control: an id that names no request is still forwarded, and the decision route\'s 404 REQUEST_NOT_FOUND is the answer', async () => {
+    const answer = await call(first, 'POST', '/actions/sys_approval_request/approval_approve', {
+      recordId: 'areq_does_not_exist', params: {},
+    });
+
+    expect(answer.status, answer.text).toBe(404);
+    expect(answer.json?.error?.code, answer.text).toBe('REQUEST_NOT_FOUND');
+  });
 });
