@@ -63,6 +63,8 @@ const session: MePermissionsResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
+  // No queue: the "In a queue" toggle stays off the toolbar.
+  hasAnyQueue: false,
   positions: [],
   permissionSets: ['member_default'],
   objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
