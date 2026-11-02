@@ -40,8 +40,9 @@ export interface LoginFormLabels {
   /**
    * Divider label between the social provider buttons and the email/password
    * form (defaults to "or continue with email"). Rendered only when the server
-   * reports at least one social provider, and only while that form is shown:
-   * under SSO-only mode it appears once "Use a password instead" reveals it.
+   * reports at least one social provider, and only while an email field is
+   * shown: under SSO-only mode, the SSO email field (when the server also
+   * advertises SSO) or the form "Use a password instead" reveals.
    */
   orText?: string;
   /**
@@ -458,6 +459,11 @@ export function LoginForm({
   // its own enforcement declaration, or the SSO button. Never while the
   // server answers `features.sso: false` with no enforcement.
   const ssoOnlyCopy = ssoOnlyView && !noSignInMethod && (ssoEnforced || ssoEnabled);
+  // Under declared enforcement the SSO button IS the way in, so the SSO-only
+  // view draws it on first paint with the email field it routes, and no
+  // password field. It used to live only inside the password form, reachable
+  // solely through the break-glass link.
+  const ssoEmailFormVisible = ssoOnlyView && ssoEnforced && ssoEnabled;
 
   return (
     // `sm:max-w-[400px]`, not a fixed `sm:w-[400px]`: identical wherever the
@@ -517,7 +523,7 @@ export function LoginForm({
         <SocialSignInButtons
           mode="sign-in"
           dividerText={labels.orText}
-          hideDivider={!passwordFormVisible}
+          hideDivider={!passwordFormVisible && !ssoEmailFormVisible}
           buttonText={labels.socialButton}
           onProvidersResolved={(hasProviders) => setHasSocialProviders(hasProviders)}
         />
@@ -718,6 +724,43 @@ export function LoginForm({
              link to the password form for the env owner / local admin. */
           <div className="space-y-4">
             {error && <AuthErrorBanner message={error} />}
+            {ssoEmailFormVisible && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleSso();
+                }}
+                className="space-y-4"
+                data-testid="login-sso-email-form"
+              >
+                <div className="space-y-2">
+                  <label htmlFor="login-sso-email" className={AUTH_FIELD_LABEL_CLASS}>
+                    {l.emailLabel}
+                  </label>
+                  <input
+                    id="login-sso-email"
+                    type="email"
+                    inputMode="email"
+                    placeholder={l.emailPlaceholder}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="username"
+                    disabled={ssoSubmitting}
+                    className={AUTH_INPUT_CLASS}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={ssoSubmitting}
+                  aria-busy={ssoSubmitting}
+                  className={AUTH_PRIMARY_BUTTON_CLASS}
+                >
+                  {ssoSubmitting && <AuthSpinner />}
+                  {l.ssoButton}
+                </button>
+              </form>
+            )}
             {breakGlassOffered && (
               <button
                 type="button"
