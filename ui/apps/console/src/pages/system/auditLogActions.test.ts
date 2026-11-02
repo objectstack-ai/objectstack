@@ -27,7 +27,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as auditLogActions from './auditLogActions';
-import { actionBadgeVariant, actionFilterOptionsOf } from './auditLogActions';
+import { actionBadgeVariant, actionFilterOptionsOf, actionLabelOf } from './auditLogActions';
 
 /**
  * `sys_audit_log.action` as objectstack's `sys-audit-log.object.ts` declares it
@@ -139,5 +139,36 @@ describe('actionBadgeVariant (objectui#13175)', () => {
     expect(actionBadgeVariant(null)).toBe('outline');
     expect(actionBadgeVariant('')).toBe('outline');
     expect(actionBadgeVariant('constructor')).toBe('outline');
+  });
+});
+
+describe('actionLabelOf', () => {
+  const options = actionFilterOptionsOf(
+    auditObject([
+      { label: '更新', value: 'update' },
+      { label: '创建', value: 'create' },
+      { label: '  ', value: 'account_locked' },
+    ]),
+  );
+
+  it('labels a declared action with its declared option label', () => {
+    expect(actionLabelOf(options, 'update')).toBe('更新');
+    expect(actionLabelOf(options, 'create')).toBe('创建');
+  });
+
+  it('labels an action whose declared label is blank with its value, as the filter does', () => {
+    expect(actionLabelOf(options, 'account_locked')).toBe('account_locked');
+  });
+
+  it('falls back to the stored value for an action no option declares', () => {
+    expect(actionLabelOf(options, 'nightly_purge')).toBe('nightly_purge');
+    expect(actionLabelOf([], 'update')).toBe('update');
+    expect(actionLabelOf(options, 'constructor')).toBe('constructor');
+  });
+
+  it('answers undefined for a missing or empty action, so the page shows its dash', () => {
+    expect(actionLabelOf(options, undefined)).toBeUndefined();
+    expect(actionLabelOf(options, null)).toBeUndefined();
+    expect(actionLabelOf(options, '')).toBeUndefined();
   });
 });
