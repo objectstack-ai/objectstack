@@ -13,14 +13,20 @@ import type { SemanticMigration } from '../../types.js';
 export const entry: SemanticMigration = {
   id: 'packageless-overlay-write-closed',
   surface:
-    'a metadata write that names no package (PUT, DELETE, publish or rollback under '
-    + '/api/v1/meta/<type>/<name> with no ?package=, and the metadata item page, in Studio\'s All '
-    + 'metadata area where Setup\'s metadata URLs now land, when its URL holds no ?package=) onto a '
-    + 'view, dashboard, report, translation or email template that one installed read-only package '
-    + 'ships, where `os migrate packageless-overlays` would move the row into that package\'s '
-    + 'paired `<base>.custom` as a declared override (a row it moves as the pair\'s own member, an '
-    + 'email template locale the base does not ship, keeps the write); and the package-less '
-    + 'sys_metadata rows Setup\'s form stored that way',
+    'a metadata write onto a view, dashboard, report, translation or email template that an '
+    + 'installed read-only package ships, at either of the two addresses that bypassed that '
+    + 'package\'s paired `<base>.custom`: (1) naming no package (PUT, DELETE, publish or rollback '
+    + 'under /api/v1/meta/<type>/<name> with no ?package=, and the metadata item page, in Studio\'s '
+    + 'All metadata area where Setup\'s metadata URLs now land, when its URL holds no ?package=), '
+    + 'where one installed read-only package ships the item and `os migrate packageless-overlays` '
+    + 'would move the row into the pair as a declared override (a row it moves as the pair\'s own '
+    + 'member, an email template locale the base does not ship, keeps the write); (2) naming the '
+    + 'read-only package itself (a save in draft or publish mode or a per-item publish under '
+    + '/api/v1/meta/<type>/<name>?package=<base>, POST /api/v1/packages/<base>/publish-drafts '
+    + 'holding such a draft, and a rollback of a row bound to the package), where the pair can be '
+    + 'ensured, the base records a version and the override write gate admits the declared body '
+    + 'into the pair (a delete naming the package keeps the write); and the sys_metadata rows '
+    + 'those writes stored, package-less or bound to the read-only package itself',
   replacement:
     'after upgrading, run `os migrate packageless-overlays` (preview) on each deployment with '
     + 'Setup customizations, with the flags and environment the deployment boots with (`--preset` '
@@ -51,16 +57,24 @@ export const entry: SemanticMigration = {
   reason:
     'A customization of an installed package lives in its paired `.custom` package, where it is '
     + 'a declared override that is exported with the pair and judged against the base\'s version '
-    + '(ADR-0146 D1, D2, D11). The package-less write made a row of no package instead, which no '
-    + 'export carries. Rows already stored that way are still served unchanged, so nothing breaks '
-    + 'at the upgrade. Between the upgrade and `--apply`, every customization is served, and the '
+    + '(ADR-0146 D1, D2, D11). Two writes bypassed the pair: the package-less write made a row of '
+    + 'no package, which no export carries, and the write naming the read-only package itself made '
+    + 'a row bound to that package, declaring nothing, served in place of the package\'s own '
+    + 'document. Rows already stored either way are still served unchanged, so nothing breaks at '
+    + 'the upgrade. Between the upgrade and `--apply`, every customization is served, and the '
     + 'package-less save, publish, delete or rollback of a movable one the command moves as a '
     + 'declared override is refused 403 NOT_OVERRIDABLE naming the pair and this command; an '
     + 'email template locale the base does not ship, which the command moves as the pair\'s own '
     + 'member, keeps its package-less write. The close reaches only what the command moves as a '
     + 'declared override (its own classification and its own move steps), so no customization is '
-    + 'left without a write door. No conversion applies: the rows are stored data, not authored '
-    + 'source, and the move goes through the save door. ADR-0146, ADR-0087.',
+    + 'left without a write door. The save, publish or rollback naming the read-only package '
+    + 'itself is refused 403 NOT_OVERRIDABLE naming the pair and the `overrides` declaration '
+    + 'wherever the pair can take the declared override (it can be ensured, the base records a '
+    + 'version and the override write gate admits the declared body); a delete naming the package '
+    + 'stays open, as the way to remove such a row, and so does every write the pair could not '
+    + 'take, an email template locale the base does not ship among them. No conversion applies: '
+    + 'the rows are stored data, not authored source, and the move goes through the save door. '
+    + 'ADR-0146, ADR-0087.',
   acceptanceCriteria:
     'On the deployment\'s database and configuration, with its boot flags and environment, the '
     + 'preview of `os migrate packageless-overlays` lists no movable row. Each customization is then '
