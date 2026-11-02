@@ -34,6 +34,8 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act } from '@testing-library/react';
 import type { ReactNode } from 'react';
+// Paid at collection, not inside the mock factory's clocked first call.
+import '@object-ui/react';
 
 interface AuthState {
   session: { activeOrganizationId?: string | null } | null;
