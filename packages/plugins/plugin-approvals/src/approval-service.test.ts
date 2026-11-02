@@ -1003,6 +1003,35 @@ describe('ApprovalService (node era)', () => {
       expectNothingRecorded();
     });
 
+    it("the Console's decide body passes: a tags list for a list output, one string (comma and all) otherwise", async () => {
+      // The shape `decisionOutputParams` + `TagsField` send from both decision
+      // surfaces (ui/packages/app-shell): a `multiple: true` free-value output
+      // as a trimmed, distinct string list, a single-value one as one string
+      // whose comma is literal, a picker list as record ids.
+      const defs = [
+        NEXT_REVIEWERS,
+        { key: 'labels', type: 'text', multiple: true },
+        { key: 'watchers', multiple: true },
+        'note',
+      ];
+      const outputs = {
+        next_reviewers: ['u2', 'u3'],
+        labels: ['alpha', 'beta', 'gamma'],
+        watchers: ['ops'],
+        note: 'a, b',
+      };
+      const req: any = await svc.openNodeRequest(typedInput(defs), CTX);
+      const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', outputs }, SYS);
+      expect(out.finalized).toBe(true);
+      expect(out.outputs).toEqual(outputs);
+    });
+
+    it('the comma string the Console used to send for a list output is refused', async () => {
+      const msg = await refusal([{ key: 'labels', type: 'text', multiple: true }], { labels: 'alpha, beta' });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.labels` takes a list of values/);
+      expectNothingRecorded();
+    });
+
     it('a blank optional picker output is left to `required`, not judged', async () => {
       const req: any = await svc.openNodeRequest(typedInput([{ key: 'co_signer', type: 'user', multiple: true }]), CTX);
       const out = await svc.decideNode(req.id, {
