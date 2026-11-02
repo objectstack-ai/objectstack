@@ -1076,6 +1076,8 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'list.noMatches': 'No matching records',
   'list.noMatchesMessage': 'No records match your current filters or search. Try adjusting or clearing them.',
   'list.clearSearch': 'Clear search',
+  // objectstack#28908 — the empty state's way out of a filter the reader applied.
+  'list.clearFilters': 'Clear filters',
   // Emptied by the VIEW's own declared filter, with no user filter or search
   // applied (objectui#11687): the "your filters" wording above would name
   // filters the user never set.
@@ -3893,6 +3895,21 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     onSearchChange?.(value);
   }, [onSearchChange]);
 
+  // objectstack#28908 — the empty state's "Clear filters": removes the
+  // reader's whole query (the panel's conditions, the "In a queue" toggle and
+  // the search) and leaves the view's declared filter alone, which is not the
+  // reader's. The panel's group goes through the same emit as a panel edit, so
+  // the toolbar badge clears and the host stores the empty group. User-filter
+  // chips are not reset here: `UserFilters` holds its own selection and each
+  // chip clears in place.
+  const handleClearReaderQuery = React.useCallback(() => {
+    const cleared: FilterBuilderRowGroup = { ...currentFilters, conditions: [] };
+    setCurrentFilters(cleared);
+    onFilterChange?.(cleared);
+    setSittingInQueueOnly(false);
+    if (searchInput) handleSearchChange('');
+  }, [currentFilters, onFilterChange, searchInput, handleSearchChange]);
+
   // objectstack#27520 row 17 — see `toolbarFlags.emptyStateAddRecord`.
   // A view that declares the inline block keeps its empty-state Create as
   // before; a host-supplied create path now offers it too.
@@ -6670,6 +6687,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             // navigation, so a user can come back to a list their own search
             // emptied: the empty state offers the way out.
             onClearSearch={searchTerm && searchTerm.trim() ? () => handleSearchChange('') : undefined}
+            // objectstack#28908 — a filter the reader applied (the panel's
+            // finished conditions, the queue toggle) is part of the empty
+            // query: the one clear action removes it, the search with it.
+            onClearFilters={
+              appliedQueueSittingConditions.length > 0 ||
+              (Array.isArray(appliedFilters?.conditions) && appliedFilterGroup(appliedFilters).conditions.length > 0)
+                ? handleClearReaderQuery
+                : undefined
+            }
             t={t}
             displayLocale={displayLocale}
           />

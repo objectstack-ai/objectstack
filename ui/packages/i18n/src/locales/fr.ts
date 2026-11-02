@@ -785,6 +785,7 @@ const fr = {
     noMatches: "Aucun enregistrement correspondant",
     noMatchesMessage: "Aucun enregistrement ne correspond à vos filtres ou à votre recherche. Essayez de les ajuster ou de les effacer.",
     clearSearch: "Effacer la recherche",
+    clearFilters: "Effacer les filtres",
     viewFilterNoMatchesMessage: "Aucun enregistrement ne correspond au filtre de cette vue.",
     ownedNoneTitle: "Rien à vous pour l'instant",
     ownedNoneMessage: "Cette vue ne liste que vos propres enregistrements, et vous n'en avez encore aucun.",

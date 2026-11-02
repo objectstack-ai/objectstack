@@ -764,6 +764,7 @@ const ko = {
     noMatches: "일치하는 레코드가 없습니다",
     noMatchesMessage: "현재 필터나 검색어와 일치하는 레코드가 없습니다. 조건을 조정하거나 지워 보세요.",
     clearSearch: "검색 지우기",
+    clearFilters: "필터 지우기",
     viewFilterNoMatchesMessage: "이 뷰의 필터와 일치하는 레코드가 없습니다.",
     ownedNoneTitle: "아직 내 레코드가 없습니다",
     ownedNoneMessage: "이 뷰에는 내 레코드만 표시되며, 아직 하나도 없습니다.",

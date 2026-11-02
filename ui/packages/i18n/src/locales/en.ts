@@ -1069,6 +1069,7 @@ const en = {
     noMatches: 'No matching records',
     noMatchesMessage: 'No records match your current filters or search. Try adjusting or clearing them.',
     clearSearch: 'Clear search',
+    clearFilters: 'Clear filters',
     viewFilterNoMatchesMessage: 'No records match this view’s filter.',
     ownedNoneTitle: 'Nothing of yours yet',
     ownedNoneMessage: 'This view lists only records that are yours, and you don’t have any yet.',
