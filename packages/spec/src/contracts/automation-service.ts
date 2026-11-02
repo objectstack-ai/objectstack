@@ -1157,6 +1157,19 @@ export interface ConnectorConnectionState {
     /** When it was last connected, and by whom. */
     connectedAt?: string;
     connectedBy?: string;
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the OAuth client the
+     * administrator entered on this connection, for an instance that declares
+     * `clientSource: 'installer'`: its id, and whether a client secret is kept
+     * with it. ⛔ Never the secret itself, which stays encrypted in the
+     * connection record. Absent for an instance whose client is declared or
+     * registered dynamically.
+     */
+    client?: {
+        source: 'installer';
+        clientId: string;
+        hasSecret: boolean;
+    };
 }
 
 /** What {@link IAutomationService.getConnectorConnection} and its revoke / begin siblings are asked about. */
@@ -1165,6 +1178,20 @@ export interface ConnectorConnectionRequest {
     connector: string;
     /** The caller — its organization selects the connection, its user stamps the row. */
     context?: ExecutionContext;
+    /**
+     * ADR-0143 D2.1 (2026-11-02 amendment) — the OAuth client the
+     * administrator registered with the vendor against this deployment's
+     * redirect URI, for an instance that declares `clientSource: 'installer'`.
+     * Read by {@link IAutomationService.beginConnectorConnection} only, which
+     * requires it for such an instance and refuses it for any other (`400
+     * VALIDATION_ERROR`); the read and revoke members refuse it. The secret,
+     * when the vendor issued one, is kept encrypted in the connection record
+     * and never answered back.
+     */
+    client?: {
+        clientId: string;
+        clientSecret?: string;
+    };
 }
 
 /** What {@link IAutomationService.beginConnectorConnection} answers: where to send the administrator's browser. */
@@ -1511,7 +1538,9 @@ export interface IAutomationService {
      * URL to send the browser to. Nothing is stored in the connection record
      * until the callback completes. Rejects as {@link getConnectorConnection}
      * does, plus `503 SERVICE_UNAVAILABLE` when the deployment has no fixed
-     * origin for the redirect URI.
+     * origin for the redirect URI, and `400 VALIDATION_ERROR` for an instance
+     * declaring `clientSource: 'installer'` begun without `client`, or any
+     * other instance begun with one (ADR-0143 D2.1, 2026-11-02 amendment).
      */
     beginConnectorConnection?(request: ConnectorConnectionRequest): Promise<ConnectorConnectionBegin>;
 
