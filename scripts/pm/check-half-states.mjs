@@ -17547,10 +17547,11 @@ export function h66ReleasedNonDispatchableRemainder(issue, commentRows) {
 // ⛔ It models the full 取卡全序 only in part, and says so rather than implying
 // otherwise: `target:` board membership is a board read this file does not
 // make, and the same-priority 「先 `Bug`」 tiebreak is not taken. The author leg
-// IS taken: within one rank a card opened by a human account sorts before one
-// an App (`user.type` `Bot`, every `[bot]` login) opened, and ⛔ it never lifts a
-// card out of its rank. An unreadable author reads as the fleet's, ⛔ never
-// promoted. An unreadable `created_at` sorts LAST rather than first (#4690's
+// IS taken: within one rank a non-fleet card sorts before a fleet card, and ⛔
+// it never lifts a card out of its rank. A card is the fleet's when an App
+// opened it (`user.type` `Bot`, every `[bot]` login) OR its body opens with a
+// seat signature (`readSignatureLine`), since seat-operated human accounts file
+// cards too. An unreadable author reads as the fleet's, ⛔ never promoted. An unreadable `created_at` sorts LAST rather than first (#4690's
 // direction on every timestamp here), with `number` as a total-order tiebreak
 // so two runs over one board agree.
 // ---------------------------------------------------------------------------
@@ -17661,7 +17662,7 @@ export function h67SpeaksAbout(issue) {
 /**
  * Which candidates this run buys a page for, and which it defers — OLDEST
  * FIRST, by the legs of 取卡全序 this file can read for free: rank, then a
- * human author before an App author, then age.
+ * non-fleet card before a fleet one (App author or seat-signed body), then age.
  *
  * ⛔ The opposite of `h66BuyOrder`, deliberately, and the header carries the
  * argument: H66 chases a fresh write, this one chases the card a dispatching
@@ -17684,8 +17685,10 @@ export function h67ReadOrder(issues, cap = H67_TIMELINE_READ_CAP) {
     const at = H67_SELECTION_ORDER_LABELS.findIndex((l) => labels.includes(l));
     return at === -1 ? H67_SELECTION_ORDER_LABELS.length : at;
   };
-  // A human account before the fleet, inside one rank only; unread reads as fleet.
+  // Non-fleet before fleet, inside one rank only; a seat-signed body or an
+  // unreadable author reads as the fleet's.
   const fleet = (issue) => {
+    if (readSignatureLine(issue?.body) !== null) return 1;
     const author = artefactAuthor(issue);
     return author && !author.isApp ? 0 : 1;
   };
@@ -25249,7 +25252,7 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // being asserted would still print rows, and every one of them would read as
   // 「close this」, which is the one thing the card forbids. Pinned AT the count
   // since the read order took the author leg, so the same-priority pair cannot go.
-  'H67 queued merged-delivery reading': 156,
+  'H67 queued merged-delivery reading': 158,
   // Registered with the decorated ownership-marker reading (#18680); the pin
   // sits just under the count on its neighbours' grounds. What this battery
   // floors is a WIDENING of the two markers' READING, so the FIRING CONTROLS
@@ -36135,6 +36138,9 @@ Doubles as the fire's **write self-check** (step 0). \`201\` is not the reading.
   b(BATTERY67, '⭐ H67 order: within ONE priority a human-opened card is reached before an OLDER fleet-opened one', order67(PAIR67, 2), '22,21');
   b(BATTERY67, 'H67 order: …and the author leg is the ONLY reason — two fleet cards of that priority stay oldest-first', order67([PAIR67[0], { ...PAIR67[1], user: fleet67 }], 2), '21,22');
   b(BATTERY67, '⛔ H67 order: the author leg never lifts a card OUT of its priority, and never past p0', order67([{ ...PAIR67[1], labels: [{ name: 'priority:p3' }] }, PAIR67[0], { ...PAIR67[0], number: 23, labels: [{ name: 'priority:p0' }] }], 3), '23,21,22');
+  const SIGNED67 = 'domain:skills#1 · huangyiirene · session_01J8VVAnMUWA9rufXzFaEh4J\n\nFiling gate ③ …';
+  b(BATTERY67, '⭐ H67 order: a HUMAN account whose body opens with a seat signature is the fleet\'s — it stays behind the older fleet card', order67([{ ...PAIR67[1], body: SIGNED67 }, PAIR67[0]], 2), '21,22');
+  b(BATTERY67, 'H67 order: …while the same human card with the signature off its first line is still reached first', order67([{ ...PAIR67[1], body: `A user report.\n\n${SIGNED67}` }, PAIR67[0]], 2), '22,21');
   b(BATTERY67, 'H67 order: every App author is the fleet\'s (`github-actions[bot]` too), and an unreadable author ⛔ is never promoted', order67([{ ...PAIR67[1], user: { login: 'github-actions[bot]', type: 'Bot' } }, { ...PAIR67[1], number: 24, user: undefined }, PAIR67[0]], 3), '21,22,24');
   b(BATTERY67, 'H67 order: `pm:blocking` ranks above p1, as the selection order does', order67([{ number: 8, created_at: '2026-09-10T00:00:00Z', labels: [{ name: 'priority:p1' }] }, { number: 9, created_at: '2026-09-11T00:00:00Z', labels: [{ name: 'pm:blocking' }] }], 2), '9,8');
   b(BATTERY67, 'H67 order: ⭐ it is the OPPOSITE of H66\'s, and that is the point', order67(CAND67.filter((i) => i.number !== 3 && i.number !== 4), 2) === h66BuyOrder(CAND67.filter((i) => i.number !== 3 && i.number !== 4).map((i) => ({ ...i, updated_at: i.created_at })), 2).buy.map((i) => i.number).join(','), false);
