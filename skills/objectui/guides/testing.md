@@ -323,24 +323,16 @@ test('all assets load without 404', async ({ page }) => {
 
 ## Mocking strategies
 
-### MSW for API mocking in integration tests
+### A fetch double for API mocking
+
+Fake the wire, not the client: pass a `vi.fn` as the adapter's `fetch` (as in `packages/data-objectstack/src/aggregate-rows-post-unwrap-7028.test.ts`).
 
 ```typescript
-import { http, HttpResponse } from 'msw';
-import { setupServer } from 'msw/node';
-
-const server = setupServer(
-  http.get('/api/v1/contacts', () => {
-    return HttpResponse.json({
-      records: [{ id: 1, name: 'Alice' }],
-      total: 1,
-    });
-  }),
-);
-
-beforeAll(() => server.listen());
-afterEach(() => server.resetHandlers());
-afterAll(() => server.close());
+const fetch = vi.fn(async (url: unknown) => Response.json({
+  success: true,
+  data: String(url).includes('/discovery') ? { routes: {} } : { records: [{ id: '1' }], total: 1 },
+}));
+const adapter = new ObjectStackAdapter({ baseUrl: '', fetch });
 ```
 
 ### Vitest mocks for unit tests
