@@ -152,6 +152,69 @@ describe('ADR-0143 D2.1 — `oauth2` instance auth', () => {
   });
 });
 
+// ADR-0143 D2.1, amended 2026-11-02 (#28702 letter B): the administrator of
+// each deployment registers their own OAuth client with the vendor, against
+// that deployment's callback, and enters it on the instance's connection. The
+// definition says so with `clientSource: 'installer'` and names no client.
+describe("ADR-0143 D2.1 — an `authorization_code` client supplied by the installer (`clientSource: 'installer'`)", () => {
+  const { clientId: _c, credentialRef: _r, ...endpointsOnly } = authorizationCode;
+  const installer = { ...endpointsOnly, clientSource: 'installer' };
+
+  it('CONTROL: accepts the installer form with the endpoints and no client, on a non-MCP provider', () => {
+    const parsed = DeclarativeConnectorEntrySchema.parse(entry(installer));
+    expect(parsed.auth).toEqual(installer);
+  });
+
+  it("CONTROL: accepts the installer form on `provider: 'mcp'` over http, with the endpoints left to discovery", () => {
+    const auth = { type: 'oauth2', grant: 'authorization_code', clientSource: 'installer' };
+    expect(DeclarativeConnectorEntrySchema.parse(entry(auth, mcpHttp)).auth).toEqual(auth);
+  });
+
+  it('keeps a packaged `clientId` accepted without `clientSource` (the declared form, for a private app)', () => {
+    // The existing accept set does not move: the same input parses before and
+    // after the amendment. Refusing it would be a narrowing beside this widening.
+    expect(DeclarativeConnectorEntrySchema.safeParse(entry(authorizationCode)).success).toBe(true);
+  });
+
+  it('refuses a packaged `clientId` beside `clientSource`, located at `auth.clientId`', () => {
+    expect(located(entry({ ...installer, clientId: 'client-123' }))).toEqual(['custom @ auth.clientId']);
+    expect(located(entry({ ...installer, clientId: 'client-123', credentialRef: 'VENDOR_CLIENT_SECRET' }))).toEqual([
+      'custom @ auth.clientId',
+    ]);
+    expect(located(entry({ ...installer, clientId: 'client-123' }, mcpHttp))).toEqual(['custom @ auth.clientId']);
+  });
+
+  it('refuses a client-secret reference with the installer form: the secret is entered on the connection with its client', () => {
+    expect(located(entry({ ...installer, credentialRef: 'VENDOR_CLIENT_SECRET' }))).toEqual(['custom @ auth.credentialRef']);
+  });
+
+  it('still requires the endpoints off MCP-over-http: the installer owns the client, not the authorization server', () => {
+    expect(located(entry({ type: 'oauth2', grant: 'authorization_code', clientSource: 'installer' }))).toEqual([
+      'custom @ auth.tokenUrl',
+      'custom @ auth.authorizationUrl',
+    ]);
+  });
+
+  it('refuses an unknown `clientSource` value at `auth.clientSource`', () => {
+    expect(located(entry({ ...installer, clientSource: 'publisher' }))).toEqual(['invalid_value @ auth.clientSource']);
+  });
+
+  it('refuses `clientSource` on `client_credentials`, which keeps no connection to hold the client', () => {
+    const result = DeclarativeConnectorEntrySchema.safeParse(entry({ ...clientCredentials, clientSource: 'installer' }));
+    expect(result.success).toBe(false);
+    expect(result.error!.issues.map((i) => [i.code, i.path.join('.'), (i as { keys?: string[] }).keys])).toEqual([
+      ['unrecognized_keys', 'auth', ['clientSource']],
+    ]);
+  });
+
+  it('the definition carries no client and no secret: the declared keys are the endpoints, the scopes and the source', () => {
+    const parsed = DeclarativeConnectorEntrySchema.parse(entry(installer));
+    expect(Object.keys(parsed.auth as object).sort()).toEqual(
+      ['authorizationUrl', 'clientSource', 'grant', 'scopes', 'tokenUrl', 'type'],
+    );
+  });
+});
+
 describe('ADR-0143 D2.2 — `app-credential` instance auth', () => {
   it('CONTROL: accepts each vendor with an app id and the app secret as a reference', () => {
     for (const vendor of ['feishu', 'dingtalk', 'wecom']) {

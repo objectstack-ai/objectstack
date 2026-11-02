@@ -278,7 +278,7 @@ describe('the connector redactor — purity and the untouched remainder', () => 
  * until it is confirmed to be a reference or not a secret, and listed.
  */
 const DECLARED_NOT_A_SECRET = [
-  'appId', 'authorizationUrl', 'clientId', 'credentialRef', 'grant', 'headerName', 'keyId',
+  'appId', 'authorizationUrl', 'clientId', 'clientSource', 'credentialRef', 'grant', 'headerName', 'keyId',
   'paramName', 'resource', 'scheme', 'scopes', 'tokenUrl', 'type', 'username', 'vendor',
   'vendorPublicKeyRef',
 ];
