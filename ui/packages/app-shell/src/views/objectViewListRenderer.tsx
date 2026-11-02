@@ -72,6 +72,7 @@ export function useObjectViewListRenderer({
     recordOpen,
     openAsPage,
     phoneTitle,
+    handleListPersonalizationChange,
     urlFilters,
     initialUfSelections,
     handleUserFilterSelectionsChange,
@@ -113,6 +114,8 @@ export function useObjectViewListRenderer({
      * a chart; `null` elsewhere, where the page header draws it.
      */
     phoneTitle: ReactNode;
+    /** objectstack#28950 — what of the list differs from the view, keyed by the list identity. */
+    handleListPersonalizationChange: ReturnType<typeof useObjectViewListUrlState>['handleListPersonalizationChange'];
     urlFilters: ReturnType<typeof useObjectViewUrlFilters>['urlFilters'];
     initialUfSelections: ReturnType<typeof useObjectViewUrlFilters>['initialUfSelections'];
     handleUserFilterSelectionsChange: ReturnType<typeof useObjectViewUrlFilters>['handleUserFilterSelectionsChange'];
@@ -401,7 +404,7 @@ export function useObjectViewListRenderer({
          * popover's) names the parts it put back, and they are CLEARED from
          * this user's stored state rather than stored as the view's values, so
          * a later change to the view reaches them. A view left with nothing is
-         * removed (`patchViewPreference`), and with it the ⋯ "Reset view".
+         * removed (`patchViewPreference`).
          * The sort leaves the URL too, which would otherwise seed it again.
          * A deliberate `sort: []` or `hiddenFields: []` still arrives through
          * `persistListSort` / `persistHiddenFields` and stays stored.
@@ -873,9 +876,16 @@ export function useObjectViewListRenderer({
                 // objectui#12949 — the view's own values under the user's
                 // preference, for the Display control's reset and count, and
                 // (objectstack#28948) the sort popover's reset.
-                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort }}
+                // objectstack#28950 — and the view's own grouping, under a
+                // grouping the URL carries (the `grouping` rung above), so the
+                // list can tell the reader's from the view's.
+                viewDefaults={{ hiddenFields: viewHiddenFields, rowHeight: viewRowHeight, sort: viewSort, grouping: listSchema.grouping }}
                 // objectstack#28948 — those resets clear the user's state.
                 onRestoreViewDefaults={restoreViewDefaults}
+                // objectstack#28950 — what of the list differs from the view,
+                // for the 「Personalized」 marker, which then owns the one reset
+                // (the Display control draws none of its own).
+                onPersonalizationChange={(parts) => handleListPersonalizationChange(identityKey, parts)}
                 className={className}
                 onEdit={editHandler}
                 // objectui#13089 — the view's Add button is the header New:
@@ -963,7 +973,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange]);
 
     return { renderListView };
 }
