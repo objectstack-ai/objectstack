@@ -30,6 +30,7 @@ import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissio
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { ServedTranslationDataSchema, LocaleSchema } from '../system/translation.zod';
 import { PushVendorSchema } from '../system/push-config.zod';
+import { PUSH_DEVICE_PLATFORMS } from '../system/push-device-platform';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -3534,7 +3535,7 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
 // to DEFAULT_NOTIFICATION_ROUTES and flips that table's catalog pin.
 export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   token: z.string().describe('Device push notification token'),
-  platform: z.enum(['ios', 'android', 'web']).describe('Device platform'),
+  platform: z.enum(PUSH_DEVICE_PLATFORMS).describe('Device platform'),
   deviceId: z.string().optional().describe(
     'Client-held device id, stable per app install. Re-registering the same deviceId refreshes that device; '
     + 'absent, the server mints one and answers it, and the client keeps it for later registrations and unregister',
@@ -3542,7 +3543,7 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   name: z.string().optional().describe('Device friendly name'),
   vendor: PushVendorSchema.optional().describe(
     'Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, '
-    + 'android means fcm; web has no core vendor, so a web registration names fcm or is refused',
+    + 'android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused',
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
   locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),

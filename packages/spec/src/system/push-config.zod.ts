@@ -60,6 +60,14 @@ export type PushVendor = z.input<typeof PushVendorSchema>;
  * be written without them (a PEM block, a JSON document) and a reference
  * never needs them.
  */
+// Stricter than the house `credentialRef` (`z.string().min(1)`,
+// shared/connector-auth.zod.ts) on purpose. A bearer token or an API key looks
+// like a name, so a connector's reference cannot tell a pasted secret from a
+// reference and checks only that one is there. The two push secrets can be
+// told apart: a .p8 key is a PEM block and a service-account file is a JSON
+// document, and every name the house writes (an environment-variable name in
+// the open tier) has neither whitespace nor braces. If a secrets layer ever
+// names a secret with either, this widens to the house shape.
 function secretReference(secret: string) {
   return z.string()
     .min(1)

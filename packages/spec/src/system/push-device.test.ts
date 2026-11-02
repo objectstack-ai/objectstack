@@ -7,6 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { UserDeviceSchema } from './push-device.zod';
+import { RegisterDeviceRequestSchema } from '../api/protocol.zod';
 
 const DEVICE = {
   deviceId: 'install-1',
@@ -60,6 +61,11 @@ describe('UserDeviceSchema', () => {
     const parsed = UserDeviceSchema.safeParse({ ...DEVICE, enabled: false, invalidatedAt: 'yesterday' });
     expect(parsed.success).toBe(false);
     expect(parsed.error?.issues[0]?.path).toEqual(['invalidatedAt']);
+  });
+
+  it('names the same platforms its registration does', () => {
+    expect(UserDeviceSchema.shape.platform.options).toEqual(RegisterDeviceRequestSchema.shape.platform.options);
+    expect(UserDeviceSchema.shape.platform.options).toEqual(['ios', 'android', 'web']);
   });
 
   it('has no organization member: a device belongs to its user alone', () => {

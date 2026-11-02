@@ -52,6 +52,14 @@ describe('RegisterDeviceRequestSchema (push device registry)', () => {
     expect('vendor' in parsed).toBe(false);
   });
 
+  // web has no default vendor, and the schema does not tie a vendor to a
+  // platform: a web registration names either one. Refusing a web body WITHOUT
+  // vendor is the route's (the server device-registry slice), not this schema's.
+  it.each(['apns', 'fcm'] as const)('admits a web registration naming vendor %s', (vendor) => {
+    const body = { token: 't', platform: 'web', vendor } as const;
+    expect(RegisterDeviceRequestSchema.parse(body)).toEqual(body);
+  });
+
   it.each(['hms', 'xiaomi', 'web_push', 'APNS', ''])('refuses vendor %j (core delivers through apns / fcm only)', (vendor) => {
     const parsed = RegisterDeviceRequestSchema.safeParse({ token: 't', platform: 'android', vendor });
     expect(parsed.success).toBe(false);

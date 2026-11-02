@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { PushVendorSchema } from './push-config.zod';
 import { LocaleSchema } from './translation.zod';
+import { PUSH_DEVICE_PLATFORMS } from './push-device-platform';
 
 /**
  * Push Device Protocol — the stored device shape of the push device registry
@@ -51,13 +52,19 @@ export const UserDeviceSchema = lazySchema(() => z.object({
   userId: z.string().min(1).describe('The user the device belongs to: the session user who registered it. No organization member'),
   vendor: PushVendorSchema.describe('Push vendor the token belongs to: the registration\'s vendor, or the one derived from platform'),
   token: z.string().min(1).describe('Vendor push token. Held by one live device at a time: a second user\'s registration moves it'),
-  platform: z.enum(['ios', 'android', 'web']).describe('Device platform, as the registration named it'),
+  platform: z.enum(PUSH_DEVICE_PLATFORMS).describe('Device platform, as the registration named it'),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
   locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
   name: z.string().optional().describe('Device friendly name, as the registration named it'),
   enabled: z.boolean().describe('False once the vendor reported the token dead; nothing is delivered to a disabled device'),
-  invalidatedAt: z.string().datetime().optional().describe('When the vendor reported the token dead; absent while the device is enabled'),
-  lastSeenAt: z.string().datetime().optional().describe('When the device last registered or refreshed'),
+  invalidatedAt: z.string().datetime().optional().describe(
+    'When the vendor reported the token dead. Present exactly while enabled is false: absent on an enabled device, '
+    + 'and cleared by the registration that re-enables it',
+  ),
+  lastSeenAt: z.string().datetime().optional().describe(
+    'When the device last registered or refreshed. Every registration and refresh sets it, so it is absent only on a '
+    + 'row no registration wrote; listDevices answers such a device last',
+  ),
 }).describe(
   '[PLANNED — not yet served] A push device of one user: one row per app install. No table stores it yet; '
   + 'the device registry lands with the push channel',

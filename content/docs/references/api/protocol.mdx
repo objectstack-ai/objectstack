@@ -2771,7 +2771,7 @@ The authoring surface of a metadata write. Closed: `copilot` is an AI assistant'
 | **platform** | `Enum<'ios' \| 'android' \| 'web'>` | ✅ | Device platform |
 | **deviceId** | `string` | optional | Client-held device id, stable per app install. Re-registering the same deviceId refreshes that device; absent, the server mints one and answers it, and the client keeps it for later registrations and unregister |
 | **name** | `string` | optional | Device friendly name |
-| **vendor** | `Enum<'apns' \| 'fcm'>` | optional | Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, android means fcm; web has no core vendor, so a web registration names fcm or is refused |
+| **vendor** | `Enum<'apns' \| 'fcm'>` | optional | Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, android means fcm. web has no default vendor: a web registration names apns or fcm, and one without vendor is refused |
 | **appId** | `string` | optional | App the token was issued to: the iOS bundle ID or the Android application ID |
 | **locale** | `string` | optional | Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in |
 

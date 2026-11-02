@@ -245,9 +245,9 @@ export interface INotificationService {
      *   user, and the other user's device stops receiving it. A push meant
      *   for the previous owner never reaches the phone's new user.
      * - An absent `request.vendor` is derived from `request.platform`
-     *   (`ios` → `apns`, `android` → `fcm`). A `web` registration names its
-     *   vendor; without one there is nothing to derive, and it is refused as
-     *   a validation error, never stored with a guessed vendor.
+     *   (`ios` → `apns`, `android` → `fcm`). `web` has no default vendor: a
+     *   `web` registration names `apns` or `fcm`, and one without `vendor` is
+     *   refused as a validation error, never stored with a guessed vendor.
      *
      * @param userId - The signed-in user, from the session; never a body member
      * @param request - The registration body
@@ -257,10 +257,12 @@ export interface INotificationService {
     /**
      * Unregister one of this user's devices (sign-out, account switch).
      *
-     * A `deviceId` this user does not hold — unknown, or another user's —
-     * answers not found (`NOT_FOUND`, 404 at the device route), never a
-     * success and never a distinct "forbidden": a caller cannot learn that a
-     * device id exists for somebody else, and cannot remove it.
+     * Resolves `{ success: true }` once the device is removed. A `deviceId`
+     * this user does not hold — unknown, or another user's — never resolves:
+     * the call throws an error whose `code` is `NOT_FOUND`, which the device
+     * route answers as 404. It is never a distinct "forbidden", so a caller
+     * cannot learn that a device id exists for somebody else, and cannot
+     * remove it.
      *
      * @param userId - The signed-in user, from the session
      * @param deviceId - The id {@link registerDevice} answered
@@ -268,7 +270,8 @@ export interface INotificationService {
     unregisterDevice?(userId: string, deviceId: string): Promise<UnregisterDeviceResponse>;
 
     /**
-     * List this user's devices, newest `lastSeenAt` first.
+     * List this user's devices, newest `lastSeenAt` first; a device with no
+     * `lastSeenAt` comes last.
      *
      * Disabled devices (a token the vendor reported dead) are listed too,
      * with `enabled: false` and their `invalidatedAt`, so a settings screen

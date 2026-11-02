@@ -75,8 +75,8 @@ const result = UserDeviceSchema.parse(data);
 | **locale** | `string` | optional | Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in |
 | **name** | `string` | optional | Device friendly name, as the registration named it |
 | **enabled** | `boolean` | ✅ | False once the vendor reported the token dead; nothing is delivered to a disabled device |
-| **invalidatedAt** | `string` | optional | When the vendor reported the token dead; absent while the device is enabled |
-| **lastSeenAt** | `string` | optional | When the device last registered or refreshed |
+| **invalidatedAt** | `string` | optional | When the vendor reported the token dead. Present exactly while enabled is false: absent on an enabled device, and cleared by the registration that re-enables it |
+| **lastSeenAt** | `string` | optional | When the device last registered or refreshed. Every registration and refresh sets it, so it is absent only on a row no registration wrote; listDevices answers such a device last |
 
 
 ---
