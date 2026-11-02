@@ -648,6 +648,56 @@ const calendarDisplayLocalePatches = [
   },
 ];
 
+/** The phone-only classes the close-touch-target family adds (objectstack#29107). */
+const PHONE_CLOSE_TOUCH_TARGET =
+  'max-sm:right-1 max-sm:top-1 max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center';
+
+/**
+ * The phone-width close-button touch-target patch (objectstack#29107).
+ *
+ * `DialogContent` auto-renders its close button as the bare 16 px lucide glyph
+ * inside `absolute right-4 top-4`, with no padding and no minimum size, so on a
+ * phone the whole tap target is 16 x 16 px — under the 44 px floor the
+ * Console's phone-width audit holds every control to. Every modal a phone user
+ * opens draws this one button (the declared-action param dialog, the command
+ * palette), so the floor belongs in the primitive, not at each call site.
+ *
+ * The payload is phone-only (`max-sm:`), so from `sm` up the button keeps
+ * upstream's classes and the desktop header does not grow. Below `sm` the
+ * button becomes a 44 px flex box anchored 4 px from the corner, the glyph
+ * centred in it at its own 16 px size. The Sheet close takes the same class
+ * set through its own family, `sheetCloseTouchTargetPatches`.
+ *
+ * Inline, like the `hideOverlay` family: the payload is utility classes on the
+ * primitive's own element, so there is no implementation to host in `src/lib/`.
+ * One anchor, written from the vendored registry bytes
+ * (`scripts/__tests__/fixtures/shadcn-registry/dialog.registry.txt`): the
+ * opening of the Close element's class list, which names the element and its
+ * desktop placement and nothing incidental. The phone classes sit right after
+ * the placement they override.
+ *
+ * @param {string} primitive Radix namespace prefix, e.g. `Dialog`.
+ * @returns {LocalPatch[]}
+ */
+function phoneCloseTouchTargetPatches(primitive) {
+  const anchor = `<${primitive}Primitive.Close className="absolute right-4 top-4 `;
+  return [
+    {
+      id: `${primitive.toLowerCase()}-phone-close-touch-target`,
+      issue: 'objectstack#29107',
+      reason:
+        `${primitive}Content's close button is a 16 x 16 px tap target upstream ` +
+        '(the bare glyph, no padding or minimum size). Below `sm` this makes it a ' +
+        '44 px box with the glyph centred; from `sm` up upstream classes apply ' +
+        'unchanged, so the desktop header does not grow.',
+      find: anchor,
+      replace: `${anchor}${PHONE_CLOSE_TOUCH_TARGET} `,
+      marker: `${anchor}${PHONE_CLOSE_TOUCH_TARGET} `,
+      occurrences: 1,
+    },
+  ];
+}
+
 /**
  * The phone-only height floor the menu-row and tab touch-target families add
  * (objectstack#29215): 44 px below `sm`, nothing from `sm` up.
@@ -780,7 +830,7 @@ const tabsTouchTargetPatches = [
  */
 export const LOCAL_PATCHES = {
   sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches, ...sheetCloseTouchTargetPatches],
-  dialog: i18nCloseLabelPatches('Dialog'),
+  dialog: [...i18nCloseLabelPatches('Dialog'), ...phoneCloseTouchTargetPatches('Dialog')],
   sidebar: [
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,

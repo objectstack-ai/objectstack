@@ -162,7 +162,7 @@ export const RecordTitleChip: React.FC<RecordTitleChipProps> = ({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-5 w-5 shrink-0 text-muted-foreground/50 hover:text-foreground"
+                  className="h-5 w-5 min-h-[44px] min-w-[44px] shrink-0 text-muted-foreground/50 hover:text-foreground sm:min-h-0 sm:min-w-0"
                   onClick={handleCopyId}
                   aria-label={copyLabel}
                 >

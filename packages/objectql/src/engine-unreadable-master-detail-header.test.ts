@@ -315,7 +315,9 @@ describe('[#22519] an unreadable master-detail header answers what a nonexistent
       const nowhere = envelopeOf(await refusalOf(() => write(door, NOWHERE, CAROL)));
       expect(nowhere).toEqual(NOT_FOUND);
       // Alice's own header: it exists, and Carol's read door refuses the object.
-      expect(envelopeOf(await refusalOf(() => write(door, 'h_mine_open', CAROL)))).toEqual(nowhere);
+      // [#29062] Not the header line l1 already stores: an update carrying a
+      // stored value back is not judged again, so a repoint must name another.
+      expect(envelopeOf(await refusalOf(() => write(door, 'h_mine_locked', CAROL)))).toEqual(nowhere);
     });
 
     it('the partial batch insert: an unreadable row fails as a nonexistent row does, and a readable row lands', async () => {

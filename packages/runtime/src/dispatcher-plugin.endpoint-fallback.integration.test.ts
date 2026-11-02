@@ -372,6 +372,9 @@ const TASK_ROWS = [
     { id: 'tsk_2', name: 'Ship the thing', status: 'done' },
 ];
 
+/** The row the flow endpoint below is launched on. */
+const INQUIRY_ROWS = [{ id: 'inq_1', subject: 'Old inquiry' }];
+
 const ADMIN_SET = {
     id: 'ps-admin',
     name: 'admin_full_access',
@@ -415,6 +418,9 @@ function executionServicesPlugin(): Plugin {
                         return ids.includes('ps-admin') ? [ADMIN_SET] : [];
                     }
                     if (object === 'showcase_task') return TASK_ROWS;
+                    // The row the flow endpoint is launched on, readable by its
+                    // caller: the door loads it in the caller's scope first.
+                    if (object === 'showcase_inquiry') return INQUIRY_ROWS;
                     return [];
                 },
             });

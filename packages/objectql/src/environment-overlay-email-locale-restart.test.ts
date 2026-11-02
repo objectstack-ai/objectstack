@@ -32,7 +32,8 @@
  * row; a package-less row is laid down as a release before the close stored
  * it (`seedPackagelessRow`), served until the ceremony moves it; a shipped
  * member's package-less write is refused, and an unshipped member's, which
- * the ceremony cannot move (#28904), stays open.
+ * the ceremony moves as the pair's own member declaring nothing (#28904, the
+ * last section), stays open.
  *
  * ## The harness
  *
@@ -865,8 +866,10 @@ describe('[#23074] the artifact envelope is stamped only on the member the packa
      * the by-name read then serve, or `'closed'`: the ceremony moves a shipped
      * member's unmigrated row, so its package-less reset is refused naming the
      * ceremony and the row keeps serving its member. A member the base does
-     * not ship cannot be moved (the pair's save refuses it, #28777; #28904),
-     * so its package-less reset stays open, as before the close.
+     * not ship moves as the pair's own member, declaring nothing (a declared
+     * override of it is refused, #28777; #28904), and the close reaches only
+     * the declared-override moves, so its package-less reset stays open, as
+     * before the close.
      */
     async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }, after: string | undefined | 'closed') {
         const shadowBoot = (await bootWithOverlays(new Map(), name)).engine;
@@ -943,5 +946,124 @@ describe('[#23074] the artifact envelope is stamped only on the member the packa
         expect(read.item.locale).toBe('ja-JP');
         expect(read.item._packageId).toBe(PKG);
         expect(read.packageId).toBe(PKG);
+    });
+});
+
+/**
+ * [#28904, ADR-0146 D2 / D11] `os migrate packageless-overlays` and a
+ * package-less row of a member the package does not ship. The package ships
+ * `acme.digest` in `en-US` alone, so a `zh-CN` row of it overrides nothing
+ * the package ships: the pair holds it only as its OWN member, declaring no
+ * override (a declared override of it stays refused, #28777). The ceremony
+ * moves it that way and reports it `moved`, naming the member it adds; a
+ * shipped member's row (`acme.welcome`'s `zh-CN`) still moves as the declared
+ * override. Either way the send path keeps the row's wording and envelope
+ * columns, the unbound row is gone, and a second run moves nothing.
+ */
+describe('[#28904] the ceremony moves a row of a member the package does not ship as the pair\'s own member', () => {
+    const ACTOR = 'os migrate packageless-overlays';
+    const ENVELOPE = {
+        bodyText: 'ADMIN digest zh-CN text',
+        replyTo: 'support@acme.test',
+        fromOverride: { name: 'Acme 支持', address: 'support@acme.test' },
+    };
+    const rowsOf = (stores: Map<string, Map<string, Record<string, unknown>>>, name: string) =>
+        Array.from(stores.get('sys_metadata')?.values() ?? [])
+            .filter((r) => r.type === T && r.name === name)
+            .map((r) => ({
+                packageId: (r.package_id as string | null | undefined) ?? null,
+                member: (r.bundle_member as string | null | undefined) ?? null,
+                state: r.state,
+                body: JSON.parse(String(r.metadata)) as Record<string, unknown>,
+            }));
+    /** The member the send path resolves (`plugin-email`'s loader reads the execution list by `(name, locale)`). */
+    const sentMember = async (protocol: ObjectStackProtocolImplementation, name: string, locale: string) =>
+        (((await protocol.getMetaItemsForExecution({ type: T })) as any)?.items as any[] ?? [])
+            .find((it) => it?.name === name && it?.locale === locale);
+    const census = (protocol: ObjectStackProtocolImplementation): Promise<any> => (protocol as any).listPackagelessOverlays();
+    const migrate = (protocol: ObjectStackProtocolImplementation): Promise<any> =>
+        (protocol as any).migratePackagelessOverlays({ actor: ACTOR });
+
+    /** One package-less row of `name` in `zh-CN`, stored by a release before the close, then a restart. */
+    async function withUnboundZh(name: string, extra: Record<string, unknown> = {}) {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const first = await boot(stores);
+        await seedPackagelessRow(first.raw, name, { ...template('zh-CN', `ADMIN ${name} zh-CN`), name, ...ENVELOPE, ...extra });
+        return { stores, ...(await boot(stores)) };
+    }
+
+    it('an unshipped locale: moved into the pair as its own member with no `overrides`, still sent with its wording and envelope, and a re-run moves 0', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST);
+        const sent = { subject: `ADMIN ${DIGEST} zh-CN`, bodyHtml: `<p>ADMIN ${DIGEST} zh-CN</p>`, ...ENVELOPE };
+        expect(await sentMember(raw, DIGEST, 'zh-CN')).toMatchObject(sent);
+
+        const listed = await census(raw);
+        expect(listed.rows.map((r: any) => [r.name, r.member, r.disposition, r.addedMember])).toEqual([[DIGEST, 'zh-CN', 'movable', 'zh-CN']]);
+
+        const result = await migrate(raw);
+        expect(result.outcomes).toEqual([{ id: listed.rows[0].id, outcome: 'moved', packageId: PAIR, addedMember: 'zh-CN' }]);
+        expect(result.bases).toEqual([{ base: PKG, pair: PAIR, pairCreated: false, moved: 1, declarationsCompleted: 0, failed: 0, shadowed: 0 }]);
+        const stored = rowsOf(stores, DIGEST);
+        expect(stored.map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
+        expect(stored[0]!.body).not.toHaveProperty('overrides');
+        expect(stored[0]!.body).toMatchObject(sent);
+
+        // Still sent, at once and after a restart; the package's own `en-US` member is untouched.
+        for (const served of [raw, (await boot(stores)).raw]) {
+            expect(await sentMember(served, DIGEST, 'zh-CN')).toMatchObject(sent);
+            expect(((await served.getMetaItem({ type: T, name: DIGEST, member: 'zh-CN' })) as any)?.item).toMatchObject(sent);
+            expect((await sentMember(served, DIGEST, 'en-US'))?.subject).toBe('PKG digest en');
+        }
+
+        const again = await migrate(raw);
+        expect(again.rows).toEqual([]);
+        expect(again.outcomes).toEqual([]);
+        expect(rowsOf(stores, DIGEST).map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
+    });
+
+    it('an unshipped locale whose stored body declares the base: the declaration is dropped, as the pair\'s own member carries none', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST, { overrides: { package: PKG, basedOn: '0.9.0' } });
+        const result = await migrate(raw);
+        expect(result.outcomes.map((o: any) => [o.outcome, o.addedMember])).toEqual([['moved', 'zh-CN']]);
+        const stored = rowsOf(stores, DIGEST);
+        expect(stored.map((r) => [r.packageId, r.member])).toEqual([[PAIR, 'zh-CN']]);
+        expect(stored[0]!.body).not.toHaveProperty('overrides');
+        expect((await sentMember(raw, DIGEST, 'zh-CN'))?.subject).toBe(`ADMIN ${DIGEST} zh-CN`);
+    });
+
+    it('READ BACK FIRST: a save that leaves no row of that member in the pair keeps the unbound row, and the row is reported failed', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST);
+        // A save door that answers and writes nothing.
+        (raw as any).saveMetaItem = async () => ({ success: true });
+        const result = await migrate(raw);
+        expect(result.outcomes.map((o: any) => o.outcome)).toEqual(['failed']);
+        expect(result.outcomes[0].error).toContain("does not read back as its own member 'zh-CN'");
+        expect(rowsOf(stores, DIGEST).map((r) => [r.packageId, r.member])).toEqual([[null, 'zh-CN']]);
+        expect(result.bases[0]).toMatchObject({ moved: 0, failed: 1 });
+    });
+
+    it('CONTROL a shipped locale: moved as the declared override of the package, as before', async () => {
+        const { stores, raw } = await withUnboundZh(NAME);
+        const listed = await census(raw);
+        expect(listed.rows.map((r: any) => [r.name, r.member, r.disposition])).toEqual([[NAME, 'zh-CN', 'movable']]);
+        expect(listed.rows[0]).not.toHaveProperty('addedMember');
+
+        const result = await migrate(raw);
+        expect(result.outcomes).toEqual([{ id: listed.rows[0].id, outcome: 'moved', packageId: PAIR, basedOn: '1.0.0' }]);
+        const stored = rowsOf(stores, NAME);
+        expect(stored.map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
+        expect(stored[0]!.body.overrides).toEqual({ package: PKG, basedOn: '1.0.0' });
+        expect(await sentMember(raw, NAME, 'zh-CN')).toMatchObject({ subject: `ADMIN ${NAME} zh-CN`, ...ENVELOPE });
+    });
+
+    it('the refusal of a declared override at an unshipped locale is unchanged: after the move, that save into the pair answers 403 NOT_OVERRIDABLE', async () => {
+        const { stores, raw } = await withUnboundZh(DIGEST);
+        await migrate(raw);
+        const refused: any = await raw.saveMetaItem({
+            type: T, name: DIGEST, packageId: PAIR,
+            item: { ...template('zh-CN', 'DECLARED zh-CN'), name: DIGEST, overrides: DECLARATION },
+        } as any).then(() => undefined, (e: unknown) => e);
+        expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+        expect(rowsOf(stores, DIGEST).map((r) => r.body.subject)).toEqual([`ADMIN ${DIGEST} zh-CN`]);
     });
 });

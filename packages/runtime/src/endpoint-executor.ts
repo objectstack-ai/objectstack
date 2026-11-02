@@ -53,7 +53,10 @@ import { INTERNAL_ERROR_MESSAGE, looksLikeInternalErrorLeak, resolveThrownHttpEr
 import { apiErrorResponse } from './error-envelope.js';
 import { isServiceServeable } from './service-serveable.js';
 import { validationFailure } from './validation-failure.js';
-import { buildAutomationContext } from './domains/automation.js';
+import { buildAutomationContext, flowStartRecordKeys } from './domains/automation.js';
+// The row a start addresses — flow start admission's third question, the action
+// door's caller-scope load and refusal, asked by every door that starts a flow.
+import { refuseUnreadableFlowStartRecords } from './action-execution.js';
 import {
     classifyFlowRefusal,
     flowFailureDetails,
@@ -577,6 +580,20 @@ async function executeFlow(
     }
 
     const automationContext = buildAutomationContext(ctx.body, ctx.protocolContext) as AutomationContext;
+    // The third question every door that starts a flow by name asks, after the
+    // two above and before `execute()`: each row slot the built context carries
+    // (the same builder, so the same slots the trigger route judges) is loaded
+    // in the caller's own scope through this endpoint's own data seam, and
+    // refused with the action door's `404 RECORD_NOT_FOUND`, so a refused start
+    // has no run. Thrown, and mapped by `executeEndpointTarget`'s one error path
+    // like the builder's own refusal.
+    await refuseUnreadableFlowStartRecords(
+        service,
+        plan.flow,
+        flowStartRecordKeys(automationContext as Record<string, unknown>),
+        ctx.executionContext,
+        (object, id) => deps.callData('get', { object, id }, ctx.dataDriver, ctx.environmentId, ctx.executionContext),
+    );
     const result = await automation.execute(plan.flow, automationContext);
 
     // [#9462] Rows 2-4, read off the PRODUCER's classification through the one
