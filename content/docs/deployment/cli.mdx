@@ -1303,6 +1303,7 @@ where the data lives.
 | `os migrate files-to-references` | Convert legacy file-field values to `sys_file` references, verify the ownership ledger, and record the deployment's migration flag |
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
+| `os migrate blank-single-values` | Rewrite the empty strings (`''`) still stored on optional single-value option, reference and file columns to `null`, the form a cleared value is stored in today, so `$empty` finds those rows. Repairs values; no flag, nothing depends on it having run. See [below](#os-migrate-blank-single-values) |
 | `os migrate record-currency-codes` | Write the currency code you give into the rows of a record-mode currency field that hold an amount and no code, the rows stored before the field was switched to `currencyMode: 'record'`. The code is never derived. No flag; idempotent. See [below](#os-migrate-record-currency-codes) |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
 | `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. It upgrades a database 17.x or an 18.0 pre-release (`18.0.0-next.*`) created; a v18 server refuses to start on one until it has run. See [below](#os-migrate-organization-ownership) |
@@ -1506,6 +1507,27 @@ changes no behaviour, so there is no posture for a flag to attest.
 A deployment whose database was seeded fresh on this version has nothing to do
 here: its parents were created with the value already in place, and the run
 reports zero.
+
+#### `os migrate blank-single-values`
+
+Clearing an optional `select`, `radio`, `lookup`, `master_detail`, `user`,
+`tree`, `image`, `file`, `avatar`, `video` or `audio` field stores `null`.
+Rows cleared before that rule landed still hold an empty string, which these
+types read as a value: `$empty: true` does not find them, and `$empty: false`
+does.
+
+```bash
+os migrate blank-single-values                  # Dry run: counts per object and column, writes no rows
+os migrate blank-single-values --apply          # Rewrite '' to null (prompts)
+os migrate blank-single-values --apply --yes --json   # CI / scripts
+os migrate blank-single-values --object account       # Restrict to one object (repeatable)
+```
+
+The columns are the ones the write door itself stores a cleared value as
+`null` on, so the two never disagree. A `required` column, a `multiple: true`
+column and a text-like column are never touched. Idempotent: a second run
+finds nothing and writes nothing, and re-running until it reports zero is the
+verification, so it records no flag.
 
 #### `os migrate record-currency-codes`
 

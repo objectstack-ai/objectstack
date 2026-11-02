@@ -3,9 +3,7 @@
 import { isGrantActive } from '@objectstack/core';
 
 import type { SharingEngine } from './sharing-service.js';
-import { TeamGraphService, holdsRole } from './team-graph.js';
-
-const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+import { TeamGraphService, holdsRole, readMembershipToCompletion } from './team-graph.js';
 
 /**
  * The `sys_user_position` predicate "assignments of `positionName`", scoped to
@@ -22,6 +20,13 @@ function positionAssignmentPredicate(positionName: string, scopeOrg: string | nu
 
 /** The columns both reads project: the holder and the ADR-0091 D2 validity window. */
 const ASSIGNMENT_FIELDS = ['user_id', 'valid_from', 'valid_until'];
+
+/**
+ * [#29503] Page size of the user-scoped assignment read — the bound it always
+ * carried. One user's rows for one position fit in one page in practice; the
+ * walk only makes a longer history of lapsed rows read whole instead of cut.
+ */
+const HOLDER_CHECK_PAGE_ROWS = 1000;
 
 type PositionCache = {
   expand?: Map<string, string[]>;
@@ -90,24 +95,24 @@ export class PositionGraphService {
 
     // 1) Platform assignment table (source of truth).
     const scopeOrg = organizationId ?? this.organizationId;
-    try {
-      // valid_from / valid_until ride the projection so the ADR-0091 D2
-      // validity filter below sees them — expired holders stop receiving
-      // position-recipient shares at resolution time, fail-closed.
-      const rows = await this.engine.find('sys_user_position', {
-        filter: positionAssignmentPredicate(positionName, scopeOrg),
-        fields: ASSIGNMENT_FIELDS,
-        limit: 10000,
-        context: SYSTEM_CTX,
-      });
-      const nowMs = Date.now();
-      for (const r of (rows ?? []) as any[]) {
-        if (!isGrantActive(r, nowMs)) continue;
-        const uid = String(r.user_id ?? '');
-        if (uid) users.add(uid);
-      }
-    } catch {
-      /* table may not exist on minimal stacks — union source below still applies */
+    // valid_from / valid_until ride the projection so the ADR-0091 D2
+    // validity filter below sees them — expired holders stop receiving
+    // position-recipient shares at resolution time, fail-closed.
+    // [#29503] Read to completion, and a failed read throws (nothing is cached
+    // for it): answering the membership-role limb alone was a shrunk holder set
+    // that looked complete. A stack with no `sys_user_position` has no
+    // assignment holders, and the union source below still applies.
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_user_position',
+      where: positionAssignmentPredicate(positionName, scopeOrg),
+      fields: ASSIGNMENT_FIELDS,
+      subject: `the assignments of position '${positionName}'${scopeOrg ? ` in organization '${scopeOrg}'` : ''}`,
+    });
+    const nowMs = Date.now();
+    for (const r of (rows ?? []) as any[]) {
+      if (!isGrantActive(r, nowMs)) continue;
+      const uid = String(r.user_id ?? '');
+      if (uid) users.add(uid);
     }
 
     // 2) better-auth membership string (transition window, ADR-0057 D4).
@@ -135,25 +140,29 @@ export class PositionGraphService {
    * assignment import quadratic in the position's holder count.
    *
    * Uncached on purpose: the answer is wanted right after a write that may
-   * have changed it. A failed assignment read falls through to the transition
-   * source, as the expansion's does.
+   * have changed it. [#29503] A failed assignment read refuses, as the
+   * expansion's does; only a stack with no `sys_user_position` falls through
+   * to the transition source.
    */
   async holdsPosition(userId: string, positionName: string, organizationId?: string): Promise<boolean> {
     if (!userId || !positionName) return false;
     const scopeOrg = organizationId ?? this.organizationId;
-    try {
-      const rows = await this.engine.find('sys_user_position', {
-        filter: { ...positionAssignmentPredicate(positionName, scopeOrg), user_id: userId },
-        fields: ASSIGNMENT_FIELDS,
-        limit: 1000,
-        context: SYSTEM_CTX,
-      });
-      const nowMs = Date.now();
-      for (const r of (rows ?? []) as any[]) {
-        if (String(r.user_id ?? '') === userId && isGrantActive(r, nowMs)) return true;
-      }
-    } catch {
-      /* table may not exist on minimal stacks — the transition source below still applies */
+    // [#29503] Every one of the user's assignment rows for the position, read to
+    // completion, so an active row past an arbitrary bound of lapsed ones still
+    // counts; a failed read refuses (a `false` here made the per-user recompute
+    // revoke the holder's grants on an outage). A stack with no
+    // `sys_user_position` falls through to the transition source below.
+    const rows = await readMembershipToCompletion(this.engine, {
+      object: 'sys_user_position',
+      where: { ...positionAssignmentPredicate(positionName, scopeOrg), user_id: userId },
+      fields: ASSIGNMENT_FIELDS,
+      subject: `whether user '${userId}' holds position '${positionName}'${scopeOrg ? ` in organization '${scopeOrg}'` : ''}`,
+      pageRows: HOLDER_CHECK_PAGE_ROWS,
+      kind: 'check',
+    });
+    const nowMs = Date.now();
+    for (const r of (rows ?? []) as any[]) {
+      if (String(r.user_id ?? '') === userId && isGrantActive(r, nowMs)) return true;
     }
     return holdsRole(this.engine, positionName, userId, scopeOrg);
   }

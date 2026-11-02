@@ -3620,6 +3620,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.list.col.label': 'Label',
   'engine.list.col.source': 'Source',
   'engine.list.col.object': 'Object',
+  // objectstack#29569 — an object_extension lists by the object it extends.
+  'engine.list.col.extend': 'Object',
   'engine.list.col.type': 'Type',
   'engine.list.col.description': 'Description',
   'engine.list.col.sharedWith': 'Shared with',

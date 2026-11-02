@@ -1306,6 +1306,7 @@
     "api/PackageExportManifest:label",
     "api/PackageExportManifest:name",
     "api/PackageExportManifest:version",
+    "api/PackageExportManifest:withheldMaps",
     "api/PackageInstallManifest:capabilities [RETIRED]",
     "api/PackageInstallManifest:configuration [RETIRED]",
     "api/PackageInstallManifest:contributes",
