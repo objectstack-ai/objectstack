@@ -72,8 +72,8 @@ const result = AuthEndpointSchema.parse(data);
 | **oidcProvider** | `boolean` | optional | Embedded OIDC authorization server wired, from the same decision that mounts it, so OAuth applications can be registered and managed; on by default alongside the MCP surface. It says nothing about sign-in providers, which socialProviders lists; the flag is default-on, so absent reads as on |
 | **deviceAuthorization** | `boolean` | optional | Device authorization (browser-approved CLI login) wired, so the device-code endpoints answer; when false the console device-approval page says device authorization is not enabled instead of calling them. Absent means not wired |
 | **admin** | `boolean` | optional | Admin plugin wired (forced on whenever SCIM is enabled), so user administration (creating, banning, unlocking and impersonating users, setting their passwords) is available; the console shows those actions only when it is true. Absent means not wired |
-| **termsUrl** | `string` | optional | Terms-of-service link shown beneath the login and register cards: the OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty string to suppress the link |
-| **privacyUrl** | `string` | optional | Privacy-policy link shown beneath the login and register cards: the OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty string to suppress the link |
+| **termsUrl** | `string` | optional | Terms-of-service link shown beneath the login and register cards: the trimmed OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty or blank (whitespace-only) value to suppress the link |
+| **privacyUrl** | `string` | optional | Privacy-policy link shown beneath the login and register cards: the trimmed OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty or blank (whitespace-only) value to suppress the link |
 
 
 ---
@@ -209,8 +209,8 @@ This schema accepts one of the following structures:
 | **oidcProvider** | `boolean` | optional | Embedded OIDC authorization server wired, from the same decision that mounts it, so OAuth applications can be registered and managed; on by default alongside the MCP surface. It says nothing about sign-in providers, which socialProviders lists; the flag is default-on, so absent reads as on |
 | **deviceAuthorization** | `boolean` | optional | Device authorization (browser-approved CLI login) wired, so the device-code endpoints answer; when false the console device-approval page says device authorization is not enabled instead of calling them. Absent means not wired |
 | **admin** | `boolean` | optional | Admin plugin wired (forced on whenever SCIM is enabled), so user administration (creating, banning, unlocking and impersonating users, setting their passwords) is available; the console shows those actions only when it is true. Absent means not wired |
-| **termsUrl** | `string` | optional | Terms-of-service link shown beneath the login and register cards: the OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty string to suppress the link |
-| **privacyUrl** | `string` | optional | Privacy-policy link shown beneath the login and register cards: the OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty string to suppress the link |
+| **termsUrl** | `string` | optional | Terms-of-service link shown beneath the login and register cards: the trimmed OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty or blank (whitespace-only) value to suppress the link |
+| **privacyUrl** | `string` | optional | Privacy-policy link shown beneath the login and register cards: the trimmed OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty or blank (whitespace-only) value to suppress the link |
 
 
 ---

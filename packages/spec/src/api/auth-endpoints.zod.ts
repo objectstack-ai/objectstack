@@ -290,10 +290,10 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
     + 'the console shows those actions only when it is true. Absent means not wired',
   ),
   termsUrl: z.string().optional().describe(
-    'Terms-of-service link shown beneath the login and register cards: the OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty string to suppress the link',
+    'Terms-of-service link shown beneath the login and register cards: the trimmed OS_TERMS_URL value when set, otherwise the public ObjectStack terms page; absent when the operator set OS_TERMS_URL to an empty or blank (whitespace-only) value to suppress the link',
   ),
   privacyUrl: z.string().optional().describe(
-    'Privacy-policy link shown beneath the login and register cards: the OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty string to suppress the link',
+    'Privacy-policy link shown beneath the login and register cards: the trimmed OS_PRIVACY_URL value when set, otherwise the public ObjectStack privacy page; absent when the operator set OS_PRIVACY_URL to an empty or blank (whitespace-only) value to suppress the link',
   ),
 }));
 
