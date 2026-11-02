@@ -529,3 +529,71 @@ describe('#8019 — change-email notifies the previous address without gating on
     expect(changeEmail?.updateEmailWithoutVerification).toBeUndefined();
   });
 });
+
+// ───────────────────────────────────────────────────────────────────────────
+describe('#29163 — the uncoded refusals on /change-email and /update-user carry a ledgered code', () => {
+  /**
+   * Each refusal is asserted on its envelope (ADR-0112): the status, the
+   * `code`, and the vendor's own sentence, which the stamp keeps byte-for-byte.
+   * The body stays the door's flat `{ message, code }` — the shape its coded
+   * siblings (pinned in the last case) already answer in.
+   */
+  it('the caller\'s own address: 400 VALIDATION_ERROR, nothing mailed and nothing changed', async () => {
+    const engine = createMemoryEngine();
+    const email = createRecordingEmailService();
+    const manager = makeManager(engine, email.service);
+    const cookie = cookieFrom(await signUp(manager, 'own@example.com'));
+    email.sent.length = 0;
+
+    for (const newEmail of ['own@example.com', 'OWN@example.com']) {
+      const response = await post(manager, '/change-email', cookie, { newEmail });
+      expect(response.status).toBe(400);
+      expect(await errorBody(response)).toEqual({ message: 'Email is the same', code: 'VALIDATION_ERROR' });
+    }
+    expect(email.sent).toHaveLength(0);
+    expect(userRows(engine).map((u) => u.email)).toEqual(['own@example.com']);
+  });
+
+  it('no email transport: 400 EMAIL_SERVICE_REQUIRED', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine);
+    const cookie = cookieFrom(await signUp(manager, 'nomail-29163@example.com'));
+
+    const response = await post(manager, '/change-email', cookie, { newEmail: 'elsewhere@example.com' });
+    expect(response.status).toBe(400);
+    expect(await errorBody(response)).toEqual({ message: "Verification email isn't enabled", code: 'EMAIL_SERVICE_REQUIRED' });
+  });
+
+  it('/update-user with nothing it can update: 400 VALIDATION_ERROR, and a real update still succeeds', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine, createRecordingEmailService().service);
+    const cookie = cookieFrom(await signUp(manager, 'update-29163@example.com'));
+
+    for (const body of [{}, { undeclared_key: 'x' }]) {
+      const response = await post(manager, '/update-user', cookie, body);
+      expect(response.status).toBe(400);
+      expect(await errorBody(response)).toEqual({ message: 'No fields to update', code: 'VALIDATION_ERROR' });
+    }
+    const ok = await post(manager, '/update-user', cookie, { name: 'Renamed' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ status: true });
+  });
+
+  it('refusals the vendor already codes on these doors pass through unchanged', async () => {
+    const engine = createMemoryEngine();
+    const manager = makeManager(engine, createRecordingEmailService().service);
+    const cookie = cookieFrom(await signUp(manager, 'coded-29163@example.com'));
+
+    const invalid = await post(manager, '/change-email', cookie, { newEmail: 'not-an-email' });
+    expect(invalid.status).toBe(400);
+    expect(await errorBody(invalid)).toEqual({ message: '[body.newEmail] Invalid email address', code: 'VALIDATION_ERROR' });
+
+    const emailKey = await post(manager, '/update-user', cookie, { email: 'x@example.com' });
+    expect(emailKey.status).toBe(400);
+    expect(await errorBody(emailKey)).toEqual({ message: 'Email can not be updated', code: 'EMAIL_CAN_NOT_BE_UPDATED' });
+
+    const anonymous = await post(manager, '/change-email', '', { newEmail: 'x@example.com' });
+    expect(anonymous.status).toBe(401);
+    expect(await errorBody(anonymous)).toEqual({ message: 'Unauthorized', code: 'UNAUTHORIZED' });
+  });
+});

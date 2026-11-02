@@ -716,5 +716,31 @@ export const DEFAULT_CHANGES_BY_MAJOR: Readonly<Record<number, readonly Declared
         + 'page, write `mode: \'page\'`. The `semantic` entry `ui-record-open-overlay-modes-retired` '
         + 'carries the change to `os migrate meta` and the upgrade guide.',
     },
+    {
+      key: 'ui/UserActionsConfig:hideFields',
+      from: 'false',
+      to: 'true',
+      reason:
+        'A RULED default change (maintainer ruling on #28912: 「Fable 评估（核对后） 同意立卡」, '
+        + 'confirmed 「#28911 和 #28912 都保留，按卡上写的做。」): a list view lets a reader hide and '
+        + 'show its columns by default, and `userActions: { hideFields: false }` is the opt-out. The '
+        + 'old `false` was copied from the renderer\'s legacy `=== true` read, not chosen as product; '
+        + 'the renderer now reads `ua?.hideFields !== false`, so the spec default and the renderer '
+        + 'agree. What moves: a list view whose `userActions` block omits `hideFields` now parses to '
+        + '`true` where it parsed to `false`, and the console\'s list offers the Hide Fields control. '
+        + 'A view with NO `userActions` block parses with none on either side; the list renderer '
+        + 'reads an absent key as this default. A page `interfaceConfig.userActions` block parses to '
+        + '`true` too, and an interface page reads the same default: a page whose block omits the '
+        + 'key, or that has no block, offers the control, and `hideFields: false` withholds it, as '
+        + 'the page also does for `filter`, `rowHeight` and `group`. The accept set does not move: '
+        + '`hideFields` is still a boolean, and every authored value parses exactly as before. The '
+        + 'control only subtracts from the columns the view draws, and the choice is the reader\'s '
+        + 'own: stored on their list state on a view that declares `columns` or a saved view, '
+        + 'session-only on a system view with no `columns`; it never writes the shared view. A '
+        + 'document that SERIALISED an earlier parse (an `os compile` artifact) carries a written '
+        + '`false` and keeps withholding the control: recompile it, or delete the key. To withhold '
+        + 'the control, write `userActions: { hideFields: false }`. To take the platform default, '
+        + 'change nothing. D3 entry: `list-view-hide-fields-default-on`.',
+    },
   ],
 };

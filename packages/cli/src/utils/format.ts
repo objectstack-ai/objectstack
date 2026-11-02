@@ -1011,6 +1011,15 @@ export interface AutomationReadySummary {
   enabled: boolean;
   /** Flows declared in the stack config (used when the engine is absent). */
   declaredFlowCount: number;
+  /**
+   * [#29059] Declared flows the engine REFUSED at registration, from its own
+   * record (`getFlowRegistration(name).state === 'refused'`), counted by
+   * distinct declared name. A refused flow is absent from `flowCount` and from
+   * every list below, so without this the banner counts only what armed and
+   * the refusal shows only as a per-flow line under Boot diagnostics.
+   * 0 when the engine is absent or does not answer the read.
+   */
+  refusedCount: number;
   /** Flows registered in the engine (0 when `enabled` is false). */
   flowCount: number;
   /** Flows bound to a trigger. */
@@ -1713,12 +1722,30 @@ function printAutomationSummary(a: AutomationReadySummary): string[] {
     }
     return restated;
   }
-  if (a.flowCount === 0) return restated;
+  // [#29059] Declared flows the engine refused at registration, beside the
+  // declared count. Boot continued either way; this only says so. The
+  // engine's per-flow reason stays where it is, under Boot diagnostics.
+  const printRefused = (): void => {
+    if (a.refusedCount === 0) return;
+    console.error(
+      chalk.yellow(
+        `  ⚠ Flows:   ${a.declaredFlowCount} flow(s) declared, ${a.refusedCount} refused at registration — ` +
+        `refused flows never run; each one's reason is under Boot diagnostics ('failed to register flow')`,
+      ),
+    );
+  };
+  // A boot whose every declared flow was refused registers none: it prints
+  // the refused line alone rather than no Flows line at all.
+  if (a.flowCount === 0) {
+    printRefused();
+    return restated;
+  }
 
   const parts = [`${a.flowCount} flow(s)`, `${a.boundCount} bound to triggers`];
   if (a.triggerTypes.length > 0) parts.push(`(${a.triggerTypes.join(', ')})`);
   if (a.draftCount > 0) parts.push(`· ${a.draftCount} draft`);
   console.error(chalk.dim(`  Flows:   ${parts.join(' ')}`));
+  printRefused();
 
   // #12028 — printed FIRST among the warnings because it re-reads every line
   // above it: the counts describe the ARMED bodies only, so when a name is

@@ -5,9 +5,15 @@
  * (#4327), the follow-up to #3903's read-path guarantee.
  *
  * #4317 closed the correctness gap from the read side: every stored-row
- * rehydration seam replays the full ADR-0087 conversion chain
- * (`applyConversionsToStoredItem`, retired entries included), so a row written
- * under any past protocol is *served* canonical forever. What it deliberately
+ * rehydration seam replays the ADR-0087 conversion chain the installed release
+ * carries (`applyConversionsToStoredItem`, retired entries included), so a row
+ * is *served* canonical while that release still carries its conversions. A
+ * retirement kit ages out one major after it retires (ADR-0087 as amended,
+ * ruling 6434038284), so this pass must run on a release that still carries a
+ * row's conversions, before the deployment moves to the release that drops
+ * them. Past that, the seams still read and serve the row's legacy bytes, but
+ * no conversion recognizes its shape, so this pass counts it `canonical`: a
+ * false clean, not evidence. What it deliberately
  * did not do is make the rows themselves canonical — a pre-17 row keeps its
  * legacy bytes, the chain re-lowers it on every load, and each affected row
  * emits one conversion notice per process.
@@ -19,10 +25,13 @@
  * the types rather than in the CLI so an admin route renders the same run the
  * same way.
  *
- * **Not load-bearing.** #3855's conclusion still holds — an operator-run
- * migration cannot be relied on, so the read path stays the guarantee and
- * nothing gates on this having run. No `sys_migration` flag is recorded for
- * exactly that reason: a flag row would advertise a gate that does not exist.
+ * **Not load-bearing while the release carries a row's conversions.** #3855's
+ * conclusion holds within that window — an operator-run migration cannot be
+ * relied on, so the read path stays the guarantee there and nothing gates on
+ * this having run; for a row whose conversions the next release drops, this
+ * pass is the required step above, not an optional one. No `sys_migration`
+ * flag is recorded for exactly that reason: a flag row would advertise a gate
+ * that does not exist.
  * The verifiable statement operators wanted is the *re-run* — a second pass
  * that reports every row canonical is the evidence, and it costs one command.
  */

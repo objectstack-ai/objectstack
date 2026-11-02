@@ -74,6 +74,7 @@
   "src/ui/element-text-variant-heading-retirement.test.ts",
   "src/ui/form-field-public-picker-retirement.test.ts",
   "src/ui/form-view-buttons-reset-retirement.test.ts",
+  "src/ui/form-view-drawer-keys-retirement.test.ts",
   "src/ui/form-view-type-layout-retirement.test.ts",
   "src/ui/master-detail-detail-sort-field-retirement.test.ts",
   "src/ui/navigation-mode-retirement.test.ts",
@@ -85,5 +86,6 @@
   "src/ui/view-item-owner-hidden-retirement.test.ts",
   "src/ui/view-list-filterable-fields-retirement.test.ts",
   "src/ui/view-list-tabs-retirement.test.ts",
+  "src/ui/view-personal-declarations-retirement.test.ts",
   "src/ui/visibility-alias-keys-retirement.test.ts"
 ]

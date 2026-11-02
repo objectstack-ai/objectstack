@@ -333,14 +333,14 @@ describe('tsconfig.e2e.json — coverage of the root playwright configs (objectu
     const onDisk = rootPlaywrightConfigsOnDisk();
 
     // Non-vacuity first, for the same reason as the sweep above: the set
-    // difference below is satisfied by a discovery that finds nothing. Four
+    // difference below is satisfied by a discovery that finds nothing. Three
     // configs exist today. If one is genuinely retired, lower this floor — but
     // never satisfy it by narrowing the pattern in `rootPlaywrightConfigsOnDisk`,
     // which would be this gate reporting green about files it stopped looking at.
     expect(
       onDisk.length,
       'no playwright*.config.ts found at the repo root — the discovery is broken',
-    ).toBeGreaterThanOrEqual(4);
+    ).toBeGreaterThanOrEqual(3);
 
     const inProject = programFiles();
     const uncovered = onDisk.filter((f) => !inProject.has(f));

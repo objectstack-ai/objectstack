@@ -407,6 +407,17 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'lookupAutofill',
     why: "planned, not yet read — a lookup's pick autofill pairs (`[{ target, source, overwrite? }]`) are validated at parse (a single-value relationship; each target a writable field of the same object, named once) and their sources at `os validate` / `os build`, but no form or grid fills a field from them until the ui card's lookup widget writes the declared targets on pick. A form control offered today would let an author declare a fill nothing performs",
   },
+  // #29171 (ruling 6574398310, letter B) — a lookup's declared name exposure
+  // lands spec-first the same way: `[PLANNED — not yet served]` on its
+  // describe, served by no read or `$expand` until the server lane's card,
+  // drawn by no renderer until the ui lane's card, which adds the form row.
+  {
+    kind: 'omit',
+    type: 'field',
+    path: ROOT_PATH,
+    key: 'referenceNameVisible',
+    why: "planned, not yet served — a lookup's declared name exposure (`true` lets a reader of the record see the target's `nameField` value and id when it cannot read the target) is refused at parse off `lookup` / `user`, but no read or `$expand` serves the name and no renderer draws it until the server and ui follow-up cards land. A form control offered today would let an author declare an exposure nothing serves",
+  },
   {
     kind: 'omit',
     type: 'view',
@@ -444,13 +455,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'titleFormat',
     why: "`[DEPRECATED → nameField (ADR-0079)]` render-only title template the server cannot return or query, deliberately not offered to new authors; its own describe prescribes the migration — a single-field title to `nameField`, a composite title that import, sort or search must match to a stored computed field (a non-formula field with an `expression`) designated as `nameField`, a text formula staying legal for display only — and every target is authorable",
-  },
-  {
-    kind: 'omit',
-    type: 'view',
-    path: ROOT_PATH,
-    key: 'drawerWidth',
-    why: '`[DEPRECATED → size buckets]` pixel drawer width, deliberately not offered to new authors: a pixel width cannot be chosen without knowing the client viewport, so the renderer derives it from the size bucket',
   },
   {
     kind: 'omit',

@@ -136,11 +136,16 @@ describe('#5922 — what the rule deliberately leaves alone', () => {
     // The rule is derived from the spec's operator vocabulary, not from the
     // `$` sigil. `{ $inn: … }` is out of scope by construction; judging every
     // plain object on a scalar field is #5922's option A, which this is not.
-    expect(() => validateRecord(schema, { title: { $inn: ['a'] } }, 'update')).not.toThrow();
+    //
+    // [#29133] Pinned on a free-form `select`, not on `text`: the text family
+    // now refuses every plain object by its own shape rule (see
+    // `record-validator.text-shape.test.ts`), which would make this pin pass
+    // for a reason other than the one it states.
+    expect(() => validateRecord(schema, { stage_free: { $inn: ['a'] } }, 'update')).not.toThrow();
   });
 
   it('admits a plain non-operator object (same reason)', () => {
-    expect(() => validateRecord(schema, { title: { a: 1 } }, 'update')).not.toThrow();
+    expect(() => validateRecord(schema, { stage_free: { a: 1 } }, 'update')).not.toThrow();
   });
 });
 

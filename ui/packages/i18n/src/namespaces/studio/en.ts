@@ -1069,6 +1069,7 @@ const STUDIO_EN: Record<string, string> = {
   'engine.inspector.action.scriptLanguage': 'Script language',
   'engine.inspector.action.scriptBody': 'Script body',
   'engine.inspector.action.scriptBodyHint': 'Runs in the sandbox as {signature}.',
+  'engine.inspector.action.capabilitiesHint': 'The ctx APIs this body may call. A call it is not granted is refused when the action runs.',
   'engine.inspector.action.method': 'Method',
   // objectstack#26736 — Body Shape as the spec's two shapes.
   'engine.inspector.action.bodyShape': 'Body shape',
@@ -1130,6 +1131,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.refusal.publishWhere': 'Not published. Check {where}: Details say what to change.',
   'engine.studio.refusal.publishUnlocated': 'Not published: the server refused this draft. Details say why.',
   'engine.studio.refusal.publishPlain': 'Not published: {reason}',
+  // A leaf whose pending draft the server refused to read (403): Studio opens no buffer over it.
+  'engine.studio.refusal.draftUnreadable': 'This item has an unpublished draft you are not allowed to read, so Studio has not opened it: editing the published version here would overwrite that draft. Someone who holds the permissions the draft requires can edit or publish it. Details show what the server answered.',
   'engine.studio.publishRefused': 'Not published: {count} items need a change. Pending changes keeps each reason until it is fixed.',
   'engine.studio.publishRefusedOne': 'Not published: {count} item needs a change. Pending changes keeps the reason until it is fixed.',
   'engine.studio.publishRefusedBatch': 'Nothing went live: the package publishes as one batch, so its other drafts wait for this fix.',
@@ -2083,6 +2086,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.nameLabel': 'Name',
   'engine.studio.access.idLabel': 'Identifier',
   'engine.studio.data.savedDraft': 'Object “{label}” saved as draft',
+  // objectstack#28984 — a landed draft autosave, named; the voice of `engine.edit.draftDiscarded`.
+  'engine.studio.draftSaved': 'Draft saved: {item}',
   'engine.studio.data.lastSaved': 'Saved {time}',
   // Pillar tab labels
   'engine.fieldType.text': 'Text',
@@ -3118,6 +3123,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#27785 — a report's chart held until its axes are picked; `input`
   // is the chart panel's own label for the axis it still needs.
   'engine.studio.held.reportChartNeedsInput': '{input} on the report’s chart needs a value',
+  // objectstack#29022 — a report switched to Joined held until its first block is added;
+  // `list` is the report form's label for the blocks list.
+  'engine.studio.held.reportJoinedNeedsBlock': 'a Joined report needs at least one block in “{list}”',
   // objectstack#27895 — a list view held until a required setting of its type's own block is picked again;
   // `input` is the setting's label in the panel's type settings section.
   'engine.studio.held.listViewTypeNeedsInput': '{input} in the view’s {type} settings needs a value',

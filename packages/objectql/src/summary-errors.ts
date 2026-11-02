@@ -72,3 +72,62 @@ export class SummaryRecomputeError extends Error {
     this.name = 'SummaryRecomputeError';
   }
 }
+
+/**
+ * The refusal a unit answers when a write NESTED in it raised
+ * {@link SummaryRecomputeError} and the unit itself then did not land.
+ *
+ * That refusal says "this write is stored, only a roll-up recompute failed",
+ * and every answering surface turns it into the write's own success. It is
+ * true for the write that raised it, and only while that write stands. Two
+ * engine units carry a nested write's refusal past the point where it stops
+ * being true:
+ *
+ *  - a delete's cascade walk deletes (or clears) each dependent through the
+ *    public write path, before the parent's own row is removed. A dependent's
+ *    refusal stops the walk, so the parent's row is never removed — and under
+ *    the `'atomic'` plan the transaction then rolls the dependent back too;
+ *  - a `transaction()` whose callback lets the refusal escape rolls back every
+ *    write in it, the refusing one included.
+ *
+ * Either way the caller's own write did not land, so it is told so: an error
+ * with no `code` (an internal failure, which is what an unrecomputable roll-up
+ * is), the original refusal kept as `cause` for the operator. Every other error
+ * passes through unchanged, and so does the refusal anywhere it is still true:
+ * the dependent's own delete, a write outside any unit, a transaction that
+ * catches it and commits, a joined transaction whose owner decides.
+ *
+ * Matched by `code`, as every reader of the refusal matches it.
+ */
+function unlandedWriteRefusal(e: unknown, lead: string): unknown {
+  if (!(e instanceof Error) || (e as { code?: unknown }).code !== SUMMARY_RECOMPUTE_CODE) return e;
+  const failures = (e as { failures?: unknown }).failures;
+  const named = Array.isArray(failures)
+    ? [...new Set((failures as SummaryRecomputeFailure[]).map((f) => `${f?.parentObject}.${f?.field}`))]
+    : [];
+  const summaries = named.length > 0 ? `the roll-up summary ${named.join(', ')}` : 'a parent roll-up summary';
+  const refusal = new Error(
+    `${lead} A write inside it was stored, then ${summaries} could not be recomputed after it, and that ` +
+    "refusal stopped it. Fix the summary field's `summaryOperations` (the engine's warning names why the " +
+    'recompute was refused), then retry.',
+  );
+  (refusal as Error & { cause?: unknown }).cause = e;
+  return refusal;
+}
+
+/** {@link unlandedWriteRefusal} for a delete whose cascade walk the refusal stopped. */
+export function cascadeStoppedRefusal(e: unknown, object: string): unknown {
+  return unlandedWriteRefusal(
+    e,
+    // Double quotes: a quoted `'object'` beside a "not" reads as an unknown
+    // object to the data door's message heuristic, which answers it 404.
+    `The delete of "${object}" did not complete: its cascade stopped before the record was removed. ` +
+      'Under a transaction that rolls back nothing was written; otherwise the dependents written before ' +
+      'that point stay written.',
+  );
+}
+
+/** {@link unlandedWriteRefusal} for a transaction the refusal rolled back. */
+export function rolledBackRefusal(e: unknown): unknown {
+  return unlandedWriteRefusal(e, 'The transaction rolled back, so nothing written inside it was stored.');
+}

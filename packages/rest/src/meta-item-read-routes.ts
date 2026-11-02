@@ -383,6 +383,16 @@ export function registerMetaItemReadRoutes(this: MetaItemReadRouteHost, scope: M
                     // [#6877] One package scopes the book lookup. [#23214] The
                     // list lives beside the shared decision, as the list door's.
                     if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS['book-tree'])) return;
+                    // A bracketed `package` key (`?package[]=`) is read by no
+                    // binding below, so it scoped nothing: refused here, by the
+                    // decision the dispatcher's twin asks too.
+                    const bracketedPackage = metaReadGate.metaBracketedFilterRefusal('book-tree', req.query);
+                    if (bracketedPackage) {
+                        res.status(bracketedPackage.status).json({
+                            error: { code: bracketedPackage.code, message: bracketedPackage.message },
+                        });
+                        return;
+                    }
                     // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
                     const packageId = metaItemPackageBinding(req.query?.package);
                     // [#20408] The route's whole answer is

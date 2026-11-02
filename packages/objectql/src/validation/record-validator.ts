@@ -100,6 +100,8 @@ import {
   NUMERIC_VALUE_TYPES,
   COMPUTED_VALUE_TYPES,
   NON_TEXT_STORED_VALUE_TYPES,
+  STRING_VALUE_TYPES,
+  isUniqueDeclared,
   percentScaleOf,
   parseNumericString,
   classifyFilterToken,
@@ -302,6 +304,14 @@ interface FieldDef {
    * field whose list did not resolve as one that accepts no value at all.
    */
   picklist?: string;
+  /**
+   * The field's unique declaration (`true` / `'global'` / `'organization'`),
+   * read only through the spec's `isUniqueDeclared` — the predicate every
+   * driver materializes its constraint by. [#29176] It decides whether the
+   * write door stores a text-like `''` as `null`
+   * ({@link normalizeBlankTypedValues}).
+   */
+  unique?: unknown;
 }
 
 // [#24131] `isMissing` (the def-free "missing": `undefined`, `null`, a blank
@@ -672,9 +682,10 @@ export function normalizeMultiValueFields(
  * the declared type at all", with the same wire code and the same sentence a
  * non-readonly field gets: a `date` / `datetime` / `time` the platform reads,
  * a number for a number-typed field, a boolean, an array for a multi-value
- * field, no filter-operator object, and the ADR-0104 reference / media /
- * structured-JSON shape under the object's own posture (warn-first until the
- * deployment's evidence says otherwise). It is never REQUIRED.
+ * field, no plain object or array on a string-typed field, no filter-operator
+ * object, and the ADR-0104 reference / media / structured-JSON shape under
+ * the object's own posture (warn-first until the deployment's evidence says
+ * otherwise). It is never REQUIRED.
  *
  * ⛔ It does NOT reach the author-declared constraints on top of the type:
  * option membership (`invalid_option`), `maxLength` / `minLength`,
@@ -705,7 +716,9 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
 
 /**
  * [#20308] A BLANK string on a non-string-typed column is that column's typed
- * blank, `null` — the write door's one reading of it.
+ * blank, `null` — the write door's one reading of it. [#29176] So is `''` on
+ * an optional text-like column a unique constraint covers (its own section
+ * below).
  *
  * "Blank" is exactly what {@link isMissing} calls missing: `''` or a string of
  * whitespace. "Non-string-typed" is the spec's `NON_TEXT_STORED_VALUE_TYPES` —
@@ -722,14 +735,36 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * outcomes; objectui's date and time boxes send `''` when cleared. This makes
  * storage agree with the platform's own reading.
  *
+ * ## [#29176] The one string-stored arm: an optional column a unique constraint covers
+ *
+ * Exactly `''` on a column that is ALL of: text-like
+ * ({@link UNIQUE_BLANK_TEXT_TYPES}), not `required: true`, and covered by a
+ * unique constraint — its own `unique`, or membership in a declared
+ * `indexes[]` entry whose `unique` asks for one (`isUniqueDeclared`, the
+ * predicate the drivers build their constraints by) — is `null` from the door
+ * on. Every driver's unique constraint is NULL-distinct (driver-sql's index,
+ * the memory driver's key model), so a cleared value then holds no value to
+ * the index as well as to the reader; stored as `''` it was a value, and the
+ * second record cleared was refused `409 UNIQUE_VIOLATION` although neither
+ * held one. Its own edges, each deliberate:
+ *
+ *  - exactly `''`, never whitespace: the `$empty` operator's ruled table reads
+ *    `''` and `null` as one answer on a text-like column and whitespace as a
+ *    value, so this rewrite changes no `$empty` / `is_empty` answer;
+ *  - never a `required` column: there `''` is refused `required` as before,
+ *    and must not first become a `null` a `defaultValue` would fill;
+ *  - a blank here also takes a declared `defaultValue` on insert, as the typed
+ *    arm's does — the door runs before the defaults, by design.
+ *
  * ## What it does NOT touch
  *
- * ⛔ Every string-stored column — text, lookup ids, select values. There `''`
- * is a value, and the spec's value round-trip fixture pins it (`str_empty`:
- * an empty string must not become null). What "empty" means for those types is
- * a separate question, not answered here. ⛔ A non-blank value, and every
- * non-string value, of any type: `null`, `0`, `false`, `'abc'` pass through
- * untouched, so every type check and refusal downstream sees what it saw.
+ * ⛔ Every other string-stored column — text no unique constraint covers,
+ * lookup ids, select values. There `''` is a value, and the spec's value
+ * round-trip fixture pins it (`str_empty`: an empty string must not become
+ * null). What "empty" means for those columns is a separate question, not
+ * answered here. ⛔ A non-blank value, and every non-string value, of any
+ * type: `null`, `0`, `false`, `'abc'` pass through untouched, so every type
+ * check and refusal downstream sees what it saw.
  *
  * ## Where it runs, and why there
  *
@@ -752,33 +787,92 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * nothing changed, else a shallow copy (per row, and a copied array).
  */
 export function normalizeBlankTypedValues<T>(
-  objectSchema: { fields?: Record<string, FieldDef> } | undefined | null,
+  objectSchema: { fields?: Record<string, FieldDef>; indexes?: unknown } | undefined | null,
   data: T,
 ): T {
   const fields = objectSchema?.fields;
   if (!fields || !data || typeof data !== 'object') return data;
+  // Read once per call, and only when a row carries an `''` at all.
+  let uniqueBlank: ReadonlySet<string> | undefined;
+  const uniqueBlankColumns = () => (uniqueBlank ??= optionalUniqueTextColumns(fields, objectSchema?.indexes));
   if (Array.isArray(data)) {
     let rows: unknown[] | undefined;
     for (let i = 0; i < data.length; i++) {
-      const row = normalizeBlankTypedRow(fields, data[i]);
+      const row = normalizeBlankTypedRow(fields, uniqueBlankColumns, data[i]);
       if (row !== data[i]) (rows ??= data.slice())[i] = row;
     }
     return (rows ?? data) as T;
   }
-  return normalizeBlankTypedRow(fields, data) as T;
+  return normalizeBlankTypedRow(fields, uniqueBlankColumns, data) as T;
 }
 
-function normalizeBlankTypedRow(fields: Record<string, FieldDef>, row: unknown): unknown {
+function normalizeBlankTypedRow(
+  fields: Record<string, FieldDef>,
+  uniqueBlankColumns: () => ReadonlySet<string>,
+  row: unknown,
+): unknown {
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
   for (const [name, value] of Object.entries(row)) {
     if (typeof value !== 'string' || !isMissing(value)) continue;
     // Own-property: a field name may be `constructor` / `valueOf`.
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
-    if (!def || !NON_TEXT_STORED_VALUE_TYPES.has(def.type)) continue;
+    if (!def) continue;
+    if (!NON_TEXT_STORED_VALUE_TYPES.has(def.type) && !(value === '' && uniqueBlankColumns().has(name))) continue;
     (out ??= { ...row })[name] = null;
   }
   return out ?? row;
+}
+
+/**
+ * [#29176] The text-like types whose `''` the write door stores as `null` on
+ * an optional column a unique constraint covers ({@link normalizeBlankTypedValues}).
+ *
+ * The spec's `STRING_VALUE_TYPES` — exactly the "text-like" row of the
+ * `$empty` operator's ruled table, where `''` and `null` already answer as one
+ * — read as the constant, never re-listed, minus the two credential types.
+ * ⛔ `password` and `secret` stay out: a maintainer ruling refuses `''` on them
+ * (`EmptyCredentialWriteError`) while `null` means "clear", so rewriting the
+ * blank here would turn that refusal into a silent clear.
+ *
+ * ⛔ Not `select` / `radio` / `lookup` / `user` and the other single-value
+ * string-stored types: the same `$empty` table reads their `''` as a value,
+ * so rewriting it would change an `is_empty` answer. That is a separate
+ * question from this one.
+ */
+const UNIQUE_BLANK_TEXT_TYPES: ReadonlySet<string> = new Set(
+  [...STRING_VALUE_TYPES].filter((t) => t !== 'password' && t !== 'secret'),
+);
+
+/**
+ * [#29176] The columns of one object whose `''` the write door stores as
+ * `null`: text-like ({@link UNIQUE_BLANK_TEXT_TYPES}), not `required: true`,
+ * not a lifecycle column the engine owns, and covered by a unique constraint
+ * on either surface the drivers build one from — a field's own `unique`, or a
+ * declared `indexes[]` entry whose `unique` asks for one. Both surfaces are
+ * read through `isUniqueDeclared`, the drivers' own predicate, so a column
+ * the store does not constrain is never rewritten.
+ */
+function optionalUniqueTextColumns(fields: Record<string, FieldDef>, indexes: unknown): ReadonlySet<string> {
+  const covered = new Set<string>();
+  for (const [name, def] of Object.entries(fields)) {
+    if (def && isUniqueDeclared(def.unique)) covered.add(name);
+  }
+  if (Array.isArray(indexes)) {
+    for (const idx of indexes) {
+      if (!isPlainRecord(idx) || !isUniqueDeclared(idx.unique) || !Array.isArray(idx.fields)) continue;
+      for (const name of idx.fields) if (typeof name === 'string') covered.add(name);
+    }
+  }
+  const out = new Set<string>();
+  for (const name of covered) {
+    if (SKIP_FIELDS.has(name)) continue;
+    // Own-property: a field name may be `constructor` / `valueOf`.
+    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
+    if (!def || def.required === true || !UNIQUE_BLANK_TEXT_TYPES.has(def.type)) continue;
+    out.add(name);
+  }
+  return out;
 }
 
 /**
@@ -851,6 +945,30 @@ function isPlainObjectValue(value: unknown): boolean {
  * driver copy. A value a `before*` hook writes after the door is the hook's
  * own and is not rewritten; the arm still judges it by the same grammar.
  *
+ * ## [#29241] The string arm's half: a number or a boolean on a text field
+ *
+ * The mirror case on the string-stored side. The record validator's string arm
+ * (`BOUNDED_STRING_FIELD_TYPES`, the spec's set: text, textarea, email, url,
+ * phone, password, markdown, html, richtext, code, signature, qrcode) judges a
+ * number or a boolean by its string reading, `String(value)`: `42` is bounded,
+ * domain-checked and format-checked as `'42'`, `true` as `'true'`. The write
+ * carried the raw scalar, so driver-memory stored and read back the number `42`
+ * while a TEXT column hands back a string: one write, two stored shapes, and
+ * an equality filter or a sort that differs by driver. This writes the string
+ * the arm judged, on the same fields the numeric half reads (the validator's
+ * walk, `readonly` included). A single write is admitted or refused exactly as
+ * before; what changes is the stored form, and with it every answer that reads
+ * the stored value. A `unique` text field's key now compares the string, so
+ * `42` after `"42"` is refused as a duplicate (and on SQLite, which stored
+ * `true` and `1` both as `'1.0'`, those two no longer collide), and a filter
+ * comparing the field to the number `42` no longer matches a row written as
+ * `42`.
+ *
+ * ⛔ Not touched: a string (judged and written as itself), `null` and a missing
+ * key, a plain object or an array (the arm refuses them, #29133), every other
+ * non-scalar, and every field outside the set — `json` and the structured
+ * types, the number and boolean fields, select and the reference types.
+ *
  * Same contract as {@link normalizeBlankTypedValues}: one record or an array of
  * them, pure — the same reference comes back when nothing changed, else a
  * shallow copy (per row, and a copied array).
@@ -876,15 +994,31 @@ function normalizeNumericStringRow(fields: Record<string, FieldDef>, row: unknow
   if (!isPlainRecord(row)) return row;
   let out: Record<string, unknown> | undefined;
   for (const [name, value] of Object.entries(row)) {
-    if (typeof value !== 'string') continue;
+    const isString = typeof value === 'string';
+    if (!isString && !isStringReadScalar(value)) continue;
     // Own-property: a field name may be `constructor` / `valueOf`.
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
-    if (!def || !isJudgedNumberType(def.type) || !isInReadonlyScope(name, def, 'include')) continue;
-    const n = parseNumericString(value);
-    if (n === undefined) continue;
-    (out ??= { ...row })[name] = n;
+    if (!def || !isInReadonlyScope(name, def, 'include')) continue;
+    if (isString) {
+      if (!isJudgedNumberType(def.type)) continue;
+      const n = parseNumericString(value);
+      if (n === undefined) continue;
+      (out ??= { ...row })[name] = n;
+    } else if (BOUNDED_STRING_FIELD_TYPES.has(def.type)) {
+      // [#29241] The string arm's reading of a number or a boolean.
+      (out ??= { ...row })[name] = String(value);
+    }
   }
   return out ?? row;
+}
+
+/**
+ * [#29241] A number or a boolean: the scalars the record validator's string arm
+ * judges by their string reading (`String(value)`), so the door writes that
+ * string into a text-family field ({@link normalizeNumericStringValues}).
+ */
+function isStringReadScalar(value: unknown): value is number | boolean {
+  return typeof value === 'number' || typeof value === 'boolean';
 }
 
 /**
@@ -1122,6 +1256,28 @@ function validateOne(
   if (BOUNDED_STRING_FIELD_TYPES.has(t)) {
     // A string type's stored shape is a string; everything below is a bound,
     // a domain or a format the author declared on top of it.
+    //
+    // [#29133] A plain object or an array is refused, never stringified. The
+    // arm used to judge `String(value)` while the write carried `value`, so
+    // `{ nested: true }` passed every bound (`"[object Object]"` is 15 chars)
+    // and reached the driver as sent, which stored its JSON text — on create,
+    // PATCH and the screen-flow resume alike. Neither shape is the spec's
+    // stored value for this class and neither has a string reading the author
+    // meant, so the arm refuses it with the number arm's #20309 posture: never
+    // silently alter a value. It is a SHAPE test, so it runs ahead of
+    // `shapeOnly`. A number or a boolean keeps its string reading, and
+    // [#29241] `normalizeNumericStringValues` has already written that string
+    // into the payload at the door, so the driver stores what was judged; a
+    // filter-operator object was already refused above, with its own sentence.
+    if (isPlainObjectValue(value) || Array.isArray(value)) {
+      return fail(
+        'invalid_type',
+        { type: t, detail: `expected a string, received ${Array.isArray(value) ? 'an array' : 'an object'}` },
+        // The ADR-0104 shape sentence the operator refusal above also uses:
+        // one catalog entry for "this value's SHAPE is wrong for this type".
+        'invalid_value_shape',
+      );
+    }
     if (shapeOnly) return null;
     const s = typeof value === 'string' ? value : String(value);
     if (def.maxLength !== undefined && s.length > def.maxLength) {

@@ -955,8 +955,9 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel} disabled={submitting}>{state.cancelText || t('actionDialog.cancel')}</Button>
+          <Button variant="outline" className="h-11 sm:h-10" onClick={handleCancel} disabled={submitting}>{state.cancelText || t('actionDialog.cancel')}</Button>
           <Button
+            className="h-11 sm:h-10"
             onClick={() => { void handleSubmit(); }}
             disabled={submitting || anyUploading || !!unresolvedKey}
             aria-busy={submitting || undefined}

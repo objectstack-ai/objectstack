@@ -37,6 +37,13 @@ const apiAction: InlineAction = {
   refreshAfter: true,
 };
 const namedModal: InlineAction = { name: 'open_upgrade', label: 'Upgrade', type: 'modal', target: 'upgrade_dialog' };
+// `description` follows the pick into the derived type, in both of its input shapes.
+const describedInvite: InlineAction = {
+  type: 'api',
+  target: '/api/v1/auth/organization/invite-member',
+  description: { en: 'Sends an invitation e-mail.', 'zh-CN': '发送邀请邮件。' },
+};
+const describedPlain: InlineAction = { type: 'url', target: '/docs', description: 'Opens the documentation.' };
 
 // ── What `InlineAction` refuses at compile time ──────────────────────────────────────────────
 
@@ -56,6 +63,8 @@ describe('InlineAction is an inline action body, not unknown', () => {
     ['a url action', urlAction],
     ['an api action with a static payload', apiAction],
     ['a named modal action', namedModal],
+    ['an api action with a locale-map description', describedInvite],
+    ['a url action with a plain description', describedPlain],
   ])('%s typed as InlineAction parses', (_label, body) => {
     expect(InlineActionSchema.safeParse(body).success).toBe(true);
   });

@@ -23,7 +23,7 @@ Query records with filtering, sorting, selection, and pagination.
 | `top` | query | Max records to return. No default — omitting it returns all matching records. |
 | `skip` | query | Offset |
 | `expand` | query | Comma-separated list of relations to eager-load. Must name a reference field (`lookup` / `master_detail` / `user` / `tree`) — otherwise `400 INVALID_FIELD`. |
-| `search` | query | Full-text search term, scanned case-insensitively across the object's searchable fields (its declared `searchableFields`, or a text-like auto-default when none are declared). When that set is empty — no `searchableFields` entry names a stored field, and the auto-default finds none — a non-blank term is `400 INVALID_FIELD`, never every row. |
+| `search` | query | Full-text search term, scanned case-insensitively across the object's searchable fields (its declared `searchableFields`, or, when none are declared, a text-like auto-default plus every field marked `searchable: true` except `secret` / `password` / `vector`). When that set is empty — no `searchableFields` entry names a stored field, and the auto-default finds none — a non-blank term is `400 INVALID_FIELD`, never every row. |
 | `searchFields` | query | Comma-separated subset of the searchable fields for `search` to scan — narrows the scan, never widens it. A name outside the searchable set is `400 INVALID_FIELD`. |
 
 > **Note:** OData-style `$`-prefixed parameters (`$filter`, `$select`, `$orderby`, `$top`, `$skip`, `$expand`, `$count`, `$search`) are also accepted directly on this same endpoint as aliases — they're normalized internally to the parameter names above. There is no separate standalone OData endpoint.
@@ -418,8 +418,9 @@ bare `CloneDataResponseSchema` body, no envelope. `droppedFields` appears only
 when the engine stripped a static `readonly` column from the copy — one the
 source row carried (a clone is the one create that holds a read-only value the
 caller never typed) or one supplied through `overrides` — and names the dropped
-keys; the clone still succeeded and the field re-derived its default. It rides
-the body only: this route sets no `X-ObjectStack-Dropped-Fields` header.
+keys; the clone still succeeded and the field re-derived its default. The
+`X-ObjectStack-Dropped-Fields` response header names the same fields, as on a
+single create.
 
 ---
 

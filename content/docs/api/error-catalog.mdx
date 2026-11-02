@@ -316,12 +316,15 @@ object is rejected with `400 VALIDATION_FAILED`, and the specifics ride in
 }
 ```
 
-The check covers create, update and bulk update. Three cases are deliberately
+The check covers create, update and bulk update. Four cases are deliberately
 *not* rejections: an empty value (`null` / `""` / `[]`) means "no link", a
 `isSystem` write is exempt (seed replay and package install legitimately write
-in an order that only resolves once the batch completes), and a target that
+in an order that only resolves once the batch completes), a target that
 cannot be checked at all — an unregistered object, an unreachable datasource —
-fails **open** rather than inventing a rejection.
+fails **open** rather than inventing a rejection, and an update that carries back
+a value (or a member of a multi-valued field) the row already stores is not
+judged again, because the update does not add it; on a bulk update that holds
+only when every matched row already stores it.
 </Callout>
 
 ### `DUPLICATE_VALUE`

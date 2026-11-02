@@ -20,8 +20,28 @@ import { markGuardRefusal } from './guard-refusal.js';
  * child flow record its `config.flowName` names — a DIFFERENT metadata record,
  * not in hand at parse — so refusing them by type would also refuse
  * `loop { map(synchronous child) }`, a shape that runs correctly today and that
- * #15616's regression suite pins. The pause is therefore knowable only at RUN
- * time, and only the run can refuse it.
+ * #15616's regression suite pins. The pause is therefore not knowable at parse
+ * time, and the parse cannot refuse it.
+ *
+ * ## The first door is the arming gate (#28897)
+ *
+ * The engine holds the child flows the parse does not, so it reads the pause
+ * before any run: `activateFlowTrigger`'s region half
+ * (`declineOntoRegionSuspendingCall`, reading through
+ * `subflow-region-guard.ts`) declines to arm a caller whose region-nested
+ * `subflow` / `map` calls a child that can suspend, with `/_status` cause
+ * `suspending_subflow_in_region`, and asks again whenever a flow those calls
+ * reach is registered. This refusal is the second door, for the runs that
+ * still get here: a direct execute, a flow with no trigger to arm, or a
+ * plugin-registered pausing type the gate cannot read. When it fires on a
+ * `subflow` / `map`, `runRegion` also cancels the child run that node parked,
+ * so nothing is left parked under a run that failed.
+ *
+ * The un-routability below holds inside the run that met the refusal. One call
+ * level up it does not, on purpose ([#29166], seat ruling record 6576815635,
+ * option B): when this refusal fails a CHILD run, its caller's `subflow` /
+ * `map` node meets an ordinary child failure, routable like any other, and
+ * the arming gate does not decline that caller. See `subflow-region-guard.ts`.
  *
  * ## Why a dedicated error and not the plain `Error` this replaces
  *

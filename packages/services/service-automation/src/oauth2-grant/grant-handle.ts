@@ -50,19 +50,28 @@ import { ConnectorUpstreamUnavailableError } from '@objectstack/spec/integration
 import type { ILock } from '@objectstack/spec/contracts';
 import type { ConnectorConnectionRecord, ConnectorConnectionStore } from '../connector-connections.js';
 import { OAuth2GrantRefusedError, requestOAuth2Token, type OAuth2Client, type OAuth2TokenResponse } from './token-endpoint.js';
-import { parseMcpAuthorizationClient } from './mcp-authorization.js';
+import { parseKeptConnectionClient } from './installer-client.js';
 
 /**
  * What an `oauth2` instance's handle needs from its declaration, already
  * judged servable. An `authorization_code` instance whose endpoints or client
  * the MCP authorization flow discovers (ADR-0143 D2.1) declares neither
  * `tokenUrl` nor `clientId`: each connection then keeps its own client
- * (`registered_client`), which its refreshes use.
+ * (`registered_client`), which its refreshes use. So does an instance that
+ * declares `clientSource: 'installer'` (the 2026-11-02 amendment): the
+ * administrator entered each connection's client, and it declares none.
  */
 export interface OAuth2GrantConfig {
     readonly grant: 'authorization_code' | 'client_credentials';
     readonly tokenUrl?: string;
     readonly clientId?: string;
+    /**
+     * `'installer'`: every connection authorizes with the client its
+     * administrator entered, and with nothing else — never a client a
+     * connection kept from a discovery or registration under an earlier
+     * declaration. Without it, a kept installer's client is never used either.
+     */
+    readonly clientSource?: 'installer';
     /** The resolved client secret; absent for a public `authorization_code` client. */
     readonly clientSecret?: string;
     readonly scopes?: readonly string[];
@@ -78,11 +87,12 @@ export interface OAuth2GrantHandleDeps {
     /** The cluster lock, when the deployment has a cluster service. Read at refresh time. */
     readonly lock?: () => ILock | undefined;
     /**
-     * Told when the authorization server refused an organization's grant and
-     * the connection was marked `reconnect_required`, so the plugin re-judges
+     * Told when a refresh marked an organization's connection
+     * `reconnect_required`, with the `reason` it stored (whose cause is the
+     * one that happened on that path), so the plugin logs it and re-judges
      * the instance. A throw here is the listener's own.
      */
-    readonly onGrantRefused?: (organizationId: string) => void;
+    readonly onGrantRefused?: (organizationId: string, reason: string) => void;
     readonly timeoutMs?: number;
     readonly fetch?: typeof fetch;
     readonly now?: () => number;
@@ -153,6 +163,15 @@ export function reconnectRequiredReason(
     return `connector instance '${connector}' needs to be reconnected for organization '${organizationId}': `
         + `${RECONNECT_REQUIRED_CAUSES[cause]}. Reconnect required: an administrator connects it again, and the next dispatch `
         + 'uses the new connection (ADR-0143 D4)';
+}
+
+/**
+ * The dispatch refusal of a connection already marked `reconnect_required`:
+ * the reason the row stores, whose cause is the one that marked it, and the
+ * authorization server's refusal only for a row that stores none.
+ */
+function markedReason(connector: string, record: ConnectorConnectionRecord): string {
+    return record.statusReason ?? reconnectRequiredReason(connector, record.organizationId);
 }
 
 /** Create the handle of one `oauth2` instance. */
@@ -235,7 +254,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
             throw unavailable(`the connection of connector instance '${connector}' could not be read now; the next dispatch retries`);
         }
         if (!record) throw unavailable(notConnectedReason(connector, organizationId));
-        if (record.status === 'reconnect_required') throw unavailable(reconnectRequiredReason(connector, record.organizationId));
+        if (record.status === 'reconnect_required') throw unavailable(markedReason(connector, record));
         return record;
     };
 
@@ -248,7 +267,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
             /* the refusal stands either way; the row is re-judged on the next dispatch */
         }
         try {
-            deps.onGrantRefused?.(record.organizationId);
+            deps.onGrantRefused?.(record.organizationId, reason);
         } catch {
             /* the listener's throw is its own */
         }
@@ -258,7 +277,10 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
     /**
      * Where `record`'s refresh is sent, and as which client: the declared ones,
      * else the client the connection keeps (an MCP instance's discovered or
-     * registered one); `undefined` when it keeps none it can be read back as.
+     * registered one, or the installer's); `undefined` when it keeps none it
+     * can be read back as, or one of the other kind than the declaration says
+     * (an installer's client under a declaration that no longer takes one,
+     * or the reverse).
      */
     const endpointOf = async (
         record: ConnectorConnectionRecord,
@@ -273,12 +295,15 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
             throw unavailable(`the connection of connector instance '${connector}' for organization '${record.organizationId}' could `
                 + 'not be read back now; the next dispatch retries');
         }
-        const kept = parseMcpAuthorizationClient(text);
-        if (!kept) return undefined;
+        const kept = parseKeptConnectionClient(text);
+        if (!kept || kept.installer !== (config.clientSource === 'installer')) return undefined;
+        const tokenUrl = config.tokenUrl ?? kept.tokenUrl;
+        if (tokenUrl === undefined) return undefined;
+        const resource = config.resource ?? kept.resource;
         return {
-            tokenUrl: config.tokenUrl ?? kept.tokenUrl,
+            tokenUrl,
             client: declaredClient ?? { clientId: kept.clientId, ...(kept.clientSecret === undefined ? {} : { clientSecret: kept.clientSecret }) },
-            resource: config.resource ?? kept.resource,
+            ...(resource === undefined ? {} : { resource }),
         };
     };
 
@@ -286,7 +311,7 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
     const refreshOnce = async (organizationId: string): Promise<CachedToken> => {
         const current = await deps.connections.read(organizationId, connector);
         if (!current) throw unavailable(notConnectedReason(connector, organizationId));
-        if (current.status === 'reconnect_required') throw unavailable(reconnectRequiredReason(connector, organizationId));
+        if (current.status === 'reconnect_required') throw unavailable(markedReason(connector, current));
         let refreshToken: string | undefined;
         try {
             refreshToken = await deps.connections.resolveRefreshToken(current);

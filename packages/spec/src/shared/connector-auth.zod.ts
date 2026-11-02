@@ -341,10 +341,8 @@ const OAUTH2_GUIDANCE: Readonly<Record<string, string>> = {
  *    refused below, and a `clientId` beside `clientSource` is refused by
  *    `DeclarativeConnectorEntrySchema` with the other client-key rules. This
  *    is the form for an app installed on deployments its publisher never sees.
- *    Declared before it is served: the key carries `[PLANNED — not enforced]`
- *    until the automation service reads the installer's client from the
- *    connection, and the liveness ledger's `connector/auth` row says so,
- *    because the walker does not descend into this union.
+ *    The automation service's connect door takes the client from the
+ *    administrator and keeps it in the connection record.
  *  - **Dynamic registration** — neither, on `provider: 'mcp'` over http: the
  *    provider runs the MCP authorization flow and registers a client per
  *    connection.
@@ -369,17 +367,12 @@ export const ConnectorInstanceOAuth2AuthorizationCodeAuthSchema = lazySchema(() 
   authorizationUrl: z.string().url().optional().describe(
     'Authorization endpoint. Required (except `provider: \'mcp\'` over http, which discovers it).',
   ),
-  // Declared before it is served: the marker comes off when the server slice
-  // (#28866) reads the installer's client from the connection, together with
-  // the sentence on the `connector/auth` row of packages/spec/liveness/connector.json.
   clientSource: z.enum(['installer']).optional().describe(
-    "[PLANNED — not enforced] Where the OAuth client comes from. `'installer'`: the administrator of each deployment "
-      + "registers their own client with the vendor, against that deployment's callback, and enters its id and secret on "
-      + "the instance's connection, so the definition names no `clientId` and no `credentialRef`. Omit it to name a "
-      + "pre-registered `clientId` here, or to let `provider: 'mcp'` over http register a client. Not served yet: the "
-      + 'automation service reads it once the server half of the ADR-0143 D2.1 amendment lands. Until then, off '
-      + "`provider: 'mcp'` over http, an instance that declares it is held degraded for a missing `clientId`; on "
-      + "`provider: 'mcp'` over http the provider registers a client dynamically instead of taking the installer's.",
+    "Where the OAuth client comes from. `'installer'`: the administrator of each deployment registers their own client "
+      + "with the vendor, against that deployment's callback, and enters its id and secret on the instance's connection, "
+      + "so the definition names no `clientId` and no `credentialRef`. Omit it to name a pre-registered `clientId` here, or "
+      + "to let `provider: 'mcp'` over http register a client. The connection keeps the client encrypted, and every "
+      + 'authorization, code exchange and refresh of that connection uses it (ADR-0143 D2.1).',
   ),
   credentialRef: z.string().min(1).optional().describe(
     'Secrets-layer reference resolved to the client secret of a pre-registered client (requires `clientId`). Omit for a '

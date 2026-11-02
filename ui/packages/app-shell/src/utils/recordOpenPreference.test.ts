@@ -9,12 +9,12 @@
 /**
  * objectstack#26677 — the reader's record-open preference, read side.
  *
- * `split` left `NavigationModeSchema`: the side-by-side pane is a reader's own
- * choice, kept per browser under `os:record-open-mode`. These rows pin what
- * the console reads: the values it knows, and the default for everything
- * else — no value, an unknown one, no storage, a storage that throws.
- * objectstack#27545: the default is the split pane, and `page` (the Display
- * menu's 「Full page」) is a value it knows.
+ * How a drawer-mode record opens is a reader's own choice, kept per browser
+ * under `os:record-open-mode`. These rows pin what the console reads: the
+ * values it knows, and the default for everything else — no value, an
+ * unknown one, no storage, a storage that throws. objectstack#28915: the
+ * drawer is the default, the split pane retired, and a stored `split` is an
+ * unknown value like any other (no compatibility read).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -30,32 +30,32 @@ const storageWith = (value: string | null) => ({ getItem: (key: string) => (key 
 describe('readRecordOpenPreference (objectstack#26677)', () => {
   it('the key and the default are the ones the Display-menu control will write against', () => {
     expect(RECORD_OPEN_PREFERENCE_KEY).toBe('os:record-open-mode');
-    expect(DEFAULT_RECORD_OPEN_PREFERENCE).toBe('split');
+    expect(DEFAULT_RECORD_OPEN_PREFERENCE).toBe('drawer');
   });
 
-  it('reads the three values it knows', () => {
-    expect(readRecordOpenPreference(storageWith('split'))).toBe('split');
+  it('reads the two values it knows', () => {
     expect(readRecordOpenPreference(storageWith('drawer'))).toBe('drawer');
     expect(readRecordOpenPreference(storageWith('page'))).toBe('page');
   });
 
-  it('answers the split pane for no value, an unknown value, or a retired mode name', () => {
-    expect(readRecordOpenPreference(storageWith(null))).toBe('split');
-    expect(readRecordOpenPreference(storageWith('modal'))).toBe('split');
-    expect(readRecordOpenPreference(storageWith('SPLIT'))).toBe('split');
+  it('answers the drawer for no value, an unknown value, or a retired mode name — a stored `split` included', () => {
+    expect(readRecordOpenPreference(storageWith(null))).toBe('drawer');
+    expect(readRecordOpenPreference(storageWith('split'))).toBe('drawer');
+    expect(readRecordOpenPreference(storageWith('modal'))).toBe('drawer');
+    expect(readRecordOpenPreference(storageWith('PAGE'))).toBe('drawer');
   });
 
-  it('answers the split pane with no storage, and with a storage that throws', () => {
-    expect(readRecordOpenPreference(null)).toBe('split');
+  it('answers the drawer with no storage, and with a storage that throws', () => {
+    expect(readRecordOpenPreference(null)).toBe('drawer');
     const throwing = { getItem: () => { throw new Error('SecurityError'); } };
-    expect(readRecordOpenPreference(throwing)).toBe('split');
+    expect(readRecordOpenPreference(throwing)).toBe('drawer');
   });
 
-  it('with no `window` at all (SSR — this file runs in the node project), the default storage is absent: the split pane', () => {
+  it('with no `window` at all (SSR — this file runs in the node project), the default storage is absent: the drawer', () => {
     // The browser's own `localStorage` is read by the console's object page;
     // `ObjectView.recordOpenPreference-26677.test.tsx` drives that path.
     expect(typeof window).toBe('undefined');
-    expect(readRecordOpenPreference()).toBe('split');
+    expect(readRecordOpenPreference()).toBe('drawer');
   });
 });
 
@@ -71,18 +71,17 @@ describe('writeRecordOpenPreference (objectstack#26681)', () => {
 
   it('keeps the choice under the key the read side reads', () => {
     const storage = memoryStorage();
-    writeRecordOpenPreference('split', storage);
-    expect(storage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('split');
-    expect(readRecordOpenPreference(storage)).toBe('split');
-    writeRecordOpenPreference('drawer', storage);
-    expect(readRecordOpenPreference(storage)).toBe('drawer');
     writeRecordOpenPreference('page', storage);
+    expect(storage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('page');
     expect(readRecordOpenPreference(storage)).toBe('page');
+    writeRecordOpenPreference('drawer', storage);
+    expect(storage.getItem(RECORD_OPEN_PREFERENCE_KEY)).toBe('drawer');
+    expect(readRecordOpenPreference(storage)).toBe('drawer');
   });
 
   it('writes nothing and throws nothing with no storage, or with a storage that refuses the write', () => {
-    expect(() => writeRecordOpenPreference('split', null)).not.toThrow();
+    expect(() => writeRecordOpenPreference('page', null)).not.toThrow();
     const refusing = { setItem: () => { throw new Error('QuotaExceededError'); } };
-    expect(() => writeRecordOpenPreference('split', refusing)).not.toThrow();
+    expect(() => writeRecordOpenPreference('page', refusing)).not.toThrow();
   });
 });

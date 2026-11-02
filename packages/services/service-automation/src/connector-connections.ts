@@ -29,8 +29,19 @@ export const CONNECTOR_CONNECTION_OBJECT = 'sys_connector_connection';
 /** Its `type: 'secret'` column. */
 export const CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD = 'refresh_token';
 
-/** The encrypted field holding the client an MCP authorization flow discovered or registered (ADR-0143 D2.1). */
+/**
+ * The encrypted field holding the client a connection authorizes with when the
+ * instance declares none (ADR-0143 D2.1): the one an MCP authorization flow
+ * discovered or registered, or the one the administrator entered for an
+ * instance declaring `clientSource: 'installer'` (2026-11-02 amendment).
+ */
 export const CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD = 'registered_client';
+
+/** The installer's client id, in plain text beside the encrypted client: what a read shows. Never a secret. */
+export const CONNECTOR_CONNECTION_CLIENT_ID_FIELD = 'client_id';
+
+/** Whether the installer's client came with a secret (kept only inside the encrypted client). */
+export const CONNECTOR_CONNECTION_CLIENT_HAS_SECRET_FIELD = 'client_has_secret';
 
 /** A connection's status (`not connected` is the absence of a row). */
 export type ConnectorConnectionRowStatus = 'connected' | 'reconnect_required';
@@ -52,8 +63,17 @@ export interface ConnectorConnectionRecord {
     revision: number;
     /** Whether a refresh token is stored — never what it is. */
     hasRefreshToken: boolean;
-    /** Whether the row keeps a discovered or registered client (an MCP instance's connection). */
+    /** Whether the row keeps a client of its own: discovered or registered (an MCP instance's connection), or the installer's. */
     hasRegisteredClient: boolean;
+    /**
+     * The id of the client the administrator entered (`clientSource:
+     * 'installer'`, ADR-0143 D2.1), from the plain column; absent for any
+     * other connection. The client itself is read only through
+     * {@link ConnectorConnectionStore.resolveRegisteredClient}.
+     */
+    installerClientId?: string;
+    /** Whether that client came with a secret — never what it is. */
+    installerClientHasSecret: boolean;
     connectedAt?: string;
     connectedBy?: string;
 }
@@ -62,7 +82,8 @@ export interface ConnectorConnectionRecord {
 const RECORD_FIELDS = [
     'id', 'organization_id', 'connector_name', 'status', 'status_reason', 'scopes', 'expires_at',
     'revision', 'connected_at', 'connected_by', CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD,
-    CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD,
+    CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD, CONNECTOR_CONNECTION_CLIENT_ID_FIELD,
+    CONNECTOR_CONNECTION_CLIENT_HAS_SECRET_FIELD,
 ];
 
 function toRecord(row: Record<string, unknown>): ConnectorConnectionRecord | undefined {
@@ -84,6 +105,11 @@ function toRecord(row: Record<string, unknown>): ConnectorConnectionRecord | und
         revision: Number.isFinite(revision) ? revision : 0,
         hasRefreshToken: typeof masked === 'string' && masked.length > 0,
         hasRegisteredClient: typeof maskedClient === 'string' && maskedClient.length > 0,
+        ...(optionalText(row[CONNECTOR_CONNECTION_CLIENT_ID_FIELD]) === undefined
+            ? {}
+            : { installerClientId: optionalText(row[CONNECTOR_CONNECTION_CLIENT_ID_FIELD]) }),
+        installerClientHasSecret: row[CONNECTOR_CONNECTION_CLIENT_HAS_SECRET_FIELD] === true
+            || row[CONNECTOR_CONNECTION_CLIENT_HAS_SECRET_FIELD] === 1,
         connectedAt: optionalText(row.connected_at),
         connectedBy: optionalText(row.connected_by),
     };
@@ -236,12 +262,21 @@ export class ConnectorConnectionStore {
     /**
      * Store what a completed connect produced for `(organizationId,
      * connectorName)`, replacing any earlier connection there (a reconnect),
-     * and raise its revision. `registeredClient` is the serialized client an
-     * MCP authorization flow discovered or registered, kept encrypted beside
-     * the refresh token it authorizes.
+     * and raise its revision. `registeredClient` is the serialized client the
+     * connection authorizes with (one an MCP authorization flow discovered or
+     * registered, or the installer's), kept encrypted beside the refresh token
+     * it authorizes. `installerClient` repeats the installer's client id, and
+     * whether it has a secret, in the plain columns a read shows — never the
+     * secret, which is only inside `registeredClient`.
      */
     async connect(
-        args: { organizationId: string; connectorName: string; userId?: string; registeredClient?: string } & ConnectorGrantWrite,
+        args: {
+            organizationId: string;
+            connectorName: string;
+            userId?: string;
+            registeredClient?: string;
+            installerClient?: { clientId: string; hasSecret: boolean };
+        } & ConnectorGrantWrite,
     ): Promise<ConnectorConnectionRecord> {
         const engine = this.engineOrThrow(`Connector instance '${args.connectorName}' was not connected`);
         const existing = await this.readOrRefuse(args.organizationId, args.connectorName);
@@ -250,6 +285,8 @@ export class ConnectorConnectionStore {
             grant: 'authorization_code',
             [CONNECTOR_CONNECTION_REFRESH_TOKEN_FIELD]: args.refreshToken ?? null,
             [CONNECTOR_CONNECTION_REGISTERED_CLIENT_FIELD]: args.registeredClient ?? null,
+            [CONNECTOR_CONNECTION_CLIENT_ID_FIELD]: args.installerClient?.clientId ?? null,
+            [CONNECTOR_CONNECTION_CLIENT_HAS_SECRET_FIELD]: args.installerClient?.hasSecret ?? false,
             status: 'connected',
             status_reason: null,
             scopes: args.scopes ?? null,

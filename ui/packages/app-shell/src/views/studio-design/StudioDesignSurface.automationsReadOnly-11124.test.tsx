@@ -213,6 +213,32 @@ describe('Automations pillar on a read-only package (objectui#11124)', () => {
     const label = await inspectStartNode();
     expect(label).toBeDisabled();
     expect(within(screen.getByRole('complementary')).getByLabelText('ID')).toBeDisabled();
+    // objectstack#28985 — the pillar hands the inspector the package's reason,
+    // and the inspector body is the tab stop described by it.
+    const body = screen.getByTestId('flow-node-readonly-reason');
+    expect(body).toContainElement(label);
+    expect(body).toHaveAttribute('tabindex', '0');
+    expect(body).toHaveAccessibleDescription(READ_ONLY_REASON);
+  });
+
+  it('a selected connection opens read-only, and its inspector carries the package reason (objectstack#29077)', async () => {
+    renderPillar(true);
+    await openFlow();
+
+    const hit = [...document.querySelectorAll('path > title')].find((el) => el.textContent === 'Start → End');
+    expect(hit, 'the canvas must render the start → end connection').toBeTruthy();
+    fireEvent.click(hit!.parentElement!);
+    const rail = screen.getByRole('complementary');
+    const remove = await within(rail).findByRole(
+      'button',
+      { name: t('engine.inspector.flowEdge.remove', 'en') },
+      { timeout: 8000 },
+    );
+    expect(remove).toBeDisabled();
+    const body = screen.getByTestId('flow-edge-readonly-reason');
+    expect(body).toContainElement(remove);
+    expect(body).toHaveAttribute('tabindex', '0');
+    expect(body).toHaveAccessibleDescription(READ_ONLY_REASON);
   });
 
   it('offers no canvas edit: no "add connected node" or "insert node" handle', async () => {
@@ -256,6 +282,7 @@ describe('Automations pillar on a writable package — the control (objectui#111
 
     const label = await inspectStartNode();
     expect(label).toBeEnabled();
+    expect(screen.queryByTestId('flow-node-readonly-reason')).toBeNull();
 
     fireEvent.click(toggle);
     await waitFor(() => expect(server.saves).toHaveLength(1), { timeout: 8000 });

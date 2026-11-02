@@ -12,8 +12,9 @@
  * This file finds every reader of the whole object list off the metadata
  * context in the packages' and the console's source (a `{ objects }`
  * destructured from `useMetadata()`, `useMetadata().objects`, `.objects` on a
- * binding of `useMetadata()`, or `getItemsByType('object')`, which holds the
- * same list as served), and fails on a reader the table below does not
+ * binding of `useMetadata()`, `getItemsByType('object')`, which holds the
+ * same list as served, or `readObjectsByName(…)`, which reads it once it is
+ * loaded), and fails on a reader the table below does not
  * classify, and on a row that names no reader. Each row says where the reader
  * runs:
  *
@@ -21,6 +22,8 @@
  *     only where no package scopes the read;
  *   - `action`: it reads `objects` only when an action needs it, after
  *     `ensureType('object')`;
+ *   - `byName`: it reads the objects it names by name (`readObjectsByName`,
+ *     objectstack#29121), and `objects` only once something else loaded it;
  *   - `off`: it is not mounted on an app's object-list open, and keeps the
  *     whole registry (the control: its own pins stay unchanged).
  *
@@ -43,7 +46,7 @@ import ts from 'typescript';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, '..', '..', '..', '..', '..');
 
-type Kind = 'scope' | 'action' | 'off';
+type Kind = 'scope' | 'action' | 'byName' | 'off';
 
 /** Every reader of `objects` off the metadata context, and where it runs. */
 const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
@@ -53,7 +56,7 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   },
   'packages/app-shell/src/hooks/useNavMemberGates.ts': {
     kind: 'scope',
-    why: "the capability gate reads the app's scope; with no app package (the home feeds) it reads objects",
+    why: "the capability gate reads the app's scope; outside an app (the home feeds) the app list's required objects by name (objectstack#29121)",
   },
   'packages/app-shell/src/hooks/useServedViewItems.ts': {
     kind: 'scope',
@@ -61,7 +64,7 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   },
   'packages/app-shell/src/hooks/useObjectPresence.ts': {
     kind: 'scope',
-    why: "an object's presence (the bell's sys_activity feed) is asked by name through the app scope, until something loads the whole registry",
+    why: "an object's presence (the bell's and Home's sys_activity feed) is asked by name, through the app scope inside an app, until something loads the whole registry; it also holds readObjectsByName",
   },
   'packages/app-shell/src/views/appReportIndex.ts': {
     kind: 'scope',
@@ -73,13 +76,22 @@ const OBJECTS_READERS: Record<string, { kind: Kind; why: string }> = {
   },
   'packages/app-shell/src/hooks/useConsoleActionRuntime.tsx': { kind: 'off', why: 'read inside action handlers, when an action runs' },
   'packages/plugin-grid/src/ObjectGrid.tsx': { kind: 'off', why: 'read inside an action handler, when an action runs' },
-  'packages/app-shell/src/hooks/useNavTargetLabel.ts': { kind: 'off', why: 'read when a label is resolved for a nav entry without its own label, or a view entry' },
-  'packages/app-shell/src/hooks/useRecentItemLabel.ts': { kind: 'off', why: 'read when a recent object or view entry is labelled' },
-  'packages/app-shell/src/layout/ActivityObjectLabel.tsx': { kind: 'off', why: "the inbox and the home rail's activity rows" },
+  'packages/app-shell/src/hooks/useNavTargetLabel.ts': {
+    kind: 'off',
+    why: 'read when a label is resolved for a nav entry without its own label, or a view entry; with { byName: true } (Home, recent rows) the object is read by name',
+  },
+  'packages/app-shell/src/hooks/useRecentItemLabel.ts': { kind: 'byName', why: "a recent object or view entry's object, by name (objectstack#29121)" },
+  'packages/app-shell/src/layout/ActivityObjectLabel.tsx': { kind: 'byName', why: "the inbox's and the home rail's activity rows, each row's object by name (objectstack#29121)" },
   'packages/app-shell/src/chrome/CommandPalette.tsx': { kind: 'off', why: "the Studio scope's object list, read while the palette lists Studio entries" },
-  'packages/app-shell/src/console/home/HomeLayout.tsx': { kind: 'off', why: 'the home page, outside any app' },
-  'packages/app-shell/src/console/home/HomePage.tsx': { kind: 'off', why: 'the home page, outside any app' },
-  'packages/app-shell/src/views/DashboardView.tsx': { kind: 'off', why: "a dashboard route: its widgets' objects" },
+  'packages/app-shell/src/console/home/HomeLayout.tsx': {
+    kind: 'scope',
+    why: "Home's command palette, mounted from its first open: the host app's scope over its navigation's objects (objectstack#29121)",
+  },
+  'packages/app-shell/src/console/home/HomePage.tsx': { kind: 'byName', why: "Home's recent record rows, each row's object by name (objectstack#29121)" },
+  'packages/app-shell/src/views/DashboardView.tsx': {
+    kind: 'scope',
+    why: "a dashboard route asks its widgets' objects by name (readDashboardWidgetObjects); a context without readObjectScope reads objects",
+  },
   'packages/app-shell/src/views/ReportView.tsx': { kind: 'off', why: "a report route: its columns' objects" },
   'packages/app-shell/src/views/PageView.tsx': {
     kind: 'scope',
@@ -133,7 +145,7 @@ const isUseMetadataCall = (node: ts.Node | undefined): boolean =>
 /** Whether the module reads `objects` off the metadata context, by any of the three spellings. */
 function readsObjects(path: string): boolean {
   const source = readFileSync(path, 'utf8');
-  if (!source.includes('useMetadata(')) return false;
+  if (!source.includes('useMetadata(') && !source.includes('readObjectsByName(')) return false;
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, path.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   const bindings = new Set<string>();
   let found = false;
@@ -165,6 +177,8 @@ function readsObjects(path: string): boolean {
         (ts.isIdentifier(callee) && bindings.has(`fn:${callee.text}`))
       ) found = true;
     }
+    // objectstack#29121 — `readObjectsByName(…)` reads the whole list once it is loaded.
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'readObjectsByName') found = true;
     ts.forEachChild(node, access);
   };
   access(file);
@@ -201,11 +215,12 @@ describe('the readers of `useMetadata().objects`, each classified (objectui#1281
     expect(found).toEqual(Object.keys(OBJECTS_READERS).sort());
   });
 
-  it('an open-path reader reads the scope, and an action-time reader waits for the list', () => {
+  it('an open-path reader reads the scope, an action-time reader waits for the list, and a by-name reader reads by name', () => {
     for (const [path, { kind }] of Object.entries(OBJECTS_READERS)) {
       const source = readFileSync(join(REPO_ROOT, path), 'utf8');
       if (kind === 'scope') expect(source, path).toContain('readObjectScope');
       if (kind === 'action') expect(source, path).toContain("ensureType('object')");
+      if (kind === 'byName') expect(source, path).toContain('readObjectsByName');
     }
   });
 });

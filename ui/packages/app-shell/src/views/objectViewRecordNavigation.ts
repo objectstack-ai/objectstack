@@ -31,6 +31,7 @@ import type { ViewNavigationConfig } from '@object-ui/types';
 import { RECORD_DRAWER_PARAM } from '../urlParams.js';
 import { viewTabLabel } from './viewTabLabel.js';
 import { listRecordDetailUrl, listRecordActionsValue } from './objectViewRecordLinks.js';
+import { RECORD_PAGE_PUSHED_STATE } from './recordPagePush.js';
 import {
     expandedRecordPath,
     recordDrawerReturnState,
@@ -238,6 +239,12 @@ export function useObjectViewRecordNavigation({
                 label: listLabel,
                 ...(set ?? {}),
               },
+              // A phone pushes the page over its list, so the page's 「‹」
+              // goes back in the history to that list entry, as a page a
+              // related row pushes does (objectstack#29074). Not on a
+              // replace: the drawer link a phone answers takes the list's
+              // place, so there is no list entry below to go back to.
+              ...(phone && !replace ? { [RECORD_PAGE_PUSHED_STATE]: true } : {}),
             };
             if (viewId) {
                 navigate(`../../record/${encodeURIComponent(String(recordId))}`, { relative: 'path', state: originState, replace });
@@ -245,7 +252,7 @@ export function useObjectViewRecordNavigation({
                 navigate(`record/${encodeURIComponent(String(recordId))}`, { state: originState, replace });
             }
         },
-        [navigate, viewId, listLabel]
+        [navigate, viewId, listLabel, phone]
     );
     /**
      * The list surface's half of the record-link mechanism (objectui#4490):
@@ -315,7 +322,7 @@ export function useObjectViewRecordNavigation({
                         navigateTo(id);
                         return;
                     }
-                    // Drawer and split → URL is the source of truth. Push
+                    // Drawer → URL is the source of truth. Push
                     // `?recordId=…` and let the URL-sync effect open the pane;
                     // a row clicked while it is open swaps its root record.
                     const next = new URLSearchParams(params);
