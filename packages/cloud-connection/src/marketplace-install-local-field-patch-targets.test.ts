@@ -75,10 +75,18 @@ function makeC(body: any) {
  * A real registry holding the installed vendor object, and — when `region` is
  * set — an installed extension that adds `crm_account.region`.
  */
-function installedObjects({ region = false } = {}): SchemaRegistry {
+function installedObjects({ region = false, takeover = false } = {}): SchemaRegistry {
     const reg = new SchemaRegistry({ multiTenant: false, searchCompanion: false } as never);
     reg.logLevel = 'silent';
     reg.registerObject(structuredClone(ACCOUNT) as any, BASE, undefined, 'own');
+    if (takeover) {
+        // [#28809] An installed extension that takes `industry` over through
+        // `fields`, adding the option `finance` the owner does not declare.
+        reg.registerObject(
+            { name: ACCOUNT.name, fields: { industry: { ...ACCOUNT.fields.industry, options: [...ACCOUNT.fields.industry.options, { value: 'finance', label: 'Finance' }] } } } as any,
+            'com.example.crm-industry', undefined, 'extend', 100,
+        );
+    }
     if (region) {
         reg.registerObject(
             { name: ACCOUNT.name, fields: { region: { type: 'text', label: 'Region' } } } as any,
@@ -190,6 +198,17 @@ describe('install-local 2e — the field-patch target check (ADR-0146 D10)', () 
         expect(res.payload.error.details.refusals[0]).toMatchObject({ object: 'crm_account', field: 'region', reason: 'field' });
         expect(h.installRegistrations()).toEqual([]);
         expect(h.syncs()).toBe(0);
+    });
+
+    it('[#28809] refuses a patch of an option only another installed extension adds by redeclaring the owner field, as the fold leaves it unapplied', async () => {
+        const objects = installedObjects({ takeover: true });
+        // The resolved object does carry the option; the owner does not declare it.
+        expect((objects.getObject(ACCOUNT.name) as any).fields.industry.options.map((o: any) => o.value)).toContain('finance');
+        const h = await mount(dir, objects);
+        const res = await h.install({ manifest: extensionPackage({ industry: { options: { finance: { label: 'Banking' } } } }) });
+        expectRefusal(res, ['objectExtensions[0].fieldPatches.industry.options.finance']);
+        expect(res.payload.error.details.refusals[0]).toMatchObject({ object: 'crm_account', field: 'industry', option: 'finance', reason: 'option' });
+        expect(h.installRegistrations()).toEqual([]);
     });
 
     it('…while a patch of the owner\'s own field installs beside that extension', async () => {
