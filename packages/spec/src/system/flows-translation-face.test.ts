@@ -106,6 +106,9 @@ const RUNNER_SLOTS: Readonly<Record<string, Disposition>> = {
   'flow.variables[].name': noReader('a variable name — the binding a screen field or node writes to'),
   'flow.variables[].type': noReader('a data-type token'),
   'flow.variables[].defaultValue': noReader('a value the run binds, not text it shows'),
+  // [#29442] Read by the start doors, which load the input from that object; the
+  // object's own labels are translated under `objects.<object>`.
+  'flow.variables[].objectName': noReader('an object name — the object a start input declared a record id is loaded from'),
   'flow.edges[].id': noReader('an edge id'),
   'flow.edges[].source': noReader('a node id the edge leaves'),
   'flow.edges[].target': noReader('a node id the edge enters'),
