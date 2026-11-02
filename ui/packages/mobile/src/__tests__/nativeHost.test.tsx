@@ -17,7 +17,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, cleanup, act } from '@testing-library/react';
 import {
   NATIVE_HOST_GLOBAL,
@@ -45,8 +45,8 @@ import {
 const ALL_METHODS: NativeHostMethod[] = ['getPushToken', 'haptic', 'openExternal', 'navigate', 'resetServer'];
 
 function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackNative & {
-  ready: ReturnType<typeof vi.fn>;
-  routeChanged: ReturnType<typeof vi.fn>;
+  ready: Mock<() => void>;
+  routeChanged: Mock<(route: string) => void>;
 } {
   return {
     version: 1,
@@ -60,8 +60,8 @@ function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackN
     openExternal: vi.fn(async () => null),
     navigate: vi.fn(async () => null),
     resetServer: vi.fn(async () => null),
-    ready: vi.fn(),
-    routeChanged: vi.fn(),
+    ready: vi.fn<() => void>(),
+    routeChanged: vi.fn<(route: string) => void>(),
   };
 }
 
