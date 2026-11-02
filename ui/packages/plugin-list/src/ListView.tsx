@@ -15,7 +15,13 @@ import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCo
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
-import { ViewSettingsPopover, type ViewSettingsRecordOpen } from './components/ViewSettingsPopover';
+import {
+  ViewSettingsPopover,
+  type ViewSettingsRecordOpen,
+  PHONE_POPOVER_GUTTER,
+  PHONE_TOUCH_TARGET,
+  useBelowSm,
+} from './components/ViewSettingsPopover';
 import { UserFilters } from './UserFilters';
 import {
   calendarWindowCovers,
@@ -2577,6 +2583,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const handlePullRefresh = React.useCallback(async () => {
     setRefreshKey(k => k + 1);
   }, []);
+
+  // Below `sm` the Filter and Sort panels keep 16 px from both screen edges.
+  const belowSm = useBelowSm();
 
   const { ref: pullRef, isRefreshing, pullDistance } = usePullToRefresh<HTMLDivElement>({
     onRefresh: handlePullRefresh,
@@ -6064,6 +6073,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 size="sm"
                 className={cn(
                   "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  PHONE_TOUCH_TARGET,
                   hasFilters && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-filter-trigger"
@@ -6084,7 +6094,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between border-b pb-2">
                   <h4 className="font-medium text-sm">{t('list.filterRecords')}</h4>
@@ -6155,8 +6165,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           )}
 
           {/* Sort. Below `sm` the Display panel carries the Sort panel when it
-              is drawn (`sortInDisplay`), so this trigger hides there; with no
-              Display panel it stays on the bar at every width. */}
+              is drawn (`sortInDisplay`), so this trigger hides there while no
+              sort is active; with no Display panel it stays on the bar at
+              every width. */}
           {toolbarFlags.showSort && (
           <Popover open={showSort} onOpenChange={setShowSort}>
             <PopoverTrigger asChild>
@@ -6165,7 +6176,11 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 size="sm"
                 className={cn(
                   "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                  sortInDisplay && "hidden sm:inline-flex",
+                  PHONE_TOUCH_TARGET,
+                  // On a phone an active sort keeps this trigger, with its
+                  // level count, on the bar: the Display panel holds the
+                  // builder, but only the bar can show the list is sorted.
+                  sortInDisplay && currentSort.length === 0 && "hidden sm:inline-flex",
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
@@ -6182,7 +6197,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
               {sortPanelBody}
             </PopoverContent>
           </Popover>
@@ -6590,14 +6605,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   if (!searchTerm) setPhoneSearchOpen(false);
                 }}
                 // 16px text: a smaller font makes iOS Safari zoom on focus.
-                className="h-7 w-36 pl-7 pr-7 text-base [&::-webkit-search-cancel-button]:hidden"
+                className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
                 autoFocus
                 data-testid="phone-search-input"
               />
               <Button
                 variant="ghost"
                 size="sm"
-                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
                 aria-label={t('list.clearSearch')}
                 title={t('list.clearSearch')}
                 onClick={() => {
@@ -6615,6 +6630,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               size="sm"
               className={cn(
                 "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                PHONE_TOUCH_TARGET,
                 searchTerm && "text-foreground font-medium",
               )}
               aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}

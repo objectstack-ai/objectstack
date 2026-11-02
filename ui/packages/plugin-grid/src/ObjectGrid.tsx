@@ -3418,6 +3418,38 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   if (cardFace && data.length > 0 && !isGrouped) {
     const renderMobileCard = buildMobileCardRenderer({ compact: !useCardView });
 
+    // The card list's pager. Under server pagination `data` is one page of
+    // the match set, so without it a card list never reached past its first
+    // page. It turns the same page the table's pager turns, with the table's
+    // words, at a touch size, and returns the reader to the top of the list.
+    const cardPageCount = manualPaginationOn && typeof resolvedTotalMatching === 'number' && manualPageSize > 0
+      ? Math.ceil(resolvedTotalMatching / manualPageSize)
+      : 1;
+    const cardPage = Math.min(Math.max(1, manualPage ?? 1), cardPageCount);
+    const goToCardPage = (next: number, from: HTMLElement) => {
+      from.closest('[data-testid="object-grid-card-scroller"]')?.scrollTo({ top: 0 });
+      manualOnPageChange?.(Math.min(cardPageCount, Math.max(1, next)));
+    };
+    const cardPager = cardPageCount > 1 && manualOnPageChange ? (
+      <div data-testid="object-grid-card-pager" className="flex items-center justify-center gap-1 px-2 pb-2">
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(1, e.currentTarget)} disabled={cardPage === 1} aria-label={t('table.firstPage')}>
+          <ChevronsLeft className="h-4 w-4" />
+        </Button>
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(cardPage - 1, e.currentTarget)} disabled={cardPage === 1} aria-label={t('table.previousPage')}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="px-2 text-xs text-muted-foreground tabular-nums" data-testid="object-grid-card-page-info">
+          {t('table.pageInfo', { current: cardPage, total: cardPageCount })}
+        </span>
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(cardPage + 1, e.currentTarget)} disabled={cardPage === cardPageCount} aria-label={t('table.nextPage')}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(cardPageCount, e.currentTarget)} disabled={cardPage === cardPageCount} aria-label={t('table.lastPage')}>
+          <ChevronsRight className="h-4 w-4" />
+        </Button>
+      </div>
+    ) : null;
+
     // objectui#13134 — the card list scrolls in a box of its own, as the
     // table does in its own body. Its host bounds it (`ListView`'s view area
     // is `overflow-hidden`), so without this box a list taller than the
@@ -3441,6 +3473,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
+        {cardPager}
         </div>
         {navigation.isOverlay && (
           <NavigationOverlay

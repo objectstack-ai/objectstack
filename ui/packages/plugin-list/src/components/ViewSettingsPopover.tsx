@@ -57,6 +57,36 @@ import {
   Undo2,
 } from 'lucide-react';
 
+/**
+ * A bar or panel control's touch size below `sm`: 44 px on both sides (WCAG
+ * 2.5.5), so a phone's finger lands on it. At `sm` and up the compact sizes
+ * stay as they are.
+ */
+export const PHONE_TOUCH_TARGET = 'max-sm:h-11 max-sm:min-w-11';
+
+const BELOW_SM_QUERY = '(max-width: 639.98px)';
+
+/**
+ * Whether the viewport is below `sm`, for the one thing a class cannot carry:
+ * a popover's collision padding, which keeps a phone-width panel 16 px from
+ * both screen edges. `false` where `matchMedia` is missing (server, tests).
+ */
+export function useBelowSm(): boolean {
+  return React.useSyncExternalStore(
+    (onChange) => {
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+      const mql = window.matchMedia(BELOW_SM_QUERY);
+      mql.addEventListener?.('change', onChange);
+      return () => mql.removeEventListener?.('change', onChange);
+    },
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(BELOW_SM_QUERY).matches,
+    () => false,
+  );
+}
+
+/** The 16 px a phone-width popover keeps from each screen edge (`w-[calc(100vw-2rem)]`). */
+export const PHONE_POPOVER_GUTTER = 16;
+
 export interface ViewSettingsField {
   name: string;
   label?: string;
@@ -214,11 +244,11 @@ function Section({ title, badge, onClear, clearLabel, defaultOpen = true, childr
   const [open, setOpen] = React.useState(defaultOpen);
   return (
     <div className="border-b last:border-b-0">
-      <div className="flex items-center justify-between px-3 py-2">
+      <div className="flex items-center justify-between px-3 py-2 max-sm:py-0">
         <button
           type="button"
           onClick={() => setOpen((x) => !x)}
-          className="flex items-center gap-1.5 text-xs font-medium text-foreground/80 hover:text-foreground"
+          className="flex items-center gap-1.5 text-xs font-medium text-foreground/80 hover:text-foreground max-sm:min-h-11 max-sm:flex-1"
         >
           <ChevronDown
             className={cn('h-3.5 w-3.5 transition-transform', !open && '-rotate-90')}
@@ -234,7 +264,7 @@ function Section({ title, badge, onClear, clearLabel, defaultOpen = true, childr
           <button
             type="button"
             onClick={onClear}
-            className="text-[11px] text-muted-foreground hover:text-foreground"
+            className="text-[11px] text-muted-foreground hover:text-foreground max-sm:min-h-11 max-sm:px-2"
           >
             {clearLabel}
           </button>
@@ -281,7 +311,7 @@ function ColorFieldPicker({
         if (picked) onPick(picked.value);
       }}
     >
-      <SelectTrigger className="h-8 rounded px-2 text-xs" data-testid="color-field-select">
+      <SelectTrigger className="h-8 rounded px-2 text-xs max-sm:h-11" data-testid="color-field-select">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -314,8 +344,9 @@ function SwitchRow({
 }) {
   const id = React.useId();
   return (
-    <div className="flex items-center justify-between gap-3 border-b px-3 py-2 last:border-b-0">
-      <label htmlFor={id} className="text-xs font-medium text-foreground/80 cursor-pointer">
+    <div className="flex items-center justify-between gap-3 border-b px-3 py-2 last:border-b-0 max-sm:py-0">
+      {/* Below `sm` the words fill the row's 44 px, so the whole row is the switch's touch target. */}
+      <label htmlFor={id} className="text-xs font-medium text-foreground/80 cursor-pointer max-sm:flex max-sm:min-h-11 max-sm:flex-1 max-sm:items-center">
         {label}
       </label>
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} data-testid={testId} />
@@ -496,6 +527,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
   } = props;
 
   const [open, setOpen] = React.useState(false);
+  const belowSm = useBelowSm();
   // Closing through the controlled state lets Radix return focus to the
   // Display trigger, as Escape and an outside click do.
   const closeMenu = React.useCallback(() => setOpen(false), []);
@@ -517,6 +549,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
           title={triggerLabel}
           className={cn(
             'h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150',
+            PHONE_TOUCH_TARGET,
             changedCount > 0 && 'text-foreground font-medium',
           )}
           data-testid="toolbar-display-trigger"
@@ -535,7 +568,12 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
       </PopoverTrigger>
       {/* Below `sm` the panel takes the phone's width, as Filter and Sort do, so
           the Sort block's rows keep their words. */}
-      <PopoverContent align="end" className="w-[calc(100vw-2rem)] sm:w-80 p-0" data-testid="view-settings-content">
+      <PopoverContent
+        align="end"
+        collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined}
+        className="w-[calc(100vw-2rem)] sm:w-80 p-0"
+        data-testid="view-settings-content"
+      >
         <div className="max-h-[min(70vh,560px)] overflow-y-auto">
           {layout && (
             <div className="flex items-center justify-between gap-3 border-b px-3 py-2" data-testid="display-layout-row">
@@ -619,7 +657,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                 {allFields.map((field) => (
                   <label
                     key={field.name}
-                    className="flex items-center gap-2 text-xs py-1 px-1 rounded hover:bg-muted cursor-pointer"
+                    className="flex items-center gap-2 text-xs py-1 px-1 rounded hover:bg-muted cursor-pointer max-sm:min-h-11"
                   >
                     <input
                       type="checkbox"
@@ -647,7 +685,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-7 gap-1.5"
+                className="h-7 gap-1.5 max-sm:h-11"
                 onClick={density.cycle}
                 title={t('grid.toolbar.densityCycleShortHint', { defaultValue: 'Click to cycle' })}
                 data-testid="view-settings-density-cycle"
@@ -689,7 +727,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-xs"
+                className="h-7 px-2 text-xs max-sm:h-11"
                 disabled={changedCount === 0}
                 onClick={onReset}
                 data-testid="display-reset-button"
@@ -703,7 +741,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
                   onClick={onRefresh}
                   disabled={refreshing}
                   title={t('list.refresh', { defaultValue: 'Refresh' })}
@@ -719,7 +757,7 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                     key={format}
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 text-xs"
+                    className="h-7 px-2 text-xs max-sm:h-11"
                     disabled={exportBusy}
                     onClick={() => onExport!(format)}
                     data-testid={`display-export-${format}`}
