@@ -3428,9 +3428,9 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const cardPage = Math.min(Math.max(1, manualPage ?? 1), cardPageCount);
     const goToCardPage = (next: number, from: HTMLElement) => {
       from.closest('[data-testid="object-grid-card-scroller"]')?.scrollTo({ top: 0 });
-      manualOnPageChange?.(Math.min(cardPageCount, Math.max(1, next)));
+      manualOnPageChange(Math.min(cardPageCount, Math.max(1, next)));
     };
-    const cardPager = cardPageCount > 1 && manualOnPageChange ? (
+    const cardPager = cardPageCount > 1 ? (
       <div data-testid="object-grid-card-pager" className="flex items-center justify-center gap-1 px-2 pb-2">
         <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(1, e.currentTarget)} disabled={cardPage === 1} aria-label={t('table.firstPage')}>
           <ChevronsLeft className="h-4 w-4" />
