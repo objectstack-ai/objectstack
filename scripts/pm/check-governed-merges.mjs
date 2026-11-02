@@ -550,16 +550,16 @@
  * The same day, asked whether the rule reaches the sibling repos — 「任何对
  * agents.md 等文件的修改…包括 objectui cloud仓库」 — the maintainer answered
  * 「同意」. So the surface register above reaches every governed repository:
- * by default each row governs all five — `objectstack`, `objectui`, `cloud`,
- * `objectos` and `hotcrm` — and since the B2 ruling of 2026-10-13 (header
+ * by default each row governs all six — `objectstack`, `objectui`, `cloud`,
+ * `objectos`, `hotcrm` and `mobile` — and since the B2 ruling of 2026-10-13 (header
  * section "The register is scoped per row") a row may be scoped to a subset:
  * the `workflows` row names `objectstack`, `objectui` and `cloud`. This sweep
- * still covers all five repos in one invocation, judging each against the
+ * still covers all six repos in one invocation, judging each against the
  * rows that govern it; `--test` and `--branch` answer for ONE repository, the
  * checkout at `--root` (`checkoutRepoFor`), and say which one on stderr.
  *
  * ⚠️ The 2026-08-18 quotation above names two sibling repos and the register
- * below holds five, so read that quote as the repos IN VIEW that day — an
+ * below holds six, so read that quote as the repos IN VIEW that day — an
  * enumeration, never an exclusion, and never the register. The definition it
  * states (agent instruction files, judged the same across repos — still true
  * of every row that declares no `repos` scope) already covered `hotcrm`, a
@@ -617,7 +617,7 @@
  * asks whether the floor predates the window rather than whether the clone is
  * shallow, so a shallow container with enough depth — the common case, since
  * the default window is 24h — still sweeps exactly as before, with no fetch.
- * Deepening is never done here: this sweep reads five checkouts it does not
+ * Deepening is never done here: this sweep reads six checkouts it does not
  * own, so the remedy is printed as a command for the operator to run.
  *
  * ## And a DEAD MIRROR is the same fact again, in the direction that reads as
@@ -642,7 +642,7 @@
  * 2026-08-30 `hotcrm` was probed BY HAND, as a control this sweep had no row
  * for — it was not configured here until the 2026-09-03 ruling above. The
  * reading stands as measured; what changed is that those four names are now
- * four of the five repos this sweep audits itself.) Wherever that clone
+ * four of the six repos this sweep audits itself.) Wherever that clone
  * survives, this sweep
  * printed `✓ audited objectstack-ai/cloud — tip 15f55df2d ... 0 mainline
  * commit(s) in window` and exited 0 — and would have printed it FOREVER, since
@@ -1997,7 +1997,7 @@ export const CALLER_DERIVED_NOTE =
 /**
  * `--pr`'s argument, as data. `16997` means this checkout's own repo; the
  * qualified spelling names any of the governed repos, because the PM audits
- * five of them from one checkout — and since the register is scoped per row,
+ * six of them from one checkout — and since the register is scoped per row,
  * the repository named here is also the one the verdict answers for. Pure.
  */
 export function parsePullTarget(value, selfSlug = null) {
