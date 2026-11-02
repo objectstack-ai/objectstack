@@ -142,7 +142,7 @@ describe('[ruling 6573563853] one super-user predicate: the field vote follows s
     ['viewAllRecords', [VIEW_ALL]],
     ['modifyAllRecords', [MODIFY_ALL]],
     ['shadowed wildcard', [SHADOWED_WILDCARD]],
-    ['app set only', [APP_READ_ONLY]],
+    ['plain object read and edit', [set({ name: 'plain_rw', objects: { [OBJ]: { allowRead: true, allowEdit: true } } })]],
     ['member_default', [shipped('member_default')]],
   ];
 
