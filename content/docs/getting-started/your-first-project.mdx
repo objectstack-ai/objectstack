@@ -25,14 +25,20 @@ The two paths produce identical projects.
 | A package manager | npm 9+ / pnpm 10.15+ / yarn / bun | `npm --version` |
 
 That's all. A standalone project does **not** need pnpm, TypeScript pre-installed,
-or a database server — the default template runs on an in-memory driver, and
-TypeScript comes in as a dev dependency.
+or a database server — the default template stores its data in a SQLite file,
+`.objectstack/data/objectstack.db` inside the project (git-ignored), and
+TypeScript comes in as a dev dependency. Records survive a restart; to start
+from an empty database, stop the server and delete `.objectstack/data/`, or run
+`npx os dev --fresh` for a throwaway one.
 
-<Callout type="warn">
-**npm 10 cannot install the CLI right now.** npm 10, the npm that Node 22 ships,
-fails with `Cannot read properties of null (reading 'edgesOut')`. Upgrade npm
-first with `npm install -g npm@11` (npm 11 needs Node 22.9+), or use pnpm.
-Already scaffolded? Upgrade, then run `npm install` in the project.
+<Callout type="info">
+**`Cannot read properties of null (reading 'edgesOut')` from npm 10?** npm 10,
+the npm that Node 22 ships, crashed this way installing the CLI (measured on
+10.9.4 and 10.9.9) while vitest 4's newest release had no matching
+`@vitest/browser-webdriverio`. That release, 4.1.12, is now published, and npm
+10.9.9 installs `@objectstack/cli` again (measured on 18.2.0). If you still hit
+it, upgrade with `npm install -g npm@11` (npm 11 needs Node 22.9+) or use pnpm,
+then run `npm install` in the project.
 [Troubleshooting](/docs/deployment/troubleshooting#cannot-read-properties-of-null-reading-edgesout-from-npm-install)
 has the other fix.
 </Callout>
@@ -263,11 +269,23 @@ is refused. No code changes either way — see [Drivers](/docs/data-modeling/dri
 npm run dev            # objectstack dev — rebuild + server restart on change
 ```
 
-Or with the visual Console (data browser, metadata explorer, API docs):
+The dev server prints the database file and the Console link on boot. The
+Console — data browser, metadata explorer, API docs — is served at
+`http://localhost:3000/_console/`; sign in as the dev admin
+(`admin@objectos.ai` / `admin123`).
 
-```bash
-npx os dev --ui        # then open http://localhost:3000/_console/
-```
+<Callout type="info">
+**The starter has no app, so `my_app_note` is in no Console navigation.** You
+will see the platform's own apps and not the note object: this template ships
+objects only, with no app and no views. That is the intended starting point,
+not a broken install — the object is live, and the REST calls in step 4 read
+and write it. **An object appears in Console navigation only when an app lists
+it.** `npx os generate app notes` writes one under `src/apps/`, with a
+navigation entry for the starter's only object and its export line in
+`src/apps/index.ts`; the Console shows it after the dev server rebuilds. Or
+describe the app you want to your coding agent —
+[Build with Claude Code](/docs/getting-started/build-with-claude-code).
+</Callout>
 
 ## 4. Call your API
 

@@ -3418,9 +3418,46 @@ export type MetaListAnswer =
  * the dispatcher's `errorFromThrown`), as {@link refuseUnknownMetaListType} does.
  */
 function refuseEmptyListFilter(param: 'id' | 'object', names: 'app' | 'object', lists: 'app' | 'view'): never {
+    throwListFilterRefusal(param, param, names, lists, 'got ""', `an empty ${names} name`);
+}
+
+/**
+ * The app list's answer to a BRACKETED spelling of its one-app filter —
+ * `?id[]=NAME`, `?id[0]=NAME`, any key that opens `id[`. A client that
+ * serialises arrays qs-style sends it; every adapter hands the key through as
+ * spelled (`readQuery` in `plugin-hono-server`, `readDispatchQuery` in
+ * `@objectstack/hono`), so step 3 of {@link createMetaListAnswer}, which reads
+ * `query.id`, never saw it, and the caller who asked for one app was answered
+ * every app it may see. Refused with {@link refuseEmptyListFilter}'s answer —
+ * one sentence frame, `400 VALIDATION_ERROR` — naming the key as sent: the
+ * filter takes exactly one name, spelled `?id=NAME`. A bracketed key beside a
+ * plain `?id=` is refused too: the request carries two spellings of one filter.
+ *
+ * Only the app list reads `id`, so only it judges the bracketed spelling; on
+ * every other type the key is not read, as no other `id` spelling is.
+ */
+function refuseBracketedAppIdFilter(query: Readonly<Record<string, unknown>> | undefined): void {
+    if (!query || typeof query !== 'object') return;
+    const key = Object.keys(query).find((k) => k.startsWith('id['));
+    if (key === undefined) return;
+    throwListFilterRefusal(
+        'id', key, 'app', 'app',
+        "the 'id' filter takes exactly one app name, spelled ?id=NAME", "a bracketed 'id' key",
+    );
+}
+
+/** The one sentence frame of the list chain's narrowing-filter refusals. */
+function throwListFilterRefusal(
+    param: 'id' | 'object',
+    key: string,
+    names: 'app' | 'object',
+    lists: 'app' | 'view',
+    got: string,
+    notAFilter: string,
+): never {
     const err: any = new Error(
-        `Query parameter '${param}' names no ${names}; got "". The list was not served: an empty ${names} `
-        + `name is not a filter. Name one ${names}, or leave the parameter out to list every ${lists} you can see.`,
+        `Query parameter '${key}' names no ${names}; ${got}. The list was not served: ${notAFilter} `
+        + `is not a filter. Name one ${names}, or leave the parameter out to list every ${lists} you can see.`,
     );
     err.status = 400;
     err.code = 'VALIDATION_ERROR';
@@ -3516,8 +3553,9 @@ async function describeMetaPositionList(sources: MetaListAnswerSources, list: an
  *     items, before the locale collapse (`_packageId` scopes membership).
  *  3. `app` — `?id=<app>` narrows to the app of that `name` (#7566); absent
  *     means no filter, and [#28548] an EMPTY value is refused (`400
- *     VALIDATION_ERROR`), never read as absent; no match is an EMPTY list,
- *     never a 404.
+ *     VALIDATION_ERROR`), never read as absent, as is a bracketed key
+ *     (`?id[]=`, `?id[0]=`), never read as no filter; no match is an EMPTY
+ *     list, never a 404.
  *  4. `view` — `?object=<object>` keeps the independent views bound to that
  *     object, sorted by `order` then `name` (the switcher); [#28548] an EMPTY
  *     value is refused (`400 VALIDATION_ERROR`), never read as absent.
@@ -3575,7 +3613,9 @@ export function createMetaListAnswer(
         }
 
         // 3. [#7566] `?id=<app>`. [#28548] An EMPTY one is refused, never
-        // read as absent (see {@link refuseEmptyListFilter}).
+        // read as absent (see {@link refuseEmptyListFilter}), and so is a
+        // bracketed spelling of the key (see {@link refuseBracketedAppIdFilter}).
+        if (metaType === 'app') refuseBracketedAppIdFilter(query);
         const appIdFilter = metaType === 'app' ? query?.id : undefined;
         if (appIdFilter === '') refuseEmptyListFilter('id', 'app', 'app');
         if (typeof appIdFilter === 'string') {
