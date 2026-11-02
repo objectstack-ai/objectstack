@@ -144,7 +144,7 @@ import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engin
 // [#25522 cut 10] The write path's reference check and the caller's read of a
 // master-detail header; the methods of the same names below hand each body the
 // members it reads (`ReferentialIntegrityHost`).
-import { assertReferencesResolve, masterDetailHeadersCallerReads } from './engine-referential-integrity.js';
+import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredReferenceRows } from './engine-referential-integrity.js';
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
@@ -10462,6 +10462,15 @@ export class ObjectQL implements IObjectQLEngine {
    *   "no link", which is what `deleteBehavior: 'set_null'` produces.
    * - **Already-expanded objects are skipped.** A read round-trip can hand back
    *   `{id, name, …}` in the slot; that is not an id write.
+   * - **A value the row already stores is not the write's (#29062).** The
+   *   check judges only the references a write ADDS. An update's `storedRows`
+   *   (the by-id prior row; a predicate update's matched rows) forgive a
+   *   refused value, or a multi-valued member, that every one of those rows
+   *   already holds: an edit form carries the whole record back, and a stored
+   *   id that has since stopped resolving (the delete walk leaves a `user`
+   *   value in place, `DELETE_SEMANTICS_REFERENCE_TYPES`) is not the editor's
+   *   to answer for. A value new to any of the rows is refused as before, and
+   *   an insert has no stored rows, so every value it supplies is judged.
    *
    * ## Why the probe bypasses RLS — and why it keeps the tenant wall
    *
@@ -10516,13 +10525,14 @@ export class ObjectQL implements IObjectQLEngine {
     supplied: Record<string, unknown> | null | undefined,
     context: any,
     msgCtx?: { locale?: string; translate?: any; objectName?: string },
+    storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
     const host: ThisParameterType<typeof assertReferencesResolve> = {
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
     };
-    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx);
+    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
   }
 
   /**
@@ -18206,9 +18216,12 @@ export class ObjectQL implements IObjectQLEngine {
                const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], permissionResolution))(updatePayload);
                emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
                // [#4441] A repoint is as capable of dangling as an initial link.
+               // [#29062] …but a value the row already stores is not a repoint:
+               // the prior row is what the check forgives a refused value against.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 async () => [priorRecord],
                );
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
@@ -18632,9 +18645,13 @@ export class ObjectQL implements IObjectQLEngine {
                // [#4441] The bulk call site too — a guard wired into single-id
                // writes only is still a hole one call site over (AGENTS.md
                // PD #10's own worked example, #3106).
+               // [#29062] A refused value is forgiven only when EVERY matched row
+               // already stores it (the `readPriorRows` memo, read only then);
+               // a row it is new to makes it this write's reference.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 readPriorRows,
                );
                // `updateMany` presence is part of the ladder verdict resolved above.
                // [commit 9d7f7259f] The predicate driver exit, enveloped on the same

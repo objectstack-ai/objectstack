@@ -100,6 +100,18 @@ const FLAG_BY_EMAIL = {
     ai: { exposed: true, description: 'Flag the lead by email.' },
 };
 
+/**
+ * [#29173] The showcase's "Recalculate Selection" shape: the recalc target run
+ * ONCE for a whole bulk selection (`execution: 'aggregate'`), with every
+ * selected id in `params._selectedIds` and no `recordId` — and the same
+ * `recordIdParam` a per-record run seeds from its row.
+ */
+const RECALC_SELECTION = {
+    name: 'recalc_selection', label: 'Recalculate Selection', objectName: OBJECT, type: 'api',
+    execution: 'aggregate', target: '/api/v1/apps/showcase/recalc', recordIdParam: 'recordId',
+    ai: { exposed: true, description: 'Recalculate the selected leads.' },
+};
+
 /** An api action whose `target` carries no record token. */
 const PING_LOCAL = {
     name: 'ping_local', label: 'Ping', objectName: OBJECT, type: 'api', method: 'POST',
@@ -113,6 +125,8 @@ function boot(opts: {
     /** What the target answers: status, JSON body, extra response headers. */
     answer?: { status?: number; body?: unknown; text?: string; headers?: Array<[string, string]> };
     noServer?: boolean;
+    /** Actions declared on the object beside the shared roster above. */
+    extraActions?: unknown[];
     /** [#28943] Objects served beside `crm_lead` (by name), e.g. a `sys_api_key` carrying its revoke action. */
     extraObjects?: any[];
 } = {}) {
@@ -131,7 +145,7 @@ function boot(opts: {
     });
     const server = { getRawApp: () => ({ request }) };
     const executeAction = vi.fn(async () => ({ ran: 'script' }));
-    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD, NOTE_OWNER, FLAG_BY_EMAIL, PING_LOCAL] };
+    const objectDef = { name: OBJECT, actions: [BAN_LEAD, REMOTE_PING, DELETE_LEAD, RECALC_LEAD, APPROVE_LEAD, NOTE_OWNER, FLAG_BY_EMAIL, PING_LOCAL, ...(opts.extraActions ?? [])] };
     const served: Record<string, any> = Object.fromEntries([objectDef, ...(opts.extraObjects ?? [])].map((o) => [o.name, o]));
     const ql: any = {
         executeAction,
@@ -1606,5 +1620,84 @@ describe('an api action whose target names its record, called with no record id,
         // `{id}` without a row is filled from the routed id, as `recordIdParam` is.
         const rowless = buildApiActionRequest(APPROVE_LEAD, { recordId: 'areq 1', params: {}, ec });
         expect((rowless as any).path).toBe('/api/v1/approvals/requests/areq%201/approve');
+    });
+});
+
+describe('[#29173] a record-less aggregate api action declaring `recordIdParam` is forwarded, and invents no record', () => {
+    const SELECTED = ['u_target', 'lead 7'];
+    const runViaMcp = async (h: ReturnType<typeof boot>, name: string, input: any = {}) => {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, service: string) =>
+                service === 'metadata' ? h.metadata
+                : service === 'automation' ? null
+                : service === 'http.server' ? { getRawApp: () => ({ request: h.request }) }
+                : h.ql,
+            getObjectQL: async () => h.ql,
+        };
+        return invokeBusinessAction(deps, CTX() as any, name, input, {
+            driver: h.ql,
+            ec: { userId: 'u_agent', tenantId: 'org_1', systemPermissions: [] },
+            getMeta: () => h.metadata,
+            callData: async (_a: string, p: any) => ({ object: p?.object, id: p?.id, record: { id: p?.id } }),
+        });
+    };
+
+    it('REST: the bulk bar\'s one aggregate request reaches the target with the selection, and no `recordId` key', async () => {
+        const { dispatcher, injected } = boot({ extraActions: [RECALC_SELECTION], answer: { body: { success: true, data: { selected: 2, acted: 2 } } } });
+
+        const res = await dispatcher.handleActions(
+            `/${OBJECT}/${RECALC_SELECTION.name}`, 'POST', { params: { _selectedIds: SELECTED } }, CTX(),
+        );
+
+        expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+        expect(injected).toHaveLength(1);
+        expect(injected[0].url).toBe('http://app.example.test/api/v1/apps/showcase/recalc');
+        const body = JSON.parse(String(injected[0].init.body));
+        expect(body).toEqual({ _selectedIds: SELECTED });
+        expect(body).not.toHaveProperty('recordId');
+        expect(res?.response?.body?.data).toEqual({ selected: 2, acted: 2 });
+    });
+
+    it('MCP `run_action`: the same record-less run is forwarded, and no `recordId` key is invented', async () => {
+        const h = boot({ extraActions: [RECALC_SELECTION] });
+
+        const result: any = await runViaMcp(h, RECALC_SELECTION.name, { params: { _selectedIds: SELECTED } });
+
+        expect(result.ok).toBe(true);
+        expect(h.injected).toHaveLength(1);
+        const body = JSON.parse(String(h.injected[0].init.body));
+        expect(body).toEqual({ _selectedIds: SELECTED });
+        expect(body).not.toHaveProperty('recordId');
+    });
+
+    it('REST, the per-record control: the same action run on one record still seeds `recordIdParam` from that row', async () => {
+        for (const recordId of SELECTED) {
+            const { dispatcher, injected } = boot({ extraActions: [RECALC_SELECTION] });
+
+            const res = await dispatcher.handleActions(`/${OBJECT}/${RECALC_SELECTION.name}`, 'POST', { recordId }, CTX());
+
+            expect(statusOf(res), JSON.stringify(res?.response?.body)).toBe(200);
+            expect(JSON.parse(String(injected[0].init.body))).toEqual({ recordId });
+        }
+    });
+
+    it('buildApiActionRequest: the empty subject record of a record-less dispatch is no row; a dispatch naming a record keeps both #8018 refusals', () => {
+        const ec = { userId: 'u1', tenantId: 'org_9' };
+        for (const record of [{}, null, undefined]) {
+            const built = buildApiActionRequest(RECALC_SELECTION, { record, params: { _selectedIds: SELECTED }, ec });
+            expect(built, JSON.stringify(record)).toEqual({ method: 'POST', path: '/api/v1/apps/showcase/recalc', body: { _selectedIds: SELECTED } });
+        }
+        // An empty id is no id, as the path half reads it.
+        expect((buildApiActionRequest(RECALC_SELECTION, { recordId: '', record: {}, params: {}, ec }) as any).body).toEqual({});
+
+        const byToken = { ...RECALC_SELECTION, recordIdParam: 'token', recordIdField: 'token' };
+        const absent = buildApiActionRequest(byToken, { recordId: 's1', record: { id: 's1' }, params: {}, ec });
+        expect((absent as any).status).toBe(400);
+        expect(absent).not.toHaveProperty('path');
+        expect((absent as any).message).toContain('"token"');
+        const nulled = buildApiActionRequest(byToken, { recordId: 's1', record: { id: 's1', token: null }, params: {}, ec });
+        expect((nulled as any).status).toBe(400);
+        expect(nulled).not.toHaveProperty('path');
+        expect((nulled as any).message).toContain('"token"');
     });
 });
