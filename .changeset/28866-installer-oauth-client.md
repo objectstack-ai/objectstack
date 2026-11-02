@@ -10,6 +10,10 @@ Clause-②: yes (narrowing)
 Metadata-protocol: none
 Ruling-ref: 6566728470
 
+<!-- adr-0087: not-required (no-migration-prescription) No metadata key, schema, accepted value, stored row, export or error code is removed or renamed: the begin leg of the connector connection door now refuses, with the existing 400 VALIDATION_ERROR, a request body it used to drop unread, so nothing stored changes and there is nothing for objectstack migrate meta to rewrite, and the two contract types only gain OPTIONAL members no existing caller has to send. -->
+
+**BREAKING** for three call shapes only, each of which used to be answered as if its extra input were absent and now answers `400 VALIDATION_ERROR` with nothing connected, read or revoked: a `POST /api/v1/automation/connectors/NAME/connection` whose JSON body carries a key other than `clientId` and `clientSecret`; the same begin carrying a client for an instance that does not declare `clientSource: 'installer'`; and an in-process `getConnectorConnection` or `revokeConnectorConnection` call whose request carries `client`. What to do: nothing, unless a caller sends a body to that begin leg. Send none (or `{}`) for an instance that declares its client or leaves it to MCP dynamic registration, and send only `clientId` and `clientSecret` for one that takes the installer's.
+
 An `authorization_code` instance that declares `clientSource: 'installer'` names no client in its definition. Its administrator registers a client with the vendor against this deployment's redirect URI and hands it to the connect door:
 
 ```http
