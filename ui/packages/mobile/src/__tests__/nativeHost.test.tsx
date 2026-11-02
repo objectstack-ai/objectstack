@@ -226,15 +226,12 @@ describe('typed call wrappers feature-detect and never throw', () => {
 
   it('scan resolves "ok" with the decoded text, forwards the formats, and keeps the bridge as `this`', async () => {
     const bridge = fakeBridge();
-    let self: unknown;
-    bridge.scan = vi.fn(async function (this: unknown) {
-      self = this;
-      return 'ASSET-0042';
-    });
+    const scan = vi.fn(async () => 'ASSET-0042');
+    bridge.scan = scan;
     install(bridge);
     await expect(nativeScan({ formats: ['qr', 'ean13'] })).resolves.toEqual({ status: 'ok', value: 'ASSET-0042' });
-    expect(bridge.scan).toHaveBeenCalledWith({ formats: ['qr', 'ean13'] });
-    expect(self).toBe(bridge);
+    expect(scan).toHaveBeenCalledWith({ formats: ['qr', 'ean13'] });
+    expect(scan.mock.contexts[0]).toBe(bridge);
   });
 
   it('scan resolves "ok" with null when the user closes the scanner', async () => {
