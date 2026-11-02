@@ -100,6 +100,8 @@ function declareWalk(cell: DialectCell): void {
           READ_OPTIONS,
         );
         reads += 1;
+        // A driver that ignores the cursor would page forever: fail instead of hanging.
+        expect(reads, 'the walk did not end; the cursor is not narrowing the read').toBeLessThanOrEqual(MEMBER_IDS.length + 1);
         visited.push(...page);
         if (page.length < pageSize) break;
         after = page[page.length - 1]!.id;
