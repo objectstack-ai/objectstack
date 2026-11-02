@@ -483,8 +483,10 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
                             variant="ghost"
                             size="icon"
                             // Revealed on keyboard focus too, as in the details
-                            // body (objectstack#25883).
-                            className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity"
+                            // body (objectstack#25883). A touch screen has no
+                            // hover, so a coarse pointer always draws it, and
+                            // below `sm` it is a 44 px target (objectstack#29071).
+                            className="h-5 w-5 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity"
                             aria-label={t('detail.editInlineHint')}
                             onClick={(e) => {
                               e.stopPropagation();

@@ -19,7 +19,8 @@
  *  - under a wall a non-operator gets a disabled switch with the console's
  *    sentence, and nothing is sent; `single` and the operator under the same
  *    wall (CONTROLS) get a live switch;
- *  - a refusal is the server's sentence, verbatim;
+ *  - a refusal is the server's sentence, verbatim, announced as an alert
+ *    (objectstack#29139), and announced again when the next flip is refused;
  *  - a writable package's flow (CONTROL) keeps its definition switch and its
  *    Delete, with no ledger switch.
  *
@@ -111,6 +112,8 @@ const doors = {
   enabled: true,
   unbound: null as null | { unboundCause: string; reason: string },
   toggle: null as null | { status: number; body: unknown },
+  // Held until released: the toggle request is in flight meanwhile.
+  toggleGate: null as null | Promise<void>,
 };
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -123,6 +126,7 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
     return json(200, { success: true, data: { flows: [row] } });
   }
   if (url.endsWith('/automation/approval/toggle')) {
+    if (doors.toggleGate) await doors.toggleGate;
     if (doors.toggle) return json(doors.toggle.status, doors.toggle.body);
     doors.enabled = (JSON.parse(String(init?.body)) as { enabled: boolean }).enabled;
     return json(200, { success: true, data: { name: 'approval', enabled: doors.enabled } });
@@ -140,6 +144,7 @@ beforeEach(() => {
   doors.enabled = true;
   doors.unbound = null;
   doors.toggle = null;
+  doors.toggleGate = null;
   fetchMock.mockClear();
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   vi.mocked(toast.success).mockClear();
@@ -240,6 +245,42 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     expect(await screen.findByTestId('studio-refusal-message')).toHaveTextContent(sentence);
     expect(screen.getByTestId('auto-ledger-switch')).toHaveAttribute('aria-checked', 'true');
     expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  // objectstack#29139 — the refusal is announced, as Setup › Packaged
+  // automation announced it: the sentence is an alert, and nothing is one
+  // before a refusal or while the next flip is in flight.
+  it('announces the subflow guard\'s 409: one alert, the sentence verbatim, and again on a second refusal', async () => {
+    const sentence =
+      "Flow 'approval' cannot be disabled while 1 packaged flow still calls it as a subflow: 'notify_owner'. " +
+      'Disabling it would break that caller mid-run at its subflow node with a late, inexplicable failure ' +
+      "(ADR-0126 §7.3). Switch 'notify_owner' off first — or leave this one armed.";
+    doors.toggle = { status: 409, body: { success: false, error: { code: 'DELETE_RESTRICTED', message: sentence } } };
+    mount();
+    const sw = await ledgerSwitch();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(sw);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(sentence);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByTestId('studio-refusal')).toContainElement(alert);
+
+    // Flipped again and refused with the same sentence: the strip leaves while
+    // the request is in flight, and the alert that comes back is a new element,
+    // which is what makes the same sentence announced a second time.
+    let release!: () => void;
+    doors.toggleGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fireEvent.click(screen.getByTestId('auto-ledger-switch'));
+    await waitFor(() => expect(calls('/automation/approval/toggle')).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    release();
+    const again = await screen.findByRole('alert');
+    expect(again).not.toBe(alert);
+    expect(again.textContent).toBe(sentence);
+    expect(screen.getByTestId('auto-ledger-switch')).toHaveAttribute('aria-checked', 'true');
   });
 
   it('a writable package\'s flow keeps its definition switch and Delete, with no ledger switch', async () => {

@@ -161,7 +161,10 @@ import {
 } from '@object-ui/components';
 import {
   SchemaRendererContext,
+  declaredUserMessage,
+  delegationScopeMessage,
   extractFieldErrors,
+  isPermissionError,
   unmarkedRefusalLines,
   usePredicateScope,
   type ApiFetch,
@@ -1925,7 +1928,7 @@ async function submitPublic(slug: string, data: Record<string, unknown>): Promis
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw refusedWriteError(`Submit failed (${res.status}): ${body || res.statusText}`, body);
+    throw new WriteRefusal('Submit', res.status, body);
   }
   return res.json().catch(() => ({}));
 }
@@ -1965,42 +1968,120 @@ async function submitInternal(
   );
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw refusedWriteError(
-      `${recordId ? 'Update' : 'Create'} failed (${res.status}): ${body || res.statusText}`,
-      body,
-    );
+    throw new WriteRefusal(recordId ? 'Update' : 'Create', res.status, body);
   }
   return res.json().catch(() => ({}));
 }
 
+/** The first argument that is a string with something in it after trimming. */
+function firstSentence(...vals: unknown[]): string | null {
+  for (const v of vals) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
 /**
  * The error a refused submit throws (objectstack-ai/objectstack#27417): the
- * message this page has always shown, plus the response body attached the way
- * `@objectstack/client` attaches it to its own errors — the semantic `code`,
- * and `details` from the wrapped envelope's `error.details`, else the whole
- * flat body.
+ * response attached the way `@objectstack/client` attaches it to its own
+ * errors — the HTTP `status`, the semantic `code`, `details` from the wrapped
+ * envelope's `error.details` (else the whole flat body), and the producer's
+ * marked `userMessage` from either dialect.
  *
- * That is what lets the record dialog's reader of the server's field paths,
- * `extractFieldErrors` (`@object-ui/react`), read this page's refusals exactly
- * as it reads the client's: the flat `400 VALIDATION_FAILED` with `fields[]`
- * the submit routes answer, and the `409 UNIQUE_VIOLATION` naming its one
- * `field`. ⛔ No field path is read here; a body that is not JSON attaches
- * nothing, and the refusal marks no field.
+ * That is what lets the record dialog's readers (`@object-ui/react`) read this
+ * page's refusals exactly as they read the client's: `extractFieldErrors` the
+ * flat `400 VALIDATION_FAILED` with `fields[]` the submit routes answer and the
+ * `409 UNIQUE_VIOLATION` naming its one `field`; `isPermissionError` a `403` or
+ * a `PERMISSION_DENIED`; `declaredUserMessage` the marked sentence. ⛔ No field
+ * path is read here; a body that is not JSON attaches nothing, and the refusal
+ * marks no field.
+ *
+ * The message is the server's own sentence — the envelope's `error` (or the
+ * wrapped `error.message`), or a plain-text body — and never the body itself:
+ * the end user once read `Create failed (403): {"error":…,"code":…}` verbatim
+ * (objectstack-ai/objectstack#29019). Which text reaches the page is
+ * {@link refusalText}'s call, not this message's.
  */
-function refusedWriteError(message: string, body: string): Error {
-  const error = new Error(message) as Error & { code?: string; details?: unknown };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(body);
-  } catch {
-    return error;
+class WriteRefusal extends Error {
+  readonly status: number;
+  /** The response body as received — kept for a debugger, never drawn. */
+  readonly body: string;
+  /** The server's sentence for this refusal, or `null` when it gave none. */
+  readonly reason: string | null;
+  code?: string;
+  details?: unknown;
+  userMessage?: string;
+
+  constructor(verb: 'Submit' | 'Create' | 'Update', status: number, body: string) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      parsed = undefined;
+    }
+    const envelope =
+      parsed && typeof parsed === 'object'
+        ? (parsed as {
+            code?: unknown;
+            details?: unknown;
+            message?: unknown;
+            userMessage?: unknown;
+            error?: unknown;
+          })
+        : null;
+    const wrapped =
+      envelope?.error && typeof envelope.error === 'object'
+        ? (envelope.error as { code?: unknown; details?: unknown; message?: unknown; userMessage?: unknown })
+        : null;
+    // A body that is not JSON is the server's sentence when it reads as one:
+    // plain text, not a markup page a proxy answered in its place.
+    const plain = parsed === undefined && !body.trim().startsWith('<') ? firstSentence(body) : null;
+    const reason = envelope
+      ? firstSentence(envelope.error, wrapped?.message, envelope.message)
+      : plain;
+    super(reason ?? `${verb} failed (${status})`);
+    this.name = 'WriteRefusal';
+    this.status = status;
+    this.body = body;
+    this.reason = reason;
+    if (!envelope) return;
+    const code = firstSentence(envelope.code, wrapped?.code);
+    if (code) this.code = code;
+    this.details = envelope.details ?? wrapped?.details ?? envelope;
+    const marked = [envelope.userMessage, wrapped?.userMessage].find(
+      (m): m is string => typeof m === 'string' && m.trim() !== '',
+    );
+    if (marked) this.userMessage = marked;
   }
-  if (!parsed || typeof parsed !== 'object') return error;
-  const envelope = parsed as { code?: unknown; details?: unknown; error?: { code?: unknown; details?: unknown } };
-  const code = [envelope.code, envelope.error?.code].find((c) => typeof c === 'string' && c);
-  if (typeof code === 'string') error.code = code;
-  error.details = envelope.details ?? envelope.error?.details ?? envelope;
-  return error;
+}
+
+/**
+ * What the banner and the toast say for a refused write — the record dialog's
+ * reading (`@object-ui/components`' form renderer), so a refusal reads the same
+ * on both surfaces:
+ *
+ *  1. the sentence the producer MARKED for the end user (`userMessage`), or a
+ *     delegated administrator's scope refusal, which names only their own scope;
+ *  2. any other denial (`403`, `PERMISSION_DENIED`, `FORBIDDEN`) as the fixed
+ *     localized line — the server's text names objects and policies, not
+ *     something the submitter can act on (objectstack#3821, #24914 B′);
+ *  3. the per-rule lines no row carries (`unmarkedRefusalLines`);
+ *  4. the server's sentence of a `4xx` — it answers the request the submitter
+ *     made, and they can change it;
+ *  5. otherwise — a `5xx`, or a refusal that gave no sentence — the localized
+ *     generic line: a server fault's text is a diagnostic, not a reason.
+ */
+function refusalText(
+  err: WriteRefusal,
+  unmarked: string[] | null,
+  t: (key: string) => string,
+): string | string[] {
+  const marked = declaredUserMessage(err) ?? delegationScopeMessage(err);
+  if (marked) return marked;
+  if (isPermissionError(err)) return t('form.noPermissionToSave');
+  if (unmarked && unmarked.length > 1) return unmarked;
+  if (unmarked?.[0]) return unmarked[0];
+  return err.status < 500 && err.reason ? err.reason : t('form.submitFailed');
 }
 
 /**
@@ -2936,7 +3017,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       }
     } catch (err: any) {
       // The fields the server's refusal names, read by the record dialog's
-      // reader (see `refusedWriteError`), marked where this form draws them. A
+      // reader (see `WriteRefusal`), marked where this form draws them. A
       // field the form does not draw marks nothing; the banner still says it.
       const drawn = sections.flatMap((s) => s.fields);
       const named = (extractFieldErrors(err) ?? []).filter((fe) =>
@@ -2945,10 +3026,13 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
       // A refusal listing one entry per failed rule says each entry no row
       // carries on its own line, not the envelope's `; `-joined summary.
       const unmarked = unmarkedRefusalLines(err, (field) => named.some((fe) => fe.field === field));
+      // A refused write says a sentence in the reader's language, never the
+      // response body (objectstack-ai/objectstack#29019); anything else thrown
+      // on the way says its own message, as before.
       const msg: string | string[] =
-        unmarked && unmarked.length > 1
-          ? unmarked
-          : unmarked?.[0] ?? err?.message ?? String(err);
+        err instanceof WriteRefusal
+          ? refusalText(err, unmarked, t)
+          : err?.message ?? String(err);
       setError(msg);
       toast.error(refusalContent(msg), { id: outcomeToastId });
       setFieldErrors(Object.fromEntries(
