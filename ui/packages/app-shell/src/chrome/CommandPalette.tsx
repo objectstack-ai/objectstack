@@ -236,7 +236,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   // such entries through `useNavigationWrites`). A present
   // label renders as authored — an inline locale map in the viewer's `language`,
   // the locale the sidebar passes (objectui#11299).
-  const targetLabel = useNavTargetLabel();
+  const targetLabel = useNavTargetLabel(RECENT_ROW_LABELS);
   const navLabel = (item: NavigationItem) =>
     resolveNavItemLabel(item, t, targetLabel, language);
 
