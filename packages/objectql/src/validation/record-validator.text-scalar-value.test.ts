@@ -145,6 +145,7 @@ describe('#29241 — write path end to end: the driver receives the judged strin
         title: { name: 'title', label: 'Title', type: 'text' },
         mail: { name: 'mail', label: 'Mail', type: 'phone' },
         amount: { name: 'amount', label: 'Amount', type: 'number' },
+        code: { name: 'code', label: 'Code', type: 'text', unique: true },
       },
     } as any);
     return { engine, writes };
@@ -165,5 +166,14 @@ describe('#29241 — write path end to end: the driver receives the judged strin
     }
     // A text-family format type is written the same way; a number field keeps its number.
     expect(writes[0]).toEqual(expect.objectContaining({ mail: '5551234', amount: 7 }));
+  });
+
+  it('a unique text field: 42 and "42" reach the driver as one value, so its unique key sees one value', async () => {
+    // What any driver's unique check compares (driver-memory keys on the stored
+    // value): base handed it 42 and "42", two keys; now one.
+    const { engine, writes } = await boot();
+    await engine.insert('scalar_task', { code: 42 } as any);
+    await engine.insert('scalar_task', { code: '42' } as any);
+    expect(writes.map((w) => (w as Record<string, unknown>).code)).toEqual(['42', '42']);
   });
 });

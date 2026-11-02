@@ -13,6 +13,20 @@
  * query builder, past every engine read coercion.
  *
  * Controls: a string is stored as sent, and a number field keeps its number.
+ *
+ * The unique key compares what is stored, so the accept set of a `unique`
+ * text field moves (Clause-② yes, narrowing), measured on `origin/main`
+ * @ `7f277a86` (the file at base) and on this change, SQLite here and driver-memory beside it:
+ *
+ *   sequence on a unique text field   base (SQLite)   base (memory)   head (both)
+ *   42, then '42'                     201, 201        201, 201        201, 409
+ *   true, then 'true'                 201, 201        201, 201        201, 409
+ *   true, then 1                      201, 409        201, 201        201, 201
+ *   false, then 0                     201, 409        201, 201        201, 201
+ *
+ * The first two rows are the narrowing: the validator reads both values as one
+ * string, and now the unique key does too. The last two are SQLite's widening:
+ * base stored `true` and `1` both as `'1.0'`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -28,6 +42,7 @@ const OBJ = {
     title: { name: 'title', type: 'text' as const },
     note: { name: 'note', type: 'textarea' as const },
     amount: { name: 'amount', type: 'number' as const },
+    code: { name: 'code', type: 'text' as const, unique: true },
   },
 };
 
@@ -131,4 +146,32 @@ describe('REST write doors on SQLite: a number or boolean on a text field is sto
     expect(res.status).toBe(201);
     expectStrings(await ctx.threeReads('s1'), { title: '42', note: 'true' });
   });
+});
+
+describe('a unique text field compares the stored string (#29241, Clause-② narrowing)', () => {
+  let ctx: Awaited<ReturnType<typeof boot>>;
+  beforeEach(async () => { ctx = await boot(); });
+
+  const post = (id: string, code: unknown) =>
+    ctx.call('POST', '/api/v1/data/:object', { object: 'scalar_rest' }, { id, code });
+
+  for (const [first, second] of [[42, '42'], [true, 'true']] as const) {
+    it(`${JSON.stringify(first)}, then ${JSON.stringify(second)}: the second is refused 409 UNIQUE_VIOLATION (base stored both)`, async () => {
+      expect((await post('a', first)).status).toBe(201);
+      const res = await post('b', second);
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body?.error?.code ?? res.body?.code).toBe('UNIQUE_VIOLATION');
+      expect((await ctx.threeReads('a')).stored!.code).toBe(String(first));
+    });
+  }
+
+  for (const [first, second] of [[true, 1], [false, 0]] as const) {
+    it(`${JSON.stringify(first)}, then ${JSON.stringify(second)}: both land, as two strings (base refused the second on SQLite)`, async () => {
+      expect((await post('a', first)).status).toBe(201);
+      const res = await post('b', second);
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect((await ctx.threeReads('a')).stored!.code).toBe(String(first));
+      expect((await ctx.threeReads('b')).stored!.code).toBe(String(second));
+    });
+  }
 });
