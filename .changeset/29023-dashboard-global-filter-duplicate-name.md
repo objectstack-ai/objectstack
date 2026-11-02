@@ -5,7 +5,7 @@
 fix(spec)!: a dashboard that declares two global filters under one name is refused at every door that parses it
 
 Clause-②: no (narrowing)
-Metadata-protocol: semantic
+Metadata-protocol: narrowed
 Skills-docs: none — `skills/objectstack-ui/rules/dashboards.md` teaches a filter's `name` as "the stable key `filterBindings` references", defaulting to `field`, and no file under `skills/**` shows two filters under one key; every taught use stays true.
 
 **BREAKING** for a dashboard whose `globalFilters` repeats a filter key.
