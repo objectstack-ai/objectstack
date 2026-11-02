@@ -231,7 +231,7 @@ export function ObjectViewTitleSwitcher({
                         // margin pulled out of it truncated the label it was sized for.
                         className={cn(
                             // Below `sm` the trigger is a 44 px touch target.
-                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left max-sm:min-h-11',
+                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left max-sm:min-h-11 max-sm:min-w-11',
                             // Inset: the title clips what overflows it (`truncate`), an outer ring included.
                             'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             open && 'bg-muted',

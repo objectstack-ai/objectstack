@@ -6180,7 +6180,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   // On a phone an active sort keeps this trigger, with its
                   // level count, on the bar: the Display panel holds the
                   // builder, but only the bar can show the list is sorted.
-                  sortInDisplay && currentSort.length === 0 && "hidden sm:inline-flex",
+                  // The open search field takes its slot while it is open.
+                  sortInDisplay && (currentSort.length === 0 || phoneSearchOpen) && "hidden sm:inline-flex",
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
