@@ -76,7 +76,11 @@ const SheetContent = React.forwardRef<
       {...props}
     >
       {children}
-      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
+      {/* Below `sm` the close button is a 44 px touch target, the phone floor
+          the Console's phone-width audit holds every control to
+          (objectstack#29078); the glyph stays 16 px and stays where it was,
+          the box around it grows. */}
+      <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary max-sm:right-1 max-sm:top-1 max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center">
         <X className="h-4 w-4" />
         <CloseSrLabel />
       </SheetPrimitive.Close>
