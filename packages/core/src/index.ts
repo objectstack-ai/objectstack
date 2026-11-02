@@ -169,6 +169,14 @@ export * from './utils/multi-value-storage-form.js';
 // engine at runtime.
 export * from './utils/required-emptiness.js';
 
+// [#29277] …and the blank-as-null rule: which columns of an object store a
+// blank string as `null`, and which blanks (the #20308, #29176 and #29277
+// arms). `@objectstack/objectql`'s write door applies it, and
+// `@objectstack/metadata-protocol`'s seed replay compares a seed value in the
+// form it stores — one rule, here because those two do not depend on each
+// other.
+export * from './utils/blank-storage-form.js';
+
 // [#21007] …and the refusal a scalar comparison gets on a field stored as a
 // JSON column: the operator set and the words. `driver-sql` refuses it on
 // `where`, and `@objectstack/objectql` on the per-aggregation `filter` it

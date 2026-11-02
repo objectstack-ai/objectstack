@@ -15,8 +15,5 @@ export type { MinimapProps, MinimapItem } from './Minimap';
 export { PropertyEditor } from './PropertyEditor';
 export type { PropertyEditorProps, PropertyField } from './PropertyEditor';
 
-export { VersionHistory } from './VersionHistory';
-export type { VersionHistoryProps, VersionHistoryEntry } from './VersionHistory';
-
 export { HistoryPanel } from './HistoryPanel';
 export type { HistoryPanelProps } from './HistoryPanel';

@@ -66,12 +66,33 @@
  * or match an option label, to hit a multi-valued field. The declaration is
  * read from the field map the engine already passes in (`fields`), whose
  * entries are the object's full field definitions — `multiple` included.
+ *
+ * [#29394] A field whose DECLARED type can never hold a string — the #15661
+ * text-operator door's `door-refusal` verdict (`textOperatorDoorVerdict`:
+ * numeric, boolean, calendar-date, instant, clock-time and structured-JSON
+ * types, plus a `formula` whose readable `returnType` names one) — contributes
+ * NO clause. That door judges only the caller's own `where`, before this
+ * expansion runs, so the `$icontains` emitted here used to reach the driver
+ * unjudged and answer per backend: every SQL face and `driver-memory` refuse a
+ * text operator on a JSON column, so one `json` field in a declared
+ * `searchableFields` failed EVERY search on the object with `INVALID_FILTER`;
+ * the SQL faces type-gate a numeric / boolean / temporal column to no-match,
+ * while `driver-memory` matched a date stored as text by ISO substring. A
+ * search term is text, and such a column has no text for it to match, so the
+ * answer is the declared no-match on every backend — reached here, by skipping,
+ * rather than by a cast whose rendering differs per dialect. The resolved set
+ * is NOT narrowed: `resolveSearchFields` still answers it whole, so the
+ * refusals judged on it (#24284, #28120) and the `$searchFields` door are
+ * unmoved, and a set holding only such fields expands to an `$or` with no arm,
+ * which is FALSE (`FILTER_LOGIC_CASES`): no rows, never an error, never every
+ * row. ⛔ No second type list: the verdict is the spec's.
  */
 
 import {
   isMultiValueField,
   resolveSearchFields,
   SEARCHABLE_ENUM_TYPES,
+  textOperatorDoorVerdict,
   type SearchFieldMeta,
   type SearchFieldResolutionOptions,
 } from '@objectstack/spec/data';
@@ -152,7 +173,23 @@ function isMultiValuedSearchField(meta: SearchFieldMeta): boolean {
   return typeof type === 'string' && isMultiValueField({ type, multiple: multiple === true });
 }
 
+/**
+ * [#29394] Can this field's DECLARED type never hold a string? The #15661
+ * door's own verdict, over the field definition the engine handed in (its
+ * `returnType` read for a `formula`). An unreadable `type` is not judged, the
+ * door's rule too: unresolvable is not wrong.
+ */
+function neverHoldsText(meta: SearchFieldMeta): boolean {
+  const { type, returnType } = meta as SearchFieldMeta & { returnType?: unknown };
+  if (typeof type !== 'string') return false;
+  const declared = typeof returnType === 'string' ? { type, returnType } : { type };
+  return textOperatorDoorVerdict(declared) === 'door-refusal';
+}
+
 function fieldClausesForTerm(field: string, term: string, meta: SearchFieldMeta): any[] {
+  // [#29394] No text clause over a column that can never hold text — see the
+  // module header.
+  if (neverHoldsText(meta)) return [];
   // [#21009] Membership on a multi-valued field — see the module header.
   if (isMultiValuedSearchField(meta)) {
     const values = optionValuesMatching(meta, term).filter((v) => v !== null && v !== undefined);
@@ -248,6 +285,10 @@ function withholdUnqueryable(
  *   non-throwing; the judgement lives at the call site every verb reaches.
  *   [#25672] A set that `queryableFields` withheld down to nothing is this
  *   case too.
+ *
+ * [#29394] A NON-empty set whose every field can never hold text is not the
+ * second case: each term's `$or` is emitted with no arm, FALSE, so the search
+ * answers no rows rather than being refused.
  */
 export function expandSearchToFilter(raw: unknown, opts: ExpandSearchOptions): any | null {
   const { query, fields: requested } = normalizeSearch(raw);

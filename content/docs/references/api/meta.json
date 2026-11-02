@@ -37,6 +37,7 @@
     "misc",
     "package-api-assembled",
     "package-lifecycle",
+    "push-delivery",
     "record-page",
     "sortability"
   ]
