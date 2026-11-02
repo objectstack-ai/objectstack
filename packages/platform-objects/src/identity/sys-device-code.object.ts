@@ -48,7 +48,6 @@ export const SysDeviceCode = ObjectSchema.create({
   },
   description: 'OAuth 2.0 Device Authorization Grant (RFC 8628) pending requests',
   nameField: 'user_code', // [ADR-0079] canonical primary-title pointer (single-field titleFormat)
-  titleFormat: '{user_code}',
   highlightFields: ['user_code', 'status', 'client_id', 'expires_at'],
 
   // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: the one policy

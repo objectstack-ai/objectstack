@@ -68,7 +68,18 @@
  *    unrefused when the deployment restarts. A hot install of that package is
  *    refused (the stored page is already in the registry then).
  *  - ⛔ A downgrade. `OS_METADATA_COLLISION=warn` softens the ADR-0048 Phase 1
- *    namespace gate only.
+ *    namespace gate only. *
+ * ## The app-scoped record page
+ *
+ * A record page may name the apps whose routes open it for its object
+ * (`PageSchema.apps`; maintainer ruling A on objectstack#28979, record
+ * 6573557633). The rule above holds one level down, per app: at most one
+ * record page per object per app, refused here by the same holders, claims
+ * and overlay rules, keyed by the SLOT ({@link RecordPageSlot}) instead of by
+ * the object alone. The deployment's default is the slot with no app; it and
+ * an app's slot never meet. "The record page of object X inside app A" is
+ * `@objectstack/spec/ui`'s `defaultRecordPageObject(page, A)`, the reading
+ * `defineStack` and the metadata save door ask too.
  */
 
 import { defaultRecordPageObject, misplacedDefaultPageRefusal } from '@objectstack/spec/ui';
@@ -78,10 +89,48 @@ export type DefaultRecordPageHolder =
   | { readonly kind: 'package'; readonly packageId: string; readonly page: string }
   | { readonly kind: 'environment'; readonly page: string };
 
-/** One default record page a manifest declares. */
-export interface DeclaredDefaultRecordPage {
-  /** The object the page is the default record page of. */
+/**
+ * One record-page slot: an object's deployment default (`app` absent), or the
+ * record page an app's routes open for an object (`app` set).
+ */
+export interface RecordPageSlot {
+  /** The object whose record view the slot chooses the page of. */
   readonly object: string;
+  /** The app the slot is scoped to; absent for the deployment's default. */
+  readonly app?: string;
+}
+
+/** The registry's key for a slot — the object alone for the default, so the default's keys are unchanged. */
+export function recordPageSlotKey(slot: RecordPageSlot): string {
+  return slot.app === undefined ? slot.object : JSON.stringify([slot.object, slot.app]);
+}
+
+/**
+ * Every slot `item` holds: its object's default when it is one, and one slot
+ * per distinct string entry of its `apps` that `defaultRecordPageObject` places
+ * (a record page bound to an object). Reads an unparsed body.
+ */
+export function recordPageSlotsOf(item: unknown): RecordPageSlot[] {
+  const slots: RecordPageSlot[] = [];
+  const object = defaultRecordPageObject(item);
+  if (object !== undefined) slots.push({ object });
+  const apps = (item as { apps?: unknown } | null | undefined)?.apps;
+  if (Array.isArray(apps)) {
+    for (const app of new Set(apps.filter((a): a is string => typeof a === 'string'))) {
+      const scoped = defaultRecordPageObject(item, app);
+      if (scoped !== undefined) slots.push({ object: scoped, app });
+    }
+  }
+  return slots;
+}
+
+/** Whether `item` holds `slot`. */
+export function holdsRecordPageSlot(item: unknown, slot: RecordPageSlot): boolean {
+  return defaultRecordPageObject(item, slot.app) === slot.object;
+}
+
+/** One record-page slot a manifest declares a page for. */
+export interface DeclaredDefaultRecordPage extends RecordPageSlot {
   /** The page's name. */
   readonly page: string;
 }
@@ -100,7 +149,8 @@ function pageName(item: unknown): string | undefined {
 }
 
 /**
- * Every default record page a manifest declares, read from the SAME sources
+ * Every record-page slot a manifest declares a page for — each default record
+ * page, and each app a scoped record page names — read from the SAME sources
  * the engine's registration seams read: the manifest's own `pages` and each
  * nested `plugins[]` entry's (a nested plugin contributes under its parent
  * package — `ObjectQL.registerPlugin`), one level deep, arrays only. In
@@ -113,9 +163,9 @@ export function declaredDefaultRecordPages(manifest: unknown): DeclaredDefaultRe
     const pages = (source as { pages?: unknown }).pages;
     if (!Array.isArray(pages)) return;
     for (const item of pages) {
-      const object = defaultRecordPageObject(item);
       const page = pageName(item);
-      if (object !== undefined && page !== undefined) out.push({ object, page });
+      if (page === undefined) continue;
+      for (const slot of recordPageSlotsOf(item)) out.push({ ...slot, page });
     }
   };
   read(manifest);

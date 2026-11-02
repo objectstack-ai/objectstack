@@ -499,10 +499,19 @@ function isNullableField(def: AnyRec): boolean {
 /**
  * [#29026] A `count` / `sum` roll-up summary is always valued: zero children is
  * zero. `@objectstack/objectql`'s `summaryEmptySetValue` is the authority — the
- * engine seeds a new parent row with it, falls back to it when an aggregate
- * over no rows answers `null`, and backfills a stored `NULL` with it — and this
- * package may not import a runtime, so the two functions are named here. A
- * `min` / `max` / `avg` over no rows IS `null`, and stays nullable. Measured on
+ * engine seeds a new parent row with it at create time
+ * (`initializeSummaryFields`) and falls back to it when a child write's
+ * recompute over no rows answers `null` — and this package may not import a
+ * runtime, so the two functions are named here. A `min` / `max` / `avg` over
+ * no rows IS `null`, and stays nullable.
+ *
+ * This judgment PRESUMES the one-off `os migrate summary-nulls` ran. Nothing
+ * backfills a stored `NULL` automatically: a parent row stored before the
+ * create-time seed shipped, and never visited by a child write since, keeps
+ * its `NULL` until that migration (`summary-backfill.ts`) recomputes it. On a
+ * database upgraded in place without it, such a row reads `null`, and a
+ * predicate this gate passed faults on it — a validation rule then refuses the
+ * write. Measured on
  * a record-triggered run: `showcase_expense_report.total_amount` (a `sum`)
  * reads `0` on a report with no lines
  * (`examples/app-showcase/test/notify-recipient-optional-fields.test.ts`).

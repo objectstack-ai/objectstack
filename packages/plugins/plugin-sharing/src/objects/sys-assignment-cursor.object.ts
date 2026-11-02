@@ -29,7 +29,6 @@ export const SysAssignmentCursor = ObjectSchema.create({
   description: 'Where round-robin assignment last left off, per assignment rule entry.',
   displayNameField: 'rule',
   nameField: 'rule',
-  titleFormat: '{rule} / {entry}',
   highlightFields: ['rule', 'entry', 'last_user_id', 'version'],
 
   fields: {
