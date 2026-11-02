@@ -1015,11 +1015,11 @@
     "data/ObjectExtension": {
       "sites": [
         "",
-        "fields.valueType",
-        "fields.valueType.currencyConfig",
-        "fields.valueType.inlineColumns.element",
-        "fields.valueType.relatedListFilter.lazy",
-        "fields.valueType.summaryOperations"
+        "fields.out.valueType",
+        "fields.out.valueType.currencyConfig",
+        "fields.out.valueType.inlineColumns.element",
+        "fields.out.valueType.relatedListFilter.lazy",
+        "fields.out.valueType.summaryOperations"
       ]
     },
     "data/PostgresConfig": {

@@ -8,8 +8,8 @@
  * service, no entry).
  *
  * The page body is the console's `automation:connector-credentials` component
- * (`@object-ui/app-shell`), the way Setup's packaged-automation entry names
- * `automation:packaged`. It reads `GET /api/v1/automation/connectors/credential-refs`
+ * (`@object-ui/app-shell`), the way Setup's packaged-actions entry names
+ * `automation:packaged-actions`. It reads `GET /api/v1/automation/connectors/credential-refs`
  * and writes through `PUT` / `DELETE …/credential-refs/:ref`; ⛔ no value ever
  * reaches it, since none of the three routes answers one.
  *
