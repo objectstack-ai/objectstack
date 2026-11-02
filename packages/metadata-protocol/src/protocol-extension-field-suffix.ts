@@ -13,8 +13,14 @@
  *     protocol` (`saveMetaItem`, `rollbackMetaItem`, and the promotion
  *     `publishMetaItem` / `publishPackageDrafts` share), for an `object` body,
  *     through {@link objectBodyExtensionFieldSuffixRefusal};
+ *   - the same three doors for an `object_extension` item, as the package's one
+ *     `objectExtensions` entry, through {@link judgeExtensionFieldSuffix}
+ *     (`objectExtensionItemRefusal`, `protocol-object-extension-item.ts`);
  *   - `duplicatePackage`, for every object the copy would write, judged against
  *     the TARGET id before the copy mints anything;
+ *   - `reassignOrphanedMetadata` (the adopt-orphans door), for every active
+ *     `object` row the adoption would rebind, judged against the TARGET id
+ *     before the first storage update;
  *   - `os validate` (`@objectstack/cli`) and the marketplace install
  *     (`@objectstack/cloud-connection`), for a whole package body, through
  *     {@link judgeExtensionFieldSuffix}.

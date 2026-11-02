@@ -289,6 +289,25 @@ export function aggregateObjectOf(cube: Cube): string {
 }
 
 /**
+ * [#28799] Every granularity `query.timeDimensions` asks of each dimension, in
+ * request order, keyed by the dimension as spelled. A dimension asked at two
+ * granularities keeps both, so the group-key builders hand the engine both
+ * buckets and its duplicate-column refusal answers the pair. A map of one
+ * granularity per dimension kept the last entry and dropped the other
+ * silently: `month` then `year` was served as one `year` bucket.
+ */
+function granularitiesByDimension(query: AnalyticsQuery): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const td of query.timeDimensions ?? []) {
+    if (!td.granularity) continue;
+    const grans = out.get(td.dimension);
+    if (grans) grans.push(td.granularity);
+    else out.set(td.dimension, [td.granularity]);
+  }
+  return out;
+}
+
+/**
  * The `engine.aggregate` `groupBy` the strategy's direct path hands the engine
  * for `query`, in order: one key per `dimensions` entry, then one per bucketed
  * `timeDimensions` entry not also listed there, each named once
@@ -307,26 +326,26 @@ export function aggregateGroupKeys(query: AnalyticsQuery, cube: Cube): Aggregate
   // path grouped raw timestamps (one bucket per row) and date-bucketed
   // dataset widgets never matched their legacy `categoryGranularity`
   // counterpart.
-  const granByDim = new Map<string, string>();
-  for (const td of query.timeDimensions ?? []) {
-    if (td.granularity) granByDim.set(td.dimension, td.granularity);
-  }
+  const gransByDim = granularitiesByDimension(query);
   // [#28744] Each group key is named once (see {@link pushGroupKey}): two
   // dimensions over one column (`region`, and `zone` declared over `region`)
   // share its group, and the row mapping in `ObjectQLStrategy.execute` keys
-  // the answer by every dimension name over it.
+  // the answer by every dimension name over it. [#28799] A dimension asked at
+  // two granularities yields both buckets, which the engine refuses.
   const groupBy: AggregateGroupKey[] = [];
   if (query.dimensions && query.dimensions.length > 0) {
     for (const dim of query.dimensions) {
       const field = resolveCubeFieldName(cube, dim, 'dimension');
-      const gran = granByDim.get(dim);
-      pushGroupKey(groupBy, gran ? { field, dateGranularity: gran } : field);
-      granByDim.delete(dim);
+      const grans = gransByDim.get(dim) ?? [];
+      if (grans.length === 0) pushGroupKey(groupBy, field);
+      for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
+      gransByDim.delete(dim);
     }
   }
   // Time dimensions not also listed in `dimensions` still bucket + group.
-  for (const [dim, gran] of granByDim) {
-    pushGroupKey(groupBy, { field: resolveCubeFieldName(cube, dim, 'dimension'), dateGranularity: gran });
+  for (const [dim, grans] of gransByDim) {
+    const field = resolveCubeFieldName(cube, dim, 'dimension');
+    for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
   }
   return groupBy;
 }
@@ -1417,12 +1436,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // Rewrite group-by: a cross-object dim becomes its base FK column; base and
     // time dims pass through. `baseDimFields` are the group keys carried into
     // the re-bucket verbatim (the FK columns are replaced by resolved attrs).
-    type GroupByItem = string | { field: string; dateGranularity: string };
-    const granByDim = new Map<string, string>();
-    for (const td of query.timeDimensions ?? []) {
-      if (td.granularity) granByDim.set(td.dimension, td.granularity);
-    }
-    const groupBy: GroupByItem[] = [];
+    // [#28799] Every granularity of each dimension, as in `aggregateGroupKeys`.
+    const gransByDim = granularitiesByDimension(query);
+    const groupBy: AggregateGroupKey[] = [];
     const baseDimFields: string[] = [];
     for (const dim of query.dimensions ?? []) {
       const cd = crossByDim.get(dim);
@@ -1436,17 +1452,18 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         continue;
       }
       const field = this.resolveFieldName(cube, dim, 'dimension');
-      const gran = granByDim.get(dim);
+      const grans = gransByDim.get(dim) ?? [];
       // …and so is a base column two dimensions read: the FK column itself
       // (`account` beside `account.name`), or one column under two dimension
       // names (`region`, `zone` over `region`, #28744).
-      pushGroupKey(groupBy, gran ? { field, dateGranularity: gran } : field);
+      if (grans.length === 0) pushGroupKey(groupBy, field);
+      for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
       baseDimFields.push(field);
-      granByDim.delete(dim);
+      gransByDim.delete(dim);
     }
-    for (const [dim, gran] of granByDim) {
+    for (const [dim, grans] of gransByDim) {
       const field = this.resolveFieldName(cube, dim, 'dimension');
-      pushGroupKey(groupBy, { field, dateGranularity: gran });
+      for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
       baseDimFields.push(field);
     }
 

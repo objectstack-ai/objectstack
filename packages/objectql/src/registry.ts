@@ -2024,6 +2024,30 @@ class ExtensionMembershipKeysRefusedError extends Error {
 }
 
 /**
+ * [#28574] The refusals an `extend` contribution meets at registration, before
+ * anything is materialized: `defaultRowScope`
+ * ({@link ExtensionDefaultRowScopeRefusedError}) and `membershipKeys`
+ * ({@link ExtensionMembershipKeysRefusedError}), in that order. `undefined`
+ * when the contribution carries neither.
+ *
+ * The ONE copy of both: {@link SchemaRegistry.registerObject} throws what this
+ * answers, and the metadata save and publish doors ask it of an
+ * `object_extension` item (through
+ * {@link SchemaRegistry.extendContributionRefusal}) so the item is refused at
+ * the door with the same sentence, instead of being stored and then failing
+ * every sync that registers it.
+ */
+export function extendContributionRefusal(
+  schema: { name?: unknown; defaultRowScope?: unknown; membershipKeys?: unknown },
+  packageId: string | undefined,
+): Error | undefined {
+  const name = String(schema.name ?? '');
+  if (schema.defaultRowScope !== undefined) return new ExtensionDefaultRowScopeRefusedError(name, packageId);
+  if (schema.membershipKeys !== undefined) return new ExtensionMembershipKeysRefusedError(name, packageId);
+  return undefined;
+}
+
+/**
  * {@link ValidationRuleCopyRefusedError}'s code — `INVALID_METADATA`, for the
  * reason {@link EXTENSION_DEFAULT_ROW_SCOPE_REFUSED_CODE} gives: a body this
  * registry will not take as written. ⛔ Not a new code. The condition is named
@@ -4208,14 +4232,14 @@ export class SchemaRegistry {
     // {@link ExtensionDefaultRowScopeRefusedError}. Here, beside the field-`type`
     // door and for the same reason: before any materialization and before the
     // contributor list is opened, so a refused contribution leaves nothing behind.
-    if (ownership === 'extend' && (schema as { defaultRowScope?: unknown }).defaultRowScope !== undefined) {
-      throw new ExtensionDefaultRowScopeRefusedError(schema.name, packageId);
-    }
     // [#25234 ruling A, refusal 10] Nor does it declare a membership key — see
     // {@link ExtensionMembershipKeysRefusedError}. The same door, for the same
-    // reason, so a refused contribution leaves nothing behind.
-    if (ownership === 'extend' && (schema as { membershipKeys?: unknown }).membershipKeys !== undefined) {
-      throw new ExtensionMembershipKeysRefusedError(schema.name, packageId);
+    // reason, so a refused contribution leaves nothing behind. [#28574] Both
+    // are asked through {@link extendContributionRefusal}, the one copy the
+    // metadata save and publish doors also ask of an `object_extension` item.
+    if (ownership === 'extend') {
+      const extendRefusal = extendContributionRefusal(schema, packageId);
+      if (extendRefusal) throw extendRefusal;
     }
     // [ADR-0144 D6] A `summary` roll-up that reads a `record`-mode amount —
     // `sum` / `avg` / `min` / `max` of a child field whose rows each carry
@@ -6038,6 +6062,75 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#28574] {@link extendContributionRefusal}, asked of the registry by the
+   * metadata doors (which reach this registry through the engine and do not
+   * import this package).
+   */
+  extendContributionRefusal(
+    schema: { name?: unknown; defaultRowScope?: unknown; membershipKeys?: unknown },
+    packageId: string | undefined,
+  ): Error | undefined {
+    return extendContributionRefusal(schema, packageId);
+  }
+
+  /**
+   * [#28574, ADR-0146 D10] Register an `object_extension` item — a stored row
+   * of a writable package — as that package's `'extend'` contributor of the
+   * object it names.
+   *
+   * The WHOLE body is the contribution: every key the extension's schema
+   * declares reaches {@link mergeObjectDefinitions}, never a hand-copied key
+   * list. Only the two addressing keys are taken off it: `extend` becomes the
+   * contribution's `name` (the object it registers under) and `priority` its
+   * merge priority ({@link DEFAULT_EXTENDER_PRIORITY} when absent). The body
+   * is the caller's PARSED body (`ObjectExtensionSchema`), so schema defaults
+   * and the parse's own rewrites are already applied.
+   *
+   * Re-registering replaces the package's previous contribution to the object
+   * (the `extend` arm of {@link registerObject}), so every sync that re-reads
+   * the stored row can call this again. Refusals are {@link registerObject}'s.
+   *
+   * @returns the FQN registered under.
+   */
+  registerObjectExtension(
+    extension: { extend: string; priority?: number } & Record<string, unknown>,
+    packageId: string,
+  ): string {
+    const { extend, priority, ...contribution } = extension;
+    return this.registerObject(
+      { ...contribution, name: extend } as unknown as ServiceObject,
+      packageId,
+      undefined,
+      'extend',
+      typeof priority === 'number' ? priority : DEFAULT_EXTENDER_PRIORITY,
+    );
+  }
+
+  /**
+   * [#28574] Withdraw ONE package's `'extend'` contribution to an object — the
+   * delete of that package's `object_extension` item. The owner, the overlay
+   * layer and every other package's extension stay exactly where they are; a
+   * package's whole set leaves with {@link unregisterObjectsByPackage}.
+   *
+   * @returns whether a contribution was removed (idempotent: `false` when the
+   *   package contributes no extension to the object).
+   */
+  withdrawObjectExtension(name: string, packageId: string): boolean {
+    const fqn = this.resolveObjectKey(name) ?? name;
+    const contributors = this.objectContributors.get(fqn);
+    if (!contributors) return false;
+    const idx = contributors.findIndex(c => c.ownership === 'extend' && c.packageId === packageId);
+    if (idx === -1) return false;
+    contributors.splice(idx, 1);
+    if (contributors.length === 0) this.closeObjectEntry(fqn);
+    // The same two invalidations every other contributor mutation performs.
+    this.mergedObjectCache.delete(fqn);
+    this._objectRevision += 1;
+    this.log(`[Registry] Withdrew extend contribution to ${fqn} from ${packageId}`);
+    return true;
+  }
+
+  /**
    * [ADR-0029 D9.7] Remove the tenant OVERLAY layer of an object, leaving the
    * packaged owner exactly where it is — the layer-addressed sibling of
    * #6818's name-addressed {@link unregisterObject}.
@@ -7558,11 +7651,12 @@ export class SchemaRegistry {
    * claims and record (each step's reason is on it below).
    *
    * @param options.keepBootSeed [#28697] Keep `id` in the boot seed of
-   *   disabled packages ({@link setInitialDisabledPackageIds}). The engine's
-   *   withdrawal of a package refused part-way through its first registration
-   *   passes it: that package never existed for an operator, so the persisted
-   *   disable state its next install must honour is not forgotten with the
-   *   row. An operator's uninstall omits it.
+   *   disabled packages ({@link setInitialDisabledPackageIds}), for a caller
+   *   taking back a package that never existed for an operator, so the
+   *   persisted disable state its next install must honour is not forgotten
+   *   with the row. An operator's uninstall omits it. (A registration the
+   *   engine refuses part-way is put back by {@link restoringOnRefusal}
+   *   instead, which never touches the boot seed.)
    */
   uninstallPackage(id: string, options?: { keepBootSeed?: boolean }): boolean {
     const pkg = this.getPackage(id);

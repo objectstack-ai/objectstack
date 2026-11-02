@@ -68,8 +68,8 @@ argument, and `getMeta()` — not `get()` — reads that metadata back.
 ```typescript
 import { evaluateExpression } from '@object-ui/core'
 
-const isAdmin = evaluateExpression('${user.role === "admin"}', {
-  user: { name: 'John', role: 'admin' },
+const isPlatformAdmin = evaluateExpression('${user.isPlatformAdmin === true}', {
+  user: { name: 'John', isPlatformAdmin: true },
 }) // true
 ```
 

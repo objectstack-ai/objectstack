@@ -15,10 +15,13 @@
 //
 //   1. ⭐ an upsert naming a row the caller cannot read answers the SAME body as
 //      a batch create naming that id (the row's `id` echo aside), whose code and
-//      status are the plain `POST /data/:object` create's `409
-//      UNIQUE_VIOLATION`; the stored row is byte-identical afterwards and the
-//      answer names no other organization;
-//   2. an upsert naming an id that exists nowhere is created, as the create is;
+//      status are the plain `POST /data/:object` create's — `409
+//      UNIQUE_VIOLATION` for a caller holding the create grant, the create's
+//      `403 PERMISSION_DENIED` for one without it; the stored row is
+//      byte-identical afterwards and the answer names no other organization;
+//   2. an upsert naming an id that exists nowhere answers as the create does:
+//      created with the create grant, the create's refusal without it (and
+//      then the same refusal as for a held id);
 //   3. a row the caller CAN read keeps the update arm: written with the edit
 //      grant, the engine's refusal without it.
 //
@@ -32,6 +35,12 @@
 //     reads: the update arm's refusal, unchanged;
 //   - a create-only principal on `showcase_contact` (no read at all) — every
 //     row is one it cannot read;
+//   - the edit-without-read class on `showcase_semantic_zoo`: a principal
+//     holding edit and no read, once without and once with create. The object
+//     declares `public_read_write`, so the platform's `update` ownership floor
+//     does not bind it, and no baseline set grants anything on it; an edit
+//     grant makes no row readable, so every row is one the principal cannot
+//     read;
 //   - control: member, `showcase_account` (read only) — one refusal for a row
 //     that exists and for one that does not, unchanged.
 //
@@ -100,6 +109,8 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
   let adminTok: string;
   let memberTok: string;
   let creatorTok: string;
+  let editorTok: string;
+  let editCreatorTok: string;
   const d = doors(() => stack);
   const rows: Record<string, string> = {};
   let projectId = '';
@@ -107,6 +118,13 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
   const CREATE_ONLY = 'qa_upsert_read_contact_create_only';
   const CREATOR = 'upsert-read-creator@verify.test';
   const MEMBER = 'upsert-read-member@verify.test';
+  // The edit-without-read class, on an object whose OWD keeps the platform's
+  // `update` ownership floor out of play and that no baseline set grants.
+  const OPEN_WRITE = 'showcase_semantic_zoo';
+  const EDIT_ONLY = 'qa_upsert_read_zoo_edit_only';
+  const EDIT_CREATE = 'qa_upsert_read_zoo_edit_create';
+  const EDITOR = 'upsert-read-editor@verify.test';
+  const EDIT_CREATOR = 'upsert-read-edit-creator@verify.test';
 
   const stored = async (object: string, id: string) =>
     JSON.stringify(await ql.findOne(object, { where: { id }, context: SYS }));
@@ -117,6 +135,27 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
     showcase_task: () => ({ title: 'upsert probe', project: projectId, status: 'todo' }),
     showcase_contact: () => ({ name: 'Upsert Probe', email: 'upsert-probe@verify.test' }),
     showcase_account: () => ({ name: 'Upsert Probe', status: 'prospect' }),
+    [OPEN_WRITE]: () => ({ name: 'Upsert Probe' }),
+  };
+
+  /** Save a permission set granting `grant` on one object, and bind it to a fresh user. */
+  const principalWith = async (set: string, object: string, grant: Record<string, boolean>, email: string): Promise<string> => {
+    const saved = await stack.apiAs(adminTok, 'PUT', `/meta/permission/${set}`, {
+      name: set, label: set, systemPermissions: [], objects: { [object]: grant },
+    });
+    expect(saved.status, await saved.clone().text()).toBe(200);
+    const token = await stack.signUp(email, PASS);
+    const userId = (await ql.findOne('sys_user', { where: { email }, context: SYS }))?.id;
+    expect(userId, `${email} provisioned`).toBeTruthy();
+    await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: set }, { context: SYS });
+    return token;
+  };
+
+  /** The `object_crud` layer's verdict `/security/explain` gives the caller for one operation. */
+  const crudVerdict = async (token: string, object: string, operation: string): Promise<string> => {
+    const res = await d.call(token, 'GET', `/security/explain?object=${object}&operation=${operation}`);
+    expect(res.status, JSON.stringify(res.body)).toBe(200);
+    return String((res.body?.layers ?? []).find((l: any) => l?.layer === 'object_crud')?.verdict);
   };
 
   beforeAll(async () => {
@@ -137,12 +176,16 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
     expect(creatorId, 'creator provisioned').toBeTruthy();
     await ql.insert('sys_user_permission_set', { user_id: creatorId, permission_set: CREATE_ONLY }, { context: SYS });
 
+    // The edit-without-read class: edit and no read, without and with create.
+    editorTok = await principalWith(EDIT_ONLY, OPEN_WRITE, { allowRead: false, allowCreate: false, allowEdit: true, allowDelete: false }, EDITOR);
+    editCreatorTok = await principalWith(EDIT_CREATE, OPEN_WRITE, { allowRead: false, allowCreate: true, allowEdit: true, allowDelete: false }, EDIT_CREATOR);
+
     projectId = String((await ql.find('showcase_project', { limit: 1, context: SYS }))?.[0]?.id ?? '');
     expect(projectId, 'the showcase seed provides a project').toBeTruthy();
 
     // Rows the admin owns: hidden from the member by the private OWD, and from
-    // the creator by having no read at all.
-    for (const object of ['showcase_inquiry', 'showcase_private_note', 'showcase_contact']) {
+    // the creator and the edit-without-read principals by having no read at all.
+    for (const object of ['showcase_inquiry', 'showcase_private_note', 'showcase_contact', OPEN_WRITE]) {
       const made = await d.create(adminTok, object, unknownId(), PAYLOAD[object]());
       expect(made.status, `admin ${object} created — ${JSON.stringify(made.body)}`).toBeLessThan(300);
       rows[`hidden:${object}`] = createdId(made);
@@ -171,15 +214,32 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
     expect((await d.create(memberTok, 'showcase_account', unknownId(), PAYLOAD.showcase_account())).status, 'the member may not create accounts').toBe(403);
     expect((await d.call(creatorTok, 'GET', `/data/showcase_contact/${rows['hidden:showcase_contact']}`)).status, 'the creator reads no contact').toBe(403);
     expect((await d.create(creatorTok, 'showcase_contact', unknownId(), PAYLOAD.showcase_contact())).status, 'the creator creates contacts').toBe(201);
+
+    // The edit-without-read class: the edit grant is real, the read grant is
+    // absent, and the create grant is exactly where the table says.
+    const zooRow = rows[`hidden:${OPEN_WRITE}`];
+    expect((await d.call(adminTok, 'GET', `/data/${OPEN_WRITE}/${zooRow}`)).status).toBe(200);
+    for (const [who, tok, mayCreate] of [['edit only', editorTok, false], ['edit+create', editCreatorTok, true]] as const) {
+      expect(await crudVerdict(tok, OPEN_WRITE, 'update'), `${who}: holds edit`).toBe('grants');
+      expect(await crudVerdict(tok, OPEN_WRITE, 'read'), `${who}: holds no read`).toBe('denies');
+      expect((await d.call(tok, 'GET', `/data/${OPEN_WRITE}/${zooRow}`)).status, `${who}: reads no row`).toBe(403);
+      expect((await d.create(tok, OPEN_WRITE, unknownId(), PAYLOAD[OPEN_WRITE]())).status, `${who}: the create grant`).toBe(mayCreate ? 201 : 403);
+    }
   });
 
-  const HIDDEN: Array<[string, string, () => string]> = [
-    ['member, read+create without edit, private row', 'showcase_inquiry', () => memberTok],
-    ['member, read+create+edit, private row', 'showcase_private_note', () => memberTok],
-    ['create-only principal, no read at all', 'showcase_contact', () => creatorTok],
+  /** The plain create's answer for an id already held, by whether the caller holds the create grant. */
+  const COLLISION = { status: 409, code: 'UNIQUE_VIOLATION', mayCreate: true } as const;
+  const CREATE_REFUSED = { status: 403, code: 'PERMISSION_DENIED', mayCreate: false } as const;
+
+  const HIDDEN: Array<[string, string, () => string, typeof COLLISION | typeof CREATE_REFUSED]> = [
+    ['member, read+create without edit, private row', 'showcase_inquiry', () => memberTok, COLLISION],
+    ['member, read+create+edit, private row', 'showcase_private_note', () => memberTok, COLLISION],
+    ['create-only principal, no read at all', 'showcase_contact', () => creatorTok, COLLISION],
+    ['edit without read or create, open-write OWD', OPEN_WRITE, () => editorTok, CREATE_REFUSED],
+    ['edit+create without read, open-write OWD', OPEN_WRITE, () => editCreatorTok, COLLISION],
   ];
 
-  for (const [label, object, tok] of HIDDEN) {
+  for (const [label, object, tok, answer] of HIDDEN) {
     for (const atomic of [false, true]) {
       it(`${label} (${object}, ${atomic ? 'atomic' : 'non-atomic'}): the unreadable row answers as a create naming it`, async () => {
         const id = rows[`hidden:${object}`];
@@ -192,25 +252,34 @@ describe('upsert by id: a row the caller cannot read answers as a create naming 
         // ⭐ The create's answer, whole: same status, same envelope, same row
         // refusal — nothing of the upsert's own.
         expect(comparable(ups), JSON.stringify(ups.body)).toEqual(comparable(batchCreate));
-        expect(create.status, JSON.stringify(create.body)).toBe(409);
-        expect(create.body?.code).toBe('UNIQUE_VIOLATION');
+        expect(create.status, JSON.stringify(create.body)).toBe(answer.status);
+        expect(create.body?.code).toBe(answer.code);
         expect(ups.body?.results?.[0]?.errors?.[0]).toMatchObject({ code: create.body.code, httpStatus: create.status });
         expect(ups.body?.results?.[0]?.id).toBe(id);
         // Nothing moved.
         expect(await stored(object, id)).toBe(before);
       });
 
-      it(`${label} (${object}, ${atomic ? 'atomic' : 'non-atomic'}): an id that names no row is created, as the create is`, async () => {
+      it(`${label} (${object}, ${atomic ? 'atomic' : 'non-atomic'}): an id that names no row answers as the create does`, async () => {
         const id = unknownId();
         const ups = await d.upsert(tok(), object, id, PAYLOAD[object](), atomic);
-        expect(ups.status, JSON.stringify(ups.body)).toBe(200);
-        expect(ups.body?.success, JSON.stringify(ups.body)).toBe(true);
-        expect(ups.body?.results?.[0]).toMatchObject({ id, success: true });
-        expect(JSON.parse(await stored(object, id))?.id).toBe(id);
-
         const other = unknownId();
         const batchCreate = await d.batchCreate(tok(), object, other, PAYLOAD[object](), atomic);
-        expect(batchCreate.body?.success, JSON.stringify(batchCreate.body)).toBe(true);
+        if (answer.mayCreate) {
+          expect(ups.status, JSON.stringify(ups.body)).toBe(200);
+          expect(ups.body?.success, JSON.stringify(ups.body)).toBe(true);
+          expect(ups.body?.results?.[0]).toMatchObject({ id, success: true });
+          expect(JSON.parse(await stored(object, id))?.id).toBe(id);
+          expect(batchCreate.body?.success, JSON.stringify(batchCreate.body)).toBe(true);
+          return;
+        }
+        // Without the create grant: the create's refusal, nothing stored, and
+        // the same answer an upsert naming a held id gets.
+        expect(comparable(ups), JSON.stringify(ups.body)).toEqual(comparable(batchCreate));
+        expect(ups.body?.results?.[0]?.errors?.[0], JSON.stringify(ups.body)).toMatchObject({ code: answer.code, httpStatus: answer.status });
+        expect(await ql.findOne(object, { where: { id }, context: SYS })).toBeFalsy();
+        const held = await d.upsert(tok(), object, rows[`hidden:${object}`], PAYLOAD[object](), atomic);
+        expect(comparable(held), JSON.stringify(held.body)).toEqual(comparable(ups));
       });
     }
   }

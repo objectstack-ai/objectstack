@@ -21,11 +21,10 @@
  *    leaves the other package's object and list as they were, and keeps the
  *    boot seed of disabled packages;
  *  - CONTROLS: a clean body registers everything as before; a body that took
- *    over a tenant's object is not withdrawn (the withdrawal would drop the
- *    tenant's layer); nor is an installed id refused part-way by the registry
- *    (the withdrawal would take the installed version with it), which keeps
- *    serving its installed version instead
- *    (`package-refused-upgrade-keeps-installed.test.ts`).
+ *    over a tenant's object leaves nothing of itself and the tenant's object
+ *    serves as before (`package-refused-first-install-over-tenant.test.ts`);
+ *    an installed id refused part-way by the registry keeps serving its
+ *    installed version (`package-refused-upgrade-keeps-installed.test.ts`).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -216,15 +215,17 @@ describe('[#28697] controls', () => {
         expect(t.innerNamespace).toBe(PKG);
     });
 
-    it('a body that took over a tenant\'s object is not withdrawn: the tenant\'s layer keeps serving', () => {
+    it('a body that took over a tenant\'s object leaves nothing of itself: the tenant\'s object serves as before', () => {
         const engine = new ObjectQL();
         engine.registry.registerObject({ ...object('probe_a', { label: 'Tenant label' }), _provenance: 'org' } as any, 'sys_metadata', undefined, 'own');
         const err = refusal(() => engine.registerApp(body({ objects: [object('probe_a'), { name: 'probe_b', fields: { t: { label: 'No type' } } }] }) as any));
         expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
-        expect(engine.registry.getObjectContributors('probe_a').map((c) => `${c.ownership}:${c.packageId}`).sort())
-            .toEqual(['overlay:sys_metadata', `own:${PKG}`]);
+        expect(engine.registry.getObjectContributors('probe_a').map((c) => `${c.ownership}:${c.packageId}`))
+            .toEqual(['own:sys_metadata']);
         expect((engine.registry.getObject('probe_a') as any)?.label).toBe('Tenant label');
-        expect(engine.registry.getPackage(PKG), 'not withdrawn').toBeDefined();
+        expect({ ...trace(engine), objects: trace(engine).objects.filter((n) => n !== 'probe_a') }).toEqual({
+            pkg: undefined, objects: [], apps: [], items: [], nav: [], kinds: [], datasources: [], innerNamespace: undefined,
+        });
     });
 
     it('an installed id refused part-way by the registry is not withdrawn: the installed version keeps serving', () => {
