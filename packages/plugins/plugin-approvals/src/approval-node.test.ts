@@ -265,7 +265,8 @@ describe('Approval node bridge (ADR-0019)', () => {
         { id: 'start', type: 'start', label: 'Start' },
         {
           id: 'lead_review', type: 'approval', label: 'Lead Review',
-          config: { approvers: [{ type: 'user', value: 'lead' }], decisionOutputs: ['next_reviewers'] },
+          // A list answer needs `multiple: true`: a bare key takes one value since #28658.
+          config: { approvers: [{ type: 'user', value: 'lead' }], decisionOutputs: [{ key: 'next_reviewers', multiple: true }] },
         },
         {
           id: 'co_sign', type: 'approval', label: 'Co-sign',

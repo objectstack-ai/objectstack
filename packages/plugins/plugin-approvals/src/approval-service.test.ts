@@ -632,8 +632,10 @@ describe('ApprovalService (node era)', () => {
   });
 
   it('decision outputs: accepted keys return from decideNode and snapshot as __decisionOutputs', async () => {
+    // A list answer needs `multiple: true` on its declaration: a bare key takes
+    // one value since #28658.
     const req = await svc.openNodeRequest(
-      openInput(['u9'], {}, { decisionOutputs: ['next_reviewers', 'note'] }), CTX,
+      openInput(['u9'], {}, { decisionOutputs: [{ key: 'next_reviewers', multiple: true }, 'note'] }), CTX,
     );
     const out = await svc.decideNode(req.id, {
       decision: 'approve', actorId: 'u9', outputs: { next_reviewers: ['u2', 'u3'] },
@@ -970,13 +972,35 @@ describe('ApprovalService (node era)', () => {
       expect(engine._tables['sys_approval_request'][0].pending_approvers).toBe('u1,u2');
     });
 
-    it('text — declared or a bare key — keeps accepting any value', async () => {
+    it('text: free values in the declared shape are accepted, unresolved', async () => {
       const req: any = await svc.openNodeRequest(
         typedInput(['note', { key: 'reason', type: 'text' }, { key: 'tags', type: 'text', multiple: true }]), CTX,
       );
-      const outputs = { note: ['a', 'a'], reason: 7, tags: 'one' };
+      const outputs = { note: 'looks fine', reason: 7, tags: ['urgent', 'nobody_resolves_this'] };
       const out = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u9', outputs }, SYS);
       expect(out.outputs).toEqual(outputs);
+    });
+
+    it('text with multiple: true takes a list — a single value is refused', async () => {
+      const msg = await refusal([{ key: 'tags', type: 'text', multiple: true }], { tags: 'urgent' });
+      expect(msg).toMatch(/^VALIDATION_FAILED: `outputs\.tags` takes a list of values/);
+      expectNothingRecorded();
+    });
+
+    it('text without multiple takes one value — a list is refused, a bare key included', async () => {
+      for (const defs of [[{ key: 'note', type: 'text' }], ['note']]) {
+        engine._tables['sys_approval_request'] = [];
+        engine._tables['sys_approval_action'] = [];
+        const msg = await refusal(defs, { note: ['a', 'b'] });
+        expect(msg, JSON.stringify(defs)).toMatch(/^VALIDATION_FAILED: `outputs\.note` takes one value/);
+        expectNothingRecorded();
+      }
+    });
+
+    it('a text list holds no entry twice', async () => {
+      const msg = await refusal([{ key: 'tags', type: 'text', multiple: true }], { tags: ['urgent', 'later', 'urgent'] });
+      expect(msg).toContain("`outputs.tags` lists 'urgent' more than once");
+      expectNothingRecorded();
     });
 
     it('a blank optional picker output is left to `required`, not judged', async () => {

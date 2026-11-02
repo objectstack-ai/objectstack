@@ -1326,8 +1326,8 @@ function teamOrganizationOf(row: any): string {
 /**
  * What one value of each picker kind of decision output is (#28658): the
  * thing the picker commits, and the thing an `expression` approver with the
- * matching `resolveAs` reads downstream. `text` is absent: free text is not
- * judged.
+ * matching `resolveAs` reads downstream. `text` is absent: free text has no
+ * resolver, so only its shape (`multiple`) is judged.
  */
 const DECISION_OUTPUT_VALUE_NOUN: Readonly<Record<string, string>> = {
   user: 'user id',
@@ -4490,13 +4490,14 @@ export class ApprovalService implements IApprovalService {
    * against its declaration, and throw ONE `VALIDATION_FAILED` naming every
    * `outputs.KEY` that does not match. Called before any write.
    *
-   *  - `text` (the default, and every bare-key declaration) is free text and is
-   *    not judged, as before.
    *  - A blank value is `required`'s question, not this one's: an omitted
    *    optional output stays omitted.
    *  - `multiple: true` takes a list and only a list, with no entry twice;
-   *    `multiple` absent or false takes one value.
-   *  - Each value must resolve, through the lookup the matching `expression`
+   *    `multiple` absent or false takes one value. This holds for every
+   *    declaration, `text` (the default, and every bare-key declaration)
+   *    included: the ruling's sentence on `multiple` names no kind.
+   *  - `text` is judged on that shape only; its values are free.
+   *  - A picker's values must resolve, through the lookup the matching `expression`
    *    approver's `resolveAs` expands it with
    *    ({@link decisionOutputValueRefusal}).
    */
@@ -4508,20 +4509,33 @@ export class ApprovalService implements IApprovalService {
     const problems: string[] = [];
     for (const def of defs) {
       const kind = def.type ?? 'text';
-      const noun = DECISION_OUTPUT_VALUE_NOUN[kind];
-      if (!noun || !Object.prototype.hasOwnProperty.call(outputs, def.key)) continue;
+      // `undefined` for `text`: its shape is judged, its values are not.
+      const noun: string | undefined = DECISION_OUTPUT_VALUE_NOUN[kind];
+      if (!Object.prototype.hasOwnProperty.call(outputs, def.key)) continue;
       const value = outputs[def.key];
       if (isBlankDecisionOutput(value)) continue;
       const path = `\`outputs.${def.key}\``;
+      const what = noun ?? 'value';
       if (def.multiple === true && !Array.isArray(value)) {
-        problems.push(`${path} takes a list of ${noun}s (it is declared \`multiple: true\`), not a single value`);
+        problems.push(`${path} takes a list of ${what}s (it is declared \`multiple: true\`), not a single value`);
         continue;
       }
       if (def.multiple !== true && Array.isArray(value)) {
-        problems.push(`${path} takes one ${noun} (it is not declared \`multiple: true\`), not a list`);
+        problems.push(`${path} takes one ${what} (it is not declared \`multiple: true\`), not a list`);
         continue;
       }
       const values: unknown[] = Array.isArray(value) ? value : [value];
+      if (!noun) {
+        // Free text: one entry twice is the same answer given twice.
+        const seenText = new Set<string>();
+        const repeatedText = new Set<string>();
+        for (const v of values) {
+          const spelled = typeof v === 'string' ? `'${v}'` : JSON.stringify(v);
+          (seenText.has(spelled) ? repeatedText : seenText).add(spelled);
+        }
+        if (repeatedText.size) problems.push(`${path} lists ${[...repeatedText].join(', ')} more than once`);
+        continue;
+      }
       if (values.some(v => typeof v !== 'string' || v.trim() === '')) {
         problems.push(`${path} must hold ${def.multiple === true ? `${noun}s` : `a ${noun}`} as text`);
         continue;
