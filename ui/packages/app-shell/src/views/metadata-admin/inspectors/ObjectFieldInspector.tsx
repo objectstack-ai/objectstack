@@ -1116,6 +1116,7 @@ export function ObjectFieldInspector({
     <DisplayPatchLock>
       <ReferenceNameVisibleField
         value={def.referenceNameVisible === true}
+        divided={type === 'lookup'}
         onCommit={(on) => (on ? patchDef({ referenceNameVisible: true }) : unsetDefKey('referenceNameVisible'))}
         disabled={locked}
         locale={locale}
@@ -2528,17 +2529,20 @@ function ReferenceNameVisibleField({
   value,
   onCommit,
   disabled,
+  divided,
   locale,
 }: {
   value: boolean;
   onCommit: (on: boolean) => void;
   disabled?: boolean;
+  /** Ruled off from the controls above it (a lookup's picker config); a `user` field shows it alone. */
+  divided?: boolean;
   locale?: string;
 }) {
   const id = React.useId();
   const helpId = `${id}-help`;
   return (
-    <div className="space-y-1 border-t pt-2.5" data-testid="field-reference-name-visible">
+    <div className={divided ? 'space-y-1 border-t pt-2.5' : 'space-y-1'} data-testid="field-reference-name-visible">
       <label htmlFor={id} className="flex items-center gap-2 text-xs cursor-pointer select-none">
         <input
           id={id}
