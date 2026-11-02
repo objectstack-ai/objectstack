@@ -2922,6 +2922,7 @@ const ar = {
       orText: "أو تابع باستخدام البريد الإلكتروني",
       ssoButton: "تسجيل الدخول باستخدام SSO",
       ssoOnlyDescription: "سجّل الدخول عبر الدخول الموحّد لمؤسستك",
+      noSignInMethodText: "لا تتوفر أي طريقة لتسجيل الدخول. تواصل مع المسؤول.",
       usePasswordText: "استخدام كلمة المرور بدلاً من ذلك",
       backToSsoText: "العودة إلى الدخول الموحّد",
       // objectui#12600 — the console login card's own header, the password
