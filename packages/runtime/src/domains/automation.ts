@@ -61,7 +61,16 @@ import {
 import { flowStartRefusal } from '../flow-start-admission.js';
 // ADR-0143 D5 · ruling A (record 6548764795) — which credential admitted the
 // caller, read the way the api-action forward table reads it.
-import { apiForwardCredentialKind } from '../action-execution.js';
+//
+// Flow start admission's third question, the row a start addresses: the action
+// door's caller-scope read and refusal, asked by every door that starts a flow
+// by name (`../flow-start-admission.ts`).
+import {
+    apiForwardCredentialKind,
+    callData,
+    refuseUnreadableFlowStartRecords,
+    type FlowStartRecordKeys,
+} from '../action-execution.js';
 // [#12156] ADR-0126 §7.1 clone — the whole-definition copy, the keys it must
 // not carry forward, the same-name refusal and the references notice.
 import {
@@ -188,9 +197,7 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     // `<objectName>Id` alias) stay out even when the caller's own bag names
     // them: the console mirrors the launched row's id into `params.recordId`,
     // and that is the row being addressed, not a screen being answered.
-    const alias = objectName
-        ? `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`
-        : undefined;
+    const alias = recordIdAlias(objectName);
     const callerParamKeys = Object.keys(baseParams).filter((k) => k !== 'recordId' && k !== alias);
     if (recordId !== undefined && baseParams.recordId === undefined) {
         baseParams.recordId = recordId;
@@ -223,6 +230,39 @@ export function buildAutomationContext(body: any, context: HttpProtocolContext):
     // the console around it. `AutomationContext.locale` names its reader.
     if (typeof ec?.locale === 'string' && ec.locale.length > 0) automationContext.locale = ec.locale;
     return automationContext;
+}
+
+/**
+ * The camelCase `<objectName>Id` alias {@link buildAutomationContext} seeds the
+ * row id under (`crm_lead` → `crmLeadId`), or `undefined` when the start names
+ * no object. ONE spelling, read by the builder to seed it and by
+ * {@link flowStartRecordKeys} to judge what it carries.
+ */
+function recordIdAlias(objectName: unknown): string | undefined {
+    return objectName
+        ? `${String(objectName).replace(/_([a-z])/g, (_: string, c: string) => c.toUpperCase())}Id`
+        : undefined;
+}
+
+/**
+ * What a context {@link buildAutomationContext} built hands the run as the row
+ * it addresses: the object the start names (`object`) and the value under each
+ * row slot this builder defines, `params.recordId` and the `<object>Id` alias,
+ * read off the BUILT bag, so a caller's own `params` value in a slot is the one
+ * judged, exactly as the run receives it. Read by the trigger routes and a
+ * declared `type: 'flow'` endpoint, which share the builder, for flow start
+ * admission's third question (`refuseUnreadableFlowStartRecords`).
+ */
+export function flowStartRecordKeys(automationContext: Record<string, unknown>): {
+    objectName: unknown;
+    recordKeys: FlowStartRecordKeys;
+} {
+    const params = (automationContext.params ?? {}) as Record<string, unknown>;
+    const objectName = automationContext.object;
+    const alias = recordIdAlias(objectName);
+    const recordKeys: Array<readonly [string, unknown]> = [['recordId', params.recordId]];
+    if (alias !== undefined) recordKeys.push([alias, params[alias]]);
+    return { objectName, recordKeys };
 }
 
 export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
@@ -2718,7 +2758,25 @@ async function respondToFlowTrigger(
             }),
         };
     }
-    const result = await automationService.execute(flowName, buildAutomationContext(body, context));
+    const automationContext = buildAutomationContext(body, context);
+    // Flow start admission's third question, the row this start addresses:
+    // every row slot the built context carries is loaded in the caller's own
+    // scope, by the read the action door's subject load makes, and refused with
+    // its `404 RECORD_NOT_FOUND` BEFORE `execute()`, so a refused start has no
+    // run. Answered through `errorFromThrown`, the exit the action door serves
+    // the same refusal through, so the two doors answer one envelope.
+    try {
+        await refuseUnreadableFlowStartRecords(
+            automationService,
+            flowName,
+            flowStartRecordKeys(automationContext),
+            context?.executionContext,
+            (object, id) => callData(deps, context, 'get', { object, id }, context?.dataDriver, context?.environmentId, context?.executionContext),
+        );
+    } catch (err) {
+        return { handled: true, response: deps.errorFromThrown(err, 500) };
+    }
+    const result = await automationService.execute(flowName, automationContext);
     const refusal = classifyFlowRefusal(flowName, result);
     if (refusal) {
         // The run's own artefacts ride the 400 arm ONLY — they describe a run

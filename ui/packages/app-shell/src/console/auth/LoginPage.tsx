@@ -203,6 +203,7 @@ export function LoginPage() {
           ssoOnlyDescription: t('auth.login.ssoOnlyDescription'),
           usePasswordText: t('auth.login.usePasswordText'),
           backToSsoText: t('auth.login.backToSsoText'),
+          noSignInMethodText: t('auth.login.noSignInMethodText'),
         }}
       />
   );
