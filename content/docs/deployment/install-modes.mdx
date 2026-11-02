@@ -13,7 +13,7 @@ picks one of those.
 |:---|:---|:---|
 | What is installed | the package, registered as code | a copy of every metadata item, written once into the environment |
 | Who is the authority | the package | this environment: the copy is its own metadata |
-| Editing | nothing it ships is edited in place; you customise beside it | every copied item is edited like anything authored in Studio |
+| Editing | nothing it ships is edited in place; a customization is an item of its paired `<package>.custom` package ([how](/docs/concepts/metadata-lifecycle#customizing-an-installed-package-the-paired-custom-override-adr-0146)) | every copied item is edited like anything authored in Studio |
 | Later versions | install the next version | the copy follows no upgrade |
 | The vendor's protection locks | kept and enforced | not copied; the install lists each lock it drops |
 | Tenancy posture | any | refused where the deployment walls organizations (`group`, `isolated`) |
