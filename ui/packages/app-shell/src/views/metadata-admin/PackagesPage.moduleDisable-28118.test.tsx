@@ -214,7 +214,8 @@ describe('Installed Apps view — a marketplace suite\'s module row (objectstack
   it('CONTROL: the suite\'s app row, served disableable: false, offers no Disable', async () => {
     await renderInstalledApps();
     fireEvent.click(await screen.findByTestId('pkg-row-com.acme.suite'));
-    await screen.findByTestId('pkg-scope');
+    // The sheet is open once its read actions are drawn.
+    await screen.findByRole('button', { name: label('viewInfo') });
     await settle();
     expect(screen.queryByRole('button', { name: label('disable') })).toBeNull();
   });
