@@ -14993,16 +14993,20 @@ export class ObjectStackProtocolImplementation implements
      *    on a package publish, an object draft of the same batch (`pending` as
      *    a set), since the batch promotes as one unit in no type order;
      *  - the set's current definition already grants on it: the grant is not
-     *    this write's. A re-save, a stored-row migration (`os migrate meta
-     *    --stored`) or a restore that keeps it is not judged, and neither is
-     *    an object that has gone since the grant was made.
+     *    this write's. A re-save or a restore that keeps it is not judged, and
+     *    neither is an object that has gone since the grant was made.
      *
      * Asked in draft and in publish mode by {@link saveMetaItem} after the
-     * schema gate, again by {@link promoteDraftForPublish} on the draft body
+     * schema gate (except a `migrate-stored` re-save, the platform healing
+     * its own storage: a draft-only set holds no active definition, so its
+     * own rewrite would be judged as new grants), again by {@link promoteDraftForPublish} on the draft body
      * (the object can go between a draft's save and its publish), and by the
      * restore doors ({@link refuseRestoredBodyTheSaveDoorRefuses}). Answered
      * as the schema gate answers: `422 INVALID_METADATA`, one finding per
-     * unknown object at `objects.<name>`, naming it.
+     * unknown object at `objects.<name>`, naming it. [#29279] `door` names
+     * what the finding says was looked for: a save counts an object saved
+     * here, a draft's publish (`'publish'`) only a published object or an
+     * object draft of its batch.
      */
     private unknownGrantObjectSaveRefusal(
         singularType: string,
@@ -15010,6 +15014,7 @@ export class ObjectStackProtocolImplementation implements
         name: string,
         pending?: 'drafts' | ReadonlySet<string>,
         writeFace?: MetadataWriteFace,
+        door?: 'save' | 'publish',
     ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof unknownGrantObjectSaveRefusal> = {
@@ -15017,7 +15022,7 @@ export class ObjectStackProtocolImplementation implements
             listDrafts: (...a) => this.listDrafts(...a),
             readMetaItem: (...a) => this.readMetaItem(...a),
         };
-        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace);
+        return unknownGrantObjectSaveRefusal.call(host, singularType, item, name, pending, writeFace, door);
     }
 
     /**
@@ -16766,8 +16771,12 @@ export class ObjectStackProtocolImplementation implements
         // here is refused, in draft and in publish mode, after the schema and
         // before the authoring gate and every write: stored, the grant applies
         // to nothing. A draft may grant on an object that is itself still a
-        // draft. See {@link unknownGrantObjectSaveRefusal}.
-        {
+        // draft. [#29279] A `migrate-stored` re-save rewrites a row the store
+        // already holds and is not judged: a draft-only set has no active row
+        // to hold its grants, so judging it refused the pass's own rewrite of
+        // a draft whose object draft was gone; the draft is judged at its
+        // publish. See {@link unknownGrantObjectSaveRefusal}.
+        if (writeSource !== 'migrate-stored') {
             const grantRefusal = await this.unknownGrantObjectSaveRefusal(
                 singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
             );
@@ -18678,7 +18687,7 @@ export class ObjectStackProtocolImplementation implements
         // {@link unknownGrantObjectSaveRefusal}.
         if (draftForGate) {
             const grantRefusal = await this.unknownGrantObjectSaveRefusal(
-                singularType, draftForGate.body, request.name, request.batchObjects,
+                singularType, draftForGate.body, request.name, request.batchObjects, undefined, 'publish',
             );
             if (grantRefusal) throw grantRefusal;
         }
