@@ -83,6 +83,12 @@ vi.mock('../registerApprovalsComponents', () => ({}));
 vi.mock('../registerSystemComponents', () => ({}));
 vi.mock('../registerChatbotComponents', () => ({}));
 
+// Pay the heavy graph's first load here, at module top, so the clocked test
+// windows below measure the boot's decision and not module loading. Each case
+// then re-runs `main.tsx` itself against these already-loaded modules.
+await import('@object-ui/app-shell');
+await import('@object-ui/components');
+
 const BLOB_MANIFEST = 'blob:generated-manifest';
 
 function installBridge(version: number): void {
