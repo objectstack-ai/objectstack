@@ -149,4 +149,9 @@ export const jaJPGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_notification_template.fields.version.label": "b74a37c0879ec50e",
   "objects.sys_notification_template.label": "30ecafa4dac4b40d",
   "objects.sys_notification_template.pluralLabel": "9e270c87ef2578df",
+  "objects.sys_user_device.fields.platform.options.android": "44fa27bdaae7f812",
+  "objects.sys_user_device.fields.platform.options.ios": "461f32943613be91",
+  "objects.sys_user_device.fields.platform.options.web": "2a7ead3da8c035c5",
+  "objects.sys_user_device.fields.vendor.options.apns": "b6edcf327f308698",
+  "objects.sys_user_device.fields.vendor.options.fcm": "fc3b030ffd243df4",
 };

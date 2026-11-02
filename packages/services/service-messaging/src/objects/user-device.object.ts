@@ -73,7 +73,10 @@ export const UserDevice = ObjectSchema.create({
             description: 'The user the device belongs to: the signed-in user who registered it.',
         }),
 
-        vendor: Field.select(['apns', 'fcm'], {
+        vendor: Field.select([
+            { label: 'APNs', value: 'apns' },
+            { label: 'FCM', value: 'fcm' },
+        ], {
             label: 'Vendor',
             required: true,
             description: 'Push vendor the token belongs to.',
@@ -92,7 +95,11 @@ export const UserDevice = ObjectSchema.create({
         // Spec's `PUSH_DEVICE_PLATFORMS` is not on a public entry, so the three
         // are spelled here; `user-device.object.test.ts` holds them equal to
         // the registration schema's enum.
-        platform: Field.select(['ios', 'android', 'web'], {
+        platform: Field.select([
+            { label: 'iOS', value: 'ios' },
+            { label: 'Android', value: 'android' },
+            { label: 'Web', value: 'web' },
+        ], {
             label: 'Platform',
             required: true,
         }),

@@ -353,6 +353,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   { object: 'sys_metadata_activation', census: P1, fate: 'column-drop', citation: `${D7}, D6, D14 (C0): the tenant-less activation ledger` },
   { object: 'sys_presence', census: P1, fate: 'column-drop', citation: `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}` },
   {
+    object: 'sys_user_device',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: tenancy.enabled: false and no organization_id field; ${D7}: a push device belongs to its user, ` +
+      'never to an organization (spec UserDeviceSchema, rule a)',
+  },
+  {
     object: 'sys_platform_setting',
     census: PMAIN,
     fate: 'column-drop',
