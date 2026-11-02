@@ -1409,6 +1409,9 @@ const ar = {
     noActivity: "لا يوجد نشاط مسجل",
     activityAccessDenied: "ليس لديك صلاحية عرض نشاط هذا السجل.",
     commentsAccessDenied: "ليس لديك صلاحية عرض التعليقات على هذا السجل.",
+    activityLoadFailed: "تعذر تحميل نشاط هذا السجل.",
+    commentsLoadFailed: "تعذر تحميل تعليقات هذا السجل.",
+    retryLoadFeed: "إعادة المحاولة",
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
     // `detail.*` pack did not already name, and the `formatFieldChange`
     // sentences, which are assembled in code and so need interpolation holes.

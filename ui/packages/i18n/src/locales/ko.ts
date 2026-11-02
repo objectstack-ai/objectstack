@@ -1259,6 +1259,9 @@ const ko = {
     noActivity: "기록된 활동 없음",
     activityAccessDenied: "이 레코드의 활동을 볼 권한이 없습니다.",
     commentsAccessDenied: "이 레코드의 댓글을 볼 권한이 없습니다.",
+    activityLoadFailed: "이 레코드의 활동을 불러오지 못했습니다.",
+    commentsLoadFailed: "이 레코드의 댓글을 불러오지 못했습니다.",
+    retryLoadFeed: "다시 시도",
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
     // `detail.*` pack did not already name, and the `formatFieldChange`
     // sentences, which are assembled in code and so need interpolation holes.

@@ -1298,6 +1298,9 @@ const es = {
     noActivity: "Sin actividad registrada",
     activityAccessDenied: "No tiene permiso para ver la actividad de este registro.",
     commentsAccessDenied: "No tiene permiso para ver los comentarios de este registro.",
+    activityLoadFailed: "No se pudo cargar la actividad de este registro.",
+    commentsLoadFailed: "No se pudieron cargar los comentarios de este registro.",
+    retryLoadFeed: "Reintentar",
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
     // `detail.*` pack did not already name, and the `formatFieldChange`
     // sentences, which are assembled in code and so need interpolation holes.

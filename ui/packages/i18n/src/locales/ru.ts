@@ -1410,6 +1410,9 @@ const ru = {
     noActivity: "Нет зарегистрированной активности",
     activityAccessDenied: "У вас нет разрешения на просмотр активности этой записи.",
     commentsAccessDenied: "У вас нет разрешения на просмотр комментариев к этой записи.",
+    activityLoadFailed: "Не удалось загрузить активность этой записи.",
+    commentsLoadFailed: "Не удалось загрузить комментарии к этой записи.",
+    retryLoadFeed: "Повторить",
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
     // `detail.*` pack did not already name, and the `formatFieldChange`
     // sentences, which are assembled in code and so need interpolation holes.

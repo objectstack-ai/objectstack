@@ -1259,6 +1259,9 @@ const de = {
     noActivity: "Keine Aktivitäten aufgezeichnet",
     activityAccessDenied: "Sie haben keine Berechtigung, die Aktivitäten dieses Datensatzes anzuzeigen.",
     commentsAccessDenied: "Sie haben keine Berechtigung, die Kommentare zu diesem Datensatz anzuzeigen.",
+    activityLoadFailed: "Die Aktivitäten dieses Datensatzes konnten nicht geladen werden.",
+    commentsLoadFailed: "Die Kommentare zu diesem Datensatz konnten nicht geladen werden.",
+    retryLoadFeed: "Erneut versuchen",
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
     // `detail.*` pack did not already name, and the `formatFieldChange`
     // sentences, which are assembled in code and so need interpolation holes.
