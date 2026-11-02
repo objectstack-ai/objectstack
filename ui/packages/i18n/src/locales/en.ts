@@ -1125,8 +1125,6 @@ const en = {
     pullToRefresh: 'Pull to refresh',
     refreshing: 'Refreshing…',
     share: 'Share',
-    sharingPersonal: 'Personal view',
-    sharingCollaborative: 'Shared view',
     sharingLockedBy: 'Locked by {{user}}',
     print: 'Print',
     hideFieldsTitle: 'Hide Fields',

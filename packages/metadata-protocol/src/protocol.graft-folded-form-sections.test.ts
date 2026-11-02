@@ -526,7 +526,7 @@ describe('#20186 the save door judges a flattened overlay by the member its view
     it.each([
         ['aria', { aria: { ariaLabel: 'Leads' } }],
         ['an i18n description', { description: { en: 'All leads' } }],
-        ['list-style sharing', { sharing: { type: 'personal' } }],
+        ['list-style sharing', { sharing: { lockedBy: 'admin' } }],
     ])('W2: %s now saves verbatim', async (_label, extra) => {
         const body = { ...LIST, ...extra };
         expect(await storedViewBody(body.name, body)).toEqual(body);
