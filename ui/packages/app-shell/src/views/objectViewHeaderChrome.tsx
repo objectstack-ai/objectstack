@@ -18,7 +18,6 @@ import { declaredPrimaryToolbarAction, MOBILE_FAB_LIST_CLEARANCE } from './objec
 import { ListHeaderActionBar } from './objectViewHeaderLaunchGate.js';
 import type { useObjectViewToolbarAffordances } from './objectViewToolbarAffordances.js';
 import type { useObjectViewIdentity } from './objectViewIdentity.js';
-import type { useObjectViewListUrlState } from './objectViewListUrlState.js';
 import type { useObjectViewHeaderToolbar } from './objectViewHeaderToolbar.js';
 
 export function useObjectViewHeaderChrome({
@@ -35,8 +34,6 @@ export function useObjectViewHeaderChrome({
     importDisabled,
     setShowImport,
     listFavorite,
-    activeViewHasPreference,
-    handleResetView,
     isEnvironmentList,
     toolbarBar,
     viewAccess,
@@ -54,8 +51,6 @@ export function useObjectViewHeaderChrome({
     importDisabled: ReturnType<typeof useObjectViewToolbarAffordances>['importDisabled'];
     setShowImport: Dispatch<SetStateAction<boolean>>;
     listFavorite: ReturnType<typeof useObjectListFavorite>;
-    activeViewHasPreference: ReturnType<typeof useObjectViewListUrlState>['activeViewHasPreference'];
-    handleResetView: ReturnType<typeof useObjectViewListUrlState>['handleResetView'];
     isEnvironmentList: ReturnType<typeof useObjectViewToolbarAffordances>['isEnvironmentList'];
     toolbarBar: ReturnType<typeof useObjectViewHeaderToolbar>['toolbarBar'];
     viewAccess: ReturnType<typeof useMetaItemRefusal>;
@@ -86,7 +81,7 @@ export function useObjectViewHeaderChrome({
     // objectui#12705 — the header's actions folded, for a header too narrow
     // for them and the description: the primary action stays labelled and
     // every other action goes into one `⋯` menu, above the page's own entries
-    // (favorites, Reset view). The header decides when; this decides what.
+    // (favorites). The header decides when; this decides what.
     //
     // The primary is DECLARED, never read off the row's order: the page's own
     // New when it draws one, else the toolbar action authored
@@ -131,13 +126,6 @@ export function useObjectViewHeaderChrome({
                 icon: listFavorite.isFavorite ? 'star-off' : 'star',
                 type: 'script' as const,
                 onClick: listFavorite.toggle,
-            }] : []),
-            ...(activeViewHasPreference ? [{
-                name: 'object_view_reset_view',
-                label: t('console.objectView.resetView'),
-                icon: 'rotate-ccw',
-                type: 'script' as const,
-                onClick: handleResetView,
             }] : []),
         ],
         variant: 'ghost',

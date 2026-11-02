@@ -33,6 +33,14 @@
  * authors a script writes `type: 'script'` with it (objectstack#26734). The
  * field-value editor holds a row that names no field yet, and writes it to
  * `patch` once it does (objectstack#26735).
+ *
+ * A sandboxed-JS (L2) script body shows its Capabilities grant list
+ * (objectstack#29181): the sandbox refuses every `ctx` call the body was not
+ * granted, so a script that read or wrote data was refused on every click
+ * while no control here could grant it. The list is the Hook inspector's
+ * control, shared (`ScriptCapabilitiesField`), because both bodies are the
+ * spec's one `HookBodySchema`. An expression body shows none, and a switch to
+ * it drops the grant with the other L2-only keys ({@link writeScriptBody}).
  */
 
 import * as React from 'react';
@@ -66,6 +74,7 @@ import { useMetaOptions } from '../previews/useMetaOptions.js';
 import { ConditionBuilder, CLIENT_CONDITION_ROOTS } from './ConditionBuilder.js';
 import { expressionSource, writeExpressionSource } from './expression-envelope.js';
 import { IconPickerWidget } from '../widgets.js';
+import { ScriptCapabilitiesField } from './ScriptCapabilitiesField.js';
 
 /* ─────────────── constants ─────────────── */
 
@@ -1018,6 +1027,16 @@ export function ActionDefaultInspector({
                 {withSlots(tr('engine.inspector.action.scriptBodyHint'), { signature: <code>(input, ctx) =&gt; Promise&lt;output&gt;</code> })}
               </div>
             </div>
+            {bodyLanguageOf(body) === 'js' && (
+              <ScriptCapabilitiesField
+                value={body.capabilities}
+                onCommit={(capabilities) => patchBody({ capabilities })}
+                hintKey="engine.inspector.action.capabilitiesHint"
+                locale={locale}
+                disabled={readOnly}
+                testId="action-body-capabilities"
+              />
+            )}
               </>
             )}
           </>

@@ -86,6 +86,14 @@ const REPORT_CURATED_FIELDS = new Set([
  * `blocks[]`, or delete it", PR objectstack#20160) and has always refused a
  * container `order` ("a `joined` report orders per block"). `chart` is inert
  * on a joined container (objectstack#20161) and is hidden by the same switch.
+ * `dateRange` and `exportOptions` are keys of ONE table over ONE dataset, and
+ * the joined arm refuses both whatever their value (objectstack#26548); the
+ * spec form's "Period & export" section hides them on a joined report.
+ *
+ * The list is every container key the joined arm of `ReportSchema` refuses.
+ * The spec exports no such list, so `ReportSchema` is the judge in the tests:
+ * a report carrying every key a non-joined report can carry, switched to
+ * `joined` here, must parse (`joinedClearsRefused-29195.test.tsx`).
  *
  * Why CLEAR rather than un-hide: the moment the type becomes `joined` this
  * inspector hides its dataset / values / rows / columns / chart controls
@@ -102,7 +110,16 @@ const REPORT_CURATED_FIELDS = new Set([
  * refinement skips. `runtimeFilter` and `drilldown` are deliberately NOT here:
  * the joined branch reads both.
  */
-const JOINED_CONTAINER_CLEARED_KEYS = ['dataset', 'values', 'rows', 'columns', 'chart', 'order'] as const;
+const JOINED_CONTAINER_CLEARED_KEYS = [
+  'dataset',
+  'values',
+  'rows',
+  'columns',
+  'chart',
+  'order',
+  'dateRange',
+  'exportOptions',
+] as const;
 
 /**
  * Chart types offered in the curated Chart panel. A dataset-bound report plots

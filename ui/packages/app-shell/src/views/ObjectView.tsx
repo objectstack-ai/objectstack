@@ -74,6 +74,7 @@ import { useObjectViewHeaderChrome } from './objectViewHeaderChrome.js';
 import { ObjectViewPageHeader } from './objectViewPageHeader.js';
 import { ObjectViewRecordOverlay } from './objectViewRecordOverlay.js';
 import { useObjectViewListRenderer } from './objectViewListRenderer.js';
+import { ListPersonalizedMarker } from './ListPersonalizedMarker.js';
 import { useObjectViewViewCrud } from './objectViewViewCrud.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
@@ -643,7 +644,8 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         listSeedRef,
         ownListParamsRef,
         writeListUrlState,
-        activeViewHasPreference,
+        handleListPersonalizationChange,
+        listPersonalizedParts,
         handleResetView,
     } = useObjectViewListUrlState({
         objectName,
@@ -655,6 +657,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         searchParams,
         setSearchParams,
     });
+    // objectstack#28950 — the 「Personalized」 marker beside the list title (the
+    // page header's badge slot, and the phone title): drawn only while the
+    // reader's list differs from the view, and the one way back to it.
+    const personalizedMarker = !isEnvironmentList && listPersonalizedParts.length > 0 ? (
+        <ListPersonalizedMarker parts={listPersonalizedParts} onReset={handleResetView} />
+    ) : null;
 
     // objectstack#25992 slice 11b: the view-config save and create handlers, view switching
     // and the view-tab CRUD callbacks moved to `./objectViewViewCrud.tsx` (the mobile view
@@ -805,6 +813,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         setSearchParams,
         listIdentityKey,
         ownListParamsRef,
+        listSeedRef,
     });
 
     // objectstack#27594: the list title is the view switcher, which replaced the
@@ -865,8 +874,12 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         recordOpen,
         openAsPage,
         phoneTitle: !pageHeaderShown && titleSwitcher ? (
-            <span className="flex min-w-0 max-w-full text-base font-semibold" data-testid="list-phone-title">{titleSwitcher}</span>
+            <span className="flex min-w-0 max-w-full items-center gap-1.5 text-base font-semibold" data-testid="list-phone-title">
+                <span className="flex min-w-0">{titleSwitcher}</span>
+                {personalizedMarker}
+            </span>
         ) : null,
+        handleListPersonalizationChange,
         urlFilters,
         initialUfSelections,
         handleUserFilterSelectionsChange,
@@ -915,8 +928,6 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
         importDisabled,
         setShowImport,
         listFavorite,
-        activeViewHasPreference,
-        handleResetView,
         isEnvironmentList,
         toolbarBar,
         viewAccess,
@@ -996,8 +1007,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
                  environmentEntitlements={environmentEntitlements}
                  toolbarBar={toolbarBar}
                  listFavorite={listFavorite}
-                 activeViewHasPreference={activeViewHasPreference}
-                 handleResetView={handleResetView}
+                 personalizedMarker={personalizedMarker}
                  foldedHeaderActions={foldedHeaderActions}
              />
 
