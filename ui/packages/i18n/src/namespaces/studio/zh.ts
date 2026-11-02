@@ -1691,6 +1691,8 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.packages.detail.kernelReadOnly': '此软件包是平台的一部分，不能编辑、禁用或删除。',
   'engine.packages.detail.codeReadOnly': '此软件包从代码加载，在这里是只读的：不能在控制台中编辑、禁用或删除。请在其源代码中修改后重新部署。',
   'engine.packages.detail.readOnly': '此软件包在这里是只读的：不能在控制台中编辑、禁用或删除。',
+  'engine.packages.detail.codeReadOnlyDisableable': '此软件包从代码加载，在这里是只读的：不能在控制台中编辑或删除，但可以禁用并重新启用。请在其源代码中修改后重新部署。',
+  'engine.packages.detail.readOnlyDisableable': '此软件包在这里是只读的：不能在控制台中编辑或删除，但可以禁用并重新启用。',
   'engine.packages.detail.actions': '操作',
   'engine.packages.detail.edit': '编辑',
   'engine.packages.edit.title': '编辑软件包',

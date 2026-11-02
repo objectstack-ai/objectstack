@@ -218,10 +218,13 @@ the detail.
    `POST /api/v1/marketplace/install-local/:manifestId/reseed-sample-data` and
    `…/purge-sample-data`, both requiring `manage_metadata`.
 7. **Enable and disable.** **Setup → Installed Apps** lists the apps installed
-   from the marketplace. An admin with `manage_metadata` may disable a writable
-   package, and a **module of an installed app**: a `type: 'module'` package
-   that declares an installed `type: 'app'` package in its
-   `manifest.dependencies` ([Disabling a module](#disabling-a-module) below).
+   from the marketplace, each package of a suite as its own row. An admin with
+   `manage_metadata` may disable a writable package, and a **module of an
+   installed app**: a `type: 'module'` package that declares an installed
+   `type: 'app'` package in its `manifest.dependencies`
+   ([Disabling a module](#disabling-a-module) below). The package's detail
+   sheet offers **Disable** where the runtime allows it and **Enable** on any
+   disabled package.
    For every other package provided by code or by an installed app (the app
    itself, a plugin, a platform package), the runtime answers
    `PATCH /api/v1/packages/:id/disable` with `422 WRITABLE_PACKAGE_REQUIRED`.
@@ -267,7 +270,13 @@ An app ships extras in one of two shapes:
 
 A customer who does not use one of your modules can switch it off, per
 environment, with `PATCH /api/v1/packages/:id/disable`, and back on with
-`PATCH /api/v1/packages/:id/enable`. The module qualifies when its manifest
+`PATCH /api/v1/packages/:id/enable`. In the Console, the admin opens the
+module's row in **Setup → Installed Apps** (or **Setup → Packages** for a suite
+booted from code) and presses **Disable**, then confirms. The row's
+`disableable` key on `GET /api/v1/packages` is the runtime's own answer to
+whether the disable door accepts the package, and the Console offers
+**Disable** from it alone; `writable` stays `false` for a module, so its edit,
+publish and delete actions stay hidden. The module qualifies when its manifest
 says `type: 'module'` and declares your app in `dependencies`, the way every
 module of a suite already does:
 

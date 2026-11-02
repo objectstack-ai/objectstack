@@ -158,8 +158,15 @@ export interface PackageManifestRow {
  *
  * The list reads both at load (`UncheckedPackageRow` below is the wire before
  * that read) and refuses a row by name when either is missing.
+ *
+ * `disableable` is the disable door's own verdict, served beside `writable`
+ * (objectstack#28318): the detail sheet offers Disable from it alone, never
+ * from `writable`, `manifest.type` or `scope` — a module of an installed app
+ * is `disableable` and not `writable`. Read like `writable` in the sheet:
+ * anything but `true` offers no Disable, the answer the door would give.
  */
 export interface InstalledPackageRow extends Pick<InstalledPackageAtEitherStage, 'source' | 'writable'> {
+  disableable?: InstalledPackageAtEitherStage['disableable'];
   manifest: PackageManifestRow;
   status?: string;
   enabled?: boolean;
@@ -571,11 +578,17 @@ export function PackageDetailSheet({
   // Scope badge above draws Writable: the same served verdict, the row's
   // top-level `writable` (objectstack#14375), read the same way (anything but
   // `true` is never writable). On a read-only package the server refuses
-  // Edit, Publish, Revert, Disable and Delete (`WRITABLE_PACKAGE_REQUIRED`)
-  // and Duplicate (`DUPLICATE_SOURCE_NOT_A_BASE`: its source must be a
-  // writable base); Adopt orphans would bind loose items into a package the
-  // org cannot author. So none of them is offered there. The reads stay.
+  // Edit, Publish, Revert and Delete (`WRITABLE_PACKAGE_REQUIRED`) and
+  // Duplicate (`DUPLICATE_SOURCE_NOT_A_BASE`: its source must be a writable
+  // base); Adopt orphans would bind loose items into a package the org cannot
+  // author. So none of them is offered there. The reads stay. Disable has its
+  // own served verdict, `disableable`, below.
   const writable = pkg.writable === true;
+  // objectstack#28118 — Disable is offered from the disable door's own served
+  // verdict (`disableable`, objectstack#28318), never re-derived here: it is
+  // `true` for a writable base and for a module of an installed app, which
+  // stays read-only for every other write action above and below.
+  const disableable = pkg.disableable === true;
   // The name the delete dialog asks the author to type: the one the sheet's
   // title shows.
   const displayName = pkg.manifest.name || id;
@@ -1018,8 +1031,8 @@ export function PackageDetailSheet({
           ) : pkg.writable === false ? (
             <p className="text-sm text-muted-foreground" data-testid="pkg-detail-readonly-reason">
               {pkg.manifest.scope === 'project'
-                ? t('engine.packages.detail.codeReadOnly', locale)
-                : t('engine.packages.detail.readOnly', locale)}
+                ? t(disableable ? 'engine.packages.detail.codeReadOnlyDisableable' : 'engine.packages.detail.codeReadOnly', locale)
+                : t(disableable ? 'engine.packages.detail.readOnlyDisableable' : 'engine.packages.detail.readOnly', locale)}
             </p>
           ) : null}
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -1048,10 +1061,11 @@ export function PackageDetailSheet({
                 {t('engine.packages.detail.revert', locale)}
               </Button>
             )}
-            {/* Disable is refused on a read-only package; Enable is not (the
-                server's enable door has no writability gate), so a disabled
-                read-only package can still be switched back on. */}
-            {(writable || !enabled) && (
+            {/* Disable is offered where the disable door accepts it, the
+                served `disableable`; Enable is not refused anywhere (the
+                server's enable door has no writability gate), so any disabled
+                package can still be switched back on. */}
+            {(disableable || !enabled) && (
               <Button
                 size="sm"
                 variant="outline"

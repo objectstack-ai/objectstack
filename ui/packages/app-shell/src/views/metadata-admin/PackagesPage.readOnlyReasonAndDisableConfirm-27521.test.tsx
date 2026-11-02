@@ -40,6 +40,9 @@ function row(
     enabled: extra.enabled ?? true,
     source: 'code',
     writable,
+    // The disable door's verdict as the server serves it for a non-module
+    // package (objectstack#28318): disableable exactly when writable.
+    disableable: writable,
   };
 }
 

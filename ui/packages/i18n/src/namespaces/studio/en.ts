@@ -1873,6 +1873,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.packages.detail.kernelReadOnly': 'This package is part of the platform. It cannot be edited, disabled or deleted.',
   'engine.packages.detail.codeReadOnly': 'This package is loaded from code, so it is read-only here: it cannot be edited, disabled or deleted in the console. Change it in its source and deploy again.',
   'engine.packages.detail.readOnly': 'This package is read-only here: it cannot be edited, disabled or deleted in the console.',
+  'engine.packages.detail.codeReadOnlyDisableable': 'This package is loaded from code, so it is read-only here: it cannot be edited or deleted in the console, but you can disable it and enable it again. Change it in its source and deploy again.',
+  'engine.packages.detail.readOnlyDisableable': 'This package is read-only here: it cannot be edited or deleted in the console, but you can disable it and enable it again.',
   'engine.packages.detail.actions': 'Actions',
   'engine.packages.detail.edit': 'Edit',
   'engine.packages.edit.title': 'Edit package',
