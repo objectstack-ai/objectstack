@@ -3733,7 +3733,6 @@ const en = {
     quickActions: {
       title: 'Quick Actions',
       manageObjects: 'Manage Objects',
-      manageObjectsDesc: 'Configure data models',
       systemSettings: 'System Settings',
       systemSettingsDesc: 'Configure your system',
     },
@@ -5516,20 +5515,9 @@ const en = {
   // prose and are rendered verbatim; the four `*Failed*` keys below are the
   // last-resort fallbacks for a response that carried no message at all.
   packagedAutomation: {
-    title: 'Packaged automation',
-    // Covers BOTH sections since ADR-0126 §8 item 2 put packaged actions on
-    // this page: only flows can be cloned, so the clone clause names them.
-    subtitle:
-      'Flows and actions shipped by installed packages. Turn one off for this deployment, or clone a flow under a new name to customize it. Editing happens in Studio.',
     refresh: 'Refresh',
-    // Section headings — the page carries two tables.
-    flowsHeading: 'Packaged flows',
     actionsHeading: 'Packaged actions',
-    colFlow: 'Flow',
     colActivation: 'Activation',
-    colActions: 'Actions',
-    // The switch's accessible name — the only place a row's label is spoken.
-    toggleLabel: 'Activation for {{label}}',
     on: 'On',
     off: 'Off',
     // The Activation badge on a flow whose switch is ON but whose trigger the
@@ -5537,33 +5525,15 @@ const en = {
     // keeps the flag, this says the flow does not run. The same words as
     // Studio's rail for the same state (`engine.studio.auto.notRunning`).
     notRunning: 'Not running here',
-    // The same row when the engine's cause is `deployment_policy` (objectstack#27378):
-    // package-authored scheduled work is off on this deployment. Plain words for the
-    // admin; the platform's sentence, which names the operator switch, stays behind
-    // the Details chip.
-    notRunningDeploymentPolicy: 'On, but this deployment does not run scheduled work',
-    clone: 'Clone',
-    cloneTitle: 'Clone packaged flow',
-    cloneBody:
-      'The copy carries the whole definition and takes a new machine name and label. Edit the copy in Studio.',
-    cloneName: 'New machine name',
-    cloneLabel: 'New label',
     // The Clone dialog's prefilled label (objectui#13344): the source flow's
     // label, or its machine name when it has none, marked as the copy.
     cloneCopyLabel: '{{label}} (copy)',
     cancel: 'Cancel',
-    cloneConfirm: 'Create clone',
     cloneCreated: 'Created flow "{{name}}".',
     // The clone result's next steps (objectui#13270): switch the flow the
     // admin cloned from off through its own toggle, or open the clone where
     // it is edited. The sharing-rule clone's words for the same offer.
     cloneSwitchSourceOff: 'Switch "{{label}}" off',
-    cloneSourceOff: 'The packaged flow "{{label}}" is switched off.',
-    cloneOpen: 'Open the clone in Studio',
-    emptyTitle: 'No packaged flows',
-    emptyBody:
-      'No installed package ships an automation flow on this deployment. Flows you author yourself live in Studio.',
-    loadFailed: 'Could not load packaged automation.',
     // Two keys per action, not one: the response arm has an HTTP status to
     // name and the transport-exception arm does not, and a single key cannot
     // carry a hole only half its call sites can fill.
@@ -5572,8 +5542,6 @@ const en = {
     // than defining a second key with the same English in ten packs.
     toggleFailedHttp: 'Could not change activation (HTTP {{status}}).',
     toggleFailed: 'Could not change activation.',
-    cloneFailedHttp: 'Could not clone this flow (HTTP {{status}}).',
-    cloneFailed: 'Could not clone this flow.',
     // The chip an unarmed flow row's platform sentence opens from
     // (objectui#12609). ⛔ Generic on purpose: the same word on every row that
     // carries a sentence, whatever the sentence says. The sentence itself is
