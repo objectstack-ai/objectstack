@@ -206,10 +206,11 @@ export type NotificationTemplateStoreWiring = NotificationTemplateStoreOptions &
  * Loads `sys_notification_template` rows by `(topic, channel, locale)` in the
  * recipient's organization, with a locale fallback: the named tag, its primary
  * subtag (`zh-CN` → `zh`), then the stack's declared fallback and its primary
- * subtag (#28919, the same rung the email template ladder reads since #28880;
- * see {@link TEMPLATE_DECLARED_FALLBACK_LOCALE}), then {@link DEFAULT_LOCALE}.
- * A call that names no locale reads `DEFAULT_LOCALE` alone, and a store with
- * no declared fallback skips that rung. Best-effort: no data engine or a lookup error yields
+ * subtag (#28919, the same rung the email template ladder reads since #28880),
+ * then {@link DEFAULT_LOCALE}. The declared fallback is handed in by this
+ * package's own composition; a call that names no locale reads
+ * `DEFAULT_LOCALE` alone, and a store built without that reader skips the
+ * rung. Best-effort: no data engine or a lookup error yields
  * `null` (→ the renderer's generic fallback), never a throw — a template outage
  * must not block delivery.
  *
