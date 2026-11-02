@@ -370,6 +370,8 @@
     "api/RecordPageResponse",
     "api/RecordPageStreamRefusal",
     "api/RecordPageStreamRows",
+    "api/RecordPageTimelineCount",
+    "api/RecordPageTimelineRequest",
     "api/RefreshTokenRequest",
     "api/RegisterDeviceRequest",
     "api/RegisterDeviceResponse",
