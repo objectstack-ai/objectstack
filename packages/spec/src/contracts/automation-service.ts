@@ -1151,9 +1151,9 @@ export interface ConnectorConnectionState {
      * dispatches nothing for this organization); `connected`; or
      * `reconnect_required` — the grant stopped working: the authorization
      * server refused it on refresh, the connection keeps nothing to renew an
-     * expired access token with (no refresh token was issued, or no client to
-     * refresh with), or the upstream refused the connection's token while an
-     * `mcp` instance discovered its tools. `statusReason` says which.
+     * access token it has to renew with (no refresh token was issued, or no
+     * client to refresh with), or the upstream refused the connection's token
+     * while an `mcp` instance discovered its tools. `statusReason` says which.
      */
     status: 'not_connected' | 'connected' | 'reconnect_required';
     /** Why the grant stopped working, when `status` is `reconnect_required`. */
