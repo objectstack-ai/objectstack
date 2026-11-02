@@ -947,6 +947,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.graft-folded-form-sections.test.ts",
       "verb": "delete",
       "pinned": 1
