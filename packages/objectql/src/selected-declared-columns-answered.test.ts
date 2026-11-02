@@ -6,16 +6,19 @@
  *
  * The driver here stores only the keys a write carried and answers a
  * projection the way MongoDB does — a named key the document lacks is simply
- * absent. That is the driver-mongodb / driver-memory shape (measured on both
- * through the engine, `packages/runtime/src/declared-column-null-on-read.test.ts`
- * and `packages/drivers/driver-mongodb/src/mongodb-declared-column-null-on-read.test.ts`),
- * and the one this engine seam exists for.
+ * absent. That is the driver-mongodb / driver-memory shape (both measured
+ * through the engine on `origin/main`: no key for a never-written declared
+ * field, where driver-sql answers `null`), and the one this engine seam exists
+ * for. driver-mongodb is pinned in its own package
+ * (`mongodb-declared-column-null-on-read.test.ts`) and driver-sql in
+ * `@objectstack/runtime` (`declared-column-null-on-read.test.ts`); this file is
+ * the driver-memory shape's pin.
  *
  * What must stay absent is pinned beside what must appear: a column the read
  * did not select, a column outside the declared set, a federated object's
  * unprovisioned injected column, and a `formula` field (computed, never
  * `null`-filled ahead of its formula). Field-level security's refusal is
- * pinned on real drivers with the security plugin composed, in the runtime
+ * pinned on a real driver with the security plugin composed, in the runtime
  * file named above.
  */
 

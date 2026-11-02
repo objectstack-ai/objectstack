@@ -16,11 +16,16 @@
  *
  * driver-mongodb answers as driver-memory does (its insert doors store no key
  * for a field given no value); it is pinned in its own package,
- * `mongodb-declared-column-null-on-read.test.ts`.
+ * `mongodb-declared-column-null-on-read.test.ts`. driver-memory is not bound
+ * here: a new test consumer of it is a maintainer ruling
+ * (`check:driver-memory-census`), so its shape is pinned through the engine by
+ * the sparse driver in `@objectstack/objectql`'s
+ * `selected-declared-columns-answered.test.ts`, and the table's memory column
+ * was measured once, with a probe that is not kept.
  *
  * The engine answers the selected column `null` in one place
  * (`selectedStoredColumns` in `@objectstack/objectql`'s
- * `declared-read-columns.ts`), so both drivers here answer alike. The security
+ * `declared-read-columns.ts`), so every driver answers as SQL does. The security
  * plugin is composed with a member who may not read `secret`: field-level
  * security's refusal must keep the key ABSENT — a refused column must never
  * reappear as `null`, which would tell the member the field exists and is
@@ -36,7 +41,6 @@ import { PermissionSetSchema } from '@objectstack/spec/security';
 import type { EngineQueryOptions } from '@objectstack/spec/data';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
 import { SecurityPlugin } from '@objectstack/plugin-security';
 import { installDefaultOrganization } from './default-organization.testkit.js';
 
@@ -60,14 +64,11 @@ const own = (row: unknown, key: string): boolean =>
   row != null && typeof row === 'object' && Object.prototype.hasOwnProperty.call(row, key);
 
 /**
- * Each driver with the composition it serves: driver-sql under a real
- * `single` install's Default Organization (its tenant column is NOT NULL);
- * driver-memory with none, since it refuses any tenant-scoped call (it has no
- * row-level tenant isolation) and is served unscoped.
+ * The driver with the composition it serves: driver-sql under a real `single`
+ * install's Default Organization (its tenant column is NOT NULL).
  */
 const DRIVERS: Array<[string, () => unknown, boolean]> = [
   ['driver-sql (SQLite)', () => new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never), true],
-  ['driver-memory', () => new InMemoryDriver(), false],
 ];
 
 describe.each(DRIVERS)('[#29408] a selected, unwritten declared column reads null — %s', (_label, makeDriver, withOrganization) => {
