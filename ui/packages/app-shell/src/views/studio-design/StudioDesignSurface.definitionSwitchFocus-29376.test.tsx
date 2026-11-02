@@ -189,8 +189,13 @@ describe('Automations — the flow definition switch keeps keyboard focus across
     // In flight: still focused, refused to a press, still focusable.
     expect(document.activeElement).toBe(sw);
     expect(sw).toBeEnabled();
+    // The second press is refused. Draft saves run one at a time
+    // (`useDraftSaveGuard`'s queue), so a second save would wait behind the
+    // held one and the server count alone cannot see it in flight: the switch
+    // still showing the first flip can, and the count after release does.
     await user.keyboard(' ');
     await new Promise((r) => setTimeout(r, 50));
+    expect(sw).toHaveAttribute('aria-checked', 'false');
     expect(server.saves).toHaveLength(1);
 
     release();
@@ -204,6 +209,7 @@ describe('Automations — the flow definition switch keeps keyboard focus across
     // The answer landed on the same switch, and focus is still on it.
     expect(screen.getByRole('switch')).toBe(sw);
     expect(document.activeElement).toBe(sw);
+    await new Promise((r) => setTimeout(r, 50));
     expect(server.saves).toHaveLength(1);
     stopFixup();
   });
