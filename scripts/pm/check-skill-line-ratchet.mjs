@@ -1191,7 +1191,11 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   // 82 → 80 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 80],
+  // 80 → 81 (#29160): one line naming the three advisory relay ops. The ruling of record is that card's body, which
+  // quotes the maintainer verbatim — 「可以，按方案改中继，能发这个操作的账号名单我稍后点名。」 and
+  // 「你写清楚issue就可以，让车道开发」 — names this file and the one line, and confirms the raise the seat stated in
+  // its comment 6572738609. Measured delta +1 (80 → 81 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 81],
   // Lowered 84 → 77 by the rules-only rewrite of the seven core references
   // (maintainer ruling: provenance narratives, incident post-mortems and rationale
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
