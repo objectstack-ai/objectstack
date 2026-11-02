@@ -2858,7 +2858,7 @@
       "title": "Customize a read-only base's flow in Studio: the pair's item under the base's name, declaring the override, is armed in place of the base in one reload, keeps the base's ledger switch, lets a waiting run finish on the base, and Restore re-arms the base — New similar stays a separate copy under a new name",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2939,7 +2939,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "ui/packages/app-shell/src/views/studio-design/AutomationsPillar.customizeFlow-28570.test.tsx + AutomationsPillar.newSimilar-28567.test.tsx (jsdom: acceptance[0], [4] and [5]'s console calls against a mocked server) + packages/services/service-automation/src/flow-sync-one-precedence.test.ts (engine layer: the override is armed by every step and its removal re-arms the base; the ledger is the base's; 'with N-12: a run suspended on the base finishes on the base' — corroborates acceptance[1]–[4], drives no HTTP door). the browser journey has no live spec yet: the e2e is owed by #28579 slice 3 (the card's Wanted 3), so until it lands every browser and api clause is the run's live leg"
+        "ref": "ui/packages/app-shell/src/views/studio-design/AutomationsPillar.customizeFlow-28570.test.tsx + AutomationsPillar.newSimilar-28567.test.tsx (jsdom: acceptance[0], [4] and [5]'s console calls against a mocked server) + packages/services/service-automation/src/flow-sync-one-precedence.test.ts (engine layer: the override is armed by every step and its removal re-arms the base; the ledger is the base's; 'with N-12: a run suspended on the base finishes on the base' — corroborates acceptance[1]–[4], drives no HTTP door). the live spec of #28579 slice 3 (ui/e2e/live/studio-customize-journey.spec.ts) customizes a view and an object, not a flow, so every browser and api clause is the run's live leg"
       },
       "source": [
         "packages/services/service-automation/src/flow-precedence.ts#resolveFlowPrecedence (the declared .custom rank, #28412)",
@@ -2955,6 +2955,12 @@
           "revision": 1,
           "date": "2026-11-02",
           "change": "new item (ADR-0146 N-11 #28412 / PRs #28693 and #28770, N-18 #28570 / PR #28824, N-22 #28567 / PR #28668): a flow customized in Studio is the pair's item under the base's name declaring the override, armed in place of the base, keeping the base's ledger switch, with a waiting run finishing on the base and Restore re-arming it; New similar is the separate copy under a new name. Specimen showcase_budget_approval. Read from source at base eb123b7ccc",
+          "ref": "#28579"
+        },
+        {
+          "revision": 2,
+          "date": "2026-11-02",
+          "change": "automated no longer says the e2e is owed by #28579 slice 3: the slice 3 live spec (ui/e2e/live/studio-customize-journey.spec.ts) does not drive a flow, so the live leg stays the run's. No clause, step or fixture changed",
           "ref": "#28579"
         }
       ]
