@@ -2770,6 +2770,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.listItemNeedsInput': '「{list}」第 {n} 项的「{input}」需要填写',
   // objectstack#27785 — a report's chart held until its axes are picked.
   'engine.studio.held.reportChartNeedsInput': '报表图表的「{input}」需要填写',
+  'engine.studio.held.reportJoinedNeedsBlock': '联合报表需要在「{list}」中至少添加一个块',
   // objectstack#27895 — a list view held until a required setting of its type's own block is picked again.
   'engine.studio.held.listViewTypeNeedsInput': '视图{type}设置中的「{input}」需要填写',
   'engine.studio.held.fieldNeedsInput': '字段「{field}」的「{input}」需要填写',

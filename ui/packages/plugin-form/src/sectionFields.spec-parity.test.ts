@@ -51,6 +51,11 @@ const objectSchema = {
       label: 'Industry',
       options: [{ label: 'Tech', value: 'tech' }],
     },
+    // A bare declared field: no label, options, help or rules of its own, so
+    // every override below lands on it verbatim. A name the object does not
+    // declare builds no field at all (objectstack#29021), so it cannot be the
+    // blank slate this table writes on.
+    plain: { type: 'number' },
   },
 };
 
@@ -60,10 +65,10 @@ const ctx = {
   fieldLabel: (_obj: string, _name: string, fallback: string) => fallback || _name,
 };
 
-/** Normalize a spec field def against a schema that does NOT define `ghost`,
- * so every override is observable verbatim (no object-metadata interference). */
+/** Normalize a spec field def onto the bare declared `plain` field, so every
+ * override is observable verbatim (no object-metadata interference). */
 const norm = (def: Record<string, unknown>) =>
-  normalizeSectionField({ field: 'ghost', ...def }, ctx) as any;
+  normalizeSectionField({ field: 'plain', ...def }, ctx) as any;
 
 /**
  * One row per spec FormFieldSchema key: sample authored value → where the
@@ -109,7 +114,7 @@ const TABLE: Record<string, (f: (def: Record<string, unknown>) => any) => void> 
   immutable: (f) => {
     // Locked once the record exists: an edit form draws it disabled, a create
     // form leaves it editable, and no `immutable` key is carried (objectstack#25923).
-    const edit = normalizeSectionField({ field: 'ghost', immutable: true }, { ...ctx, mode: 'edit', recordId: 'r1' }) as any;
+    const edit = normalizeSectionField({ field: 'plain', immutable: true }, { ...ctx, mode: 'edit', recordId: 'r1' }) as any;
     expect(edit.disabled).toBe(true);
     expect(edit.immutable).toBeUndefined();
     expect(f({ immutable: true }).disabled).toBeFalsy();

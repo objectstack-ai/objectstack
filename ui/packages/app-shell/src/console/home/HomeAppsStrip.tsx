@@ -51,9 +51,9 @@ import { BRANDED_TILE_CLASSES, appTileColors, appTileStyle } from '../../layout/
 
 const COMPACT_LIMIT = 19;
 
-/** The 12 px links at the heading's right. */
+/** The 12 px links at the heading's right; 44 px tall below `sm`, the touch target. */
 const HEADER_LINK_CLASSES =
-  'inline-flex items-center gap-1.5 rounded-sm text-xs transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'inline-flex items-center gap-1.5 rounded-sm text-xs transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11';
 
 /**
  * One app's 56 px icon square, drawn from the app's branding (see the module
@@ -300,7 +300,8 @@ export function HomeAppsStrip({
         <button
           type="button"
           onClick={() => setShowAll(false)}
-          className="mt-2.5 text-xs text-primary hover:underline"
+          className="mt-2.5 text-xs text-primary hover:underline max-sm:min-h-11 max-sm:min-w-11"
+          data-testid="apps-show-less"
         >
           {t('home.showLess', { defaultValue: 'Show less' })}
         </button>

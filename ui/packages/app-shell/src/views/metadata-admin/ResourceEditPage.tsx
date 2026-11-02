@@ -2570,6 +2570,29 @@ function MetadataResourceEditPageImpl({
   // so its fields are not either.
   const formReadOnly = readOnly || walledDeciding || (!editing && !createMode);
 
+  // objectstack#29079 — why the scoped inspector is read-only, as the sentence
+  // the notice above the editor gives for the cause in force, in the notices'
+  // order. The inspector is shared by hosts whose causes differ, so the host
+  // names the cause (`MetadataInspectorProps.readOnlyReason`). View mode owes
+  // no sentence: the inspector exists only beside a designer canvas, and a
+  // designer type enters editing whenever it can be written (the auto-on
+  // effect above) and offers no Edit button to point at.
+  const inspectorReadOnlyReason = ((): string | undefined => {
+    if (!formReadOnly) return undefined;
+    if (walledDeciding) {
+      return tFormat('engine.catalog.readOnly.walled', locale, {
+        type: translateMetadataType(type, locale, entry?.label ?? type),
+      });
+    }
+    if (!readOnly) return undefined;
+    if (hostReadOnly) return t('engine.studio.pkg.readonlyHint', locale);
+    if (isLocked) return [lockBannerTitle(layered?.lock, locale), lockReason].filter(Boolean).join(' ');
+    if (declarationOnly) return t(`engine.catalog.declaredOnly.hint.${type}`, locale);
+    if (!canAuthor) return t('engine.edit.capabilityReadOnly', locale);
+    if (showArtifactLockedBanner) return tFormat('engine.edit.artifactLockedBanner', locale, { type });
+    return tFormat('engine.edit.readOnlyTypeBanner', locale, { flag: 'OS_METADATA_WRITABLE', type });
+  })();
+
   // Note: URL `?tab=` deep-links were repurposed to open side-panel
   // sheets (Layers / References / Related). Anything else is ignored —
   // the main work area is always the form+preview.
@@ -3490,6 +3513,7 @@ function MetadataResourceEditPageImpl({
                               setBlockingReport({ key: selectionKey, count })
                             }
                             readOnly={formReadOnly}
+                            readOnlyReason={inspectorReadOnlyReason}
                             locale={locale}
                           />
                         ) : !selection && DefaultInspectorComponent ? (

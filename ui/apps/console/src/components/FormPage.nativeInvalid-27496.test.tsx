@@ -103,6 +103,7 @@ describe('#27496 — a submit the browser blocks replaces the stale banner', () 
     stubPublic(false, 400, { error: 'Validation failed', code: 'VALIDATION_FAILED' });
     await refuseThenSubmitBadEmail();
     await fixEmailAndSubmit();
-    expect(await screen.findByText(/Submit failed \(400\)/)).toBeInTheDocument();
+    // The server's sentence, out of the envelope, never the body (#29019).
+    expect(await screen.findByText('Validation failed')).toBeInTheDocument();
   });
 });

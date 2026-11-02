@@ -53,6 +53,7 @@ import {
   usePredicateScope,
 } from '@object-ui/react';
 import {
+  DataErrorState,
   NavigationOverlay,
   RefreshIndicator,
   cn,
@@ -115,6 +116,12 @@ const TREE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // contract declares no empty-text key, so nothing authored overrides them.
   'common.loading': 'Loading…',
   'common.noData': 'No data',
+  // The load-failure title, borrowed from the list's own failure panel: a
+  // tree is a list layout (`ListView` mounts it for a `tree` view), and a
+  // failed read here is the same "Couldn't load records" a reader sees on the
+  // grid, so one failure gets one translation. The error's own message is
+  // drawn under it, as `ObjectGrid` draws it under `grid.errorLoading`.
+  'list.loadErrorTitle': 'Couldn\u2019t load records',
 };
 
 const useTreeTranslation = createSafeTranslation(
@@ -1168,11 +1175,17 @@ export const ObjectTree: React.FC<ObjectTreeProps> = ({
   // rules-of-hooks.
   const { t } = useTreeTranslation();
 
+  // The load-failure panel: a translated title and the error's own message,
+  // drawn by the component named for a failure (`role="alert"`), never an
+  // English literal on a translated page.
   if (error) {
     return (
-      <div className={cn('flex items-center justify-center h-40 text-destructive', className)}>
-        <p>Failed to load tree: {error.message}</p>
-      </div>
+      <DataErrorState
+        data-testid="tree-load-error"
+        className={cn('h-40', className)}
+        title={t('list.loadErrorTitle')}
+        message={error.message}
+      />
     );
   }
 

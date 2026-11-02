@@ -212,7 +212,8 @@ describe('objectui#9136 — the tree honours filter and the row ceiling on inlin
     render(<ObjectTree schema={{ ...base, data: { provider: 'value', items: [root, child] } }} />);
     await waitFor(() => expect(drawn().count).toBe(2));
     expect(drawn().names).toBe('Acme,Engineering');
-    expect(screen.queryByText(/Failed to load tree/)).toBeNull();
+    // The load-failure panel (objectstack#28966 moved it off an English literal).
+    expect(screen.queryByTestId('tree-load-error')).toBeNull();
   });
 
   it('providerBackedControl: the OBJECT provider is untouched by this repair', async () => {
