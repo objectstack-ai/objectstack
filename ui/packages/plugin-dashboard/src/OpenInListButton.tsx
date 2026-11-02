@@ -18,7 +18,7 @@
 
 import React from 'react';
 import { useDrillNavigation } from '@object-ui/react';
-import { Button } from '@object-ui/components';
+import { Button, cn } from '@object-ui/components';
 import { useSafeTranslate } from '@object-ui/i18n';
 import { ArrowUpRight } from 'lucide-react';
 
@@ -49,7 +49,8 @@ export const OpenInListButton: React.FC<OpenInListButtonProps> = ({
       type="button"
       variant="ghost"
       size="sm"
-      className={className}
+      // 44 px tall below `sm`, a phone's touch-target floor (objectstack#29078).
+      className={cn('min-h-11 sm:min-h-0', className)}
       data-testid="drill-open-in-list"
       onClick={() => {
         openRecordList(objectName, filter);

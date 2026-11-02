@@ -5154,6 +5154,18 @@ export function InterfacesPillar({
         const readAt = current.addedIn ?? (pair && isStudioCustomizeType(current.type) ? pair : packageId);
         const draftRead = await readDraftForSave<Record<string, unknown>>(client, current.type, current.name, readAt);
         if (cancelled) return;
+        // A pending draft the server refused to read (`403`: its audience gate
+        // names a capability this author does not hold) is no absence. No
+        // buffer is installed over it, so nothing is shown to edit and the
+        // autosave has nothing to send: a buffer seeded from the published
+        // layer would be saved over the draft, dropping its keys and its gate.
+        if ('refused' in draftRead) {
+          setError({
+            message: t('engine.studio.refusal.draftUnreadable', locale),
+            detail: formatMetadataError(draftRead.refused),
+          });
+          return;
+        }
         const body = extractDraftBody(draftRead.answer);
         // objectui#11799 — the baseline is read only when it is used, for a
         // leaf with no pending draft. An unsaved leaf always has one, so it

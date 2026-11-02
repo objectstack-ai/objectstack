@@ -361,6 +361,18 @@ function toStoredDateValue(date: Date, declaredType: unknown, stored: unknown): 
   return isDateOnlyField(declaredType, stored) ? toDateInputValue(date) : date.toISOString();
 }
 
+/**
+ * Does `stored` name the instant `date` is? Read the way the grid read it to
+ * place the event (`toDisplayDate`); an empty or unparseable value never
+ * matches, so a drop onto a record with no value there still writes.
+ */
+function sameInstant(date: Date, stored: unknown): boolean {
+  if (typeof stored !== 'string' && typeof stored !== 'number' && !(stored instanceof Date)) return false;
+  if (stored === '') return false;
+  const read = toDisplayDate(stored);
+  return !isNaN(read.getTime()) && read.getTime() === date.getTime();
+}
+
 /** Does this date field hold a calendar day? {@link toStoredDateValue}'s split. */
 function isDateOnlyField(declaredType: unknown, stored: unknown): boolean {
   return typeof declaredType === 'string'
@@ -1272,6 +1284,19 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
     const id = record?.id ?? record?._id;
     if (!id || !schema.objectName || !dataSource?.update) return;
 
+    // A drop that leaves every date it would write where the record already
+    // has it writes nothing: a write of unchanged values still moves
+    // `updated_at` and runs every after-update trigger and flow. Compared as
+    // the instants the grid placed the event at (`toDisplayDate`), so a stored
+    // spelling that differs from the one written back is still "unchanged".
+    const writesEnd = Boolean(endDateField && newEnd);
+    if (
+      sameInstant(newStart, record?.[startDateField]) &&
+      (!writesEnd || sameInstant(newEnd as Date, record?.[endDateField as string]))
+    ) {
+      return;
+    }
+
     // A `date` field is written as the calendar day, a `datetime` as the
     // instant (objectui#10866, `toStoredDateValue`). The month grid moves a
     // value by calendar days and keeps its time of day (objectui#11005), so a
@@ -1666,6 +1691,9 @@ export const ObjectCalendar: React.FC<ObjectCalendarComponentProps> = ({
                 : undefined
           }
           onTimeRangeSelect={rangeSelectCreate}
+          // With no `endDateField` the end is not stored, so no gesture may
+          // move it on its own: no resize-end handle is drawn.
+          endEditable={Boolean(calendarConfig.endDateField)}
         />
       </div>
       {/* objectui#7210 — a month drawn from the first N rows of a larger set

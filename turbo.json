@@ -343,7 +343,8 @@
         "$TURBO_ROOT$/packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts",
         "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts",
         "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts",
-        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts"
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts",
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-non-date-bucket.test.ts"
       ]
     },
     "@objectstack/lint#test": {
