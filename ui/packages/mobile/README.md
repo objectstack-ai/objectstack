@@ -11,6 +11,7 @@ Mobile optimization for Object UI — responsive hooks, gesture support, touch t
 - 📐 **Responsive Containers** - `ResponsiveContainer` for breakpoint-aware rendering
 - 🏗️ **MobileProvider** - Context provider for mobile-aware applications
 - 📲 **PWA Support** - Manifest generation and service worker registration
+- 🧩 **Native Shell Mode** - `useNativeHost` and typed calls into the ObjectStack mobile shell's bridge
 - ⚙️ **Configurable Breakpoints** - Customizable breakpoint definitions
 
 ## Installation
@@ -274,6 +275,51 @@ export const manifest = generatePWAManifest({
 
 void registerServiceWorker({ url: '/service-worker.js' });
 ```
+
+### Native shell mode
+
+The ObjectStack mobile app hosts the web Console in a WebView and injects a bridge,
+`window.ObjectStackNative`. Its presence is how a page knows it runs inside the
+shell; the bridge contract is owned by the mobile app (`docs/HYBRID-SHELL.md`,
+"Native bridge"), and `ObjectStackNative` types exactly its members.
+
+- `useNativeHost()` returns the bridge, or `null` outside the shell. It reads the
+  global lazily and re-checks at `DOMContentLoaded`, `load` and a few points after
+  `load`, so a bridge injected after the first render still arrives.
+- `useNativeHostRouting({ route, navigate })` wires a router to the shell: `ready()`
+  once per page load after the first commit, `routeChanged(route)` once per route
+  change, and the shell's cancelable `objectstack-native:navigate` window event moves
+  the router (in-app paths only) instead of reloading the page. Outside the shell it
+  installs nothing.
+- `nativeGetPushToken`, `nativeHaptic`, `nativeOpenExternal`, `nativeNavigate` and
+  `nativeResetServer` check `has(capability)` and that the method exists before
+  calling. They never throw: each resolves `{ status: 'unavailable' }` without the
+  capability, `{ status: 'ok', value }` on success, or
+  `{ status: 'failed', code, message }` when the shell refuses the call.
+
+```tsx
+import { nativeHaptic, useNativeHost } from '@object-ui/mobile';
+
+export function SaveButton({ onSave }: { onSave: () => Promise<void> }) {
+  const host = useNativeHost();
+  return (
+    <button
+      type="button"
+      onClick={async () => {
+        await onSave();
+        // Resolves { status: 'unavailable' } in a browser; nothing to branch on.
+        await nativeHaptic('success');
+      }}
+    >
+      {host ? 'Save' : 'Save changes'}
+    </button>
+  );
+}
+```
+
+The shell pads its WebView with the device safe area itself, so a page does not add
+padding in shell mode. The insets stay readable as the CSS variables
+`--os-native-safe-top|bottom|left|right` and as `useNativeHost()?.safeArea`.
 
 ## Links
 
