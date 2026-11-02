@@ -86,7 +86,7 @@ function recordingClientFactory() {
     return { clientFactory, seen };
 }
 
-async function thrownBy(fn: () => Promise<unknown>): Promise<Error> {
+async function thrownBy(fn: () => unknown): Promise<Error> {
     try {
         await fn();
     } catch (err) {
