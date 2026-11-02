@@ -1377,7 +1377,7 @@
     "ui/ViewFilterRule:operator",
     "ui/ViewFilterRule:value",
     "ui/ViewSharing:lockedBy",
-    "ui/ViewSharing:type",
+    "ui/ViewSharing:type [RETIRED]",
     "ui/ViewTab:filter",
     "ui/ViewTab:icon",
     "ui/ViewTab:isDefault",

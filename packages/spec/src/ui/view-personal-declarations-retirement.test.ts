@@ -78,9 +78,9 @@ type Issue = { code: string; path: PropertyKey[]; message: string };
 type Parse = { success: boolean; data?: unknown; error?: { issues: Issue[] } };
 type Door = { name: string; parse: (body: Record<string, unknown>) => Parse; at: PropertyKey[]; read: (data: unknown) => unknown };
 
-const LIST = { type: 'grid', columns: ['name'] } as const;
-const RECORD = { name: 'crm_lead.hot', object: 'crm_lead', viewKind: 'list', config: LIST } as const;
-const OVERLAY = { name: 'crm_lead.board', object: 'crm_lead', viewKind: 'list' } as const;
+const LIST = { type: 'grid' as const, columns: ['name'] };
+const RECORD = { name: 'crm_lead.hot', object: 'crm_lead', viewKind: 'list' as const, config: LIST };
+const OVERLAY = { name: 'crm_lead.board', object: 'crm_lead', viewKind: 'list' as const };
 
 /** The issues a door reports at or under `at` — a wrapper may report others of its own. */
 const issuesAt = (r: Parse, at: PropertyKey[]) =>
