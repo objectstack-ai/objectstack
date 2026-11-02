@@ -720,7 +720,7 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * [#20308] A BLANK string on a non-string-typed column is that column's typed
  * blank, `null` — the write door's one reading of it. [#29176] So is `''` on
  * an optional text-like column a unique constraint covers, and [#29277] `''`
- * on an optional single-value option or reference column (each its own
+ * on an optional single-value option, reference or file column (each its own
  * section below).
  *
  * "Blank" is exactly what {@link isMissing} calls missing: `''` or a string of
@@ -759,15 +759,15 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  *  - a blank here also takes a declared `defaultValue` on insert, as the typed
  *    arm's does — the door runs before the defaults, by design.
  *
- * ## [#29277] Single-value option and reference columns
+ * ## [#29277] One-string columns on the `$empty` table's `null_only` row
  *
- * Exactly `''` on a column that is ALL of: string-stored single-value on the
- * `$empty` table's `null_only` row ({@link isSingleValueCodeColumn}: a
- * `SINGLE_OPTION_TYPES` or `REFERENCE_VALUE_TYPES` member that
- * `expandEmptyOperator` puts on `null_only`, so `multiple: true` is out), and
- * not `required: true` — is `null` from the door on, unique or not
- * (maintainer ruling B on #29346, record 6579813296). `''` is neither an
- * option code nor a record id, so it holds no value there; the ruled table
+ * Exactly `''` on a column that is ALL of: on the `$empty` table's
+ * `null_only` row (`expandEmptyOperator`, the table's own answer — so a
+ * `multiple: true` column, the `multi_value` row, is out), storing ONE string
+ * ({@link ONE_STRING_STORED_TYPES}), and not `required: true` — is `null` from
+ * the door on, unique or not (maintainer ruling B on #29346, record
+ * 6579813296; {@link isOneStringNullOnlyColumn}). `''` is neither an option
+ * code, a record id nor a file id, so it holds no value there; the ruled table
  * reads only `null` as empty on that row, and is unchanged — a row that
  * already stores `''` keeps answering as a value until a data step cleans it.
  * On a unique column the second record cleared is no longer refused `409`.
@@ -777,8 +777,9 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  * ## What it does NOT touch
  *
  * ⛔ Every other string-stored column — text no unique constraint covers, a
- * `multiple: true` option or reference column (the table's `multi_value`
- * row), a file reference, a computed column. There `''` is a value, and the
+ * `multiple: true` option, reference or file column (the table's
+ * `multi_value` row), and the `null_only` types that do not store one string
+ * (see {@link ONE_STRING_STORED_TYPES}). There `''` is a value, and the
  * spec's value round-trip fixture pins it on text (`str_empty`: an empty
  * string must not become null). ⛔ A non-blank value, and every non-string value, of any
  * type: `null`, `0`, `false`, `'abc'` pass through untouched, so every type
@@ -854,7 +855,7 @@ function normalizeBlankTypedRow(
  * blank here would turn that refusal into a silent clear.
  *
  * The single-value option and reference types are not text-like: their arm
- * is {@link isSingleValueCodeColumn} (#29277), which needs no unique
+ * is {@link isOneStringNullOnlyColumn} (#29277), which needs no unique
  * constraint.
  */
 const UNIQUE_BLANK_TEXT_TYPES: ReadonlySet<string> = new Set(
@@ -862,20 +863,41 @@ const UNIQUE_BLANK_TEXT_TYPES: ReadonlySet<string> = new Set(
 );
 
 /**
- * [#29277] The string-stored single-value classes: an option code
- * (`SINGLE_OPTION_TYPES`) or a record id (`REFERENCE_VALUE_TYPES`), read as
- * the spec's constants, never re-listed.
+ * [#29277] The storage-shape half of the arm: the spec's value classes whose
+ * single value IS one string — an option code (`SINGLE_OPTION_TYPES`), a
+ * record id (`REFERENCE_VALUE_TYPES`), an opaque `sys_file` id
+ * (`FILE_REFERENCE_TYPES`; SQL stores it JSON-encoded, still one string to
+ * every reader). Read as the spec's constants, never re-listed. The spec has
+ * no predicate for "stores one string", so this set is stated here, and
+ * `record-validator.single-value-blank.test.ts` ties it to the table: every
+ * type on the `null_only` row that is not typed (`NON_TEXT_STORED_VALUE_TYPES`)
+ * must be in this set or in one of the two classes left out below, so a type
+ * that joins the row unclassified turns that pin red.
+ *
+ * Left out, each measured on SQLite through the engine:
+ *
+ *  - `STRUCTURED_JSON_TYPES` (`json`, `composite`, `record`, `location`,
+ *    `address`, `repeater`, `vector`): the value is an object or an array, so
+ *    `''` is not a blank of its shape. What empty means for them is a
+ *    separate question.
+ *  - `COMPUTED_VALUE_TYPES` (`formula`, `autonumber`; `summary` is typed): the
+ *    engine owns the value — a formula is never stored, an autonumber is
+ *    issued on insert whatever the caller sent, `''` included.
  */
-const SINGLE_VALUE_CODE_TYPES: ReadonlySet<string> = new Set([...SINGLE_OPTION_TYPES, ...REFERENCE_VALUE_TYPES]);
+const ONE_STRING_STORED_TYPES: ReadonlySet<string> = new Set([
+  ...SINGLE_OPTION_TYPES,
+  ...REFERENCE_VALUE_TYPES,
+  ...FILE_REFERENCE_TYPES,
+]);
 
 /**
- * [#29277] Is `def` a string-stored single-value column on the `$empty`
- * table's `null_only` row? The row is the table's own answer
- * (`expandEmptyOperator`), so a `multiple: true` column — the `multi_value`
- * row — is never one, and a type the table moves is followed without an edit.
+ * [#29277] Is `def` on the `$empty` table's `null_only` row, storing one
+ * string? The row is the table's own answer (`expandEmptyOperator`), read
+ * first: a `multiple: true` column — the `multi_value` row — is never one,
+ * and a type the table moves off the row is followed without an edit.
  */
-function isSingleValueCodeColumn(def: FieldDef): boolean {
-  return SINGLE_VALUE_CODE_TYPES.has(def.type) && expandEmptyOperator(def).arm === 'null_only';
+function isOneStringNullOnlyColumn(def: FieldDef): boolean {
+  return expandEmptyOperator(def).arm === 'null_only' && ONE_STRING_STORED_TYPES.has(def.type);
 }
 
 /**
@@ -889,8 +911,8 @@ function isSingleValueCodeColumn(def: FieldDef): boolean {
  *    for one. Both surfaces are read through `isUniqueDeclared`, the drivers'
  *    own predicate, so a text column the store does not constrain is never
  *    rewritten;
- *  - [#29277] a single-value option or reference column
- *    ({@link isSingleValueCodeColumn}), unique or not.
+ *  - [#29277] a one-string column on the `$empty` table's `null_only` row
+ *    ({@link isOneStringNullOnlyColumn}), unique or not.
  */
 function blankAsNullColumns(fields: Record<string, FieldDef>, indexes: unknown): ReadonlySet<string> {
   const covered = new Set<string>();
@@ -906,7 +928,7 @@ function blankAsNullColumns(fields: Record<string, FieldDef>, indexes: unknown):
   const out = new Set<string>();
   for (const [name, def] of Object.entries(fields)) {
     if (!def || SKIP_FIELDS.has(name) || def.required === true) continue;
-    if (UNIQUE_BLANK_TEXT_TYPES.has(def.type) ? covered.has(name) : isSingleValueCodeColumn(def)) out.add(name);
+    if (UNIQUE_BLANK_TEXT_TYPES.has(def.type) ? covered.has(name) : isOneStringNullOnlyColumn(def)) out.add(name);
   }
   return out;
 }

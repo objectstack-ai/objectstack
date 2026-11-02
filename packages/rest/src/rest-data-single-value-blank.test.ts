@@ -12,9 +12,11 @@
  * `NULL` as distinct from every `NULL`), and on every column the clear was not
  * empty to `$empty`, whose ruled table reads only `null` as empty on these
  * types. Maintainer ruling B on #29346 (record 6579813296): the write door
- * stores `''` as `null` on every optional column whose type is string-stored
- * single-value on the table's `null_only` row — `select`, `radio`, `lookup`,
- * `master_detail`, `user`, `tree` today.
+ * stores `''` as `null` on every optional column the table puts on its
+ * `null_only` row whose value is one string — `select`, `radio`, `lookup`,
+ * `master_detail`, `user`, `tree`, and the file references `image`, `file`,
+ * `avatar`, `video`, `audio` today (an opaque file id; SQL stores it
+ * JSON-encoded, and a cleared one collided the same way).
  *
  * The PHYSICAL column is read with the driver's own query builder. Pinned
  * beside it: the `$empty` table is unchanged (a row that already holds `''`
@@ -48,6 +50,12 @@ const OBJ = {
     c_master: { name: 'c_master', type: 'master_detail' as const, reference: 'svb_target' },
     c_user: { name: 'c_user', type: 'user' as const },
     c_tree: { name: 'c_tree', type: 'tree' as const },
+    c_image: { name: 'c_image', type: 'image' as const },
+    c_file: { name: 'c_file', type: 'file' as const },
+    c_avatar: { name: 'c_avatar', type: 'avatar' as const },
+    c_video: { name: 'c_video', type: 'video' as const },
+    c_audio: { name: 'c_audio', type: 'audio' as const },
+    u_image: { name: 'u_image', type: 'image' as const, unique: true },
     u_select: { name: 'u_select', type: 'select' as const, options: OPTS, unique: true },
     u_lookup: { name: 'u_lookup', type: 'lookup' as const, reference: 'svb_target', unique: true },
     grp: { name: 'grp', type: 'text' as const },
@@ -55,7 +63,10 @@ const OBJ = {
   },
   indexes: [{ name: 'idx_svb_obj_grp_lookup', fields: ['grp', 'i_lookup'], unique: 'global' as const }],
 };
-const PER_TYPE = ['c_select', 'c_radio', 'c_lookup', 'c_master', 'c_user', 'c_tree'] as const;
+const PER_TYPE = [
+  'c_select', 'c_radio', 'c_lookup', 'c_master', 'c_user', 'c_tree',
+  'c_image', 'c_file', 'c_avatar', 'c_video', 'c_audio',
+] as const;
 const REQ = {
   name: 'svb_req', label: 'Required', systemFields: false,
   fields: {
@@ -136,17 +147,20 @@ describe('REST write doors on SQLite: a cleared optional single-value option / r
   let ctx: Ctx;
   beforeEach(async () => { ctx = await boot(); });
 
-  it('POST create with "" on every ruled type: 201, every column stores NULL', async () => {
+  it('POST create with "" on every joined type: 201, every column stores NULL', async () => {
     const res = await create(ctx, { id: 'p1', name: 'r1', ...allBlank });
     expect(res.status).toBe(201);
     const row = await ctx.stored('svb_obj', 'p1');
     for (const f of PER_TYPE) expect(row?.[f], f).toBeNull();
   });
 
-  it('PATCH clearing every ruled type: 200, every column stores NULL', async () => {
+  it('PATCH clearing every joined type: 200, every column stores NULL', async () => {
     // `c_user` is left unset: no `sys_user` is registered here to resolve an id.
     expect((await create(ctx, { id: 'e0', name: 'parent' })).status).toBe(201);
-    const set = { c_select: 'gold', c_radio: 'gold', c_lookup: 't1', c_master: 't1', c_tree: 'e0' };
+    const set = {
+      c_select: 'gold', c_radio: 'gold', c_lookup: 't1', c_master: 't1', c_tree: 'e0',
+      c_image: 'img_1', c_file: 'fil_1', c_avatar: 'ava_1', c_video: 'vid_1', c_audio: 'aud_1',
+    };
     expect((await create(ctx, { id: 'e1', name: 'r1', ...set })).status).toBe(201);
     const res = await patch(ctx, 'e1', allBlank);
     expect(res.status).toBe(200);
@@ -172,6 +186,13 @@ describe('REST write doors on SQLite: a cleared optional single-value option / r
     const second = await patch(ctx, 'w2', { u_select: '', u_lookup: '' });
     expect([first.status, second.status]).toEqual([200, 200]);
     for (const id of ['w1', 'w2']) expect((await ctx.stored('svb_obj', id))?.u_lookup, id).toBeNull();
+  });
+
+  it('unique image: two records created with "" both land (no 409)', async () => {
+    const a = await create(ctx, { id: 'g1', name: 'r1', u_image: '' });
+    const b = await create(ctx, { id: 'g2', name: 'r2', u_image: '' });
+    expect([a.status, b.status]).toEqual([201, 201]);
+    for (const id of ['g1', 'g2']) expect((await ctx.stored('svb_obj', id))?.u_image, id).toBeNull();
   });
 
   it('a member of a declared unique index: same group, cleared lookup, both land', async () => {
