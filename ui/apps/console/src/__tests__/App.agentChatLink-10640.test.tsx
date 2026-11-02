@@ -114,6 +114,8 @@ vi.mock('../AppContent', () => ({
   AppContent: stub('app-content'),
   // objectui#12700: the permissions scope `App` mounts over /home and /apps, a pass-through here.
   ConsolePermissionsScope: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  // objectstack#29114: the early permissions request beside the route, nothing here.
+  ConsolePermissionsRequest: () => null,
 }));
 vi.mock('../pages/SharedRecordPage', () => ({ default: stub('shared-record-page') }));
 vi.mock('../pages/DocPage', () => ({ default: stub('doc-page') }));

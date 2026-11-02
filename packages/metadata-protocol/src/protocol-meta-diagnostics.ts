@@ -283,8 +283,11 @@ export async function getMetaDiagnostics(
 /**
  * [#27514] Does the installed-package listing carry this id? `true` ("cannot
  * disprove, so do not refuse") when the listing cannot be read at all.
+ * [#29180] Exported for the `_drafts` listing (`protocol-drafts.ts`), which
+ * asks the same question of its own package filter; nothing re-exports this
+ * module, so the published surface does not move.
  */
-async function packageIsInstalled(host: Pick<MetaDiagnosticsHost, 'getMetaItems'>, packageId: string): Promise<boolean> {
+export async function packageIsInstalled(host: Pick<MetaDiagnosticsHost, 'getMetaItems'>, packageId: string): Promise<boolean> {
     let listed: unknown;
     try {
         listed = await host.getMetaItems({ type: 'package' });
