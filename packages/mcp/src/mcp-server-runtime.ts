@@ -26,6 +26,7 @@ import {
   metadataPartialListingSentence,
 } from './metadata-completeness.js';
 import { DEFAULT_SERVER_VERSION } from './package-version.js';
+import { createPlatformMcpServer } from './request-params.js';
 import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
 import {
@@ -1223,7 +1224,9 @@ export class MCPServerRuntime {
       ...config,
     };
 
-    this.mcpServer = new McpServer(
+    // [#29135] Built through the one seam both transports share, so malformed
+    // params answer -32602 Invalid params rather than -32603 (see request-params.ts).
+    this.mcpServer = createPlatformMcpServer(
       {
         name: this.config.name,
         version: this.config.version,
@@ -1830,7 +1833,8 @@ export class MCPServerRuntime {
         : undefined;
 
     // Fresh, isolated server per request (stateless).
-    const server = new McpServer(
+    // [#29135] The same seam as the long-lived server: malformed params answer -32602.
+    const server = createPlatformMcpServer(
       { name: this.config.name, version: this.config.version },
       {
         // [#8034] `tools` is DERIVED, exactly as on the long-lived server:
