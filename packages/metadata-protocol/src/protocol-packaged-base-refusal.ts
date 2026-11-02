@@ -209,6 +209,58 @@ function sealedDeclareOrRenameClause(type: string, basePackageId: unknown, write
 }
 
 // ─────────────────────────────────────────────────────────────────────────
+// ADR-0146 D11 — the package-less write onto a packaged item is closed
+// ─────────────────────────────────────────────────────────────────────────
+
+/** The write a {@link packagelessOverlayWriteRefusal} judges: the four package-less writes ADR-0146 D11 closes. */
+export type PackagelessWriteOperation = 'save' | 'publish' | 'delete' | 'rollback';
+
+/**
+ * The refusal `ObjectStackProtocolImplementation#packagelessOverlayWriteRefusal`
+ * throws; the method's docblock there is its contract.
+ *
+ * [ADR-0146 D11] A write naming no package (`packageId` absent, `null` or
+ * empty) onto an item of one of the five overlay types that one read-only code
+ * package ships, whose row `os migrate packageless-overlays` would move into
+ * the base's pair (`packagelessCloseSubject`, the ceremony's own reading), is
+ * refused `403 NOT_OVERRIDABLE` — the code and status the sealed write already
+ * answers, so no door gains a code. Every row the ceremony leaves keeps its
+ * package-less write, so the sentence's two doors are always open: the pair
+ * (`?package=<base>.custom`), where the customization is a declared override,
+ * and the ceremony, which moves a row stored before the close there. Such a
+ * row is still served until it is moved (the read path is not this
+ * function's); only its package-less write is refused.
+ *
+ * The fix first, then the rule and the ceremony: the REST door bounds a
+ * refusal's text (`CLIENT_MESSAGE_MAX`, 500 characters, `@objectstack/types`),
+ * and the metadata item page shows that text as sent.
+ */
+export function packagelessOverlayWriteRefusal(
+    request: { type: string; name: string },
+    closed: { base: string; pair: string },
+    operation: PackagelessWriteOperation,
+): Error {
+    const type = PLURAL_TO_SINGULAR[request.type] ?? request.type;
+    const item = `'${type}/${request.name}'`;
+    const shipped = `ships in '${closed.base}'`;
+    const pair = `'${closed.pair}' (?package=${closed.pair})`;
+    const declared = `overrides: { package: '${closed.base}', basedOn }`;
+    const rule = 'A write naming no package is closed where `os migrate packageless-overlays` can move its row '
+        + `(ADR-0146 D11); a package-less row stored before it is served until that command moves it into '${closed.pair}'.`;
+    const message = operation === 'rollback'
+        ? `${item} ${shipped}, and a rollback of its package-less row is closed (ADR-0146 D11): run `
+            + `\`os migrate packageless-overlays\` to move the row into ${pair}; to restore a version from before `
+            + `the move, save that version's body there, declaring ${declared}.`
+        : operation === 'delete'
+            ? `${item} ${shipped}: remove its customization from ${pair}. ${rule}`
+            : `${item} ${shipped}: ${operation === 'publish' ? 'publish' : 'save'} it into ${pair}, declaring ${declared}. ${rule}`;
+    const err = new Error(message);
+    (err as any).code = 'NOT_OVERRIDABLE';
+    (err as any).status = 403;
+    return err;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
 // ADR-0146 D2 — the override write gate (ruling A on decision card #28390)
 // ─────────────────────────────────────────────────────────────────────────
 

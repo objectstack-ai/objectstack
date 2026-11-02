@@ -42,7 +42,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { ObjectKernel, resolveUserAuthzGrants, type PluginContext } from '@objectstack/core';
+import { ObjectKernel, resolveUserAuthzGrants, FLOW_WRITE_REFERENCE_CHECK, type PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
@@ -167,7 +167,10 @@ describe("[#28070] a runAs:'user' run's data context carries the rung its resolv
     const h = envelopeHarness();
     h.engine.registerFlow('rung_sys', recordingFlow('rung_sys', 'system') as never);
     await h.engine.execute('rung_sys', { userId: 'usr_admin', tenantId: 'org_a' } as never);
-    expect(h.ctxOf('first')).toEqual({ isSystem: true, actor: 'svc:flow:rung_sys', userId: 'usr_admin', tenantId: 'org_a', flowRunId: expect.any(String) });
+    expect(h.ctxOf('first')).toEqual({
+      isSystem: true, actor: 'svc:flow:rung_sys', userId: 'usr_admin', tenantId: 'org_a', flowRunId: expect.any(String),
+      [FLOW_WRITE_REFERENCE_CHECK]: true, // #28881
+    });
   });
 
   it("after an approval decision the rung is the decider's: a platform administrator's submission does not lend a member decider its rung", async () => {
