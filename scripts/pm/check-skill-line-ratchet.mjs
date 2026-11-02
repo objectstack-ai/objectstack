@@ -1456,6 +1456,11 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 53],
+  // repo:mobile lane charter — the on-demand seat for the native shell that
+  // hosts the Console (maintainer choice 2026-11-02, verbatim: "Register, seat
+  // on demand (Recommended)"). A NEW file, so this is an added row and no other
+  // row moves; set at the landed line count (headroom 0, same convention).
+  ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 49],
   // Project Director seat charter (maintainer ruling 2026-08-27, verbatim:
   // 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」; the file
   // carries it as a rule line since the rules-only rewrite, not as this quotation)
@@ -2290,6 +2295,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/ui.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
   ['.claude/agents/os-dev.md', 0],

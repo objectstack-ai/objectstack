@@ -3,7 +3,7 @@
 
 /**
  * check-governed-merges — report-only post-merge audit of the governed
- * surfaces (#9495), across the five governed repos (#9619, #14867), plus the
+ * surfaces (#9495), across the six governed repos (#9619, #14867, mobile), plus the
  * pre-arm `--test` predicate every seat runs before flipping ready (#9550).
  * Enumerates the PRs that MERGED into `main` since a given date/ref whose diff
  * touched a governed surface — and, since #19036, every landing over
@@ -13,7 +13,7 @@
  * completed sweep exits 0 whether it found 0 or 40 entries; non-zero exits
  * classify the ENVIRONMENT, not the tree).
  *
- *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all five repos
+ *   node scripts/pm/check-governed-merges.mjs                  # sweep, last 24h, all six repos
  *   node scripts/pm/check-governed-merges.mjs --since 7d       # or 36h, or ISO date
  *   node scripts/pm/check-governed-merges.mjs --since-ref v5.0.0-rc.3       # topological, exact
  *   node scripts/pm/check-governed-merges.mjs --since-ref objectstack=<tip> --since-ref objectui=<tip>
@@ -1400,9 +1400,13 @@ export function applyGeneratedExceptions(verdict, provenanceByPath = new Map()) 
 }
 
 /**
- * The five governed repos: the four the 2026-08-18 cross-repo extension named,
+ * The six governed repos: the four the 2026-08-18 cross-repo extension named,
  * plus `hotcrm`, added by the 2026-09-03 ruling on #14867 (「其他同意」 → 纳入)
- * because the definition's own terms already covered it. `id` doubles as
+ * because the definition's own terms already covered it, plus `mobile`, the
+ * native shell that hosts the Console, registered as an on-demand repo lane
+ * by the maintainer's 2026-11-02 choice "Register, seat on demand
+ * (Recommended)". Its workflows stay outside the scoped `workflows` row, as
+ * hotcrm's do. `id` doubles as
  * the sibling directory name beside this checkout — the layout every session
  * container uses — and `--repo-root <id>=<path>` overrides it for any other
  * layout. A checkout whose `origin` remote is not `slug` is treated as ABSENT
@@ -1414,6 +1418,7 @@ export const GOVERNED_REPOS = Object.freeze([
   Object.freeze({ id: 'cloud', slug: 'objectstack-ai/cloud', what: 'the cloud repo' }),
   Object.freeze({ id: 'objectos', slug: 'objectstack-ai/objectos', what: 'the objectos repo' }),
   Object.freeze({ id: 'hotcrm', slug: 'objectstack-ai/hotcrm', what: 'the hotcrm exemplar app repo (#14867, ruled 2026-09-03)' }),
+  Object.freeze({ id: 'mobile', slug: 'objectstack-ai/mobile', what: 'the mobile native shell repo that hosts the Console (on-demand repo lane, 2026-11-02)' }),
 ]);
 
 export const SELF_REPO_ID = 'objectstack';
@@ -4827,7 +4832,7 @@ async function selfTest() {
 
   // ── multi-repo scope (#9619) ──────────────────────────────────────────────
   battery('multi-repo scope (#9619)');
-  assert('five-governed-repos-declared', GOVERNED_REPOS.map((r) => r.id).join(',') === 'objectstack,objectui,cloud,objectos,hotcrm', GOVERNED_REPOS.map((r) => r.id).join(','));
+  assert('six-governed-repos-declared', GOVERNED_REPOS.map((r) => r.id).join(',') === 'objectstack,objectui,cloud,objectos,hotcrm,mobile', GOVERNED_REPOS.map((r) => r.id).join(','));
   // #14867: hotcrm pinned by SLUG as well as id. The defect this closes is not
   // a wrong row — it is NO row: an unconfigured repo prints nothing at all, so
   // a later removal would restore a silence indistinguishable from a clean
@@ -4849,7 +4854,7 @@ async function selfTest() {
   };
   const resolved = resolveRepoCheckouts({ selfRoot: '/w/objectstack', siblingDir: '/w', probe: (p) => layout[p] ?? { exists: false, slug: null } });
   const byId = Object.fromEntries(resolved.map((r) => [r.id, r]));
-  assert('all-five-repos-are-resolved-not-just-the-self-repo', resolved.length === 5);
+  assert('all-six-repos-are-resolved-not-just-the-self-repo', resolved.length === 6);
   // /w/hotcrm is absent from the layout too, so this fixture also pins the
   // property #14867 bought: a governed repo with no checkout is UNAUDITED and
   // says so, where an unconfigured repo said nothing.

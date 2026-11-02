@@ -183,7 +183,14 @@ gh() {
 # board unless one is later ruled). Those absences are deliberate, not oversights.
 # Actually RUNNING this against hotcrm is a PM landing step, same as objectos
 # (needs label-write credentials on that repo).
-for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos objectstack-ai/hotcrm; do
+#
+# mobile enrolled on the same terms when its on-demand repo lane was registered
+# (maintainer choice 2026-11-02, verbatim: "Register, seat on demand
+# (Recommended)"): the native shell that hosts the Console. Full pm vocabulary,
+# OUT of the domain-lane loop and OUT of the target:<major> loop, and no
+# repo:mobile seam row until a seam card gives one a reader. Running this
+# against mobile is a PM landing step, same as hotcrm.
+for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud objectstack-ai/objectos objectstack-ai/hotcrm objectstack-ai/mobile; do
   gh label create pm:queue            -R "$R" -c 0e8a16 -d "Ready for the PM dispatch loop" 2>/dev/null || true
   gh label create pm:dispatched       -R "$R" -c 1d76db -d "Dispatched to a dev agent by /pm-dispatch" 2>/dev/null || true
   # needs-user-decision on a PR means awaiting the maintainer's review (SKILL.md 复核, 终局四件套); on a card it is the ruling inbox.
