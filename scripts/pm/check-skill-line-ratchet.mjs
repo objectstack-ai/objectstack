@@ -1290,6 +1290,13 @@ export const CEILINGS = new Map([
   // fork-PR flow it amends. Both are NEW to this map, so neither is a raise —
   // set at the landed line count, headroom 0, same convention as above.
   ['.claude/skills/pm-dispatch/references/untrusted-text.md', 54],
+  // The fleet-wide security-findings rule (never a card, never a public
+  // mechanism, a repository security advisory as the private card). Ruling
+  // of record: the #29111 card body, filed under the maintainer's verbatim,
+  // untranslated 「同意方案，选 B，立卡」; the raises below cite it as "#29111".
+  // A NEW file, so an added row that funds nothing — set at the landed line
+  // count, headroom 0, same convention as above.
+  ['.claude/skills/pm-dispatch/references/security-findings.md', 55],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   // Lowered 51 → 47 by #25712 item 4: objectui stopped being a sister repo, so
@@ -1309,7 +1316,11 @@ export const CEILINGS = new Map([
   // same convention (lowering is always legitimate).
   // Lowered 103 → 102 when the whole-card cloud route (PR #26749) merged with
   // main's cloud-involvement lines; landed count, headroom 0, same convention.
-  ['.claude/skills/pm-dispatch/references/triage-duties.md', 102],
+  // Lowered 102 → 99 by the triage push-list card (#28921): lines 10-11 and
+  // 94-95 each merged after deleting what contract-review.md and AGENTS.md
+  // already state, and the reporting pair 101-102 replaced by one pointer to the
+  // push list in lanes/triage.md. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/triage-duties.md', 99],
   // execution-duties.md, raised 183 → 185 by the split-off-card ruling — an
   // ORDINARY raise, ⛔ not a cross-file move (card #23579). The text is two rule
   // lines beside the derived-sub-issue rules in 〈候选与批次〉: a queued card found
@@ -1388,13 +1399,21 @@ export const CEILINGS = new Map([
   // is +4. Not a CROSS_FILE_MOVES destination, so no `ruledRaises` record
   // applies. Landed count, headroom 0, same convention.
   // 68 → 66 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/skills/pm-dispatch/references/filing-gate.md', 66],
+  // 66 → 67 (#29111): the ruling orders 「安全发现」 into the not-a-card list;
+  // the possible-data-leak reach exception left the exceptions line in place,
+  // so the measured delta is +1.
+  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/filing-gate.md', 67],
   // The project layer above the seats (maintainer's word: ONE project form, the
   // instruction line 「pm-dispatch <席位…>」 is the summon, seats are read from the
   // seat posts' 🟢 line, takeover never waits for a walled account, mailbox PRs,
   // a generated roster board). A NEW file, so this is an added row that funds
   // nothing; set at the landed line count, headroom 0, same convention as above.
-  ['.claude/skills/pm-dispatch/references/project-forms.md', 54],
+  // 54 → 55 (#29111): the ruling keeps 「⛔ 不敲:安全发现」 and points the
+  // mailbox at the shared rule; the pointer does not fit the full 不敲 line,
+  // so the measured delta is +1. Not a CROSS_FILE_MOVES destination. Landed
+  // count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/project-forms.md', 55],
   // The app-vs-platform boundary — the deciding question (could this be written
   // from the metadata alone, with no knowledge of this company?), the publication
   // test (one consumer is a use, two is a contract) and the two anti-patterns.
@@ -1418,7 +1437,9 @@ export const CEILINGS = new Map([
   // pointers between the former lanes left, so the merged file lands one line
   // under the 88 the three rows summed to. A NEW file, so an added row set at
   // the landed line count, headroom 0, same convention as above.
-  ['.claude/skills/pm-dispatch/references/lanes/server.md', 87],
+  // 87 → 86 (#29111): the security-card disclosure pair became one pointer
+  // at security-findings.md (lowering is always legitimate).
+  ['.claude/skills/pm-dispatch/references/lanes/server.md', 86],
   // Lowered 39 → 38 by the rules-only rewrite (maintainer 2026-09-04:
   // 「各条规则的出处叙事、事故复盘 根本不重要啊，不需要写入skills啊」) — provenance dates,
   // ruling citations and incident narrative left; every rule stayed. Landed count,
@@ -1452,6 +1473,11 @@ export const CEILINGS = new Map([
   // ruling citations and incident narrative left; every rule stayed. Landed count,
   // headroom 0, same convention (lowering is always legitimate).
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 53],
+  // repo:mobile lane charter — the on-demand seat for the native shell that
+  // hosts the Console (maintainer choice 2026-11-02, verbatim: "Register, seat
+  // on demand (Recommended)"). A NEW file, so this is an added row and no other
+  // row moves; set at the landed line count (headroom 0, same convention).
+  ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 56],
   // Project Director seat charter (maintainer ruling 2026-08-27, verbatim:
   // 「项目总监 由人工定期指挥，负责处理 contract-review 类别的和需要决裁的。」; the file
   // carries it as a rule line since the rules-only rewrite, not as this quotation)
@@ -1496,7 +1522,20 @@ export const CEILINGS = new Map([
   // maintainer 「#25558 记为 D」 (2026-10-24), adopting the record's workload
   // 「`lanes/triage.md`「应用仓无分诊席」之后补「应用仓业务理由由该项目召唤的
   // 总监席复核;第三方应用的总监是其自身维护者」」. Measured +1, ceiling +1.
-  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 8],
+  // 8 → 15 by the triage push-list card (#28921). Ruling of record: the card
+  // body's maintainer words, verbatim and untranslated, 「由分诊每天出一次中文进度
+  // 表，频率太低，而且有问题的时候要找我，没问题我也不需要看」, 「需要我协助的时候你
+  // 应该推送消息给我 os-zhuang，但是需要和我沟通哪些情况下」 and 「立卡」 on the push
+  // list (「同意推送清单，立卡？」) whose card names this file, plus the addendum
+  // comment 6568980556 「pr 超过 6小时没更新，如果不是带决策或者是被阻塞，应该都属于
+  // 有问题吧」. The text is the push list:
+  // no progress table, the seven cases split at-once / end-of-round, one push per
+  // round, the 6 h stale-PR case and the not-pushed list. Eight lines landed, one
+  // paid in place (the scope line, which cross-repo-coordination.md states for
+  // the same reader), so the measured delta is +7; triage-duties.md fell 102 → 99
+  // in the same PR, net +4 over both. Not a CROSS_FILE_MOVES destination, so no
+  // `ruledRaises` record applies. Landed count, headroom 0, same convention.
+  ['.claude/skills/pm-dispatch/references/lanes/triage.md', 15],
   // 399 → 405 (#11126): maintainer-ruled (2026-08-23, option B, quoted in that
   // PR) — the +6-line cross-repo dispatch-gates caveat, sized so the queued
   // #11137 (395→399 on main) and this PR's +6 compose to exactly 405.
@@ -1550,7 +1589,12 @@ export const CEILINGS = new Map([
   // Not a CROSS_FILE_MOVES destination, so no `ruledRaises` record applies.
   // Landed count, headroom 0, same convention.
   // 404 → 402 (#25753): lines that named objectui as a sibling repo retired; landed count.
-  ['.claude/agents/os-dev.md', 402],
+  // 402 → 405 (#29111): the ruling orders the private report field
+  // `security_findings`: the delivery sentence names the comment copy's value
+  // (+1), one rule line routes the finding to the field (+1) and the JSON
+  // template gains it (+1), +3 measured, no restatement in the file to pay with.
+  // Not a CROSS_FILE_MOVES destination. Landed count, headroom 0.
+  ['.claude/agents/os-dev.md', 405],
   // #9473: the other four `.claude/skills/` are read in full by the sessions
   // that use them too — the erosion mechanism the ratchet exists to stop
   // isn't specific to the pm-dispatch surface. Set at current counts on
@@ -1573,7 +1617,9 @@ export const CEILINGS = new Map([
   // 276 → 277: comment 6500750765 again, +1 measured line: retest trigger 2's
   // security-hardening clause (no card exists, so the PM session that landed the
   // hardening re-runs the item itself).
-  ['.claude/skills/checklist-test/SKILL.md', 277],
+  // 277 → 276 (#29111): the Guardrails security definition and fix dispatch
+  // became a pointer at pm-dispatch security-findings.md (lowering is legitimate).
+  ['.claude/skills/checklist-test/SKILL.md', 276],
   ['.claude/skills/checklist-author/SKILL.md', 62],
   // 157 → 140 (#25753): lines that named objectui as a sibling repo retired; landed count.
   ['.claude/skills/dogfood-verification/SKILL.md', 140],
@@ -2259,6 +2305,8 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/seat-lifecycle.md', 0],
   ['.claude/skills/pm-dispatch/references/coordinator.md', 0],
   ['.claude/skills/pm-dispatch/references/untrusted-text.md', 0],
+  // security-findings.md carries no table row (#29111): the measurement 0.
+  ['.claude/skills/pm-dispatch/references/security-findings.md', 0],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 0],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 0],
   ['.claude/skills/pm-dispatch/references/cross-repo-coordination.md', 0],
@@ -2273,6 +2321,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   ['.claude/skills/pm-dispatch/references/lanes/spec.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/ui.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/hotcrm.md', 0],
+  ['.claude/skills/pm-dispatch/references/lanes/mobile.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/director.md', 0],
   ['.claude/skills/pm-dispatch/references/lanes/triage.md', 0],
   ['.claude/agents/os-dev.md', 0],

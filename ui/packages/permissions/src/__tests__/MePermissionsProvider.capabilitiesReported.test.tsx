@@ -56,7 +56,8 @@ describe('objectui#4656 — absent-vs-empty systemPermissions truth table', () =
             authenticated: true,
             userId: 'u1',
             tenantId: 't1',
-            roles: ['org_owner'],
+            hasAnyQueue: false,
+            positions: ['org_owner'],
             permissionSets: ['organization_admin'],
             // No `systemPermissions` key at all — pre-ADR-0066 shape.
             objects: {},
@@ -81,7 +82,8 @@ describe('objectui#4656 — absent-vs-empty systemPermissions truth table', () =
             authenticated: true,
             userId: 'u1',
             tenantId: 't1',
-            roles: ['org_owner'],
+            hasAnyQueue: false,
+            positions: ['org_owner'],
             permissionSets: ['organization_admin'],
             systemPermissions: [], // a REAL answer: holds zero capabilities
             objects: {},
@@ -105,7 +107,8 @@ describe('objectui#4656 — absent-vs-empty systemPermissions truth table', () =
             authenticated: true,
             userId: 'u1',
             tenantId: 't1',
-            roles: [],
+            hasAnyQueue: false,
+            positions: [],
             permissionSets: [],
             systemPermissions: [],
             objects: {},
@@ -125,7 +128,8 @@ describe('objectui#4656 — absent-vs-empty systemPermissions truth table', () =
             authenticated: true,
             userId: 'u1',
             tenantId: 't1',
-            roles: ['org_owner'],
+            hasAnyQueue: false,
+            positions: ['org_owner'],
             permissionSets: ['organization_admin'],
             systemPermissions: ['manage_org_users', 'setup.access', 'manage_metadata'],
             objects: {},
@@ -146,7 +150,8 @@ describe('objectui#4656 — absent-vs-empty systemPermissions truth table', () =
             authenticated: true,
             userId: 'u1',
             tenantId: 't1',
-            roles: ['org_owner'],
+            hasAnyQueue: false,
+            positions: ['org_owner'],
             permissionSets: ['organization_admin'],
             // The objectstack#8270 EE owner's exact set — non-empty, no manage_metadata.
             systemPermissions: ['manage_org_users', 'setup.access', 'setup.write'],
@@ -203,7 +208,8 @@ describe('objectui#4656 — absent-vs-empty systemPermissions truth table', () =
         <MePermissionsProvider
           initialPermissions={{
             authenticated: true, userId: 'u1', tenantId: 't1',
-            roles: ['org_owner'], permissionSets: ['organization_admin'],
+            hasAnyQueue: false,
+            positions: ['org_owner'], permissionSets: ['organization_admin'],
             // `systemPermissions` omitted — pre-ADR-0066 shape.
             objects: {}, fields: {},
           }}
@@ -219,7 +225,8 @@ describe('objectui#4656 — absent-vs-empty systemPermissions truth table', () =
         <MePermissionsProvider
           initialPermissions={{
             authenticated: true, userId: 'u1', tenantId: 't1',
-            roles: ['org_owner'], permissionSets: ['organization_admin'],
+            hasAnyQueue: false,
+            positions: ['org_owner'], permissionSets: ['organization_admin'],
             systemPermissions: [], // real answer: holds nothing
             objects: {}, fields: {},
           }}

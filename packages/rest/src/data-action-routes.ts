@@ -72,7 +72,7 @@ import { importControlOptOutRefusal, prepareImportRequest } from './import-prepa
 import { readTemplateMode, templateFieldDefs, templateText } from './import-template.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
-import { handleRouteError, logUnexpectedRouteError, mapDataError, nestedRefusalEnvelope } from './error-response.js';
+import { applyDroppedFieldsHeader, handleRouteError, logUnexpectedRouteError, mapDataError, nestedRefusalEnvelope } from './error-response.js';
 // [#24348] The shared ADR-0112 nested envelope for the import doors' control
 // opt-out refusal — the flat sibling-`code` dialect the doors' older answers
 // use is ratcheted down by `check:route-envelope`.
@@ -99,6 +99,7 @@ import {
     rowsToCsv,
     type RestServer,
 } from './rest-server.js';
+import { earnedWriteDespiteStaleSummary } from './stale-summary-answer.js';
 
 // [#23050 slice 1] Moved here from `rest-server.ts`, verbatim, because this module is
 // the first one outside that file to need it: exporting it from there changed the
@@ -437,11 +438,17 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     ...(environmentId ? { environmentId } : {}),
                     ...(context ? { context } : {}),
                 });
+                // [#3431] The strips in the header too, as single create sends them.
+                applyDroppedFieldsHeader(res, result);
                 res.status(201).json(result);
             } catch (error: any) {
                 // Clone's domain errors (CLONE_DISABLED/RECORD_NOT_FOUND)
                 // carry an explicit `.status`; `handleRouteError` resolves
                 // that passthrough itself and logs only genuine faults.
+                // [#28782] A copy stored under a failing roll-up: the answer it earned, 201,
+                // with the header the success path sets.
+                const earned = earnedWriteDespiteStaleSummary(error, res, req.params?.object);
+                if (earned) { res.status(201).json(earned); return; }
                 handleRouteError(res, error, req.params?.object);
             }
         },
@@ -594,6 +601,11 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     translate: await this.resolveMessageTranslator(environmentId, req),
                 });
 
+                // [#3431] A commit's row strips (`results[i].droppedFields`) in
+                // the header too, as their union. A dry run writes nothing, so
+                // it is no write answer and sends none; its rows still preview
+                // the strip in the body.
+                if (!dryRun) applyDroppedFieldsHeader(res, undefined, summary.results);
                 res.json({
                     object: objectName,
                     dryRun,

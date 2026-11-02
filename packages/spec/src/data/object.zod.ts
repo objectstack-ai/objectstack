@@ -4835,7 +4835,7 @@ const FieldDisplayPatchSchema = lazySchema(() => {
       error: (issue) =>
         issue.code === 'invalid_type' && Array.isArray(issue.input)
           ? 'A field patch\'s `options` is a map keyed by each option\'s stored value — ' +
-            '`options: { tech: { label: \'Technology\' } }` — not the field\'s option list: which options ' +
+            '`options: { technology: { label: \'Tech\' } }` — not the field\'s option list: which options ' +
             'exist stays the vendor\'s (ADR-0146 D6).'
           : undefined,
     }).optional().describe(
@@ -4877,9 +4877,9 @@ function refuseExtensionFieldPatchKeys(fieldPatches: unknown, ctx: z.RefinementC
  * objectExtensions: [{
  *   extend: 'contact',               // target object FQN
  *   fields: { sales_stage: Field.select([...]) },
- *   // A base field's display properties only (ADR-0146 D10). Not applied
- *   // until the registry merge carries the slot — see `fieldPatches`.
- *   fieldPatches: { industry: { label: 'Sector', options: { tech: { label: 'Technology' } } } },
+ *   // A base field's display properties only (ADR-0146 D10), applied by the
+ *   // registry merge (`mergeObjectDefinitions`) — see `fieldPatches`.
+ *   fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } },
  * }]
  * ```
  */
@@ -4900,15 +4900,13 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
   },
   guidance: {
     // The merge in `objectql/src/engine.ts` copies EXACTLY the declared keys
-    // (extend / fields / label / pluralLabel / description / validations /
-    // indexes / priority) onto the extension def. Anything else is not
-    // "unsupported yet" — there is no slot for it to arrive through.
-    // `fieldPatches` is the one declared key that copy does not carry yet:
-    // it is parsed and marked not enforced until the merge card (N-23d,
-    // #28565) carries it through the engine into `mergeObjectDefinitions`.
+    // (extend / fields / fieldPatches / label / pluralLabel / description /
+    // validations / indexes / priority) onto the extension def. Anything else
+    // is not "unsupported yet" — there is no slot for it to arrive through.
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
-      '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes` only. ' +
+      '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes`, and ' +
+      'applies `fieldPatches`, and nothing else. ' +
       "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
       '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
       'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
@@ -4953,18 +4951,21 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
    * fields. Keys are DERIVED from `BASE_FIELD_DISPLAY_WHITELIST`; structural
    * keys are refused by name with the D6 prescription; an `__c` key is refused
    * by the root refinement below. Pure shape: whether the target has the field
-   * or the option, and who may patch, are the server's (N-23d, #28565), which
-   * also carries the slot through `engine.ts`'s extension copy — dropped there
-   * until then — and flips the marker below.
+   * or the option is the server's — `@objectstack/metadata-core`'s
+   * `fieldPatchTargetMisses`, refused at the marketplace install door and at
+   * `os validate`, named in the boot log — and the merge that applies the patch
+   * is `@objectstack/objectql`'s `mergeObjectDefinitions`.
    */
   fieldPatches: z.record(z.string(), FieldDisplayPatchSchema).optional().describe(
-    '[EXPERIMENTAL — not enforced] Display patches of the target object\'s own fields, keyed by field ' +
-    'name: change a vendor field\'s display properties (BASE_FIELD_DISPLAY_WHITELIST: label, description, ' +
-    'help text, placeholder, option labels) without taking the field over, so its type, values and rules ' +
-    'stay the vendor\'s and its upgrades still apply (ADR-0146 D10). Nothing applies a patch yet: the ' +
-    'registry merge that does is rollout card N-23d, and until it lands the engine drops this slot at ' +
-    'registration. Example: `fieldPatches: { industry: { label: \'Sector\', inlineHelpText: \'The market ' +
-    'the account sells into\', options: { tech: { label: \'Technology\' } } } }`.',
+    'Display patches of the target object\'s own fields, keyed by field name: change a vendor field\'s ' +
+    'display properties (BASE_FIELD_DISPLAY_WHITELIST: label, description, help text, placeholder, option ' +
+    'labels) without taking the field over, so its type, values and rules stay the vendor\'s and its ' +
+    'upgrades still apply (ADR-0146 D10). Applied by the registry merge (`mergeObjectDefinitions`) after ' +
+    'the additive merges, on every object read: a tenant\'s own text keeps winning, and between two ' +
+    'extensions the higher `priority` wins. A patch naming a field or option value the target does not ' +
+    'have is refused at install and by `os validate`. Example: `fieldPatches: { industry: { label: ' +
+    '\'Sector\', inlineHelpText: \'The market the account sells into\', options: { technology: { label: ' +
+    '\'Tech\' } } } }`.',
   ),
 
   /** Override label */

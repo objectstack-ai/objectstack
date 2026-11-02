@@ -75,7 +75,7 @@ import { defaultEnvCredentialResolver, type CredentialResolver } from './credent
 // [#22450] The one bundle-locale negotiation rule (exact → case-insensitive →
 // base language → variant expansion), asked about the locales the i18n service
 // holds — the same question objectql's `negotiatedMessageLocale` asks it.
-import { resolveBundleLocale } from '@objectstack/spec/system';
+import { resolveBundleLocale, type FlowTerminalMessageKey } from '@objectstack/spec/system';
 // [#25222] The registration-time checks' bodies, and the declarations only
 // they read. Each `AutomationEngine` method of the same name calls its body.
 import {
@@ -221,6 +221,8 @@ import {
     rejudgeSubflowCallers,
     refuseCustomerAuthoredToggle,
 } from './subflow-guards.js';
+import { describeSubflowNoticeTrap, subflowNoticeTrap } from './subflow-notice-guard.js';
+import { describeRegionSuspendingCall, regionSuspendingCall } from './subflow-region-guard.js';
 // [#25222] The consumed-suspension restore's bodies: journaling a consumed
 // suspension, resolving its witnesses, and restoring, peeking at or inspecting
 // one. Each `AutomationEngine` method of the same name calls its body.
@@ -243,6 +245,7 @@ import {
     warnIfNodeTypeVocabularyNeverSealed,
     setNodeError,
     renderRefusalMessage,
+    renderFlowTerminalMessage,
     renderFlowTextSlot,
     translatedFlowTemplate,
 } from './node-text-rendering.js';
@@ -2539,14 +2542,19 @@ export function graftConditionEnvelopes(converted: unknown, parsed: unknown): un
 /**
  * [#11997] Where one flow body came from, as the boot pull could tell.
  *
+ * `'override'` — [#28412, ADR-0146 D9 item 1] the shipping package's declared
+ * override: a stored row bound, by its own `package_id`, to that package's
+ * paired `<package>.custom`, whose body declares `overrides.package` = the
+ * package. `packageId` is the pair. It is the packaged flow now, armed over
+ * the loader's body for the name.
  * `'package'` — a code-shipped artifact (`isCodeArtifactBody`, ADR-0029 D9.6).
  * `'runtime'` — a `sys_metadata`/runtime-authored row with no real package
  * provenance: the ADR-0005 overlay, and the sanctioned override path per
  * ADR-0048 §1.5.
  */
 export interface FlowContender {
-    source: 'package' | 'runtime';
-    /** The owning package id, when a code package ships this body. */
+    source: 'override' | 'package' | 'runtime';
+    /** The owning package id, when a code package ships this body; the `.custom` pair for an override. */
     packageId?: string;
 }
 
@@ -2898,6 +2906,26 @@ export class AutomationEngine implements IAutomationService {
      * {@link unregisterFlow} drops it with the flow.
      */
     private readonly subflowDeclinedFlows = new Map<string, string>();
+    /**
+     * [#28840] Flows {@link activateFlowTrigger} declined to arm because a
+     * `save_notice` of theirs runs after a `subflow` / `map` node whose child
+     * flow can suspend, each with the reason `/_status` and the binding audit
+     * read. A record for {@link subflowDeclinedFlows}'s reasons: deleted the
+     * moment the flow gets past the gate, re-asked by
+     * {@link rejudgeSubflowCallers} whenever a flow its calls reach is
+     * registered, and dropped with the flow by {@link withdrawFlow}.
+     */
+    private readonly subflowNoticeDeclinedFlows = new Map<string, string>();
+    /**
+     * [#28897] Flows {@link activateFlowTrigger} declined to arm because a
+     * `subflow` / `map` node inside one of their region bodies calls a child
+     * flow that can suspend, each with the reason `/_status` and the binding
+     * audit read. A record for {@link subflowNoticeDeclinedFlows}'s reasons,
+     * kept the same way: deleted the moment the flow gets past the gate,
+     * re-asked by {@link rejudgeSubflowCallers}, dropped by
+     * {@link withdrawFlow}.
+     */
+    private readonly subflowRegionDeclinedFlows = new Map<string, string>();
     /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
@@ -3874,6 +3902,23 @@ export class AutomationEngine implements IAutomationService {
         // trigger would change nothing, so "no trigger registered" would name
         // a remedy that cannot work.
         if (this.declineOntoDisabledSubflows(flowName, resolved.triggerType)) return;
+        // [#28840] The save-notice half, a decline for the same reasons: a
+        // `save_notice` after a `subflow` / `map` node whose child can suspend
+        // is refused by name when the suspended run resumes, after the write
+        // answered, and a decision that resumes it is stranded. The flow parse
+        // cannot see the child (#28806), which may register after this flow,
+        // so the gate asks here and {@link rejudgeSubflowCallers} asks again
+        // when the child arrives or changes.
+        if (this.declineOntoSuspendingSubflowNotice(flowName, resolved.triggerType)) return;
+        // [#28897] The region half, a decline for the same reasons: a region
+        // body cannot carry a durable pause, so a region-nested `subflow` /
+        // `map` whose child suspends fails the run at the region boundary
+        // (`region-suspension-refusal.ts`), the first time that child
+        // suspends. That refusal stays as the second door; this is the first.
+        // Last of the halves, and {@link describeUnboundReason} reads the
+        // records in the same order, so a record an earlier half's decline
+        // left unasked is never the one reported.
+        if (this.declineOntoRegionSuspendingCall(flowName, resolved.triggerType)) return;
         const trigger = this.triggers.get(resolved.triggerType);
         if (!trigger) return;
         try {
@@ -4623,6 +4668,8 @@ export class AutomationEngine implements IAutomationService {
             flowVersionHistory: this.flowVersionHistory,
             policyDisabledFlows: this.policyDisabledFlows,
             subflowDeclinedFlows: this.subflowDeclinedFlows,
+            subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
+            subflowRegionDeclinedFlows: this.subflowRegionDeclinedFlows,
             flowRefusals: this.flowRefusals,
             logger: this.logger,
         };
@@ -4753,6 +4800,8 @@ export class AutomationEngine implements IAutomationService {
             boundFlowTriggers: this.boundFlowTriggers,
             policyDisabledFlows: this.policyDisabledFlows,
             subflowDeclinedFlows: this.subflowDeclinedFlows,
+            subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
+            subflowRegionDeclinedFlows: this.subflowRegionDeclinedFlows,
             triggers: this.triggers,
         };
         return describeUnboundReason.call(host, name, resolved);
@@ -5188,6 +5237,18 @@ export class AutomationEngine implements IAutomationService {
      * `engine.execute`. Scanning only `subflow` would let a `map` caller break
      * exactly the way §7.3 exists to prevent.
      *
+     * [#28846] At EVERY region depth: a `subflow` / `map` node inside a
+     * `loop` body, a `parallel` branch or a `try_catch` slot calls its child
+     * on each pass exactly as a top-level one does, so a guard that read only
+     * the top-level `nodes` armed a caller onto a disabled child and let that
+     * child be switched off under it. The regions are read through
+     * `collectFlowGraphs`, the spec's one region walk, never a second walker.
+     *
+     * [#28897] That reading is `subflowCalls` (`subflow-region-guard.ts`),
+     * which also keeps each call's node and the container holding it: the
+     * arming gate's region half ({@link declineOntoRegionSuspendingCall})
+     * reads the same calls, never a walk of its own.
+     *
      * ⛔ The historical `flow` alias for `config.flowName` is NOT read here.
      * ADR-0087 D2's conversion `flow-node-subflow-flow-alias` canonicalizes it
      * at load, so only the canonical key reaches a registered definition;
@@ -5484,6 +5545,90 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#28840] The arming gate's save-notice half, asked by
+     * {@link activateFlowTrigger} of an enabled flow it is about to arm: does a
+     * `save_notice` of it run after a `subflow` / `map` node whose child flow
+     * can suspend ({@link subflowNoticeTrap}: a pausing node reachable from the
+     * child's start, or a child of the child that can suspend, transitively)?
+     * Then it is declined: recorded on {@link subflowNoticeDeclinedFlows} for
+     * `/_status` and the binding audit, and said once as a `warn` naming the
+     * notice, the call node and where the child suspends.
+     *
+     * Any flow, packaged or authored here: the stranded decision is the same.
+     * ⛔ A decline, never a refusal, for {@link declineOntoDisabledSubflows}'s
+     * reason and one of its own: which flows suspend depends on what else is
+     * registered, so `registerFlow` cannot refuse it without depending on load
+     * order.
+     *
+     * #4632 verdict: FUNCTIONAL, `warn`, as the disabled-subflow decline: the
+     * flow is visibly smaller than declared and `/_status` says why. Said once
+     * per decline reason.
+     *
+     * @returns `true` when the flow is declined and must not be armed.
+     */
+    private declineOntoSuspendingSubflowNotice(flowName: string, triggerType: string): boolean {
+        const trap = subflowNoticeTrap(this.flows, flowName);
+        if (!trap) {
+            this.subflowNoticeDeclinedFlows.delete(flowName);
+            return false;
+        }
+        const why = describeSubflowNoticeTrap(trap);
+        const reason =
+            `not armed — ${why}, and it is armed; it is also armed once '${trap.child}' is republished without a ` +
+            `node that suspends`;
+        const previous = this.subflowNoticeDeclinedFlows.get(flowName);
+        this.subflowNoticeDeclinedFlows.set(flowName, reason);
+        if (previous === reason) return true;
+        this.logger.warn(
+            `Flow '${flowName}' is registered but NOT armed on trigger '${triggerType}' — ${why}. It is armed the ` +
+                `moment the \`save_notice\` moves, or '${trap.child}' is republished without a node that suspends.`,
+        );
+        return true;
+    }
+
+    /**
+     * [#28897] The arming gate's region half, asked by
+     * {@link activateFlowTrigger} of an enabled flow it is about to arm: does a
+     * `subflow` / `map` node inside one of its region bodies (a `loop` body, a
+     * `parallel` branch, a `try_catch` slot, at any depth) call a child flow
+     * that can suspend ({@link regionSuspendingCall}, which reads the calls
+     * through {@link subflowTargets}' reading and where the child suspends
+     * through the save-notice half's)? A region body cannot carry a durable
+     * pause, so that run would fail at the region boundary the first time the
+     * child suspends (`region-suspension-refusal.ts`). Then it is declined:
+     * recorded on {@link subflowRegionDeclinedFlows} for `/_status` and the
+     * binding audit, and said once as a `warn` naming the region node, the call
+     * node and where the child suspends.
+     *
+     * Any flow, packaged or authored here, as the save-notice half: the failed
+     * run is the same. ⛔ A decline, never a refusal, for that half's reasons.
+     *
+     * #4632 verdict: FUNCTIONAL, `warn`, as the other halves. Said once per
+     * decline reason.
+     *
+     * @returns `true` when the flow is declined and must not be armed.
+     */
+    private declineOntoRegionSuspendingCall(flowName: string, triggerType: string): boolean {
+        const trap = regionSuspendingCall(this.flows, flowName);
+        if (!trap) {
+            this.subflowRegionDeclinedFlows.delete(flowName);
+            return false;
+        }
+        const why = describeRegionSuspendingCall(trap);
+        const reason =
+            `not armed — ${why}, and it is armed; it is also armed once '${trap.child}' is republished without a ` +
+            `node that suspends`;
+        const previous = this.subflowRegionDeclinedFlows.get(flowName);
+        this.subflowRegionDeclinedFlows.set(flowName, reason);
+        if (previous === reason) return true;
+        this.logger.warn(
+            `Flow '${flowName}' is registered but NOT armed on trigger '${triggerType}' — ${why}. It is armed the ` +
+                `moment '${trap.callNode.id}' moves, or '${trap.child}' is republished without a node that suspends.`,
+        );
+        return true;
+    }
+
+    /**
      * [#20725, ADR-0126 §7.3] `subflow` just changed state — (re)registered,
      * switched on or off, or read off the ledger at boot — so ask the arming
      * gate again for each packaged flow that calls it, where the answer can
@@ -5499,12 +5644,26 @@ export class AutomationEngine implements IAutomationService {
      * Every other caller is left exactly as it is: an armed caller whose
      * subflows are all enabled is not stopped and restarted, and a caller
      * unbound for a reason of its own is not re-offered here.
+     *
+     * [#28840] And the save-notice half of the gate, for every flow whose
+     * calls reach `subflow`, directly or through other flows, packaged or
+     * not: whether a child can suspend is read through its own calls, so a
+     * change two calls away moves the answer. A caller that half declined is
+     * re-offered, and an armed caller it would now decline is unbound and
+     * offered again, both through the one gate.
+     *
+     * [#28897] The region half reads the same children through the same
+     * calls, so the same callers are re-asked for it, the same way.
      */
     private rejudgeSubflowCallers(subflow: string): void {
         // The body lives in ./subflow-guards.ts (#25222).
         const host: ThisParameterType<typeof rejudgeSubflowCallers> = {
             boundFlowTriggers: this.boundFlowTriggers,
             subflowDeclinedFlows: this.subflowDeclinedFlows,
+            subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
+            subflowRegionDeclinedFlows: this.subflowRegionDeclinedFlows,
+            flows: this.flows,
+            subflowTargets: (...a) => this.subflowTargets(...a),
             packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
             disabledPackagedSubflows: (...a) => this.disabledPackagedSubflows(...a),
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
@@ -6275,7 +6434,12 @@ export class AutomationEngine implements IAutomationService {
                 // that executed no node, so stamping "Opportunity created!" on
                 // one would be a toast about work nobody did. They carry no
                 // `summary` for exactly the same reason.
-                successMessage: flow.successMessage,
+                //
+                // [#28054] Rendered, not copied: a `{{ }}` template over the
+                // variables the run finished with, in the run's locale.
+                successMessage: this.renderFlowTerminalMessage(
+                    flowName, 'successMessage', flow.successMessage, variables, runContext,
+                ),
                 // The authored flow name for the runner header and the
                 // completion toast — on EVERY evaluation's result, paused and
                 // terminal alike (see `AutomationResult.flowLabel`).
@@ -6548,7 +6712,12 @@ export class AutomationEngine implements IAutomationService {
                 // does not degrade to a plainer toast: the consumer falls back
                 // to the raw node error text, which is what every non-screen
                 // flow showed until now.
-                errorMessage: flow.errorMessage,
+                //
+                // [#28054] Rendered over the variables at the failure point
+                // (`$error` included), in the run's locale.
+                errorMessage: this.renderFlowTerminalMessage(
+                    flowName, 'errorMessage', flow.errorMessage, variables, runContext,
+                ),
                 flowLabel: flow.label,
                 // A failed run's counts matter MORE, not less: they say how far
                 // it got before dying — how many rows it had already written.
@@ -7211,6 +7380,7 @@ export class AutomationEngine implements IAutomationService {
             finishRefusedRun: (...a) => this.finishRefusedRun(...a),
             journalConsumedSuspension: (...a) => this.journalConsumedSuspension(...a),
             failAncestors: (...a) => this.failAncestors(...a),
+            renderFlowTerminalMessage: (...a) => this.renderFlowTerminalMessage(...a),
         };
         return resumeInternal.call(host, runId, signal, skipBubble, childSummary, childRefusal);
     }
@@ -8932,6 +9102,39 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#28054] A flow's terminal text — `successMessage` or `errorMessage` —
+     * rendered in the run's language, the way {@link renderRefusalMessage}
+     * renders a refusing `end` node's message: the translated TEMPLATE at
+     * `flowTerminalMessageKey` (`@objectstack/spec/system`) is picked in the
+     * run's locale, then its `{{ }}` holes are filled over `variables` through
+     * {@link renderFlowTextSlot}, the one text renderer. Every terminal exit
+     * calls it: a success exit over the variables the run finished with, a
+     * failure exit over the variables at the failure point. A hole over a
+     * variable the run never bound renders nothing, as in every text slot, and
+     * a message with no hole renders as written.
+     *
+     * `undefined` when the flow authors none, when the text renders empty, and
+     * when the authored template refuses to render (the doors compile it, so
+     * only a `{{ amount | currency }}` hole meeting no tenant default currency
+     * gets there): the run has already ended, so its verdict stands and the
+     * caller shows its own sentence, never raw holes; the warning names why.
+     */
+    private renderFlowTerminalMessage(
+        flowName: string,
+        key: FlowTerminalMessageKey,
+        authored: string | undefined,
+        variables: Map<string, unknown>,
+        context: AutomationContext,
+    ): string | undefined {
+        // The body lives in ./node-text-rendering.ts.
+        const host: ThisParameterType<typeof renderFlowTerminalMessage> = {
+            renderFlowTextSlot: (...a) => this.renderFlowTextSlot(...a),
+            logger: this.logger,
+        };
+        return renderFlowTerminalMessage.call(host, flowName, key, authored, variables, context);
+    }
+
+    /**
      * [#22450, #22507] Render one user-read flow TEXT slot in the run's
      * language: pick the translated TEMPLATE at `slot.key`, then fill its
      * `{{ }}` holes through `renderTextSlot`, the one text renderer — or render
@@ -9137,6 +9340,12 @@ export class AutomationEngine implements IAutomationService {
      * failure, ran its catch handler, and the run reported success over a sweep
      * that had processed nothing. The container executors test for the named
      * type and re-throw, so no region can contain it.
+     *
+     * [#28897] When the suspending node is a `subflow` / `map`, the child run
+     * it parked (and any run that child is parked on) is cancelled before the
+     * refusal is thrown, so no run is left parked under a caller that failed.
+     * The arming gate declines such a caller first
+     * ({@link declineOntoRegionSuspendingCall}); this is the second door.
      */
     runRegion(
         region: FlowRegionParsed,
@@ -9148,6 +9357,9 @@ export class AutomationEngine implements IAutomationService {
         // The body lives in ./dag-traversal.ts (#25222).
         const host: ThisParameterType<typeof runRegion> = {
             executeNode: (...a) => this.executeNode(...a),
+            resolveSuspensionChain: (...a) => this.resolveSuspensionChain(...a),
+            cancelRun: (...a) => this.cancelRun(...a),
+            logger: this.logger,
         };
         return runRegion.call(host, region, variables, context, grouping, partialSteps);
     }
@@ -9470,6 +9682,15 @@ export class AutomationEngine implements IAutomationService {
      * started under — not whatever a hot-reload re-registered under the same
      * name while the loop slept between attempts (#9414). `flowLabel` is
      * passed for the same reason.
+     *
+     * [#28054] `flowErrorMessage` is a `{{ }}` template, rendered over the
+     * variables at the failure point — and those are the LAST attempt's, which
+     * only that attempt holds. So each attempt is handed this template and
+     * renders it at its own failure exit, and the exhausted exit reports the
+     * last attempt's rendering: still the definition this dispatch started
+     * under, filled from the run that failed last. An attempt that never
+     * dispatched (its flow vanished or was disabled between attempts) bound no
+     * variable, so the template renders over none.
      */
     private async retryExecution(
         flowName: string,
@@ -9500,6 +9721,9 @@ export class AutomationEngine implements IAutomationService {
         // with `lastError` so the exhausted exit never reports one attempt's
         // text beside another attempt's refusal.
         let lastCarried: CarriedRefusal = {};
+        // [#28054] The last attempt's rendering of `flowErrorMessage`, paired
+        // with `lastError` the same way.
+        let lastErrorMessage: string | undefined;
         for (let i = 0; i < maxRetries; i++) {
             // Calculate delay with exponential backoff
             let delay = Math.min(baseDelay * Math.pow(multiplier, i), maxDelay);
@@ -9509,7 +9733,7 @@ export class AutomationEngine implements IAutomationService {
             await new Promise(r => setTimeout(r, delay));
 
             // Execute directly without recursion into retryExecution again
-            const result = await this.executeWithoutRetry(flowName, context);
+            const result = await this.executeWithoutRetry(flowName, context, { errorMessage: flowErrorMessage });
             // [#9510] THE THIRD STATE, read deliberately and BEFORE `success`.
             // Since the ADR-0019 suspend arm was restored to
             // `executeWithoutRetry`, an attempt can end NON-TERMINAL: the run
@@ -9536,6 +9760,9 @@ export class AutomationEngine implements IAutomationService {
             if (result.success) return result;
             lastError = result.error ?? 'Unknown error';
             lastCarried = carriedRefusalOfResult(result);
+            lastErrorMessage = result.status === 'failed'
+                ? result.errorMessage
+                : this.renderFlowTerminalMessage(flowName, 'errorMessage', flowErrorMessage, new Map(), context ?? {});
         }
         // [#9378] Same "ran and was rejected" class as `execute()`'s own failure
         // exit — every attempt above dispatched the flow — so it carries the
@@ -9554,7 +9781,7 @@ export class AutomationEngine implements IAutomationService {
             error: lastError,
             durationMs: Date.now() - startTime,
             status: 'failed',
-            errorMessage: flowErrorMessage,
+            errorMessage: lastErrorMessage,
             flowLabel,
             ...lastCarried,
         };
@@ -9674,10 +9901,16 @@ export class AutomationEngine implements IAutomationService {
      * attempt, because it is the SAME event happening on a later attempt. Two
      * answers for one user-visible situation is what this method's missing
      * suspend arm produced.
+     *
+     * [#28054] `dispatched` carries the `errorMessage` template of the
+     * definition the retried dispatch started under; the failure exit renders
+     * it over this attempt's variables in place of the re-read flow's own (see
+     * {@link retryExecution}).
      */
     private executeWithoutRetry(
         flowName: string,
         context?: AutomationContext,
+        dispatched?: { errorMessage: string | undefined },
     ): Promise<AutomationResult> {
         // The body lives in ./dag-traversal.ts (#25222).
         const host: ThisParameterType<typeof executeWithoutRetry> = {
@@ -9694,7 +9927,8 @@ export class AutomationEngine implements IAutomationService {
             finishRefusedRun: (...a) => this.finishRefusedRun(...a),
             persistSuspendedRun: (...a) => this.persistSuspendedRun(...a),
             flowChecksumOf: (...a) => this.flowChecksumOf(...a),
+            renderFlowTerminalMessage: (...a) => this.renderFlowTerminalMessage(...a),
         };
-        return executeWithoutRetry.call(host, flowName, context);
+        return executeWithoutRetry.call(host, flowName, context, dispatched);
     }
 }

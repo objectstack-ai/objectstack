@@ -62,7 +62,7 @@ import {
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
 import { itemDiscriminator } from '@objectstack/metadata-core';
-import { externalBindingDatasourceRefusal } from '@objectstack/spec/data';
+import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
@@ -527,6 +527,82 @@ export async function unknownDatasourceSaveRefusal(
     return err;
 }
 
+/**
+ * The body of `ObjectStackProtocolImplementation#unknownGrantObjectSaveRefusal`;
+ * the method's docblock there is its contract. [#28990] Written here beside
+ * {@link unknownDatasourceSaveRefusal}, whose shape it follows: the engine's
+ * registered objects, then the by-name read (`readMetaItem`), then the pending
+ * drafts, then the definition the set already holds.
+ */
+export async function unknownGrantObjectSaveRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts' | 'readMetaItem'>,
+    singularType: string,
+    item: unknown,
+    name: string,
+    pending?: 'drafts' | ReadonlySet<string>,
+    writeFace?: MetadataWriteFace,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (singularType !== 'permission') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const grants = (item as { objects?: unknown }).objects;
+    if (!grants || typeof grants !== 'object' || Array.isArray(grants)) return undefined;
+    // A registry that cannot look an object up by name cannot say a name is
+    // unknown, so nothing is refused on it.
+    const registry = this.engine?.registry as { getObject?: unknown } | undefined;
+    const getObject = registry?.getObject;
+    if (typeof getObject !== 'function') return undefined;
+    // `'*'` is the wildcard grant the permission evaluator falls back to for
+    // every object with no entry of its own: it names no object.
+    let unknown = Object.keys(grants).filter((key) => {
+        if (key === '*') return false;
+        // The object's own name, exactly: the registry's legacy `pkg__name`
+        // lookup answers an object the evaluator never keys a grant by.
+        const registered = getObject.call(registry, key) as { name?: unknown } | undefined;
+        return registered?.name !== key;
+    });
+    if (unknown.length === 0) return undefined;
+    // An object the environment stores, or the code layer defines, that the
+    // registry has not (yet) registered: known here, and judged where it is used.
+    const declared = await Promise.all(unknown.map(async (key) =>
+        Boolean((await this.readMetaItem({ type: 'object', name: key }))?.item)));
+    unknown = unknown.filter((_, index) => !declared[index]);
+    if (unknown.length === 0) return undefined;
+    // An object still pending: any object draft, for a draft save; the batch's
+    // own object drafts, for a package publish.
+    if (pending instanceof Set) {
+        unknown = unknown.filter((key) => !pending.has(key));
+    } else if (pending === 'drafts') {
+        const drafted = new Set((await this.listDrafts({ type: 'object' })).drafts.map((d) => d.name));
+        unknown = unknown.filter((key) => !drafted.has(key));
+    }
+    if (unknown.length === 0) return undefined;
+    // A grant the set already holds is not this save's: a re-save, a
+    // stored-row migration or a restore that keeps it is judged at the save
+    // that introduced it, and an object that has gone since is not the
+    // re-saving author's to answer for. (A declaration boot never runs
+    // `onEnable`, so what a plugin registers there is absent from it.)
+    const current = (await this.readMetaItem({ type: 'permission', name }))?.item as { objects?: unknown } | undefined;
+    const held = current?.objects && typeof current.objects === 'object' && !Array.isArray(current.objects)
+        ? new Set(Object.keys(current.objects))
+        : new Set<string>();
+    unknown = unknown.filter((key) => !held.has(key));
+    if (unknown.length === 0) return undefined;
+    const issues: MetadataIssueEntry[] = unknown.map((key) => ({
+        path: `objects.${key}`,
+        message: `Permission '${name}' grants on object '${key}' which is not defined in objects: no package registers `
+            + 'an object of that name and none is saved here, so the grant applies to nothing. Correct the name to the '
+            + `object's full name (e.g. 'crm_lead', not 'lead'), create the object first, or remove the grant.`,
+        code: 'custom',
+    }));
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
+}
+
 /** The body of `ObjectStackProtocolImplementation#objectsBoundExternallyTo`; the method's docblock there is its contract. */
 export async function objectsBoundExternallyTo(
     this: Pick<SaveDoorRefusalHost, 'engine' | 'readActiveOverlayRows' | 'rethrowUnlessMetadataStoreUnprovisioned' | 'storedOverlayEntries'>,
@@ -676,4 +752,84 @@ export function objectNamespacePrefixViolation(
     name: string, packageId: string | null | undefined): string | null {
     if (typeof packageId !== 'string' || packageId === '') return null;
     return validateObjectNamespacePrefix(name, this.engine?.registry?.getPackage?.(packageId)?.manifest?.namespace);
+}
+
+/** The seed modes whose load matches incoming records to existing rows by the dataset's `externalId`. */
+const KEYED_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update', 'ignore']);
+
+/**
+ * The body of `ObjectStackProtocolImplementation#seedExternalIdSaveRefusal`;
+ * the method's docblock there is its contract. Written here, beside the other
+ * refusals the save door and the publish promotion ask in turn, rather than
+ * moved: its reads are the engine's registered object and, on a draft save,
+ * the object drafts.
+ */
+export async function seedExternalIdSaveRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts'>,
+    singularType: string,
+    item: unknown,
+    name: string,
+    pending?: 'drafts' | ReadonlyArray<unknown>,
+    writeFace?: MetadataWriteFace,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (singularType !== 'seed') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const seed = item as { object?: unknown; mode?: unknown; externalId?: unknown };
+    if (typeof seed.object !== 'string' || seed.object === '') return undefined;
+    const objectName = seed.object;
+    // `SeedSchema`'s defaults, as the loader applies them (`mode: 'upsert'`,
+    // `externalId: 'name'`): a body read before the parse filled them keys the
+    // same way a parsed one does.
+    const mode = typeof seed.mode === 'string' ? seed.mode : 'upsert';
+    if (!KEYED_SEED_MODES.has(mode)) return undefined;
+    const declared = seed.externalId !== undefined;
+    const externalId = declared ? seed.externalId : 'name';
+    const composite = Array.isArray(externalId);
+    const members = (composite ? externalId : [externalId]) as unknown[];
+    // The object as the publish will have it: a draft of it in the same
+    // package batch, else the engine's registered definition (its fields as
+    // the runtime serves them, extension fields and injected columns
+    // included). On a draft save, an object that is itself still a draft may
+    // gain the field before it is published, so the seed is judged at its
+    // publish instead. An object resolved by neither is not judged here:
+    // the load reports an object it cannot find.
+    const pendingObject = Array.isArray(pending)
+        ? pending.find((o) => (o as { name?: unknown } | null)?.name === objectName) as { fields?: unknown } | undefined
+        : undefined;
+    if (!pendingObject && pending === 'drafts'
+        && (await this.listDrafts({ type: 'object' })).drafts.some((d) => d.name === objectName)) {
+        return undefined;
+    }
+    const registered = (this.engine?.registry as { getObject?(name: string): unknown } | undefined)
+        ?.getObject?.(objectName) as { fields?: unknown } | undefined;
+    if (!pendingObject && !registered) return undefined;
+    const fieldNames = new Set<string>(resolveInjectedSystemColumns(pendingObject ?? registered).names);
+    for (const def of [registered, pendingObject]) {
+        const fields = def?.fields;
+        if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+            for (const key of Object.keys(fields)) fieldNames.add(key);
+        }
+    }
+    const missing = members
+        .map((member, index) => ({ member, index }))
+        .filter(({ member }) => typeof member === 'string' && !fieldNames.has(member));
+    if (missing.length === 0) return undefined;
+    const consequence = `so a load in \`${mode}\` mode could never match a row it wrote before: each publish and each `
+        + `replay would ${mode === 'update' ? 'skip every record' : 'insert every record again'}. Name a field the object `
+        + "declares, or use `mode: 'insert'` for rows with no natural key.";
+    const issues: MetadataIssueEntry[] = missing.map(({ member, index }) => ({
+        path: composite ? `externalId.${index}` : 'externalId',
+        message: (declared
+            ? `Seed '${name}' keys on externalId member '${String(member)}', which is not a field of object '${objectName}', `
+            : `Seed '${name}' declares no externalId, so it keys on the default 'name', which is not a field of object '${objectName}', `)
+            + consequence,
+        code: 'custom',
+    }));
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
 }

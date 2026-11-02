@@ -3086,6 +3086,16 @@ export class ObjectQLPlugin implements Plugin {
   ): void {
     const ql = this.ql;
     if (!ql) return;
+    // [#28697] The body seam's owner-stamp refusal for objects, in its
+    // envelope, asked of every residual object before any of them registers:
+    // a residual object wearing a `_packageId` other than the residual's id
+    // kept it through `applyProtection` and `registerObject` alike, which
+    // stamp only an unset key ({@link collectionItemOwnerStampRefusal}, `engine.ts`).
+    for (const object of residual.objects) {
+      const name = (object as { name?: unknown }).name;
+      const refusal = collectionItemOwnerStampRefusal(object, 'object', typeof name === 'string' && name !== '' ? name : '(unnamed)', residual.ownerId);
+      if (refusal) throw refusal;
+    }
     const bodyPicklists = new Set<string>();
     for (const body of bodies) for (const name of collectManifestPicklistNames(body)) bodyPicklists.add(name);
     const unserved: string[] = [];
@@ -4189,6 +4199,17 @@ export class ObjectQLPlugin implements Plugin {
                         // unstamped — a synthetic id like 'metadata-service'
                         // would flip isArtifactBacked() and the two-tier write
                         // authorization for genuinely runtime-authored items.
+                        //
+                        // [#28697] The stamp read here is the one the metadata
+                        // plugin's body registration wrote, and that door judges
+                        // a body's own `_packageId` against the body it found the
+                        // item in before it stamps (`artifactItemOwnerStampRefusal`,
+                        // `@objectstack/metadata`), the build door having judged
+                        // every parsed stack first. This seam holds no body to
+                        // judge against: it reads items, not the package that
+                        // registered them, so the judgement lives at the door
+                        // that writes the stamp, and a body stamp naming another
+                        // package never reaches this line.
                         if (this.ql?.registry?.registerItem) {
                             this.ql.registry.registerItem(type, item, keyField, item._packageId);
                         }

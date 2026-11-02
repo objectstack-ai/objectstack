@@ -60,6 +60,25 @@ export type AppBundleAnswer =
 
 export type AppBundleRequest = (appId: string, etag: string | undefined) => Promise<AppBundleAnswer>;
 
+/**
+ * The active bundle as it stands, read without waiting (objectstack#28645):
+ *
+ *   - `none` — no app was entered this session;
+ *   - `pending` — the active app's bundle has no answer in hand yet (its first
+ *     load, or a reload after a {@link AppBundleStore.clear}); `settled`
+ *     settles when it lands;
+ *   - `ready` — its items as held, empty when the app has no bundle. A
+ *     revalidation on the wire rides along as `settled`: the held items answer
+ *     until it lands.
+ *
+ * `settled` is the load's own promise, so two peeks of one load hand out the
+ * same one. It never rejects.
+ */
+export type AppBundlePeek =
+  | { status: 'none' }
+  | { status: 'pending'; settled: Promise<unknown> }
+  | { status: 'ready'; items: AppBundleItems; settled?: Promise<unknown> };
+
 interface AppBundleState {
   appId: string;
   etag?: string;
@@ -112,6 +131,25 @@ export class AppBundleStore {
     if (state.inflight) items = await state.inflight;
     else if (state.stale || Date.now() - state.checkedAt >= this.ttlMs) items = await this.ask(appId);
     return items.get(type)?.get(name);
+  }
+
+  /**
+   * The active bundle without waiting for it ({@link AppBundlePeek}). A bundle
+   * that is stale or past its lifetime is asked again here, as {@link read}
+   * asks it, but its held items keep answering until the answer lands.
+   */
+  peek(): AppBundlePeek {
+    const appId = this.active;
+    const state = appId ? this.bundles.get(appId) : undefined;
+    if (!appId || !state) return { status: 'none' };
+    // `ask` keeps this state (it is the one held) and sets its `inflight`.
+    if (!state.inflight && (state.stale || Date.now() - state.checkedAt >= this.ttlMs)) this.ask(appId);
+    const inflight = state.inflight;
+    // Never answered (a first load, or a reload after `clear()`, both start at
+    // 0) is `pending`. An answer that held nothing (no bundle for this app) is
+    // still an answer: its revalidation rides along as `settled`.
+    if (inflight && state.checkedAt === 0) return { status: 'pending', settled: inflight };
+    return inflight ? { status: 'ready', items: state.items, settled: inflight } : { status: 'ready', items: state.items };
   }
 
   /** Whether any bundle held this session holds `type` / `name`. */

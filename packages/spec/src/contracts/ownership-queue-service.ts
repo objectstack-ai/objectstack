@@ -110,6 +110,23 @@ export interface IOwnershipQueueService {
   queuesOf(userId: string, organizationId: string | null): Promise<string[]>;
 
   /**
+   * Does `organizationId` have at least one ownership queue? `true` exactly
+   * when some name would resolve there through {@link resolveQueue}: a
+   * declared queue the activation ledger leaves on, or an organization's
+   * `sys_queue` row that does not sit under a declared queue's name.
+   *
+   * The one answer `GET /auth/me/permissions` carries as `hasAnyQueue`
+   * (`MePermissionsAuthenticatedResponseSchema`, `@objectstack/spec/api`), so
+   * a member who may not read `sys_queue` can still tell whether a queue
+   * filter can ever return a row. It discloses no name and no count.
+   *
+   * Optional, as {@link declaredQueueNamed} is, so an implementation written
+   * before it still satisfies the contract: the route answers `false` when the
+   * registered service does not carry it.
+   */
+  hasAnyQueue?(organizationId: string | null): Promise<boolean>;
+
+  /**
    * The declared queue named `name`, whether or not the activation ledger
    * switches it off — `null` when no package declares it. Optional: the
    * activation door looks a `queue` row's subject up through it (a queue

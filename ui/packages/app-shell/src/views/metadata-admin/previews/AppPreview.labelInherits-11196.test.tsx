@@ -5,7 +5,7 @@
  * name a label-less nav entry the way the console's sidebar does.
  *
  * Since objectui#9868 the platform writes nav entries with NO `label` (the
- * console's `NavigationSyncEffect` for every page and dashboard): absent ⇒ the
+ * console's create sites, `useNavigationWrites`, for every page and dashboard): absent ⇒ the
  * entry shows its target's CURRENT label at render time. The preview read the
  * raw label and showed `(unnamed)`; the canvas showed a positional `Item N`.
  * Both now ask the runtime's rule, with the console's own target resolver
@@ -31,7 +31,7 @@ import { AppPreview } from './AppPreview';
 afterEach(cleanup);
 
 const NAVIGATION = [
-  // What NavigationSyncEffect writes since objectui#9868, and a label-less object entry.
+  // What the console's create sites write since objectui#9868, and a label-less object entry.
   { id: 'nav_leads', type: 'object', objectName: 'lead' },
   { id: 'nav_sales', type: 'dashboard', dashboardName: 'sales_overview' },
   { id: 'nav_home', type: 'page', pageName: 'home_page' },

@@ -46,7 +46,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const navigateMock = vi.fn();
 
@@ -222,17 +222,18 @@ afterEach(() => {
  * workspace owner. `systemPermissions` is present and NON-empty — it simply
  * does not contain `manage_metadata`.
  */
-const eePayload = (systemPermissions?: string[]): MePermissionsResponse =>
+const eePayload = (systemPermissions?: string[]): MePermissionsAuthenticatedResponse =>
   ({
     authenticated: true,
     userId: 'u1',
     tenantId: 'acme',
-    roles: ['org_owner', 'everyone'],
+    positions: ['org_owner', 'everyone'],
+    hasAnyQueue: false,
     permissionSets: ['organization_admin', 'member_default'],
     ...(systemPermissions ? { systemPermissions } : {}),
     objects: {},
     fields: {},
-  }) as MePermissionsResponse;
+  }) as MePermissionsAuthenticatedResponse;
 
 const OWNER_CAPS = ['manage_org_users', 'setup.access', 'setup.write'];
 

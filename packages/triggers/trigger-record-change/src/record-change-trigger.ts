@@ -155,6 +155,54 @@ export function materializeDeclaredFields(
 
 const TRIGGER_PREFIX = 'com.objectstack.trigger.record-change';
 
+/** The `close` of each open save-notice channel, keyed by the channel itself. */
+const saveNoticeClosers = new WeakMap<object, () => void>();
+
+/**
+ * The `saveNotice` member of a record-change run's context (#28251): the
+ * triggering write's `ctx.notice` and the writer's locale, or nothing when the
+ * dispatch bound no `ctx.notice` (a delete). Spread into the context, so an
+ * absent channel is an absent key, never `undefined`.
+ *
+ * The channel is OPEN only while the hook handler awaits the run: the handler
+ * closes it ({@link closeSaveNoticeChannel}) once the run returns, which is
+ * when the write goes on to answer. A `set` after that — a leg an approval or
+ * a wait resumed, while the suspended run is still held in memory — throws,
+ * naming why, so the `save_notice` node refuses instead of handing a message
+ * to an answer that was already sent. (A run restored from storage carries no
+ * function at all, which the node refuses the same way.)
+ */
+export function saveNoticeChannelOf(
+    notice: HookContext['notice'],
+    locale: string | undefined,
+): Pick<AutomationContext, 'saveNotice'> {
+    if (typeof notice !== 'function') return {};
+    let open = true;
+    const channel = {
+        set: (message: string) => {
+            if (!open) {
+                throw new Error(
+                    'the write that started this run has already answered — a save notice can only be set while '
+                        + 'the run is still inside that write, before any node suspended it (an approval or a wait). '
+                        + 'Move the save_notice node ahead of the node that suspends the run.',
+                );
+            }
+            notice(message);
+        },
+        ...(typeof locale === 'string' && locale.length > 0 ? { locale } : {}),
+    };
+    saveNoticeClosers.set(channel, () => {
+        open = false;
+    });
+    return { saveNotice: channel };
+}
+
+/** Close the save-notice channel `context` carries, if it carries one this module opened. */
+export function closeSaveNoticeChannel(context: AutomationContext): void {
+    const channel = context.saveNotice;
+    if (channel) saveNoticeClosers.get(channel)?.();
+}
+
 /**
  * Map a flow start node's `triggerType` (e.g. `record-after-update`) to the
  * ObjectQL `HookEvent`(s) it binds. Returns a list because one token can bind
@@ -313,7 +361,13 @@ export class RecordChangeTrigger implements FlowTrigger {
                     return;
                 }
                 const automationCtx = await this.buildContext(binding, ctx);
-                await callback(automationCtx);
+                try {
+                    await callback(automationCtx);
+                } finally {
+                    // [#28251] The write answers once this handler returns, so
+                    // a notice set after this point (a resumed leg) refuses.
+                    closeSaveNoticeChannel(automationCtx);
+                }
             } catch (err) {
                 // Error isolation: a flow failure must NEVER break the CRUD write
                 // that triggered it. Log (loudly — ERROR reaches stderr, which
@@ -430,7 +484,7 @@ export class RecordChangeTrigger implements FlowTrigger {
                   { ...(priorBase ?? {}), ...(inputData ?? {}), ...after }
                 : { ...(priorBase ?? {}), ...(inputData ?? {}) };
 
-        const session = (ctx.session ?? {}) as { userId?: string; organizationId?: string };
+        const session = (ctx.session ?? {}) as { userId?: string; organizationId?: string; locale?: string };
 
         // Hydrate read-time computed fields (formula virtuals) onto the seeded
         // record so the flow's start condition and every `{record.<field>}`
@@ -548,6 +602,13 @@ export class RecordChangeTrigger implements FlowTrigger {
             // alias was removed in v16, #3290); it feeds the automation context's
             // driver-layer `tenantId` field unchanged.
             ...(session.organizationId ? { tenantId: session.organizationId } : {}),
+            // [#28251] The write this run was dispatched inside, for its
+            // `save_notice` nodes: the hook face of the write's own listener
+            // (`ctx.notice`, bound by the engine on every insert / update
+            // dispatch), never a second channel, plus the writer's locale the
+            // node renders its translated template in. Handed on only where
+            // the engine bound it — a delete dispatch carries none.
+            ...saveNoticeChannelOf(ctx.notice, session.locale),
             // Expose the record as params too, so flows with named `isInput`
             // variables matching record fields get them seeded. Deliberately the
             // SAME object as `record` (unchanged by commit 4f85e4d11 — `params` was never a

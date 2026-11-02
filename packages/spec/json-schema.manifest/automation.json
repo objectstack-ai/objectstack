@@ -64,6 +64,7 @@
     "automation/ParallelBranch",
     "automation/ParallelConfig",
     "automation/RetryPolicy",
+    "automation/SaveNoticeConfig",
     "automation/ScheduleOrganization",
     "automation/ScreenConfig",
     "automation/ScreenFieldConfig",

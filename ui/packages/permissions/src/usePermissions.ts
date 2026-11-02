@@ -43,6 +43,8 @@ const NO_PROVIDER_PERMISSIONS: PermissionsWithHelpers = Object.freeze({
   // for an unreported backend and keeps `hasCapabilities` fail-open.
   systemPermissions: undefined,
   hasCapabilities: () => true,
+  // [objectstack#28508] No provider → no has-queues answer.
+  hasAnyQueue: undefined,
   isLoaded: false,
   can: () => true,
   cannot: () => false,

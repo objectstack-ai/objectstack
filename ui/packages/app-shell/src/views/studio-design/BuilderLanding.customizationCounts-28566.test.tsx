@@ -47,7 +47,8 @@ function served(id: string, overrides: number, extensions: number, switchedOff: 
     overrides: Array.from({ length: overrides }, (_, i) => ({ type: 'view', name: `view_${i}` })),
     extensions: Array.from({ length: extensions }, (_, i) => ({ object: 'account', kind: 'field' as const, name: `field_${i}` })),
     switchedOff: Array.from({ length: switchedOff }, (_, i) => ({ type: 'flow', name: `flow_${i}` })),
-    counts: { overrides, extensions, switchedOff },
+    contributions: [],
+    counts: { overrides, extensions, switchedOff, contributions: 0 },
   };
   return { status: 200, body: { success: true, data } };
 }

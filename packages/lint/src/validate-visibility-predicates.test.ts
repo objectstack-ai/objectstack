@@ -58,6 +58,8 @@ describe('validateVisibilityPredicates (ADR-0089 D3b)', () => {
       pages: [
         {
           name: 'detail_page',
+          // #28725 — a `page.NAME` read resolves only against a declared variable.
+          variables: [{ name: 'selectedId', type: 'record_id' }],
           regions: [
             { components: [{ type: 'element:text', visibleWhen: "page.selectedId != ''" }] },
           ],

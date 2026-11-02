@@ -25,7 +25,7 @@ import React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import type { NavigationItem } from '@object-ui/types';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { __resetVisibilityPredicateWarnings } from '../../../../react/src/utils/visibilityDiagnostic';
 
 vi.mock('@object-ui/i18n', async (importOriginal) => ({
@@ -94,12 +94,13 @@ const NAVIGATION: NavigationItem[] = [
 
 const CRM_APP = { name: 'crm', label: 'CRM', active: true, navigation: NAVIGATION };
 
-function answerFor(opportunityRead: boolean): MePermissionsResponse {
+function answerFor(opportunityRead: boolean): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_agent',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['service_agent'],
     systemPermissions: [],
     objects: {
@@ -107,7 +108,7 @@ function answerFor(opportunityRead: boolean): MePermissionsResponse {
       crm_opportunity: { allowRead: opportunityRead },
     },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 function adapterFor(app: Record<string, unknown>) {

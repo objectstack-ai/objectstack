@@ -233,7 +233,6 @@ export {
   useNavActionDispatch,
   useNavPins,
   useNavigationSync,
-  NavigationSyncEffect,
   useResponsiveSidebar,
   useActionModal,
   useHomePath,
@@ -528,12 +527,17 @@ export {
   studioMetadataAreaPath,
 } from './views/studio-design/metadataArea.js';
 export { StudioMetadataArea } from './views/studio-design/StudioMetadataArea.js';
+// objectstack ADR-0146 D1 (N-28) — where a Setup metadata URL lands in that
+// area (the datasource's stays in Setup). A host whose legacy aliases forward
+// onto Setup's metadata routes lands them in one hop through this.
+export { setupMetadataStudioPath } from './views/studio-design/setupMetadataRedirect.js';
 
-// Setup › Packaged automation (ADR-0126 §7.4) — on/off + clone for the flows
-// installed packages ship. Reached through the `automation:packaged` component
+// Setup › Packaged actions (ADR-0126 §7.4) — on/off for the actions installed
+// packages ship. Reached through the `automation:packaged-actions` component
 // ref registered in `services/builtinComponents`; exported so a host app can
-// compose the page directly.
-export { PackagedAutomationPage } from './views/setup/PackagedAutomationPage.js';
+// compose the page directly. (Setup › Packaged automation retired with
+// objectstack ADR-0146 D11: a packaged flow's switch and its copy are Studio's.)
+export { PackagedActionsPage } from './views/setup/PackagedActionsPage.js';
 
 // AI assistant bus — connects the metadata designers to the global chat.
 export {

@@ -304,6 +304,7 @@
     "automation/RetryPolicy:jitter",
     "automation/RetryPolicy:maxRetries",
     "automation/RetryPolicy:maxRetryDelayMs",
+    "automation/SaveNoticeConfig:message",
     "automation/ScreenConfig:defaults",
     "automation/ScreenConfig:description",
     "automation/ScreenConfig:fields",

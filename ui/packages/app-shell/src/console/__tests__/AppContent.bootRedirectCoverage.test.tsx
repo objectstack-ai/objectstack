@@ -217,7 +217,10 @@ describe('boot-gate coverage — AppContent control arm (out-of-shape redirects)
    */
   it('LegacyMetadataRedirect fires under a painted layout — no splash needed, none added', async () => {
     metadataApps = [{ name: 'crm', _packageId: 'com.example.crm' }];
-    const all = await commitsAt('/apps/crm/component/metadata/directory');
+    // The datasource alias: since objectstack ADR-0146 D1 (N-28) every other
+    // alias leaves the console for Studio, but the datasource's stays in
+    // Setup, so its rewrite is still one under the painted layout.
+    const all = await commitsAt('/apps/crm/component/metadata/resource?type=datasource');
 
     expect(all.length, 'nothing rendered').toBeGreaterThan(0);
     expect(

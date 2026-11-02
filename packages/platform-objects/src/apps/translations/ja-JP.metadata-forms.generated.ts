@@ -515,6 +515,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  object_extension: {
+    label: "オブジェクト拡張",
+    description: "パッケージが、別のパッケージの定義するオブジェクトに追加するフィールドとルール"
+  },
   field: {
     label: "フィールド",
     sections: {
@@ -1810,6 +1814,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       submitText: {
         label: "送信ボタンのラベル",
         helpText: "このアクションのパラメーターダイアログにある送信ボタンのラベル。ボタンが行う操作を表す動詞です（例：「送信」「通話を記録」）。パラメーターを収集するアクションでのみ使用します。空のままにすると「確認」と表示されます。"
+      },
+      cancelText: {
+        label: "キャンセルボタンのラベル",
+        helpText: "このアクションの実行前に開くダイアログ（確認ダイアログまたはパラメーターダイアログ）にある閉じるボタンのラベル。アクション自体が「…をキャンセル」である場合は、閉じると何が残るかを書きます（例：「招待を保持」）。確認を求めるか、パラメーターを収集するアクションでのみ使用します。空のままにすると「キャンセル」と表示されます。"
       },
       confirmText: {
         label: "確認文",

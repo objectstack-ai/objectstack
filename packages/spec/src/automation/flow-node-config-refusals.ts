@@ -51,6 +51,7 @@ import {
   DeleteRecordConfigSchema,
   GetRecordConfigSchema,
   MapConfigSchema,
+  SaveNoticeConfigSchema,
   ScreenConfigSchema,
   UpdateRecordConfigSchema,
 } from './builtin-node-config.zod';
@@ -130,6 +131,7 @@ export function getBuiltinNodeConfigContracts(): ReadonlyMap<string, BuiltinNode
       ['update_record', { schema: UpdateRecordConfigSchema }],
       ['delete_record', { schema: DeleteRecordConfigSchema }],
       ['notify', { schema: NotifyConfigSchema }],
+      ['save_notice', { schema: SaveNoticeConfigSchema }],
       ['http', { schema: HttpConfigSchema }],
       ['screen', { schema: ScreenConfigSchema }],
       ['script', { schema: ScriptConfigSchema }],

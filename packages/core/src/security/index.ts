@@ -308,6 +308,8 @@ export {
 // plugin-hono-server, which re-exports them under the same names.
 export {
   buildEffectiveObjectPermissions,
+  // [#28877] The map's disabled-package accessor over an engine registry.
+  registryObjectPackageDisabled,
   foldWildcardSuperUser,
   clampManagedObjectWrites,
   seedSuperUserRestrictedObjects,
@@ -499,6 +501,15 @@ export {
   carryAppAutomationElevation,
   type AppAutomationElevation,
 } from './app-automation-elevation.js';
+
+// #28881 — the mark a flow run's system elevation carries so its record writes
+// keep the write-time reference check. Set by service-automation, read by
+// objectql.
+export {
+  FLOW_WRITE_REFERENCE_CHECK,
+  markFlowWriteReferenceCheck,
+  keepsFlowWriteReferenceCheck,
+} from './flow-write-reference-check.js';
 
 // Ruling of record 6355206139 — the EXTERNAL rung's OWD seam: plugin-security
 // stamps whether a held grant's RLS speaks, plugin-sharing floors the OWD.

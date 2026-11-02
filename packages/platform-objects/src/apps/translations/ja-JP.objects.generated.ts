@@ -844,7 +844,8 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       cancel_invitation: {
         label: "招待をキャンセル",
         confirmText: "この招待をキャンセルしますか？受信者は承認できなくなります。",
-        successMessage: "招待をキャンセルしました"
+        successMessage: "招待をキャンセルしました",
+        cancelText: "招待を保持"
       },
       resend_invitation: {
         label: "招待を再送",

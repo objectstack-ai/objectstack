@@ -115,6 +115,9 @@ const STUDIO_EN: Record<string, string> = {
   'perm.rls.remove': 'Remove policy',
   'perm.rls.nameNeeded': 'Give the policy a name to save it.',
   'perm.rls.nameRefused': 'Not saved. Policy name, on row {row}: {problem}',
+  'perm.rls.policyRefused': 'Not saved. Policy on row {row}: {problem}',
+  'perm.rls.checkNotApplicable': 'Does not apply to this policy\'s operation: only a write is checked.',
+  'perm.rls.clauseHeld': 'Not saved: fix the policy finding shown under USING or CHECK.',
   // CEL authoring safety for RLS predicates (objectui#2413).
   'perm.cel.valid': 'Valid CEL',
   'perm.cel.suggestions': 'Field and scope suggestions',
@@ -349,6 +352,10 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.hidden': 'Hidden',
   'designer.field.trackHistory': 'Track history',
   'designer.field.placeholder': 'Placeholder',
+  // objectstack#28575 — a read-only base's own field: only the spec's display-property whitelist is editable.
+  'designer.field.basePatchOnly': 'This field belongs to the installed package: you can change only its {properties}, saved as your customization, and everything else stays as the package defines it.',
+  'designer.field.basePatchOnly.optionLabels': 'Option labels',
+  'designer.field.basePatchOnly.separator': ', ',
   'designer.field.group': 'Group',
   'designer.field.noGroup': '— No group —',
   'designer.field.picklistValues': 'Picklist values',
@@ -1123,6 +1130,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.refusal.publishWhere': 'Not published. Check {where}: Details say what to change.',
   'engine.studio.refusal.publishUnlocated': 'Not published: the server refused this draft. Details say why.',
   'engine.studio.refusal.publishPlain': 'Not published: {reason}',
+  // A leaf whose pending draft the server refused to read (403): Studio opens no buffer over it.
+  'engine.studio.refusal.draftUnreadable': 'This item has an unpublished draft you are not allowed to read, so Studio has not opened it: editing the published version here would overwrite that draft. Someone who holds the permissions the draft requires can edit or publish it. Details show what the server answered.',
   'engine.studio.publishRefused': 'Not published: {count} items need a change. Pending changes keeps each reason until it is fixed.',
   'engine.studio.publishRefusedOne': 'Not published: {count} item needs a change. Pending changes keeps the reason until it is fixed.',
   'engine.studio.publishRefusedBatch': 'Nothing went live: the package publishes as one batch, so its other drafts wait for this fix.',
@@ -3111,6 +3120,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#27785 — a report's chart held until its axes are picked; `input`
   // is the chart panel's own label for the axis it still needs.
   'engine.studio.held.reportChartNeedsInput': '{input} on the report’s chart needs a value',
+  // objectstack#29022 — a report switched to Joined held until its first block is added;
+  // `list` is the report form's label for the blocks list.
+  'engine.studio.held.reportJoinedNeedsBlock': 'a Joined report needs at least one block in “{list}”',
   // objectstack#27895 — a list view held until a required setting of its type's own block is picked again;
   // `input` is the setting's label in the panel's type settings section.
   'engine.studio.held.listViewTypeNeedsInput': '{input} in the view’s {type} settings needs a value',
@@ -3207,8 +3219,16 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.customize.restore': 'Restore package original',
   'engine.studio.customize.restoreConfirm': 'Restore {package}’s “{item}”?',
   'engine.studio.customize.restoreBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s version is served again.',
+  'engine.studio.customize.restoreFlowBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s flow runs again in its place, under the same on/off switch.',
   'engine.studio.customize.restoreDraft': 'Its unpublished draft is discarded first.',
   'engine.studio.customize.restoreDone': '“{item}” is back to {package}’s version',
+  // objectstack#28572 — one surface for a read-only base and its customization package.
+  'engine.studio.customize.addedIn': 'In {pair}',
+  'engine.studio.customize.addedInTitle': 'This item is added by {pair}, this deployment’s customization package, and is saved there.',
+  'engine.studio.pkg.withPair': 'with {pair}',
+  'engine.studio.if.addInPairTitle': 'New in the customization of {baseName}',
+  'engine.studio.interfaces.create.descriptionInPair':
+    'Saved as a draft in this deployment’s customization of {baseName}, and opened on the canvas. The navigation of {baseName} stays as it was installed.',
   'engine.studio.app.scaffoldNav': "Add this package's objects as menu items",
   'engine.studio.landing.title': 'App Builder',
   'engine.studio.landing.description': 'Design objects, forms, automations and interfaces inside a writable package; edits save as drafts and the whole package publishes in one release. Code and installed packages are read-only: browse them here, and customize them with an environment overlay.',
@@ -3225,9 +3245,6 @@ const STUDIO_EN: Record<string, string> = {
   // objectui#11808 — the routes a read-only package does have (ADR-0070 D2,
   // ADR-0005): an environment overlay, and the marketplace where the runtime has one.
   'engine.studio.landing.readonlyHint': 'Code and installed packages are read-only, so they are not edited or duplicated here. Customize one with an environment overlay, for the metadata types that accept one.',
-  // objectui#12513 — the link leaves Studio for Setup, and says so.
-  'engine.studio.landing.overlay': 'Open in Setup',
-  'engine.studio.landing.overlayTitle': 'Open this package’s metadata: each type shows whether it accepts an environment overlay',
   'engine.studio.landing.marketplace': 'Or install a template app from the marketplace',
   // ADR-0146 D3 — a read-only base's card says what this deployment changed on
   // it, from the server's per-package customization read.
@@ -3243,9 +3260,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.name': 'Organization flows',
   'engine.studio.org.hint': 'Flows that belong to no package',
   'engine.studio.org.description': 'The organization’s own flows that belong to no package, such as a clone of a packaged flow. They open editable.',
-  'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
-  // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
-  'engine.studio.org.openSetup': 'Open in Setup',
+  // ADR-0146 D11 — no link out: no Setup page copies a flow into this scope any more.
+  'engine.studio.org.none': 'No flows outside a package. To change a packaged flow, open its package and use New similar.',
   // objectstack#28561 — the "All metadata" area's cross-package leg: the
   // environment catalog, entered from the landing.
   'engine.studio.landing.envCatalog.name': 'Environment catalog',
@@ -3255,6 +3271,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.area.assignments.position': 'The people who hold this position are assigned in Setup.',
   'engine.studio.area.assignments.permission': 'The people this permission set is assigned to are managed in Setup.',
   'engine.studio.area.assignments.open': 'Open in Setup',
+  // objectstack#28569 — the area's form editor of an email template or a translation.
+  'engine.studio.area.formEditor.locale': 'Locale {locale}',
+  'engine.studio.area.formEditor.oneLocale': 'Only the {locale} version of this template is customized. {package}’s other languages of it stay as they are.',
+  'engine.studio.area.formEditor.translationWhole': 'Customizing a translation replaces {package}’s whole {locale} bundle: every string in it is then served from your copy, the ones you leave unchanged included.',
   'engine.studio.publishedAllFlows': 'Published {count} flows',
   'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',

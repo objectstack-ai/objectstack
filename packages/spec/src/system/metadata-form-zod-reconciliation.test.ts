@@ -396,6 +396,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'pressed',
     why: "planned, not yet rendered — the reader's pressed-state predicate is validated at parse (CEL only, no boolean literal) and judged at the authoring doors in the `record` scope, but no action surface draws the pressed face until the console's header buttons read it. A form control offered today would let an author write a predicate nothing shows",
   },
+
   // #27945 — a lookup's pick autofill lands spec-first the same way: `planned`
   // in the liveness ledger, read by no form or grid until the ui card's lookup
   // widget writes the declared targets on pick.

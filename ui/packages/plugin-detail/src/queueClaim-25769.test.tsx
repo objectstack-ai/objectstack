@@ -22,7 +22,7 @@
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import {
   recordSitsInQueue,
   queueClaimAdmitted,
@@ -30,12 +30,13 @@ import {
   claimQueuedRecord,
 } from './queueClaim';
 
-function me(userId: string): MePermissionsResponse {
+function me(userId: string): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId,
     tenantId: 't1',
-    roles: [],
+    hasAnyQueue: false,
+    positions: [],
     permissionSets: [],
     objects: { ticket: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
     fields: {},

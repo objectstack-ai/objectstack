@@ -7,6 +7,8 @@ import type { AggregationFunction, Cube } from '@objectstack/spec/data';
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
+import { assertDatasetGroupColumnsDistinct } from '../dataset-group-column-door.js';
+import { assertDatasetDateBucketsTemporal } from '../dataset-date-bucket-door.js';
 import {
   declaredDatetimeLowering,
   declaredDateColumn,
@@ -220,6 +222,187 @@ function bucketEchoRefused(dimension: string, granularity: string, cause: Bucket
   return err;
 }
 
+/** One `engine.aggregate` group key: a column, or a column bucketed by a granularity. */
+export type AggregateGroupKey = string | { field: string; dateGranularity: string };
+
+/**
+ * [#28692, #28744] Append `item` to an `engine.aggregate` `groupBy` unless an
+ * identical key is already there: the same column, or the same column bucketed
+ * at the same granularity. Several dimensions can read one column (two dataset
+ * dimensions declared over it, a relationship's FK column under each dimension
+ * through it), and they share its one group, which every dimension name is
+ * mapped from afterwards. The engine refuses a `groupBy` naming a column twice
+ * (`INVALID_QUERY`), and that refusal stands for a caller that really asks for
+ * two values under one name: the column raw beside its bucket, or two buckets
+ * of it, are different keys, so both are handed on and the engine refuses them.
+ */
+function pushGroupKey(groupBy: AggregateGroupKey[], item: AggregateGroupKey): void {
+  const same = (a: (typeof groupBy)[number]) =>
+    typeof a === 'string' || typeof item === 'string'
+      ? a === item
+      : a.field === item.field && a.dateGranularity === item.dateGranularity;
+  if (!groupBy.some(same)) groupBy.push(item);
+}
+
+/**
+ * The member `member` resolves to in `cube`'s `kind` bag: its own key, a
+ * `<cube>.`-qualified or other dotted spelling of a key, the key with its dots
+ * flattened, or (for a dotted dimension) a synthetic relation traversal.
+ * Module-level because it reads only the cube; `ObjectQLStrategy.lookupMember`
+ * is this function.
+ */
+function lookupCubeMember(
+  cube: Cube,
+  member: string,
+  kind: 'dimension' | 'measure',
+): { sql: string; type?: string } | undefined {
+  const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
+  if (bag[member]) return bag[member];
+  if (member.includes('.')) {
+    const [first, ...rest] = member.split('.');
+    const tail = rest.join('.');
+    if (first === cube.name && bag[tail]) return bag[tail];
+    if (bag[tail]) return bag[tail];
+    const flat = member.replace(/\./g, '_');
+    if (bag[flat]) return bag[flat];
+    if (kind === 'dimension') return { sql: member, type: 'string' };
+  } else if (bag[member]) {
+    return bag[member];
+  }
+  return undefined;
+}
+
+/**
+ * The column `member` reads on the base object; `ObjectQLStrategy.resolveFieldName` is this function.
+ * Module-level, and not exported from the package root, so the draft preview names the members over a
+ * column with the strategy's own reading (`assertDatasetGroupColumnsDistinct`).
+ */
+export function resolveCubeFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
+  if (kind === 'dimension' || kind === 'any') {
+    const dim = lookupCubeMember(cube, member, 'dimension');
+    if (dim) return dim.sql.replace(/^\$/, '');
+  }
+  if (kind === 'measure' || kind === 'any') {
+    const measure = lookupCubeMember(cube, member, 'measure');
+    if (measure) return measure.sql.replace(/^\$/, '');
+  }
+  return member.includes('.') ? member.split('.')[1] : member;
+}
+
+/** The object an aggregate over `cube` runs on; `ObjectQLStrategy.extractObjectName` is this function. */
+export function aggregateObjectOf(cube: Cube): string {
+  return cube.sql.trim();
+}
+
+/**
+ * [#28799] Every granularity `query.timeDimensions` asks of each dimension, in
+ * request order, keyed by the dimension as spelled. A dimension asked at two
+ * granularities keeps both, so the group-key builders hand the engine both
+ * buckets and its duplicate-column refusal answers the pair. A map of one
+ * granularity per dimension kept the last entry and dropped the other
+ * silently: `month` then `year` was served as one `year` bucket.
+ */
+function granularitiesByDimension(query: AnalyticsQuery): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const td of query.timeDimensions ?? []) {
+    if (!td.granularity) continue;
+    const grans = out.get(td.dimension);
+    if (grans) grans.push(td.granularity);
+    else out.set(td.dimension, [td.granularity]);
+  }
+  return out;
+}
+
+/**
+ * The `engine.aggregate` `groupBy` the strategy's direct path hands the engine
+ * for `query`, in order: one key per `dimensions` entry, then one per bucketed
+ * `timeDimensions` entry not also listed there, each named once
+ * ({@link pushGroupKey}).
+ *
+ * [#28765] Module-level, and not exported from the package root, so the draft
+ * preview, which hands no engine anything, judges the same keys at the same
+ * positions and refuses a selection the live faces refuse with their words
+ * (`assertDatasetGroupColumnsDistinct`, #28798). It reads only the cube.
+ */
+export function aggregateGroupKeys(query: AnalyticsQuery, cube: Cube): AggregateGroupKey[] {
+  // Build groupBy from dimensions, honouring `timeDimensions` granularity.
+  // A date dimension with a granularity becomes a STRUCTURED groupBy item
+  // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (the
+  // driver's own SQL expression, or in memory). Without this the ObjectQL
+  // path grouped raw timestamps (one bucket per row) and date-bucketed
+  // dataset widgets never matched their legacy `categoryGranularity`
+  // counterpart.
+  const gransByDim = granularitiesByDimension(query);
+  // [#28744] Each group key is named once (see {@link pushGroupKey}): two
+  // dimensions over one column (`region`, and `zone` declared over `region`)
+  // share its group, and the row mapping in `ObjectQLStrategy.execute` keys
+  // the answer by every dimension name over it. [#28799] A dimension asked at
+  // two granularities yields both buckets, which the engine refuses.
+  const groupBy: AggregateGroupKey[] = [];
+  if (query.dimensions && query.dimensions.length > 0) {
+    for (const dim of query.dimensions) {
+      const field = resolveCubeFieldName(cube, dim, 'dimension');
+      const grans = gransByDim.get(dim) ?? [];
+      if (grans.length === 0) pushGroupKey(groupBy, field);
+      for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
+      gransByDim.delete(dim);
+    }
+  }
+  // Time dimensions not also listed in `dimensions` still bucket + group.
+  for (const [dim, grans] of gransByDim) {
+    const field = resolveCubeFieldName(cube, dim, 'dimension');
+    for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
+  }
+  return groupBy;
+}
+
+/**
+ * The `engine.aggregate` `groupBy` the strategy's cross-object path hands the
+ * engine for `query`, and the base group columns its re-bucket carries
+ * verbatim. A cross-object dimension becomes its base FK column; base and time
+ * dimensions are keyed as on the direct path ({@link aggregateGroupKeys}).
+ *
+ * [#28841] Module-level, so `executeCrossObject` and the `/analytics/sql` echo
+ * judge the same keys. It reads only the cube and the plan.
+ */
+function crossObjectGroupKeys(
+  query: AnalyticsQuery,
+  cube: Cube,
+  crossByDim: ReadonlyMap<string, CrossObjectPlanDim>,
+): { groupBy: AggregateGroupKey[]; baseDimFields: string[] } {
+  // [#28799] Every granularity of each dimension, as in `aggregateGroupKeys`.
+  const gransByDim = granularitiesByDimension(query);
+  const groupBy: AggregateGroupKey[] = [];
+  const baseDimFields: string[] = [];
+  for (const dim of query.dimensions ?? []) {
+    const cd = crossByDim.get(dim);
+    if (cd) {
+      // [#28692] Once per FK column: two dimensions through one relationship
+      // (`account.id` and `account.name`, or `account` beside `account.name`)
+      // share it, and the engine refuses a groupBy naming a column twice
+      // (`INVALID_QUERY`), where the native strategy served the groups. The
+      // re-bucket reads the one column for each dimension.
+      pushGroupKey(groupBy, cd.fkField);
+      continue;
+    }
+    const field = resolveCubeFieldName(cube, dim, 'dimension');
+    const grans = gransByDim.get(dim) ?? [];
+    // …and so is a base column two dimensions read: the FK column itself
+    // (`account` beside `account.name`), or one column under two dimension
+    // names (`region`, `zone` over `region`, #28744).
+    if (grans.length === 0) pushGroupKey(groupBy, field);
+    for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
+    baseDimFields.push(field);
+    gransByDim.delete(dim);
+  }
+  for (const [dim, grans] of gransByDim) {
+    const field = resolveCubeFieldName(cube, dim, 'dimension');
+    for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
+    baseDimFields.push(field);
+  }
+  return { groupBy, baseDimFields };
+}
+
 /**
  * ObjectQLStrategy — Priority 2
  *
@@ -241,31 +424,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     const cube = ctx.getCube(query.cube!)!;
     const objectName = this.extractObjectName(cube);
 
-    // Build groupBy from dimensions, honouring `timeDimensions` granularity.
-    // A date dimension with a granularity becomes a STRUCTURED groupBy item
-    // `{ field, dateGranularity }` — which `engine.aggregate()` buckets (the
-    // driver's own SQL expression, or in memory). Without this the ObjectQL
-    // path grouped raw timestamps (one bucket per row) and date-bucketed
-    // dataset widgets never matched their legacy `categoryGranularity`
-    // counterpart.
-    type GroupByItem = string | { field: string; dateGranularity: string };
-    const granByDim = new Map<string, string>();
-    for (const td of query.timeDimensions ?? []) {
-      if (td.granularity) granByDim.set(td.dimension, td.granularity);
-    }
-    const groupBy: GroupByItem[] = [];
-    if (query.dimensions && query.dimensions.length > 0) {
-      for (const dim of query.dimensions) {
-        const field = this.resolveFieldName(cube, dim, 'dimension');
-        const gran = granByDim.get(dim);
-        groupBy.push(gran ? { field, dateGranularity: gran } : field);
-        granByDim.delete(dim);
-      }
-    }
-    // Time dimensions not also listed in `dimensions` still bucket + group.
-    for (const [dim, gran] of granByDim) {
-      groupBy.push({ field: this.resolveFieldName(cube, dim, 'dimension'), dateGranularity: gran });
-    }
+    const groupBy = aggregateGroupKeys(query, cube);
 
     // The compiled dataset's own scope (#10298 / PR #10758), read ONCE and
     // reused below for both the per-measure aggregation filter (#10413 phase
@@ -396,6 +555,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (plan) {
       return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
     }
+
+    // [#28798] A selection asking one column for two values under one name is
+    // refused here, in the dataset's words, before the engine refuses the same
+    // keys with a prescription (`alias`) no dataset selection can spell. Right
+    // before the call, so every refusal above keeps its precedence.
+    assertDatasetGroupColumnsDistinct(objectName, groupBy, query, (m) => this.resolveFieldName(cube, m, 'dimension'));
 
     // ADR-0021 D-C — the base object's read scope (tenant + RLS) MUST be ANDed
     // in before the query leaves the strategy (#3597). A base-only query has a
@@ -581,11 +746,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
 
     // Date-bucketed dimensions render as a bucket expression, so a `month`
     // trend does not read as if it grouped by the raw column — see `dimExpr`
-    // below for which expression.
-    const granByDim = new Map<string, string>();
-    for (const td of query.timeDimensions ?? []) {
-      if (td.granularity) granByDim.set(td.dimension, td.granularity);
-    }
+    // below for which expression. [#28841] Every granularity of each
+    // dimension, as the query's key builders read them; the door below
+    // refuses a dimension asked at two, so each rendered one has one.
+    const gransByDim = granularitiesByDimension(query);
     const tableName = this.extractObjectName(cube);
     // #3654 — plan cross-object dims (throws for out-of-envelope, so
     // `/analytics/sql` and `execute()` accept/reject the SAME set). An in-envelope
@@ -615,6 +779,31 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       'as-written',
     );
     const crossByDim = new Map((plan?.crossDims ?? []).map((cd) => [cd.outputName, cd]));
+    // The time-dimension windows, read here and rendered below (see the
+    // read-scope note). [#28852] Read before the door below, as `execute()`
+    // reads them before its own call, so a selection carrying both an
+    // unrecognised `dateRange` and one column asked twice is refused about
+    // the `dateRange` on both faces.
+    const echoDateColumn = declaredDateColumn(
+      ctx,
+      (member) => this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
+    );
+    const windows = this.dateRangeBounds(cube, query, echoDateColumn);
+    // [#28841] The query's refusal for one column asked twice, on the keys
+    // `execute()` would hand the engine (its cross-object path's when `plan`
+    // routes it there), before any bucket renders: the echo used to print one
+    // bucket for two granularities, and both columns for a column raw beside
+    // its bucket, for a statement the query refuses.
+    const echoGroupBy = plan ? crossObjectGroupKeys(query, cube, crossByDim).groupBy : aggregateGroupKeys(query, cube);
+    assertDatasetGroupColumnsDistinct(tableName, echoGroupBy, query, (m) => this.resolveFieldName(cube, m, 'dimension'));
+    // [#28977] …then, on the same keys, the engine's refusal of a date bucket
+    // over a field declared neither a date nor a datetime, which `query()`
+    // answers after the column refusal above (#28798). The echo used to print
+    // `strftime('%Y-%m', region)` for it, or, at a non-UTC zone, a 501 saying
+    // the query is served. A host that names no declared type is not judged,
+    // as the engine judges no undeclared field.
+    const declaredType = (ctx as DatasetScopedStrategyContext).declaredFieldType;
+    assertDatasetDateBucketsTemporal(tableName, echoGroupBy, (field) => declaredType?.call(ctx, tableName, field));
     const joinClauses: string[] = [];
     // [#21441] The bucket expression the driver itself groups by for its
     // dialect, read from the `dateBucketSql` hook: `strftime('%Y-%m', …)` on
@@ -666,7 +855,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
         return `"${cd.refObject}"."${cd.attr}"`;
       }
       const col = this.resolveFieldName(cube, dim, 'dimension');
-      const gran = granByDim.get(dim);
+      const gran = gransByDim.get(dim)?.[0];
       if (!gran) return col;
       if (inMemoryZone !== undefined) throw bucketEchoRefused(dim, gran, { zone: inMemoryZone });
       const bucket = driverBucketSql(col, gran);
@@ -683,7 +872,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     }
     // A time dimension that is bucketed but not also listed in `dimensions`
     // still groups (see `execute`), so it belongs in the rendered GROUP BY too.
-    for (const [dim] of granByDim) {
+    for (const [dim] of gransByDim) {
       if (query.dimensions?.includes(dim)) continue;
       const expr = dimExpr(dim);
       selectParts.push(`${expr} AS "${dim}"`);
@@ -771,11 +960,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // the inclusive `<=` the engine runs there. This echo kept its own
     // type-blind copy of the rule, which rendered `< day+1` on every column,
     // until #5930 step 4.
-    const echoDateColumn = declaredDateColumn(
-      ctx,
-      (member) => this.resolveStorageTarget(cube, member, this.extractObjectName(cube), relationshipReferenceOf(ctx)),
-    );
-    for (const { member, bounds } of this.dateRangeBounds(cube, query, echoDateColumn)) {
+    for (const { member, bounds } of windows) {
       const windowSql = this.renderFilterNodeSql(normalizeDateRangeWindow(member, bounds, echoLowering), cube, params, ctx);
       if (windowSql) whereParts.push(windowSql);
     }
@@ -1330,30 +1515,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     // Rewrite group-by: a cross-object dim becomes its base FK column; base and
     // time dims pass through. `baseDimFields` are the group keys carried into
     // the re-bucket verbatim (the FK columns are replaced by resolved attrs).
-    type GroupByItem = string | { field: string; dateGranularity: string };
-    const granByDim = new Map<string, string>();
-    for (const td of query.timeDimensions ?? []) {
-      if (td.granularity) granByDim.set(td.dimension, td.granularity);
-    }
-    const groupBy: GroupByItem[] = [];
-    const baseDimFields: string[] = [];
-    for (const dim of query.dimensions ?? []) {
-      const cd = crossByDim.get(dim);
-      if (cd) {
-        groupBy.push(cd.fkField);
-        continue;
-      }
-      const field = this.resolveFieldName(cube, dim, 'dimension');
-      const gran = granByDim.get(dim);
-      groupBy.push(gran ? { field, dateGranularity: gran } : field);
-      baseDimFields.push(field);
-      granByDim.delete(dim);
-    }
-    for (const [dim, gran] of granByDim) {
-      const field = this.resolveFieldName(cube, dim, 'dimension');
-      groupBy.push({ field, dateGranularity: gran });
-      baseDimFields.push(field);
-    }
+    const { groupBy, baseDimFields } = crossObjectGroupKeys(query, cube, crossByDim);
+
+    // [#28798] The dataset refusal for a column asked twice, as on the direct path.
+    assertDatasetGroupColumnsDistinct(baseObject, groupBy, query, (m) => this.resolveFieldName(cube, m, 'dimension'));
 
     // Base aggregate, grouped by the FK, scoped to the base object. Threads the
     // ExecutionContext for the engine-side second belt too (#3602).
@@ -1454,7 +1619,10 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (scope != null) markFilterSubtreeProvenance(scope, 'policy');
     const filter = scope != null ? { $and: [idFilter, scope] } : idFilter;
     const rows = await ctx.executeAggregate(refObject, {
-      groupBy: ['id', attr],
+      // [#28692] `<relation>.id` resolves the FK to the related record's own
+      // id: `id` is already the key, and naming it twice is a groupBy the
+      // engine refuses (`INVALID_QUERY`).
+      groupBy: attr === 'id' ? ['id'] : ['id', attr],
       aggregations: [{ field: 'id', method: 'count', alias: '_c' }],
       filter,
       context: ctx.context,
@@ -1664,21 +1832,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     member: string,
     kind: 'dimension' | 'measure',
   ): { sql: string; type?: string } | undefined {
-    const bag = kind === 'dimension' ? cube.dimensions : cube.measures;
-    if (bag[member]) return bag[member];
-    if (member.includes('.')) {
-      const [first, ...rest] = member.split('.');
-      const tail = rest.join('.');
-      if (first === cube.name && bag[tail]) return bag[tail];
-      if (bag[tail]) return bag[tail];
-      const flat = member.replace(/\./g, '_');
-      if (bag[flat]) return bag[flat];
-      if (kind === 'dimension') return { sql: member, type: 'string' };
-    } else if (bag[member]) {
-      return bag[member];
-    }
-    return undefined;
+    return lookupCubeMember(cube, member, kind);
   }
+
 
   /**
    * [#14079] The (object, field) a filter member binds against — the echo's
@@ -1710,16 +1866,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   private resolveFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
-    if (kind === 'dimension' || kind === 'any') {
-      const dim = this.lookupMember(cube, member, 'dimension');
-      if (dim) return dim.sql.replace(/^\$/, '');
-    }
-    if (kind === 'measure' || kind === 'any') {
-      const measure = this.lookupMember(cube, member, 'measure');
-      if (measure) return measure.sql.replace(/^\$/, '');
-    }
-    return member.includes('.') ? member.split('.')[1] : member;
+    return resolveCubeFieldName(cube, member, kind);
   }
+
 
   private resolveMeasureAggregation(cube: Cube, measureName: string): { field: string; method: AggregationFunction } {
     const direct = this.lookupMember(cube, measureName, 'measure') as
@@ -2270,7 +2419,7 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
   }
 
   private extractObjectName(cube: Cube): string {
-    return cube.sql.trim();
+    return aggregateObjectOf(cube);
   }
 
   /**

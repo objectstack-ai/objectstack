@@ -41,6 +41,7 @@ import {
   TENANT_EMAIL_OBJECT,
   type EmailLogObject,
 } from './email-log-objects.js';
+import { resolveBundleLocale } from '@objectstack/spec/system';
 
 /**
  * Queue topic durable email delivery is published to and consumed from
@@ -523,6 +524,20 @@ export interface TemplateLoader {
 }
 
 /**
+ * [#28880] The built-in registry loader's own capability, kept off
+ * {@link TemplateLoader} and out of the package's exports: under this key it
+ * answers the locale tags a template name's bundle carries, sorted ascending.
+ * With it, {@link EmailService}'s ladder folds a named locale against that
+ * list (`resolveBundleLocale`) before loading the resolved tag exactly, and
+ * the stack's declared fallback joins the ladder. A loader without it — any
+ * replacement loader — answers the exact ladder it always did.
+ */
+export const TEMPLATE_BUNDLE_LOCALES = Symbol('@objectstack/plugin-email:template-bundle-locales');
+
+/** What the built-in loader answers under {@link TEMPLATE_BUNDLE_LOCALES}. */
+export type TemplateBundleLocales = (name: string) => Promise<string[]>;
+
+/**
  * What the loader answers: the render input of one resolved `email_template`
  * definition, spelled as the `sys_email_template` columns were — the shape
  * the renderer has always read. No row backs it any more; the registry
@@ -609,6 +624,9 @@ export class EmailService implements IEmailService {
    */
   private readonly managedRowIds = new Set<string>();
 
+  /** [#28880] The stack's declared fallback locale, read at each resolve. Unset ⇒ none declared. */
+  private templateFallbackLocale?: () => string | undefined;
+
   /**
    * Set once queue delivery has been reported as unavailable, so the
    * degradation is stated at the FIRST send and not on every one
@@ -637,6 +655,24 @@ export class EmailService implements IEmailService {
   /** Wire (or replace) the template loader after construction. */
   setTemplateLoader(loader: TemplateLoader): void {
     this.options.templateLoader = loader;
+  }
+
+  /**
+   * [#28880] Wire the stack's declared fallback locale (`i18n.fallbackLocale`,
+   * else `defaultLocale`, as the i18n service's `getFallbackLocale` answers
+   * it). Read at each resolve, so a later-registered i18n service is seen.
+   */
+  setTemplateFallbackLocale(read: () => string | undefined): void {
+    this.templateFallbackLocale = read;
+  }
+
+  private declaredFallbackLocale(): string | undefined {
+    try {
+      const declared = this.templateFallbackLocale?.();
+      return typeof declared === 'string' && declared.trim() ? declared.trim() : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Wire (or replace) persistence after construction. */
@@ -1404,8 +1440,33 @@ export class EmailService implements IEmailService {
     // locale means the DOCUMENTED default, so ask for it by name.
     const preferred = input.locale && String(input.locale).trim();
     const wanted = preferred || DEFAULT_TEMPLATE_LOCALE;
-    let row = await loader.load(input.template, wanted);
-    if (!row && wanted !== DEFAULT_TEMPLATE_LOCALE) {
+    // [#28880] A named locale, over the built-in loader, is folded against the
+    // bundle's own tags by the platform's one BCP-47 ladder (exact →
+    // case-insensitive → base language → variant expansion, the first match
+    // in ascending tag order), then the stack's declared fallback is folded
+    // the same way, before the `en-US` rung below. Each rung loads the tag it
+    // resolved to, exactly. A no-locale call keeps its ladder: en-US, then the
+    // loader's own answer.
+    const bundleLocales = (loader as { [TEMPLATE_BUNDLE_LOCALES]?: TemplateBundleLocales })[TEMPLATE_BUNDLE_LOCALES];
+    const locales = preferred && typeof bundleLocales === 'function'
+      ? await bundleLocales.call(loader, input.template)
+      : undefined;
+    const tried = new Set<string>();
+    let row: EmailTemplateRow | null = null;
+    if (locales) {
+      const bundle: Record<string, true> = Object.fromEntries(locales.map((tag) => [tag, true] as const));
+      for (const requested of [wanted, this.declaredFallbackLocale()]) {
+        const tag = requested === undefined ? undefined : resolveBundleLocale(bundle, requested);
+        if (tag === undefined || tried.has(tag)) continue;
+        tried.add(tag);
+        row = await loader.load(input.template, tag);
+        if (row) break;
+      }
+    } else {
+      tried.add(wanted);
+      row = await loader.load(input.template, wanted);
+    }
+    if (!row && !tried.has(DEFAULT_TEMPLATE_LOCALE)) {
       row = await loader.load(input.template, DEFAULT_TEMPLATE_LOCALE);
     }
     if (!row && !preferred) {

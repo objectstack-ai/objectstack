@@ -33,18 +33,19 @@
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { useRecordCrudVerdicts, __clearRecordCrudVerdictCache } from './useRecordCrudVerdicts';
 
 const OBJECT = 'note';
 
 /** A `/me/permissions` payload for one principal; the object grant is constant. */
-function me(userId: string): MePermissionsResponse {
+function me(userId: string): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId,
     tenantId: 't1',
-    roles: [],
+    hasAnyQueue: false,
+    positions: [],
     permissionSets: [],
     objects: { [OBJECT]: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
     fields: {},

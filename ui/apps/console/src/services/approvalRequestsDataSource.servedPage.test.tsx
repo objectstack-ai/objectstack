@@ -19,9 +19,12 @@
  *     `decision_progress`), through the provider, never through the adapter;
  *   - the Timeline tab's list AND its count from
  *     `GET /approvals/requests/:id/actions`;
- *   - the timeline's label read of its `request_id` column from the adapter,
- *     never refused (the build round's carried pin: under its route the same
- *     read was refused by the routed source's list).
+ *   - no label read of the timeline's `request_id` (objectstack#28470): it is
+ *     the parent FK, which the related list draws in no column, so the list no
+ *     longer asks the adapter for the request's own name. Every other lookup
+ *     label read the page makes is still never refused (the build round's
+ *     carried pin: under its route a label read was refused by the routed
+ *     source's list).
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent, within } from '@testing-library/react';
@@ -304,7 +307,7 @@ describe("the served request page, opened through the console's adapter layer (o
     expect(host.find.mock.calls.some(([resource]) => resource === APPROVAL_ACTION_OBJECT)).toBe(false);
   });
 
-  it("the timeline's label read of its request_id column reaches the adapter, and no read the page makes is refused", async () => {
+  it("the timeline asks no label read of its parent request_id, and no read the page makes is refused", async () => {
     const warn = vi.spyOn(console, 'warn');
     try {
       openServedPage();
@@ -312,18 +315,24 @@ describe("the served request page, opened through the console's adapter layer (o
       fireEvent.mouseDown(tab);
       fireEvent.click(tab);
       await screen.findByText('Budget checked', undefined, { timeout: 8000 });
+      // The rows' other lookup (`actor_id`) is labelled: the fallback ran.
       await waitFor(
         () =>
           expect(
-            host.find.mock.calls.some(
-              ([resource, params]) =>
-                resource === APPROVAL_REQUEST_OBJECT &&
-                JSON.stringify((params as { $filter?: unknown })?.$filter ?? null).includes(REQ),
-            ),
-            'the label read asked the adapter for the parent request',
+            host.find.mock.calls.some(([resource]) => resource === 'sys_user'),
+            'the label read of the rows\' actor_id reached the adapter',
           ).toBe(true),
         { timeout: 8000 },
       );
+      // objectstack#28470 — never the parent FK: no column draws it.
+      expect(
+        host.find.mock.calls.some(
+          ([resource, params]) =>
+            resource === APPROVAL_REQUEST_OBJECT &&
+            JSON.stringify((params as { $filter?: unknown })?.$filter ?? null).includes(REQ),
+        ),
+        'no label read asked the adapter for the parent request',
+      ).toBe(false);
       const lookupFailures = warn.mock.calls.filter(([message]) => String(message).includes('Failed to resolve lookups'));
       expect(lookupFailures, 'no lookup-label read was refused').toEqual([]);
     } finally {

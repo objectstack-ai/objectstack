@@ -137,6 +137,7 @@ describe('the ensure door client (objectstack#28562)', () => {
       await expect(ensureCustomizationPackage(BASE)).resolves.toEqual({
         basePackageId: BASE,
         packageId: PAIR,
+        namespace: 'hotcrm_custom',
         created: true,
         writable: true,
       });

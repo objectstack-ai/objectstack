@@ -454,6 +454,7 @@
     "data/HookContext:event",
     "data/HookContext:id",
     "data/HookContext:input",
+    "data/HookContext:notice",
     "data/HookContext:object",
     "data/HookContext:previous",
     "data/HookContext:provenance",

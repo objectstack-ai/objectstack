@@ -220,13 +220,35 @@ function declaredSubjectValues(
  * raw editor's SUGGESTIONS, so a mount that loses one loses an offer and keeps
  * the spelling; this list is the row builder's ONLY subject control, so
  * dropping an entry drops the author's ability to build that row at all.
+ *
+ * ## Every `user.*` member is a key the bag really carries (objectstack#28833)
+ *
+ * The `user` object `buildExpressionScope` binds is `buildExpressionUser`'s
+ * output (`providers/expressionUser.ts`), and a member it does not put there
+ * is not `false`: the predicate FAULTS, which a fail-open gate (an action's or
+ * a field's `visible`) answers by showing the item to everyone and a
+ * withholding gate (navigation) answers by showing it to no one. Either way an
+ * admin gate built on such a member never means "admins only".
+ *
+ *  - `user.isPlatformAdmin` is the platform-admin signal, carried on both the
+ *    signed-in and the anonymous branch (anonymous: `false`). It replaces an
+ *    `isAdmin` member no producer ever set.
+ *  - ⛔ No `user.role`. The bag does carry it, but it is better-auth's legacy
+ *    `sys_user.role` scalar: ObjectStack never writes it (ADR-0068 D2), it
+ *    reads `user` for a signed-in platform admin too, and offering it beside
+ *    the other identity members reads as "the platform role". A stored
+ *    `user.role` row still opens in row mode, because an out-of-vocabulary
+ *    subject is appended as its own option.
+ *
+ * `ConditionBuilder.contextSubjectsBag.test.ts` re-derives the member list
+ * from `buildExpressionUser` on both branches and evaluates each subject
+ * against the real bag, so a member renamed or dropped there reddens here.
  */
-const CONTEXT_SUBJECTS = [
+export const CONTEXT_SUBJECTS: ReadonlyArray<{ value: string; label?: string }> = [
   { value: 'record.id', label: 'record.id' },
   { value: 'user.id', label: 'user.id' },
   { value: 'user.email', label: 'user.email' },
-  { value: 'user.role', label: 'user.role' },
-  { value: 'user.isAdmin', label: 'user.isAdmin' },
+  { value: 'user.isPlatformAdmin', label: 'user.isPlatformAdmin' },
 ];
 
 const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
@@ -471,8 +493,11 @@ export function celRootsMentioned(expr: string): string[] {
  * Each clause carries its own roots in its own text, and {@link
  * celExampleForRoots} reads them back out with {@link celRootsMentioned}, so a
  * clause cannot claim a root it does not spell.
+ *
+ * A `user.*` clause names a member the bag carries, the rule
+ * {@link CONTEXT_SUBJECTS} states, pinned by the same test.
  */
-const CEL_EXAMPLE_CLAUSES = ["record.status != 'done'", 'user.isAdmin'] as const;
+export const CEL_EXAMPLE_CLAUSES = ["record.status != 'done'", 'user.isPlatformAdmin'] as const;
 
 /**
  * The placeholder example for a mount that offers `offered` — every clause

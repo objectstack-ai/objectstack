@@ -7,7 +7,8 @@
  * ADR-0126 §2: in a Regime C type "the packaged base is locked — in-place edit
  * refused loudly at the write door, the refusal naming the sanctioned path".
  * For a flow those paths are the clone under a new name (§7.1,
- * `POST /api/v1/automation/:name/clone`) and the enable/disable switch (§7.2,
+ * `POST /api/v1/automation/:name/clone`; [#28412] for a save, the declared
+ * override from the paired `.custom` instead) and the enable/disable switch (§7.2,
  * `POST /api/v1/automation/:name/toggle`, operator-gated per §5). The sentence
  * is the metadata protocol's, chosen per regime there; the protocol-side pins
  * are `packages/metadata-protocol/src/protocol.packaged-base-refusal.test.ts`.
@@ -78,9 +79,17 @@ function boot(environmentId: string | undefined) {
     return { call };
 }
 
-const expectRegimeC = (message: unknown) => {
+const expectRegimeC = (message: unknown, verb: 'save' | 'delete') => {
     const text = String(message);
-    expect(text).toContain('POST /api/v1/automation/:name/clone');
+    // [#28412, ADR-0146 D9] A save names the declared override from the
+    // package's paired `.custom` in place of the clone (a second flow beside
+    // the base, both running); the removal still names the clone.
+    if (verb === 'save') {
+        expect(text).toContain(`Declare an override from '${PACKAGE_ID}.custom'`);
+        expect(text).not.toContain('POST /api/v1/automation/:name/clone');
+    } else {
+        expect(text).toContain('POST /api/v1/automation/:name/clone');
+    }
     expect(text).toContain('POST /api/v1/automation/:name/toggle');
     expect(text).toContain('docs/adr/0126-packaged-metadata-customization-model.md');
     expect(text).not.toContain('OS_METADATA_WRITABLE');
@@ -95,7 +104,7 @@ describe('PUT / DELETE /api/v1/meta/flow/:name on a packaged flow — the refusa
             const r = await call('PUT', 'flow', PACKAGED_FLOW, { name: PACKAGED_FLOW, label: 'Changed in place' });
             expect(r.status).toBe(403);
             expect(r.code).toBe('NOT_OVERRIDABLE');
-            expectRegimeC(r.message);
+            expectRegimeC(r.message, 'save');
         });
     }
 
@@ -104,7 +113,7 @@ describe('PUT / DELETE /api/v1/meta/flow/:name on a packaged flow — the refusa
         const r = await call('DELETE', 'flow', PACKAGED_FLOW);
         expect(r.status).toBe(403);
         expect(r.code).toBe('NOT_OVERRIDABLE');
-        expectRegimeC(r.message);
+        expectRegimeC(r.message, 'delete');
     });
 
     it('control: a packaged `page` (no declared regime) reads the one sealed-write sentence (ADR-0131 D6)', async () => {

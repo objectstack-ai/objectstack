@@ -263,7 +263,7 @@ vi.mock('../../providers/AdapterProvider', () => ({
   useAdapter: () => fakeAdapter,
 }));
 
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { AppHeader } from '../AppHeader';
 import { useHomeInbox } from '../../hooks/useHomeInbox';
 import { __resetSharedUserFeeds, __markFirstPainted } from '../../hooks/sharedUserFeeds';
@@ -821,11 +821,12 @@ describe('AppHeader — the bell panel renders what the inbox returns, under BOT
  */
 describe('AppHeader — the Activity tab asks only a caller who may read sys_activity (objectui#12081)', () => {
   /** `/auth/me/permissions` for an authenticated member — `member_default`'s two inbox reads, no `*`. */
-  const MEMBER: MePermissionsResponse = {
+  const MEMBER: MePermissionsAuthenticatedResponse = {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['member_default'],
     objects: {
       sys_inbox_message: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false },

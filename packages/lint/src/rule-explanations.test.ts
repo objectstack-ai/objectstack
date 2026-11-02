@@ -11,11 +11,16 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { UNCONSUMED_WIDGET_OPTION } from '@objectstack/sdui-parser';
-import { FUNCTIONAL_COMPLETENESS_RULES } from '@objectstack/spec/kernel';
+import {
+  CUSTOMIZATION_NAMESPACE_SUFFIX,
+  FUNCTIONAL_COMPLETENESS_RULES,
+  MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH,
+} from '@objectstack/spec/kernel';
 
 import * as indexBarrel from './index.js';
 import { RULE_EXPLANATIONS, explainRule } from './rule-explanations.js';
 import { CARRIER_ROOTS, CONSUMER_ROOTS, FIELD_NO_CONSUMERS } from './validate-field-consumers.js';
+import { NAMESPACE_NO_CUSTOMIZATION_PAIR } from './validate-customization-namespace.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -92,6 +97,19 @@ describe('rule explanations (#22161)', () => {
     expect(text).toContain(
       `Roots scanned: ${CONSUMER_ROOTS.join(', ')} (consumers) · ${CARRIER_ROOTS.join(', ')} (carriers).`,
     );
+  });
+
+  // [#28473] The module imports nothing, so the pairing rule's numbers and
+  // suffix are written out in the text; held here to the spec constants.
+  it('the namespace-no-customization-pair text states the pairing rule\'s own limit and suffix', () => {
+    const text = explainRule(NAMESPACE_NO_CUSTOMIZATION_PAIR)!.paragraphs.join('\n');
+    const suffix = CUSTOMIZATION_NAMESPACE_SUFFIX;
+    const max = MAX_CUSTOMIZATION_BASE_NAMESPACE_LENGTH;
+    expect(text).toContain(
+      `A manifest namespace is at most ${max + suffix.length} characters and \`${suffix}\` takes ${suffix.length}, ` +
+        `so a namespace of ${max + 1} characters or more has no pair namespace`,
+    );
+    expect(text).toContain(`to ${max} characters or fewer`);
   });
 
   it('explainRule is an exact-id lookup: no prefix, case or prototype match', () => {

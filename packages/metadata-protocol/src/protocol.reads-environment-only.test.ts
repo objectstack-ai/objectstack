@@ -310,6 +310,56 @@ describe('§3 the boot report names the sealed overlays, per type, with their re
         expect(sealed[0]).toContain('datasource×1 (pkg_ds)');
         expect(sealed[0]).not.toContain('host_ds');
     });
+
+    // [#28771, ADR-0146 D2] The shipping package's declared `.custom` override
+    // of a shipped flow is served (and armed) since #28412, so the census that
+    // says "no read serves them … delete the stored row" does not count it. The
+    // judgement is `isServedOverrideRowOf` on the row's `package_id` column.
+    describe('[#28771] a served .custom override is not counted as unserved', () => {
+        const FLOW = 'managed_flow';
+        const PAIR = `${PKG}.custom`;
+        const DECLARED = { overrides: { package: PKG, basedOn: '1.0.0' } };
+        const flowArtifact: Artifact = { type: 'flow', name: FLOW, body: { name: FLOW, _packageId: PKG } };
+        const override = (over: Row = {}, body: Row = DECLARED) =>
+            metaRow('flow', FLOW, { label: 'override', ...body }, { id: 'r_flow_override', package_id: PAIR, ...over });
+        const legacy = () => metaRow('flow', FLOW, { label: 'legacy' }, { id: 'r_flow_legacy' });
+        const sealedLines = (warns: string[]) => warns.filter((w) => w.includes('[metadata_sealed_overlay_unserved]'));
+
+        it('a boot holding only the declared override prints no sealed-overlay line', async () => {
+            const { warns } = await boot({ sys_metadata: [override()] }, [flowArtifact]);
+            expect(sealedLines(warns)).toEqual([]);
+        });
+
+        it('a boot holding the override and a legacy package-less row reports the legacy row alone, with its remedies', async () => {
+            const { warns } = await boot({ sys_metadata: [override(), legacy()] }, [flowArtifact]);
+            const sealed = sealedLines(warns);
+            expect(sealed).toHaveLength(1);
+            expect(sealed[0]).toContain(`1 active environment sys_metadata row(s)`);
+            expect(sealed[0]).toContain(`flow×1 (${FLOW})`);
+            expect(sealed[0]).toContain('linkage-free clone');
+            expect(sealed[0]).toContain('delete the stored row');
+        });
+
+        it('control: a legacy row alone is reported as before', async () => {
+            const { warns } = await boot({ sys_metadata: [legacy()] }, [flowArtifact]);
+            const sealed = sealedLines(warns);
+            expect(sealed).toHaveLength(1);
+            expect(sealed[0]).toContain(`flow×1 (${FLOW})`);
+        });
+
+        for (const [label, row] of [
+            ['the pair\'s undeclared row', () => override({}, {})],
+            ['a dependent package\'s declaration', () => override({ package_id: 'app.partner' })],
+            ['a package-less row whose body stamps the pair', () => metaRow('flow', FLOW, { label: 'stamped', _packageId: PAIR, ...DECLARED }, { id: 'r_flow_stamped' })],
+        ] as const) {
+            it(`control: ${label} is served by no rule, so it is still reported`, async () => {
+                const { warns } = await boot({ sys_metadata: [row()] }, [flowArtifact]);
+                const sealed = sealedLines(warns);
+                expect(sealed).toHaveLength(1);
+                expect(sealed[0]).toContain(`flow×1 (${FLOW})`);
+            });
+        }
+    });
 });
 
 describe('§4 [ADR-0131 C7] the anonymous form doors\' legacy organization read is deleted', () => {

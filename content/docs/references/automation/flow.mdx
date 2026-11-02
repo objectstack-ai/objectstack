@@ -31,8 +31,8 @@ const result = FlowSchema.parse(data);
 | **name** | `string` | ✅ | Machine name |
 | **label** | `string` | ✅ | Flow label |
 | **description** | `string` | optional |  |
-| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
-| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
+| **successMessage** | `string` | optional | Text for a terminal success, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". A `{{ }}` template over the run's variables (`{{ enrolledCount }} contacts enrolled`), rendered when the run completes. |
+| **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |
@@ -205,6 +205,7 @@ const result = FlowSchema.parse(data);
 * `get_record`
 * `http`
 * `notify`
+* `save_notice`
 * `script`
 * `screen`
 * `wait`
@@ -253,8 +254,8 @@ const result = FlowSchema.parse(data);
 | **name** | `string` | ✅ | Machine name |
 | **label** | `string` | ✅ | Flow label |
 | **description** | `string` | optional |  |
-| **successMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". |
-| **errorMessage** | `string` | optional | Message carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. |
+| **successMessage** | `string` | optional | Text for a terminal success, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of a generic "Done". A `{{ }}` template over the run's variables (`{{ enrolledCount }} contacts enrolled`), rendered when the run completes. |
+| **errorMessage** | `string` | optional | Text for a terminal failure, carried on AutomationResult for every terminal run (not only screen flows); the screen-flow UI shows it as a toast instead of the raw error. A `{{ }}` template over the run's variables, rendered over the variables at the failure point. |
 | **version** | `integer` | optional (default: `1`) | Version number |
 | **status** | `Enum<'draft' \| 'active' \| 'obsolete' \| 'invalid'>` | optional (default: `"draft"`) | Deployment status |
 | **type** | `Enum<'autolaunched' \| 'record_change' \| 'schedule' \| 'screen' \| 'api'>` | ✅ | Flow type |

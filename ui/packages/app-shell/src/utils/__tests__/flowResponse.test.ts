@@ -562,58 +562,46 @@ describe("judgeFlowLaunch — a straight-through run's success copy (objectui#12
     });
 });
 
-describe("interpretFlowResponse — the flow's own toasts in the active language (objectui#12075)", () => {
-    // `flows.FLOW.successMessage` / `errorMessage` (objectstack#22507). The
-    // bundle shape is the spec's `TranslationBundle`, keyed by locale.
-    const copy = {
-        flowName: 'case_escalate',
-        locale: 'zh-CN',
-        bundle: {
-            'zh-CN': {
-                flows: { case_escalate: { successMessage: '工单已升级', errorMessage: '升级失败' } },
-            },
-        },
-    };
+describe("interpretFlowResponse — the flow's own toasts are drawn as served (objectstack#28054)", () => {
+    // The engine renders `successMessage` / `errorMessage` as `{{ }}` templates
+    // and picks their `flows.FLOW.*` translations in the run's locale before
+    // it fills the holes, so the served strings arrive translated and filled.
+    // A client overlay never touches a server-rendered slot (ruling A on
+    // objectstack#22507): it would put the bundle's template, holes raw, in
+    // place of the filled sentence.
+    const SERVED_DONE = '已登记 3 位联系人';
+    const SERVED_FAILED = '登记失败:3';
 
-    it('translates the served successMessage on a done run, and the launch speaks the translation', () => {
-        const json = { success: true, data: { success: true, status: 'completed', successMessage: 'Case escalated' } };
-        const out = interpretFlowResponse(ok, json, 'Flow "case_escalate"', copy);
-        expect(out).toMatchObject({ kind: 'done', successMessage: '工单已升级' });
-        expect(judgeFlowLaunch(out, undefined).successToast).toBe('工单已升级');
+    it('answers the served successMessage on a done run, and the launch speaks it as served', () => {
+        const json = { success: true, data: { success: true, status: 'completed', successMessage: SERVED_DONE } };
+        const out = interpretFlowResponse(ok, json, 'Flow "enrol"', 'zh-CN');
+        expect(out).toMatchObject({ kind: 'done', successMessage: SERVED_DONE });
+        expect(judgeFlowLaunch(out, undefined).successToast).toBe(SERVED_DONE);
     });
 
-    it('translates the authored errorMessage on a 200 flow failure', () => {
+    it('answers the served errorMessage on a 200 flow failure', () => {
         const out = interpretFlowResponse(ok, {
             success: true,
-            data: { success: false, error: 'boom', errorMessage: 'Escalation failed' },
-        }, 'Resume', copy);
-        expect(out).toMatchObject({ kind: 'failed', retryable: false, error: '升级失败' });
+            data: { success: false, error: 'boom', errorMessage: SERVED_FAILED },
+        }, 'Resume', 'zh-CN');
+        expect(out).toMatchObject({ kind: 'failed', retryable: false, error: SERVED_FAILED });
     });
 
-    it('translates the authored errorMessage carried in a 400 FLOW_FAILED envelope', () => {
+    it('answers the served errorMessage carried in a 400 FLOW_FAILED envelope', () => {
         const out = interpretFlowResponse(
             { ok: false, status: 400 },
-            errorEnvelope(400, 'FLOW_FAILED', 'engine prose', { errorMessage: 'Escalation failed' }),
+            errorEnvelope(400, 'FLOW_FAILED', 'engine prose', { errorMessage: SERVED_FAILED }),
             'Resume',
-            copy,
+            'zh-CN',
         );
-        expect(out).toMatchObject({ kind: 'failed', retryable: false, error: '升级失败' });
+        expect(out).toMatchObject({ kind: 'failed', retryable: false, error: SERVED_FAILED });
     });
 
-    it('adds no toast the flow does not author, and leaves the engine prose untranslated', () => {
-        const done = interpretFlowResponse(ok, { success: true, data: { success: true } }, 'Flow "x"', copy);
+    it('adds no toast the flow does not author, and leaves the engine prose as it is', () => {
+        const done = interpretFlowResponse(ok, { success: true, data: { success: true } }, 'Flow "x"', 'zh-CN');
         expect(done).toMatchObject({ kind: 'done', successMessage: undefined });
-        const failed = interpretFlowResponse(ok, { success: true, data: { success: false, error: 'boom' } }, 'Resume', copy);
+        const failed = interpretFlowResponse(ok, { success: true, data: { success: false, error: 'boom' } }, 'Resume', 'zh-CN');
         expect(failed).toMatchObject({ kind: 'failed', error: 'boom' });
-    });
-
-    it('answers the served strings where the bundle carries no key, or there is no bundle', () => {
-        const json = { success: true, data: { success: true, status: 'completed', successMessage: 'Case escalated' } };
-        const otherFlow = { ...copy, flowName: 'other_flow' };
-        expect(interpretFlowResponse(ok, json, 'Flow "other_flow"', otherFlow)).toMatchObject({ successMessage: 'Case escalated' });
-        expect(interpretFlowResponse(ok, json, 'Flow "case_escalate"', { ...copy, bundle: undefined }))
-            .toMatchObject({ successMessage: 'Case escalated' });
-        expect(interpretFlowResponse(ok, json, 'Flow "case_escalate"')).toMatchObject({ successMessage: 'Case escalated' });
     });
 });
 
@@ -674,8 +662,8 @@ describe('interpretFlowResponse — a refusal met inside the run, by the record-
         expect(FlowFailureDetailsSchema.safeParse(details).error?.issues).toBeUndefined();
         return { success: false, error };
     }
-    const failed400 = (json: unknown, copy?: Parameters<typeof interpretFlowResponse>[3]) =>
-        interpretFlowResponse({ ok: false, status: 400 }, json, 'Resume', copy);
+    const failed400 = (json: unknown, locale?: string) =>
+        interpretFlowResponse({ ok: false, status: 400 }, json, 'Resume', locale);
 
     it('a unique refusal shows the inner sentence, without the node and operation wrapper', () => {
         expect(failed400(flowFailed({ innerRefusal: UNIQUE }))).toEqual({
@@ -691,7 +679,7 @@ describe('interpretFlowResponse — a refusal met inside the run, by the record-
         const en = failed400(flowFailed({ innerRefusal: DENIED }));
         expect(en).toMatchObject({ error: builtInLocales.en.form.noPermissionToSave });
 
-        const zh = failed400(flowFailed({ innerRefusal: DENIED }), { flowName: 'convert', bundle: undefined, locale: 'zh-CN' });
+        const zh = failed400(flowFailed({ innerRefusal: DENIED }), 'zh-CN');
         expect(zh).toMatchObject({ error: builtInLocales.zh.form.noPermissionToSave });
         expect((zh as { error: string }).error).not.toContain('crm_account');
     });

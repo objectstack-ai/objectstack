@@ -29,7 +29,7 @@ import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom';
 import React from 'react';
 
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { registerAllFields } from '@object-ui/fields';
 import { ActionProvider, SchemaRendererProvider } from '@object-ui/react';
 import { ObjectGrid } from '../ObjectGrid';
@@ -57,11 +57,12 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; update: bool
   { shape: 'full', bits: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true }, update: true, remove: true },
 ];
 
-const envelope = (bits: Record<string, unknown>): MePermissionsResponse => ({
+const envelope = (bits: Record<string, unknown>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits as never },
   fields: {},

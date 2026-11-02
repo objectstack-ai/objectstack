@@ -113,9 +113,10 @@ const HOTCRM_READ = {
   ],
   extensions: [{ object: 'crm_account', kind: 'field', name: 'tier__c' }],
   switchedOff: [],
-  counts: { overrides: 2, extensions: 1, switchedOff: 0 },
+  contributions: [],
+  counts: { overrides: 2, extensions: 1, switchedOff: 0, contributions: 0 },
 };
-const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], counts: { overrides: 0, extensions: 0, switchedOff: 0 } };
+const EMPTY_READ = { packageId: PLAIN, overrides: [], extensions: [], switchedOff: [], contributions: [], counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 } };
 
 let customizationsFail = false;
 const fetchMock = vi.fn(async (url: string) => {

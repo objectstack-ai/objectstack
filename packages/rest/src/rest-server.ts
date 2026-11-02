@@ -430,7 +430,8 @@ import {
     thrownAnswerIsBareNotFound,
     // `logUnexpectedRouteError` and `applyDroppedFieldsHeader`, read only by the CRUD doors' catches
     // and their two write answers, moved with `registerCrudEndpoints`' body to `crud-routes.ts`
-    // (#23050 slice 12).
+    // (#23050 slice 12); the header is now also set by the batch, createMany, updateMany, clone
+    // and import doors, in their own modules.
     // `isExpectedRouteError`, read only by the public form submit door's catch, moved with
     // `registerFormEndpoints`' body to `form-routes.ts` (#23050 slice 11).
 } from './error-response.js';

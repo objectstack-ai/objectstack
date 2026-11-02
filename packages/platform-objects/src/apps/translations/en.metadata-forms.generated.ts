@@ -515,6 +515,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  object_extension: {
+    label: "Object Extension",
+    description: "Fields and rules a package adds to an object another package defines"
+  },
   field: {
     label: "Field",
     sections: {
@@ -1810,6 +1814,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       submitText: {
         label: "Submit button label",
         helpText: "Label of the submit button in this action's param dialog, the verb the button performs (e.g. \"Send\", \"Log Call\"). Only for an action that collects params. Leave empty to show \"Confirm\"."
+      },
+      cancelText: {
+        label: "Cancel button label",
+        helpText: "Label of the dismiss button on the dialog this action opens before it runs, its confirm dialog or its param dialog. Name what dismissing keeps where the action's own verb is \"Cancel …\" (e.g. \"Keep invitation\"). Only for an action that asks for confirmation or collects params. Leave empty to show \"Cancel\"."
       },
       confirmText: {
         label: "Confirm Text",

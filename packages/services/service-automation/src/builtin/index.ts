@@ -19,6 +19,7 @@
  *  - io      — http                               (foundational outbound I/O)
  *  - io      — connector_action                   (generic integration dispatch)
  *  - io      — notify                              (outbound notification via messaging service)
+ *  - io      — save_notice                         (tell the saver what the save set in motion, #28251)
  *
  * `connector_action` is the *generic dispatch* counterpart to `http`
  * (ADR-0018 §Addendum): the platform ships the node + an (initially empty)
@@ -39,6 +40,7 @@ import { registerScreenNodes } from './screen-nodes.js';
 import { registerHttpNodes } from './http-nodes.js';
 import { registerConnectorNodes } from './connector-nodes.js';
 import { registerNotifyNode } from './notify-node.js';
+import { registerSaveNoticeNode } from './save-notice-node.js';
 import { registerWaitNode } from './wait-node.js';
 import { registerSubflowNode } from './subflow-node.js';
 import { registerMapNode } from './map-node.js';
@@ -52,6 +54,7 @@ export { registerScreenNodes } from './screen-nodes.js';
 export { registerHttpNodes } from './http-nodes.js';
 export { registerConnectorNodes } from './connector-nodes.js';
 export { registerNotifyNode } from './notify-node.js';
+export { registerSaveNoticeNode } from './save-notice-node.js';
 export { registerWaitNode, parseIsoDuration, rearmSuspendedWaitTimers } from './wait-node.js';
 export { registerSubflowNode } from './subflow-node.js';
 export { registerMapNode } from './map-node.js';
@@ -71,6 +74,7 @@ export function installBuiltinNodes(engine: AutomationEngine, ctx: PluginContext
     registerHttpNodes(engine, ctx);
     registerConnectorNodes(engine, ctx);
     registerNotifyNode(engine, ctx);
+    registerSaveNoticeNode(engine, ctx);
     registerWaitNode(engine, ctx);
     registerSubflowNode(engine, ctx);
     registerMapNode(engine, ctx);

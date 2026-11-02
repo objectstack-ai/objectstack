@@ -79,6 +79,13 @@ import { judgePicklistReferences, picklistRefusalHeading, printPicklistReference
 // [ADR-0146 D2, #28643] The override write gate — the walk `os validate` step
 // 3a-iii runs, over the publish door's own judge (`judgeOverrideWrite`).
 import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
+// [ADR-0146 D10, #28727] The `__c` extension-field reservation — the walk
+// `os validate` step 3a-iv runs, over the save and install doors' own judge
+// (`judgeExtensionFieldSuffix`).
+import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
+// [#28893] The ADR-0031 region-shape check — the walk `os validate` step 3a-vi
+// runs, over the automation engine's own registration verdict.
+import { findFlowRegionRefusals } from '../utils/flow-region-shape.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -798,6 +805,60 @@ export default class Compile extends Command {
         printBulletList(
           overrideRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
           { noun: 'override refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3b-iii-bis. [ADR-0146 D10, #28727] The `__c` extension-field
+      //     reservation, at build time — the SAME call `os validate` makes at
+      //     its step 3a-iv, over the walk `utils/extension-field-suffix.ts`
+      //     takes and the save and install doors' own judge
+      //     (`judgeExtensionFieldSuffix`): a field spelled `__c` only in a
+      //     base's paired `.custom` package, and every
+      //     `objectExtensions[].fields` key of a `.custom` pair suffixed. Before
+      //     this the build emitted such an artifact and the marketplace install
+      //     or a save or publish door refused it later with the same judge; now
+      //     the door that ships refuses it and writes no artifact.
+      //
+      //     Beside the override gate above, ahead of every artifact write, with
+      //     the same two faces: this command's failure envelope under `--json`
+      //     (`errors`, the rows `os validate --json` carries), `os validate`'s
+      //     text otherwise.
+      const suffixRefusals = findExtensionFieldSuffixRefusals(result.data as Record<string, unknown>);
+      if (suffixRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: suffixRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = suffixRefusals.length;
+        console.log('');
+        printError(`${n} field${n > 1 ? 's break' : ' breaks'} the \`__c\` extension-field reservation (ADR-0146 D10)`);
+        printBulletList(
+          suffixRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3b-iii-ter. [#28893] Flow region shape (ADR-0031), at build time — the
+      //     SAME call `os validate` makes at its step 3a-vi: the engine's
+      //     registration verdict (`FlowSchema`, then the spec's
+      //     `validateControlFlow`). Before this the build emitted a flow the
+      //     engine then refused at boot, logging a warning and running without
+      //     it; now the door that ships refuses it and writes no artifact. Same
+      //     two faces as the gates above.
+      const regionRefusals = findFlowRegionRefusals(result.data as Record<string, unknown>);
+      if (regionRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: regionRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = regionRefusals.length;
+        console.log('');
+        printError(`The automation engine would refuse to register ${n} flow${n > 1 ? 's' : ''} for a malformed region (ADR-0031)`);
+        printBulletList(
+          regionRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'flow region refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }

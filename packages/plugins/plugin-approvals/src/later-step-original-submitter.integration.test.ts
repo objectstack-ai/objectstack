@@ -329,20 +329,23 @@ describe('every step of an approval run names the run\'s original submitter (#24
     expect(await submitActor(step2.id)).toBeNull();
   });
 
-  it('recall on step 2: the step-1 decider is refused FORBIDDEN; the original submitter is admitted', async () => {
+  it('recall on step 2: the step-1 decider is refused — no participant of step 2, so no reader of it; the original submitter is admitted', async () => {
     const step1 = await submit('deal_chain', 'recall', 5000);
     await approve(step1, 'u_mgr');
     const step2 = await pendingOn('D_recall');
     expect(step2?.flow_node_id).toBe('exec');
 
-    expect(await refusalCode(svc.recall(step2.id, { actorId: 'u_mgr' }, asUser('u_mgr')))).toBe('FORBIDDEN');
+    // Step 2 is not the step-1 decider's to read — nor, therefore, to act on:
+    // answered as for a missing id. Were they stamped its submitter, they would
+    // read it and be admitted, and this would fail.
+    expect(await refusalCode(svc.recall(step2.id, { actorId: 'u_mgr' }, asUser('u_mgr')))).toBe('REQUEST_NOT_FOUND');
     expect((await stored(step2.id)).status, 'the refused recall moved nothing').toBe('pending');
 
     expect(await refusalCode(svc.recall(step2.id, { actorId: SUBMITTER }, asUser(SUBMITTER)))).toBeUndefined();
     expect((await stored(step2.id)).status).toBe('recalled');
   });
 
-  it('resubmit on step 2: the step-1 decider is refused FORBIDDEN; the original submitter is admitted', async () => {
+  it('resubmit on step 2: the step-1 decider is refused — no participant of step 2, so no reader of it; the original submitter is admitted', async () => {
     const step1 = await submit('deal_revisable', 'resubmit', 5000);
     await approve(step1, 'u_mgr');
     const step2 = await pendingOn('D_resubmit');
@@ -354,7 +357,7 @@ describe('every step of an approval run names the run\'s original submitter (#24
     expect(emits.filter((e) => e.topic === 'approval.returned' && e.source?.id === step2.id).map((e) => e.audience))
       .toEqual([[SUBMITTER]]);
 
-    expect(await refusalCode(svc.resubmit(step2.id, { actorId: 'u_mgr' }, asUser('u_mgr')))).toBe('FORBIDDEN');
+    expect(await refusalCode(svc.resubmit(step2.id, { actorId: 'u_mgr' }, asUser('u_mgr')))).toBe('REQUEST_NOT_FOUND');
     expect((await stored(step2.id)).status, 'the refused resubmit moved nothing').toBe('returned');
     expect(await pendingOn('D_resubmit')).toBeUndefined();
 

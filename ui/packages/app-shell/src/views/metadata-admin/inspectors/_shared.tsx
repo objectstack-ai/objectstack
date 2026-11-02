@@ -30,7 +30,21 @@
 import * as React from 'react';
 import { ArrowDown, ArrowUp, Trash2, X } from 'lucide-react';
 import { cn } from '@object-ui/components';
-import { Badge, Button, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@object-ui/components';
+import {
+  Badge,
+  Button,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@object-ui/components';
 import { type LoadState } from '../loadState.js';
 import { t, tFormat, useMetadataLocale, type SupportedLocale } from '../i18n.js';
 
@@ -702,6 +716,53 @@ export function InspectorRemoveButton({ label, onClick, disabled }: { label: str
 
 export function InspectorEmptyState({ message }: { message: string }) {
   return <div className="text-xs italic text-muted-foreground p-4 text-center">{message}</div>;
+}
+
+export interface InspectorReadOnlyReasonProps {
+  /** The inspector's `readOnly`: with it false, `children` render bare. */
+  readOnly?: boolean;
+  /** The host's `readOnlyReason`. Missing or blank, `children` render bare. */
+  reason?: string;
+  /** The group's accessible name: the element the panel edits. */
+  label: string;
+  testId?: string;
+  children: React.ReactNode;
+}
+
+/**
+ * The reason a read-only inspector's controls are disabled, given on hover, on
+ * keyboard focus and to assistive tech. A disabled control takes neither hover
+ * nor focus, so the panel itself is the tooltip trigger and a tab stop
+ * described by an `sr-only` copy of the reason. One trigger for the panel, not
+ * one per control: the host's reason is the same for all of them. Draws
+ * nothing of its own unless `readOnly` and the reason is non-blank, so a host
+ * that passes no reason renders exactly as before.
+ */
+export function InspectorReadOnlyReason({ readOnly, reason: reasonProp, label, testId, children }: InspectorReadOnlyReasonProps) {
+  const reasonId = React.useId();
+  const reason = readOnly ? reasonProp?.trim() : undefined;
+  if (!reason) return <>{children}</>;
+  return (
+    <TooltipProvider delayDuration={200}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            role="group"
+            aria-label={label}
+            tabIndex={0}
+            aria-describedby={reasonId}
+            data-disabled-reason=""
+            data-testid={testId}
+            className="flex h-full min-h-0 flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            {children}
+            <span id={reasonId} className="sr-only">{reason}</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="left" align="start">{reason}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
 }
 
 /**

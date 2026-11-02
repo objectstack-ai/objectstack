@@ -88,6 +88,7 @@
  *   objects.<name>._actions.<action>.successMessage
  *   objects.<name>._actions.<action>.disabledReason
  *   objects.<name>._actions.<action>.submitText      (only beside a non-empty `params`)
+ *   objects.<name>._actions.<action>.cancelText      (only beside `confirmText` or a non-empty `params`)
  *   objects.<name>._actions.<action>.outcomeMessages.<outcome>
  *   objects.<name>._actions.<action>.params.<param>.label / .helpText / .placeholder
  *   objects.<name>._actions.<action>.params.<param>.options.<value>
@@ -95,6 +96,7 @@
  *   objects.<name>._actions.<action>.resultDialog.fields.<path>
  *   globalActions.<action>.label / .description / .confirmText / .successMessage
  *                          / .disabledReason / .submitText (beside a non-empty `params`)
+ *                          / .cancelText (beside `confirmText` or a non-empty `params`)
  *   globalActions.<action>.outcomeMessages.<outcome>
  *   globalActions.<action>.params.<param>.* / .resultDialog.* (same shape as object actions)
  *   apps.<app>.label / .description
@@ -125,6 +127,7 @@
  *   flows.<flow>.screens.<node_id>.fields.<field>.options.<value>   (#22507)
  *   flows.<flow>.successMessage / .errorMessage                (#22507)
  *   flows.<flow>.refusals.<node_id>.message                    (#22450)
+ *   flows.<flow>.notices.<node_id>.message                     (#28251)
  *   flows.<flow>.approvals.<node_id>.label                     (#24916)
  *     ^ walked because the ledger's `flows` row is `live` and warns no
  *       author; a group the ledger does warn on is left out of the walk
@@ -768,6 +771,29 @@ function pushActionSubmitText(
 ): void {
   if (!Array.isArray(action?.params) || action.params.length === 0) return;
   pushOptional(out, [...actionRoot, 'submitText'], action.submitText, source, { objectName });
+}
+
+/**
+ * Emit `cancelText`, the dismiss button label of the dialog an action opens
+ * before it runs, under the action's translation root — OPTIONAL-not-derived
+ * like `submitText` (an action that names no label shows the console's own
+ * "Cancel"), and only for an action that opens one of the two dialogs carrying
+ * that button: the confirm dialog of a declared `confirmText`, or the param
+ * dialog of a non-empty `params`. Those are the actions `translateAction`
+ * overlays the key onto; any other action gets no slot, so a translation filed
+ * there stays dangling.
+ */
+function pushActionCancelText(
+  out: ExpectedEntry[],
+  actionRoot: string[],
+  action: any,
+  source: ExpectedEntry['source'],
+  objectName: string | undefined,
+): void {
+  const opensDialog = action?.confirmText != null
+    || (Array.isArray(action?.params) && action.params.length > 0);
+  if (!opensDialog) return;
+  pushOptional(out, [...actionRoot, 'cancelText'], action.cancelText, source, { objectName });
 }
 
 /**
@@ -1529,6 +1555,7 @@ export function collectExpectedEntries(
         pushOptional(out, [...aroot, 'successMessage'], actionCopy(action.successMessage), 'action', { objectName });
         pushOptional(out, [...aroot, 'disabledReason'], action.disabledReason, 'action', { objectName });
         pushActionSubmitText(out, aroot, action, 'action', objectName);
+        pushActionCancelText(out, aroot, action, 'action', objectName);
         pushActionOutcomeMessages(out, aroot, action, 'action', objectName);
         pushActionParams(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
         pushActionResultDialog(out, ['objects', objectName, '_actions', aname], action, 'action', objectName);
@@ -1627,6 +1654,7 @@ export function collectExpectedEntries(
     // seed for it.
     pushOptional(out, [...root, 'disabledReason'], action.disabledReason, kind, { objectName });
     pushActionSubmitText(out, root, action, kind, objectName);
+    pushActionCancelText(out, root, action, kind, objectName);
     pushActionOutcomeMessages(out, root, action, kind, objectName);
     pushActionParams(out, root, action, kind, objectName);
     pushActionResultDialog(out, root, action, kind, objectName);
@@ -2079,6 +2107,12 @@ const END_NODE_TYPE = 'end';
 const REFUSED_OUTCOME = 'refused';
 
 /**
+ * [#28251] The node whose message `flows.<flow>.notices.<node_id>.message`
+ * addresses: a `save_notice` node (`SaveNoticeConfigSchema`).
+ */
+const SAVE_NOTICE_NODE_TYPE = 'save_notice';
+
+/**
  * Depth ceiling for the region recursion, mirroring the ceiling the spec-side
  * walks use (`conversions/walk.ts`, `automation/control-flow.zod.ts`) and for
  * the same reason: a stack handed to `defineStack` is hand-built objects rather
@@ -2347,6 +2381,19 @@ function walkScreenFlows(config: any, out: ExpectedEntry[]): void {
       const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
       if (!nodeId) continue;
       pushOptional(out, ['flows', flowName, 'refusals', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
+    }
+
+    // [#28251] `flows.<flow>.notices.<node_id>.message` — the message of every
+    // `save_notice` node, at any depth of the same node universe. The engine
+    // reads that key (`flowNoticeMessageKey`) in the WRITER's locale before it
+    // renders the holes, so the seed is the authored template, holes and all,
+    // exactly as for a refusal: the person who made the record write reads it.
+    for (const node of nodes) {
+      if (!node || typeof node !== 'object' || node.type !== SAVE_NOTICE_NODE_TYPE) continue;
+      const cfg = node.config && typeof node.config === 'object' ? node.config : {};
+      const nodeId = typeof node.id === 'string' && node.id.length > 0 ? node.id : undefined;
+      if (!nodeId) continue;
+      pushOptional(out, ['flows', flowName, 'notices', nodeId, 'message'], inlineText(cfg.message), 'flow', scope);
     }
 
     // [#24916] `flows.<flow>.approvals.<node_id>.label` — an `approval` node's

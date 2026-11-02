@@ -19,6 +19,7 @@
  */
 
 import * as React from 'react';
+import { RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE } from '@objectstack/spec/api';
 import type { FeedItem } from '@object-ui/types';
 
 /**
@@ -45,6 +46,20 @@ export interface RecordTimelinePanel {
 }
 
 export const RecordTimelinePanelContext = React.createContext<RecordTimelinePanel | null>(null);
+
+/** The most entries the 动态 panel shows (its wide face); 3 when narrow. */
+export const RECORD_TIMELINE_PANEL_MAX_ENTRIES = 5;
+
+/**
+ * The whole 动态 stream's size as the host counts it (objectstack#28737): the
+ * record page payload's `timeline` count, kept current by the host across its
+ * own comment writes. The host then holds only the newest of the stream's
+ * activity, so the count its rows would give is not the stream's: the panel's
+ * count chip, its 「查看全部 N 条」, the 动态 tab's count and the tab row's
+ * probe all name this one instead. `null` (no host count, or not yet
+ * answered): each counts the stream it holds, as before.
+ */
+export const RecordTimelineTotalContext = React.createContext<number | null>(null);
 
 /**
  * Where the 动态 stream drawn in full — the 动态 tab — reports how many
@@ -120,7 +135,7 @@ export function mergeTimelineStream(
 ): FeedItem[] {
   const changes = fieldChanges ?? [];
   const base = (feed ?? []).filter(
-    (item) => !(changes.length > 0 && (item as { activityType?: string }).activityType === 'updated'),
+    (item) => !(changes.length > 0 && (item as { activityType?: string }).activityType === RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE),
   );
   return [...base, ...changes]
     .map((item, index) => ({ item, index }))

@@ -84,6 +84,7 @@ import { isExpectedRouteError, mapDataError } from './error-response.js';
 import { logError } from './log.js';
 import type { TransportScopedMetaRequest } from './meta-collection-routes.js';
 import type { RestServer } from './rest-server.js';
+import { earnedAnswerLogged } from './stale-summary-answer.js';
 
 /**
  * The `RestServer` members {@link registerFormEndpoints} reads — every one of
@@ -823,7 +824,15 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                     ...(environmentId ? { environmentId } : {}),
                     context,
                 };
-                const result = await p.createData(formCreateRequest);
+                // [#28782] A row stored under a parent roll-up the engine
+                // could not recompute is answered as the created row it is
+                // (#28781's carrier), never the refusal's 500 — an anonymous
+                // visitor who retried would file a second case.
+                const result = await p.createData(formCreateRequest).catch((e: unknown) => {
+                    const earned = earnedAnswerLogged(e, match.object);
+                    if (earned === undefined) throw e;
+                    return earned as Awaited<ReturnType<typeof p.createData>>;
+                });
                 // [#22437] The answer is the created record's id, and
                 // nothing else the insert stored. `createData` answers
                 // `{ object, id, record, droppedFields? }`, and its `record`

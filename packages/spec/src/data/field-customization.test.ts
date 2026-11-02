@@ -212,9 +212,9 @@ describe('`ObjectExtensionSchema.fieldPatches` — the per-field display patch s
     expect('fieldPatches' in parsed).toBe(false);
   });
 
-  it('reads `[EXPERIMENTAL — not enforced]` and names the merge card until the merge applies it', () => {
+  it('is live: no `[EXPERIMENTAL — not enforced]` marker, and it names the merge that applies it', () => {
     const description = shapeOf(ObjectExtensionSchema).fieldPatches!.description ?? '';
-    expect(description.startsWith('[EXPERIMENTAL — not enforced]')).toBe(true);
-    expect(description).toContain('N-23d');
+    expect(description).not.toContain('EXPERIMENTAL');
+    expect(description).toContain('mergeObjectDefinitions');
   });
 });

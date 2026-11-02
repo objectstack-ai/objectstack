@@ -24,7 +24,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { I18nProvider } from '@object-ui/i18n';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const { AUTH, toastError, toastSuccess } = vi.hoisted(() => ({
   AUTH: { user: { id: 'u_admin' }, activeOrganization: { id: 'org_1' } },
@@ -130,11 +130,12 @@ const settingsCalls = (method: string, url = '/api/settings/localization') =>
   fetchMock.mock.calls.filter(([u, init]) => u === url && ((init as RequestInit | undefined)?.method ?? 'GET') === method);
 
 function permissionsPayload(systemPermissions: string[] | undefined): MePermissionsResponse {
-  const base: MePermissionsResponse = {
+  const base: MePermissionsAuthenticatedResponse = {
     authenticated: true,
     userId: 'u_admin',
     tenantId: 'org_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     objects: {},
     fields: {},
@@ -340,6 +341,10 @@ describe('a browser zone the door would refuse is never offered (objectui#11758)
 
   it('no browser zone at all → no prompt and no request', async () => {
     browserZone = undefined;
+    // Nor a currency to offer (objectstack#28872): a language with no country
+    // region maps to none, so the prompt has nothing to ask about either key.
+    vi.spyOn(window.navigator, 'languages', 'get').mockReturnValue(['es-419']);
+    vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('es-419');
     renderPrompt(ADMIN);
     await settle();
     expect(screen.queryByRole('dialog')).toBeNull();

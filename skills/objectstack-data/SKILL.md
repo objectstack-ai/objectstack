@@ -122,7 +122,8 @@ explicitly. Views may narrow it, never widen it.
 `$search` scans **the queried object's own columns**. A dotted path is never a
 search target: unlike `fields` / `sort` / `filters`, the search axis does not
 resolve traversal, and `project_id.name` in `searchableFields` (or in a
-`$searchFields` override) is **refused**, not silently dropped.
+`$searchFields` override) is **refused** (`os validate`
+`searchable-field-unknown`; a request, `400 INVALID_FIELD`), not silently dropped.
 
 **This is the one prescription — emit it every time.** To search by a related
 record's title, copy that title into a **stored field on this object** and
@@ -167,13 +168,6 @@ fresh as whatever writes it. Cover both write paths:
 
 Rows written by a path that bypasses hooks (bulk import, direct SQL) need a
 one-off backfill. See [Lifecycle Hooks](./references/data-hooks.md).
-
-Both spellings are refused loudly: `os validate` reports
-`searchable-field-unknown`, and a request naming the dotted path is `400
-INVALID_FIELD`. Each message carries its own prescription.
-
-Cross-object search paths are rejected by design, not pending. Do not invent a
-per-project convention for this — the mirror field is the answer.
 
 ---
 
@@ -328,13 +322,8 @@ See [rules/relationships.md](./rules/relationships.md) for detailed examples.
 > validation predicate — so `record.due_date == null` matches an omitted field the
 > same as an explicit `null`. (On update, the prior record supplies it.)
 
-The **complete** set of validation types (`ValidationRuleSchema` discriminators):
-- `script` — Formula expression (inverted logic)
-- `state_machine` — Legal state transitions
-- `format` — Regex or built-in format
-- `cross_field` — Compare values across fields
-- `json_schema` — Validate a JSON field against a JSON Schema
-- `conditional` — Apply a nested rule only `when` a predicate holds
+The **complete** set of types (`ValidationRuleSchema` discriminators): `script`,
+`state_machine`, `format`, `cross_field`, `json_schema`, `conditional`.
 
 > **There is NO `unique` validation type** (removed from the spec).
 > Enforce uniqueness — including composite — with a **unique index**, and state
@@ -357,14 +346,10 @@ indexes: [
 ]
 ```
 
-> `type` and `partial` were **retired at protocol 17** (a `tsc` and parse error;
-> `os migrate meta --from 16` lists the edits). A unique index **states its
-> scope** — `'organization'` or `'global'`: on a declared index bare `unique: true`
-> is the deprecated spelling of `'global'` and protocol 18 rejects it; on a FIELD
-> it means `'organization'` and stays valid.
-
-See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope,
-and how to build partial / gin / gist indexes at the database layer.
+See [rules/indexing.md](./rules/indexing.md) for composite indexes, unique scope
+(`'organization'` / `'global'` — on a declared index bare `unique: true` is
+refused), the retired `type` / `partial`, and partial / gin / gist indexes at the
+database layer.
 
 → Moved verbatim to [references/examples-objects.md](./references/examples-objects.md) § Lifecycle Hooks (the hooks reference itself is [references/data-hooks.md](./references/data-hooks.md)).
 
@@ -373,12 +358,23 @@ and how to build partial / gin / gist indexes at the database layer.
 ## Object Extension Model
 
 To add fields/validations/indexes to an object you do not own, author
-`defineObjectExtension({ extend, fields, priority })` and register it on
+`defineObjectExtension({ extend, fields, fieldPatches, priority })` and register it on
 `defineStack({ objectExtensions: [...] })`. `priority` sets merge order (default
 `200`, range `0–999`); an extension can add but never remove. ⛔ Not the same key
 as object-level `ownership` (the record-ownership enum
 `'user' | 'business_unit' | 'org' | 'none'`). Schema:
 `node_modules/@objectstack/spec/src/data/object.zod.ts` (`ObjectExtensionSchema`).
+
+**Relabel a field the owner declares with `fieldPatches` — never by redeclaring
+it in `fields`**, which takes the field over whole and cuts it off from the
+owner's upgrades. A patch carries display keys only
+(`BASE_FIELD_DISPLAY_WHITELIST`): `label`, `description`, `inlineHelpText`,
+`placeholder`, and an option's `label` keyed by its stored `value`; the type,
+values and rules stay the owner's. A key the tenant edited keeps the tenant's
+text; between two extensions the higher `priority` wins. A patch naming a field
+or option value the target lacks is refused at install and by `os validate`, and
+a `picklist`-bound field's options are never patchable. Example:
+`defineObjectExtension({ extend: 'crm_account', fieldPatches: { industry: { label: 'Sector', options: { technology: { label: 'Tech' } } } } })`.
 
 ---
 

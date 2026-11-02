@@ -473,6 +473,29 @@ export function datasourceNotFoundError(name: string): Error {
   return err;
 }
 
+/**
+ * [#28928] Refuse a `secret` whose value is the empty string, on create and on
+ * edit, before anything is read for the secret or written.
+ *
+ * A create sealed it as the datasource's credential, and an edit took it as a
+ * rotation: a new `sys_secret` row holding nothing, `external.credentialsRef`
+ * repointed at it, and the working row removed. The live pool kept serving, so
+ * the datasource broke only at its next connect, with nothing left to restore.
+ * The console never sends one (it leaves `secret` out of an untouched field);
+ * a script or an SDK call that clears the field is what reached it.
+ *
+ * `null` and an absent `secret` are unchanged: they keep the stored
+ * credential. A whitespace-only value is a value, sealed and used as sent.
+ * Only the empty string is judged, so the answer cannot echo a credential.
+ */
+function assertSecretNotEmpty(heading: string, secret: SecretInput | undefined): void {
+  if (secret == null || (secret as { value?: unknown }).value !== '') return;
+  throw new Error(
+    `${heading}\nThe \`secret\` is empty. Send the credential to store, or leave \`secret\` out (or null) `
+      + 'to keep the stored one. Nothing was written.',
+  );
+}
+
 function metadataIncompleteError(message: string, errors: string[]): Error {
   const err = new Error(message) as Error & { code?: string; status?: number; cause?: unknown };
   err.code = 'SERVICE_UNAVAILABLE';
@@ -793,6 +816,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
 
   async createDatasource(input: DatasourceDraft, secret?: SecretInput): Promise<DatasourceSummary> {
     this.assertValidName(input?.name);
+    assertSecretNotEmpty(`Invalid datasource '${input.name}'.`, secret);
     this.assertNoDraftCredentialsRef(input);
     this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${input.name}'.`, input);
     assertNoInlineSslKey(`Invalid datasource '${input.name}'.`, input);
@@ -862,6 +886,7 @@ export class DatasourceAdminService implements IDatasourceAdminService {
     // judges a key the author is writing now.
     this.assertNoUndeclaredTopLevelKey(`Invalid datasource '${existing.name}'.`, patch);
     assertNoInlineSslKey(`Invalid datasource '${existing.name}'.`, patch);
+    assertSecretNotEmpty(`Invalid datasource '${existing.name}'.`, secret);
 
     // Merge patch over the existing record; `name`/`origin` are never patched.
     // [#28633] Every key the create door stores is patchable the same way
@@ -1151,7 +1176,22 @@ export class DatasourceAdminService implements IDatasourceAdminService {
       // inline copy is the last cleartext copy, so it is dropped only once the
       // existing ref is proved resolvable.
       const resolved = await this.tryReadSecret(plan.credentialsRef);
-      if (resolved == null || resolved === '') {
+      // [#29069] An empty credential is told apart from one that is gone, in
+      // the connect path's wording (`DatasourceConnectionService.connect`'s
+      // `secret === ''` branch): a row sealed empty before the admin doors
+      // refused an empty `secret` decrypts to ''. The outcome is the same
+      // refusal — dropping the inline copy would leave nothing that works.
+      if (resolved === '') {
+        return this.refuse(
+          name,
+          `Datasource '${name}' already references a stored secret, but credential `
+            + `'${plan.credentialsRef}' is empty (its sys_secret row holds an empty value). Removing the `
+            + 'inline credential would leave this datasource with no working credential at all.',
+          'Re-enter the credential in the connection form\'s secret field to set the datasource\'s '
+            + 'secret again — that rebinds it and replaces the empty one; the inline copy can then be removed.',
+        );
+      }
+      if (resolved == null) {
         return this.refuse(
           name,
           `Datasource '${name}' already references a stored secret, but it could not be resolved or `

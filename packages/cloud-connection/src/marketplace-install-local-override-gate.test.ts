@@ -110,6 +110,8 @@ const BASE_HOLDINGS: Holdings = {
     [BASE]: {
         dashboard: [{ name: 'crm_board', label: 'Board' }],
         object: [{ name: 'crm_account' }],
+        flow: [{ name: 'crm_followup', label: 'Follow up' }],
+        action: [{ name: 'crm_call', label: 'Call' }],
     },
 };
 
@@ -179,6 +181,23 @@ describe('install-local 2d — the override write gate at the managed install (A
         expect(res.payload.data).not.toHaveProperty('overrideCollisions');
     });
 
+    it('[#28412] the paired .custom installs its declared FLOW override; a declared action override still waits', async () => {
+        // ADR-0146 D9: flow's conditions are delivered, so the gate admits it.
+        const flow = await install({
+            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            flows: [{ name: 'crm_followup', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
+        });
+        expect(flow.res.status, JSON.stringify(flow.res.payload)).toBe(200);
+        expect(flow.registered).toEqual([PAIR]);
+
+        const action = await install({
+            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            actions: [{ name: 'crm_call', label: 'Ours', overrides: { package: BASE, basedOn: '1.0.0' } }],
+        });
+        expect(action.res.status).toBe(403);
+        expect(refusedOf(action.res)).toEqual([['action', 'crm_call', 'declared_type_not_yet_available']]);
+    });
+
     it('CONTROL: a dependent shipping its own names installs, and its answer carries no collision key', async () => {
         const { res, registered } = await install({
             id: PARTNER, version: '1.0.0', dependencies: deps(BASE), dashboards: [{ name: 'partner_board' }],
@@ -213,5 +232,36 @@ describe('install-local 2d — the override write gate at the managed install (A
             [PAIR, 'page', 'crm_home', 'undeclared_same_name'],
         ]);
         expect(collisions[1].message).toMatch(/Declare it/);
+    });
+
+    // [#28746] An email template is one item per `(name, locale)`: the base
+    // below ships `crm_welcome` in `en-US` only, so a member is judged alone.
+    const TEMPLATE_HOLDINGS: Holdings = {
+        [BASE]: { email_template: [{ name: 'crm_welcome', locale: 'en-US', subject: 'Welcome' }] },
+    };
+    const DECLARED = { package: BASE, basedOn: '1.0.0' } as const;
+
+    it('[#28746] the paired .custom declaring an override of a locale the base does not ship is refused 403, and nothing is written', async () => {
+        const { res, registered, ledger } = await install({
+            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            emailTemplates: [{ name: 'crm_welcome', locale: 'fr-FR', subject: 'Bienvenue', overrides: { ...DECLARED } }],
+        }, [{ id: BASE }], TEMPLATE_HOLDINGS);
+        expect(res.status, JSON.stringify(res.payload)).toBe(403);
+        expect(res.payload?.error?.code).toBe('NOT_OVERRIDABLE');
+        expect(refusedOf(res)).toEqual([['email_template', 'crm_welcome', 'declared_package_ships_no_such_item']]);
+        expect(registered).toEqual([]);
+        expect(ledger).toEqual([]);
+    });
+
+    it('[#28746] CONTROL: the pair overrides the locale the base ships, and adds an undeclared locale of its own', async () => {
+        const { res, registered } = await install({
+            id: PAIR, version: '1.0.0', dependencies: deps(BASE),
+            emailTemplates: [
+                { name: 'crm_welcome', locale: 'en-US', subject: 'Ours', overrides: { ...DECLARED } },
+                { name: 'crm_welcome', locale: 'fr-FR', subject: 'Bienvenue' },
+            ],
+        }, [{ id: BASE }], TEMPLATE_HOLDINGS);
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(registered).toEqual([PAIR]);
     });
 });

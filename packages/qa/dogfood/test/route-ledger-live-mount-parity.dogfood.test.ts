@@ -140,6 +140,12 @@ function collectLedgerRows(): LedgerRow[] {
 const UNEXERCISED_BY_THIS_BOOT: Record<string, string> = {
   '* /api/v1/auth/**':
     'plugin-auth mounts one rawApp.all() catch-all on Hono directly, so no auth route ever passes through the IHttpServer port. Audited against better-auth\'s live auth.api table by auth-route-ledger.conformance.test.ts instead',
+  // [#28709] One door, raw only. Unlike the "two doors" rows below, the
+  // dispatcher does NOT answer this path: its `/auth` domain relays to the auth
+  // service, which does not serve it. plugin-hono-server's
+  // registerCurrentUserEndpoints is the only owner.
+  'GET /api/v1/auth/me/permissions':
+    'plugin-hono-server mounts this with rawApp.get() directly on Hono (registerCurrentUserEndpoints), ahead of plugin-auth\'s catch-all, so it never passes through the IHttpServer port. Driven on the real handler, every body parsed through MePermissionsResponseSchema, by packages/plugins/plugin-hono-server/src/current-user-endpoints-has-any-queue.test.ts',
   '* /api/v1/apps/**':
     'the ADR-0121 declarative-endpoint carve-out is a setFallbackHandler seam, not a route — being invisible to a route table is the property that makes it incapable of shadowing one (#5040 §1-C)',
   // [#22576] Two doors, one path. These rows ledger the DISPATCHER's

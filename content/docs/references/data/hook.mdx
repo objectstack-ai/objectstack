@@ -111,6 +111,7 @@ L2 sandboxed JS body — runs inside an isolated VM with declared capabilities
 | **transaction** | `any` | optional | Database transaction handle |
 | **ql** | `any` | ✅ | ObjectQL Engine Reference |
 | **api** | `any` | optional | Cross-object data access (IScopedContext — `object(name)` + `transaction(cb)`) |
+| **notice** | `any` | optional | Tell the person who made THIS insert/update what the save set in motion: `ctx.notice(message)` hands one non-empty string to the write's own `onNotice` listener, answered as the create/update `notice`. Bound by the engine on every insert/update dispatch (a no-op when nothing listens); absent on find/delete |
 | **user** | `{ id?: string; name?: string; email?: string; organizationId?: string }` | optional | Current user info shortcut |
 
 ### Nested Shape: `HookContext.dispatch`

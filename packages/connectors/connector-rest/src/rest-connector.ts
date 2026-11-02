@@ -100,11 +100,37 @@ export interface RestConnectorBundle {
     >;
 }
 
-/** Build the request URL from base + path + query, encoding query params. */
+/**
+ * Build the request URL from base + path + query, encoding query params.
+ *
+ * The base is parsed first and its own query is lifted off before the path is
+ * joined: a text join of `https://api.example.com/v1?region=eu` and `/items`
+ * reads `…/v1?region=eu/items`, which sends every path-bearing action to `/v1`
+ * with the path inside the `region` value. The path is then joined onto the
+ * base's path with one slash between, exactly as before, so a base without a
+ * query yields the same URL byte for byte, and a path can only ever land under
+ * the base's origin: it is appended after the base's path, never resolved
+ * against it, so `//other.example` or an absolute URL stays a path segment.
+ *
+ * The base's query parameters come back first, then the action's own: those
+ * written inline in `path`, then `query` (auth's query parameter included).
+ * **On a clash the action's value wins** — it is the more specific intent, and
+ * refusing would break a working action the day its base gains the parameter.
+ * A base fragment is left where the text join put it, as before.
+ */
 function buildUrl(baseUrl: string, path: string, query?: RestRequestInput['query']): string {
-    const base = baseUrl.replace(/\/+$/, '');
+    const base = new URL(baseUrl);
+    const baseParams = [...base.searchParams];
+    base.search = '';
     const suffix = path ? (path.startsWith('/') ? path : `/${path}`) : '';
-    const url = new URL(base + suffix);
+    const url = new URL(base.toString().replace(/\/+$/, '') + suffix);
+    if (baseParams.length > 0) {
+        const own = [...url.searchParams];
+        const ownKeys = new Set(own.map(([key]) => key));
+        const merged = new URLSearchParams(baseParams.filter(([key]) => !ownKeys.has(key)));
+        for (const [key, value] of own) merged.append(key, value);
+        url.search = merged.toString();
+    }
     if (query) {
         for (const [key, value] of Object.entries(query)) {
             if (value !== undefined && value !== null) url.searchParams.set(key, String(value));

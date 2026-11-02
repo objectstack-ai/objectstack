@@ -24,9 +24,13 @@
  *
  * The wall's IMPLEMENTATION is open — the Layer 0 compiler, `accessible_org_ids`
  * resolution and the D5 write stamping all ship in open packages — but ENABLING
- * a multi-organization posture (`group` or `isolated`) requires the enterprise
- * `@objectstack/organizations` runtime (ADR-0105 D12). The two are separate
- * questions and must not be conflated: open code does not mean free activation.
+ * a multi-organization posture (`group` or `isolated`) requires the
+ * `@objectstack/organizations` runtime to be mounted (ADR-0105 D12, ADR-0093 D5).
+ * That runtime is open code too: it ships from this repository under Apache-2.0
+ * (ADR-0132 D1). What stays commercial is the entitlement — the licence gate the
+ * commercial package of the same name adds by subclassing the open one (ADR-0132
+ * D2, D3). The two are separate questions and must not be conflated: open code
+ * does not mean free activation.
  *
  * Cloud ADR-0016's 铁律 (强制免费、治理收费) is satisfied by the first half alone —
  * it guarantees that a deployment RUNNING a multi-org shape is safe, which the
@@ -58,13 +62,22 @@ export function postureEnforcesWall(posture: TenancyPosture): boolean {
  * Does this posture require `organization_id` to be stamped on write?
  *
  * True exactly when a wall is enforced: an absent value would land a row behind
- * a wall that then hides it. The STAMPER, however, is the enterprise
- * `@objectstack/organizations` runtime, not the open engine — the same runtime
- * whose presence activates these postures in the first place, so the two can
- * never be out of step. This predicate is the shared vocabulary that runtime
- * compiles against; the open engine only VALIDATES supplied values (the write
- * side of the Layer 0 wall), which is a security property rather than a
- * packaging one.
+ * a wall that then hides it.
+ *
+ * The stamping is open code (ADR-0105 D5, the write half of the wall): the
+ * engine lands an insert in the caller's active organization in every posture
+ * (`ObjectQL#driverWriteTarget`, `packages/objectql`), and the SQL driver
+ * fills an absent `organization_id` from it (`SqlDriver#injectTenantOnInsert`,
+ * `packages/drivers/driver-sql`). An explicit value is never overwritten; where
+ * `@objectstack/plugin-security` installs the wall on the write, it holds that
+ * value to the Layer 0 verdict, storing it where the wall admits it and
+ * refusing the write where it does not. The `@objectstack/organizations`
+ * runtime (open code, ADR-0132 D1) fills an absent value too, in its write
+ * middleware, but it is not the only stamper.
+ *
+ * What does need that runtime is ACTIVATING a walled posture (ADR-0105 D12):
+ * open code does not mean free activation. This predicate is the shared
+ * vocabulary for the stamping rule, whichever package does the stamping.
  */
 export function postureStampsOrganization(posture: TenancyPosture): boolean {
   return postureEnforcesWall(posture);
@@ -87,9 +100,11 @@ export function postureUsesUnionScope(posture: TenancyPosture): boolean {
  *
  * Presence-of-package answers "may this deployment run multi-org at all"; it
  * cannot answer "which shapes of it" — that is a packaging decision, and the
- * commercial runtime owns it. Declaring the set here lets the enterprise package
- * gate `group` and `isolated` independently (different tiers, a license flag, a
- * trial) without the open core hard-coding anyone's price list.
+ * commercial runtime owns it. Declaring the set here lets the commercial package
+ * of the same name gate `group` and `isolated` independently under its
+ * commercial entitlement (different tiers, a licence flag, a trial) without the
+ * open core hard-coding anyone's price list. The open package entitles both
+ * walled postures by construction (ADR-0132 D4).
  *
  * Omitting `supportedPostures` entitles every walled posture, which is what
  * every runtime predating this seam did.
@@ -102,8 +117,9 @@ export function postureUsesUnionScope(posture: TenancyPosture): boolean {
  * declaration leaves behaviour byte-identical to a runtime predating the key.
  *
  * They exist because the alternative seams are dead. Host self-declaration of
- * the boundary is a paywall bypass (only a mounted enterprise runtime may
- * declare anything here, which is what keeps the org-create gate intact), and
+ * the boundary is a paywall bypass (only a mounted `org-scoping` runtime may
+ * declare anything here, and on a commercial host that is the licence-gated
+ * one, which is what keeps the org-create gate intact), and
  * carrying `tenancy` through `objectExtensions` silently drops it in the merge
  * (objectstack#12680). Nor can the per-object authoring channel
  * (`tenancy: { enabled: false }`) express either fact: that declaration travels

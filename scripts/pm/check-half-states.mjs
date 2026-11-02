@@ -2076,7 +2076,7 @@ const nextDirectiveOnLine = (key) =>
  * every FURTHER key after a separator run; ⛔ a key after a WORD is prose.
  *
  * @param {string} text
- * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'} key
+ * @param {'Blocked-by'|'Restart-when'|'Maintainer-action'|'Unlock-action'|'Seam'|'Patrol'} key
  * @returns {string[]}
  */
 export function directiveValues(text, key) {
@@ -15440,6 +15440,235 @@ export function h68ClassBWithoutSeamLine(issue) {
 }
 
 // ---------------------------------------------------------------------------
+// H70 + H71 (#28642) — a project seat's hourly patrol, and the card its absence
+// leaves waiting.
+//
+// The seating rule (seat-lifecycle.md 〈座位贴协议〉) makes taking a project
+// seat create ONE self-bound patrol routine in the same act and record it on
+// the stub as `Patrol: TRIGGER_ID · CRON` (seat-post-protocol.md 〈座位 Routine
+// 创建〉); an empty queue is standby, so the patrol runs until `seat-offline`.
+// The measured incident: a HELD seat with nothing in hand never created its
+// routine, woke only on PR subscriptions and one-shot reminders, and a p1
+// `pm:queue` card on its lane sat unclaimed 4.5 h. Nothing on the board could
+// show either half — the post had no patrol line to be missing, and a queued
+// card looks like a queued card. Two readings, both FREE (the seat posts and
+// the `pm:queue` page are listings this sweep already holds):
+//
+//   H70  a HELD seat post (🟢 a login — not `🟢 Routine`, whose scheduler IS
+//        its patrol, and not the director seat, which has none) whose body
+//        carries no `Patrol:` line. The reader is the one `Blocked-by:`
+//        shares, so `- **Patrol:** …` is a line; the VALUE is not judged.
+//   H71  an open, UNASSIGNED `pm:queue` card on a lane where some seat post
+//        reads 🟢 (any holder, `Routine` included — someone is on the clock),
+//        quiet for more than QUEUE_ON_DUTY_UNCLAIMED_HOURS. Quiet is read off
+//        `updated_at`, the H10/H30 clock: adding the label bumps it, so the
+//        age is a LOWER BOUND on time-in-queue — it never fires early, and a
+//        comment inside the window hides a card until the next sweep.
+//
+// ⚠️ The filing card asked H71 to require the seat to have SPARE CONCURRENCY.
+// That is not machine-readable today — a seat post states its cap in prose, and
+// the cap can span several lane seats of one account — so the condition is
+// DROPPED rather than guessed, and the row says so. ⛔ Report-only, both rows:
+// readings the patrols act on, never a merge gate (the card's triage ruling).
+// ---------------------------------------------------------------------------
+
+/** H71's clock — the card's own figure: an on-duty lane should claim within the hour its patrol fires, so two hours is one missed fire plus slack. */
+export const QUEUE_ON_DUTY_UNCLAIMED_HOURS = 2;
+
+/**
+ * The director seat's post — no patrol by rule (项目席唤醒 … 总监席除外). Matched
+ * anywhere in the SEAT-NAME half (before the ` — ` status separator), never at
+ * its first character only: the live `director(项目总监)` and a retitled
+ * `项目总监` must both be excluded, and a status word cannot name the seat.
+ */
+const DIRECTOR_SEAT_TITLE = /^\[PM seat\][^—]*?(?:\bdirector\b|总监)[^—]*—/iu;
+
+/** Labels that make a queued card no candidate for H71 — a pending decision or a re-triage. */
+export const H71_NOT_CANDIDATE_LABELS = Object.freeze(['needs-user-decision', 'pm:retriage']);
+
+/** Is this seat post's status 🟢 — any holder, a `Routine` included? */
+export function seatOnDuty(issue) {
+  const m = /^\[PM seat\]\s*(.*?)\s*—\s*(.*)$/u.exec(issue?.title ?? '');
+  return Boolean(m) && m[2].trim().startsWith('🟢');
+}
+
+/** Has this text a `Patrol:` line at line start with a value — decoration tolerated, the value unjudged? */
+export function hasPatrolLine(text) {
+  return directiveValues(text, 'Patrol').length > 0;
+}
+
+/** H70 — null when out of scope or carrying the line, else the finding sentence. */
+export function h70HeldSeatWithoutPatrol(issue) {
+  if (!issue || issue.pull_request || issue.state === 'closed') return null;
+  if (!labelNames(issue).includes('pm:seat')) return null;
+  if (!seatIsHeld(issue) || DIRECTOR_SEAT_TITLE.test(String(issue.title ?? ''))) return null;
+  if (hasPatrolLine(issue.body)) return null;
+  return (
+    '`pm:seat` HELD by a login with no `Patrol:` line in its body — taking a project seat creates ONE ' +
+    'self-bound hourly patrol routine in the same act and records it on the stub as `Patrol: TRIGGER_ID · ' +
+    'CRON` (seat-lifecycle.md 〈座位贴协议〉, seat-post-protocol.md 〈座位 Routine 创建〉). Without the line ' +
+    'nobody can see whether this seat has a patrol at all: a seat with none wakes only on PR subscriptions and ' +
+    'relays, and stops looking once its queue empties — the measured shape a p1 card waited 4.5 h behind. ' +
+    'Remedy — WHO and HOW: the holder creates the routine if it is missing and writes the line (bare or ' +
+    'decorated) into the stub. ⛔ Report-only: no label, title or body is written from this script. Out of ' +
+    'scope by rule: a `🟢 Routine` seat (its scheduler is the patrol), the director seat (no patrol), a vacant ' +
+    'or paused seat; the line\'s VALUE is not judged here.'
+  );
+}
+
+/**
+ * H71 — null when clean, else the finding sentence.
+ *
+ * @param {object} issue — the card.
+ * @param {Map<string, number[]>} onDutyLanes — canonical lane → issue numbers of
+ *   its 🟢 seat posts, read off the `pm:seat` listing this sweep holds.
+ */
+export function h71UnclaimedOnDutyLane(issue, onDutyLanes, nowMs = Date.now()) {
+  if (!issue || issue.pull_request || issue.state === 'closed') return null;
+  const labels = labelNames(issue);
+  if (!labels.includes('pm:queue') || labels.includes('pm:epic')) return null;
+  // Not candidates though they may legally pair with `pm:queue` (H29's vocabulary):
+  // a card awaiting the maintainer's decision or a re-triage is never dispatched,
+  // so "that seat claims it" would be the wrong remedy.
+  if (H71_NOT_CANDIDATE_LABELS.some((l) => labels.includes(l))) return null;
+  if ((issue.assignees ?? []).length > 0) return null;
+  const lanes = [...new Set(labels.filter((l) => /^domain:/u.test(l)).map(canonicalLane))];
+  const held = lanes.filter((lane) => (onDutyLanes?.get(lane) ?? []).length > 0);
+  if (held.length === 0) return null;
+  const updated = Date.parse(issue.updated_at ?? '');
+  const ageHours = Number.isFinite(updated) ? (nowMs - updated) / 3_600_000 : null;
+  if (ageHours !== null && ageHours <= QUEUE_ON_DUTY_UNCLAIMED_HOURS) return null;
+  const seats = held.map((lane) => `\`${lane}\` (${onDutyLanes.get(lane).map((n) => `#${n}`).join(', ')})`).join(', ');
+  const reading =
+    ageHours === null
+      ? 'an unreadable `updated_at` (which must not read as fresh)'
+      : `no activity for ~${Math.round(ageHours)}h (threshold ${QUEUE_ON_DUTY_UNCLAIMED_HOURS}h; a lower bound on its time in the queue)`;
+  return (
+    `\`pm:queue\`, open and unassigned, with ${reading}, on a lane a 🟢 seat holds: ${seats}. A seat on duty ` +
+    'runs an hourly patrol whose first act is to claim up to its `batch` limit, so a card this old on its lane ' +
+    'usually means the patrol is not running (H70 names a held post with no `Patrol:` line) or the seat is full. ' +
+    'Remedy — WHO and HOW: that seat claims it, or says on its post why not (in hand at its limit, or the card ' +
+    'is not ready). ⚠️ Spare concurrency is NOT judged: no seat post states it machine-readably, so a full seat ' +
+    'reads the same as an idle one here. ⛔ Report-only: no label or assignee is written from this script. Out ' +
+    'of scope: an assigned queue card (H24), a `pm:epic` subtree card, a card awaiting a decision or a ' +
+    're-triage (`needs-user-decision`, `pm:retriage`: not candidates), a lane with no 🟢 seat post.'
+  );
+}
+
+// ---------------------------------------------------------------------------
+// H72 (#28675) — a recent mailbox comment the doorbell reader does not read.
+//
+// 〈信箱 PR〉 (project-forms.md) makes a mailbox's vocabulary a CLOSED table: one
+// key per event a seat MUST ring for, and 「表外即半态」 — a comment outside the
+// table is a half-state. Measured over every open `pm:mailbox` PR the day the
+// table grew: a lane's question to triage written free-form, five `surface`
+// lines, a `ruling` line carrying its reasons, `take` and `main-red cleared` —
+// each reached a subscribed seat that no reader could act on, and nothing on the
+// board listed them. This row lists them, so the sending seat learns the table
+// and an event with no key surfaces as a vocabulary finding rather than a habit.
+//
+// ONE reader. The reading is `record-recognisers.mjs`'s `mailboxEvents`, never a
+// second parser here. That module imports THIS one at module scope, so neither
+// direction of a static import runs, and an `await import` taken while this
+// module's own top-level `await selfTest()` is pending deadlocks (both measured,
+// H62's banner). The SWEEP is not awaited at module scope (`sweep(options)
+// .catch(…)`), so it takes the import lazily, after this module has finished
+// evaluating — and so does the label (`mailbox-open.mjs`'s MAILBOX_LABEL), from
+// the opener that owns it. The two predicates below take what the sweep read:
+// this file's battery drives them with readings, and `record-recognisers.mjs`'s
+// doorbell battery drives them end-to-end with the real reader, which is the
+// pin that the reading H72 judges IS the reader's.
+//
+// Population and cost: the open-PR listing the sweep already holds (H7's), cut
+// to `pm:mailbox` rows touched inside the window — a new comment bumps a PR's
+// `updated_at`, so a quiet mailbox costs nothing. ONE comment page per touched
+// mailbox, `since` the window start: the only requests this row buys, bounded by
+// the mailbox count. An unread page leaves that mailbox UNJUDGED, and the
+// summary's `read X of Y` says so.
+//
+// The window, MAILBOX_OFF_TABLE_WINDOW_HOURS = 24. A comment is an EVENT, not
+// state a seat can repair — a re-send is forbidden and an edit reaches no reader
+// — so the row lists RECENT bells, every sweep inside a day sees each one, and
+// they age out. Without the window every mailbox's history would fire forever:
+// the pre-`To:` archive alone is refused line by line under today's reader.
+//
+// ⛔ Report-only: no comment, label or body is written. Band `inventory`: a
+// census of one mailbox's recent off-table bells — nothing is stopped (`stall`)
+// and nothing on the board contradicts itself in a way a write repairs
+// (`state`); the repair is the next bell, spelled from the table.
+// ---------------------------------------------------------------------------
+
+/** H72's window: a bell is listed while it is younger than this, then ages out. */
+export const MAILBOX_OFF_TABLE_WINDOW_HOURS = 24;
+
+/** How many off-table comments one H72 row names before it counts the rest. */
+export const H72_LISTED_COMMENTS = 5;
+
+/**
+ * The most comment pages H72 reads per mailbox per sweep — 300 bells in one day on one mailbox, against a
+ * text that caps a seat at five per round. A window that outruns it is left UNJUDGED and counted short.
+ */
+export const H72_COMMENT_PAGE_CEILING = 3;
+
+const H72_WINDOW_MS = MAILBOX_OFF_TABLE_WINDOW_HOURS * 3_600_000;
+
+/**
+ * Does the sweep owe this open PR row a comment page for H72? True for an open `mailboxLabel` row whose
+ * `updated_at` is inside the window — or unreadable, which must not read as quiet.
+ *
+ * @param {object} pr — a row of the open-PR listing.
+ * @param {string} mailboxLabel — `mailbox-open.mjs`'s MAILBOX_LABEL, handed in by the sweep.
+ */
+export function h72NeedsThread(pr, mailboxLabel, nowMs = Date.now()) {
+  if (!pr || pr.state === 'closed' || typeof mailboxLabel !== 'string' || mailboxLabel === '') return false;
+  if (!labelNames(pr).includes(mailboxLabel)) return false;
+  const updated = Date.parse(pr.updated_at ?? '');
+  return !Number.isFinite(updated) || nowMs - updated <= H72_WINDOW_MS;
+}
+
+/** A reader's reason, made safe for a GitHub body: a `<word>` placeholder spelled `WORD`, cut to one short clause. */
+function h72Reason(reason) {
+  const text = String(reason ?? 'no reason given')
+    .replace(/<([a-z][a-z -]*)>/giu, (_, w) => w.trim().toUpperCase().replace(/ +/gu, '-'))
+    .replace(/[<>]/gu, '');
+  return text.length > 140 ? `${text.slice(0, 139)}…` : text;
+}
+
+/**
+ * H72 — null when clean, else the finding sentence.
+ *
+ * @param {object} reading — what `mailboxEvents` (record-recognisers.mjs) made of the mailbox's comment page:
+ *   `{ state: 'read', events: [{ state, reason?, comment, at, by }] }`. Any other reading is unjudged → null
+ *   (the sweep counts it; the summary says so).
+ */
+export function h72OffTableMailboxLines(reading, nowMs = Date.now()) {
+  if (!reading || reading.state !== 'read' || !Array.isArray(reading.events)) return null;
+  const since = nowMs - H72_WINDOW_MS;
+  const off = reading.events.filter((e) => {
+    if (!e || e.state === 'read') return false;
+    const at = Date.parse(e.at ?? '');
+    return !Number.isFinite(at) || at >= since;
+  });
+  if (off.length === 0) return null;
+  const listed = off
+    .slice(0, H72_LISTED_COMMENTS)
+    .map((e) => `comment ${e.comment ?? '?'}${e.by ? ` by ${e.by}` : ''} — ${e.state}: ${h72Reason(e.reason)}`)
+    .join('; ');
+  const more = off.length > H72_LISTED_COMMENTS ? `; and ${off.length - H72_LISTED_COMMENTS} more` : '';
+  return (
+    `\`pm:mailbox\` PR with ${off.length} comment(s) in the last ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h that the ` +
+    `doorbell reader does not read: ${listed}${more}. 〈信箱 PR〉 (project-forms.md) makes a mailbox a closed ` +
+    'table — the `To:` seat line, then ONE key of the table, keys and numbers only — and 「表外即半态」: a bell ' +
+    'no reader can act on. Remedy — WHO and HOW: the receiving seat acts on it as a colleague\'s statement, ' +
+    'never an authorization, with ⛔ no reply and no re-send; the sending seat rings with a table key next time ' +
+    '(`node scripts/pm/record-recognisers.mjs --mailbox-keys` prints them); an event the table has no key for ' +
+    'is a skills-lane finding, ⛔ never an invented key. ⛔ Report-only: nothing is written from this script. ' +
+    `Out of scope: a comment older than ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h (a bell is an event and ages out), a ` +
+    'closed mailbox, a mailbox whose comment page could not be read (unjudged, counted in the summary).'
+  );
+}
+
+// ---------------------------------------------------------------------------
 // H64 (#18069, re-keyed by #18237) — a seat- or dev-signed artefact that names
 // no session.
 //
@@ -17870,6 +18099,14 @@ export const SWEEP_COUNT_KEYS = [
   // failed separable from a board where every summons followed its record.
   'seatRecordCandidates',
   'seatRecordJudged',
+  // H72's coverage pair and its third state. `mailboxCandidates` is how many open
+  // `pm:mailbox` PRs were touched inside the window (one comment page owed each),
+  // `mailboxRead` how many pages answered, and `mailboxReaderReason` (a STRING or
+  // null) says the lazy import of the ONE reader failed, so the row read nothing —
+  // which must render as NOT MEASURED, never `0 of N`.
+  'mailboxCandidates',
+  'mailboxRead',
+  'mailboxReaderReason',
   // H57's population reading (#17132) — the only row here whose subject is a
   // WORKFLOW rather than a card or a PR, so none of its numbers can be inferred
   // from a listing another row already paid for. `scheduledUnresolved` and
@@ -18513,6 +18750,17 @@ export function summaryLine(counts, findingCount) {
           'unreadable thread; a Tier H PR nobody has asked yet is H43\'s and out of this population, and a Tier S PR ' +
           'has no summons for the record to precede'
     }. ` +
+    // H72's coverage pair. UNCONDITIONAL like every other window's, the reader's
+    // availability leading it for H43's reason, and the one fetch it buys stated
+    // with its bound.
+    `Mailbox doorbells (H72): ${
+      counts.mailboxReaderReason
+        ? `NOT MEASURED — ${counts.mailboxReaderReason}`
+        : `comment page read on ${counts.mailboxRead ?? 0} of ${counts.mailboxCandidates ?? 0} open ` +
+          `\`pm:mailbox\` PR(s) touched in the last ${MAILBOX_OFF_TABLE_WINDOW_HOURS}h — ONE page each, \`since\` ` +
+          'the window start, and none for a quiet mailbox. An unread page leaves that mailbox UNJUDGED rather ' +
+          'than clean; a comment older than the window ages out, because a bell is an event and not state'
+    }. ` +
     // H49's coverage pair (#16003). UNCONDITIONAL like every other window's,
     // and it carries the two disclosures this row owes: it fetches NOTHING (the
     // thread is H2's read, bought for exactly this population), and its PR side
@@ -18754,6 +19002,7 @@ export const SUMMARY_CLAUSE_ANCHORS = [
   ['h47Release', 'Release records (H47): '],
   ['h48Brief', 'Maintainer briefs (H48): '],
   ['h69SeatRecord', 'Seat records (H69): '],
+  ['h72Mailbox', 'Mailbox doorbells (H72): '],
   ['h49Partial', 'Partial landings (H49): '],
   ['h50ThreadRead', 'Thread-read fields (H50): '],
   ['h52OpenQuestions', 'Open questions (H52): '],
@@ -19237,6 +19486,9 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H27: 'stall',
   H28: 'stall',
   H32: 'stall',
+  // H71 is a `stall` for H32's reason, card-side: a dispatchable card not moving
+  // on a lane someone is on the clock for.
+  H71: 'stall',
   H33: 'stall',
   H36: 'stall',
   H38: 'stall',
@@ -19269,6 +19521,9 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   // a half-written handoff, readable and repairable from the board by one
   // comment. ⛔ Not `stall`: the PR may be moving perfectly well.
   H69: 'state',
+  // H70 is a `state`: the seat post contradicts the seating rule it was written
+  // under, and the repair is on the board — a routine and one stub line.
+  H70: 'state',
   H49: 'state',
   H50: 'state',
 
@@ -19557,6 +19812,10 @@ export const HALF_STATE_FAMILY_BAND = Object.freeze({
   H11: 'inventory',
   H14: 'inventory',
   H15: 'inventory',
+  // H72 is `inventory`: a census of one mailbox's recent off-table bells. Nothing
+  // is stopped (not `stall`), and no write on the board repairs a sent comment
+  // (not `state`) — the repair is the next bell, spelled from the table.
+  H72: 'inventory',
 });
 
 const FAMILY_BAND_RANK = new Map(HALF_STATE_FAMILY_BANDS.map((b) => [b.name, b.rank]));
@@ -23030,6 +23289,9 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (labels.includes('pm:seat')) {
       const desync = h5SeatStickerDesync(issue);
       if (desync) findings.push([issue, 'H5', desync]);
+      // H70 (#28642) — the post's own body, free: a held seat with no `Patrol:` line.
+      const patrolless = h70HeldSeatWithoutPatrol(issue);
+      if (patrolless) findings.push([issue, 'H70', patrolless]);
       if (h6SeatBodyOversized(issue)) {
         const kb = (Buffer.byteLength(issue.body ?? '', 'utf8') / 1024).toFixed(1);
         findings.push([issue, 'H6', `seat body is ${kb} KB (soft bound ~10 KB) — compact to the six-section current-state template (#7583; edit history is the archive)`]);
@@ -23327,6 +23589,19 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     const idle = h32SeatIdleOverQueue(issue, marker, laneInventory.get(lane) ?? { unclaimed: 0, inFlight: 0 });
     if (idle) findings.push([issue, 'H32', idle]);
   }
+  // H71 (#28642) — the card-side complement of H32, off the same listings: an
+  // unclaimed queue card gone quiet on a lane some 🟢 seat post holds. Free.
+  const onDutyLanes = new Map();
+  for (const issue of seen.values()) {
+    if (!labelNames(issue).includes('pm:seat') || !seatOnDuty(issue)) continue;
+    const { lane, foreign } = seatLane(issue);
+    if (!lane || foreign) continue;
+    onDutyLanes.set(lane, [...(onDutyLanes.get(lane) ?? []), issue.number]);
+  }
+  for (const issue of seen.values()) {
+    const waiting = h71UnclaimedOnDutyLane(issue, onDutyLanes);
+    if (waiting) findings.push([issue, 'H71', waiting]);
+  }
 
   // H7 + H12 + H21 — the PR side. Listed straight from `/pulls` rather than
   // filtered out of the label pages above: PRs carry no `pm:*` label, so the
@@ -23343,6 +23618,54 @@ async function sweepInto(findings, seen, seenPrs, seenMerged, seenUnscoped, seen
     if (negated) findings.push([pr, 'H21', negated]);
     const orphan = h12OrphanLanding(pr);
     if (orphan) findings.push([pr, 'H12', orphan]);
+  }
+
+  // H72 (#28675) — the open mailboxes this listing already holds, read through
+  // the ONE doorbell reader. Both modules are imported HERE, lazily: the reader's
+  // module imports this one at module scope, and this point runs only after this
+  // module finished evaluating (banner above `h72NeedsThread`). A failed import
+  // silences the row, so it is recorded as the reason and rendered NOT MEASURED
+  // rather than as a clean board; a failed page drops that one mailbox, counted.
+  {
+    const nowMs = Date.now();
+    let reader = null;
+    try {
+      const [{ mailboxEvents }, { MAILBOX_LABEL }] = await Promise.all([
+        import('./record-recognisers.mjs'),
+        import('./mailbox-open.mjs'),
+      ]);
+      reader = { mailboxEvents, MAILBOX_LABEL };
+    } catch (err) {
+      stats.mailboxReaderReason = `the doorbell reader did not load (${String(err?.message ?? err).split('\n')[0]})`;
+    }
+    if (reader) {
+      const since = new Date(nowMs - MAILBOX_OFF_TABLE_WINDOW_HOURS * 3_600_000).toISOString();
+      for (const pr of seenPrs.values()) {
+        if (!h72NeedsThread(pr, reader.MAILBOX_LABEL, nowMs)) continue;
+        stats.mailboxCandidates = (stats.mailboxCandidates ?? 0) + 1;
+        // Every page of the window, oldest first as GitHub serves them, so the
+        // NEWEST bells are never the ones a single page leaves out. A window that
+        // outruns the ceiling is UNJUDGED, not judged on its oldest pages.
+        const rows = [];
+        let complete = false;
+        try {
+          for (let page = 1; page <= H72_COMMENT_PAGE_CEILING; page++) {
+            const batch = await rest(`/repos/${OWNER_REPO}/issues/${pr.number}/comments?since=${encodeURIComponent(since)}&per_page=100&page=${page}`);
+            rows.push(...(Array.isArray(batch) ? batch : []));
+            if (!Array.isArray(batch) || batch.length < 100) {
+              complete = true;
+              break;
+            }
+          }
+        } catch {
+          continue;
+        }
+        if (!complete) continue;
+        stats.mailboxRead = (stats.mailboxRead ?? 0) + 1;
+        const offTable = h72OffTableMailboxLines(reader.mailboxEvents(rows), nowMs);
+        if (offTable) findings.push([pr, 'H72', offTable]);
+      }
+    }
   }
 
   // H16 — the only predicate here whose input no listing carries:
@@ -24831,6 +25154,17 @@ export const SELF_TEST_BATTERIES = Object.freeze({
   // cases that must stay quiet, the unread thread that must stay UNJUDGED, and
   // the three verdict-word dialects.
   'H43 hand-off timing': 80,
+  // Registered with the seat-patrol rows (#28642), pin just under the count: two
+  // free readings, each with its firing controls and its out-of-scope arms inside.
+  'H70/H71 seat patrol': 30,
+  // Registered with the mailbox off-table row (#28675), pin just under the count:
+  // the predicate over readings (firing, window boundary, unreadable stamp and
+  // reading, the listing cap), the population predicate, the text's shape, the
+  // band, the coverage clause in its three states, and the lazy one-reader import
+  // read off this file's source. The end-to-end leg — the REAL reader's readings
+  // through this predicate — lives in record-recognisers.mjs's doorbell battery,
+  // because this self-test cannot import that module (H62's banner).
+  'H72 mailbox off-table bells': 20,
 });
 
 /** The floor on the ROSTER itself — how many batteries must be declared at all. */
@@ -28098,6 +28432,88 @@ async function selfTest() {
   b(BATTERY18901, 'H68 band: no code is left unregistered and none registered that the sweep never pushes', familyRegistryCoverage().missing.length + familyRegistryCoverage().extra.length, 0);
   b(BATTERY18901, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY18901) && SELF_TEST_BATTERIES[BATTERY18901] > 0, true);
   b(BATTERY18901, 'floor: the roster now declares TEN batteries, and the floor rose with it', SELF_TEST_BATTERY_FLOOR === 10 && Object.keys(SELF_TEST_BATTERIES).length >= SELF_TEST_BATTERY_FLOOR, true);
+
+  // -- H70 + H71 (#28642): a project seat's patrol line, and the queue card a
+  //    missing patrol leaves waiting. Both free; fixtures are offline rows. ---
+  const BATTERY28642 = 'H70/H71 seat patrol';
+  const seat70 = (title, body, extra = {}) => ({ ...issue(['pm:seat'], [], body, title), state: 'open', ...extra });
+  const HELD70 = '[PM seat] domain:spec · seat 4 — 🟢 marchtian';
+  // The measured spelling on a live stub (the skills seat 2 post): bulleted, bold key.
+  const LIVE_PATROL70 = '- **Patrol:** hourly at :33 past the hour, a scheduled task bound to the seated session.';
+  const STUB70 = '## Current PM — 🟢 marchtian\n\n- **Holder:** `marchtian`\n- **Mailbox:** PR #28676';
+  const row70 = (...args) => String(h70HeldSeatWithoutPatrol(...args) ?? '');
+  b(BATTERY28642, 'H70: a held project seat whose stub has no `Patrol:` line -> finding', typeof h70HeldSeatWithoutPatrol(seat70(HELD70, STUB70)), 'string');
+  b(BATTERY28642, '⭐ H70: the bare protocol spelling `Patrol: TRIGGER_ID · CRON` clears it', h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\nPatrol: trig_01PjbHZiLyrERj8ppEGppxjS · 33 * * * *`)), null);
+  b(BATTERY28642, 'H70: the measured live spelling — bulleted, bold key — is the same line (shared directive reader)', h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\n${LIVE_PATROL70}`)), null);
+  b(BATTERY28642, 'H70: …and a backticked line reads too', h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\n\`Patrol: trig_x · 48 * * * *\``)), null);
+  b(BATTERY28642, '⛔ H70: a `Patrol:` with nothing after it is no line, and a mid-sentence mention is prose — still fires', [typeof h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\nPatrol:`)), typeof h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\nthe seat should write a Patrol: line here`))].join(), 'string,string');
+  b(BATTERY28642, '⛔ H70: a lowercase key is not the line — the spelling stays byte-stable', typeof h70HeldSeatWithoutPatrol(seat70(HELD70, `${STUB70}\npatrol: trig_x · 0 * * * *`)), 'string');
+  b(BATTERY28642, '⛔ H70: a `🟢 Routine` seat is out of scope — its scheduler is its patrol', h70HeldSeatWithoutPatrol(seat70('[PM seat] triage (objectstack-wide) — 🟢 Routine · trig_01 (hourly)', STUB70)), null);
+  b(BATTERY28642, '⛔ H70: the director seat has no patrol by rule — never fires, held or not', h70HeldSeatWithoutPatrol(seat70('[PM seat] director(项目总监) — 🟢 os-zhuang', STUB70)), null);
+  b(BATTERY28642, '⛔ H70: a retitled director post — 总监 inside the seat name, not at its start — is still excluded', h70HeldSeatWithoutPatrol(seat70('[PM seat] 项目总监 — 🟢 os-zhuang', STUB70)), null);
+  b(BATTERY28642, 'H70 control: …and 总监 in the STATUS half does not exclude a lane seat', typeof h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:server — 🟢 os-zhuang · 总监 relay', STUB70)), 'string');
+  b(BATTERY28642, 'H70 control: …and the same holder on a LANE seat fires', typeof h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:server — 🟢 os-zhuang', STUB70)), 'string');
+  b(BATTERY28642, '⛔ H70: a vacant or paused seat is out of scope', [h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:ui · seat 3 — ⏳ vacant', STUB70)), h70HeldSeatWithoutPatrol(seat70('[PM seat] domain:ui · seat 3 — ⏸️ paused', STUB70))].every((v) => v === null), true);
+  b(BATTERY28642, '⛔ H70: a card without `pm:seat`, a closed post, a PR row and a missing row are never judged', [h70HeldSeatWithoutPatrol({ ...seat70(HELD70, STUB70), labels: [{ name: 'domain:spec' }] }), h70HeldSeatWithoutPatrol(seat70(HELD70, STUB70, { state: 'closed' })), h70HeldSeatWithoutPatrol(seat70(HELD70, STUB70, { pull_request: {} })), h70HeldSeatWithoutPatrol(undefined)].every((v) => v === null), true);
+  b(BATTERY28642, 'H70 text: names the line\'s shape WITHOUT angle brackets, both rule homes and the report-only boundary', [row70(seat70(HELD70, STUB70)).includes('`Patrol: TRIGGER_ID · CRON`'), row70(seat70(HELD70, STUB70)).includes('〈座位贴协议〉'), row70(seat70(HELD70, STUB70)).includes('〈座位 Routine 创建〉'), row70(seat70(HELD70, STUB70)).includes('Report-only'), /<[a-z ]+>/.test(row70(seat70(HELD70, STUB70)))].join(), 'true,true,true,true,false');
+  b(BATTERY28642, 'H70 band: registered as `state`, and the sweep really pushes it', `${familyBand('H70')}/${familyRegistryCoverage().emitted.includes('H70')}`, 'state/true');
+
+  const NOW71 = Date.parse('2026-11-01T10:29:00Z');
+  const ON_DUTY71 = new Map([['domain:spec', [18917]]]);
+  // The measured incident: a p1 card entered the queue at 05:56Z on a lane whose seat was held, unclaimed till 10:29Z.
+  const card71 = (labels, extra = {}) => ({ ...issue(labels), number: 28560, state: 'open', updated_at: '2026-11-01T05:56:00Z', ...extra });
+  const row71 = (...args) => String(h71UnclaimedOnDutyLane(...args) ?? '');
+  b(BATTERY28642, 'H71: the incident — unassigned `pm:queue` card on a 🟢 lane, quiet ~4.5h -> finding', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec', 'priority:p1']), ON_DUTY71, NOW71), 'string');
+  b(BATTERY28642, 'H71: …and the row names the lane, its seat post and the age', [row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes('`domain:spec` (#18917)'), row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes('~5h')].join(), 'true,true');
+  b(BATTERY28642, '⭐ H71: inside the window is clean — 1h59m quiet does not fire, 2h01m does', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: '2026-11-01T08:30:00Z' }), ON_DUTY71, NOW71), typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: '2026-11-01T08:28:00Z' }), ON_DUTY71, NOW71)].join(), ',string');
+  b(BATTERY28642, '⛔ H71: a lane with NO 🟢 seat post is out of scope however old the card', h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:ui']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: an ASSIGNED queue card is H24\'s, not this row\'s', h71UnclaimedOnDutyLane({ ...card71(['pm:queue', 'domain:spec']), assignees: [{ login: 'marchtian' }] }, ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a `pm:epic` subtree card and a card not in `pm:queue` are out of scope', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:epic', 'domain:spec']), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:blocked', 'domain:spec']), ON_DUTY71, NOW71)].every((v) => v === null), true);
+  b(BATTERY28642, '⛔ H71: a queued card awaiting a decision (`needs-user-decision`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'needs-user-decision', 'domain:spec']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a queued card in re-triage (`pm:retriage`) is not a candidate', h71UnclaimedOnDutyLane(card71(['pm:queue', 'pm:retriage', 'domain:spec']), ON_DUTY71, NOW71), null);
+  b(BATTERY28642, '⛔ H71: a closed card, a PR row and a missing row are never judged', [h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { state: 'closed' }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { pull_request: {} }), ON_DUTY71, NOW71), h71UnclaimedOnDutyLane(undefined, ON_DUTY71, NOW71)].every((v) => v === null), true);
+  b(BATTERY28642, 'H71: an unreadable `updated_at` must not read as fresh', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:spec'], { updated_at: 'not a date' }), ON_DUTY71, NOW71), 'string');
+  b(BATTERY28642, 'H71: a retired lane spelling reads through the alias map to the lane that absorbed it', typeof h71UnclaimedOnDutyLane(card71(['pm:queue', 'domain:engine']), new Map([['domain:server', [6367]]]), NOW71), 'string');
+  b(BATTERY28642, 'H71 text: the dropped spare-concurrency condition is SAID, and the row stays report-only', ['Spare concurrency is NOT judged', 'Report-only', 'lower bound'].every((s) => row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71).includes(s)), true);
+  b(BATTERY28642, 'seatOnDuty: 🟢 login and 🟢 Routine are on duty; vacant, paused and an unparseable title are not', [seatOnDuty(seat70(HELD70, '')), seatOnDuty(seat70('[PM seat] triage (objectstack-wide) — 🟢 Routine', '')), seatOnDuty(seat70('[PM seat] domain:ui — ⏳ vacant', '')), seatOnDuty(seat70('[PM seat] domain:ui — ⏸️ paused', '')), seatOnDuty(seat70('devx seat registry', ''))].join(), 'true,true,false,false,false');
+  b(BATTERY28642, 'H71 band: registered as `stall`, and the sweep really pushes it', `${familyBand('H71')}/${familyRegistryCoverage().emitted.includes('H71')}`, 'stall/true');
+  b(BATTERY28642, 'H70/H71: neither is a loud finding — they never escalate a sweep', [isLoudFinding(row70(seat70(HELD70, STUB70))), isLoudFinding(row71(card71(['pm:queue', 'domain:spec']), ON_DUTY71, NOW71))].join(), 'false,false');
+  b(BATTERY28642, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28642) && SELF_TEST_BATTERIES[BATTERY28642] > 0, true);
+
+  // -- H72 (#28675): a recent mailbox comment the doorbell reader does not read.
+  //    The readings below are `mailboxEvents`' SHAPE; record-recognisers.mjs's
+  //    doorbell battery drives the real reader through the same predicate. ----
+  const BATTERY28675 = 'H72 mailbox off-table bells';
+  const NOW72 = Date.parse('2026-11-01T14:00:00Z');
+  const ago72 = (minutes) => new Date(NOW72 - minutes * 60_000).toISOString();
+  const ev72 = (state, comment, minutes, extra = {}) => ({ state, comment, at: ago72(minutes), by: 'objectstack-fleet[bot]', ...extra });
+  const REFUSED72 = (comment, minutes) => ev72('refused', comment, minutes, { reason: 'the first line is not `To: <seat>` — a message names the seat it is for, then its key' });
+  const READ72 = (comment, minutes) => ev72('read', comment, minutes, { id: 'notify:seat-online' });
+  const reading72 = (...events) => ({ state: 'read', events, halfStates: events.filter((e) => e.state !== 'read').map((e) => e.comment) });
+  const row72 = (...args) => String(h72OffTableMailboxLines(...args) ?? '');
+  const mailbox72 = (extra = {}) => ({ number: 28646, state: 'open', labels: [{ name: 'pm:mailbox' }, { name: 'pinned' }], updated_at: ago72(30), ...extra });
+  b(BATTERY28675, 'H72: a refused comment inside the window -> finding', typeof h72OffTableMailboxLines(reading72(READ72(1, 60), REFUSED72(2, 90)), NOW72), 'string');
+  b(BATTERY28675, 'H72: an UNREADABLE comment (a table key that does not spell its template) is off-table too', typeof h72OffTableMailboxLines(reading72(ev72('unreadable', 3, 10, { reason: 'does not spell `Notify: ruling · #n · LETTER · record ID`' })), NOW72), 'string');
+  b(BATTERY28675, 'H72: a thread whose every comment reads is clean', h72OffTableMailboxLines(reading72(READ72(1, 60), READ72(2, 5)), NOW72), null);
+  b(BATTERY28675, '⭐ H72: the window boundary — 23h59m old fires, 24h01m has aged out', [typeof h72OffTableMailboxLines(reading72(REFUSED72(4, 24 * 60 - 1)), NOW72), h72OffTableMailboxLines(reading72(REFUSED72(4, 24 * 60 + 1)), NOW72)].join(), 'string,');
+  b(BATTERY28675, 'H72: an unreadable `at` must not read as aged out', typeof h72OffTableMailboxLines(reading72({ ...REFUSED72(5, 10), at: 'not a date' }), NOW72), 'string');
+  b(BATTERY28675, '⛔ H72: a reading that is not `read` (an unreadable thread) is UNJUDGED, never a finding and never clean-by-default text', [h72OffTableMailboxLines({ state: 'unreadable', gaps: ['x'] }, NOW72), h72OffTableMailboxLines(null, NOW72), h72OffTableMailboxLines({ state: 'read' }, NOW72)].every((v) => v === null), true);
+  b(BATTERY28675, 'H72: the row names each comment id, its author, its state and the reader\'s reason', ['comment 2 by objectstack-fleet[bot] — refused:', 'not `To: SEAT`'].every((x) => row72(reading72(REFUSED72(2, 90)), NOW72).includes(x)), true);
+  b(BATTERY28675, `H72: it names at most ${H72_LISTED_COMMENTS} comments and counts the rest`, (() => { const r = row72(reading72(...[1, 2, 3, 4, 5, 6, 7].map((c) => REFUSED72(c, 10))), NOW72); return r.includes('7 comment(s)') && r.includes('comment 5 by') && !r.includes('comment 6 by') && r.includes('and 2 more'); })(), true);
+  b(BATTERY28675, 'H72 text: no angle-bracket fragment survives — a reason\'s `<seat>` is spelled SEAT, a stray bracket dropped', /[<>]/.test(row72(reading72(REFUSED72(2, 9), ev72('refused', 8, 9, { reason: '`Notify: a<b` is not a key of the table' })), NOW72)), false);
+  b(BATTERY28675, 'H72 text: names the table, the printout, the no-re-send remedy and the report-only boundary — and no tracker number', (() => { const r = row72(reading72(REFUSED72(2, 9)), NOW72); return ['〈信箱 PR〉', '--mailbox-keys', 'no re-send', 'Report-only', 'never an authorization'].every((x) => r.includes(x)) && !/#[0-9]/.test(r); })(), true);
+  b(BATTERY28675, 'H72 population: an open `pm:mailbox` PR touched inside the window owes ONE comment page', h72NeedsThread(mailbox72(), 'pm:mailbox', NOW72), true);
+  b(BATTERY28675, '⛔ H72 population: a quiet mailbox (untouched for longer than the window) costs nothing', h72NeedsThread(mailbox72({ updated_at: ago72(24 * 60 + 1) }), 'pm:mailbox', NOW72), false);
+  b(BATTERY28675, '⛔ H72 population: a closed mailbox, a PR without the label and a missing label argument are out', [h72NeedsThread(mailbox72({ state: 'closed' }), 'pm:mailbox', NOW72), h72NeedsThread(mailbox72({ labels: [{ name: 'pinned' }] }), 'pm:mailbox', NOW72), h72NeedsThread(mailbox72(), '', NOW72), h72NeedsThread(undefined, 'pm:mailbox', NOW72)].every((v) => v === false), true);
+  b(BATTERY28675, 'H72 population: an unreadable `updated_at` must not read as quiet', h72NeedsThread(mailbox72({ updated_at: 'never' }), 'pm:mailbox', NOW72), true);
+  b(BATTERY28675, 'H72 constants: a one-day window and a five-comment listing', `${MAILBOX_OFF_TABLE_WINDOW_HOURS}/${H72_LISTED_COMMENTS}`, '24/5');
+  b(BATTERY28675, 'H72 band: registered as `inventory`, and the sweep really pushes it', `${familyBand('H72')}/${familyRegistryCoverage().emitted.includes('H72')}`, 'inventory/true');
+  b(BATTERY28675, 'H72: not a loud finding — it never escalates a sweep', isLoudFinding(row72(reading72(REFUSED72(2, 9)), NOW72)), false);
+  b(BATTERY28675, 'H72: the three count keys ride the enumerated forwarding contract', ['mailboxCandidates', 'mailboxRead', 'mailboxReaderReason'].every((k) => SWEEP_COUNT_KEYS.includes(k)), true);
+  b(BATTERY28675, 'H72 summary: the coverage pair is reported, with the window', saidBy('h72Mailbox', summaryLine({ mailboxRead: 3, mailboxCandidates: 4 }, 0)).includes('comment page read on 3 of 4 open `pm:mailbox` PR(s) touched in the last 24h'), true);
+  b(BATTERY28675, '⛔ H72 summary: a reader that did not load renders NOT MEASURED, never `0 of N`', (() => { const c = saidBy('h72Mailbox', summaryLine({ mailboxReaderReason: 'the doorbell reader did not load (x)', mailboxCandidates: 0 }, 0)); return c.includes('NOT MEASURED — the doorbell reader did not load (x)') && !c.includes('0 of 0'); })(), true);
+  b(BATTERY28675, '⭐ H72: the sweep takes the ONE reader and the opener\'s label LAZILY — `mailboxEvents` from record-recognisers.mjs, MAILBOX_LABEL from mailbox-open.mjs — and spells no doorbell key of its own', (() => { const src = readFileSync(fileURLToPath(import.meta.url), 'utf8'); return src.includes("import('./record-recognisers.mjs')") && src.includes("import('./mailbox-open.mjs')") && !/^import [^\n]*from '\.\/(?:record-recognisers|mailbox-open)\.mjs'/mu.test(src) && !src.includes(['MAILBOX_KEYS', '='].join(' ')); })(), true);
+  b(BATTERY28675, 'floor: this battery is DECLARED on the roster, with a positive pin', Object.prototype.hasOwnProperty.call(SELF_TEST_BATTERIES, BATTERY28675) && SELF_TEST_BATTERIES[BATTERY28675] > 0, true);
 
   // -- H64 — a seat- or dev-signed artefact that names no session (#18069,
   //    re-keyed by #18237) ---------------------------------------------------
@@ -32331,7 +32747,9 @@ Mutual exclusion: \`get_comments\` page 747 → \`[]\`, page 746 = my own R+117 
   const audit18312 = seatWindowAudit();
   t('seat window: exactly ONE page-less comment read exists in this file', audit18312.pagelessPaths.length, 1);
   t('seat window: …and it is the CARD window, keyed by the card number', audit18312.pagelessPaths[0].includes('issue.number'), true);
-  t('seat window: every other comment read names its page', audit18312.commentPaths.length - audit18312.pagelessPaths.length, 3);
+  // ⚠️ RAISED 3 → 4 (#28675), not weakened: H72's mailbox read is the fourth, and it
+  // names its page like the other three (a paged walk of the window, `since` its start).
+  t('seat window: every other comment read names its page', audit18312.commentPaths.length - audit18312.pagelessPaths.length, 4);
   // ⭐ ONE fetch per seat post: one purchase site, behind a memo every reader
   // shares. ⚠️ The needles are ASSEMBLED — a literal one in a fixture would be
   // counted by the file-wide audit it exists to check (`RETIRED_ASSIGNEE_COINAGE`'s

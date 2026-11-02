@@ -94,8 +94,12 @@ export type PackageCustomizationsState =
  *
  * The base's name comes from the package list the area already reads (one
  * request, `packages-io.ts`); when that list cannot name it, the id stands in.
+ *
+ * `refresh` (objectstack#28572): read again whenever it moves (Studio's
+ * publish, which is what changes the served overrides). A re-read keeps the
+ * last answer for the same base until it lands, so the marks do not blink.
  */
-export function usePackageCustomizations(baseId: string | null): PackageCustomizationsState {
+export function usePackageCustomizations(baseId: string | null, refresh: unknown = 0): PackageCustomizationsState {
   const readable = baseId !== null && customizationPackageId(baseId).ok;
   const [answer, setAnswer] = React.useState<{ id: string; state: PackageCustomizationsState } | null>(null);
   React.useEffect(() => {
@@ -119,7 +123,7 @@ export function usePackageCustomizations(baseId: string | null): PackageCustomiz
     return () => {
       cancelled = true;
     };
-  }, [baseId, readable]);
+  }, [baseId, readable, refresh]);
   if (!readable) return { status: 'off' };
   return answer?.id === baseId ? answer.state : { status: 'loading' };
 }

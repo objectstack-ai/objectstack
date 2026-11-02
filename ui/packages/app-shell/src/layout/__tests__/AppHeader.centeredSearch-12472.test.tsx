@@ -41,7 +41,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const route = vi.hoisted(() => ({ pathname: '/apps/crm/lead', search: '' }));
 
@@ -140,11 +140,12 @@ vi.mock('../../providers/AdapterProvider', () => ({
 import { AppHeader, type AppHeaderVariant } from '../AppHeader';
 import { CommandPaletteProvider } from '../../context/CommandPaletteProvider';
 
-const AUTHOR: MePermissionsResponse = {
+const AUTHOR: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   systemPermissions: ['manage_metadata', 'studio.access', 'setup.access'],
   objects: {},

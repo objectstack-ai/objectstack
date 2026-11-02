@@ -30,7 +30,7 @@ const TWO_FACTOR_OFFERED = P`has(features.twoFactor) && features.twoFactor == tr
  * The Account App's "Profile" entry no longer routes here — it points at
  * the `account:profile_card` Console component for a settings-form-style
  * personal profile. This page therefore optimizes for the admin
- * use case: scanning a user's signals (email/verification/role),
+ * use case: scanning a user's signals (email/verification),
  * reviewing related sessions/orgs/oauth/api-keys, and triggering
  * admin actions (ban / impersonate).
  *
@@ -46,10 +46,12 @@ const TWO_FACTOR_OFFERED = P`has(features.twoFactor) && features.twoFactor == tr
  *    change_my_password / resend_verification_email / …`), so they still
  *    appear in the header and its overflow menu.
  *  - `record:highlights` promotes the signals worth scanning at the top:
- *    email, phone, verification state, platform role. Highlight fields
- *    are auto-dropped from the details grid below. 2FA state is not one
- *    of them: it is drawn only in the Security tab, behind the
- *    deployment's `twoFactor` gate (see {@link TWO_FACTOR_OFFERED}).
+ *    email, phone, verification state. Highlight fields are auto-dropped
+ *    from the details grid below. 2FA state is not one of them: it is
+ *    drawn only in the Security tab, behind the deployment's `twoFactor`
+ *    gate (see {@link TWO_FACTOR_OFFERED}). Nor is better-auth's legacy
+ *    `role` scalar (#28105): it is not the platform role, and the page
+ *    does not draw it anywhere.
  *  - The FIRST tab is the details grid: a `record:details` that
  *    re-groups remaining fields into sections (locale on Identity, the ban
  *    state and reason in Account Status) and hides admin-internal columns.
@@ -175,7 +177,10 @@ export const SysUserDetailPage: Page = {
             // No `two_factor_enabled` (#25287): a highlight field has no
             // per-field gate, and on a deployment with 2FA off the chip read a
             // dead "No". The state is drawn in the Security tab instead.
-            fields: ['email', 'phone_number', 'email_verified', 'role'],
+            // No `role` (#28105): better-auth's legacy scalar read as the
+            // "Platform Role" chip, but ObjectStack never writes it and with
+            // the admin plugin on it reads `user` for a platform admin too.
+            fields: ['email', 'phone_number', 'email_verified'],
           },
         },
 
@@ -215,7 +220,7 @@ export const SysUserDetailPage: Page = {
                         'phone_number',
                         'email_verified',
                         'two_factor_enabled', // not a highlight: drawn in the Security tab, behind the 2FA gate
-                        'role',
+                        'role', // not a highlight either: the legacy better-auth scalar, not the platform role (#28105)
                       ],
                       sections: [
                         {

@@ -89,7 +89,21 @@
  * this engine-only reader served it as stored — to an administrator's key, a
  * member being refused by the engine as usual. The family's one projection is
  * now applied here and the evaluate shapes are refused; see
- * {@link storedMetadataBodyRefusal} and {@link serveStoredMetadataRows}. What
+ * {@link storedMetadataBodyRefusal} and {@link serveStoredMetadataRows}.
+ *
+ * ⚠️ A THIRD limb was security as well: the EVALUATE positions of a field
+ * declared `internal: true`. The engine omits such a field from every row, but
+ * it would still evaluate one named in a filter or a sort. Those positions are
+ * refused by the ENGINE itself now, on its own read path, for every caller but
+ * a system context (`QueryEvaluationGate`, `@objectstack/objectql`'s
+ * `internal-field-evaluation-guard.ts`) — the one definition the protocol's
+ * data door asks too. This transport's principal is never a system context
+ * (it is admitted from an API key alone), so `query` and `aggregate` hand the
+ * engine the caller's query and a filter, a sort, a group key or an
+ * aggregation over such a field answers the door's `400 INVALID_FIELD`, word
+ * for word, on this transport as on REST and on the HTTP bridge — whether or
+ * not the host registers a `protocol` service. ⛔ Never a copy of that gate
+ * here: a second definition is the fork this note exists to close. What
  * remains of the divergence above is genuinely not security.
  */
 
@@ -125,16 +139,20 @@ import { recordNotFoundError } from '@objectstack/core';
 // asks beside its exposure gate (`RestServer.enforceApiAccess`, the runtime
 // dispatcher's `refuseUnexposedDataAction`), asked here by the write arms.
 import { apiKeyManagementCredentialRefusal } from '@objectstack/core';
+// [#28715] The engine's own reading of "this field declares options" (its
+// `label()` map is built from it), never a second spelling here.
+import { declaresOptions } from '@objectstack/formula';
 import type { McpDataBridge, McpObjectSummary } from './mcp-http-tools.js';
 import { metaItemsArray, type McpObjectView } from './mcp-server-runtime.js';
 import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
+import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 
 /**
- * [#25138] The object reads this transport asks of the `protocol` service.
- * Every member is optional: the slot is filled by name from a host-owned
+ * [#25138] The object reads this transport asks of the `protocol` service,
+ * and the data door's internal-field gate beside them. Every member is optional: the slot is filled by name from a host-owned
  * registry, and a host may fill it with a partial object (the same duck-typed
  * probe `plugin.ts` applies to `getMetaItems` for the skill read).
  * `getMetaItemForExecution` is the server-only by-name face the REST exposure
@@ -942,6 +960,17 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       };
     },
 
+    // [#28715] From the object `describeObject` reads: the protocol's served
+    // object, where a picklist-bound field carries its list's resolved
+    // `options`, so the served-form predicate is the one that matches.
+    async optionFieldsOf(name: string): Promise<readonly string[] | null> {
+      const def = (await objectView.getObject(name)) as ObjectDef | undefined;
+      if (!def) return null;
+      return Object.entries(def.fields ?? {})
+        .filter(([, f]) => declaresOptions(f))
+        .map(([key]) => key);
+    },
+
     async query(object, opts) {
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.query, context);
@@ -954,6 +983,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // [#21207] …and the same for a stored content-hash column.
       const hashRefusal = storedMetadataHashRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
       if (hashRefusal) throw hashRefusal;
+      // A filter or sort on an `internal: true` field is refused by the engine
+      // itself (see the module header), after the refusals above, as the
+      // data door orders them.
       const read = storedMetadataBodyReadFields(object, opts?.fields);
       const query: Record<string, unknown> = {};
       if (opts?.where) query.where = opts.where;
@@ -989,9 +1021,18 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.create, context);
       enforceApiKeyManagementCredential(object, GATED_ACTIONS.create);
-      const written = (await engine.insert(object, data, { context })) as
-        | Record<string, unknown>
-        | undefined;
+      // [#28782] A record stored under a parent roll-up the engine could not
+      // recompute (`ERR_SUMMARY_RECOMPUTE`, carrying `written`) builds this
+      // bridge's answer and carries it on the refusal (#28781's carrier), so
+      // the `create_record` tool answers the create it is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      let written: Record<string, unknown> | undefined;
+      try {
+        written = (await engine.insert(object, data, { context })) as Record<string, unknown> | undefined;
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+        written = stale.written as Record<string, unknown> | undefined;
+      }
       const record = { ...data, ...(written ?? {}) };
       // [#8497] `written` is the engine's WRITE result, which since #7823 keeps
       // the stored row whole — flagged columns included. This is a generic data
@@ -1003,7 +1044,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // is absent for a package's boot-registered object on an `environmentId`
       // kernel, and with no schema the helper masks and omits nothing.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      return { object, id: record.id, record };
+      const answer = { object, id: record.id, record };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
 
     async update(object, id, data) {
@@ -1024,7 +1067,16 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // `Error`, so a stdio caller sees the same `RECORD_NOT_FOUND` / 404 the
       // HTTP bridge's `callData` path throws for the identical miss.
       if (!existing) throw recordNotFoundError(object, id);
-      await engine.update(object, data, { where: { id }, context });
+      // [#28844] An update the engine applied but whose parent roll-up it could
+      // not recompute (`ERR_SUMMARY_RECOMPUTE`) answers the update it is,
+      // attached to the refusal by #28781's carrier as `create` does; every
+      // other throw, a refusal before the write among them, propagates as is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      try {
+        await engine.update(object, data, { where: { id }, context });
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+      }
       const record = { ...(existing as Record<string, unknown>), ...data };
       // [#8497] The engine's update RESULT is deliberately discarded here (this
       // arm echoes the read-path row plus the caller's own patch), so no STORED
@@ -1036,7 +1088,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // property literally true on every verb of this bridge rather than true-
       // by-argument on one.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      return { object, id, record };
+      const answer = { object, id, record };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
 
     async remove(object, id) {
@@ -1047,9 +1101,18 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const existing = await findById(engine, object, id, context);
       // Same shared envelope as `update`, above.
       if (!existing) throw recordNotFoundError(object, id);
-      await engine.delete(object, { where: { id }, context });
+      // [#28844] As `update`, above: a delete applied under a failing roll-up
+      // answers the delete it is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      try {
+        await engine.delete(object, { where: { id }, context });
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+      }
       // `success`, not `deleted` — the spec's `DeleteDataResponse` key (#5581).
-      return { object, id, success: true };
+      const answer = { object, id, success: true };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
   };
 
@@ -1077,6 +1140,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         aggregations: opts?.aggregations,
       });
       if (hashRefusal) throw hashRefusal;
+      // A filter (`where` or an aggregation's own), a group key or an
+      // aggregation operand on an `internal: true` field is refused by the
+      // engine itself (see the module header).
       // No casts: `McpDataBridge.aggregate` declares the engine's own
       // `EngineAggregateOptions` slices since #8032, so the honest call
       // compiles — the two `as unknown as` casts this line used to carry

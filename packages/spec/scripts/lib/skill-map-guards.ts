@@ -280,6 +280,28 @@ export const TRANSITIVE_ALLOWLIST: Record<string, readonly string[]> = {
     // declaration those keys must match -- lives here.
     'data/field.zod.ts',
   ],
+  // The closure as it stood before #28508. `api/auth.zod.ts` (core) gained one
+  // import edge then -- `security/permission.zod.ts`, for the effective object
+  // permissions `MePermissionsAuthenticatedResponseSchema` carries -- and that
+  // edge alone dragged 22 pointers into this index (fields, objects, views,
+  // actions, RLS, expressions) that the objectstack-api SKILL.md does not teach.
+  // These are the transitive pointers the index already published; a new one
+  // joins by a row here, not by an import edge.
+  'objectstack-api': [
+    'api/contract.zod.ts',
+    'api/error-code-ledger.zod.ts',
+    'api/realtime-shared.zod.ts',
+    'data/data-engine.zod.ts',
+    'data/filter.zod.ts',
+    'data/query.zod.ts',
+    'kernel/execution-context.zod.ts',
+    'kernel/metadata-protection.zod.ts',
+    'security/explain.zod.ts',
+    'shared/duration.zod.ts',
+    'shared/epoch.zod.ts',
+    'shared/http.zod.ts',
+    'shared/suggestions.zod.ts',
+  ],
 };
 
 /** Whether a `packages/spec/src`-relative path exists on disk; injected so the guard stays pure. */

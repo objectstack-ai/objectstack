@@ -30,7 +30,7 @@ import {
   RelatedRecordActionsProvider,
   type RelatedRecordActionsValue,
 } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordRelatedListRenderer } from '../renderers/record-related-list';
 
 const h = vi.hoisted(() => ({ captured: null as any }));
@@ -52,16 +52,17 @@ const SHAPE = {
   full: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true },
 } as const;
 
-function answer(bits: Record<string, unknown>): MePermissionsResponse {
+function answer(bits: Record<string, unknown>): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u-pin',
     tenantId: null,
-    roles: ['member'],
+    positions: ['member'],
+    hasAnyQueue: false,
     permissionSets: ['member'],
     objects: { [JUNCTION]: bits },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 const ds = { find: vi.fn(async () => []), delete: vi.fn(async () => undefined) };

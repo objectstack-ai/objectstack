@@ -428,13 +428,15 @@ describe('a deep-link miss and an empty list show no "no designers" notice (obje
     server.active.delete('flow/qa_urgent_alert_clone');
     renderAt('/studio/~org/automations');
 
+    // ADR-0146 D11 — the sentence names Studio's New similar, not the
+    // retired Setup › Packaged automation page.
     await screen.findByText(
-      'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
+      'No flows outside a package. To change a packaged flow, open its package and use New similar.',
       undefined,
       { timeout: 8000 },
     );
     // objectui#12514 — the sentence is the content column's one block now.
-    expect(screen.getByTestId('auto-empty')).toHaveTextContent('No flows outside a package yet.');
+    expect(screen.getByTestId('auto-empty')).toHaveTextContent('No flows outside a package.');
     expect(getMetadataPreview('flow')).toBe(FlowPreview);
     expect(document.body.textContent).not.toContain(NO_DESIGNERS);
     expect(document.body.textContent).not.toContain('The link names flow');

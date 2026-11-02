@@ -97,7 +97,7 @@ vi.mock('./MetadataInspector', () => ({
 import { toast } from 'sonner';
 import { I18nProvider } from '@object-ui/i18n';
 import { MetadataCtx } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordDetailView } from './RecordDetailView';
 
 type Pack = {
@@ -252,16 +252,17 @@ function metadataFor(pages: unknown[]) {
 const FULL = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
 
 /** The caller's `/me/permissions` answer: full on the record's object, `bits` on `sys_comment`. */
-function answer(bits: Record<string, unknown> = FULL): MePermissionsResponse {
+function answer(bits: Record<string, unknown> = FULL): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: auth.user.id,
     tenantId: null,
-    roles: ['member'],
+    positions: ['member'],
+    hasAnyQueue: false,
     permissionSets: ['member'],
     objects: { [OBJECT_NAME]: FULL, [COMMENT]: bits },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 interface MountOptions {

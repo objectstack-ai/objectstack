@@ -5,7 +5,6 @@ export { useNavActionDispatch } from './useNavActionDispatch.js';
 export { useNavPins } from './useNavPins.js';
 export {
   useNavigationSync,
-  NavigationSyncEffect,
   generateNavId,
   addNavigationItem,
   removeNavigationItems,

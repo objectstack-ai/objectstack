@@ -962,6 +962,18 @@ export default defineConfig({
         find: /^@objectstack\/plugin-sharing$/,
         replacement: path.resolve(__dirname, '../plugins/plugin-sharing/src/index.ts'),
       },
+      // `commands/migrate/packageless-overlays.ts` mounts a live
+      // `@objectstack/service-package` `PackageServicePlugin` under `--apply`, so
+      // the `.custom` pair the ceremony creates persists to `sys_packages`;
+      // `packageless-overlays.integration.test.ts` boots it the same way.
+      // Resolved to source for the reason its neighbours give. Anchored
+      // (service-package's bare entry is the one imported).
+      // `check:test-source-alias` names this import and is the gate that fails
+      // without the entry.
+      {
+        find: /^@objectstack\/service-package$/,
+        replacement: path.resolve(__dirname, '../services/service-package/src/index.ts'),
+      },
     ],
   },
   test: {

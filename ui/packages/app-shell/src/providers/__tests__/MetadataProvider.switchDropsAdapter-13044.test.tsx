@@ -114,6 +114,10 @@ describe('a switch drops the adapter metadata the provider read through it (obje
     authState.activeOrganization = { id: 'org_a' };
     hold.add(VIEW_URL);
     const m = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand, no longer at mount.
+    act(() => {
+      void m.ctx().ensureType!('view');
+    });
     await waitFor(() => expect(count(calls, VIEW_URL)).toBe(1));
 
     authState.activeOrganization = { id: 'org_b' };
@@ -140,9 +144,13 @@ describe('a switch drops the adapter metadata the provider read through it (obje
       authState.activeOrganization = { id: 'org_a' };
       authState.user = { id: 'user_a' };
       const m = mount(adapter);
+      // objectstack#28645 — the provider reads the view list on demand, no longer at mount.
+      act(() => {
+        void m.ctx().ensureType!('view');
+      });
       await waitFor(() => expect(count(calls, VIEW_URL)).toBe(1));
       await waitFor(() => expect(m.ctx().getTypeStatus!('view')).toBe('ready'));
-      // Settled within the open: the eager read's answer serves the list read.
+      // Settled within the open: the provider read's answer serves the list read.
       await adapter.listViews('account');
       expect(count(calls, VIEW_URL)).toBe(1);
 

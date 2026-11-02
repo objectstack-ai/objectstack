@@ -32,7 +32,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 const probe = vi.hoisted(() => ({
   props: null as null | Record<string, unknown>,
@@ -78,11 +78,12 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; create: bool
   { shape: 'full', bits: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true }, create: true, update: true },
 ];
 
-const envelope = (bits: Record<string, unknown>): MePermissionsResponse => ({
+const envelope = (bits: Record<string, unknown>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits as never },
   fields: {},

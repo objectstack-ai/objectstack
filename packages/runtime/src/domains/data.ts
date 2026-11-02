@@ -47,6 +47,39 @@ import { validationFailure, fieldsFromZodIssues, VALIDATION_FAILED_STATUS } from
 // [#23491] The request contracts `RestServer`'s twin routes validate (#3899).
 // [#23574] …the query's too.
 import { CreateDataRequestSchema, FindDataRequestSchema, UpdateDataRequestSchema } from '@objectstack/spec/api';
+// [#28661] A write that landed answers its success even when a parent's
+// roll-up could not be recomputed after it — the answer the protocol attached
+// to the engine's refusal, the body `RestServer`'s twin routes answer too.
+import { earnedAnswerOf, staleSummaryAnswerLines } from '@objectstack/types';
+
+/**
+ * [#28661] Run one `/data` write through `callData`, answering the body the
+ * write EARNED when it landed but a parent's roll-up summary could not be
+ * recomputed after it (objectql's `ERR_SUMMARY_RECOMPUTE`, carrying the answer
+ * `ObjectStackProtocolImplementation` built). That refusal answered `500`, so
+ * a client was told a landed write failed and a retried create duplicated
+ * it. The stale column is logged at `error`, once per field per process
+ * (`staleSummaryAnswerLines`). Every other error, and the refusal when no
+ * answer rides on it (the ObjectQL fallback, which builds none), propagates
+ * unchanged. `RestServer`'s twin is `earnedWriteDespiteStaleSummary`.
+ */
+async function callDataWrite(
+    deps: DomainHandlerDeps,
+    objectName: string,
+    call: () => Promise<unknown>,
+): Promise<unknown> {
+    try {
+        return await call();
+    } catch (e) {
+        const earned = earnedAnswerOf(e);
+        if (!earned) throw e;
+        const log = deps.logger && typeof deps.logger.error === 'function'
+            ? (line: string) => deps.logger.error(`[HttpDispatcher] ${line}`)
+            : (line: string) => console.error(`[HttpDispatcher] ${line}`);
+        for (const line of staleSummaryAnswerLines(e as Parameters<typeof staleSummaryAnswerLines>[0], objectName)) log(line);
+        return earned;
+    }
+}
 
 /**
  * [#23265] The request's `If-Match`, from either header shape a host hands
@@ -362,8 +395,8 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             const parsedUpdate = UpdateDataRequestSchema.safeParse(updateInput);
             if (!parsedUpdate.success) return requestSchemaRefusal(deps, 'update', parsedUpdate.error.issues, updateInput);
             // Spec: returns UpdateDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, _context, 'update', updateInput,
-                _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await callDataWrite(deps, objectName, () => actionExec.callData(deps, _context, 'update', updateInput,
+                _context.dataDriver, _context.environmentId, _context.executionContext));
             return { handled: true, response: deps.success(result) };
         }
 
@@ -413,11 +446,11 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
                     response: deps.errorFromThrown(validationFailure(versionRefusal, []), VALIDATION_FAILED_STATUS),
                 };
             }
-            const result = await actionExec.callData(deps, _context, 'delete', {
+            const result = await callDataWrite(deps, objectName, () => actionExec.callData(deps, _context, 'delete', {
                 object: objectName,
                 id,
                 ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
-            }, _context.dataDriver, _context.environmentId, _context.executionContext);
+            }, _context.dataDriver, _context.environmentId, _context.executionContext));
             return { handled: true, response: deps.success(result) };
         }
     } else {
@@ -474,7 +507,7 @@ export async function handleDataRequest(deps: DomainHandlerDeps, path: string, m
             const parsedCreate = CreateDataRequestSchema.safeParse(createInput);
             if (!parsedCreate.success) return requestSchemaRefusal(deps, 'create', parsedCreate.error.issues, createInput);
             // Spec: returns CreateDataResponse = { object, id, record }
-            const result = await actionExec.callData(deps, _context, 'create', createInput, _context.dataDriver, _context.environmentId, _context.executionContext);
+            const result = await callDataWrite(deps, objectName, () => actionExec.callData(deps, _context, 'create', createInput, _context.dataDriver, _context.environmentId, _context.executionContext));
             const res = deps.success(result);
             res.status = 201;
             return { handled: true, response: res };

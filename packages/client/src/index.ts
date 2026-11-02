@@ -31,6 +31,7 @@ import {
   PublishPackageDraftsResponse,
   LoginRequest,
   SessionResponse,
+  MePermissionsResponse,
   GetPresignedUrlRequest,
   PresignedUrlResponse,
   CompleteUploadRequest,
@@ -542,8 +543,8 @@ export interface CloneDataResult<T = any> {
    * a non-system clone cannot seed a static `readonly` column, whether the value
    * was COPIED from the source row or supplied through `overrides`, so those
    * keys are dropped and the field re-derives its default. Present only when
-   * ≥1 field was dropped; the clone still succeeded. Body only: unlike `create`,
-   * the clone route sets no `X-ObjectStack-Dropped-Fields` header.
+   * ≥1 field was dropped; the clone still succeeded. REST also mirrors this in
+   * the `X-ObjectStack-Dropped-Fields` response header, as it does for `create`.
    */
   droppedFields?: DroppedFieldsEvent[];
   /**
@@ -4989,6 +4990,26 @@ export class ObjectStackClient {
             headers: { Origin: this.baseUrl },
         });
         return normalizeSessionResponse(await res.json());
+    },
+
+    /**
+     * [#28709] The caller's effective permissions: `GET /auth/me/permissions`,
+     * the body the console reads once per session for its whole permission
+     * layer, declared strictly by `MePermissionsResponseSchema`
+     * (`@objectstack/spec/api`). Served by plugin-hono-server, not better-auth.
+     *
+     * Discriminate on `authenticated`: an anonymous caller RESOLVES
+     * `{ authenticated: false }` (the route answers it at 200, so a client can
+     * tell "signed out" from a fault), unlike {@link me}, which rejects. The
+     * authenticated answer carries `hasAnyQueue` among the rest;
+     * `systemPermissions` / `tabPermissions` are absent only on a server
+     * without SecurityPlugin, where absent means unknown and an empty array
+     * means none.
+     */
+    mePermissions: async (): Promise<MePermissionsResponse> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/me/permissions`);
+        return (await res.json()) as MePermissionsResponse;
     },
 
     /**

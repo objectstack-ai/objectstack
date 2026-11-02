@@ -28,7 +28,7 @@ import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-li
 // at once and the parse-back below reads the same module.
 import ExcelJS from 'exceljs';
 import { I18nProvider } from '@object-ui/i18n';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { DatasetReportRenderer } from '../DatasetReportRenderer';
 
 const OBJECT = 'crm_opportunity';
@@ -103,12 +103,13 @@ afterEach(() => {
   expect(strayUrls).toEqual([]);
 });
 
-function permissions(apiOperations?: string[]): MePermissionsResponse {
+function permissions(apiOperations?: string[]): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'usr_1',
     tenantId: null,
-    roles: [],
+    hasAnyQueue: false,
+    positions: [],
     permissionSets: [],
     objects: { [OBJECT]: { allowRead: true, ...(apiOperations ? { apiOperations } : {}) } },
     fields: {},

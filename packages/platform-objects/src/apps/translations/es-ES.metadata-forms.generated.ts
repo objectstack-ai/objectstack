@@ -515,6 +515,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       }
     }
   },
+  object_extension: {
+    label: "Extensión de Objeto",
+    description: "Campos y reglas que un paquete añade a un objeto que define otro paquete"
+  },
   field: {
     label: "Campo",
     sections: {
@@ -1810,6 +1814,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       submitText: {
         label: "Etiqueta del botón de envío",
         helpText: "Etiqueta del botón de envío en el diálogo de parámetros de esta acción, el verbo que ejecuta el botón (p. ej., \"Enviar\", \"Registrar llamada\"). Solo para una acción que recoge parámetros. Déjalo vacío para mostrar \"Confirmar\"."
+      },
+      cancelText: {
+        label: "Etiqueta del botón de cancelar",
+        helpText: "Etiqueta del botón para descartar el diálogo que abre esta acción antes de ejecutarse, su diálogo de confirmación o su diálogo de parámetros. Cuando el verbo de la propia acción es \"Cancelar …\", indica lo que se conserva al descartar (p. ej., \"Conservar invitación\"). Solo para una acción que pide confirmación o recoge parámetros. Déjalo vacío para mostrar \"Cancelar\"."
       },
       confirmText: {
         label: "Texto de confirmación",

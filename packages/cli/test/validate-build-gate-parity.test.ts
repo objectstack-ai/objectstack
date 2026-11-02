@@ -197,6 +197,31 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // here — deleted there rather than reworded, for the reason the
   // `runPerPackageAuthoringRules` row above gives.
   'findOverrideDeclarationRefusals',
+  // [ADR-0146 D10, #28564, #28727] The `__c` extension-field reservation: a
+  // field spelled `__c` only in a base's paired `.custom` package, and every
+  // `objectExtensions[].fields` key of a `.custom` pair suffixed, judged by
+  // the save and install doors' own `judgeExtensionFieldSuffix`. Not a
+  // registry rule: the WALK decides which package each field is declared in —
+  // each `packages[]` entry under its own id, or the stack under
+  // `manifest.id` — and the verdict turns on that package's id, which the
+  // union stack a registry rule is handed does not carry.
+  //
+  // ⭐ This row is the #28564 VALIDATE_ONLY_GATES entry CLOSED. That entry read
+  // "os build is a further point it did not name", and it was right: the
+  // build emitted an artifact the marketplace install and the save and
+  // publish doors refused later. `compile.ts` now makes the same call
+  // (#28727), so the row moved here — deleted there rather than reworded, for
+  // the reason the `runPerPackageAuthoringRules` row above gives.
+  'findExtensionFieldSuffixRefusals',
+  // [#28893] Flow region shape (ADR-0031): every `loop` body, `parallel`
+  // branch and `try_catch` region single-entry/single-exit and acyclic, and a
+  // `parallel` with two branches, judged by the automation engine's own
+  // registration call (`FlowSchema`, then the spec's `validateControlFlow`).
+  // Wired into both commands in one card. Not a registry rule today, so
+  // `os lint` is blind to it: the parity test pins that gap
+  // (`authoring-rule-command-parity.test.ts`, `OUTSIDE_THE_TABLE`), and moving
+  // it into `authoring-rules.ts` is the reported follow-up.
+  'findFlowRegionRefusals',
 ];
 
 /**
@@ -235,13 +260,19 @@ const BUILD_ONLY_GATES: Readonly<Record<string, string>> = {
  * SHARED_NON_REGISTRY_GATES instead.
  *
  * EMPTY is this ledger's steady state: every row is a gap the build carries.
- * Both rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
- * gained the call: `findViewContainerNameRefusals` (#20331 → #20393) and
- * `findOverrideDeclarationRefusals` (#28410 → #28643). The ledger stays,
- * empty, because it is the only honest place the closed roster has for the
- * next validate-only gate.
+ * Three rows it has held moved to SHARED_NON_REGISTRY_GATES when `compile.ts`
+ * gained the call: `findViewContainerNameRefusals` (#20331 → #20393),
+ * `findOverrideDeclarationRefusals` (#28410 → #28643) and
+ * `findExtensionFieldSuffixRefusals` (#28564 → #28727). It holds one today,
+ * `findFieldPatchTargetRefusals` (#28565), whose card did not name the build.
  */
-const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {};
+const VALIDATE_ONLY_GATES: Readonly<Record<string, string>> = {
+  findFieldPatchTargetRefusals:
+    '[ADR-0146 D10, second rule] An object extension\'s `fieldPatches` naming a field or option value its ' +
+    'in-stack target lacks, judged by the marketplace install door\'s own `fieldPatchTargetRefusals`. Wired ' +
+    'where the rollout card asked for it (`os validate` and the install door); `os build` still emits such an ' +
+    'artifact, which the install door then refuses — the build-side gap, reported rather than closed here.',
+};
 
 /**
  * Everything else the two commands call, and the reason each one is NOT an

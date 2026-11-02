@@ -181,6 +181,18 @@ function builtinNearMissHint(key: string, allow: ReadonlySet<string>): string {
  * exactly as before and additionally NAMED with it — see
  * {@link builtinNearMissHint}. Message copy only; the accepted set is the
  * declared params plus `allow`, unchanged.
+ *
+ * ## Several declarations of one name: required only when every one is
+ *
+ * An action may declare the same request key more than once, each declaration
+ * shown under its own `visible` gate, because a param's `required` is a static
+ * boolean: `sys_user.create_user` declares `email` optional while phone sign-in
+ * is on and required while it is off (#28280). This check reads neither
+ * `visible` nor `features`, so it cannot tell which declaration the caller saw.
+ * It therefore treats the name as required only when EVERY declaration of it is
+ * required, and judges the value shape by the FIRST declaration. The endpoint
+ * behind the action still refuses a value it needs: Create User answers a blank
+ * email with phone sign-in off with its own 400.
  */
 export function validateActionParams(
   resolved: ResolvedActionParam[],
@@ -189,7 +201,11 @@ export function validateActionParams(
 ): ActionParamIssue[] {
   const issues: ActionParamIssue[] = [];
   const declared = new Map<string, ResolvedActionParam>();
-  for (const p of resolved) if (p?.name) declared.set(p.name, p);
+  for (const p of resolved) {
+    if (!p?.name) continue;
+    const first = declared.get(p.name);
+    declared.set(p.name, first ? { ...first, required: Boolean(first.required && p.required) } : p);
+  }
   const allow = new Set<string>(opts?.builtinKeys ?? ACTION_PARAM_BUILTIN_KEYS);
 
   for (const p of declared.values()) {

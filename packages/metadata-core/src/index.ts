@@ -144,3 +144,9 @@ export * from './anonymous-form-intake.js';
 // load-time diagnostics (`@objectstack/metadata-protocol`), so the diagnostics
 // judge a field as its author wrote it.
 export * from './resolved-picklist-options.js';
+
+// [ADR-0146 D10, second rule] The target check of an object extension's
+// `fieldPatches` — one judge for the marketplace install door, `os validate`
+// and the registry fold's boot log, so the three cannot disagree about which
+// patch names a field or option its target lacks.
+export * from './extension-field-patch-targets.js';

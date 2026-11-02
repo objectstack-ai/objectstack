@@ -151,11 +151,17 @@ function isPlainRecord(value: unknown): value is Record<string, unknown> {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** An element's identity for an array hop: a non-empty string `id`, or none. */
+/**
+ * An element's identity for an array hop: a non-empty string `id`; for an
+ * element with no `id`, a non-empty string `key` (a connector action's machine
+ * name); otherwise none.
+ */
 function identityOf(element: unknown): string | undefined {
     if (!isPlainRecord(element)) return undefined;
     const id = element.id;
-    return typeof id === 'string' && id !== '' ? id : undefined;
+    if (typeof id === 'string' && id !== '') return id;
+    const key = element.key;
+    return typeof key === 'string' && key !== '' ? key : undefined;
 }
 
 /**
@@ -190,7 +196,9 @@ function elementWithIdentity(
  * into an identity, and every body — served and incoming — is then walked by
  * that identity, never by the index. Two kinds of identity:
  *
- *  - **the element's own `id`** (`{ elementId }`) — a flow node;
+ *  - **the element's own `id`** (`{ elementId }`) — a flow node — or, for an
+ *    element with no `id`, its own `key` — a connector action, whose `key` is
+ *    its machine name;
  *  - **for an element with no `id`, the identified element below it on the
  *    same path** (`{ anchor }`, #20590). A `parallel` block's branch carries no
  *    `id`, and a credential inside one sits at
@@ -201,8 +209,8 @@ function elementWithIdentity(
  *    is that walk: the hops from inside the element down to, and including,
  *    the first identified element beneath it.
  *
- * An array hop that reaches neither — an element with no `id` and no
- * identified element below it on the path, or an `id` shared with a sibling —
+ * An array hop that reaches neither — an element with no `id` or `key` and no
+ * identified element below it on the path, or an identity shared with a sibling —
  * resolves to nothing, and the path is skipped.
  */
 type PathHop =
@@ -516,6 +524,41 @@ export function redactedPathsCarriedForward(type: string, incoming: unknown, sto
  * {@link redactedPathsCarriedForward}: the grafted body, and where each graft
  * landed. `landed` is empty exactly when `out` is `incoming` by reference.
  */
+/**
+ * A `redactedKeys` entry resolved against the STORED body into the container
+ * hops that reach the key and the key itself — which may carry dots.
+ *
+ * `redactedKeys` joins each path on dots, so a key whose own name carries a dot
+ * (a connector root key spelled `v1.url`, or one held under `providerConfig`)
+ * is indistinguishable from a nested path by the string alone. The two are told
+ * apart by what the stored body actually holds, trying the partitions in a
+ * fixed order: the standard split FIRST — every dot a separator, the only
+ * reading before dotted keys were withheld — then progressively longer trailing
+ * keys, ending with the whole string as a single key. The first partition whose
+ * stored container holds the key wins, so a nested position always shadows a
+ * dotted-key alias of the same spelling (the alias is then left to the author's
+ * word, never carried onto the wrong position). `undefined` when no partition
+ * reaches a present value — the caller reads that as "nothing at rest to carry".
+ */
+function resolveRedactedPath(
+    stored: unknown,
+    path: string,
+): { hops: PathHop[]; key: string } | undefined {
+    const segments = path.split('.');
+    for (let cut = segments.length - 1; cut >= 0; cut -= 1) {
+        const key = segments.slice(cut).join('.');
+        // resolveHops reads the last entry as the key and the rest as container
+        // hops, so a placeholder last entry leaves exactly `cut` container hops.
+        const hops = resolveHops(stored, [...segments.slice(0, cut), key]);
+        if (!hops) continue;
+        const container = containerAt(stored, hops);
+        if (container && Object.prototype.hasOwnProperty.call(container, key) && container[key] !== undefined) {
+            return { hops, key };
+        }
+    }
+    return undefined;
+}
+
 function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out: T; landed: string[] } {
     const unchanged = { out: incoming, landed: [] as string[] };
     if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return unchanged;
@@ -535,11 +578,15 @@ function planCarryForward<T>(type: string, incoming: T, stored: unknown): { out:
         // Dotted, item-relative — the registry's documented contract for
         // `redactedKeys` (`config.password`; an array hop is an index into the
         // stored body, `nodes.0.config.secret`, resolved to an identity by
-        // {@link resolveHops}).
-        const segments = path.split('.');
-        const key = segments[segments.length - 1] as string;
-        const hops = resolveHops(stored, segments);
-        if (!hops) continue;
+        // {@link resolveHops}). A key whose OWN name carries a dot (a connector
+        // root key spelled `v1.url`, or one under `providerConfig`) cannot be
+        // told from a nested path by the join alone, so the split is tried
+        // first — every dot a separator, the existing reading — and only when
+        // that resolves to nothing at rest is a longer trailing key tried,
+        // ending with the whole string as a single key. {@link resolveRedactedPath}.
+        const resolved = resolveRedactedPath(stored, path);
+        if (!resolved) continue;
+        const { hops, key } = resolved;
 
         const storedParent = containerAt(stored, hops);
         const storedValue = storedParent?.[key];

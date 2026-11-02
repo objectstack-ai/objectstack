@@ -83,3 +83,17 @@ export function beginLoadRun(
 export function shownLoadFailure(failures: LoadFailures): Error | null {
   return failures.schema || failures.record;
 }
+
+/**
+ * The record read answered "no such record": `DataSource.findOne` resolves
+ * `null` for it (the ObjectStack adapter maps the server's 404 to that). An
+ * edit form has nothing to edit then, so the read is a failure like any other,
+ * drawn as the record not-found state rather than as an empty form whose
+ * submit can only be refused.
+ */
+export class RecordNotFoundError extends Error {
+  constructor(readonly objectName: string, readonly recordId: string) {
+    super(`Record ${recordId} not found in ${objectName}`);
+    this.name = 'RecordNotFoundError';
+  }
+}

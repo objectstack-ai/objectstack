@@ -23,9 +23,15 @@
 //    (the CONTROL that the field is sortable for a caller who may read it).
 //
 // This file writes /meta (the zh-CN member), so it boots its own showcase.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the zh-CN member is authored into the showcase's `.custom` pair. The base
+// ships `en-US` only, so the member declares no `overrides`: it is the pair's
+// own member, and the by-name read serves it the same.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
+import { ensurePair, inPair } from './customization-pair.js';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
@@ -85,7 +91,8 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
       expect(read.status).toBe(200);
       const shipped: Record<string, unknown> = ((await read.json()) as any).item;
       const authored = Object.fromEntries(Object.entries(shipped).filter(([k]) => !k.startsWith('_')));
-      const res = await stack.apiAs(admin, 'PUT', `/meta/email_template/${TEMPLATE}`, {
+      await ensurePair(stack, admin, PKG);
+      const res = await stack.apiAs(admin, 'PUT', inPair(`/meta/email_template/${TEMPLATE}`, PKG), {
         ...authored, locale: 'zh-CN', subject: ZH_SUBJECT, bodyText: 'mrd-live zh-CN body', bodyHtml: '<p>mrd-live zh-CN body</p>',
       });
       expect(res.status, await res.clone().text()).toBe(200);
@@ -162,6 +169,53 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
 
     it('CONTROL — the admin\'s definition offers budget as sortable', async () => {
       expect((await sortability(admin)).budget?.sortable).toBe(true);
+    });
+  });
+
+  // A client that serialises arrays qs-style sends `?id[]=NAME` or
+  // `?id[0]=NAME`. The adapter hands the key through as spelled (`id[]`), so
+  // the app list's one-app filter never read it and the caller's whole list
+  // came back for a request that asked for one app. It is refused like the
+  // empty `?id=`: 400 VALIDATION_ERROR naming the key, no list.
+  describe('GET /meta/app with a bracketed `id` key is refused, never answered with the whole list', () => {
+    const appNames = (body: any): string[] => ((Array.isArray(body) ? body : body?.items) ?? []).map((a: any) => a?.name);
+
+    for (const spelling of ['id[]', 'id[0]']) {
+      it(`?${spelling}=setup: 400 VALIDATION_ERROR naming the key, for the admin and for a member`, async () => {
+        for (const [who, token] of [['admin', admin], ['member', liaison]] as const) {
+          const res = await stack.apiAs(token, 'GET', `/meta/app?${spelling}=setup`);
+          const body: any = await res.json();
+          expect({ who, status: res.status, code: codeOf(body) }, JSON.stringify(body).slice(0, 400))
+            .toEqual({ who, status: 400, code: 'VALIDATION_ERROR' });
+          expect(messageOf(body)).toMatch(new RegExp(`^Query parameter '${spelling.replace(/[[\]]/g, '\\$&')}' names no app`));
+          expect(appNames(body)).toEqual([]);
+        }
+      });
+    }
+
+    it('CONTROLS — ?id=NAME is one app, ?id= and a repeated id are 400, no id is the pruned list', async () => {
+      const one = await stack.apiAs(admin, 'GET', '/meta/app?id=showcase_app');
+      expect(one.status).toBe(200);
+      expect(appNames(await one.json())).toEqual(['showcase_app']);
+      // The filter narrows: `setup` names no app on this stack, so `?id=setup`
+      // is an empty list where `?id[]=setup` answered the whole one.
+      const none = await stack.apiAs(admin, 'GET', '/meta/app?id=setup');
+      expect(none.status).toBe(200);
+      expect(appNames(await none.json())).toEqual([]);
+      for (const query of ['id=', 'id=showcase_app&id=showcase_app']) {
+        const res = await stack.apiAs(admin, 'GET', `/meta/app?${query}`);
+        expect({ query, status: res.status, code: codeOf(await res.json()) })
+          .toEqual({ query, status: 400, code: 'VALIDATION_ERROR' });
+      }
+      const adminList = await stack.apiAs(admin, 'GET', '/meta/app');
+      const memberList = await stack.apiAs(liaison, 'GET', '/meta/app');
+      expect(adminList.status).toBe(200);
+      expect(memberList.status).toBe(200);
+      const adminApps = appNames(await adminList.json());
+      const memberApps = appNames(await memberList.json());
+      expect(adminApps, JSON.stringify({ adminApps, memberApps })).toContain('showcase_app');
+      expect(memberApps, JSON.stringify({ adminApps, memberApps })).toContain('showcase_app');
+      expect(memberApps, 'a member never sees setup').not.toContain('setup');
     });
   });
 });

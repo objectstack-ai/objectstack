@@ -206,8 +206,9 @@ describe('the fold`s output is authorable (objectui#5435)', () => {
 
       // `showGroup: ua?.group !== false`      — default ON
       expect(defaults.group).toBe(true);
-      // `showHideFields: ua?.hideFields === true` — default OFF (opt-in)
-      expect(defaults.hideFields).toBe(false);
+      // `showHideFields: ua?.hideFields !== false` — default ON since
+      // objectstack#28912 (the maintainer flipped both sides together)
+      expect(defaults.hideFields).toBe(true);
       // `showColor: ua?.rowColor === true`    — default OFF (opt-in)
       expect(defaults.rowColor).toBe(false);
     });

@@ -85,7 +85,7 @@ import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-
 import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
-import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
+import { ObjectQLStrategy, aggregateGroupKeys, aggregateObjectOf, resolveCubeFieldName } from './strategies/objectql-strategy.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
 // pair the strategies compile it with, so "the field the gate saw" and "the
 // column that reached SQL" cannot be two different things.
@@ -115,7 +115,9 @@ import {
   withServedLabelTargets,
   type DimensionLabelDeps,
 } from './dimension-labels.js';
-import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
+import { evaluateAnalyticsQueryOverRows, lowerPreviewRowFilters } from './preview-evaluator.js';
+import { assertDatasetGroupColumnsDistinct } from './dataset-group-column-door.js';
+import { assertDatasetDateBucketsTemporal } from './dataset-date-bucket-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { scopedMeasureFilter } from './scoped-measure-key.js';
@@ -453,6 +455,25 @@ const RELATIONSHIP_MEMBER_NOUN: Readonly<Record<RelationshipMember['param'], str
 };
 
 /**
+ * The member each leaf of a `where` tree binds against, in tree order, read
+ * through the lowering both strategies compile with
+ * (`normalizeAnalyticsFilterTree` + `collectFilterLeaves`), structure
+ * discarded. A `where` that is not an object, or that the lowering refuses,
+ * names nothing here: it is refused where it already is. One reader for
+ * {@link namedQueryFields}, {@link relationshipMembers} and
+ * {@link previewWhereColumns}, so what each of them judges is the same leaf
+ * list.
+ */
+function whereLeafMembers(where: unknown): string[] {
+  if (!where || typeof where !== 'object') return [];
+  try {
+    return collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * [#28555] Every entry of `query` that reads a column through a relationship
  * path, in request order: `dimensions`, `timeDimensions`, then (with
  * `withMeasures`) `measures`, then the `where` leaves. Each is resolved the
@@ -483,16 +504,7 @@ function relationshipMembers(query: AnalyticsQuery, cube: Cube, withMeasures: bo
   for (const member of query.dimensions ?? []) read(member, 'dimensions', 'dimension');
   for (const td of query.timeDimensions ?? []) read(td?.dimension, 'timeDimensions', 'any');
   if (withMeasures) for (const member of query.measures ?? []) read(member, 'measures', 'measure');
-  const where = (query as { where?: unknown }).where;
-  if (where && typeof where === 'object') {
-    let leaves: string[] = [];
-    try {
-      leaves = collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
-    } catch {
-      leaves = [];
-    }
-    for (const member of leaves) read(member, 'where', 'any');
-  }
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) read(member, 'where', 'any');
   return out;
 }
 
@@ -630,23 +642,14 @@ function namedQueryFields(
     }
     return true;
   };
-  const filterMembers = (where: unknown): string[] => {
-    if (!where || typeof where !== 'object') return [];
-    try {
-      return collectFilterLeaves(normalizeAnalyticsFilterTree({ where }, NO_DATETIME_COLUMNS)).map((leaf) => leaf.member);
-    } catch {
-      return [];
-    }
-  };
-
   for (const member of query.dimensions ?? []) name(member, 'dimension', 'aggregate');
   for (const td of query.timeDimensions ?? []) name(td.dimension, 'any', td.granularity ? 'aggregate' : 'predicate');
   for (const member of query.measures ?? []) if (!durationColumns(member, 'aggregate')) name(member, 'measure', 'aggregate');
-  for (const member of filterMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) name(member, 'any', 'predicate');
   for (const measure of query.measures ?? []) {
-    for (const member of filterMembers(scopedMeasureFilter(datasetScope, measure, cube.name))) name(member, 'any', 'predicate');
+    for (const member of whereLeafMembers(scopedMeasureFilter(datasetScope, measure, cube.name))) name(member, 'any', 'predicate');
   }
-  for (const member of filterMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
+  for (const member of whereLeafMembers(datasetScope?.filter)) name(member, 'any', 'predicate');
   const order = (query as { order?: unknown }).order;
   if (order && typeof order === 'object' && !Array.isArray(order)) {
     // An order key naming both a duration measure and a declared member is
@@ -2889,12 +2892,43 @@ export class AnalyticsService implements IAnalyticsService {
             // under one `null` key (and a filter on one matched no row) where
             // the live strategies join it. See {@link assertPreviewJoinsNothing}.
             this.assertPreviewJoinsNothing(q, cube);
+            // [#28977] …then the row filters (the `where`, then the
+            // time-dimension windows), lowered once here and handed to the
+            // evaluator: the ObjectQL strategy lowers both before the two doors
+            // below, so an unrecognised `dateRange` beside a column asked twice
+            // or a bucket over a text column is refused about the `dateRange`
+            // on every face. The evaluator lowered them after both doors, and
+            // answered the door's refusal.
+            const previewCube = previewEvaluationCube(q, cube);
+            const declaredType = (field: string) => this.sourceFieldMeta?.(dataset.object, field)?.type;
+            const whereColumns = previewWhereColumns(q, cube);
+            const rowFilters = lowerPreviewRowFilters(q, previewCube, declaredType, whereColumns);
+            // [#28765, #28798] …and a selection asking one column for two
+            // values under one name (raw beside its own bucket, or two buckets
+            // of it), with the refusal the ObjectQL strategy gives both live
+            // faces for the keys its direct path builds, where the evaluator
+            // served both columns.
+            assertDatasetGroupColumnsDistinct(
+              aggregateObjectOf(cube),
+              aggregateGroupKeys(q, cube),
+              q,
+              (member) => resolveCubeFieldName(cube, member, 'dimension'),
+            );
+            // [#28852] …and a date bucket over a field declared neither a date
+            // nor a datetime, with the refusal the engine gives both live faces
+            // for the same keys (after the column refusal above, as there),
+            // where the evaluator served one `null` (or `1970`) group.
+            assertDatasetDateBucketsTemporal(aggregateObjectOf(cube), aggregateGroupKeys(q, cube), declaredType);
             return evaluateAnalyticsQueryOverRows(
               q,
-              previewEvaluationCube(q, cube),
+              previewCube,
               seedRows!,
-              (field) => this.sourceFieldMeta?.(dataset.object, field)?.type,
+              declaredType,
               compiled.durations,
+              // [#28691] …and each `where` member the live faces read from a
+              // column spelled otherwise is read from that column.
+              whereColumns,
+              rowFilters,
             );
           },
         } as IAnalyticsService;
@@ -4775,6 +4809,35 @@ function previewEvaluationCube(query: AnalyticsQuery, cube: Cube): Cube {
     if (entry && entry.key !== member) aliases[member] = cube.dimensions[entry.key];
   }
   return Object.keys(aliases).length > 0 ? { ...cube, dimensions: { ...cube.dimensions, ...aliases } } : cube;
+}
+
+/**
+ * [#28691] The column each `where` member resolves to, for every member
+ * spelled other than its column, which the draft-preview evaluator matches
+ * against the drafted rows (they carry columns). `OBJECT.region`,
+ * `CUBE.region` and a dataset dimension `zone` over `region` all read
+ * `region`, as both live strategies read them. Measured before: each matched
+ * no drafted row (`[]`, or under an `$or` only the other arm's rows) where
+ * both live faces served the rows.
+ *
+ * The leaves are read with the reader the strategies compile with
+ * (`normalizeAnalyticsFilterTree` + `collectFilterLeaves`, as
+ * {@link relationshipMembers} reads them), and each is resolved by
+ * {@link declaredMemberEntry}'s `'any'` arm, the strategies' filter-member
+ * lookup. A member that resolves to no declared entry, or to an expression or
+ * a relationship path, is not listed: it is read as written, or was refused
+ * before the evaluator runs.
+ */
+function previewWhereColumns(query: AnalyticsQuery, cube: Cube): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const member of whereLeafMembers((query as { where?: unknown }).where)) {
+    if (out[member] !== undefined) continue;
+    const entry = declaredMemberEntry(cube, member, 'any');
+    if (!entry) continue;
+    const column = typeof entry.sql === 'string' ? entry.sql.trim() : entry.key;
+    if (column !== member && BARE_IDENTIFIER.test(column)) out[member] = column;
+  }
+  return out;
 }
 
 /**

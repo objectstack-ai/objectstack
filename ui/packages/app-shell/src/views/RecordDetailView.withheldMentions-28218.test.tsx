@@ -13,6 +13,10 @@
  * warning naming them, with no reason given. A write that withheld nobody says
  * nothing.
  *
+ * Since objectstack#28470 the roster is not read when the record opens: the
+ * composer reads it on its first focus, and a reply or an edit whose text holds
+ * an `@` before then reads it at the write, so both resolve their mentions.
+ *
  * Real subjects: `RecordDetailView` on an authored page composing
  * `record:discussion`, driven through its real composer, reply input and edit
  * form, under a real `I18nProvider` with the `en` pack read by key. The data
@@ -183,16 +187,21 @@ async function mount(dataSource: ReturnType<typeof makeDataSource>) {
   );
   const view = within(rendered.container);
   await view.findByText(ADA_ROW.body);
-  // The picker's roster has been read: the suggestions the writes map through.
-  await waitFor(() => expect(dataSource.find).toHaveBeenCalledWith('sys_user', expect.anything()));
   await act(async () => {});
+  // The open reads no roster (objectstack#28470).
+  expect(dataSource.find).not.toHaveBeenCalledWith('sys_user', expect.anything());
   return view;
 }
 
 type View = Awaited<ReturnType<typeof mount>>;
 
-async function postComment(view: View, text: string) {
+async function postComment(view: View, dataSource: ReturnType<typeof makeDataSource>, text: string) {
   const box = await view.findByPlaceholderText(EN.detail.leaveCommentPlaceholder);
+  // The composer's first focus reads the picker's roster: the suggestions the
+  // write maps through.
+  fireEvent.focus(box);
+  await waitFor(() => expect(dataSource.find).toHaveBeenCalledWith('sys_user', expect.anything()));
+  await act(async () => {});
   fireEvent.change(box, { target: { value: text } });
   await act(async () => {
     fireEvent.click(view.getByTitle(EN.detail.submitComment));
@@ -219,7 +228,7 @@ describe('the comment author is told who a mention will not reach (objectstack#2
     const dataSource = makeDataSource(['u-grace', 'u-linus']);
     const view = await mount(dataSource);
 
-    await postComment(view, 'Please check @Grace Hopper and @Linus before Friday');
+    await postComment(view, dataSource, 'Please check @Grace Hopper and @Linus before Friday');
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
     expect(toast.warning).toHaveBeenCalledWith(withheldSentence('Grace Hopper', 'Linus'));
@@ -236,7 +245,7 @@ describe('the comment author is told who a mention will not reach (objectstack#2
     const dataSource = makeDataSource(['u-linus']);
     const view = await mount(dataSource);
 
-    await postComment(view, '@Grace Hopper and @Linus, see above');
+    await postComment(view, dataSource, '@Grace Hopper and @Linus, see above');
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
     expect(toast.warning).toHaveBeenCalledWith(withheldSentence('Linus'));
@@ -246,7 +255,7 @@ describe('the comment author is told who a mention will not reach (objectstack#2
     const dataSource = makeDataSource([]);
     const view = await mount(dataSource);
 
-    await postComment(view, 'Thanks @Grace Hopper');
+    await postComment(view, dataSource, 'Thanks @Grace Hopper');
 
     expect(
       await view.findByText('Thanks @Grace Hopper', { selector: ':not(textarea):not(input)' }),
@@ -267,6 +276,8 @@ describe('the comment author is told who a mention will not reach (objectstack#2
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
     expect(toast.warning).toHaveBeenCalledWith(withheldSentence('Grace Hopper'));
+    // No composer was focused: the write read the roster to resolve its mention.
+    expect(dataSource.find.mock.calls.filter(([o]: [string]) => o === 'sys_user')).toHaveLength(1);
     expect(dataSource.create).toHaveBeenCalledWith(
       COMMENT,
       expect.objectContaining({ parent_id: 'c-ada', mentions: JSON.stringify(['u-grace']) }),

@@ -31,6 +31,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { SchemaRegistry } from '@objectstack/objectql';
 import { AutomationEngine } from './engine.js';
 import { resolveFlowPrecedence, describeFlowContender, renderFlowContender } from './flow-precedence.js';
+import { bindStoredRow } from '@objectstack/metadata-protocol';
 
 const FLOW = 'opportunity_approval';
 const silentLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as any;
@@ -304,4 +305,60 @@ describe('#12563 — renderFlowContender: one spelling for the contested-flow ph
             'a code-shipped package (id unknown)',
         );
     });
+});
+
+/**
+ * [#28412, ADR-0146 D9 item 1] The one stored row the sealed base yields to:
+ * the shipping package's declared `.custom` override. Over a real
+ * `SchemaRegistry` holding the loader's body under the package and the stored
+ * row in the bare slot — the way `hydrateOverlayIntoRegistry` registers it,
+ * its `package_id` column recorded with `bindStoredRow` — the boot pull arms
+ * the override, warns nothing and records no shadowing, in either
+ * registration order. A stored row bound anywhere else stays shadowed, as
+ * above.
+ */
+describe('[#28412] the declared .custom override is the packaged flow over a real registry', () => {
+    const OWNER = 'com.example.crm';
+    const PAIR = `${OWNER}.custom`;
+    const DECLARED = { overrides: { package: OWNER, basedOn: '1.0.0' } };
+    const loaderBody = () => ({ ...flowBody(FLOW, 'PACKAGED'), _packageId: OWNER });
+    const hydrated = (binding: string | null, body: Record<string, unknown> = DECLARED) =>
+        bindStoredRow({ ...flowBody(FLOW, 'OVERRIDE'), ...body, _provenance: 'org' }, binding);
+
+    function registryWith(stored: unknown, order: 'package-first' | 'stored-first') {
+        const registry: any = new SchemaRegistry();
+        if (order === 'package-first') {
+            registry.registerItem('flow', loaderBody(), 'name', OWNER);
+            registry.registerItem('flow', stored, 'name');
+        } else {
+            registry.registerItem('flow', stored, 'name');
+            registry.registerItem('flow', loaderBody(), 'name', OWNER);
+        }
+        return registry;
+    }
+
+    for (const order of ['package-first', 'stored-first'] as const) {
+        it(`${order}: the pair's declared row is armed, with no warning and no shadowing receipt`, async () => {
+            const warn = vi.fn();
+            const { engine, resolved } = bootPull(registryWith(hydrated(PAIR), order), { warn });
+            expect(resolved.map((r) => r.name)).toEqual([FLOW]);
+            expect(((await engine.getFlow(FLOW)) as { label?: string } | null)?.label).toBe('OVERRIDE');
+            expect(warn).not.toHaveBeenCalled();
+            expect(engine.getShadowedFlows()).toEqual([]);
+            // The ledger identity is the base's: the name stays packaged by OWNER.
+            expect(engine.packagedFlowOwner(FLOW)).toBe(OWNER);
+        });
+    }
+
+    for (const [label, stored] of [
+        ['a dependent package\'s declaration', () => hydrated('com.example.partner')],
+        ['a package-less row stamping the pair', () => hydrated(null, { ...DECLARED, _packageId: PAIR })],
+        ['the pair\'s undeclared row', () => hydrated(PAIR, {})],
+    ] as const) {
+        it(`${label}: the loader's body stays armed and the row is shadowed`, async () => {
+            const { engine } = bootPull(registryWith(stored(), 'package-first'));
+            expect(((await engine.getFlow(FLOW)) as { label?: string } | null)?.label).toBe('PACKAGED');
+            expect(engine.getShadowedFlows().map((r) => r.armed)).toEqual([{ source: 'package', packageId: OWNER }]);
+        });
+    }
 });

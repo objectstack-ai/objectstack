@@ -53,7 +53,7 @@ import type { ObjectPermissionConfig, RoleDefinition } from '@object-ui/types';
 import { PermCtx, type PermissionContextValue } from '../PermissionContext';
 import { usePermissions } from '../usePermissions';
 import { PermissionProvider } from '../PermissionProvider';
-import { MePermissionsProvider, type MePermissionsResponse } from '../MePermissionsProvider';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '../MePermissionsProvider';
 
 const memoProxy = vi.hoisted(() => ({ armed: false, epoch: 0 }));
 
@@ -137,11 +137,12 @@ const PERMISSIONS: ObjectPermissionConfig[] = [
 ];
 const USER_ROLES = ['restricted'];
 
-const ME: MePermissionsResponse = {
+const ME: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u-1',
   tenantId: 't-1',
-  roles: ['restricted'],
+  hasAnyQueue: false,
+  positions: ['restricted'],
   permissionSets: ['ps-1'],
   systemPermissions: ['manage_app'],
   objects: { accounts: { allowRead: true, allowEdit: false, apiOperations: ['find'] } },

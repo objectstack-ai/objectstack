@@ -107,6 +107,31 @@ export function areaItemPillarPath(input: {
   return studioPillarItemPath(input.packageId, pillar, { type: input.type, name: input.name });
 }
 
+/**
+ * objectstack#28569 (ADR-0146 Consequences) — the types whose item opens the
+ * area's simplified form editor (`StudioBundleItemEditor`): the fields Setup's
+ * form offers beside the type's preview, and Customize on a read-only base.
+ * Both are `overridable` in the spec's classification.
+ */
+export const AREA_FORM_EDITOR_TYPES: readonly string[] = ['email_template', 'translation'];
+
+/**
+ * Whether an item of the area opens the form editor rather than the generic
+ * item page: a form-editor type on a package's leg, under the same exceptions
+ * as {@link areaItemPillarPath} (the cross-package leg and the environment
+ * scope name no package to write, and `?review=1` opens the generic page's
+ * draft review).
+ */
+export function areaItemOpensFormEditor(input: {
+  packageId: string | null;
+  type: string;
+  search: URLSearchParams;
+}): boolean {
+  if (!AREA_FORM_EDITOR_TYPES.includes(input.type) || !input.packageId) return false;
+  if (input.search.get(CATALOG_SCOPE_PARAM) === ENVIRONMENT_SCOPE) return false;
+  return input.search.get('review') !== '1';
+}
+
 /** `?package=all` is the metadata list's "every package" scope, not a package (`ResourceEditPage`'s `'all'` fold). */
 const ALL_PACKAGES_VALUE = 'all';
 

@@ -118,6 +118,9 @@ export function registerSubflowNode(engine: AutomationEngine, ctx: PluginContext
       // child screen would judge its own bag against the parent caller's list.
       // Dropped, so the child carries no signal and its screens infer.
       delete childContext.callerParamKeys;
+      // [#28251] A child run is not started by the write that started this one,
+      // so it never holds that write's save-notice channel.
+      delete childContext.saveNotice;
 
       const child = await engine.execute(flowName, childContext);
 

@@ -97,10 +97,14 @@ interface OwdRow {
  */
 async function readObjectBodies(
   client: MetadataClient,
+  packageId: string,
   name: string,
   saved: boolean,
 ): Promise<[MetadataLayered<Record<string, unknown>> | null, unknown]> {
-  const readLayered = () => client.layered<Record<string, unknown>>('object', name).catch(() => null);
+  // ADR-0048 — the layers at the package this table lists and saves, the
+  // object's owner here: a layered read naming no package is refused for a
+  // name two packages hold.
+  const readLayered = () => client.layered<Record<string, unknown>>('object', name, { packageId }).catch(() => null);
   const readDraft = () => client.getDraft<Record<string, unknown>>('object', name).catch(() => null);
   if (saved) return Promise.all([readLayered(), readDraft()]);
   const draftResp = await readDraft();
@@ -284,7 +288,7 @@ export function PackageOwdOverviewPanel({
         names.map(async (name): Promise<OwdRow> => {
           // objectui#11799 — saved = held by the published list read above.
           const saved = publishedLabel.has(name);
-          const [layRaw, draftResp] = await readObjectBodies(client, name, saved);
+          const [layRaw, draftResp] = await readObjectBodies(client, packageId, name, saved);
           const lay = (layRaw ?? {}) as { effective?: Record<string, unknown>; code?: Record<string, unknown> };
           const baseline = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
           const draftBody = extractDraftBody(draftResp);
@@ -383,7 +387,7 @@ export function PackageOwdOverviewPanel({
       for (const s of changed) {
         // objectui#11799 — the row's saved state from the load decides whether
         // the baseline is asked before the draft is in hand.
-        const [layRaw, draftResp] = await readObjectBodies(client, s.row.name, s.row.saved);
+        const [layRaw, draftResp] = await readObjectBodies(client, packageId, s.row.name, s.row.saved);
         const lay = (layRaw ?? {}) as { effective?: Record<string, unknown>; code?: Record<string, unknown> };
         const baseline = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
         const draftBody = extractDraftBody(draftResp);

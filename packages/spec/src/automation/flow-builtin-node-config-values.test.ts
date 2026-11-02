@@ -62,16 +62,21 @@ const VALID: Readonly<Record<string, Config>> = {
   loop: { collection: { dialect: 'cel', source: 'rows' }, iteratorVariable: 'row', maxIterations: 50, body: REGION },
   parallel: { branches: [{ name: 'a', ...region('inner_a') }, { name: 'b', ...region('inner_b') }] },
   try_catch: { try: REGION, errorVariable: 'err', retry: { maxRetries: 2, backoffMs: 100 } },
+  save_notice: { message: 'Sent {{ record.name }} for approval' },
 };
 
-/** start → one node of `type` → end. */
+/**
+ * start → one node of `type` → end. A `save_notice` node stands only in a flow
+ * a record create or update starts (#28251), so its probe starts from one.
+ */
 function flowWith(type: string, config: unknown, name = 'value_probe') {
+  const trigger = type === 'save_notice' ? { config: { objectName: 'task', triggerType: 'record-after-update' } } : {};
   return {
     name,
     label: 'Value probe',
     type: 'autolaunched',
     nodes: [
-      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'start', type: 'start', label: 'Start', ...trigger },
       { id: 'n', type, label: 'N', ...(config === undefined ? {} : { config }) },
       { id: 'done', type: 'end', label: 'Done' },
     ],

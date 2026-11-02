@@ -151,6 +151,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** Starts the provider's own `/meta/view` read, as a reader of the whole registry does. */
+function readViewList(ctx: () => ReturnType<typeof useMetadata>) {
+  act(() => {
+    void ctx().ensureType!('view');
+  });
+}
+
 describe('one request per object document across both caches (objectui#13044)', () => {
   it('provider first: getObjectSchema reads what the provider asked for', async () => {
     const { server, adapter } = makeServer();
@@ -205,9 +212,12 @@ describe('one request per object document across both caches (objectui#13044)', 
 });
 
 describe('the published view list: one request per open (objectui#13044, objectui#13057)', () => {
-  it('console order: the eager read lands, then the object page reads the list and the overrides together', async () => {
+  it('console order: the provider view read lands, then the object page reads the list and the overrides together', async () => {
     const { server, adapter } = makeServer();
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(ctx().getTypeStatus!('view')).toBe('ready'));
     expect(count(server.calls, VIEW_URL)).toBe(1);
     // ObjectView starts both reads in one commit (`listViews` and
@@ -222,10 +232,13 @@ describe('the published view list: one request per open (objectui#13044, objectu
     expect(count(server.calls, VIEW_URL)).toBe(1);
   });
 
-  it('a reader that asks while the eager read is on the wire joins it', async () => {
+  it('a reader that asks while the provider view read is on the wire joins it', async () => {
     const { server, adapter } = makeServer();
     server.hold.add(VIEW_URL);
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(count(server.calls, VIEW_URL)).toBe(1));
     const views = adapter.listViews('account');
     const overrides = adapter.listViewOverrides('account');
@@ -269,6 +282,9 @@ describe('controls (objectui#13044)', () => {
   it('the list is settled within an open, and a provider re-read asks again and is what the next list read sees (objectui#13057)', async () => {
     const { server, adapter } = makeServer();
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(ctx().getTypeStatus!('view')).toBe('ready'));
     await adapter.listViews('account');
     await adapter.listViews('account');
@@ -306,6 +322,9 @@ describe('controls (objectui#13044)', () => {
     ]) {
       const { server, adapter } = makeServer();
       const ctx = mount(adapter);
+      // objectstack#28645 — the provider reads the view list on demand (the
+      // whole registry, or a scope outside the app bundle), no longer at mount.
+      readViewList(ctx);
       await waitFor(() => expect(ctx().getTypeStatus!('view')).toBe('ready'));
       await adapter.listViews('account');
       expect(count(server.calls, VIEW_URL)).toBe(1);
@@ -323,6 +342,9 @@ describe('controls (objectui#13044)', () => {
     const { server, adapter } = makeServer();
     server.hold.add(VIEW_URL);
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(count(server.calls, VIEW_URL)).toBe(1));
     // Joins the eager read on the wire (after its own discovery read).
     const before = adapter.listViews('account');
@@ -339,6 +361,9 @@ describe('controls (objectui#13044)', () => {
     const { server, adapter } = makeServer();
     server.hold.add(VIEW_URL);
     const ctx = mount(adapter);
+    // objectstack#28645 — the provider reads the view list on demand (the
+    // whole registry, or a scope outside the app bundle), no longer at mount.
+    readViewList(ctx);
     await waitFor(() => expect(count(server.calls, VIEW_URL)).toBe(1));
     const before = adapter.listViews('account');
     await new Promise((resolve) => setTimeout(resolve, 0));

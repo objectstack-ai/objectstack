@@ -1056,7 +1056,7 @@ describe('StudioDesignSurface.interfacesAppLabelMap-11181', () => {
         renderPillar(language);
 
         expect(await screen.findByText(HEADING[language](MAP_TEXT[language]), undefined, { timeout: 8000 })).toBeInTheDocument();
-        expect(mockClient.layered).toHaveBeenCalledWith('app', 'acme_app');
+        expect(mockClient.layered).toHaveBeenCalledWith('app', 'acme_app', { packageId: PKG });
         expect(document.body.textContent).not.toContain('[object Object]');
       });
 

@@ -9,6 +9,12 @@
  *   - `flows.FLOW.successMessage` — the flow's own completion toast;
  *   - `flows.FLOW.errorMessage` — the flow's own failure toast.
  *
+ * Since objectstack#28054 the two toasts are `{{ }}` templates the ENGINE
+ * picks in the run's locale and renders over the run's variables, so the
+ * runner draws them as served and never overlays the bundle's copy (the
+ * objectstack#22507 ruling A, as for the screen heading). The option labels
+ * stay a client overlay.
+ *
  * The bundle reaches the runner the way every other translated console
  * surface gets it — the server's `TranslationData` payload through
  * `transformSpecTranslations`, added with the provider's `addResourceBundle`
@@ -65,8 +71,10 @@ const ZH_CN: TranslationData = {
   flows: {
     case_escalate: {
       label: '升级工单',
-      successMessage: '工单已升级',
-      errorMessage: '升级失败，请联系管理员',
+      // Templates the engine renders before it serves the toast
+      // (objectstack#28054); the runner must not draw them over the served one.
+      successMessage: '已升级 {{ escalated }} 个工单',
+      errorMessage: '升级失败：{{ $error.message }}',
       screens: {
         pick: {
           // The engine serves the heading already translated (objectstack#22507
@@ -151,16 +159,16 @@ describe('FlowRunner — the served screen heading is drawn as served (objectsta
   });
 });
 
-describe('FlowRunner — the flow\'s own toasts from `flows.FLOW.successMessage` / `errorMessage` (objectui#12075)', () => {
-  it('toasts the translated successMessage when the run completes', async () => {
+describe('FlowRunner — the flow\'s own toasts are drawn as served (objectstack#28054)', () => {
+  it('toasts the successMessage the engine served, never the bundle template over it', async () => {
     const authFetch = vi.fn(async () =>
-      jsonResponse({ success: true, data: { success: true, status: 'completed', successMessage: 'Case escalated' } }),
+      jsonResponse({ success: true, data: { success: true, status: 'completed', successMessage: '已升级 3 个工单' } }),
     );
     const dialog = renderRunner(ESCALATION, i18nWith('zh-CN', ZH_CN), authFetch);
     fireEvent.click(dialog.getAllByRole('button').find((b) => b.textContent && /提交|Submit/.test(b.textContent))!);
 
     await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
-    expect(toasts.success).toHaveBeenCalledWith('工单已升级');
+    expect(toasts.success).toHaveBeenCalledWith('已升级 3 个工单');
   });
 
   it('adds no completion copy the flow does not author: the catalog sentence names the flow', async () => {
@@ -173,23 +181,24 @@ describe('FlowRunner — the flow\'s own toasts from `flows.FLOW.successMessage`
 
     await waitFor(() => expect(toasts.success).toHaveBeenCalledTimes(1));
     const message = String(toasts.success.mock.calls[0][0]);
-    expect(message).not.toBe('工单已升级');
+    expect(message).not.toContain('{{');
     expect(message).toContain('升级工单');
   });
 
-  it('toasts and shows the translated errorMessage when the run fails', async () => {
+  it('toasts and shows the errorMessage the engine served when the run fails', async () => {
     const authFetch = vi.fn(async () =>
       jsonResponse({
         success: true,
-        data: { success: false, status: 'failed', error: 'boom', errorMessage: 'Escalation failed, contact an admin' },
+        data: { success: false, status: 'failed', error: 'boom', errorMessage: '升级失败：boom' },
       }),
     );
     const dialog = renderRunner(ESCALATION, i18nWith('zh-CN', ZH_CN), authFetch);
     fireEvent.click(dialog.getAllByRole('button').find((b) => b.textContent && /提交|Submit/.test(b.textContent))!);
 
     await waitFor(() => expect(toasts.error).toHaveBeenCalledTimes(1));
-    expect(toasts.error).toHaveBeenCalledWith('升级失败，请联系管理员');
-    expect(within(screen.getByRole('alert')).getByText('升级失败，请联系管理员')).toBeInTheDocument();
+    expect(toasts.error).toHaveBeenCalledWith('升级失败：boom');
+    expect(within(screen.getByRole('alert')).getByText('升级失败：boom')).toBeInTheDocument();
+    expect(screen.queryByText('升级失败：{{ $error.message }}')).not.toBeInTheDocument();
   });
 
   it('keeps the served toasts verbatim in a language the bundle does not carry', async () => {

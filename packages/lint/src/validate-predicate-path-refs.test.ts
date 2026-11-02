@@ -497,9 +497,10 @@ describe('registry wiring', () => {
     // prose reason to keep the halves in step. #24491 — the family declares
     // `page` too (ruling B on #23388); this rule walks `stack.views` only, so a
     // page write draws nothing from it, and the declaration keeps the family on
-    // one type set.
+    // one type set. #28663 — and `app`, for the same reason: the family's
+    // sibling judges a nav entry's `visible`, this rule judges nothing there.
     expect([...entry!.surfaces]).toEqual(['cli', 'runtime-publish']);
-    expect([...entry!.runtimeTypes!]).toEqual(['view', 'page']);
+    expect([...entry!.runtimeTypes!]).toEqual(['view', 'page', 'app']);
     expect(entry!.surfaceReason).toBeUndefined();
   });
 });

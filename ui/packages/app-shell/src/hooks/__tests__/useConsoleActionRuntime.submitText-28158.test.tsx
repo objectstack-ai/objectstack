@@ -56,6 +56,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => ({
       asked.push({ objectName, actionName, fallback });
       return bundle[`${objectName ?? 'global'}|${actionName}`] ?? (fallback || undefined);
     },
+    actionCancelText: (_o: any, _a: any, fallback: any) => fallback,
   }),
   useObjectTranslation: () => ({
     t: (key: string, options?: any) => String(options?.defaultValue ?? key),

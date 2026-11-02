@@ -111,6 +111,8 @@ export interface RecordActivityTimelineProps {
   collapseWhenEmpty?: boolean;
   /** Optional list of mention suggestions for the rich comment input. */
   mentionSuggestions?: Array<{ id: string; label: string; avatarUrl?: string }>;
+  /** Called on the comment input's focus, for the host to read {@link mentionSuggestions} (objectstack#28470). */
+  onMentionSuggestionsWanted?: () => void;
   /** Optional uploader for comment attachments. When provided, the composer
    *  exposes a drag-and-drop file panel. */
   onUploadAttachments?: (files: FileList) => Promise<Attachment[]>;
@@ -313,6 +315,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
   onToggleSubscription,
   collapseWhenEmpty = false,
   mentionSuggestions,
+  onMentionSuggestionsWanted,
   onUploadAttachments,
   titleLabel,
   emptyLabel,
@@ -765,6 +768,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
       onChange={setCommentText}
       onSubmit={handleAddComment}
       mentionSuggestions={mentionSuggestions}
+      onMentionSuggestionsWanted={onMentionSuggestionsWanted}
       placeholder={t('detail.leaveCommentPlaceholder')}
       disabled={isSubmitting}
       canSubmitEmpty={pendingAttachments.length > 0}
@@ -822,7 +826,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             ) : (
               <button
                 type="button"
-                className="flex h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex h-11 sm:h-8 w-full items-center rounded-md border border-input bg-background px-2.5 text-left text-[12.5px] text-muted-foreground transition-colors hover:border-ring/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => setComposerOpen(true)}
                 data-record-timeline-composer=""
               >
@@ -925,7 +929,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
                     onClick={() => onStreamFilterChange?.(chip)}
                     data-stream-filter={chip}
                     className={cn(
-                      'h-6 rounded-md px-2 text-xs font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'h-11 min-w-11 sm:h-6 sm:min-w-0 rounded-md px-2 text-xs font-normal transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                       streamFilter === chip ? 'bg-primary/10 text-primary' : 'bg-muted text-foreground hover:bg-muted/70',
                     )}
                   >
@@ -953,7 +957,7 @@ export const RecordActivityTimeline: React.FC<RecordActivityTimelineProps> = ({
             >
               <SelectTrigger
                 aria-label={t('detail.filterActivity')}
-                className="h-8 w-auto min-w-[140px] py-1 text-sm"
+                className="h-11 sm:h-8 w-auto min-w-[140px] py-1 text-sm"
               >
                 <SelectValue />
               </SelectTrigger>

@@ -577,12 +577,17 @@ export function useObjectListViewDraft({
           !draftChanges.some((c) => c.path.length === 0);
         // A failure of that added read costs the element marks only, never the
         // editor: the draft is the buffer either way.
+        // ADR-0048 — the published layer is read at this package, the view's
+        // owner here: a layered read naming no package is refused for a name
+        // two packages hold. On a read-only base that is the base, whose read
+        // serves its declared override (ADR-0146 D8).
+        const layeredAt = { packageId };
         const lay = objectDraftOnly
           ? null
           : !draft
-            ? await client.layered<Row>('view', viewId)
+            ? await client.layered<Row>('view', viewId, layeredAt)
             : marksNeedPublished
-              ? await client.layered<Row>('view', viewId).catch(() => undefined)
+              ? await client.layered<Row>('view', viewId, layeredAt).catch(() => undefined)
               : null;
         if (cancelled) return;
         const published = (lay as { effective?: unknown; code?: unknown } | null)?.effective ?? (lay as { code?: unknown } | null)?.code;

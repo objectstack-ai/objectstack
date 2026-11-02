@@ -48,7 +48,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import React from 'react';
 
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { registerAllFields } from '@object-ui/fields';
 import { ObjectForm } from './ObjectForm';
 import { MasterDetailForm } from './MasterDetailForm';
@@ -66,11 +66,12 @@ const FIELDS = {
 const RECORD = { id: 'v1', contract: 'C-1', version_no: 1, notes: 'first' };
 
 /** `/me/permissions` for the card's requester: create, never edit. */
-const createOnly = (fields: MePermissionsResponse['fields'] = {}): MePermissionsResponse => ({
+const createOnly = (fields: MePermissionsAuthenticatedResponse['fields'] = {}): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-requester',
   tenantId: null,
-  roles: ['clm_requester'],
+  hasAnyQueue: false,
+  positions: ['clm_requester'],
   permissionSets: ['clm_requester'],
   objects: {
     [OBJECT]: { allowCreate: true, allowRead: true, allowEdit: false, allowDelete: false },

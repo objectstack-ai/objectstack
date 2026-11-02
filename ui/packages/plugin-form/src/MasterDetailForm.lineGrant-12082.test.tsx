@@ -32,7 +32,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor, fireEvent, cleanup } from '@testing-library/react';
 import React from 'react';
 
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { registerAllFields } from '@object-ui/fields';
 import { MasterDetailForm } from './MasterDetailForm';
 
@@ -51,11 +51,12 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; create: bool
   { shape: 'full', bits: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true }, create: true, remove: true },
 ];
 
-const envelope = (child: Record<string, unknown>): MePermissionsResponse => ({
+const envelope = (child: Record<string, unknown>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   objects: {
     [PARENT]: { allowCreate: true, allowRead: true, allowEdit: true, allowDelete: true },

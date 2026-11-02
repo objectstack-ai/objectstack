@@ -45,6 +45,9 @@ export interface RichTextCommentInputProps {
   /** Focus the editor when it mounts: the 动态 panel opens this composer
    *  from its one-line stand-in, and the reader's press lands in it. */
   autoFocus?: boolean;
+  /** Called when the editor takes focus: the host reads the mention
+   *  suggestions then, not when the record opens (objectstack#28470). */
+  onMentionSuggestionsWanted?: () => void;
 }
 
 /** The look of a picked mention, in the preview and in the composer's chip row. */
@@ -110,6 +113,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   extraSlot,
   canSubmitEmpty = false,
   autoFocus = false,
+  onMentionSuggestionsWanted,
 }) => {
   const { t } = useDetailTranslation();
   const [isPreview, setIsPreview] = React.useState(false);
@@ -260,11 +264,11 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   return (
     <div className={cn('border rounded-md', className)}>
       {/* Toolbar */}
-      <div className="flex items-center gap-0.5 px-2 py-1.5 border-b bg-muted/30">
+      <div className="flex flex-wrap items-center gap-0.5 px-2 py-1.5 border-b bg-muted/30">
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
+          className="h-11 w-11 sm:h-7 sm:w-7"
           onClick={handleBold}
           disabled={disabled || isPreview}
           title={t('detail.bold')}
@@ -274,7 +278,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
+          className="h-11 w-11 sm:h-7 sm:w-7"
           onClick={handleItalic}
           disabled={disabled || isPreview}
           title={t('detail.italic')}
@@ -284,7 +288,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
+          className="h-11 w-11 sm:h-7 sm:w-7"
           onClick={handleList}
           disabled={disabled || isPreview}
           title={t('detail.listFormat')}
@@ -294,7 +298,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
+          className="h-11 w-11 sm:h-7 sm:w-7"
           onClick={handleCode}
           disabled={disabled || isPreview}
           title={t('detail.inlineCode')}
@@ -304,7 +308,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
+          className="h-11 w-11 sm:h-7 sm:w-7"
           onClick={handleMentionTrigger}
           disabled={disabled || isPreview}
           title={t('detail.mentionSomeone')}
@@ -317,7 +321,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
+          className="h-11 w-11 sm:h-7 sm:w-7"
           onClick={() => setIsPreview(!isPreview)}
           title={isPreview ? t('detail.edit') : t('detail.preview')}
         >
@@ -332,7 +336,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className="h-11 w-11 sm:h-7 sm:w-7"
             onClick={onSubmit}
             disabled={disabled || (!canSubmitEmpty && !value.trim())}
             title={t('detail.submitComment')}
@@ -358,6 +362,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
               value={value}
               onChange={handleTextChange}
               onKeyDown={handleKeyDown}
+              onFocus={onMentionSuggestionsWanted}
               disabled={disabled}
             />
 

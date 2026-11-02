@@ -16,17 +16,18 @@
  * means "resolve at render time", so an unnamed entry is written with NO
  * `label` key; an author label is still written, verbatim.
  *
- * Asserted on the real writer — `NavigationSyncEffect`, the one caller in the
- * console, which never passes a label — and, for the author-label control, on
- * `useNavigationSync().syncPageCreated` / `syncDashboardCreated` with one.
+ * Asserted on the real writer — `useNavigationWrites().created`, the door the
+ * console's create sites call (objectstack#28680; it replaced
+ * `NavigationSyncEffect`), which never passes a label — and, for the
+ * author-label control, on `useNavigationSync().syncPageCreated` /
+ * `syncDashboardCreated` with one.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import React, { useEffect } from 'react';
 import { render, waitFor } from '@testing-library/react';
 import { MetadataCtx, AdapterCtx, type MetadataContextValue } from '@object-ui/react';
-import { NavigationSyncEffect, useNavigationSync } from '../useNavigationSync';
-import { __markFirstPainted } from '../sharedUserFeeds';
+import { useNavigationSync, useNavigationWrites } from '../useNavigationSync';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -64,29 +65,32 @@ const adapterFor = (saveItem: ReturnType<typeof vi.fn>) =>
 const writtenEntries = (saveItem: ReturnType<typeof vi.fn>) =>
   saveItem.mock.calls.flatMap(([, , schema]) => schema.navigation as Record<string, unknown>[]);
 
-const flush = () => new Promise((r) => setTimeout(r, 0));
-
 beforeEach(() => {
   vi.clearAllMocks();
-  // objectui#12980 — the effect reads nothing before the console's first
-  // paint; these cases are about the diff, so they start past it.
-  __markFirstPainted();
 });
 
-describe('objectui#9868 — NavigationSyncEffect writes unnamed entries with NO label', () => {
+describe('objectui#9868 — the create sites write unnamed entries with NO label', () => {
   it('a new page and a new dashboard land in navigation without a `label` key', async () => {
     const saveItem = vi.fn().mockResolvedValue({});
-    const tree = (world: World) => (
+    function Site() {
+      const { created } = useNavigationWrites();
+      useEffect(() => {
+        void (async () => {
+          await created('page', 'my_page', { name: 'my_page' });
+          await created('dashboard', 'my_dash', { name: 'my_dash', label: 'My Dashboard' });
+        })();
+        // Once, on mount: the two creates are the case.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
+      return null;
+    }
+    render(
       <AdapterCtx.Provider value={adapterFor(saveItem)}>
-        <MetadataCtx.Provider value={metaValue(world)}>
-          <NavigationSyncEffect />
+        <MetadataCtx.Provider value={metaValue({ pages: [], dashboards: [] })}>
+          <Site />
         </MetadataCtx.Provider>
-      </AdapterCtx.Provider>
+      </AdapterCtx.Provider>,
     );
-    const { rerender } = render(tree({ pages: [], dashboards: [] }));
-    await flush();
-
-    rerender(tree({ pages: [{ name: 'my_page' }], dashboards: [{ name: 'my_dash', label: 'My Dashboard' }] }));
     await waitFor(() => expect(saveItem).toHaveBeenCalledTimes(2));
 
     const [page, dash] = [

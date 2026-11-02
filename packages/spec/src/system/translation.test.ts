@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS, FLOW_TERMINAL_MESSAGE_KEYS, flowRefusalMessageKey, flowScreenCopyKey } from './i18n-resolver';
+import { PAGE_COMPONENT_COPY_KEYS, FLOW_SCREEN_COPY_KEYS, FLOW_SCREEN_FIELD_COPY_KEYS, FLOW_TERMINAL_MESSAGE_KEYS, flowRefusalMessageKey, flowScreenCopyKey, flowTerminalMessageKey } from './i18n-resolver';
 import { TEXT_SLOT_TEMPLATE_REFUSAL } from '../automation/flow-text-slot-template';
 import { FlowSchema } from '../automation/flow.zod';
 import { ScreenConfigSchema, ScreenFieldConfigSchema } from '../automation/builtin-node-config.zod';
@@ -1335,6 +1335,30 @@ describe('translation unknown-key strictness', () => {
         const issue = parse({ f: { [spelling!]: 'x' } }).error?.issues.find((i) => i.code === 'unrecognized_keys');
         expect(issue?.message, spelling).toContain(`\`${spelling}\` → \`${key}\``);
       }
+    });
+
+    // #28054 — the engine renders the flow's terminal text as a `{{ }}`
+    // template and picks its translation before it fills the holes, so the
+    // translation is the same text slot as the source.
+    it('keys the terminal toasts as translated templates that keep the `{{ }}` holes (#28054)', () => {
+      const result = parse({ enrol: { successMessage: '已登记 {{ enrolledCount }} 位联系人', errorMessage: '登记失败' } });
+      expect(result.success, JSON.stringify(result.error?.issues)).toBe(true);
+      expect(flowTerminalMessageKey('enrol', 'successMessage')).toBe('flows.enrol.successMessage');
+      expect(flowTerminalMessageKey('enrol', 'errorMessage')).toBe('flows.enrol.errorMessage');
+    });
+
+    it('refuses a single-brace `{token}` in a translated toast, through the one text-slot judge (#28054)', () => {
+      for (const key of FLOW_TERMINAL_MESSAGE_KEYS) {
+        const result = parse({ enrol: { [key]: '已登记 {enrolledCount} 位联系人' } });
+        expect(result.success, key).toBe(false);
+        const issue = result.error!.issues[0]!;
+        expect(issue.code).toBe('custom');
+        expect(issue.path).toEqual(['flows', 'enrol', key]);
+        expect(issue.message.slice(0, issue.message.indexOf('. ') + 1)).toBe(TEXT_SLOT_TEMPLATE_REFUSAL);
+        expect(issue.message).toContain('{{ enrolledCount }}');
+      }
+      // An empty string is the untranslated skeleton slot.
+      expect(parse({ enrol: { successMessage: '' } }).success).toBe(true);
     });
 
     it('keys a screen\'s `description` — a translated template that keeps the `{{ }}` holes (#22507)', () => {

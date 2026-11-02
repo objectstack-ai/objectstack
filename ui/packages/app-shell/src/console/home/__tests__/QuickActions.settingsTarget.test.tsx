@@ -79,9 +79,6 @@ function renderQuickActions() {
 
 const SYSTEM_HUB = '/apps/setup/system';
 
-/** Where the metadata-admin engine really serves the object list (objectui#3739). */
-const OBJECTS_TARGET = '/apps/setup/metadata/object';
-
 describe('QuickActions system-settings card (objectui#3611, dormant)', () => {
   it('DORMANCY PRECONDITION: nothing renders this component, so the fix is a guard, not a user-visible change', async () => {
     // Recorded as an assertion rather than prose so it goes red the day the
@@ -121,23 +118,15 @@ describe('QuickActions system-settings card (objectui#3611, dormant)', () => {
     expect(screen.getByTestId('landing')).toHaveTextContent(SYSTEM_HUB);
   });
 
-  it('the Manage Objects card targets the canonical metadata route, not the system alias (objectui#3739)', async () => {
-    // Replaces #3611's "the sibling is unchanged" anchor. That assertion was
-    // true of the URL and wrong about it: `…/system/metadata/object` is an alias
-    // the host only forwards, so pinning it froze the extra hop in place.
-    const user = userEvent.setup();
+  it('carries no Manage Objects card: Setup carries no metadata catalog (objectstack ADR-0146 D1)', () => {
+    // objectui#3739 pointed the card at Setup's canonical `metadata/object`
+    // route. N-28 retired that route into Studio's "All metadata" area, and the
+    // card with it: objects are designed in Studio.
     renderQuickActions();
 
-    await user.click(screen.getByTestId('quick-action-manage-objects'));
-
-    expect(screen.getByTestId('landing')).toHaveTextContent(OBJECTS_TARGET);
-    // `toHaveTextContent` matches on substring, and neither spelling contains
-    // the other (`/apps/setup/system/metadata/object` has the extra segment in
-    // the MIDDLE), so the assertion above already separates them. This second
-    // one adds nothing to the logic and is kept for the diff: a revert then
-    // fails naming the alias, instead of reporting two similar-looking paths.
-    expect(screen.getByTestId('landing')).not.toHaveTextContent(
-      `${SYSTEM_HUB}/metadata/object`,
-    );
+    expect(screen.queryByTestId('quick-action-manage-objects')).not.toBeInTheDocument();
+    for (const link of screen.queryAllByRole('link')) {
+      expect(link.getAttribute('href') ?? '').not.toContain('/metadata/object');
+    }
   });
 });

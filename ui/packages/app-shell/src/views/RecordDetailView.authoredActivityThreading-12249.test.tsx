@@ -31,7 +31,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, fireEvent, within, act, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MetadataCtx } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { DETAIL_DEFAULT_TRANSLATIONS } from '@object-ui/plugin-detail';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
@@ -184,16 +184,17 @@ const CREATE_ONLY = { allowRead: true, allowCreate: true, allowEdit: false, allo
 const READ_ONLY = { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false };
 
 /** The caller's `/me/permissions` answer: full on the record's object, `bits` on `sys_comment`. */
-function answer(bits: Record<string, unknown>): MePermissionsResponse {
+function answer(bits: Record<string, unknown>): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: ['member'],
+    positions: ['member'],
+    hasAnyQueue: false,
     permissionSets: ['member'],
     objects: { [OBJECT_NAME]: FULL, [COMMENT]: bits },
     fields: {},
-  } as MePermissionsResponse;
+  } as MePermissionsAuthenticatedResponse;
 }
 
 interface MountOptions {

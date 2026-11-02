@@ -6,12 +6,14 @@ import {
   SelectTrigger,
   SelectValue,
   EmptyValue,
+  cn,
 } from '@object-ui/components';
 import { isValueStillOffered, optionDisplayLabel } from '@object-ui/core';
 import { SelectFieldMetadata } from '@object-ui/types';
 import { useFieldTranslation } from './useFieldTranslation.js';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { MultiSelectField } from './MultiSelectField.js';
 import { OptionsEmptyState } from './OptionsEmptyState.js';
 import { toHostControlProps } from './toHostGroupProps.js';
@@ -214,6 +216,7 @@ function SingleSelectField({
     >
       <SelectTrigger
         {...triggerDomProps}
+        className={cn(PHONE_TOUCH_HEIGHT, triggerDomProps.className)}
         data-testid={fieldName ? `select-trigger-${fieldName}` : undefined}
         // AFTER the spread so this widget's own computation wins, the #3222
         // discipline: `error` is the published validation slot
@@ -225,7 +228,12 @@ function SingleSelectField({
       </SelectTrigger>
       <SelectContent position="popper">
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value} data-testid={`select-option-${option.value}`}>
+          <SelectItem
+            key={option.value}
+            value={option.value}
+            className={PHONE_TOUCH_HEIGHT}
+            data-testid={`select-option-${option.value}`}
+          >
             {optionDisplayLabel(option)}
           </SelectItem>
         ))}

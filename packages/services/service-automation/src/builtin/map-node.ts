@@ -241,6 +241,9 @@ export function registerMapNode(engine: AutomationEngine, ctx: PluginContext): v
         // bag, not this item's mapped inputs — dropped, so the child carries no
         // signal and its screens infer (see `subflow-node.ts`).
         delete childContext.callerParamKeys;
+        // [#28251] A child run is not started by the write that started this one,
+        // so it never holds that write's save-notice channel.
+        delete childContext.saveNotice;
 
         const child = await engine.execute(flowName, childContext);
 

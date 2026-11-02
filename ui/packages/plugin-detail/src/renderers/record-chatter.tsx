@@ -295,6 +295,7 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         onEditComment={discussion?.onEditComment}
         onDeleteComment={discussion?.onDeleteComment}
         mentionSuggestions={mentionsEnabled ? (discussion?.mentionSuggestions as any) : undefined}
+        onMentionSuggestionsWanted={mentionsEnabled ? discussion?.onMentionSuggestionsWanted : undefined}
         onUploadAttachments={discussion?.onUploadAttachments as any}
         // objectui#11195: which of the host's two feed reads the server
         // REFUSED. The host that owns the fetch decides it, the same way it

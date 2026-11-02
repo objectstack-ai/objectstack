@@ -104,7 +104,7 @@ function StudioAccessRequired({ home }: { home: string }) {
         </div>
         <EmptyTitle>
           {t('console.studio.accessRequired', {
-            defaultValue: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Sets.',
+            defaultValue: 'You need Studio access to open Studio. An administrator can grant it with a permission set in Setup → Permission Set Assignment.',
           })}
         </EmptyTitle>
         <div className="mt-4">

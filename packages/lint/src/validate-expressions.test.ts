@@ -302,6 +302,34 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues[0].message).toMatch(/daysBetween/);
     });
 
+    // #28944 — the bare subtraction, and a timestamp minus a date field: the
+    // runtime holds a date field as its text, so the first reads null and the
+    // second a Duration (`{}`). Both are refused by the stack gate, located at
+    // the formula's expression; the daysBetween form beside them stays clean.
+    it('flags bare date subtraction and a timestamp minus a date field in a formula field', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'qa_doctor_time_off',
+          fields: {
+            start_date: { type: 'date' },
+            end_date: { type: 'date' },
+            qa_span_bare: { type: 'formula', name: 'qa_span_bare', expression: 'record.end_date - record.start_date' },
+            qa_span_daysbetween: {
+              type: 'formula', name: 'qa_span_daysbetween', expression: 'daysBetween(record.start_date, record.end_date)',
+            },
+            qa_since_today: { type: 'formula', name: 'qa_since_today', expression: 'today() - record.start_date' },
+          },
+        }],
+      });
+      expect(issues.map((i) => [i.where, i.severity])).toEqual([
+        ["object 'qa_doctor_time_off' · field 'qa_span_bare' expression", 'error'],
+        ["object 'qa_doctor_time_off' · field 'qa_since_today' expression", 'error'],
+      ]);
+      expect(issues[0].message).toMatch(/evaluates to null/);
+      expect(issues[1].message).toMatch(/reads `\{\}`/);
+      for (const issue of issues) expect(issue.message).toMatch(/daysBetween\(a, b\)/);
+    });
+
     it('accepts the daysBetween rewrite of that formula', () => {
       const issues = validateStackExpressions({
         objects: [{
@@ -3589,6 +3617,12 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // receiver above) and the provenance index (`unprovisionedIndex` /
       // `anchors`), whose keys are Map/Set methods, never metadata keys.
       'pending', 'celNode', 'celRecv', 'anchors', 'unprovisionedIndex',
+      // [#28659] The object's `[name, def]` field pairs and the set of their
+      // names, read to collect the fields `label()` can answer on. Their keys
+      // are Array / Set methods (`filter`, `map`, `has`), never metadata keys;
+      // the metadata reads, `options` and `picklist`, go through
+      // `declaresOptionsOnceServed`.
+      'fieldList', 'declaredNames',
       // [#13935] The field-rule verdict, split into a compute half and a push
       // half so the walk can tell `check` a verdict was issued. `verdict`'s
       // keys are this helper's own `{ root, message, source }`, never metadata
@@ -5346,6 +5380,49 @@ describe('the http text slots, body and literals are refused with their remedies
   it('signingSecret is left to the run; the literals as written are clean', () => {
     expect(errorsOf(stackWith({ signingSecret: '{k}' }))).toEqual([]);
     expect(errorsOf(stackWith({ method: 'POST', durable: true, timeoutMs: 5000, signingSecret: 's', headers: { 'X-Kind': 'probe' } }))).toEqual([]);
+  });
+});
+
+describe('a flow\'s own text slots — `successMessage` / `errorMessage` (#28054)', () => {
+  const stackWith = (messages: Record<string, unknown>, endMessage?: string) => ({
+    flows: [{
+      name: 'enrol',
+      ...messages,
+      nodes: [
+        { id: 'start', type: 'start' },
+        ...(endMessage !== undefined ? [{ id: 'finish', type: 'end', config: { outcome: 'refused', message: endMessage } }] : []),
+      ],
+      edges: [],
+    }],
+  });
+  const errorsOf = (stack: unknown) =>
+    validateStackExpressions(stack as never).filter((i) => (i.severity ?? 'error') === 'error');
+
+  it.each(['successMessage', 'errorMessage'] as const)('%s: a single-brace token is refused at `error`, as in a node text slot', (key) => {
+    const text = '{enrolledCount} contacts enrolled';
+    const found = errorsOf(stackWith({ [key]: text }));
+    expect(found).toHaveLength(1);
+    expect(found[0]!.where).toBe(`flow 'enrol' ${key}`);
+    expect(found[0]!.path).toBe(`flows[0].${key}`);
+    expect(found[0]!.message.startsWith(TEXT_SLOT_TEMPLATE_REFUSAL)).toBe(true);
+    expect(found[0]!.message).toContain('`{{ enrolledCount }} contacts enrolled`');
+    // The node text slot carrying the same text is refused with the same words.
+    const node = errorsOf(stackWith({}, text));
+    expect(node).toHaveLength(1);
+    expect(node[0]!.message).toBe(found[0]!.message);
+  });
+
+  it('a hole that does not compile is refused with the compile step\'s words, as in a node text slot', () => {
+    const text = 'Enrolled {{ enrolledCount + 1 }} contacts';
+    const found = errorsOf(stackWith({ successMessage: text }));
+    const node = errorsOf(stackWith({}, text));
+    expect(found).toHaveLength(1);
+    expect(node).toHaveLength(1);
+    expect(found[0]!.message).toBe(node[0]!.message);
+  });
+
+  it('a well-formed template and a plain sentence are clean', () => {
+    expect(errorsOf(stackWith({ successMessage: '{{ enrolledCount }} contacts enrolled', errorMessage: 'Enrolment failed.' }))).toEqual([]);
   });
 });
 

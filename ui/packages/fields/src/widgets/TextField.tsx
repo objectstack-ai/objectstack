@@ -1,8 +1,9 @@
 import React from 'react';
-import { Input, Textarea, EmptyValue } from '@object-ui/components';
+import { Input, Textarea, EmptyValue, cn } from '@object-ui/components';
 import type { TextFieldMetadata, TextareaFieldMetadata } from '@object-ui/types';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { CurrencyCodeField, isCurrencyCodeField } from './CurrencyCodeField.js';
 
 /**
@@ -77,6 +78,7 @@ export function TextField({ value, onChange, field, readonly, error, ...props }:
     <Input
       {...domProps}
       type={fieldData?.type === 'password' ? 'password' : 'text'}
+      className={cn(PHONE_TOUCH_HEIGHT, domProps.className)}
       value={value || ''}
       onChange={(e) => onChange(e.target.value)}
       placeholder={fieldData?.placeholder}

@@ -16,7 +16,8 @@
  * the same id. The author got a package that could never be rebuilt or
  * published — «declared ≠ enforced» on a PUBLISHED API contract, which Prime
  * Directive #10 refuses outright, and the exact failure 北极星 clause 4 names:
- * 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+ * "what is wrong must be loudly refused with a prescription, never silently
+ * stored".
  *
  * The authorising ruling is 基本裁决原则 —
  * 「spec 声明 > 实现 > 文档面;**声明而未兑现是实现缺口,补实现或退役**,

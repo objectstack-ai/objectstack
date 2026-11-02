@@ -254,7 +254,7 @@ contradicts it, and correct it here when it does.
   out of this section is the `absence-inference` trap one level up.
   **The discriminator is uniformity:** a launch/environment failure
   takes down the whole run at once (`showcase-smoke.spec.ts` generates one test per
-  `SURFACES` entry — 49 today, so "49 failed" means all of them), while a product defect
+  `SURFACES` entry — 50 today, so "50 failed" means all of them), while a product defect
   fails selectively. ⛔ Do not file a whole-run red as a product defect before checking
   the browser resolved.
 

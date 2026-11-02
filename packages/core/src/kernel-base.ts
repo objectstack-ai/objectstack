@@ -329,6 +329,22 @@ export abstract class ObjectKernelBase {
     }
 
     /**
+     * Whether `bootstrap()` dispatches the boot-phase hooks — `kernel:ready`,
+     * `kernel:bootstrapped` and `kernel:listening` — once every plugin's
+     * `start()` has run. A kernel on this base always does, so this answers
+     * `true`.
+     *
+     * Read-only. It is for a plugin that leaves part of its start to one of
+     * those hooks and must know, during its own `start()`, that the hook will
+     * come; where the answer is `false` (or a host does not say), it keeps
+     * that work in `start()`. `ObjectKernel` answers from its
+     * `bootPhaseHooks` option.
+     */
+    dispatchesBootPhaseHooks(): boolean {
+        return true;
+    }
+
+    /**
      * Get all registered plugins
      */
     getPlugins(): Map<string, Plugin> {

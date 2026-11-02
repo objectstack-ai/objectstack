@@ -23,6 +23,8 @@
  *    own view when one is chosen (objectui#12667)
  *  - The actor is named, not shown as a raw id (objectui#11701): see
  *    `actorOf` below
+ *  - The object is named by its served label in the Object column and the
+ *    drawer: see `objectLabelOf` below
  *  - Paginated table (50/page)
  *  - Row click opens a side drawer with full event details + JSON
  *    diff of old_value → new_value when present
@@ -73,7 +75,7 @@ import {
 import { LookupField, getLazyFieldWidget, objectRefOptionLabel } from '@object-ui/fields';
 import { ConsolePageHeader, useAdapter, useMetadata } from '@object-ui/app-shell';
 import { Search, X, AlertCircle, ScrollText, ExternalLink } from 'lucide-react';
-import { actionBadgeVariant, actionFilterOptionsOf } from './auditLogActions';
+import { actionBadgeVariant, actionFilterOptionsOf, actionLabelOf } from './auditLogActions';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
 const API_BASE = `${SERVER_URL}/api/v1`;
@@ -209,12 +211,44 @@ function auditPresetsOf(objectDef: unknown): AuditPreset[] {
 function objectFilterOptionsOf(objects: readonly unknown[], locale: string): ComboboxOption[] {
   const options: ComboboxOption[] = [];
   for (const raw of objects) {
-    const object = raw as { name?: unknown; label?: unknown } | null | undefined;
-    if (!object || typeof object.name !== 'string' || !object.name) continue;
-    const label = typeof object.label === 'string' && object.label.trim() ? object.label.trim() : undefined;
-    options.push({ value: object.name, label: objectRefOptionLabel(object.name, label) });
+    const object = servedObjectOf(raw);
+    if (!object) continue;
+    options.push({ value: object.name, label: objectRefOptionLabel(object.name, object.label) });
   }
   return options.sort((a, b) => a.label.localeCompare(b.label, locale));
+}
+
+/**
+ * The object a row names, as the Object column, the drawer's title and its
+ * target-record line show it: the served label of the object whose API name
+ * is `name`, read from the same `useMetadata().objects` as the Object filter's
+ * choices (`objectFilterOptionsOf`), so a cell and the filter name an object
+ * from one source. These sites show the label alone; the filter keeps its
+ * `Label (name)` spelling, where the API name tells similar labels apart.
+ *
+ * An object the metadata does not serve, or serves without a label, shows its
+ * stored `object_name`, so a row is never left unnamed. A missing or empty
+ * name answers `undefined` and the page shows its own fallback.
+ */
+function objectLabelOf(objects: readonly unknown[], name: string | null | undefined): string | undefined {
+  if (!name) return undefined;
+  for (const raw of objects) {
+    const object = servedObjectOf(raw);
+    if (object?.name === name) return object.label ?? name;
+  }
+  return name;
+}
+
+/**
+ * One entry of the served objects read as its API name and its trimmed label
+ * (`undefined` when blank), or `undefined` for an entry that names no object.
+ * The one reading behind `objectFilterOptionsOf` and `objectLabelOf`.
+ */
+function servedObjectOf(raw: unknown): { name: string; label?: string } | undefined {
+  const object = raw as { name?: unknown; label?: unknown } | null | undefined;
+  if (!object || typeof object.name !== 'string' || !object.name) return undefined;
+  const label = typeof object.label === 'string' && object.label.trim() ? object.label.trim() : undefined;
+  return { name: object.name, label };
 }
 
 /**
@@ -321,7 +355,9 @@ export function AuditLogPage() {
   const { objects, getTypeStatus } = useMetadata();
   const presets = useMemo(() => auditPresetsOf(auditObjectOf(objects)), [objects]);
   // The Action filter offers what the same document declares for
-  // `sys_audit_log.action` (objectui#13175), never a list kept here.
+  // `sys_audit_log.action` (objectui#13175), never a list kept here. The
+  // Action column and the detail drawer label a row's action from the same
+  // choices (`actionLabelOf`), so the badge reads as the filter does.
   const actionOptions = useMemo(() => actionFilterOptionsOf(auditObjectOf(objects)), [objects]);
   // The Object filter picks from the same served objects (objectui#13165).
   const objectOptions = useMemo(() => objectFilterOptionsOf(objects, displayLocale), [objects, displayLocale]);
@@ -657,8 +693,8 @@ export function AuditLogPage() {
                       onClick={() => setSelected(r)}
                     >
                       <TableCell className="font-mono text-xs">{formatDate(r.created_at, displayLocale)}</TableCell>
-                      <TableCell><Badge variant={variant}>{r.action || '—'}</Badge></TableCell>
-                      <TableCell>{r.object_name || '—'}</TableCell>
+                      <TableCell><Badge variant={variant}>{actionLabelOf(actionOptions, r.action) ?? '—'}</Badge></TableCell>
+                      <TableCell>{objectLabelOf(objects, r.object_name) ?? '—'}</TableCell>
                       <TableCell className="font-mono text-xs">{truncate(r.record_id, 18)}</TableCell>
                       <TableCell><ActorCell face={actorOf(r)} /></TableCell>
                       <TableCell className="font-mono text-xs">{r.ip_address || '—'}</TableCell>
@@ -696,9 +732,9 @@ export function AuditLogPage() {
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
               <Badge variant={actionBadgeVariant(selected?.action)}>
-                {selected?.action || '—'}
+                {actionLabelOf(actionOptions, selected?.action) ?? '—'}
               </Badge>
-              {selected?.object_name || t('console.system.auditLog.eventFallback', { defaultValue: 'Audit Event' })}
+              {objectLabelOf(objects, selected?.object_name) ?? t('console.system.auditLog.eventFallback', { defaultValue: 'Audit Event' })}
             </SheetTitle>
             <SheetDescription>
               {selected?.id ? <span className="font-mono text-xs">{selected.id}</span> : null}
@@ -727,7 +763,7 @@ export function AuditLogPage() {
                 <div className="col-span-2">
                   <div className="text-xs text-muted-foreground">{t('console.system.auditLog.targetRecord', { defaultValue: 'Target record' })}</div>
                   <div className="font-mono text-sm break-all">
-                    {selected.object_name || '—'} / {selected.record_id || '—'}
+                    {objectLabelOf(objects, selected.object_name) ?? '—'} / {selected.record_id || '—'}
                   </div>
                 </div>
                 {selected.user_agent && (

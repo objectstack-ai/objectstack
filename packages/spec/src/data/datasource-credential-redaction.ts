@@ -437,8 +437,16 @@ export function redactUrlPassword(value: string): string {
  * REFUSED at the write door — the same reasoning as the dropped inline keys.
  * A query left empty takes its `?` with it, so the served shape is exactly
  * what the write door accepts.
+ *
+ * `params` defaults to the datasource set; the connector read redactor
+ * (`integration/connector-credential-redaction.ts`) passes its own name list
+ * through this same function, so the two read paths keep ONE definition of
+ * where a query runs and what a pair is.
  */
-export function redactUrlCredentialQueryParams(value: string): string {
+export function redactUrlCredentialQueryParams(
+  value: string,
+  params: readonly string[] = CREDENTIAL_URL_QUERY_PARAM_NAMES,
+): string {
   const hashIdx = value.indexOf('#');
   const head = hashIdx === -1 ? value : value.slice(0, hashIdx);
   const fragment = hashIdx === -1 ? '' : value.slice(hashIdx);
@@ -447,7 +455,7 @@ export function redactUrlCredentialQueryParams(value: string): string {
   const kept = head
     .slice(queryIdx + 1)
     .split('&')
-    .filter((pair) => credentialQueryParamOf(pair, CREDENTIAL_URL_QUERY_PARAM_NAMES) === undefined);
+    .filter((pair) => credentialQueryParamOf(pair, params) === undefined);
   const base = head.slice(0, queryIdx);
   return `${kept.length > 0 ? `${base}?${kept.join('&')}` : base}${fragment}`;
 }

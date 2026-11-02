@@ -18,14 +18,68 @@ import {
     applyListStateParams,
     userFilterParamsKey,
     type ListStatePatch,
+    type ListUrlFieldGate,
     type ListUrlState,
+    type ListSortRule,
 } from './userFilterUrlState.js';
 import { buildListFilterKey, readListFilterState } from './listFilterStorage.js';
-import type { useObjectListPreferences } from '../context/ListPreferencesProvider.js';
+import type {
+    useObjectListPreferences,
+    ListFilterGroupPreference,
+    ListSortPreference,
+} from '../context/ListPreferencesProvider.js';
 import { parseUrlEqualityFilterTriples } from './drillUrlFilters.js';
 import { selectFilterParams } from './objectViewHelpers.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+    !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * objectstack#28949 — the stored sort through the seed's field gate: a level
+ * naming a refused field is dropped and the levels around it keep their order.
+ * An empty stored sort is a sort the user cleared, and it is kept; one whose
+ * every level was dropped is no sort at all, so the view's own sort applies.
+ */
+export function acceptStoredSort(
+    sort: readonly ListSortPreference[] | undefined,
+    acceptField: ListUrlFieldGate,
+): ListSortRule[] | undefined {
+    if (!sort) return undefined;
+    const kept = sort.filter(level => acceptField(level.field));
+    return sort.length === 0 || kept.length > 0 ? kept : undefined;
+}
+
+/**
+ * objectstack#28949 — the stored Filter panel group through the seed's field
+ * gate, at any nesting: a condition naming a refused field is dropped, a
+ * nested group left with no condition is dropped with it, and every other
+ * entry is kept exactly as stored (ids included: the panel rehydrates them).
+ * A group nothing was dropped from is returned as is; one left with no
+ * condition at all is no filter, and the list opens unfiltered.
+ */
+export function acceptStoredFilters(
+    group: ListFilterGroupPreference | undefined,
+    acceptField: ListUrlFieldGate,
+): ListFilterGroupPreference | undefined {
+    if (!group || !Array.isArray(group.conditions)) return group;
+    let dropped = false;
+    const conditions: unknown[] = [];
+    for (const entry of group.conditions) {
+        if (isRecord(entry) && Array.isArray(entry.conditions)) {
+            const nested = acceptStoredFilters(entry as ListFilterGroupPreference, acceptField);
+            if (nested !== entry) dropped = true;
+            if (nested) conditions.push(nested);
+        } else if (isRecord(entry) && typeof entry.field === 'string' && entry.field && !acceptField(entry.field)) {
+            dropped = true;
+        } else {
+            conditions.push(entry);
+        }
+    }
+    if (!dropped) return group;
+    return conditions.length > 0 ? { ...group, conditions } : undefined;
+}
 
 export function useObjectViewListUrlState({
     objectName,
@@ -68,6 +122,11 @@ export function useObjectViewListUrlState({
      *    seed waits until that state has been read (`listPrefs.ready`), so a
      *    second browser opens on it rather than on an empty cache.
      *
+     * Both seeds pass the same field gate (`acceptField`, objectstack#28949):
+     * a field stored before it was deleted, or before this user lost read on
+     * it, is dropped exactly as a stale link's is, and the rest of the state
+     * opens as stored.
+     *
      * Then the seed is written back into the URL (replace, never a new history
      * entry), so the address bar shows the list on screen: a restored filter
      * is in the link a user copies, and an entry dropped on load (a field the
@@ -93,14 +152,15 @@ export function useObjectViewListUrlState({
     const listSeedRef = useRef<{ key: string; source: 'url' | 'storage'; state: ListUrlState } | undefined>(undefined);
     const ownListParamsRef = useRef<string | undefined>(undefined);
     if (listIdentityKey && listPrefs.ready && listSeedRef.current?.key !== listIdentityKey) {
+        // A field the object does not declare (a stale link, or a stored state
+        // older than the field's deletion) or one this user cannot read is
+        // dropped. Field-level permissions gate only once loaded — the same
+        // gate `ListView` puts on its columns.
+        const acceptField: ListUrlFieldGate = (field: string) =>
+            !!objectDef.fields?.[field]
+            && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
         const carried = userFilterParamsKey(searchParams);
         if (carried && carried !== ownListParamsRef.current) {
-            // A field the object does not declare (a stale link) or one this
-            // user cannot read is dropped. Field-level permissions gate only
-            // once loaded — the same gate `ListView` puts on its columns.
-            const acceptField = (field: string) =>
-                !!objectDef.fields?.[field]
-                && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
             listSeedRef.current = {
                 key: listIdentityKey,
                 source: 'url',
@@ -113,9 +173,9 @@ export function useObjectViewListUrlState({
                 key: listIdentityKey,
                 source: 'storage',
                 state: {
-                    filters: (viewPref?.filters ?? undefined) as ListUrlState['filters'],
+                    filters: acceptStoredFilters(viewPref?.filters, acceptField) as ListUrlState['filters'],
                     search: stored?.search || undefined,
-                    sort: viewPref?.sort,
+                    sort: acceptStoredSort(viewPref?.sort, acceptField),
                 },
             };
         }

@@ -24,7 +24,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 // Module scope, never a `beforeAll` (AGENTS.md §测试纪律, objectui#3010).
 import '@object-ui/components';
 import { SchemaRenderer, MetadataCtx } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import '../nav-menu-renderer';
 
 const NAVIGATION = [
@@ -54,12 +54,13 @@ const AREAS = [
   },
 ];
 
-function answerFor(opportunityRead: boolean): MePermissionsResponse {
+function answerFor(opportunityRead: boolean): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_agent',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['service_agent'],
     systemPermissions: [],
     objects: { crm_account: { allowRead: true }, crm_opportunity: { allowRead: opportunityRead } },

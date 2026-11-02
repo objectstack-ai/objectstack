@@ -586,6 +586,18 @@ const FAILURE_PROPAGATION_SITES = new Map([
         },
     ],
     [
+        'packages/metadata-protocol/src/protocol-packageless-overlay-migration.ts::migratePackagelessOverlays',
+        {
+            callees: [['fail', 'effect']],
+            why:
+                "`fail()` is this function's per-row outcome recorder: it increments the base's `failed` count "
+                + "and appends `{ id, outcome: 'failed', error }` to the RETURNED report, which "
+                + '`os migrate packageless-overlays` prints row by row and turns into exit 1 under `--apply`. '
+                + 'The unbound row is kept on every failed path (its delete follows the read-back), so the '
+                + "report names the row whose move did not land and why — the operation's contract (#28413).",
+        },
+    ],
+    [
         'packages/cli/src/utils/schema-migration-plugins.ts::measureComposedCoverage',
         {
             callees: [['failures.set', 'effect']],

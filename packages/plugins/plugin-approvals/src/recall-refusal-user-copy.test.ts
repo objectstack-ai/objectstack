@@ -126,7 +126,12 @@ function opened(result: ApprovalRequestRow | ApprovalNodeAutoOutcome): ApprovalR
 const SYS = { isSystem: true, positions: [], permissions: [] } as any;
 /** The submitter — user A in the report. */
 const SUBMITTER = { userId: 'u1', tenantId: 't1', positions: [], permissions: [] } as any;
-/** User B in the report: not the submitter, not an admin, Console set to zh-CN. */
+/**
+ * User B in the report: not the submitter, not an admin, Console set to zh-CN —
+ * and on the request's slate, so B reads the request the recall button sits on.
+ * A caller who cannot read the request is answered as for a missing id before
+ * any of this (`approval-service.test.ts`, the act doors block).
+ */
 const OTHER_ZH = {
   userId: 'u2', tenantId: 't1', positions: [], permissions: [], locale: 'zh-CN',
 } as any;
@@ -165,15 +170,20 @@ describe('non-submitter recall refusal renders through the operation catalog (#1
     object: 'opportunity', recordId: 'opp1', runId: 'run_1', nodeId: 'step_1',
     flowName: 'record_change_approval',
     config: {
-      approvers: [{ type: 'user' as const, value: 'u9' }],
+      approvers: [{ type: 'user' as const, value: 'u2' }],
       behavior: 'first_response' as const,
     },
     record: { id: 'opp1', amount: 100 },
   });
 
-  /** The report's setup: A submits, the request is pending, B opens the record. */
-  const pendingRequest = async (svc: ApprovalService) =>
-    opened(await svc.openNodeRequest(openInput(), SUBMITTER));
+  /** The report's setup: A submits, the request is pending on B, B opens it. */
+  const pendingRequest = async (svc: ApprovalService) => {
+    // A `user` approver holds a slot only when an account carries it.
+    (engine._tables['sys_user'] ??= []).push({ id: 'u2' });
+    const req = opened(await svc.openNodeRequest(openInput(), SUBMITTER));
+    expect(req.pending_approvers).toEqual(['u2']);
+    return req;
+  };
 
   beforeEach(() => {
     engine = makeFakeEngine();
@@ -307,6 +317,9 @@ describe('non-submitter recall refusal renders through the operation catalog (#1
     const svc = svcFor();
     const req = await pendingRequest(svc);
     await expect(svc.recall(req.id, { actorId: 'u2' }, OTHER_ZH)).rejects.toThrow(/^FORBIDDEN/);
+    // A caller with no part in the request does not read it: answered as for a missing id.
+    const stranger = { userId: 'u7', tenantId: 't1', positions: [], permissions: [], locale: 'zh-CN' } as any;
+    await expect(svc.recall(req.id, { actorId: 'u7' }, stranger)).rejects.toThrow(`REQUEST_NOT_FOUND: ${req.id}`);
     const after = await svc.getRequest(req.id, SYS);
     expect(after!.status).toBe('pending');
   });

@@ -49,6 +49,8 @@ export interface RecordChatterPanelProps {
   /** Optional list of users (or any mentionable entities) the comment
    *  input can suggest after the user types `@`. */
   mentionSuggestions?: Array<{ id: string; label: string; avatarUrl?: string }>;
+  /** Called on the comment input's focus, for the host to read {@link mentionSuggestions} (objectstack#28470). */
+  onMentionSuggestionsWanted?: () => void;
   /** Optional uploader. When provided the composer renders an attachment
    *  panel; returned attachments are passed to `onAddComment`. */
   onUploadAttachments?: (files: FileList) => Promise<Array<{
@@ -93,6 +95,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
   onFilterChange,
   collapseWhenEmpty = false,
   mentionSuggestions,
+  onMentionSuggestionsWanted,
   onUploadAttachments,
   activityDenied,
   commentsDenied,
@@ -204,6 +207,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               onFilterChange={onFilterChange}
               collapseWhenEmpty={collapseWhenEmpty}
               mentionSuggestions={mentionSuggestions}
+              onMentionSuggestionsWanted={onMentionSuggestionsWanted}
               onUploadAttachments={onUploadAttachments}
               titleLabel={t('detail.discussion')}
               emptyLabel={t('detail.noCommentsYet')}
@@ -267,6 +271,7 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               onFilterChange={onFilterChange}
               collapseWhenEmpty={collapseWhenEmpty}
               mentionSuggestions={mentionSuggestions}
+              onMentionSuggestionsWanted={onMentionSuggestionsWanted}
               onUploadAttachments={onUploadAttachments}
               titleLabel={t('detail.discussion')}
               emptyLabel={t('detail.noCommentsYet')}

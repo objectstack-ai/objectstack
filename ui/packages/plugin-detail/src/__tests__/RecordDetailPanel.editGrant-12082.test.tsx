@@ -30,7 +30,7 @@
 import React from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordDetailPanel } from '../RecordDetailPanel';
 
 const OBJECT = 'crm_opportunity';
@@ -51,11 +51,12 @@ const FULL = SHAPES[3].bits;
  * the field, so the field question answers yes and only the object-level row
  * can decide.
  */
-const envelope = (bits: Record<string, unknown>, named = true): MePermissionsResponse => ({
+const envelope = (bits: Record<string, unknown>, named = true): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits as never },
   fields: named ? { [`${OBJECT}.note`]: { readable: true, editable: true } } : {},

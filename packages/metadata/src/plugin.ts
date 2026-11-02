@@ -14,7 +14,7 @@ import { Plugin, PluginContext } from '@objectstack/core';
 import { resolveArtifactPackageOrder, artifactPackageId } from '@objectstack/core';
 import { NodeMetadataManager } from './node-metadata-manager.js';
 import { MemoryLoader } from './loaders/memory-loader.js';
-import { DEFAULT_METADATA_TYPE_REGISTRY } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, judgeCollectionItemOwnerStamp, OWNER_STAMP_JUDGED_COLLECTIONS } from '@objectstack/spec/kernel';
 import type { MetadataPluginConfig } from '@objectstack/spec/kernel';
 import { applyProtection } from '@objectstack/spec/shared';
 import {
@@ -459,6 +459,43 @@ export function unclaimedTopLevel(stack: unknown): UnclaimedTopLevel | undefined
  *   the single-package branch D7 pins.
  * @returns How many items this body registered.
  */
+/**
+ * [#28697] The owner-stamp refusal at this door: an item of a judged
+ * collection ({@link OWNER_STAMP_JUDGED_COLLECTIONS}) whose body already wears
+ * a `_packageId` other than the body's own package, judged by the one judge
+ * (`judgeCollectionItemOwnerStamp`, `@objectstack/spec/kernel`) in the
+ * registration door's words and envelope (`VALIDATION_ERROR` / 400, `issues[]`
+ * at `_packageId`, the envelope the engine's body seam throws).
+ *
+ * Why here: `applyProtection` below stamps an unset key only, so a body's own
+ * stamp used to be what this door stored, and the engine's boot sync
+ * (`ObjectQLPlugin.loadMetadataFromService`) files every `app` / `view` /
+ * `flow` / `hook` it reads back under that stamp. A stack the schema parsed
+ * was judged at the build door first; a body no parse judged (a config boot's
+ * residual from a `strict: false` stack) was not, so this door judges every
+ * body it registers. The collections are the build door's, so neither door
+ * refuses what the other accepts.
+ */
+function artifactItemOwnerStampRefusal(
+    field: string,
+    metaType: string,
+    name: string,
+    item: unknown,
+    packageId: string | undefined,
+): (Error & { code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }> }) | undefined {
+    if (!(OWNER_STAMP_JUDGED_COLLECTIONS as readonly string[]).includes(field)) return undefined;
+    const refusal = judgeCollectionItemOwnerStamp(item, metaType, name, packageId, 'register');
+    if (!refusal) return undefined;
+    const err = new Error(refusal.message) as Error & {
+        code: 'VALIDATION_ERROR'; status: 400; httpStatus: 400; issues: Array<{ path: string; message: string; code: string }>;
+    };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.httpStatus = 400;
+    err.issues = [{ path: '_packageId', message: refusal.issueMessage, code: 'custom' }];
+    return err;
+}
+
 async function registerArtifactBodyCollections(
     sink: ArtifactRegistrationSink,
     body: Record<string, unknown>,
@@ -496,6 +533,8 @@ async function registerArtifactBodyCollections(
                 // write; row 1 is unchanged for every type.
                 const nameRefusal = viewContainerNameRefusal(item, sourceLabel, packageId);
                 if (nameRefusal) throw nameRefusal;
+                const ownerStamp = artifactItemOwnerStampRefusal(field, metaType, viewObject, item, packageId);
+                if (ownerStamp) throw ownerStamp;
                 applyProtection(item as any, {
                     packageId: packageId,
                     packageVersion: packageVersion,
@@ -537,6 +576,8 @@ async function registerArtifactBodyCollections(
             // it adds there is exactly the leading `object` term this path
             // was missing.
             const name = slot.name;
+            const ownerStamp = artifactItemOwnerStampRefusal(field, metaType, name, item, packageId);
+            if (ownerStamp) throw ownerStamp;
             // ADR-0010 §3.7 — translate the author-facing
             // `protection` block into the private `_lock` envelope
             // and stamp package provenance in one call. Strips the

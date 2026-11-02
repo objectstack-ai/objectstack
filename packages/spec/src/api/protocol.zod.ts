@@ -2755,7 +2755,8 @@ const WRITE_ANSWER_WITHHELD_MENTIONS_DESCRIPTION =
 const WRITE_ANSWER_NOTICE_DESCRIPTION =
   'One author-written message telling the person who made THIS write what the save set in motion (for example ' +
   '"Sent to your manager for approval"), set by a hook running on the write through the write\'s own `onNotice` ' +
-  'listener (`WriteObservabilityOptions`). Info severity: it reports an outcome, never a problem, so it is distinct ' +
+  'listener (`WriteObservabilityOptions`; a hook body calls it as `ctx.notice(message)`), or by a `save_notice` ' +
+  'node of a flow the write triggered. Info severity: it reports an outcome, never a problem, so it is distinct ' +
   'from `warnings` (the advisory validation-rule hits) and a client shows it with, or in place of, its own ' +
   'success message. One message: when more than one call sets it, the LAST one wins. Present ONLY when a hook set ' +
   'a non-empty message on a write that succeeded; otherwise the key is omitted. A nested write a hook or a flow ' +
@@ -2853,8 +2854,8 @@ export const CloneDataResponseSchema = lazySchema(() => z.object({
     + '`engine.insert`, after the `beforeInsert` hooks, `isSystem`-gated, exactly as on '
     + '`createData`), so those keys are dropped and the field re-derives its default. '
     + 'Present ONLY when ≥1 field was dropped; the clone still succeeded without them '
-    + '(status/success semantics unchanged). Carried in the 201 body only — this route '
-    + 'relays the producer verbatim and sets no `X-ObjectStack-Dropped-Fields` header. '
+    + '(status/success semantics unchanged). REST additionally surfaces this as the '
+    + '`X-ObjectStack-Dropped-Fields` response header. '
     + 'Optional — omit-when-empty keeps the shape backward-compatible for existing clients.'
   ),
   warnings: z.array(ValidateDataIssueSchema).optional().describe(WRITE_ANSWER_WARNINGS_DESCRIPTION),
@@ -3227,8 +3228,9 @@ export const CreateManyDataResponseSchema = lazySchema(() => z.object({
     '`engine.insert` after the `beforeInsert` hooks and exempts keys a hook itself wrote, ' +
     'tracked per row: rows where a hook stamped a protected key drop a different set from ' +
     'rows where it did not. Present ONLY when ≥1 field was dropped; the creates still succeeded ' +
-    'without them (count/success unchanged). Optional — omit-when-empty keeps the shape ' +
-    'backward-compatible. (The same reading applies to the partial-success bulk create, whose ' +
+    'without them (count/success unchanged). REST additionally surfaces this union as the ' +
+    '`X-ObjectStack-Dropped-Fields` response header, each field and reason once. Optional — ' +
+    'omit-when-empty keeps the shape backward-compatible. (The same reading applies to the partial-success bulk create, whose ' +
     'batch-level `droppedFields` names no row for the same reason. The paths that DO carry ' +
     'per-row `droppedFields` on each result are the bulk UPDATE and the mixed batch, where each ' +
     'row is its own engine call — see BatchOperationResultSchema.)'

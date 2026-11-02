@@ -145,6 +145,11 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // list cannot move.
       'validateReferenceIntegrity',
       'lintAutonumberFormats',
+      // A ruled join: the card's acceptance names this door. R13 judges a
+      // roll-up's aggregand against the child objects the snapshot carries
+      // and its child object against the deployment's names; the door
+      // controls are in the roll-up describe below.
+      'lintSummaryRollups',
       'validateSecurityPosture', // #8310 — at this door before #4716
       // [#19370] `security-role-word` joins this door, and NOT silently —
       // which is the distinction this pin exists to draw. The maintainer
@@ -463,6 +468,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'validatePresetComparands',
       'validateReferenceIntegrity', // [#15254]
       'lintAutonumberFormats',
+      'lintSummaryRollups', // see the roster pin above
       'validateSecurityPosture',
       'validateSecurityRoleWord', // [#19370] — see the roster pin above
       'validateRlsPredicateEnforceability', // [#25234] — see the roster pin above
@@ -688,5 +694,85 @@ describe('the object door judges related-list names against the live universe (#
       packageScope: { packageId: 'com.acme.leave', dependencies: [] },
     });
     expect(result.errors.filter((e) => e.rule === 'related-list-ref-unknown')).toEqual([]);
+  });
+});
+
+describe('a roll-up the engine would refuse at every recompute is refused at the object door', () => {
+  // A published `sum` over a text child field made every write of the child
+  // answer 500 although each write landed: the recompute's aggregate is
+  // refused after the commit. These are the door's own controls — the
+  // per-write snapshot and the differential, not the rule called directly.
+  const child = (memoType = 'text') => ({
+    name: 'qsf_child',
+    sharingModel: 'controlled_by_parent',
+    fields: {
+      name: { type: 'text' },
+      memo: { type: memoType },
+      amount: { type: 'number' },
+      parent: { type: 'master_detail', reference: 'qsf_parent', required: true, deleteBehavior: 'cascade' },
+    },
+  });
+  const parent = (summary: Record<string, unknown>) => ({
+    name: 'qsf_parent',
+    label: 'Parent',
+    sharingModel: 'private',
+    fields: {
+      name: { type: 'text' },
+      child_sum: { type: 'summary', summaryOperations: { object: 'qsf_child', function: 'sum', field: 'amount' } },
+      probe_sf: { type: 'summary', summaryOperations: summary },
+    },
+  });
+  const rollupErrors = (item: unknown, objects: unknown[], packageScope?: { packageId: string; dependencies: string[] }) =>
+    runRuntimeAuthoringRules({
+      type: 'object',
+      item,
+      context: { objects },
+      ...(packageScope ? { packageScope } : {}),
+    }).errors.filter((f) => f.rule.startsWith('rollup/'));
+
+  it('refuses sum and avg over a text child field, keyed by the parent\'s name', () => {
+    for (const fn of ['sum', 'avg']) {
+      const errs = rollupErrors(parent({ object: 'qsf_child', function: fn, field: 'memo' }), [child()]);
+      expect(errs.map((f) => [f.rule, f.path]), fn).toEqual([
+        ['rollup/non-numeric-aggregand', 'objects.qsf_parent.fields.probe_sf.summaryOperations.field'],
+      ]);
+      expect(errs[0]!.message, fn).toContain(`${fn}(qsf_child.memo), a text field`);
+      expect(errs[0]!.hint, fn).toContain("or use function: 'count'");
+    }
+  });
+
+  it('admits sum over a number child field (the control)', () => {
+    expect(rollupErrors(parent({ object: 'qsf_child', function: 'sum', field: 'amount' }), [child()])).toEqual([]);
+  });
+
+  it('admits a parent whose child object does not exist yet — an unmanaged install writes the parent first', () => {
+    // [#28661] Measured on `install-local-unmanaged-mode.dogfood.test.ts`: the
+    // install saves `crm_opportunity` (a roll-up over
+    // `crm_opportunity_line_item`) before that child exists.
+    const body = parent({ object: 'qsf_nope', function: 'sum', field: 'amount' });
+    for (const scope of [undefined, { packageId: 'pkg.qsf', dependencies: [] }]) {
+      expect(rollupErrors(body, [child()], scope), JSON.stringify(scope)).toEqual([]);
+    }
+  });
+
+  it('admits a child outside the package closure — it exists, a downstream package declares it', () => {
+    const downstream = { ...child('number'), _packageId: 'pkg.downstream' };
+    const body = { ...parent({ object: 'qsf_child', function: 'sum', field: 'memo' }), _packageId: 'pkg.qsf' };
+    expect(rollupErrors(body, [downstream], { packageId: 'pkg.qsf', dependencies: [] })).toEqual([]);
+  });
+
+  it('refuses the CHILD write that turns a stored parent\'s summed field into text', () => {
+    const storedParent = parent({ object: 'qsf_child', function: 'sum', field: 'memo' });
+    const errs = rollupErrors(child('text'), [storedParent, child('number')]);
+    expect(errs.map((f) => [f.rule, f.path])).toEqual([
+      ['rollup/non-numeric-aggregand', 'objects.qsf_parent.fields.probe_sf.summaryOperations.field'],
+    ]);
+    // …and a child write that leaves it numeric is not charged with anything.
+    expect(rollupErrors(child('number'), [storedParent, child('number')])).toEqual([]);
+  });
+
+  it('does not charge a write for a STORED parent already in violation', () => {
+    const brokenStored = parent({ object: 'qsf_child', function: 'sum', field: 'memo' });
+    expect(rollupErrors(cleanObject(), [brokenStored, child()])).toEqual([]);
   });
 });

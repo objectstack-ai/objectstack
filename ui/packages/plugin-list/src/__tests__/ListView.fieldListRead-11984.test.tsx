@@ -49,7 +49,7 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import type { DataSource, ListViewSchema } from '@object-ui/types';
 import { SchemaRendererProvider } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { ListView } from '../ListView';
 
 const OBJECT = 'fls_ticket';
@@ -66,12 +66,13 @@ const COLUMNS = Object.entries(FIELDS).map(([field, def]) => ({ field, label: de
 const FIELD_LABELS = COLUMNS.map((c) => c.label);
 const UNREADABLE = /secret/i;
 
-function answer(fields: MePermissionsResponse['fields']): MePermissionsResponse {
+function answer(fields: MePermissionsAuthenticatedResponse['fields']): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: [],
+    hasAnyQueue: false,
+    positions: [],
     permissionSets: ['fls_member'],
     objects: { [OBJECT]: { allowRead: true, allowCreate: false, allowEdit: false, allowDelete: false } },
     fields,

@@ -314,8 +314,22 @@ export const SysUser = ObjectSchema.create({
       bodyExtra: { generatePassword: true },
       params: [
         // The endpoint requires email OR phone (phone-only users get a
-        // placeholder address; requires auth.plugins.phoneNumber).
-        { field: 'email', required: false },
+        // placeholder address; requires auth.plugins.phoneNumber). With phone
+        // sign-in off (the default) it requires the email. A param's
+        // `required` is a static boolean, so the one Email field is declared
+        // twice, and the console collects and submits only the param whose
+        // gate says yes (#28280):
+        // - FIRST, optional, shown when phone sign-in is on. It must stay
+        //   first: the feature-gate guard resolves the booked path
+        //   `sys_user.actions.create_user.params.email` to the first param on
+        //   the field and wants the canonical opt-in gate on it.
+        // - SECOND, required, shown when the served config says phone sign-in
+        //   is off. `has()` keeps it hidden while the console holds no flag
+        //   (config not fetched, or the fetch failed): a bare
+        //   `features.phoneNumber != true` faults on the absent key, and a
+        //   faulting gate shows its param, so both inputs would render.
+        { field: 'email', required: false, requiresFeature: 'phoneNumber' },
+        { field: 'email', required: true, visible: 'has(features.phoneNumber) && features.phoneNumber != true' },
         {
           name: 'phoneNumber',
           label: 'Phone Number',
@@ -802,9 +816,13 @@ export const SysUser = ObjectSchema.create({
       // has no feature gate, and on a deployment with 2FA off (the default)
       // it read a dead "No" on every row. The state is shown on the user's
       // own record page, in the Security tab, behind the `twoFactor` gate.
-      // `banned` and `role` sit beside the email so a banned user or an
-      // admin is spotted from the list, without opening each record.
-      columns: ['name', 'email', 'phone_number', 'email_verified', 'banned', 'role', 'source', 'created_at'],
+      // `banned` sits beside the email so a banned user is spotted from the
+      // list, without opening each record (#27863). No `role` column
+      // (#28105): better-auth's legacy scalar is not the platform role.
+      // ObjectStack never writes it, and with the admin plugin on it reads
+      // `user` for every user, a platform admin included. Platform-admin
+      // standing is ADR-0068 D2's (owner e-mail or `admin_full_access`).
+      columns: ['name', 'email', 'phone_number', 'email_verified', 'banned', 'source', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
     },

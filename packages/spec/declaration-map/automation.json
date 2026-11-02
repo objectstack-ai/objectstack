@@ -118,6 +118,8 @@
     "ParallelBranchSchema": "automation/ParallelBranch",
     "ParallelConfig": "automation/ParallelConfig",
     "ParallelConfigSchema": "automation/ParallelConfig",
+    "SaveNoticeConfig": "automation/SaveNoticeConfig",
+    "SaveNoticeConfigSchema": "automation/SaveNoticeConfig",
     "ScheduleOrganization": "automation/ScheduleOrganization",
     "ScheduleOrganizationSchema": "automation/ScheduleOrganization",
     "ScreenConfig": "automation/ScreenConfig",

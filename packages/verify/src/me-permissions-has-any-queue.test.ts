@@ -32,6 +32,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 import { OWNERSHIP_QUEUE_SERVICE } from '@objectstack/spec/contracts';
+import { MePermissionsResponseSchema } from '@objectstack/spec/api';
 import { bootStack, type VerifyStack } from './harness.js';
 import { warmUpBoot } from './boot-warm-up.testkit.js';
 
@@ -78,7 +79,12 @@ const stackWithDeclaredQueue = () =>
 async function hasAnyQueueAs(stack: VerifyStack, token: string): Promise<unknown> {
   const res = await stack.apiAs(token, 'GET', '/auth/me/permissions');
   expect(res.status).toBe(200);
-  const body = (await res.json()) as { authenticated?: unknown; hasAnyQueue?: unknown };
+  const raw: unknown = await res.json();
+  // The real full-stack body holds to the declared STRICT contract: an
+  // undeclared key the handler sends reds here.
+  const parsed = MePermissionsResponseSchema.safeParse(raw);
+  expect(parsed.success ? [] : parsed.error.issues).toEqual([]);
+  const body = raw as { authenticated?: unknown; hasAnyQueue?: unknown };
   expect(body.authenticated).toBe(true);
   return body.hasAnyQueue;
 }

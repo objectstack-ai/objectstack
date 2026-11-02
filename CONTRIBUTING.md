@@ -113,7 +113,7 @@ Other examples: `pnpm dev:crm`, `pnpm dev:todo`. Docs site: `pnpm docs:dev`.
    [issue tracker](https://github.com/objectstack-ai/objectstack/issues), or open one
    that describes the bug or the proposal before you write code.
    [docs/NORTH-STAR.md](./docs/NORTH-STAR.md), the project's one North Star, shows where the project is going
-   and what comes first; an English summary closes it.
+   and what comes first.
 2. **Branch off an up-to-date `main`, one branch and one pull request per issue**,
    with the issue number in the branch name:
 

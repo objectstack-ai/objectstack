@@ -114,14 +114,40 @@ const afterSay = async (ctx: any) => {
   }
 };
 
-async function boot(surface: 'envelope' | 'declarative') {
+/** What the `ctx.notice` member did on each dispatch, by event (#28251). */
+let memberSeen: Array<{ event: string; type: string }> = [];
+
+async function boot(surface: 'envelope' | 'declarative' | 'member') {
   engine = new ObjectQL({ logger: noopLogger } as any);
   const d = makeMemoryDriver();
   storeFor = d.storeFor;
   engine.registerDriver(d.driver, true);
   await engine.init();
   engine.registry.registerObject(DEAL as never, 'com.objectstack.test.28000');
-  if (surface === 'envelope') {
+  memberSeen = [];
+  if (surface === 'member') {
+    // [#28251] The `ctx.notice` member, on both hook surfaces: a raw-envelope
+    // handler for the insert phases, a declarative `handler` (the flat record
+    // view a lowered body also sees) for the update phases. Each records
+    // whether the member was there, so delete / find dispatches are read too.
+    for (const e of ['beforeInsert', 'afterInsert', 'beforeDelete', 'afterDelete', 'beforeFind'] as const) {
+      engine.registerHook(e, async (ctx: any) => {
+        memberSeen.push({ event: e, type: typeof ctx.notice });
+        const say = e === 'beforeInsert' ? ctx.input?.data?.say : e === 'afterInsert' ? ctx.result?.say_after : undefined;
+        if (say !== undefined) ctx.notice(say);
+      }, { object: DEAL.name });
+    }
+    const bound = bindHooksToEngine(engine, [
+      {
+        name: 'sn_deal_member', object: DEAL.name, events: ['beforeUpdate', 'afterUpdate'],
+        handler: async (ctx: any) => {
+          const say = ctx.event === 'beforeUpdate' ? ctx.input.say : ctx.result?.say_after;
+          if (say !== undefined) ctx.notice(say);
+        },
+      },
+    ] as never, { logger: noopLogger as never });
+    expect(bound.errors).toEqual([]);
+  } else if (surface === 'envelope') {
     for (const e of ['beforeInsert', 'beforeUpdate'] as const) engine.registerHook(e, beforeSay, { object: DEAL.name });
     for (const e of ['afterInsert', 'afterUpdate'] as const) engine.registerHook(e, afterSay, { object: DEAL.name });
   } else {
@@ -241,5 +267,56 @@ describe('[#28000] a declarative `handler` reaches the same listener through its
     const created: any = await protocol.createData({ object: DEAL.name, data: { body: 'hi' } });
     const answer: any = await protocol.updateData({ object: DEAL.name, id: created.id, data: { say_after: 'Approval requested' } });
     expect(answer.notice).toBe('Approval requested');
+  });
+});
+
+describe('[#28251] `ctx.notice(message)` — the hook member bound from the same listener', () => {
+  beforeEach(() => boot('member'));
+
+  it('a beforeInsert call sets the create answer\'s notice, and the answer conforms', async () => {
+    const answer: any = await protocol.createData({ object: DEAL.name, data: { body: 'hi', say: 'Sent for approval' } });
+    expect(answer.notice).toBe('Sent for approval');
+    expect(CreateDataResponseSchema.safeParse(answer).success).toBe(true);
+  });
+
+  it('an afterInsert call wins over the beforeInsert one', async () => {
+    const answer: any = await protocol.createData({
+      object: DEAL.name, data: { body: 'hi', say: 'first', say_after: 'Renewal created' },
+    });
+    expect(answer.notice).toBe('Renewal created');
+  });
+
+  it('a declarative handler sets the update answer\'s notice, both phases', async () => {
+    const created: any = await protocol.createData({ object: DEAL.name, data: { body: 'hi' } });
+    const before: any = await protocol.updateData({ object: DEAL.name, id: created.id, data: { say: 'Sent for approval' } });
+    expect(before.notice).toBe('Sent for approval');
+    const after: any = await protocol.updateData({ object: DEAL.name, id: created.id, data: { say_after: 'Approval requested' } });
+    expect(after.notice).toBe('Approval requested');
+    expect(UpdateDataResponseSchema.safeParse(after).success).toBe(true);
+  });
+
+  it('is bound on insert dispatches and absent on delete and find ones', async () => {
+    const created: any = await protocol.createData({ object: DEAL.name, data: { body: 'hi' } });
+    await engine.find(DEAL.name, {});
+    await engine.delete(DEAL.name, { where: { id: created.id } });
+    const byEvent = Object.fromEntries(memberSeen.map((m) => [m.event, m.type]));
+    expect(byEvent).toEqual({
+      beforeInsert: 'function', afterInsert: 'function',
+      beforeFind: 'undefined', beforeDelete: 'undefined', afterDelete: 'undefined',
+    });
+  });
+
+  it('a write no one listens on (no onNotice in its bag) sets nothing and does not throw', async () => {
+    const row: any = await engine.insert(DEAL.name, { body: 'seeded', say: 'Sent for approval' });
+    expect(row.body).toBe('seeded');
+  });
+
+  it.each([
+    ['a blank string', '   '],
+    ['a number', 42],
+    ['null', null],
+  ])('refuses %s with a TypeError naming the call, and the write is refused', async (_label, say) => {
+    await expect(protocol.createData({ object: DEAL.name, data: { body: 'hi', say } }))
+      .rejects.toThrow(/ctx\.notice\(message\) takes one non-empty string/);
   });
 });

@@ -79,6 +79,13 @@ const declareOrRename = (type: string) => {
         : '';
 };
 
+/**
+ * [#28412] The Regime C types whose declared override is open although the
+ * closed list records D9 conditions for them: the conditions are delivered
+ * (`CONDITIONS_DELIVERED` in `protocol-packaged-base-refusal.ts`).
+ */
+const OPEN_REGIME_C: ReadonlySet<string> = new Set(['flow']);
+
 /** The ruled sentence, for a type with no regime row. */
 const oneSentence = (type: string, name: string) =>
     `'${type}/${name}' is provided by a managed package and is sealed: it cannot be written here. `
@@ -122,7 +129,17 @@ describe('[#23577] every write over a sealed, package-held name reads one senten
                     rowless += 1;
                 } else if (row.regime === 'C') {
                     // ADR-0126 §2: the sanctioned path, read from the row.
-                    for (const route of Object.values(row.routes)) if (route) expect(message, type).toContain(route);
+                    // [#28412, ADR-0146 D9] A Regime C type whose declared
+                    // override is open names the declaration in place of its
+                    // clone route: the clone is a second item beside the base,
+                    // and both would run.
+                    const declares = declareOrRename(type) !== '' || OPEN_REGIME_C.has(type);
+                    for (const [kind, route] of Object.entries(row.routes)) {
+                        if (!route) continue;
+                        if (declares && kind === 'clone') expect(message, type).not.toContain(route);
+                        else expect(message, type).toContain(route);
+                    }
+                    if (declares) expect(message, type).toContain(`Declare an override from '${PACKAGE_ID}.custom'`);
                     expect(message, type).not.toMatch(SOURCE_ADVICE);
                 } else {
                     // The origin-gated row: a code-defined datasource, whose one

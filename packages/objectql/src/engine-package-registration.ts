@@ -37,7 +37,11 @@
  * `registerMetadataCollections`, `stampObjectPackage`). One home each: they
  * stay declared in `engine.ts`, exported in place, and are imported here,
  * never copied. Nothing re-exports them from the package entry, so the
- * published surface does not move.
+ * published surface does not move. [#28697] Two more follow the same rule:
+ * `packageBodyObjectAndAppOwnerStampRefusal` and `registerAppNotingStamp`
+ * (`registerApp` and `registerPlugin`); the plugin-as-app now reaches
+ * `stampPackage` through `registerAppNotingStamp`, so this module no longer
+ * imports `stampPackage` itself.
  *
  * That import is a run-time module cycle (`engine.ts` imports this module,
  * this module imports `engine.ts`). Nothing here runs at module evaluation,
@@ -50,7 +54,11 @@
 import type { ServiceObject } from '@objectstack/spec/data';
 import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectstack/metadata-core';
 import { computeFQN } from './registry.js';
-import { stampObjectPackage, stampPackage } from './engine.js';
+import {
+  packageBodyObjectAndAppOwnerStampRefusal,
+  registerAppNotingStamp,
+  stampObjectPackage,
+} from './engine.js';
 import type { ObjectQL } from './engine.js';
 
 /**
@@ -143,6 +151,18 @@ export function registerPlugin(
     // contribute objects UNDER the parent's ownership.
     const ownerId = parentId;
 
+    // [#28697] The owner-stamp refusal for the objects and the plugin-as-app
+    // below, before anything of the plugin registers and outside the two
+    // `try` blocks, which log a registry failure and go on: a body stamp is
+    // refused as the collection seam refuses it, not logged past.
+    {
+        const refusal = packageBodyObjectAndAppOwnerStampRefusal(plugin, ownerId, {
+            apps: false,
+            selfAsApp: Boolean(plugin.name && plugin.navigation),
+        });
+        if (refusal) throw refusal;
+    }
+
     // Register objects (supports both Array and Map formats)
     if (plugin.objects) {
         try {
@@ -172,7 +192,7 @@ export function registerPlugin(
     if (plugin.name && plugin.navigation) {
         try {
             const resolved = pluginNamespace ? this.resolveNavObjectNames(plugin, pluginNamespace) : plugin;
-            this._registry.registerApp(stampPackage(resolved, ownerId, parentVersion), ownerId);
+            registerAppNotingStamp(this._registry, resolved, ownerId, parentVersion);
             this.logger.debug('Registered plugin-as-app', { app: plugin.name, from: pluginName });
         } catch (err: any) {
             this.logger.warn('Failed to register plugin as app', { pluginName, error: err.message });

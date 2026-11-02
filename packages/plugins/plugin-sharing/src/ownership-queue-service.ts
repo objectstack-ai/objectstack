@@ -215,9 +215,8 @@ export class OwnershipQueueService implements IOwnershipQueueService {
    *
    * The session payload's one boolean (`/auth/me/permissions` `hasAnyQueue`):
    * the console's list toolbar asks it once per session, for a member who may
-   * not read `sys_queue` themselves. It discloses no name and no count. Not
-   * yet on the spec contract, which gains it with the payload's response
-   * schema.
+   * not read `sys_queue` themselves. It discloses no name and no count. The
+   * contract states it on {@link IOwnershipQueueService.hasAnyQueue}.
    */
   async hasAnyQueue(organizationId: string | null): Promise<boolean> {
     const engine = this.engine();

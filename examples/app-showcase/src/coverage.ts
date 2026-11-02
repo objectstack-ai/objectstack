@@ -57,6 +57,15 @@ export const KIND_COVERAGE: Record<MetadataType, KindCoverage> = {
     notes:
       'Also carries the validation-rule surface: rules are authored inline via object `validations` (the `validation` KIND was retired in #4509 — ADR-0088 — because a standalone rule had no way to name the object it validated). Every declared rule type is write-path enforced (rule-validator dispatches all of state_machine/script/cross_field/format/json_schema/conditional — ADR-0020 "no silent no-ops", closing the #1475 gap) and each is demonstrated: state_machine (task/project), script+cross_field (project), format/json_schema/conditional (account). Field-level requiredWhen/readonlyWhen are likewise enforced and demonstrated on invoice.',
   },
+  // [#28574] A registry kind since an extension became an authorable item of a
+  // writable package. The showcase's own extension is the code half (the stack's
+  // `objectExtensions`, also tracked in STACK_COLLECTION_COVERAGE); the runtime
+  // half is `PUT /api/v1/meta/object_extension/<target>?package=<pkg>`.
+  object_extension: {
+    status: 'demonstrated',
+    files: ['src/data/extensions/account.extension.ts'],
+    notes: 'Authored in code as an `objectExtensions` entry; the same body is an `object_extension` item when a writable package saves it through `/api/v1/meta`.',
+  },
   field: {
     status: 'demonstrated',
     files: ['src/data/objects/field-zoo.object.ts'],

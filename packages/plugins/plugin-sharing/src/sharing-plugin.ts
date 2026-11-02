@@ -653,15 +653,15 @@ export class SharingServicePlugin implements Plugin {
         SysAssignmentCursor,
       ],
       // ADR-0029 D7 — contribute the sharing entries into the Setup app's
-      // `group_access_control` slot (priority 200 so they sit after plugin-
-      // security's Roles / Permission Sets). This plugin owns these objects (K2).
+      // `group_access_control` slot (priority 200). This plugin owns these
+      // objects (K2).
       //
-      // [ADR-0131 D6, regime C] A sharing rule has two sources, and Setup lists
-      // each where it lives: `nav_sharing_rules` opens the organization's own
-      // rules (`sys_sharing_rule` rows), `nav_declared_sharing_rules` the rules
-      // packages declare — registry items with no object behind them, so the
-      // entry is a `url` to Setup's list of the registry type in its environment
-      // scope, as plugin-security's `nav_permission_sets` is.
+      // [ADR-0131 D6, regime C] A sharing rule has two sources: `nav_sharing_rules`
+      // opens the organization's own rules (`sys_sharing_rule` rows). The rules
+      // packages declare are registry items with no object behind them, and
+      // [ADR-0146 D1] Setup carries no metadata catalog: they are listed and
+      // switched on and off in Studio's "All metadata" area, so no entry here
+      // opens them.
       navigationContributions: [
         {
           app: 'setup',
@@ -669,7 +669,6 @@ export class SharingServicePlugin implements Plugin {
           priority: 200,
           items: [
             { id: 'nav_sharing_rules', type: 'object', label: 'Sharing Rules', objectName: 'sys_sharing_rule', icon: 'share-2', requiresObject: 'sys_sharing_rule', requiredPermissions: ['manage_platform_settings'] },
-            { id: 'nav_declared_sharing_rules', type: 'url', label: 'Declared Sharing Rules', url: '/apps/setup/metadata/sharing_rule?scope=environment', icon: 'package', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_record_shares', type: 'object', label: 'Record Shares', objectName: 'sys_record_share', viewName: 'all_shares', icon: 'link', requiresObject: 'sys_record_share', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_queues', type: 'object', label: 'Queues', objectName: 'sys_queue', icon: 'inbox', requiresObject: 'sys_queue', requiredPermissions: ['manage_platform_settings'] },
             { id: 'nav_queue_members', type: 'object', label: 'Queue Members', objectName: 'sys_queue_member', icon: 'users', requiresObject: 'sys_queue_member', requiredPermissions: ['manage_platform_settings'] },

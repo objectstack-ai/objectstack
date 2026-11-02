@@ -1,18 +1,16 @@
 # Data Lifecycle & Retention
 
 Guide for declaring how long an object's data lives and how its space is
-reclaimed (ADR-0057 — system data lifecycle & retention). Not to be
-confused with **lifecycle hooks** (`beforeInsert` / `afterUpdate` …) —
-those run business logic on data operations; *this* page is about
-retention, rotation, and archival of the rows themselves.
+reclaimed (ADR-0057 — system data lifecycle & retention). Distinct from
+**lifecycle hooks** (`beforeInsert` / `afterUpdate` …), which run logic on
+writes: this page covers the rows' retention, rotation and archival
+— and, at its end, the save notice a hook hands the saver.
 
 ## Why This Exists
 
 Every object without a `lifecycle` block is **immortal**: rows are never
 deleted, and on SQLite the file never shrinks. That's correct for business
-records — and a guaranteed disk leak for anything append-only. A scheduled
-flow writing telemetry every 20 seconds once grew a dev database from 2 MB
-to 260 MB with zero business data in it.
+records — and a guaranteed disk leak for anything append-only.
 
 **Rule: any append-only, high-write-rate object (event log, run history,
 delivery outbox, ephemeral tokens) MUST declare a `lifecycle` block.**
@@ -119,8 +117,7 @@ lifecycle: {
 
 ## Safety Semantics
 
-- **No `lifecycle` block = today's behavior.** Nothing is deleted. `record`
-  is the implicit default.
+- **No `lifecycle` block = today's behavior**: `record` is the implicit default.
 - **Archive-then-delete is atomic-ish and safe by default**: an object
   declaring `archive` is never hot-deleted before the copy to the archive
   datasource succeeded. If no datasource is registered under the `archive.to`
@@ -144,13 +141,20 @@ lifecycle: {
 | `growth_alert_rows` | settings | Per-sweep growth spike alert |
 | `OS_LIFECYCLE_DISABLED=1` | env | Disables sweeping entirely |
 
-## Decision Tree
+## Save Notice
 
-1. Users create/edit it and it represents business state? → `record` (omit the block).
-2. Is it a compliance/audit trail? → `audit` + `retention`, add `archive` if cold storage exists.
-3. Written by machines at high frequency, value decays in days/weeks? → `telemetry` + `retention` (add rotation `storage` for the hottest tables).
-4. Meaningless after a deadline (tokens, receipts, read-state)? → `transient` + `ttl` on the natural expiry field.
-5. Bus/fan-out messages? → `event` + a short `ttl` (hours).
-6. Table mixes prunable history with live state (e.g. terminal vs paused runs)?
-   → add `retention.onlyWhen: { status: { $in: [...] } }` so rows outside the
-   filter are retained regardless of age. Not combinable with rotation/archive.
+A create/update hook calls `ctx.notice('Sent to your manager for approval')`
+— a sandboxed `body` or the deprecated inline `handler`, no capability. The
+answer carries it as `notice`; the console shows it on the save toast. **Info
+severity**: an outcome, never a problem — distinct from validation
+`warnings`. A `record:alert` banner is page metadata shown whenever the
+record's state says so; the notice is for what *this* save started.
+
+- One message per write, **the last call wins**; never stored.
+- Insert/update dispatches only. A write nobody waits on (batch, seed,
+  import, a nested write) sets nothing.
+- Not a non-empty string ⇒ the write refuses; a refused write answers its
+  error, no notice.
+- A flow a record create/update trigger starts sets it with a `save_notice`
+  node (`config.message`, `{{ }}` renders); refused in any other flow, and
+  after an `approval` / `wait`.

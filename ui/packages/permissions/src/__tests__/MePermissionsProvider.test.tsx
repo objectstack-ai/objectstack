@@ -40,7 +40,8 @@ describe('MePermissionsProvider', () => {
         authenticated: true,
         userId: 'u1',
         tenantId: 't1',
-        roles: ['member'],
+        positions: ['member'],
+        hasAnyQueue: false,
         permissionSets: ['restricted'],
         objects: { '*': { allowRead: true, allowEdit: true } },
         fields: {
@@ -68,7 +69,8 @@ describe('MePermissionsProvider', () => {
         authenticated: true,
         userId: 'u1',
         tenantId: 't1',
-        roles: ['viewer'],
+        positions: ['viewer'],
+        hasAnyQueue: false,
         permissionSets: ['viewer_readonly'],
         objects: { '*': { allowRead: true, allowEdit: false } },
         fields: {},
@@ -107,7 +109,8 @@ describe('MePermissionsProvider', () => {
         authenticated: true,
         userId: 'u1',
         tenantId: 't1',
-        roles: ['member'],
+        positions: ['member'],
+        hasAnyQueue: false,
         permissionSets: ['restricted'],
         objects: { account: { allowRead: true, allowEdit: true } }, // no '*', nothing for 'project'
         fields: {},
@@ -151,7 +154,8 @@ describe('MePermissionsProvider', () => {
         authenticated: true,
         userId: 'u1',
         tenantId: 't1',
-        roles: [],
+        positions: [],
+        hasAnyQueue: false,
         permissionSets: [],
         objects: { '*': { allowRead: true, allowEdit: true } },
         fields: {},
@@ -178,10 +182,11 @@ describe('MePermissionsProvider', () => {
           authenticated: true,
           userId: 'u',
           tenantId: 't',
-          roles: [],
+          positions: [],
           permissionSets: [],
           objects: {},
-          fields: { 'account.secret': { readable: false } },
+          fields: { 'account.secret': { readable: false, editable: false } },
+          hasAnyQueue: false,
         }}
       >
         <Probe object="account" field="secret" />
@@ -210,7 +215,7 @@ describe('MePermissionsProvider', () => {
       <MePermissionsProvider
         endpoint="/x"
         initialPermissions={{
-          authenticated: true, userId: 'u', tenantId: 't', roles: [], permissionSets: [],
+          authenticated: true, userId: 'u', tenantId: 't', hasAnyQueue: false, positions: [], permissionSets: [],
           objects: {
             account: { allowRead: true, apiOperations: ['get', 'list', 'export'] },
             widget: { allowRead: true }, // no apiOperations → undefined
@@ -240,7 +245,7 @@ describe('MePermissionsProvider', () => {
       <MePermissionsProvider
         endpoint="/x"
         initialPermissions={{
-          authenticated: true, userId: 'u', tenantId: 't', roles: [], permissionSets: [],
+          authenticated: true, userId: 'u', tenantId: 't', hasAnyQueue: false, positions: [], permissionSets: [],
           objects: { account: { allowRead: true, allowCreate: false } },
           fields: {},
         }}

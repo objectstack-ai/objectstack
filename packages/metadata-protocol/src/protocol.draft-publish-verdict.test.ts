@@ -313,6 +313,114 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         },
     },
     {
+        // [#28663] Not one of #26707's six: an app navigation entry whose
+        // `visible` does not parse (the card's `'org_owner' in`). It saved, read
+        // valid:true and PUBLISHED, and the console then hid the entry from
+        // everyone; the same fault in a page `visibleWhen` was refused.
+        rule: 'visibility-predicate-syntax',
+        type: 'app',
+        item: {
+            name: 'qa_nav_app',
+            label: 'QA Nav App',
+            navigation: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'deal', visible: "'org_owner' in" }],
+        },
+    },
+    {
+        // [#28663] The same fault inside an area's navigation.
+        rule: 'visibility-predicate-syntax',
+        type: 'app',
+        item: {
+            name: 'qa_area_app',
+            label: 'QA Area App',
+            areas: [{
+                id: 'area_ops', label: 'Ops',
+                navigation: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'deal', visible: "'org_owner' in" }],
+            }],
+        },
+    },
+    {
+        // [#28726] An app navigation entry whose `visible` is valid CEL but
+        // overruns `maxAstNodes` (the card's 90-clause `||` chain). It saved,
+        // read valid:true and published; the console then withheld the entry
+        // from everyone. A page `visibleWhen` of the same size was refused.
+        rule: 'visibility-predicate-over-budget',
+        type: 'app',
+        item: {
+            name: 'qa_nav_budget_app',
+            label: 'QA Nav Budget App',
+            navigation: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'deal', visible: Array.from({ length: 90 }, () => 'features.cloudManaged != true').join(' || ') }],
+        },
+    },
+    {
+        // [#28726] The same overrun on a group's child entry.
+        rule: 'visibility-predicate-over-budget',
+        type: 'app',
+        item: {
+            name: 'qa_nav_budget_child_app',
+            label: 'QA Nav Budget Child App',
+            navigation: [{
+                id: 'grp', type: 'group', label: 'Group',
+                children: [{ id: 'nav_admin_only', type: 'object', label: 'Admin Only', objectName: 'deal', visible: Array.from({ length: 90 }, () => 'features.cloudManaged != true').join(' || ') }],
+            }],
+        },
+    },
+    {
+        // [#28663] Page variables: a duplicate name.
+        rule: 'page-variable-name-duplicate',
+        type: 'page',
+        item: {
+            name: 'qa_vars_dup', label: 'Vars', type: 'app',
+            variables: [{ name: 'count', type: 'number' }, { name: 'count', type: 'string' }],
+            regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Vars' } }] }],
+        },
+    },
+    {
+        // [#28663] Page variables: an empty name.
+        rule: 'page-variable-name-empty',
+        type: 'page',
+        item: {
+            name: 'qa_vars_empty', label: 'Vars', type: 'app',
+            variables: [{ name: '', type: 'string' }],
+            regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Vars' } }] }],
+        },
+    },
+    {
+        // [#28663] Page variables: a `number` seeded with "abc" (the card's shape).
+        rule: 'page-variable-default-type',
+        type: 'page',
+        item: {
+            name: 'qa_vars_type', label: 'Vars', type: 'app',
+            variables: [{ name: 'count', type: 'number', defaultValue: 'abc' }],
+            regions: [{ name: 'main', components: [{ type: 'page:header', properties: { title: 'Vars' } }] }],
+        },
+    },
+    {
+        // [#28725] A page variable whose `source` names no component on the
+        // page (the card's `no_such_component`): nothing ever writes it.
+        rule: 'page-variable-source-unknown',
+        type: 'page',
+        item: {
+            name: 'qa_vars_source', label: 'Vars', type: 'app',
+            variables: [{ name: 'selectedProjectId', type: 'record_id', source: 'no_such_component' }],
+            regions: [{ name: 'main', components: [
+                { id: 'project_picker', type: 'element:record_picker', dataSource: { object: 'deal' }, properties: { label: 'Deal', labelField: 'name' } },
+            ] }],
+        },
+    },
+    {
+        // [#28725] A component `visibleWhen` reading an undeclared variable
+        // (the card's `page.nosuch == 'x'`): the read never resolves.
+        rule: 'visibility-page-variable-undeclared',
+        type: 'page',
+        item: {
+            name: 'qa_vars_read', label: 'Vars', type: 'app',
+            variables: [{ name: 'selectedProjectId', type: 'record_id' }],
+            regions: [{ name: 'main', components: [
+                { type: 'page:header', properties: { title: 'Vars' }, visibleWhen: "page.nosuch == 'x'" },
+            ] }],
+        },
+    },
+    {
         // Reproduction 6: a dataset whose include names no relationship.
         rule: 'dataset-include-unknown',
         type: 'dataset',
@@ -404,6 +512,86 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect(await draftDiagnostics(protocol, 'flow', flow.name)).toEqual({ valid: true });
         const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
         expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#28663] a clean nav predicate and clean page variables still read valid:true and publish', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const app = structuredClone(CASES.find((c) => c.item.name === 'qa_nav_app')!.item) as any;
+        app.navigation[0].visible = "'org_owner' in current_user.positions";
+        const page = structuredClone(CASES.find((c) => c.item.name === 'qa_vars_type')!.item) as any;
+        page.variables = [{ name: 'count', type: 'number', defaultValue: 0 }, { name: 'label', type: 'string' }];
+        await stageDraft(protocol, 'app', app);
+        await stageDraft(protocol, 'page', page);
+
+        expect(await draftDiagnostics(protocol, 'app', app.name)).toEqual({ valid: true });
+        expect(await draftDiagnostics(protocol, 'page', page.name)).toEqual({ valid: true });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#28663] the nav and variable verdicts are located at the key on the draft read', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        for (const name of ['qa_area_app', 'qa_vars_type']) {
+            const c = CASES.find((x) => x.item.name === name)!;
+            await stageDraft(protocol, c.type, c.item);
+        }
+
+        expect((await draftDiagnostics(protocol, 'app', 'qa_area_app')).errors).toContainEqual(
+            expect.objectContaining({ path: 'areas.0.navigation.0.visible', code: 'visibility-predicate-syntax' }),
+        );
+        expect((await draftDiagnostics(protocol, 'page', 'qa_vars_type')).errors).toContainEqual(
+            expect.objectContaining({ path: 'variables.0.defaultValue', code: 'page-variable-default-type' }),
+        );
+    });
+
+    it('[#28725] a `source` naming a component on the page and a declared `page.NAME` read still read valid:true and publish', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const source = structuredClone(CASES.find((c) => c.item.name === 'qa_vars_source')!.item) as any;
+        source.variables[0].source = 'project_picker';
+        const read = structuredClone(CASES.find((c) => c.item.name === 'qa_vars_read')!.item) as any;
+        read.regions[0].components[0].visibleWhen = "page.selectedProjectId != ''";
+        await stageDraft(protocol, 'page', source);
+        await stageDraft(protocol, 'page', read);
+
+        expect(await draftDiagnostics(protocol, 'page', source.name)).toEqual({ valid: true });
+        expect(await draftDiagnostics(protocol, 'page', read.name)).toEqual({ valid: true });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#28725] both verdicts are located at the reference on the draft read', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        for (const name of ['qa_vars_source', 'qa_vars_read']) {
+            const c = CASES.find((x) => x.item.name === name)!;
+            await stageDraft(protocol, c.type, c.item);
+        }
+
+        expect((await draftDiagnostics(protocol, 'page', 'qa_vars_source')).errors).toContainEqual(
+            expect.objectContaining({ path: 'variables.0.source', code: 'page-variable-source-unknown' }),
+        );
+        expect((await draftDiagnostics(protocol, 'page', 'qa_vars_read')).errors).toContainEqual(
+            expect.objectContaining({ path: 'regions.0.components.0', code: 'visibility-page-variable-undeclared' }),
+        );
+    });
+
+    it('[#28726] the nav over-budget verdict is located at the key on the draft read; a chain inside the budget reads valid:true', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const c = CASES.find((x) => x.item.name === 'qa_nav_budget_child_app')!;
+        await stageDraft(protocol, c.type, c.item);
+        expect((await draftDiagnostics(protocol, 'app', 'qa_nav_budget_child_app')).errors).toContainEqual(
+            expect.objectContaining({ path: 'navigation.0.children.0.visible', code: 'visibility-predicate-over-budget' }),
+        );
+
+        const under = structuredClone(CASES.find((x) => x.item.name === 'qa_nav_budget_app')!.item) as any;
+        under.name = 'qa_nav_budget_under_app';
+        under.navigation[0].visible = Array.from({ length: 51 }, () => 'features.cloudManaged != true').join(' || ');
+        await stageDraft(protocol, 'app', under);
+        expect(await draftDiagnostics(protocol, 'app', under.name)).toEqual({ valid: true });
     });
 
     it('a reference that resolves inside its own package is judged as "Publish all" judges it — not reported', async () => {

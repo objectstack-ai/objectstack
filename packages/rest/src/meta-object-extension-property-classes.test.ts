@@ -29,7 +29,9 @@
 // That is the WHOLE set — `mergeObjectDefinitions` names these six keys and
 // copies nothing else, which `ObjectExtensionSchema`'s own guidance states from
 // the other side ("the merge carries `fields`, `label`, `pluralLabel`,
-// `description`, `validations` and `indexes` only"). So this file pins all six
+// `description`, `validations` and `indexes`, and applies `fieldPatches`, and
+// nothing else" — `fieldPatches` is applied onto fields, not carried as a
+// property, so it is not a seventh class here). So this file pins all six
 // rather than the one the card was filed about: the two prior defects were each
 // a property class nobody was measuring, and the cheapest way to stop paying for
 // a fourth is to measure the classes instead of the instances.

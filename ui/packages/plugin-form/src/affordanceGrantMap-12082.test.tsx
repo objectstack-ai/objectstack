@@ -74,7 +74,7 @@ import {
   type ConsoleAffordance,
   type FieldAffordance,
 } from '@object-ui/core';
-import { MePermissionsProvider, usePermissions, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, usePermissions, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { SystemFieldName } from '@objectstack/spec/system';
 import { closedFormAffordance, fieldWriteGate, gateFormFields } from './fieldWriteGate';
 import ts from 'typescript';
@@ -182,11 +182,12 @@ const SHAPES: Array<{ shape: string; bits: Record<string, boolean>; holds: Reado
   },
 ];
 
-const envelope = (bits: Record<string, boolean>, fields: MePermissionsResponse['fields'] = {}): MePermissionsResponse => ({
+const envelope = (bits: Record<string, boolean>, fields: MePermissionsAuthenticatedResponse['fields'] = {}): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u-pin',
   tenantId: null,
-  roles: ['member'],
+  hasAnyQueue: false,
+  positions: ['member'],
   permissionSets: ['member'],
   objects: { [OBJECT]: bits },
   fields,

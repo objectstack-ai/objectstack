@@ -11,9 +11,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   CONNECTOR_CREDENTIAL_MAP_PATHS,
+  CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES,
   declaredConnectorAuthKeys,
+  declaredConnectorEntryKeys,
   redactConnectorItem,
 } from './connector-credential-redaction';
+import { DeclarativeConnectorEntrySchema } from './connector.zod';
+import { METADATA_READ_DECORATIONS } from '../kernel/metadata-read-decorations';
 
 const P = (n: number) => `TEST_PLACEHOLDER_${n}`;
 
@@ -142,6 +146,255 @@ describe('the connector redactor — runtime `authentication` and provider maps'
   });
 });
 
+describe('the connector redactor — `auth` / `authentication` that is not an object', () => {
+  it.each([
+    ['auth', 'a string', P(20)],
+    ['auth', 'a number', 4242],
+    ['auth', 'an array', [P(21)]],
+    ['authentication', 'a string', P(22)],
+  ] as const)('`%s` holding %s is withheld whole', (position, _what, value) => {
+    const { item: served, redactedKeys } = redactConnectorItem({ ...base, [position]: value });
+    expect(redactedKeys).toEqual([position]);
+    expect(served).not.toHaveProperty(position);
+    expect(holds(served, P(20), P(21), P(22))).toBe(false);
+    expect(served.name).toBe('vendor');
+  });
+
+  it.each([
+    ['an empty string', ''],
+    ['a null', null],
+  ] as const)('a cleared form (%s) is served as written and not reported', (_what, value) => {
+    const item = { ...base, auth: value, authentication: value };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+});
+
+describe('the connector redactor — credentials inside a URL under `providerConfig`', () => {
+  const at = (providerConfig: Record<string, unknown>, extra: Record<string, unknown> = {}) =>
+    redactConnectorItem({ ...base, providerConfig, ...extra });
+
+  it('rewrites the userinfo out of `baseUrl`, keeping the rest of the URL byte for byte', () => {
+    const { item: served, redactedKeys } = at({ baseUrl: `https://svc:${P(30)}@api.vendor.example:8443/v2/?region=eu#top` });
+    expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+    expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe('https://api.vendor.example:8443/v2/?region=eu#top');
+  });
+
+  it('a bare token in the user part goes too', () => {
+    const { item: served } = at({ baseUrl: `https://${P(31)}@api.vendor.example/v1` });
+    expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe('https://api.vendor.example/v1');
+  });
+
+  it('strips each credential query parameter, case-insensitively, and keeps the others in order', () => {
+    const { item: served, redactedKeys } = at({
+      baseUrl: `https://api.vendor.example/v1?region=eu&API_KEY=${P(32)}&page=2&access_token=${P(33)}`,
+    });
+    expect(redactedKeys).toEqual(['providerConfig.baseUrl']);
+    expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe('https://api.vendor.example/v1?region=eu&page=2');
+  });
+
+  it('covers `transport.url` and a URL `spec`, and leaves a package-relative `spec` path alone', () => {
+    const { item: served, redactedKeys } = at({
+      spec: `https://u:${P(34)}@spec.vendor.example/openapi.json?token=${P(35)}`,
+      transport: { kind: 'http', url: `https://mcp.vendor.example/mcp?sig=${P(36)}` },
+    });
+    expect(redactedKeys).toEqual(['providerConfig.spec', 'providerConfig.transport.url']);
+    expect(served.providerConfig).toEqual({
+      spec: 'https://spec.vendor.example/openapi.json',
+      transport: { kind: 'http', url: 'https://mcp.vendor.example/mcp' },
+    });
+    const relative = { ...base, providerConfig: { spec: './vendor-openapi.json' } };
+    expect(redactConnectorItem(relative)).toEqual({ item: relative, redactedKeys: [] });
+  });
+
+  it('strips the query parameter an `api-key` instance itself names with `paramName`', () => {
+    const { item: served } = at(
+      { baseUrl: `https://api.vendor.example/v1?appid=${P(37)}&units=metric` },
+      { auth: { type: 'api-key', credentialRef: 'VENDOR_KEY', paramName: 'appid' } },
+    );
+    expect((served.providerConfig as Record<string, unknown>).baseUrl).toBe('https://api.vendor.example/v1?units=metric');
+    expect(served.auth).toEqual({ type: 'api-key', credentialRef: 'VENDOR_KEY', paramName: 'appid' });
+  });
+
+  it('a URL with no credential part, and a string that is not a URL, are untouched', () => {
+    const item = {
+      ...base,
+      providerConfig: {
+        baseUrl: 'https://api.vendor.example/v1?region=eu',
+        note: `call ?token=${P(38)} by hand`,
+        include: ['search'],
+      },
+    };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('withholds whole an array holding a URL with credential parts, at any depth', () => {
+    const { item: served, redactedKeys } = at({
+      servers: [`https://u:${P(39)}@a.example`, 'https://b.example'],
+      mirrors: ['https://c.example', `https://d.example/v1?token=${P(42)}`],
+      transport: { kind: 'http', fallbacks: [{ url: `https://u:${P(43)}@e.example` }] },
+      include: ['search', 'https://f.example/v1?region=eu'],
+    });
+    expect(redactedKeys).toEqual(['providerConfig.mirrors', 'providerConfig.servers', 'providerConfig.transport.fallbacks']);
+    expect(served.providerConfig).toEqual({
+      transport: { kind: 'http' },
+      include: ['search', 'https://f.example/v1?region=eu'],
+    });
+    expect(holds(served, P(39), P(42), P(43))).toBe(false);
+  });
+
+  it('withholds whole a dot-spelled key under providerConfig that holds a credential URL (fail closed)', () => {
+    const { item: served, redactedKeys } = at({
+      'v1.url': `https://u:${P(40)}@b.example`,
+      'legacy.list': ['https://c.example', `https://d.example/v1?token=${P(44)}`],
+      'plain.note': 'https://e.example/v1?region=eu',
+    });
+    expect(redactedKeys).toEqual(['providerConfig.legacy.list', 'providerConfig.v1.url']);
+    expect(served.providerConfig).toEqual({ 'plain.note': 'https://e.example/v1?region=eu' });
+    expect(holds(served, P(40), P(44))).toBe(false);
+  });
+
+  it('a map withheld whole is not walked for URLs: it is reported once, as the map', () => {
+    const { redactedKeys } = at({ headers: { Referer: `https://u:${P(41)}@c.example` } });
+    expect(redactedKeys).toEqual(['providerConfig.headers']);
+  });
+
+  it('the query names include the datasource set and the HTTP conventions', () => {
+    for (const name of ['password', 'authToken', 'api_key', 'apikey', 'access_token', 'token', 'key', 'sig', 'client_secret']) {
+      expect(CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES).toContain(name);
+    }
+  });
+});
+
+describe('the connector redactor — top-level keys the entry does not declare', () => {
+  it.each([
+    ['a credential-shaped scalar', { apiKey: P(50) }, ['apiKey']],
+    ['several credential-shaped keys', { token: P(51), clientSecret: P(52), password: P(53) }, ['clientSecret', 'password', 'token']],
+    ['a nested container', { credentials: { user: 'svc', secret: P(54) } }, ['credentials']],
+    ['a plain undeclared key', { region: 'eu-west-1' }, ['region']],
+  ] as const)('withholds undeclared root keys on read: %s', (_label, extra, keys) => {
+    const item = { ...base, providerConfig: { baseUrl: 'https://v.example' }, ...extra };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(keys);
+    for (const key of keys) expect(served).not.toHaveProperty(key);
+    expect(holds(served, P(50), P(51), P(52), P(53), P(54), 'eu-west-1')).toBe(false);
+    expect(served.providerConfig).toEqual({ baseUrl: 'https://v.example' });
+    expect(served._diagnostics).toEqual(base._diagnostics);
+  });
+
+  it('the declared set is the closed entry\'s own shape, and every declared key is served as stored', () => {
+    const shape = (DeclarativeConnectorEntrySchema as unknown as { shape: Record<string, unknown> }).shape;
+    expect([...declaredConnectorEntryKeys()].sort()).toEqual(Object.keys(shape).sort());
+    for (const key of ['name', 'label', 'type', 'provider', 'providerConfig', 'auth', 'enabled', '_packageId', '_provenance']) {
+      expect(declaredConnectorEntryKeys().has(key), key).toBe(true);
+    }
+    const item = { ...base, providerConfig: { baseUrl: 'https://v.example' }, retryConfig: { maxAttempts: 3 }, _packageId: 'com.vendor' };
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('the read decorations are the response\'s and are left alone', () => {
+    const item = { ...base, _draft: true };
+    for (const key of METADATA_READ_DECORATIONS) expect(item).toHaveProperty(key);
+    expect(redactConnectorItem(item)).toEqual({ item, redactedKeys: [] });
+  });
+
+  it('withholds a cleared undeclared key too, and names it (the save door refuses it whatever its value)', () => {
+    const item = { ...base, apiKey: '', token: null, extra: {} };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(['apiKey', 'extra', 'token']);
+    for (const key of ['apiKey', 'token', 'extra']) expect(served).not.toHaveProperty(key);
+  });
+
+  it('withholds an undeclared root key whose own name carries a dot, and names it whole', () => {
+    const item = { ...base, 'x.y': P(59) };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(['x.y']);
+    expect(served).not.toHaveProperty('x.y');
+    expect(holds(served, P(59))).toBe(false);
+  });
+
+  it('withholds an undeclared root key beside the other positions, each named once', () => {
+    const { item: served, redactedKeys } = redactConnectorItem({
+      ...base,
+      apiKey: P(55),
+      auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: P(56) },
+      providerConfig: { baseUrl: `https://u:${P(57)}@v.example`, headers: { Authorization: P(58) } },
+    });
+    expect(redactedKeys).toEqual(['apiKey', 'auth.token', 'providerConfig.baseUrl', 'providerConfig.headers']);
+    expect(holds(served, P(55), P(56), P(57), P(58))).toBe(false);
+  });
+});
+
+describe('the connector redactor — keys `retryConfig` and `actions` elements do not declare', () => {
+  it('withholds an undeclared key inside `retryConfig`, keeping its declared keys', () => {
+    const retryConfig = { strategy: 'exponential_backoff', maxAttempts: 4, secret: P(30) };
+    const { item: served, redactedKeys } = redactConnectorItem({ ...base, retryConfig });
+    expect(redactedKeys).toEqual(['retryConfig.secret']);
+    expect(served.retryConfig).toEqual({ strategy: 'exponential_backoff', maxAttempts: 4 });
+    expect(holds(served, P(30))).toBe(false);
+  });
+
+  it('withholds an undeclared key inside each `actions` element, addressed by index, keeping the declared keys', () => {
+    const actions = [
+      { key: 'get_invoice', label: 'Get invoice', effect: 'read', inputSchema: { type: 'object' } },
+      { key: 'post_invoice', label: 'Post invoice', token: P(31), extra: { secret: P(32) } },
+    ];
+    const { item: served, redactedKeys } = redactConnectorItem({ ...base, actions });
+    expect(redactedKeys).toEqual(['actions.1.extra', 'actions.1.token']);
+    expect(served.actions).toEqual([actions[0], { key: 'post_invoice', label: 'Post invoice' }]);
+    expect((served.actions as unknown[])[0]).toBe(actions[0]);
+    expect(holds(served, P(31), P(32))).toBe(false);
+  });
+
+  it('withholds a cleared undeclared nested key too, as at the top level', () => {
+    const item = { ...base, retryConfig: { strategy: 'no_retry', note: null }, actions: [{ key: 'a', label: 'A', extra: {} }] };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(['actions.0.extra', 'retryConfig.note']);
+    expect(served.retryConfig).toEqual({ strategy: 'no_retry' });
+    expect(served.actions).toEqual([{ key: 'a', label: 'A' }]);
+  });
+
+  it('the declared nested keys are the schemas\' own', () => {
+    const retryConfig = {
+      strategy: 'exponential_backoff', maxAttempts: 3, initialDelayMs: 1000, maxDelayMs: 60000,
+      backoffMultiplier: 2, retryableStatusCodes: [429], retryOnNetworkError: true, jitter: true,
+    };
+    const action = { key: 'a', label: 'A', description: 'd', inputSchema: {}, outputSchema: {}, effect: 'write' };
+    const item = { ...base, retryConfig, actions: [action] };
+    const result = redactConnectorItem(item);
+    expect(result.redactedKeys).toEqual([]);
+    expect(result.item).toBe(item);
+  });
+
+  it.each([
+    ['a non-object `retryConfig`', { retryConfig: P(60) }, ['retryConfig']],
+    ['an `actions` element that is not an object', { actions: [{ key: 'a', label: 'A' }, P(61)] }, ['actions']],
+    ['a `null` `actions` element', { actions: [{ key: 'a', label: 'A', token: P(62) }, null] }, ['actions']],
+    ['an `actions` that is not an array', { actions: { key: 'a', token: P(63) } }, ['actions']],
+  ] as const)('withholds the container WHOLE when it is not the declared shape: %s', (_label, extra, keys) => {
+    const item = { ...base, ...extra };
+    const { item: served, redactedKeys } = redactConnectorItem(item);
+    expect(redactedKeys).toEqual(keys);
+    for (const key of keys) expect(served).not.toHaveProperty(key);
+    expect(holds(served, P(60), P(61), P(62), P(63))).toBe(false);
+  });
+
+  it('a cleared `retryConfig` or `actions`, and an empty `actions` list, are served as written', () => {
+    for (const extra of [{ retryConfig: null }, { retryConfig: '' }, { actions: null }, { actions: [] }]) {
+      const item = { ...base, ...extra };
+      const result = redactConnectorItem(item);
+      expect(result.redactedKeys).toEqual([]);
+      expect(result.item).toBe(item);
+    }
+  });
+
+  it('never mutates its input', () => {
+    const item = { ...base, retryConfig: { maxAttempts: 3, secret: P(33) }, actions: [{ key: 'a', label: 'A', token: P(34) }] };
+    const before = JSON.stringify(item);
+    redactConnectorItem(item);
+    expect(JSON.stringify(item)).toBe(before);
+  });
+});
+
 describe('the connector redactor — purity and the untouched remainder', () => {
   it('never mutates its input, and leaves every other key (`_diagnostics` included) byte for byte', () => {
     const item = {
@@ -173,7 +426,7 @@ describe('the connector redactor — purity and the untouched remainder', () => 
  * until it is confirmed to be a reference or not a secret, and listed.
  */
 const DECLARED_NOT_A_SECRET = [
-  'appId', 'authorizationUrl', 'clientId', 'credentialRef', 'grant', 'headerName', 'keyId',
+  'appId', 'authorizationUrl', 'clientId', 'clientSource', 'credentialRef', 'grant', 'headerName', 'keyId',
   'paramName', 'resource', 'scheme', 'scopes', 'tokenUrl', 'type', 'username', 'vendor',
   'vendorPublicKeyRef',
 ];

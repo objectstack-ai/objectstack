@@ -285,7 +285,7 @@ import type * as M194 from './automation/assignment-rule.zod.js';
 import type * as M195 from './security/queue.zod.js';
 
 // ---------------------------------------------------------------------------
-// 808 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 811 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -429,6 +429,9 @@ export type Iso_api_authEndpoints__EmailPasswordConfigPublicSchema = Assert<Eq< 
 // api/auth.zod.ts
 export type Iso_api_auth__AuthProvider = Assert<Eq< z.input< typeof M13.AuthProvider >, z.infer< typeof M13.AuthProvider > >>;
 export type Iso_api_auth__LoginType = Assert<Eq< z.input< typeof M13.LoginType >, z.infer< typeof M13.LoginType > >>;
+export type Iso_api_auth__MePermissionsAnonymousResponseSchema = Assert<Eq< z.input< typeof M13.MePermissionsAnonymousResponseSchema >, z.infer< typeof M13.MePermissionsAnonymousResponseSchema > >>;
+export type Iso_api_auth__MePermissionsAuthenticatedResponseSchema = Assert<Eq< z.input< typeof M13.MePermissionsAuthenticatedResponseSchema >, z.infer< typeof M13.MePermissionsAuthenticatedResponseSchema > >>;
+export type Iso_api_auth__MePermissionsResponseSchema = Assert<Eq< z.input< typeof M13.MePermissionsResponseSchema >, z.infer< typeof M13.MePermissionsResponseSchema > >>;
 export type Iso_api_auth__RefreshTokenRequestSchema = Assert<Eq< z.input< typeof M13.RefreshTokenRequestSchema >, z.infer< typeof M13.RefreshTokenRequestSchema > >>;
 export type Iso_api_auth__RegisterRequestSchema = Assert<Eq< z.input< typeof M13.RegisterRequestSchema >, z.infer< typeof M13.RegisterRequestSchema > >>;
 export type Iso_api_auth__SessionSchema = Assert<Eq< z.input< typeof M13.SessionSchema >, z.infer< typeof M13.SessionSchema > >>;
@@ -1742,7 +1745,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 808 isomorphic pins', () => {
+  it('still declares all 811 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2716,7 +2719,11 @@ describe('ADR-0122 type-alias convention', () => {
     // shape, no default and no transform
     // (Iso_shared_connectorAuth__ConnectorInstanceSignedAlipayV3AuthSchema).
     // +1 added.
-    expect(pins).toHaveLength(808);
+    // 808 -> 811 is #28508: the `GET /auth/me/permissions` response contract
+    // (`api/auth.zod.ts`), strict objects with no default and no transform —
+    // the anonymous branch, the authenticated branch and their discriminated
+    // union (Iso_api_auth__MePermissions*ResponseSchema). +3 added.
+    expect(pins).toHaveLength(811);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

@@ -13,7 +13,16 @@
  * `findData` with `count` after the child's own exposure gate, filtered by the
  * parent condition this route composes AND the list's declared scope; then
  * `getRecordFieldAccess`, the security service's `explain` and the approval
- * service's `listRequests` / `getRequest` / `getRecordLock`. Object
+ * service's `listRequests` / `getRequest` / `getRecordLock`. [#28470] A
+ * related list's `expand` is that list read's own `$expand`; the record's
+ * streams — `discussion`, `activity`, `attachments` — are `findData` over
+ * `sys_comment` (then `sys_comment_reaction`), `sys_activity` and
+ * `sys_attachment`, each after that object's own exposure gate, scoped to this
+ * record and ordered as the spec module's stream table spells it. [#28737]
+ * The `timeline` part is the size of the record's 动态 stream: a `findData`
+ * count (`limit: 0`, `count: true`) of each source the request names, over
+ * the same objects behind the same gates, as the spec's timeline table spells
+ * it — so the count is of rows the caller could read, and of no other. Object
  * permissions, row-level security, sharing and field-level security are
  * therefore whatever those calls apply, by construction.
  *
@@ -25,6 +34,8 @@
  */
 
 import {
+    RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES,
+    RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
     RecordPageRequestSchema,
     zodIssuesToFields,
     type GetDataRequest,
@@ -45,6 +56,25 @@ export const RECORD_PAGE_PARAMS: readonly string[] = [];
 
 /** The relationship field types a related list follows back to its parent. */
 const RELATIONSHIP_TYPES = new Set(['lookup', 'master_detail']);
+
+/** [#28470] The objects the record's stream parts read. */
+const COMMENT_OBJECT = 'sys_comment';
+const COMMENT_REACTION_OBJECT = 'sys_comment_reaction';
+const ACTIVITY_OBJECT = 'sys_activity';
+const ATTACHMENT_OBJECT = 'sys_attachment';
+/** [#28737] The record's field changes the timeline counts: the ledger's own object. */
+const AUDIT_LOG_OBJECT = 'sys_audit_log';
+/** [#28737] The ledger's write actions — the entries the 动态 stream draws as field changes. */
+const FIELD_CHANGE_ACTIONS = ['create', 'update', 'delete'];
+
+/**
+ * A `$expand` list spelled as the relation map the QueryAST declares, as the
+ * list read's normalizer lowers `$expand=a,b` (`{ a: { object: 'a' } }`): the
+ * same map, so a part's rows expand exactly as that read's rows do (#28470).
+ */
+function relationMap(fields: readonly string[]): Record<string, { object: string }> {
+    return Object.fromEntries(fields.map((rel): [string, { object: string }] => [rel, { object: rel }]));
+}
 
 /**
  * The `RestServer` members {@link registerRecordPageEndpoints} reads — every
@@ -141,9 +171,22 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                 // caller may not reach through the API is not judged on its
                 // field: its read below answers that refusal.
                 const related = body.related ?? [];
-                const childItems = await measureServerTiming('meta', () => Promise.all(
-                    related.map((entry) => this.loadObjectItem(p, environmentId, entry.object)),
-                ), 'Metadata reads');
+                // [#28470] The stream objects' items too, for their exposure
+                // gates — read in the same metadata wave as the children's.
+                // [#28737] And the timeline's sources, each object read once.
+                const streamObjects = [...new Set([
+                    ...(body.discussion ? [COMMENT_OBJECT, COMMENT_REACTION_OBJECT] : []),
+                    ...(body.activity ? [ACTIVITY_OBJECT] : []),
+                    ...(body.attachments ? [ATTACHMENT_OBJECT] : []),
+                    ...(body.timeline?.discussion ? [COMMENT_OBJECT] : []),
+                    ...(body.timeline?.activity ? [ACTIVITY_OBJECT] : []),
+                    ...(body.timeline?.fieldChanges ? [AUDIT_LOG_OBJECT] : []),
+                ])];
+                const [childItems, streamItemList] = await measureServerTiming('meta', () => Promise.all([
+                    Promise.all(related.map((entry) => this.loadObjectItem(p, environmentId, entry.object))),
+                    Promise.all(streamObjects.map((name) => this.loadObjectItem(p, environmentId, name))),
+                ]), 'Metadata reads');
+                const streamItems = new Map(streamObjects.map((name, index) => [name, streamItemList[index]]));
                 const malformed: Array<{ field: string; code: string; message: string }> = [];
                 const declaredFilters = related.map((entry, index) => {
                     if (entry.filter === undefined) return undefined;
@@ -207,6 +250,9 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                                 limit: entry.top,
                                 count: true,
                                 ...(entry.sort && entry.sort.length > 0 ? { orderBy: entry.sort } : {}),
+                                // [#28470] the list read's own `$expand`, so
+                                // its rows carry the names the list draws.
+                                ...(entry.expand && entry.expand.length > 0 ? { expand: relationMap(entry.expand) } : {}),
                             },
                             ...scope,
                         } satisfies ServerScopedDataRequest<FindDataRequest>);
@@ -216,6 +262,112 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     } catch (error) {
                         return { ...head, error: refusalOf(error, entry.object) };
                     }
+                };
+
+                // [#28470] One stream read: `findData` over `name` as the
+                // caller, behind that object's own exposure gate. A refusal is
+                // the read's own, carried as the part's answer.
+                const readStream = async (
+                    name: string,
+                    read: Record<string, unknown>,
+                ): Promise<{ records: any[]; total: number } | { error: PartRefusal }> => {
+                    const item = streamItems.get(name);
+                    const denial = item ? apiAccessDenialFromEnable(item.enable, name, 'list') : null;
+                    if (denial) {
+                        const nested = nestedRefusalEnvelope(denial);
+                        return { error: { code: nested.code, status: nested.status, message: nested.message } };
+                    }
+                    try {
+                        const found: any = await p.findData({
+                            object: name,
+                            query: { object: name, ...read },
+                            ...scope,
+                        } satisfies ServerScopedDataRequest<FindDataRequest>);
+                        const records = Array.isArray(found?.records) ? found.records : [];
+                        const total = typeof found?.total === 'number' ? found.total : records.length;
+                        return { records, total };
+                    } catch (error) {
+                        return { error: refusalOf(error, name) };
+                    }
+                };
+
+                // The thread, as the record feed reads it (no page size), then
+                // its comments' reactions; the reactions' refusal leaves the
+                // comments answered.
+                const answerDiscussion = async () => {
+                    const comments = await readStream(COMMENT_OBJECT, {
+                        where: { thread_id: `${object}:${id}` },
+                        orderBy: [{ field: 'created_at', order: 'asc' }],
+                    });
+                    if ('error' in comments) return { error: comments.error };
+                    const ids = comments.records
+                        .map((row: any) => row?.id)
+                        .filter((value: unknown) => typeof value === 'string' || typeof value === 'number')
+                        .map(String);
+                    if (ids.length === 0) return { comments: comments.records, reactions: { records: [] } };
+                    const reactions = await readStream(COMMENT_REACTION_OBJECT, {
+                        where: { comment_id: { $in: ids } },
+                        orderBy: [{ field: 'created_at', order: 'asc' }],
+                    });
+                    return {
+                        comments: comments.records,
+                        reactions: 'error' in reactions ? { error: reactions.error } : { records: reactions.records },
+                    };
+                };
+
+                const answerActivity = async (top: number) => {
+                    const answer = await readStream(ACTIVITY_OBJECT, {
+                        where: { object_name: object, record_id: id },
+                        orderBy: [{ field: 'timestamp', order: 'desc' }],
+                        limit: top,
+                        count: true,
+                        expand: relationMap(['actor_id']),
+                    });
+                    return 'error' in answer ? answer : { total: answer.total, records: answer.records };
+                };
+
+                const answerAttachments = async (top: number) => {
+                    const answer = await readStream(ATTACHMENT_OBJECT, {
+                        where: { parent_object: object, parent_id: id },
+                        orderBy: [{ field: 'created_at', order: 'desc' }],
+                        limit: top,
+                        count: true,
+                    });
+                    return 'error' in answer ? answer : { total: answer.total, records: answer.records };
+                };
+
+                // [#28737] The 动态 stream's size: each named source counted by
+                // its read as the caller (`readStream`, so behind that object's
+                // gate), as the spec's timeline table spells it. A source this
+                // deployment does not serve holds no entry, as the page reads
+                // such a stream as an empty one; a refused comment or activity
+                // count refuses the part, and a refused ledger count is no
+                // field change, as the stream then merges none.
+                const answerTimeline = async (
+                    sources: NonNullable<RecordPageRequest['timeline']>,
+                ): Promise<{ total: number } | { error: PartRefusal }> => {
+                    const count = async (name: string, where: Record<string, unknown>): Promise<number | { error: PartRefusal }> => {
+                        const answer = await readStream(name, { where, limit: 0, count: true });
+                        if (!('error' in answer)) return answer.total;
+                        return answer.error.code === 'OBJECT_NOT_FOUND' ? 0 : answer;
+                    };
+                    const ofRecord = { object_name: object, record_id: id };
+                    const [comments, fieldChanges, activity, updates] = await Promise.all([
+                        sources.discussion ? count(COMMENT_OBJECT, { thread_id: `${object}:${id}` }) : 0,
+                        sources.fieldChanges ? count(AUDIT_LOG_OBJECT, { ...ofRecord, action: { $in: FIELD_CHANGE_ACTIONS } }) : 0,
+                        sources.activity
+                            ? count(ACTIVITY_OBJECT, { ...ofRecord, type: { $nin: [...RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES] } })
+                            : 0,
+                        // The updates that step aside once a field change is counted.
+                        sources.activity && sources.fieldChanges
+                            ? count(ACTIVITY_OBJECT, { ...ofRecord, type: RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE })
+                            : 0,
+                    ]);
+                    if (typeof comments !== 'number') return comments;
+                    if (typeof activity !== 'number') return activity;
+                    if (typeof updates !== 'number') return updates;
+                    const changes = typeof fieldChanges === 'number' ? fieldChanges : 0;
+                    return { total: comments + changes + activity - (changes > 0 ? updates : 0) };
                 };
 
                 const answerFieldAccess = async () => {
@@ -282,11 +434,15 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     }
                 };
 
-                const [relatedAnswers, fieldAccess, explain, approvals] = await Promise.all([
+                const [relatedAnswers, fieldAccess, explain, approvals, discussion, activity, attachments, timeline] = await Promise.all([
                     Promise.all(related.map(answerRelated)),
                     body.fieldAccess ? answerFieldAccess() : Promise.resolve(undefined),
                     body.explain && body.explain.length > 0 ? answerExplain() : Promise.resolve(undefined),
                     body.approvals ? answerApprovals() : Promise.resolve(undefined),
+                    body.discussion ? answerDiscussion() : Promise.resolve(undefined),
+                    body.activity ? answerActivity(body.activity.top) : Promise.resolve(undefined),
+                    body.attachments ? answerAttachments(body.attachments.top) : Promise.resolve(undefined),
+                    body.timeline ? answerTimeline(body.timeline) : Promise.resolve(undefined),
                 ]);
 
                 sendOk(res, {
@@ -297,6 +453,10 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
                     ...(fieldAccess !== undefined ? { fieldAccess } : {}),
                     ...(explain !== undefined ? { explain } : {}),
                     ...(approvals !== undefined ? { approvals } : {}),
+                    ...(discussion !== undefined ? { discussion } : {}),
+                    ...(activity !== undefined ? { activity } : {}),
+                    ...(attachments !== undefined ? { attachments } : {}),
+                    ...(timeline !== undefined ? { timeline } : {}),
                 });
             } catch (error: any) {
                 const mapped = mapDataError(error, object);
@@ -305,7 +465,7 @@ export function registerRecordPageEndpoints(this: RecordPageRouteHost, basePath:
             }
         },
         metadata: {
-            summary: 'Record page payload: the record, its related lists\' counts and first rows, its field projection, access verdicts and approval state in one request',
+            summary: 'Record page payload: the record, its related lists\' counts and first rows, its field projection, access verdicts, approval state, discussion, activity, attachments and timeline count in one request',
             tags: ['data'],
         },
     });

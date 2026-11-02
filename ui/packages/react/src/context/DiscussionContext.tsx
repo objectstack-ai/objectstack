@@ -64,6 +64,13 @@ export interface DiscussionContextValue {
    *  input can suggest after the user types `@`. When omitted the input
    *  falls back to free-text @-mentions without autocompletion. */
   mentionSuggestions?: DiscussionMentionSuggestion[];
+  /**
+   * Ask the host for {@link mentionSuggestions} (objectstack#28470). A comment
+   * composer calls it on its first focus, so the host reads the list when a
+   * reader is about to write, never when the record opens. Idempotent: the
+   * host reads once, and a host that already holds the list ignores it.
+   */
+  onMentionSuggestionsWanted?: () => void;
   /** Optional uploader. When provided, the comment composer renders a
    *  drag-and-drop attachment panel; returned attachments are passed
    *  alongside the comment text to `onAddComment`. */
@@ -102,6 +109,7 @@ export const DiscussionContextProvider: React.FC<DiscussionContextProviderProps>
     value.onEditComment,
     value.onDeleteComment,
     value.mentionSuggestions,
+    value.onMentionSuggestionsWanted,
     value.onUploadAttachments,
     value.loading,
     value.error,

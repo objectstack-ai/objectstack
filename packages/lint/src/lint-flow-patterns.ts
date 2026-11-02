@@ -321,6 +321,9 @@ const INERT_CONDITION_NODE_TYPES = new Set([
   'create_record', 'update_record', 'delete_record', 'get_record',
   'http', 'notify', 'script', 'screen', 'wait', 'subflow', 'map',
   'connector_action', 'approval', 'end',
+  // [#28786] read: `save-notice-node.ts` parses `message` only
+  // (`SaveNoticeConfigSchema`) and never looks at `condition`.
+  'save_notice',
 ]);
 
 /** Node types that perform a data operation — the ones `flow.runAs` governs (#1888). */
@@ -359,6 +362,11 @@ const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record',
  *    context, or a throwing request (`plugin-approvals/src/approval-node.ts:136,
  *    :145-147, :212`). Plugin-registered but in-box, and this file already
  *    imports its type constant for the ADR-0044 rules.
+ *  - `save_notice` (#28786) — the run holds no write to answer (a leg resumed
+ *    after a suspension, a subflow or map child), the trigger already closed the
+ *    channel, or every `{{ }}` hole of the message rendered empty
+ *    (`save-notice-node.ts:67, :94, :104`). Which of those a row hits is data,
+ *    not authoring.
  *
  * Deliberately **absent**, each also by reading the executor:
  *
@@ -382,7 +390,7 @@ const DATA_NODE_TYPES = new Set(['get_record', 'create_record', 'update_record',
 const FALLIBLE_NODE_TYPES: ReadonlySet<string> = new Set([
   'get_record', 'create_record', 'update_record', 'delete_record',
   'http', 'notify', 'connector_action', 'script', 'subflow', 'map',
-  APPROVAL_NODE_TYPE,
+  APPROVAL_NODE_TYPE, 'save_notice',
 ]);
 
 /**

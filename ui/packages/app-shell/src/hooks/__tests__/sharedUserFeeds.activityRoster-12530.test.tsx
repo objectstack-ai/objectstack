@@ -27,7 +27,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { MetadataCtx, type MetadataContextValue } from '@object-ui/react';
 import { appListing, rosterRegistry, withRoster } from './activityRoster';
 
@@ -158,11 +158,12 @@ describe('the feed reads the objects the user’s apps list, in the query (objec
   });
 
   it('an object entry the member may not read lends the roster nothing (the sidebar’s own prune)', async () => {
-    const perms: MePermissionsResponse = {
+    const perms: MePermissionsAuthenticatedResponse = {
       authenticated: true,
       userId: 'u_admin',
       tenantId: null,
-      roles: [],
+      positions: [],
+      hasAnyQueue: false,
       permissionSets: [],
       objects: { sys_activity: { allowRead: true }, crm_lead: { allowRead: true } },
       fields: {},

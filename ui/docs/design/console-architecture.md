@@ -129,7 +129,7 @@ Navigation items can be conditionally hidden using expressions:
 {
   "type": "object",
   "objectName": "admin_settings",
-  "visible": "${user.role === 'admin'}"
+  "visible": "${current_user.isPlatformAdmin === true}"
 }
 ```
 
