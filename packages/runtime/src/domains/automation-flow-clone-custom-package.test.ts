@@ -341,7 +341,7 @@ describe('[#29016] a clone the engine refuses installs no pair', () => {
 
         expect(answer.status, JSON.stringify(answer.body)).toBe(400);
         expect(answer.code).toBe('VALIDATION_FAILED');
-        expect(answer.body.error.fields).toMatchObject([{ field: 'name' }]);
+        expect(answer.body.error.details.fields).toMatchObject([{ field: 'name' }]);
         // A refused clone changes nothing: no pair installed or persisted…
         expect(rig.installed()).toEqual(before);
         expect(rig.installed()).not.toContain(PAIR);
