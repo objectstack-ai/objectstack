@@ -1594,7 +1594,7 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
   /**
    * The views to compose a scope's objects with (objectstack#28645), and
    * whether they are in hand. `asked` are the names the scope's reader asked
-   * for (a names-only scope: every object in it).
+   * for (a names-only scope: those of them it holds).
    *
    *   - The app bundle in hand: an object it holds composes with its views (it
    *     carries every view of every object it holds). When an asked name is
@@ -1735,7 +1735,13 @@ export function MetadataProvider({ children, adapter, ttlMs = DEFAULT_TTL_MS }: 
           views: NO_VIEWS,
         };
       }
-      const scopeViews = viewsForObjects(namesOnly ? itemNames(entry.items) : (scope.names ?? NO_NAMES));
+      // objectstack#29416 — a names-only scope composes the views of the names
+      // THIS reader asked, never of every name in the shared entry: the nav
+      // gate's cross-app `requiresObject` union lands there too (`views:
+      // false`), and an object of another app outside the bundle read the whole
+      // `/meta/view` list for a reader that never asked about it.
+      const asked = scope.names ?? NO_NAMES;
+      const scopeViews = viewsForObjects(namesOnly ? itemNames(entry.items).filter((name) => asked.includes(name)) : asked);
       return {
         objects: composeObjects(entry.items, scopeViews.views) as any[],
         served: entry.items,
