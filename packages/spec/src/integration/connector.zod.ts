@@ -1302,6 +1302,30 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
 }
 
 /**
+ * What an authored connector URL holding a credential part meets at every door
+ * that runs the {@link DeclarativeConnectorEntrySchema} refinement: one issue
+ * per URL, located at the URL, naming the parts it holds — never the URL or
+ * its value — and the reference to use instead. What a credential part is —
+ * the userinfo, a credential query parameter — and the walk that finds every
+ * URL holding one are defined once, in `./connector-url-credentials.ts`, which
+ * the connector read redactor runs too. No rule per provider: a URL is
+ * recognised by its value, wherever under `providerConfig` or `auth` it sits.
+ */
+function connectorUrlCredentialRefusal(name: string, found: ConnectorUrlCredential): string {
+  const at = found.path.map(String).join('.');
+  const parts = [
+    ...(found.userinfo ? ['a userinfo (`user@` or `user:password@` before the host)'] : []),
+    ...found.params.map((param) => `the \`${param}\` query parameter`),
+  ];
+  return `Connector instance '${name}' keeps a credential in the URL at \`${at}\`: ${parts.join(' and ')}. `
+    + 'Connector metadata never holds a credential, in a URL or anywhere else. Remove it from the URL and name the '
+    + "secret with `auth: { type, credentialRef }` — `bearer` for a token, `api-key` for a key (`paramName` when the "
+    + 'API takes it as a query parameter, which the provider then adds to every request), `basic` for a user and '
+    + 'password — and set the value under that name: an environment variable in the open tier, or Setup → Connector '
+    + 'credentials.';
+}
+
+/**
  * A declarative `connectors:` **stack entry** (ADR-0097) — {@link ConnectorSchema}
  * plus the cross-field rules that apply only when a connector is *authored inside
  * a stack*, as opposed to a def a plugin builds at runtime and hands to
@@ -1346,6 +1370,10 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  *  - A provider-bound instance must NOT author `actions` — the provider derives
  *    them from the upstream (OpenAPI document / MCP `tools/list`); authoring both
  *    the instance and its actions reintroduces drift (§5 non-goals).
+ *  - A URL under an instance's `providerConfig` or `auth` holds no credential
+ *    part — no userinfo, no credential query parameter — refused at the URL
+ *    (`connectorUrlCredentialRefusal`, judged by the walk the read redactor
+ *    runs too); the secret is named with `auth.credentialRef`.
  *
  * `triggers` used to be the second key of that last rule, refused with the
  * reason that the provider derives triggers too. That reason was untrue — no
@@ -1355,29 +1383,6 @@ export function defineConnector(config: z.input<typeof ConnectorSchema>): Connec
  * retirement prescription, and a provider-bound refusal could only ever repeat
  * that verdict with a wrong reason (see "REMOVED: `triggers`" above).
  */
-/**
- * What an authored connector URL holding a credential part meets at every door
- * that parses {@link DeclarativeConnectorEntrySchema}: one issue per URL,
- * located at the URL, naming the parts it holds and the reference to use
- * instead. What a credential part is — the userinfo, a credential query
- * parameter — is defined once, in `./connector-url-credentials.ts`, which the
- * connector read redactor judges by too. No rule per provider: a URL is
- * recognised by its value, wherever under `providerConfig` or `auth` it sits.
- */
-function connectorUrlCredentialRefusal(name: string, found: ConnectorUrlCredential): string {
-  const at = found.path.map(String).join('.');
-  const parts = [
-    ...(found.userinfo ? ['a userinfo (`user@` or `user:password@` before the host)'] : []),
-    ...found.params.map((param) => `the \`${param}\` query parameter`),
-  ];
-  return `Connector instance '${name}' keeps a credential in the URL at \`${at}\`: ${parts.join(' and ')}. `
-    + 'Connector metadata never holds a credential, in a URL or anywhere else. Remove it from the URL and name the '
-    + "secret with `auth: { type, credentialRef }` — `bearer` for a token, `api-key` for a key (`paramName` when the "
-    + 'API takes it as a query parameter, which the provider then adds to every request), `basic` for a user and '
-    + 'password — and set the value under that name: an environment variable in the open tier, or Setup → Connector '
-    + 'credentials.';
-}
-
 /**
  * True for a `provider: 'mcp'` instance whose `providerConfig.transport` is an
  * http transport — the one place an `oauth2` instance may leave its endpoints

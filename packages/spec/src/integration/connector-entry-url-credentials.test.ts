@@ -185,5 +185,42 @@ describe('an authored connector URL holds no credential part', () => {
         expect(refused, `${url}: refused ⇔ rewritten`).toBe(rewritten);
       }
     });
+
+    it('at every depth, one walk: each refused URL is withheld by the read, at the position it can address', () => {
+      const entry = {
+        ...rest('https://api.vendor.example.com'),
+        providerConfig: {
+          baseUrl: `https://u:${PLACEHOLDER}@api.vendor.example.com`,
+          mirrors: [
+            'https://eu.vendor.example.com',
+            `https://us.vendor.example.com?sig=${PLACEHOLDER}`,
+            `https://ap.vendor.example.com?token=${PLACEHOLDER}`,
+          ],
+          'x.callback': { url: `https://hooks.vendor.example.com?secret=${PLACEHOLDER}` },
+          nested: { deeper: { url: `https://u:${PLACEHOLDER}@deep.vendor.example.com` }, plain: 'https://plain.vendor.example.com' },
+          headers: { Referer: `https://u:${PLACEHOLDER}@app.example.com` },
+        },
+      };
+      expect(refusals(entry).located.map(([, path]) => path)).toEqual([
+        'providerConfig.baseUrl',
+        'providerConfig.mirrors.1',
+        'providerConfig.mirrors.2',
+        'providerConfig.x.callback.url',
+        'providerConfig.nested.deeper.url',
+      ]);
+      const { item: served, redactedKeys } = redactConnectorItem(entry);
+      // An array and a dotted key are withheld whole, once; the header map is
+      // withheld whole by its own rule (item 3), the one position the write
+      // door leaves to the map's own rules.
+      expect(redactedKeys).toEqual([
+        'providerConfig.baseUrl',
+        'providerConfig.headers',
+        'providerConfig.mirrors',
+        'providerConfig.nested.deeper.url',
+        'providerConfig.x.callback',
+      ]);
+      expect(JSON.stringify(served)).not.toContain(PLACEHOLDER);
+      expect((served.providerConfig as Record<string, any>).nested.plain).toBe('https://plain.vendor.example.com');
+    });
   });
 });

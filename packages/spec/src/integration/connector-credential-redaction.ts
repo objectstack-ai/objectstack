@@ -61,10 +61,11 @@
  *     an OBJECT depth of `providerConfig`; and the endpoints an instance-auth
  *     kind declares (`auth.tokenUrl`, `auth.authorizationUrl`, `auth.resource`)
  *     and any URL a kind declares later. A string is judged when it starts
- *     with `scheme://`. What a credential part is lives in ONE place,
+ *     with `scheme://`. What a credential part is, and the walk that finds
+ *     every URL holding one, live in ONE place,
  *     `./connector-url-credentials.ts`, which the write door's refinement
- *     judges by too: an authored URL holding one is refused, so only a row
- *     stored before that refusal can carry one to this read.
+ *     runs too: an authored URL holding one is refused, so only a row stored
+ *     before that refusal can carry one to this read.
  *  6. **An array under `providerConfig` that holds such a URL, WHOLE**, and
  *     **a key under `providerConfig` whose own name carries a dot that holds
  *     such a URL at any depth, WHOLE.** The carry-forward cannot address an
@@ -132,10 +133,10 @@ import { redactUrlCredentialQueryParams } from '../data/datasource-credential-re
 import {
   CONNECTOR_CREDENTIAL_MAP_PATHS,
   CONNECTOR_CREDENTIAL_URL_QUERY_PARAM_NAMES,
-  CONNECTOR_URL_ROOTS,
   URL_USERINFO_RE,
   connectorCredentialQueryParamsOf,
-  connectorUrlCredentialPartsOf,
+  connectorUrlCredentialPositionOf,
+  findConnectorUrlCredentials,
 } from './connector-url-credentials';
 import { objectShapeOf, wrapperChainOf, zodDefOf } from '../kernel/metadata-credential-fields';
 import type { MetadataRedactionResult } from '../kernel/metadata-type-redaction';
@@ -363,56 +364,34 @@ function withValueAt(item: Record<string, unknown>, path: readonly string[], val
   return { ...item, [head]: withValueAt(item[head] as Record<string, unknown>, rest, value) };
 }
 
-/** Whether `value` is a URL holding a credential part — the parts {@link redactConnectorUrl} removes. */
-function isCredentialUrl(value: string, params: readonly string[]): boolean {
-  return connectorUrlCredentialPartsOf(value, params) !== undefined;
-}
-
-/** Whether `value` holds, at any depth, a URL {@link isCredentialUrl} judges (item 6). */
-function holdsCredentialUrl(value: unknown, params: readonly string[]): boolean {
-  if (typeof value === 'string') return isCredentialUrl(value, params);
-  if (Array.isArray(value)) return value.some((element) => holdsCredentialUrl(element, params));
-  if (isPlainRecord(value)) return Object.values(value).some((child) => holdsCredentialUrl(child, params));
-  return false;
-}
-
 /**
- * Items 5 and 6: every URL under `providerConfig` and `auth`
- * ({@link CONNECTOR_URL_ROOTS}), at object depth, whose credential parts
- * {@link redactConnectorUrl} removes — the path and the rewritten value — and
- * every array there holding such a URL, withheld whole (`value` absent).
+ * Items 5 and 6: every URL the write door's own walk returns
+ * ({@link findConnectorUrlCredentials} — the one traversal both doors run), at
+ * the position {@link connectorUrlCredentialPositionOf} names. A URL reached
+ * through object keys alone is rewritten in place — the path and the value
+ * {@link redactConnectorUrl} leaves. An array holding such a URL, and a key
+ * whose own name carries a dot holding one at any depth, cannot be addressed
+ * part for part, so each is withheld WHOLE (`value` absent), once however many
+ * URLs it holds: fail closed, and the carry-forward keeps the stored value at
+ * rest by the whole-string fallback. Item 5's "avoid silent deletion" yields to
+ * item 7's fail-closed there.
  */
 function credentialUrlRewritesOf(
   item: Record<string, unknown>,
 ): Array<{ path: string[]; value?: string }> {
   const rewrites: Array<{ path: string[]; value?: string }> = [];
+  const withheld = new Set<string>();
   const params = connectorCredentialQueryParamsOf(item);
-  const walk = (node: Record<string, unknown>, prefix: readonly string[]): void => {
-    for (const [key, value] of Object.entries(node)) {
-      const path = [...prefix, key];
-      // A key whose own name carries a dot cannot be addressed segment by
-      // segment (its dotted name is indistinguishable from a nested path once
-      // `redactedKeys` joins on dots), so it is never rewritten in place or
-      // descended into. Fail closed instead: if it holds a credential URL at
-      // any depth, withhold the key WHOLE — the carry-forward keeps the stored
-      // value at rest by the whole-string fallback. Item 5's "avoid silent
-      // deletion" yields to item 7's fail-closed here.
-      if (key.includes('.')) {
-        if (holdsCredentialUrl(value, params)) rewrites.push({ path });
-        continue;
-      }
-      if (typeof value === 'string') {
-        if (isCredentialUrl(value, params)) rewrites.push({ path, value: redactConnectorUrl(value, params) });
-      } else if (Array.isArray(value)) {
-        if (holdsCredentialUrl(value, params)) rewrites.push({ path });
-      } else if (isPlainRecord(value)) {
-        walk(value, path);
-      }
+  for (const found of findConnectorUrlCredentials(item)) {
+    const position = connectorUrlCredentialPositionOf(found.path);
+    if (position.rewrite) {
+      rewrites.push({ path: position.path, value: redactConnectorUrl(found.url, params) });
+      continue;
     }
-  };
-  for (const root of CONNECTOR_URL_ROOTS) {
-    const node = item[root];
-    if (isPlainRecord(node)) walk(node, [root]);
+    const key = JSON.stringify(position.path);
+    if (withheld.has(key)) continue;
+    withheld.add(key);
+    rewrites.push({ path: position.path });
   }
   return rewrites;
 }

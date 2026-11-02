@@ -20,7 +20,10 @@
 //    row is never touched.
 //  - CARRY-FORWARD: a save of the served form keeps the stored values; an
 //    author's own edit of a served URL is stored as the author wrote it; a
-//    `retryConfig` the author removes is removed with its stored keys.
+//    `retryConfig` the author removes is removed with its stored keys. A row
+//    stored with a credential part in a `providerConfig` URL keeps
+//    dispatching: the runtime materializes the stored row as it is, never
+//    re-judged by the entry's refinement.
 //
 // Every credential below is an obviously-fake placeholder, and every assertion
 // on one is its absence from what a door served or stored, or its presence at
@@ -40,6 +43,7 @@ const PLACEHOLDERS = {
   urlQuery: 'TEST_PLACEHOLDER_CUN_URL_QUERY',
   nested: 'TEST_PLACEHOLDER_CUN_NESTED',
   authEndpoint: 'TEST_PLACEHOLDER_CUN_AUTH_ENDPOINT',
+  legacyQuery: 'TEST_PLACEHOLDER_CUN_LEGACY_QUERY',
   resolvedRef: 'TEST_PLACEHOLDER_CUN_RESOLVED_REFERENCE',
 } as const;
 const NEVER_SERVED = Object.values(PLACEHOLDERS).filter((p) => p !== PLACEHOLDERS.resolvedRef);
@@ -51,6 +55,7 @@ const DESCRIPTOR = 'cun_descriptor';
 const EXISTING = 'cun_existing';
 const OAUTH_ROW = 'cun_oauth_stored';
 const RETRY_ROW = 'cun_retry_stored';
+const LEGACY_ROW = 'cun_legacy_url_stored';
 
 const rowsOf = (r: any): any[] => (Array.isArray(r) ? r : Array.isArray(r?.records) ? r.records : Array.isArray(r?.value) ? r.value : []);
 const bodyOf = (row: any): Record<string, any> =>
@@ -178,6 +183,12 @@ describe('connector metadata doors: an authored connector keeps no credential in
       RETRY_ROW,
       instance(RETRY_ROW, { retryConfig: { maxAttempts: 2 } }),
       instance(RETRY_ROW, { retryConfig: { maxAttempts: 2, secret: PLACEHOLDERS.nested } }),
+    );
+    // Saved disabled, so nothing materializes before the seeded form is the row.
+    await seedOver(
+      LEGACY_ROW,
+      instance(LEGACY_ROW, { enabled: false }),
+      instance(LEGACY_ROW, { providerConfig: { baseUrl: `${upstreamUrl}/v1?region=eu&token=${PLACEHOLDERS.legacyQuery}` } }),
     );
   }, 180_000);
 
@@ -330,6 +341,30 @@ describe('connector metadata doors: an authored connector keeps no credential in
       const cleared = await stack.apiAs(admin, 'PUT', `/meta/connector/${RETRY_ROW}`, withoutRetry);
       expect(cleared.status, await cleared.clone().text()).toBe(200);
       expect(bodyOf((await stored(RETRY_ROW))[0])).not.toHaveProperty('retryConfig');
+    });
+
+    it('a row stored with a credential part in its URL keeps dispatching: served without it, saved keeping it, materialized as stored', async () => {
+      const { text, item } = await read(member, LEGACY_ROW);
+      expect(holdsAPlaceholder(text)).toBe(false);
+      expect(item.providerConfig).toEqual({ baseUrl: `${upstreamUrl}/v1?region=eu` });
+
+      const served = authorable((await read(admin, LEGACY_ROW)).item);
+      const res = await stack.apiAs(admin, 'PUT', `/meta/connector/${LEGACY_ROW}`, { ...served, label: 'CUN legacy (edited)' });
+      expect(res.status, await res.clone().text()).toBe(200);
+      const atRest = bodyOf((await stored(LEGACY_ROW))[0]);
+      expect(atRest.label).toBe('CUN legacy (edited)');
+      expect(atRest.providerConfig.baseUrl).toBe(`${upstreamUrl}/v1?region=eu&token=${PLACEHOLDERS.legacyQuery}`);
+
+      await waitReady(LEGACY_ROW);
+      const handler = automation.resolveConnectorAction(LEGACY_ROW, 'request');
+      expect(handler, `${LEGACY_ROW} is materialized with its request action`).toBeTypeOf('function');
+      const before = received.length;
+      const out = await handler({ method: 'GET', path: '/probe' }, {});
+      expect(out?.status, JSON.stringify(out)).toBe(200);
+      expect(received.length).toBe(before + 1);
+      const sent = new URL(received[received.length - 1]!, 'http://upstream.invalid');
+      expect(sent.pathname).toBe('/v1/probe');
+      expect(sent.searchParams.get('token'), 'the stored URL is the one dispatched').toBe(PLACEHOLDERS.legacyQuery);
     });
   });
 });

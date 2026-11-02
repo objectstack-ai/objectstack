@@ -34,11 +34,16 @@
  *    to the fragment, names match case-insensitively on the percent-decoded
  *    key, and an empty value carries nothing.
  *
- * The write door refuses a URL holding either part; the read redactor removes
- * exactly these parts from a stored one. One definition, so the two cannot
- * disagree about what a credential in a URL is. Neither judges a URL inside a
- * header or environment map ({@link CONNECTOR_CREDENTIAL_MAP_PATHS}): the read
- * withholds such a map whole.
+ * ## One traversal, two doors
+ *
+ * {@link findConnectorUrlCredentials} is the only walk over an entry's URLs.
+ * The write door's refinement refuses each URL it returns, at that URL's path;
+ * the read redactor rewrites each one it can address and withholds the rest
+ * whole ({@link connectorUrlCredentialPositionOf}). One definition and one
+ * walk, so the two cannot disagree about which URLs carry a credential part.
+ * Neither judges a URL inside a header or environment map
+ * ({@link CONNECTOR_CREDENTIAL_MAP_PATHS}): the read withholds such a map
+ * whole.
  */
 
 import { CREDENTIAL_URL_QUERY_PARAM_NAMES, urlCredentialQueryParams } from '../data/driver/common.zod';
@@ -136,26 +141,29 @@ export function connectorUrlCredentialPartsOf(
 export interface ConnectorUrlCredential extends ConnectorUrlCredentialParts {
   /** The URL's position: object keys, and an array element's index. */
   path: Array<string | number>;
+  /** The URL itself — what the read redactor rewrites. ⛔ Never echoed by the write door's refusal. */
+  url: string;
 }
 
 /**
  * Every URL under {@link CONNECTOR_URL_ROOTS} that holds a credential part, at
  * any depth — inside arrays and under keys whose own name carries a dot too —
- * except inside the maps of {@link CONNECTOR_CREDENTIAL_MAP_PATHS}. The write
- * door's walk: it reports every position, where the read redactor rewrites
- * what it can address and withholds the rest whole.
+ * except inside the maps of {@link CONNECTOR_CREDENTIAL_MAP_PATHS}, whatever a
+ * map position holds. The one traversal both doors run (see the module note):
+ * the write door refuses every URL returned, the read redactor withholds each
+ * at its {@link connectorUrlCredentialPositionOf}.
  */
 export function findConnectorUrlCredentials(item: Record<string, unknown>): ConnectorUrlCredential[] {
   const params = connectorCredentialQueryParamsOf(item);
   const found: ConnectorUrlCredential[] = [];
   const walk = (value: unknown, path: Array<string | number>): void => {
+    if (isCredentialMapPath(path)) return;
     if (typeof value === 'string') {
       const parts = connectorUrlCredentialPartsOf(value, params);
-      if (parts) found.push({ path, ...parts });
+      if (parts) found.push({ path, url: value, ...parts });
     } else if (Array.isArray(value)) {
       value.forEach((element, index) => walk(element, [...path, index]));
     } else if (isPlainRecord(value)) {
-      if (isCredentialMapPath(path)) return;
       for (const [key, child] of Object.entries(value)) walk(child, [...path, key]);
     }
   };
@@ -163,4 +171,27 @@ export function findConnectorUrlCredentials(item: Record<string, unknown>): Conn
     if (isPlainRecord(item[root])) walk(item[root], [root]);
   }
   return found;
+}
+
+/**
+ * Where the read redactor withholds a URL {@link findConnectorUrlCredentials}
+ * returned. The served body's withheld positions are named in `redactedKeys`,
+ * joined on dots, and the save-side carry-forward re-grafts the stored value by
+ * that name, so a position must be addressable by it: object keys without a
+ * dot are. The first hop along the path that is not — an array element (the
+ * carry-forward cannot address one by index), or a key whose own name carries
+ * a dot (indistinguishable from a nested path once joined) — ends the position
+ * there, and everything under it is withheld whole: the ARRAY itself, or the
+ * dotted KEY. `rewrite` is true when no such hop exists, and the URL is then
+ * rewritten in place, its credential parts removed.
+ */
+export function connectorUrlCredentialPositionOf(
+  path: ReadonlyArray<string | number>,
+): { path: string[]; rewrite: boolean } {
+  for (let i = 1; i < path.length; i += 1) {
+    const hop = path[i]!;
+    if (typeof hop === 'number') return { path: path.slice(0, i) as string[], rewrite: false };
+    if (hop.includes('.')) return { path: path.slice(0, i + 1) as string[], rewrite: false };
+  }
+  return { path: [...path] as string[], rewrite: true };
 }

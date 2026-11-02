@@ -13,7 +13,7 @@ Metadata-protocol: narrowed
 
 - **Before.** The entry refused an undeclared top-level key, but its two nested shapes were plain objects: an undeclared key inside `retryConfig` or inside an `actions` element parsed green and meant nothing to the runtime.
 - **Now.** Each is refused by name, in one `unrecognized_keys` issue located at the container (`retryConfig`, `actions.N`) that lists every undeclared key; at the save door `422 INVALID_METADATA`, and nothing is stored. An execution binding on an action (`method`, `path`, `url`) is refused the same way: an action carries none (ADR-0097 §5).
-- **Unchanged.** The published open shapes — `ConnectorSchema`, `RetryConfigSchema`, `ConnectorActionSchema` — keep their posture: the def a plugin hands to `registerConnector`, the actions a provider derives, and the retry policy the runtime parses at materialization. A row stored before this refusal keeps working: the read withholds the undeclared key, and a save of the served form keeps it at rest.
+- **Unchanged.** The published open shapes — `ConnectorSchema`, `RetryConfigSchema`, `ConnectorActionSchema` — keep their posture: the def a plugin hands to `registerConnector`, the actions a provider derives, and the retry policy the runtime parses at materialization. A row stored before this refusal keeps working: the runtime parses its policy with the open `RetryConfigSchema`, the read withholds the undeclared key, and a save of the served form keeps it at rest; a save that leaves `retryConfig` out removes it, the withheld keys with it.
 
 ## FROM → TO
 

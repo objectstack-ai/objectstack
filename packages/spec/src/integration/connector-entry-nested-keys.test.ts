@@ -14,6 +14,7 @@
 // never echo it.
 
 import { describe, it, expect } from 'vitest';
+import { ZodError } from 'zod';
 import {
   ConnectorActionSchema,
   ConnectorSchema,
@@ -64,7 +65,6 @@ describe('an authored connector entry refuses a key its nested shapes do not dec
   ] as const)('`retryConfig` with %s is refused at `retryConfig`', (_label, extra, keys) => {
     const { located, message } = refusal({ ...INSTANCE, retryConfig: { ...RETRY, ...extra } });
     expect(located).toEqual(['unrecognized_keys', 'retryConfig', keys]);
-    expect(message).toContain("connector entry's `retryConfig`");
     expect(message).not.toContain(PLACEHOLDER);
   });
 
@@ -74,7 +74,6 @@ describe('an authored connector entry refuses a key its nested shapes do not dec
   ] as const)('an `actions` element with %s is refused at that element', (_label, extra, keys) => {
     const { located, message } = refusal({ ...DESCRIPTOR, actions: [{ key: 'list', label: 'List' }, { ...ACTION, ...extra }] });
     expect(located).toEqual(['unrecognized_keys', 'actions.1', keys]);
-    expect(message).toContain('this connector action');
     expect(message).not.toContain(PLACEHOLDER);
   });
 
@@ -88,7 +87,15 @@ describe('an authored connector entry refuses a key its nested shapes do not dec
   });
 
   it('`defineConnector()` refuses it too, and accepts the declared keys', () => {
-    expect(() => defineConnector({ ...DESCRIPTOR, actions: [{ ...ACTION, token: PLACEHOLDER } as never] })).toThrow(/this connector action/);
+    let thrown: unknown;
+    try {
+      defineConnector({ ...DESCRIPTOR, actions: [{ ...ACTION, token: PLACEHOLDER } as never] });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown, 'defineConnector must refuse the undeclared action key').toBeInstanceOf(ZodError);
+    expect((thrown as ZodError).issues.map((issue) => [issue.code, issue.path.join('.'), (issue as { keys?: unknown }).keys]))
+      .toEqual([['unrecognized_keys', 'actions.0', ['token']]]);
     expect(() => defineConnector({ ...DESCRIPTOR, actions: [ACTION] })).not.toThrow();
   });
 

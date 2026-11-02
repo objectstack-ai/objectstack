@@ -18,8 +18,8 @@ export const entry: SemanticMigration = {
     'a URL under `providerConfig`. The write door now holds the same line: a URL holding a userinfo (`user@` or ' +
     '`user:password@`) or a credential query parameter (the datasource names, the conventional HTTP key and token ' +
     'names, and the instance\'s own `auth.paramName`) is refused with `422 INVALID_METADATA`, one issue per URL ' +
-    'located at the URL, naming the parts it holds. The judgement is the read redactor\'s own, so the door refuses ' +
-    'exactly what the read withholds, and the read now applies it to the `auth` endpoints too. A URL inside a header ' +
+    'located at the URL, naming the parts it holds. The judgement and the walk are the read redactor\'s own, so the ' +
+    'door refuses exactly what the read withholds, `auth` endpoints and `providerConfig` alike. A URL inside a header ' +
     'or environment map is judged by neither (the read withholds those maps whole). There is deliberately no ' +
     'mechanical rewrite: the value in the URL may be the only copy of the secret, and where it goes next is the ' +
     'administrator\'s act. A row stored before this refusal keeps working: a save of the served form keeps the ' +
