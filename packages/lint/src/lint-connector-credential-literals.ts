@@ -79,11 +79,11 @@ export interface ConnectorCredentialLiteralFinding {
  * value is still metadata. Why each map is withheld is `os explain
  * connector-credential-literal`.
  */
-const KEPT = 'kept in metadata instead of the secrets layer';
+const KEPT = 'kept in metadata, not the secrets layer';
 
 /** The route, short, in the VERDICT as well as in the hint (see the flow rule's note). */
 const STEER_HEADER = "move it to the connector's `auth.credentialRef`";
-const STEER_ENV = 'a stdio server takes no `auth`, so `auth.credentialRef` reaches it only over an http transport';
+const STEER_ENV = 'a stdio server takes no `auth`; `auth.credentialRef` reaches it only over http';
 
 const HEADER_ROUTE =
   "Give the entry `auth: { type: 'bearer', credentialRef }` (or `{ type: 'api-key', headerName, credentialRef }`) " +
