@@ -18,13 +18,11 @@ import type { CounterStore } from './rate-limit-storage.js';
  * "None registered" includes the kernel's OWN stand-in: an `ObjectKernel` with
  * no cache plugin injects an in-memory `cache` that self-describes as
  * `degraded` (ADR-0076 D12, `readServiceSelfInfo`). Counting in it buys nothing
- * the per-process fallback does not — it is just as process-local — and costs
- * the fallback's bound: that map expires an entry only when the key is read
- * again, while `InProcessCounterStore` prunes and caps its keys, because an
- * unbounded per-key map is a memory-exhaustion vector on exactly the doors
- * these counters guard. So a `degraded` cache answers `undefined`, the counters
- * keep the bounded fallback, and the one-shot warning that there is no shared
- * cache stays true.
+ * the per-process fallback does not — it is just as process-local — and the
+ * fallback is the store this package bounds for these counters
+ * (`InProcessCounterStore` prunes expired keys and caps how many it holds). So
+ * a `degraded` cache answers `undefined`, the counters keep the bounded
+ * fallback, and the one-shot warning that there is no shared cache stays true.
  *
  * - `ObjectKernel`: `ctx.getKernel().getServiceAsync('cache')`. It is the one
  *   accessor that answers a value registration AND a factory registration; the
