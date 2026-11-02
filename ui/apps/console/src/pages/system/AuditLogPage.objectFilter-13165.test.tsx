@@ -207,12 +207,12 @@ async function chooseObject(option: string): Promise<void> {
   await settle();
 }
 
-/** The object names of the listed rows, one per row. */
+/** The Object cells of the listed rows, one per row, each reading its object's served label. */
 function listedObjects(): string[] {
   return screen
     .queryAllByRole('cell')
     .map((cell) => cell.textContent ?? '')
-    .filter((text) => text === 'crm_account' || text === 'crm_contact');
+    .filter((text) => text === 'Accounts' || text === 'Contacts');
 }
 
 function renderPage(): void {
@@ -247,14 +247,14 @@ describe('AuditLogPage — the object filter is picked, never typed (objectui#13
 
   it('choosing Accounts sends object_name equal to crm_account and lists only its rows', async () => {
     renderPage();
-    await waitFor(() => expect(listedObjects()).toContain('crm_contact'));
+    await waitFor(() => expect(listedObjects()).toContain('Contacts'));
 
     await chooseObject('Accounts (crm_account)');
 
     await waitFor(() => expect(lastFilter()).toEqual({ object_name: 'crm_account' }));
-    await waitFor(() => expect(listedObjects()).not.toContain('crm_contact'));
+    await waitFor(() => expect(listedObjects()).not.toContain('Contacts'));
     expect(listedObjects()).toHaveLength(50);
-    expect(new Set(listedObjects())).toEqual(new Set(['crm_account']));
+    expect(new Set(listedObjects())).toEqual(new Set(['Accounts']));
     // The trigger names what is chosen, and the bar counts it.
     expect(objectTrigger()).toHaveTextContent('Accounts (crm_account)');
     expect(screen.getByRole('button', { name: /Clear filters \(1\)/ })).toBeInTheDocument();
@@ -263,19 +263,19 @@ describe('AuditLogPage — the object filter is picked, never typed (objectui#13
   it('choosing the chosen object again removes the filter and lists every object again', async () => {
     renderPage();
     await chooseObject('Accounts (crm_account)');
-    await waitFor(() => expect(listedObjects()).not.toContain('crm_contact'));
+    await waitFor(() => expect(listedObjects()).not.toContain('Contacts'));
 
     await chooseObject('Accounts (crm_account)');
 
     await waitFor(() => expect(lastFilter()).toBeNull());
-    await waitFor(() => expect(listedObjects()).toContain('crm_contact'));
+    await waitFor(() => expect(listedObjects()).toContain('Contacts'));
     expect(objectTrigger()).toHaveTextContent('Any object');
   });
 
   it('"Clear filters" removes the object filter and lists every object again', async () => {
     renderPage();
     await chooseObject('Contacts (crm_contact)');
-    await waitFor(() => expect(listedObjects()).not.toContain('crm_account'));
+    await waitFor(() => expect(listedObjects()).not.toContain('Accounts'));
 
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /Clear filters/ }));
@@ -283,7 +283,7 @@ describe('AuditLogPage — the object filter is picked, never typed (objectui#13
     await settle();
 
     await waitFor(() => expect(lastFilter()).toBeNull());
-    await waitFor(() => expect(listedObjects()).toContain('crm_account'));
+    await waitFor(() => expect(listedObjects()).toContain('Accounts'));
     expect(objectTrigger()).toHaveTextContent('Any object');
   });
 
@@ -342,6 +342,6 @@ describe('AuditLogPage — the object filter is picked, never typed (objectui#13
 
     await waitFor(() => expect(lastFilter()).toEqual({ object_name: 'crm_contact' }));
     expect(requests[requests.length - 1].get('$skip')).toBe('0');
-    await waitFor(() => expect(listedObjects()).toEqual(['crm_contact', 'crm_contact']));
+    await waitFor(() => expect(listedObjects()).toEqual(['Contacts', 'Contacts']));
   });
 });
