@@ -95,6 +95,8 @@ import {
   BOUNDED_STRING_FIELD_TYPES,
   VALUE_DOMAIN_FIELD_TYPES,
   REFERENCE_VALUE_TYPES,
+  SINGLE_OPTION_TYPES,
+  expandEmptyOperator,
   FILE_REFERENCE_TYPES,
   STRUCTURED_JSON_TYPES,
   NUMERIC_VALUE_TYPES,
@@ -717,8 +719,9 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
 /**
  * [#20308] A BLANK string on a non-string-typed column is that column's typed
  * blank, `null` — the write door's one reading of it. [#29176] So is `''` on
- * an optional text-like column a unique constraint covers (its own section
- * below).
+ * an optional text-like column a unique constraint covers, and [#29277] `''`
+ * on an optional single-value option or reference column (each its own
+ * section below).
  *
  * "Blank" is exactly what {@link isMissing} calls missing: `''` or a string of
  * whitespace. "Non-string-typed" is the spec's `NON_TEXT_STORED_VALUE_TYPES` —
@@ -756,13 +759,28 @@ function isInReadonlyScope(name: string, def: FieldDef, scope: ReadonlyValueScop
  *  - a blank here also takes a declared `defaultValue` on insert, as the typed
  *    arm's does — the door runs before the defaults, by design.
  *
+ * ## [#29277] Single-value option and reference columns
+ *
+ * Exactly `''` on a column that is ALL of: string-stored single-value on the
+ * `$empty` table's `null_only` row ({@link isSingleValueCodeColumn}: a
+ * `SINGLE_OPTION_TYPES` or `REFERENCE_VALUE_TYPES` member that
+ * `expandEmptyOperator` puts on `null_only`, so `multiple: true` is out), and
+ * not `required: true` — is `null` from the door on, unique or not
+ * (maintainer ruling B on #29346, record 6579813296). `''` is neither an
+ * option code nor a record id, so it holds no value there; the ruled table
+ * reads only `null` as empty on that row, and is unchanged — a row that
+ * already stores `''` keeps answering as a value until a data step cleans it.
+ * On a unique column the second record cleared is no longer refused `409`.
+ * The same edges as the text arm: never whitespace (a value), never a
+ * `required` column, and a blank on insert takes a declared `defaultValue`.
+ *
  * ## What it does NOT touch
  *
- * ⛔ Every other string-stored column — text no unique constraint covers,
- * lookup ids, select values. There `''` is a value, and the spec's value
- * round-trip fixture pins it (`str_empty`: an empty string must not become
- * null). What "empty" means for those columns is a separate question, not
- * answered here. ⛔ A non-blank value, and every non-string value, of any
+ * ⛔ Every other string-stored column — text no unique constraint covers, a
+ * `multiple: true` option or reference column (the table's `multi_value`
+ * row), a file reference, a computed column. There `''` is a value, and the
+ * spec's value round-trip fixture pins it on text (`str_empty`: an empty
+ * string must not become null). ⛔ A non-blank value, and every non-string value, of any
  * type: `null`, `0`, `false`, `'abc'` pass through untouched, so every type
  * check and refusal downstream sees what it saw.
  *
@@ -793,22 +811,22 @@ export function normalizeBlankTypedValues<T>(
   const fields = objectSchema?.fields;
   if (!fields || !data || typeof data !== 'object') return data;
   // Read once per call, and only when a row carries an `''` at all.
-  let uniqueBlank: ReadonlySet<string> | undefined;
-  const uniqueBlankColumns = () => (uniqueBlank ??= optionalUniqueTextColumns(fields, objectSchema?.indexes));
+  let blankNull: ReadonlySet<string> | undefined;
+  const blankNullColumns = () => (blankNull ??= blankAsNullColumns(fields, objectSchema?.indexes));
   if (Array.isArray(data)) {
     let rows: unknown[] | undefined;
     for (let i = 0; i < data.length; i++) {
-      const row = normalizeBlankTypedRow(fields, uniqueBlankColumns, data[i]);
+      const row = normalizeBlankTypedRow(fields, blankNullColumns, data[i]);
       if (row !== data[i]) (rows ??= data.slice())[i] = row;
     }
     return (rows ?? data) as T;
   }
-  return normalizeBlankTypedRow(fields, uniqueBlankColumns, data) as T;
+  return normalizeBlankTypedRow(fields, blankNullColumns, data) as T;
 }
 
 function normalizeBlankTypedRow(
   fields: Record<string, FieldDef>,
-  uniqueBlankColumns: () => ReadonlySet<string>,
+  blankNullColumns: () => ReadonlySet<string>,
   row: unknown,
 ): unknown {
   if (!isPlainRecord(row)) return row;
@@ -818,7 +836,7 @@ function normalizeBlankTypedRow(
     // Own-property: a field name may be `constructor` / `valueOf`.
     const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
     if (!def) continue;
-    if (!NON_TEXT_STORED_VALUE_TYPES.has(def.type) && !(value === '' && uniqueBlankColumns().has(name))) continue;
+    if (!NON_TEXT_STORED_VALUE_TYPES.has(def.type) && !(value === '' && blankNullColumns().has(name))) continue;
     (out ??= { ...row })[name] = null;
   }
   return out ?? row;
@@ -835,25 +853,46 @@ function normalizeBlankTypedRow(
  * (`EmptyCredentialWriteError`) while `null` means "clear", so rewriting the
  * blank here would turn that refusal into a silent clear.
  *
- * ⛔ Not `select` / `radio` / `lookup` / `user` and the other single-value
- * string-stored types: the same `$empty` table reads their `''` as a value,
- * so rewriting it would change an `is_empty` answer. That is a separate
- * question from this one.
+ * The single-value option and reference types are not text-like: their arm
+ * is {@link isSingleValueCodeColumn} (#29277), which needs no unique
+ * constraint.
  */
 const UNIQUE_BLANK_TEXT_TYPES: ReadonlySet<string> = new Set(
   [...STRING_VALUE_TYPES].filter((t) => t !== 'password' && t !== 'secret'),
 );
 
 /**
- * [#29176] The columns of one object whose `''` the write door stores as
- * `null`: text-like ({@link UNIQUE_BLANK_TEXT_TYPES}), not `required: true`,
- * not a lifecycle column the engine owns, and covered by a unique constraint
- * on either surface the drivers build one from — a field's own `unique`, or a
- * declared `indexes[]` entry whose `unique` asks for one. Both surfaces are
- * read through `isUniqueDeclared`, the drivers' own predicate, so a column
- * the store does not constrain is never rewritten.
+ * [#29277] The string-stored single-value classes: an option code
+ * (`SINGLE_OPTION_TYPES`) or a record id (`REFERENCE_VALUE_TYPES`), read as
+ * the spec's constants, never re-listed.
  */
-function optionalUniqueTextColumns(fields: Record<string, FieldDef>, indexes: unknown): ReadonlySet<string> {
+const SINGLE_VALUE_CODE_TYPES: ReadonlySet<string> = new Set([...SINGLE_OPTION_TYPES, ...REFERENCE_VALUE_TYPES]);
+
+/**
+ * [#29277] Is `def` a string-stored single-value column on the `$empty`
+ * table's `null_only` row? The row is the table's own answer
+ * (`expandEmptyOperator`), so a `multiple: true` column — the `multi_value`
+ * row — is never one, and a type the table moves is followed without an edit.
+ */
+function isSingleValueCodeColumn(def: FieldDef): boolean {
+  return SINGLE_VALUE_CODE_TYPES.has(def.type) && expandEmptyOperator(def).arm === 'null_only';
+}
+
+/**
+ * The columns of one object whose `''` the write door stores as `null`. Each
+ * is not `required: true` and not a lifecycle column the engine owns, and is
+ * ONE of:
+ *
+ *  - [#29176] text-like ({@link UNIQUE_BLANK_TEXT_TYPES}) and covered by a
+ *    unique constraint on either surface the drivers build one from — a
+ *    field's own `unique`, or a declared `indexes[]` entry whose `unique` asks
+ *    for one. Both surfaces are read through `isUniqueDeclared`, the drivers'
+ *    own predicate, so a text column the store does not constrain is never
+ *    rewritten;
+ *  - [#29277] a single-value option or reference column
+ *    ({@link isSingleValueCodeColumn}), unique or not.
+ */
+function blankAsNullColumns(fields: Record<string, FieldDef>, indexes: unknown): ReadonlySet<string> {
   const covered = new Set<string>();
   for (const [name, def] of Object.entries(fields)) {
     if (def && isUniqueDeclared(def.unique)) covered.add(name);
@@ -865,12 +904,9 @@ function optionalUniqueTextColumns(fields: Record<string, FieldDef>, indexes: un
     }
   }
   const out = new Set<string>();
-  for (const name of covered) {
-    if (SKIP_FIELDS.has(name)) continue;
-    // Own-property: a field name may be `constructor` / `valueOf`.
-    const def = Object.prototype.hasOwnProperty.call(fields, name) ? fields[name] : undefined;
-    if (!def || def.required === true || !UNIQUE_BLANK_TEXT_TYPES.has(def.type)) continue;
-    out.add(name);
+  for (const [name, def] of Object.entries(fields)) {
+    if (!def || SKIP_FIELDS.has(name) || def.required === true) continue;
+    if (UNIQUE_BLANK_TEXT_TYPES.has(def.type) ? covered.has(name) : isSingleValueCodeColumn(def)) out.add(name);
   }
   return out;
 }

@@ -20,6 +20,8 @@
  * beside it: the `$empty` table is unchanged (a row that already holds `''`
  * still answers as a value), `required` still refuses `''`, a blank on insert
  * takes a declared `defaultValue`, and a real duplicate is still `409`.
+ * (Whitespace stays a value: the unit half pins it; on a reference column the
+ * referential-integrity check refuses it, before and after.)
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -142,7 +144,9 @@ describe('REST write doors on SQLite: a cleared optional single-value option / r
   });
 
   it('PATCH clearing every ruled type: 200, every column stores NULL', async () => {
-    const set = { c_select: 'gold', c_radio: 'gold', c_lookup: 't1', c_master: 't1', c_user: 'u1', c_tree: 't1' };
+    // `c_user` is left unset: no `sys_user` is registered here to resolve an id.
+    expect((await create(ctx, { id: 'e0', name: 'parent' })).status).toBe(201);
+    const set = { c_select: 'gold', c_radio: 'gold', c_lookup: 't1', c_master: 't1', c_tree: 'e0' };
     expect((await create(ctx, { id: 'e1', name: 'r1', ...set })).status).toBe(201);
     const res = await patch(ctx, 'e1', allBlank);
     expect(res.status).toBe(200);
@@ -230,10 +234,5 @@ describe('REST write doors on SQLite: a cleared optional single-value option / r
       expect(await ids({ [f]: { $empty: false } }), f).toEqual(['held', 'legacy']);
       expect(await ids({ [f]: '' }), f).toEqual(['legacy']);
     }
-  });
-
-  it('whitespace is a value and stored as sent', async () => {
-    expect((await create(ctx, { id: 's1', name: 'r1', c_lookup: '  ' })).status).toBe(201);
-    expect((await ctx.stored('svb_obj', 's1'))?.c_lookup).toBe('  ');
   });
 });
