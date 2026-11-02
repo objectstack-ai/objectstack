@@ -94,7 +94,7 @@ export const EmptySectionsFold: React.FC<EmptySectionsFoldProps> = ({
         variant="ghost"
         size="sm"
         onClick={() => setRevealed((r) => !r)}
-        className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+        className="h-11 sm:h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
       >
         {revealed ? (
           <EyeOff className="h-3.5 w-3.5 mr-1.5" />
@@ -178,7 +178,7 @@ export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
     .filter((name) => name !== '');
   const line = (
     <div
-      className="flex min-h-9 flex-wrap items-center gap-x-1.5 gap-y-1 border-b border-dashed border-border text-xs text-muted-foreground"
+      className="flex min-h-11 sm:min-h-9 flex-wrap items-center gap-x-1.5 gap-y-1 border-b border-dashed border-border text-xs text-muted-foreground"
       data-empty-sections-line=""
       data-empty-sections-count={foldedCount}
     >
@@ -190,7 +190,7 @@ export const EmptySectionsLine: React.FC<EmptySectionsLineProps> = ({
         type="button"
         aria-expanded={revealed}
         onClick={() => setRevealed((r) => !r)}
-        className="rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center sm:min-h-0 sm:min-w-0 rounded-sm font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {revealed
           ? t('detail.hideEmptySections', { defaultValue: 'Collapse' })
