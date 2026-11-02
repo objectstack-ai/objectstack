@@ -302,7 +302,7 @@ Three things worth knowing before you meet it:
 The ledger used to record only capabilities that already work, so a missing piece of a
 listed capability had nowhere to live: the backlog sweep had nothing to point a `Path:`
 at, and the platform's implementation status lived in nobody's head. The North Star's
-definition line (「做出来的是什么」…「缺任何一样就不是这个应用」) makes such a piece a
+definition line ("What gets built" … "missing any one of these, it is not this application") makes such a piece a
 **requirement**, so it belongs on the ledger — as a fourth status, not as a second
 document. A separate feature list drifts against this one the moment either is edited,
 and nothing can then say which of the two is wrong: there is no ratchet between two

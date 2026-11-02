@@ -144,6 +144,21 @@ describe('RecordPreviewCard — loading and readable (objectui#12029)', () => {
     expect(ds.findOne).toHaveBeenCalledWith(OBJECT, 'INV-1');
   });
 
+  it('an object that declares no highlightFields shows the title alone: no key field is guessed (objectstack#28868)', async () => {
+    const { highlightFields: _declared, ...undeclared } = DEF;
+    const ds = source(() => ({ ...RECORD }));
+    const { container } = mount(
+      <RecordPreviewCard objectName={OBJECT} recordId="INV-1" dataSource={ds} />,
+      { [OBJECT]: undeclared },
+    );
+    await settle(container, 'readable');
+    expect(screen.getByTitle('Laptop refresh')).toHaveTextContent('Laptop refresh');
+    // `amount` and `note` are highlight-friendly fields the old guess picked.
+    expect(screen.queryByText('Amount')).toBeNull();
+    expect(screen.queryByText('Quarterly batch')).toBeNull();
+    expect(ds.findOne).toHaveBeenCalledWith(OBJECT, 'INV-1');
+  });
+
   it('expands a reference field only when the card shows it', async () => {
     const withAccount = { ...DEF, highlightFields: ['account', 'note'] };
     const ds = source(() => ({ ...RECORD, account: { id: 'A1', name: 'Northwind' } }));
