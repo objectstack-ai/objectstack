@@ -1099,11 +1099,14 @@ describe('objectui#6024 — the derivation this pin is built on', () => {
    */
   it('the provenance instrument still fails on a surface with no record behind it', async () => {
     // An empty record for this case's id alone; every other id reads the fixture.
+    // Typed as a fixture row because the spy keeps `findOne`'s signature; it
+    // carries none of a row's values, which is the point.
     const findOne = galleryDataSource.findOne;
+    const EMPTY_RECORD = {} as (typeof USERS_ROWS)[number];
     const emptyRecord = vi
       .spyOn(galleryDataSource, 'findOne')
       .mockImplementation(async (objectName, id) =>
-        String(id) === 'empty-record' ? {} : findOne(objectName, id),
+        String(id) === 'empty-record' ? EMPTY_RECORD : findOne(objectName, id),
       );
     // The entries' spelling: the props in the `properties` bag (objectui#10859 batch 4).
     const r = await renderEntry({
