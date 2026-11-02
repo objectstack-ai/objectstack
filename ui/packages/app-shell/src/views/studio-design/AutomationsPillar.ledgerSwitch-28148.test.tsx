@@ -305,6 +305,19 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
 // objectstack#29228 — a focused control that turns `disabled` drops focus to
 // the page, and nothing hands it back. In flight the switch is refused to a
 // press but stays focusable, so a keyboard author's focus never leaves it.
+// A browser runs the HTML focus fixup: a focused control that turns `disabled`
+// drops focus to the body (measured in Chromium 153, and not handed back when
+// it is enabled again). happy-dom keeps focus on it, so the test runs the
+// fixup on the switch the way the browser does, else the focus pins could not
+// fail.
+function runFocusFixup(el: HTMLElement): () => void {
+  const observer = new MutationObserver(() => {
+    if (el.hasAttribute('disabled') && document.activeElement === el) el.blur();
+  });
+  observer.observe(el, { attributes: true, attributeFilter: ['disabled'] });
+  return () => observer.disconnect();
+}
+
 describe('Automations — the ledger switch keeps keyboard focus across a flip (objectstack#29228)', () => {
   const subflowSentence =
     "Flow 'approval' cannot be disabled while 1 packaged flow still calls it as a subflow: 'notify_owner'.";
@@ -321,15 +334,16 @@ describe('Automations — the ledger switch keeps keyboard focus across a flip (
     const user = userEvent.setup();
     mount();
     const sw = await ledgerSwitch();
+    const stopFixup = runFocusFixup(sw);
     sw.focus();
     expect(document.activeElement).toBe(sw);
 
     await user.keyboard(' ');
     await waitFor(() => expect(calls('/automation/approval/toggle')).toHaveLength(1));
-    // In flight: refused to a press, still focusable, still focused.
-    expect(sw).toHaveAttribute('aria-disabled', 'true');
-    expect(sw).toBeEnabled();
+    await waitFor(() => expect(sw).toHaveAttribute('aria-disabled', 'true'));
+    // In flight: still focused, refused to a press, still focusable.
     expect(document.activeElement).toBe(sw);
+    expect(sw).toBeEnabled();
     await user.keyboard(' ');
     await new Promise((r) => setTimeout(r, 50));
     expect(calls('/automation/approval/toggle')).toHaveLength(1);
@@ -345,6 +359,7 @@ describe('Automations — the ledger switch keeps keyboard focus across a flip (
     // The answer landed on the same switch, and focus is still on it.
     expect(screen.getByTestId('auto-ledger-switch')).toBe(sw);
     expect(document.activeElement).toBe(sw);
+    stopFixup();
   });
 
   it('a walled switch stays disabled, out of the tab order, and described by its reason', async () => {
