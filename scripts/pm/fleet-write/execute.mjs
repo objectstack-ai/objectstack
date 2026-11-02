@@ -892,6 +892,11 @@ function quotesKnown(text, known) {
   return false;
 }
 
+/** One table-safe line: control characters and whitespace runs to one space, a pipe to a slash, a backtick or a double quote to a single quote. Pure. */
+function flattenRefusalText(text) {
+  return String(text).replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\|/g, '/').replace(/[`"]/g, "'");
+}
+
 function decodedOrSelf(url) {
   try {
     return decodeURIComponent(url);
@@ -910,13 +915,20 @@ function decodedOrSelf(url) {
  */
 export function advisoryRefusalCause(answer, known = []) {
   const raw = typeof answer?.detail === 'string' ? answer.detail : typeof answer?.json?.message === 'string' ? answer.json.message : '';
-  const oneLine = raw.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\|/g, '/').replace(/[`"]/g, "'");
+  const oneLine = flattenRefusalText(raw);
+  // Status 0 is `rest()`'s fetch that threw: the text is the transport's error, never the platform's answer.
+  if (answer?.status === 0) {
+    const said = oneLine === '' || quotesKnown(raw, known) ? '' : `: "${oneLine.length > ADVISORY_REFUSAL_MESSAGE_CAP ? `${oneLine.slice(0, ADVISORY_REFUSAL_MESSAGE_CAP)}…` : oneLine}"`;
+    return `cause: the request did not reach the platform — the transport failed${said}, so the platform gave no reason`;
+  }
   const doc = typeof answer?.json?.documentation_url === 'string' ? answer.json.documentation_url.trim() : '';
   const docQuotes = doc !== '' && (quotesKnown(doc, known) || quotesKnown(decodedOrSelf(doc), known));
   const docText =
     doc === '' ? '' : docQuotes ? ' (its documentation_url quotes the payload or the advisory and is not printed)' : doc.length <= ADVISORY_REFUSAL_URL_CAP && REFUSAL_URL_SHAPE.test(doc) ? ` (documentation: ${doc})` : ' (its documentation_url is not printable)';
   if (oneLine === '') return `cause unread: the platform answered with no message${docText}`;
-  if (quotesKnown(oneLine, known)) return `cause not printed: the platform's message quotes the payload or the advisory, and no row prints either${docText}`;
+  // Judged on the raw message AND the flattened one, against the known prose as given AND flattened the same way, so a
+  // quoted run that straddles a pipe, a backtick, a quote or a line break is caught whichever side was rewritten.
+  if (quotesKnown(raw, known) || quotesKnown(oneLine, [...known, ...known.map(flattenRefusalText)])) return `cause not printed: the platform's message quotes the payload or the advisory, and no row prints either${docText}`;
   const capped = oneLine.length > ADVISORY_REFUSAL_MESSAGE_CAP ? `${oneLine.slice(0, ADVISORY_REFUSAL_MESSAGE_CAP)}… (cut at ${ADVISORY_REFUSAL_MESSAGE_CAP} characters)` : oneLine;
   return `cause, as the platform gives it: "${capped}"${docText}`;
 }
@@ -1441,7 +1453,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
-  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 30,
+  "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 32,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery: one battery, one row.
@@ -2380,6 +2392,11 @@ export async function selfTest() {
       const LONG = `${'a limit '.repeat(40)}`.trim();
       const longRefusal = await advRun([report()], { ...allowed, [REPORTS]: refusal(403, `two\nlines | a pipe \`tick\` "quote"`, `${DOC}/${'x'.repeat(ADVISORY_REFUSAL_URL_CAP)}`) });
       t('⛔ the cause is capped and kept to one table-safe line: a long message cut at the cap and saying so, a newline, a pipe, a backtick and a double quote flattened, an over-long or ill-shaped documentation_url not printed', [advisoryRefusalCause({ status: 403, detail: LONG, json: { message: LONG } }), longRefusal.rows[0]?.result, advisoryRefusalCause({ status: 403, json: { message: 'Forbidden', documentation_url: 'javascript:alert(1)' } })], [`cause, as the platform gives it: "${LONG.slice(0, ADVISORY_REFUSAL_MESSAGE_CAP)}… (cut at ${ADVISORY_REFUSAL_MESSAGE_CAP} characters)"`, `FAILED: HTTP 403; cause, as the platform gives it: "two lines / a pipe 'tick' 'quote'" (its documentation_url is not printable); ${ADVISORY_ACCESS_REMEDY}`, `cause, as the platform gives it: "Forbidden" (its documentation_url is not printable)`]);
+      // A quoted run that straddles a pipe: flattened alone, "|ADVISORY MARKER|" reads "/ADVISORY MARKER/", which no
+      // 16-character window of the known prose matches — only the raw message reproduces it.
+      const straddle = await advRun([report({ summary: `the |ADVISORY MARKER| summary` })], { ...allowed, [REPORTS]: refusal(403, 'Field |ADVISORY MARKER| refused') });
+      t('⛔ a message is judged raw as well as flattened: a run of the payload that straddles a pipe is withheld, not printed rewritten', straddle.rows[0]?.result, `FAILED: HTTP 403; ${WITHHELD}; ${ADVISORY_ACCESS_REMEDY}`);
+      t('⛔ status 0 — the fetch threw — never reads as the platform\'s reason: the row says the request did not reach it, and a transport text quoting the payload is dropped', [advisoryRefusalCause({ status: 0, json: null, detail: 'fetch failed' }), advisoryRefusalCause({ status: 0, json: null, detail: `failed on ${MARKER}` }, [MARKER]), advisoryRefusalCause({ status: 0, json: null, detail: '' })], ['cause: the request did not reach the platform — the transport failed: "fetch failed", so the platform gave no reason', 'cause: the request did not reach the platform — the transport failed, so the platform gave no reason', 'cause: the request did not reach the platform — the transport failed, so the platform gave no reason']);
 
       // ── advisory_create
       const drafted = await advRun([draft({ severity: 'high', cwe_ids: ['CWE-863'] })], { ...allowed, [CREATE]: advisory({}, 201) });
@@ -2443,7 +2460,7 @@ export async function selfTest() {
       // ── ⛔ the marker sweep: every run above, every channel this file emits on
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), JSON.stringify(r.annotations ?? []), ...paceLines].join('\n'));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
-      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [45, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, created, unconfirmed, wrong-state and refused drafts, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [46, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
       // Positive controls: the marker was there to leak, and the needle finds it where it is.
       t('…positive control: every answer served carried the marker, the report\'s and the draft\'s POST carried it to the platform — where it belongs — and the fenced runs made their GET', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') || Object.keys(answers).length === 1), JSON.stringify(writes(filed.seen)[0]?.body).includes('ADVISORY MARKER') && JSON.stringify(writes(drafted.seen)[0]?.body).includes('ADVISORY MARKER'), [other, unread, ...[added, kept, present]].every((r) => r.seen.some((s) => s.call === A_GET))], [true, true, true]);
       t('…positive control: the generic row printer, given the same answer, WOULD print it — the advisory rows never reach it', resultOf({}, advisory().json).includes('ADVISORY MARKER'), true);
