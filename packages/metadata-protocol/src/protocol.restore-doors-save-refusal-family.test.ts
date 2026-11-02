@@ -8,7 +8,8 @@
  * family of shapes after its schema gate: a hook with no `body`, a second
  * default record page of an object, an `external` object binding on a managed
  * datasource (both halves of the pair), an object `datasource` that names no
- * datasource (#26724), a `runAs: 'system'` flow an anonymous
+ * datasource (#26724), a permission-set grant on an object that does not
+ * exist (#28990), a `runAs: 'system'` flow an anonymous
  * endpoint names, the shared runtime authoring rules, and the authoring gate a
  * domain plugin registers. Measured on `origin/main` `5801a4f2c` before this
  * file: each restore door wrote every one of those shapes back, so a version
@@ -95,6 +96,8 @@ function makeStubEngine() {
     const registered = new Map<string, Map<string, unknown>>();
     // [#26724] The drivers the engine has registered by name, with no datasource item.
     const drivers = new Set<string>();
+    // [#28990] The objects the registry registers by name.
+    const objects = new Set<string>();
     let nextId = 0;
     let commit: unknown = null;
 
@@ -188,7 +191,7 @@ function makeStubEngine() {
             listItems: (type: string) => Array.from(registered.get(type)?.values() ?? []),
             getItem: (type: string, name: string) => registered.get(type)?.get(name),
             getAllObjects: () => [],
-            getObject: () => undefined,
+            getObject: (name: string) => (objects.has(name) ? { name } : undefined),
             getPackage: () => undefined,
             getArtifactItem: () => undefined,
             isPackageDisabled: () => false,
@@ -200,6 +203,7 @@ function makeStubEngine() {
         historyRows,
         registered,
         drivers,
+        objects,
         serveCommit: (c: unknown) => { commit = c; },
     };
 }
@@ -499,6 +503,28 @@ pinBothDoors({
     expectDetail: (error) => {
         expect(error.issues).toEqual([expect.objectContaining({ path: 'datasource', code: 'custom' })]);
         expect(error.issues[0].message.startsWith("Object 'wh_order' names datasource 'rt_store', and no datasource")).toBe(true);
+    },
+});
+
+pinBothDoors({
+    title: 'a permission set restored with a grant on an object that does not exist now (unknownGrantObjectSaveRefusal)',
+    type: 'permission',
+    name: 'qa_widget_editor',
+    code: 'INVALID_METADATA',
+    status: 422,
+    async stage(h) {
+        h.objects.add('qa_widget');
+        const set = (objects: Record<string, unknown>, label = 'Widget editor') => ({ name: 'qa_widget_editor', label, objects });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'qa_widget_editor', item: set({ qa_widget: { allowRead: true } }) });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'qa_widget_editor', item: set({}) });
+        await h.protocol.saveMetaItem({ type: 'permission', name: 'qa_widget_editor', item: set({}, 'Widget editor v3') });
+        // The object v1 granted on is gone, and the set holds no grant on it now.
+        h.objects.delete('qa_widget');
+        return { refused: 1, accepted: 2 };
+    },
+    expectDetail: (error) => {
+        expect(error.issues).toEqual([expect.objectContaining({ path: 'objects.qa_widget', code: 'custom' })]);
+        expect(error.issues[0].message.startsWith("Permission 'qa_widget_editor' grants on object 'qa_widget' which is not defined in objects")).toBe(true);
     },
 });
 
