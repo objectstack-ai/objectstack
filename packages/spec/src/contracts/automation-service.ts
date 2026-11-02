@@ -943,6 +943,12 @@ export interface FlowRuntimeState {
  * - `disabled_subflow` — the arming gate declined the flow because a packaged
  *   subflow it calls is disabled (ADR-0126 §7.3). Admin remedy: enable the
  *   subflow, and the caller arms.
+ * - `notice_after_suspending_subflow` — the arming gate declined the flow
+ *   because a `save_notice` of it runs after a `subflow` / `map` node whose
+ *   child flow can suspend (#28840): resumed after the write answered, the
+ *   notice would be refused by name and strand the run. Author remedy: move the
+ *   `save_notice` ahead of that node or use a `notify` node, or republish the
+ *   child without a node that suspends, and the flow arms.
  * - `missing_trigger` — no trigger of the declared type is registered on this
  *   kernel. Author remedy: depend on the trigger package
  *   (`requires: ['triggers']`).
@@ -952,6 +958,7 @@ export interface FlowRuntimeState {
 export const FLOW_UNBOUND_CAUSES = [
     'deployment_policy',
     'disabled_subflow',
+    'notice_after_suspending_subflow',
     'missing_trigger',
     'binding_failure',
 ] as const;
