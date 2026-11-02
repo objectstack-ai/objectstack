@@ -45,10 +45,10 @@ record should open as the full page (`new_window`, `none` are the other members)
 D2) and are refused with their fix. Field count never decides; a phone always pages.
 
 **6 · The reader's own choices are not metadata.** ⛔ Never author these: the
-Display menu's **Open records** (split beside the list — the default — or drawer,
-or full page; offered for a drawer-mode object only), the ⊟ right-column switch
-(`⌘⇧,`, per object), the related panels' order and hidden set (⠿ drag, ⌥↑ / ⌥↓,
-per user × object), the pane's dragged width and ⤢. They live in the console's
+Display menu's **Open records** (drawer — the default — or full page, for a
+drawer-mode object; the split beside the list is retired), the ⊟ right-column
+switch (`⌘⇧,`, per object), the related panels' order and hidden set (⠿ drag,
+⌥↑ / ⌥↓, per user × object), the drawer's dragged width and ⤢. They live in the console's
 preference store, never in the object; on `navigation` only the `size` bucket
 (`sm`…`full`) nudges the drawer's starting width (`width` / `drawerWidth` deprecated).
 

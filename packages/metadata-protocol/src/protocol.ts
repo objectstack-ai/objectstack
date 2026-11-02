@@ -14670,7 +14670,19 @@ export class ObjectStackProtocolImplementation implements
                 || (def as any).type === 'formula'
                 || (def as any).type === 'summary') {
                 delete data[name];
+                continue;
             }
+            // [#29200] A read-only column the source left EMPTY is not carried
+            // into the insert. Carried, it reached `engine.insert`'s strip as a
+            // present key and was reported in `droppedFields` (and the
+            // `X-ObjectStack-Dropped-Fields` header) although neither the caller
+            // nor the source supplied a value. Leaving it out stores the same
+            // row: the strip would have taken it from a non-system caller, and
+            // the insert's defaults treat an explicit `null` exactly as an
+            // omitted key. A read-only column that HOLDS a value is still
+            // carried, stripped and reported (#15703), and so is one the caller
+            // sets through `overrides`, which are applied below.
+            if ((def as any).readonly && data[name] == null) delete data[name];
         }
         // Caller overrides win (new name, cleared unique field, reset status…).
         if (request.overrides && typeof request.overrides === 'object') {
@@ -24929,6 +24941,13 @@ export class ObjectStackProtocolImplementation implements
      * the `_drafts` doors only. The package batch doors (publish, discard, the
      * batch closure) read the repository's `listDrafts` directly, so a
      * disabled package's drafts still publish and discard.
+     *
+     * [#29180] A `packageId` naming a package that is not installed and that
+     * no pending draft is bound to is refused `400 INVALID_REQUEST`, the
+     * diagnostics sweep's rule for its own package filter, rather than
+     * answered an empty list a caller reads as "nothing pending". An unknown
+     * `type` is refused by the transports before this is called, with the
+     * list door's verdict.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -24952,6 +24971,7 @@ export class ObjectStackProtocolImplementation implements
             get engine() { return readEngine(); },
             ensureOverlayIndex: (...a) => this.ensureOverlayIndex(...a),
             getOverlayRepo: (...a) => this.getOverlayRepo(...a),
+            getMetaItems: (...a) => this.getMetaItems(...a),
         };
         return listDrafts.call(host, request);
     }

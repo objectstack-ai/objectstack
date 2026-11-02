@@ -5,7 +5,7 @@
  * fleet-write/execute — the relay's executor: the writes a validated payload
  * asked for, in order, as the fleet App, on a GitHub Actions runner.
  *
- *   FLEET_WRITE_PAYLOAD='…' FLEET_WRITE_SENDER=login GITHUB_TOKEN=… node scripts/pm/fleet-write/execute.mjs
+ *   GITHUB_EVENT_PATH=event.json FLEET_WRITE_SENDER=login GITHUB_TOKEN=… node scripts/pm/fleet-write/execute.mjs   # client_payload from the event file
  *   node scripts/pm/fleet-write/execute.mjs --payload-file payload.json      # the same, payload from disk
  *   node scripts/pm/fleet-write/execute.mjs --self-test                      # offline: a fake platform, no network
  *
@@ -187,6 +187,54 @@
  * read the parent and ⛔ never re-send. Every read is an unpaced GET, and the
  * one write is paced like every write verb.
  *
+ * ## The three advisory rows — fenced on the ADVISORY, printing none of its text
+ *
+ * `ops.mjs`'s header section "The three rows that touch a security advisory"
+ * is the authority; this is where its fences and landings are measured.
+ *
+ *   - `advisory_report` is ONE POST of the row's body to the private-report
+ *     endpoint, and nothing is read first. It LANDS on a 2xx whose answer
+ *     carries a `ghsa_id` in its shape (`advisoryReportReadBack`): the row
+ *     names that id and the state, and a notice annotation names the id
+ *     (`relayAdvisoryAnnotationMessage`, `dispatch.mjs`), so the seat follows
+ *     with `advisory_collaborators_add`. A 2xx without an id is a FAILED
+ *     action whose sentence says UNCONFIRMED — a report may have been filed,
+ *     so ⛔ never re-sent.
+ *   - `advisory_collaborators_add` and `advisory_state` are fenced HERE, where
+ *     the fences are AUTHORITATIVE (`advisoryPreflight`): the executor reads
+ *     `GET /repos/{repo}/security-advisories/{ghsa_id}`, the last request
+ *     before the PATCH, and judges `ADVISORY_FENCES` on that answer — a read
+ *     that is not a 200 advisory, an answer naming another advisory, or a
+ *     state the action may not act in (`triage` / `draft` for the
+ *     collaborators; `ADVISORY_TRANSITIONS` for a state change: `draft` only
+ *     from `triage`, `closed` only from `triage` or `draft`) stops the action
+ *     with the PATCH NOT SENT: its row says `not sent`, zero writes, exit 5.
+ *     The collaborators' logins are merged case-insensitively
+ *     (`advisoryCollaboratorPlan`): when every login asked for is already a
+ *     collaborator nothing is sent, the row `not sent` and its result saying
+ *     `no-op`, exit 0. Otherwise the ONE PATCH carries exactly
+ *     `{ collaborating_users }` — the existing logins as the advisory listed
+ *     them, then the missing ones — or exactly `{ state }`, the one asked for.
+ *     The action LANDS only on its own answer (`confirmAdvisory`): every login
+ *     sent listed (`advisoryReadBack`), or the state asked for shown
+ *     (`advisoryStateReadBack`). A non-2xx is a FAILED action carrying
+ *     `ADVISORY_ACCESS_REMEDY`; a 2xx that does not show the result is a FAILED
+ *     action naming what it shows.
+ *
+ * ⛔ The payload reaches this file through the event file (`readEventPayload`,
+ * `validate.mjs`), never through `env:`, and the text this path prints — row,
+ * log line, step summary, annotation — is built from the advisory's id, its
+ * state and its collaborators' logins ALONE (`advisoryReportLandedText`,
+ * `advisoryLandedText`, `advisoryStateLandedText`, `advisoryFenceText`, each
+ * value in its own shape through `advisoryPrintable`), plus a platform
+ * `message` only when it is one `ADVISORY_PLATFORM_MESSAGES` names. `resultOf`,
+ * which reads an answer's `html_url`, never sees an advisory's answer. The
+ * self-test files a report and serves advisories carrying a marker in its
+ * summary, description and vulnerabilities and in every other field, and finds
+ * it in no line this file emits; its ablation is recorded in the PR that
+ * landed this. The GET is an unpaced read; the POST and the PATCH are paced
+ * like every write verb.
+ *
  * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
  * The op table spells each leg's path with a placeholder and `fromAnswer:
@@ -282,7 +330,9 @@
  *       not answer, or the platform was unreachable; zero writes.
  *   4   the sender is not authorized on the target repo; zero writes.
  *   5   an action FAILED; the summary names it and which earlier ones landed —
- *       a `run_rerun_failed` refused at a fence among them, its POST not sent.
+ *       a `run_rerun_failed` refused at a fence among them, its POST not sent,
+ *       and an `advisory_collaborators_add` or `advisory_state` refused at a
+ *       fence, its PATCH not sent.
  *  10   the write throttle refused (its prescription was printed), or a stroke's
  *       rule ⑤ batch could not be recorded; zero writes in that second case.
  */
@@ -298,8 +348,33 @@ import { GOVERNED_APPROVERS } from '../check-governed-queue-guard.mjs';
 import { scrub } from '../fleet-token.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { announceBatch, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceFilePath, paceWrite, releaseWriteLease, unrecordableText } from '../write-pace.mjs';
-import { ANNOTATED_OPS, parseRelayAnnotation, RELAY_ANNOTATION_PREFIX, relayAnnotationMessage, strokeBudgetRefusal, strokePacing } from './dispatch.mjs';
 import {
+  ADVISORY_ANNOTATED_OPS,
+  ANNOTATED_OPS,
+  parseRelayAdvisoryAnnotation,
+  parseRelayAnnotation,
+  RELAY_ANNOTATION_PREFIX,
+  relayAdvisoryAnnotationMessage,
+  relayAnnotationMessage,
+  strokeBudgetRefusal,
+  strokePacing,
+} from './dispatch.mjs';
+import {
+  ADVISORY_ACCESS_REMEDY,
+  ADVISORY_OPEN_STATES,
+  ADVISORY_TRANSITIONS,
+  GHSA_ID_SHAPE,
+  advisoryCollaboratorLogins,
+  advisoryCollaboratorPlan,
+  advisoryFenceFailures,
+  advisoryFenceText,
+  advisoryLandedText,
+  advisoryPlatformText,
+  advisoryReadBack,
+  advisoryReportLandedText,
+  advisoryReportReadBack,
+  advisoryStateLandedText,
+  advisoryStateReadBack,
   GOVERNED_REVIEW_FILES_PAGE_CAP,
   GOVERNED_REVIEW_FILES_PAGE_SIZE,
   GOVERNED_REVIEW_OPS,
@@ -323,7 +398,7 @@ import {
   subIssueReadBack,
   transferRemedy,
 } from './ops.mjs';
-import { PAYLOAD_ENV, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
+import { EVENT_PATH_ENV, readEventPayload, refusalText, tokenRepositoriesOf, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
 const DEFAULT_API = 'https://api.github.com';
@@ -729,6 +804,55 @@ export async function confirmSubIssue(req, answer, pre, payload, api, t, { sleep
   return { ok: false, why: `${platform} accepted, but ${last} ${windowMs} ms later — UNCONFIRMED: read #${parent}'s sub-issues before anything else, ⛔ do not re-send` };
 }
 
+/**
+ * The advisory's fences, AUTHORITATIVE (header: "The three advisory rows"): its own GET, judged against
+ * `ADVISORY_FENCES` — for `advisory_collaborators_add` an open advisory (`ADVISORY_OPEN_STATES`), for
+ * `advisory_state` a transition `ADVISORY_TRANSITIONS` allows — then, for the collaborators, the merge. Returns
+ * `{ plan, state }` (`plan` null for a state change; `plan.missing` empty is the no-op) to proceed, or `{ fail }`,
+ * the sentence the row prints, the PATCH NOT SENT. ⛔ That sentence carries nothing of the answer but what
+ * `advisoryFenceText` prints, and a platform `message` only when `advisoryPlatformText` names it. Never throws.
+ */
+export async function advisoryPreflight(req, payload, api, t) {
+  const spec = req.advisoryCollaborators ?? req.advisoryState;
+  const { ghsaId } = spec;
+  const to = req.advisoryState ? req.advisoryState.to : null;
+  const from = to ? ADVISORY_TRANSITIONS[to] : ADVISORY_OPEN_STATES;
+  const read = await rest(api, `/repos/${payload.repo}/security-advisories/${ghsaId}`, {}, t);
+  const failures = advisoryFenceFailures({ ghsaId, answer: read, from, to });
+  if (failures.length) {
+    const refused = !(read.status >= 200 && read.status < 300);
+    return { fail: `REFUSED at the relay's fence on ${ghsaId}, nothing sent — ${advisoryFenceText(failures)}${refused ? `${advisoryPlatformText(read.detail)}; ${ADVISORY_ACCESS_REMEDY}` : ''}` };
+  }
+  if (to) return { plan: null, state: read.json.state };
+  return { plan: advisoryCollaboratorPlan({ existing: advisoryCollaboratorLogins(read.json), requested: spec.add }), state: read.json.state };
+}
+
+/**
+ * Did an advisory action LAND? Judged on its own answer alone — `advisoryReportReadBack` (a 2xx carrying an id),
+ * `advisoryReadBack` (every login sent listed) or `advisoryStateReadBack` (the state asked for shown) — and spelled
+ * by the row texts of `ops.mjs` alone. Returns `{ ok, why, result, ghsaId }`. ⛔ Never `resultOf`, never the
+ * answer's body; a platform `message` only when `advisoryPlatformText` names it. Never throws.
+ */
+export function confirmAdvisory(req, answer, pre) {
+  const refused = !(answer?.status >= 200 && answer?.status < 300);
+  const failed = (why) => ({ ok: false, why: refused ? `${why}${advisoryPlatformText(answer?.detail)}; ${ADVISORY_ACCESS_REMEDY}` : `${why} — read the advisory before anything else, ⛔ do not re-send` });
+  if (req.advisoryReport) {
+    const v = advisoryReportReadBack(answer);
+    if (!v.ok) return refused ? failed(v.why) : { ok: false, why: v.why };
+    return { ok: true, why: '', ghsaId: v.ghsaId, result: advisoryReportLandedText({ ghsaId: v.ghsaId, state: v.state }) };
+  }
+  if (req.advisoryState) {
+    const { ghsaId, to } = req.advisoryState;
+    const v = advisoryStateReadBack({ ghsaId, to, answer });
+    if (!v.ok) return failed(v.why);
+    return { ok: true, why: '', result: advisoryStateLandedText({ ghsaId, from: pre.state, to }) };
+  }
+  const { ghsaId } = req.advisoryCollaborators;
+  const v = advisoryReadBack({ existing: pre.plan.existing, missing: pre.plan.missing, answer });
+  if (!v.ok) return failed(v.why);
+  return { ok: true, why: '', result: advisoryLandedText({ ghsaId, state: answer.json.state ?? pre.state, logins: v.listed, added: pre.plan.missing }) };
+}
+
 /** The one thing a seat needs from an answer: the id / number / url of what was written — or that a bodiless 204 accepted it. */
 export function resultOf(req, json, status = null) {
   if (status === 204 && (json === null || json === undefined)) return 'accepted (HTTP 204, no body)';
@@ -784,7 +908,15 @@ export function escapeCommandProperty(s) {
  * (no number and url, a url the reader would not parse as this number, or one
  * naming another repository than the op lands the card on). Pure.
  */
-export function annotationFor({ action, op, req, json, payload }) {
+export function annotationFor({ action, op, req, json, payload, landed = null }) {
+  // A filed report names its id — the confirmation's, read from the answer in its shape — and nothing else (header).
+  if (ADVISORY_ANNOTATED_OPS.includes(op)) {
+    const ghsaId = typeof landed?.ghsaId === 'string' && GHSA_ID_SHAPE.test(landed.ghsaId) ? landed.ghsaId : null;
+    if (!ghsaId) return { note: null, why: 'the answer carries no advisory id' };
+    const back = parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage({ action, op, ghsaId }));
+    if (!back || back.action !== action || back.op !== op || back.ghsaId !== ghsaId) return { note: null, why: 'the advisory id is not one the reader parses back' };
+    return { note: back, why: '' };
+  }
   if (!Object.hasOwn(ANNOTATION_ANSWERS, op) || !Object.hasOwn(ANNOTATED_OPS, op)) return { note: null, why: '' };
   const { number, url } = ANNOTATION_ANSWERS[op](req, json);
   if (!Number.isInteger(number) || number < 1 || typeof url !== 'string' || url === '') return { note: null, why: 'the answer carries no number and url' };
@@ -797,7 +929,8 @@ export function annotationFor({ action, op, req, json, payload }) {
 
 /** The workflow command that turns a note into a `notice` annotation on this job's check run. Pure. */
 export function annotationCommand(note) {
-  return `::notice title=${escapeCommandProperty(`${RELAY_ANNOTATION_PREFIX} ${note.op}`)}::${escapeCommandData(relayAnnotationMessage(note))}`;
+  const message = typeof note.ghsaId === 'string' ? relayAdvisoryAnnotationMessage(note) : relayAnnotationMessage(note);
+  return `::notice title=${escapeCommandProperty(`${RELAY_ANNOTATION_PREFIX} ${note.op}`)}::${escapeCommandData(message)}`;
 }
 
 /** The line a batched stroke's transcript and summary carry: rule ⑤ on the runner, said out loud. Pure. */
@@ -1087,8 +1220,25 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
         log(`  ✓ action ${i + 1} ${action.op}: ${call} -> not sent · ${rows[rows.length - 1].result}`);
         continue;
       }
-      // The body is the child's id from its own answer — the op table spells none for this row.
-      let body = sub ? { sub_issue_id: sub.childId } : (req.body ?? null);
+      // The advisory PATCHes (header): the advisory's fences, judged HERE on its own GET before the PATCH — refused, NOT SENT.
+      const adv = req.advisoryCollaborators || req.advisoryState ? await advisoryPreflight(req, payload, api, t) : null;
+      if (adv?.fail) {
+        const why = scrub(adv.fail, [token]);
+        rows.push({ action: i + 1, op: action.op, call: `${req.verb} ${req.path}`, status: 'not sent', result: `FAILED: ${why}` });
+        stoppedAt = { action: i + 1, op: action.op, why };
+        log(`  ✗ action ${i + 1} ${action.op}: ${why}`);
+        break;
+      }
+      if (adv?.plan && adv.plan.missing.length === 0) {
+        // The no-op: every login asked for is already a collaborator, so nothing is sent.
+        const call = `${req.verb} ${req.path}`;
+        rows.push({ action: i + 1, op: action.op, call, status: 'not sent', result: scrub(advisoryLandedText({ ghsaId: req.advisoryCollaborators.ghsaId, state: adv.state, logins: adv.plan.existing, noop: true }), [token]) });
+        log(`  ✓ action ${i + 1} ${action.op}: ${call} -> not sent · ${rows[rows.length - 1].result}`);
+        continue;
+      }
+      // The body is the child's id from its own answer, the advisory's merged login list or the one state asked for —
+      // the op table spells none of the three.
+      let body = sub ? { sub_issue_id: sub.childId } : adv?.plan ? { collaborating_users: adv.plan.merged } : adv ? { state: req.advisoryState.to } : (req.body ?? null);
       if (req.graphql) {
         const resolved = await graphqlVariables(req, payload, api, t);
         if (resolved.fail) {
@@ -1106,13 +1256,16 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       // The base sync is confirmed by MEASURE (header): the head polled off the expected sha, or a 422 judged by the compare.
       // The failed-jobs re-run is confirmed by reading the run back (header): attempt 2, its failed jobs queued or in progress.
       // The hierarchy link is confirmed by reading the parent's list back (header): the child's id listed, or no longer.
+      // The advisory rows are confirmed by their own answer (header): an id, every login sent, the state asked for — never by resultOf.
       const landed = req.updateBranch
         ? await confirmUpdateBranch(req, r, payload, api, t, ub)
         : req.rerunFailed
           ? await confirmRerunFailed(req, r, pre, payload, api, t, rr)
           : sub
             ? await confirmSubIssue(req, r, sub, payload, api, t, si)
-            : requestLanded(req, r);
+            : adv || req.advisoryReport
+              ? confirmAdvisory(req, r, adv)
+              : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
       rows.push({ action: i + 1, op: action.op, call, status: r.status, result: landed.ok ? (landed.idempotent ? 'already absent (idempotent)' : scrub(landed.result ?? resultOf(req, r.json, r.status), [token])) : `FAILED: ${scrub(landed.why, [token])}` });
       if (!landed.ok) {
@@ -1122,7 +1275,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       }
       log(`  ✓ action ${i + 1} ${action.op}: ${call} -> HTTP ${r.status} · ${rows[rows.length - 1].result}`);
       // A landed op that creates or moves a card reports its number where a seat CAN read it (header).
-      const { note, why } = annotationFor({ action: i + 1, op: action.op, req, json: r.json, payload });
+      const { note, why } = annotationFor({ action: i + 1, op: action.op, req, json: r.json, payload, landed });
       if (note) {
         annotations.push(note);
         log(annotationCommand(note));
@@ -1175,7 +1328,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the summary: request, sender and role, session, target, one row per request': 5,
   'redaction: the token reaches no summary line, log line or error': 3,
   'the wiring: both halves around every write verb, on the roster': 4,
-  'the CLI: environment inputs, the payload refusal, the exit ladder': 7,
+  'the CLI: the event file, environment inputs, the payload refusal, the exit ladder': 8,
   "the annotations: ONE notice per landed op that creates or moves a card — op, number and url read from the platform's answer, never the request; none for any other op, a failed request or an answer that cannot be reported; the reader's own parser reads back exactly what was emitted": 12,
   'the transfer: the sender gated on BOTH repositories, both node ids first, a pull or a moved card refused before the mutation, landing only on the target, the remedy on failure': 11,
   'the workflow_dispatch: ONE POST to the dispatch endpoint of the allowlisted file with { ref: main } under the App token, a bodiless 204 lands as accepted, a 422 or 403 is a failed action, no other actions/* request leaves, no annotation': 7,
@@ -1186,10 +1339,11 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 17 → 21 with the head fence: a stale head, the embedded copy never trusted, a run naming no pull, a pull unread.
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
+  "the advisory rows: advisory_report is ONE POST of its body, landed on a 2xx carrying an id that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's summary and description and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 22,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
-// hierarchy link battery: one battery, one row.
-const SELF_TEST_BATTERY_FLOOR = 20;
+// hierarchy link battery, 20 → 21 with the advisory rows' battery: one battery, one row.
+const SELF_TEST_BATTERY_FLOOR = 21;
 const UNATTRIBUTED_BATTERY = '(unattributed)';
 
 const batteryCases = new Map();
@@ -1399,7 +1553,7 @@ export async function selfTest() {
       const bare = { verb: 'POST', path: '/graphql', graphql: { mutation: 'enablePullRequestAutoMerge', query: 'q', pull: 21 } };
       t('⛔ a pull mutation whose descriptor declares no landed state is never judged landed', requestLanded(bare, { status: 200, json: { data: { enablePullRequestAutoMerge: { pullRequest: { number: 21, autoMergeRequest: { mergeMethod: 'SQUASH' } } } } } }).ok, false);
       // The table half: every pull mutation the op table can issue carries its entry, and selects every field that entry reads.
-      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main' }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
+      const pullRows = Object.keys(OPS).flatMap((op) => OPS[op].requests({ op, pull: 21, issue: 21, comment_id: 1, target_repo: 'x', title: 't', body: 'b', head: 'h', base: 'main', labels: ['l'], assignees: ['u'], reviewers: ['r'], workflow: 'shard-timings-refresh.yml', ref: 'main', summary: 's', description: 'd', ghsa_id: 'GHSA-abcd-2345-wxyz', collaborators: ['u'], advisory_state: 'draft' }, REPO).filter((r) => r.graphql?.pull !== undefined).map((r) => [op, r.graphql]));
       const selects = (query, field) => new RegExp(`\\b${field}\\b`).test(query.slice(query.indexOf('pullRequest {')));
       t('every pull mutation in the op table carries its PR_LANDED_STATE entry, and its query selects every field that entry reads', [pullRows.map(([op]) => op).sort(), pullRows.every(([op, g]) => g.landed === PR_LANDED_STATE[op] && g.landed.fields.every((f) => selects(g.query, f)))], [Object.keys(PR_LANDED_STATE).sort(), true]);
     }
@@ -2049,26 +2203,168 @@ export async function selfTest() {
       t('⛔ the parser is the reader\'s, imported — this file spells no pattern for the message of its own', [readReal(SELF_PATH, 'utf8').includes(['number=', '(['].join('')), typeof parseRelayAnnotation], [false, 'function']);
     }
 
-    // ── the CLI ─────────────────────────────────────────────────────────────
-    battery('the CLI: environment inputs, the payload refusal, the exit ladder');
+    // ── the three advisory rows ─────────────────────────────────────────────
+    battery("the advisory rows: advisory_report is ONE POST of its body, landed on a 2xx carrying an id that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's summary and description and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation");
     {
-      const env = (extra) => ({ ...process.env, GITHUB_TOKEN: '', GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '', OS_PM_WRITE_PACE_FILE: join(dir, 'cli-pace.jsonl'), GITHUB_STEP_SUMMARY: join(dir, 'summary.md'), ...extra });
+      // A made-up id: the fixture names no real advisory.
+      const GHSA = 'GHSA-abcd-2345-wxyz';
+      const OTHER = 'GHSA-wxyz-2345-abcd';
+      // Spaces and punctuation: prose, never an id's, a state's or a login's shape.
+      const MARKER = 'ADVISORY MARKER: how the flaw is reached, never to be logged';
+      const ADV = `/repos/${REPO}/security-advisories/${GHSA}`;
+      const A_GET = `GET ${ADV}`;
+      const A_PATCH = `PATCH ${ADV}`;
+      const REPORTS = `POST /repos/${REPO}/security-advisories/reports`;
+      const logins = (...ls) => ls.map((login) => ({ login, name: MARKER, bio: MARKER }));
+      // An advisory answer carrying the marker in every field but its id, its state and its collaborators' logins —
+      // the platform's message on a 2xx among them.
+      const advisory = (extra = {}, status = 200) => ({
+        status,
+        json: {
+          ghsa_id: GHSA, cve_id: MARKER, url: `https://api.github.test${ADV}?q=${MARKER}`, html_url: `https://github.test/${REPO}/security/advisories/${GHSA}#${MARKER}`,
+          summary: MARKER, description: MARKER, severity: 'high', state: 'draft', message: MARKER,
+          author: { login: 'os-dev-z', name: MARKER }, identifiers: [{ type: 'GHSA', value: GHSA }, { type: 'CVE', value: MARKER }],
+          vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER }, vulnerable_version_range: MARKER, patched_versions: MARKER, vulnerable_functions: [MARKER] }],
+          cvss: { vector_string: MARKER, score: 9.8 }, cwes: [{ cwe_id: 'CWE-79', name: MARKER }], credits_detailed: [{ user: { login: 'os-dev-z', name: MARKER }, type: MARKER }],
+          collaborating_users: logins('os-dev-a'), collaborating_teams: [{ name: MARKER, slug: MARKER }], private_fork: { full_name: MARKER },
+          ...extra,
+        },
+      });
+      const refusal = (status, message) => ({ status, json: { message, errors: [{ message: MARKER, value: MARKER }], documentation_url: `https://docs.github.test/${MARKER}` } });
+      const report = (extra = {}) => ({ op: 'advisory_report', summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, ...extra });
+      const add = (collaborators = ['os-dev-b'], extra = {}) => ({ op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators, ...extra });
+      const move = (to, extra = {}) => ({ op: 'advisory_state', ghsa_id: GHSA, advisory_state: to, ...extra });
+      // Every run of this battery feeds the marker sweep at its end, with its pace log captured.
+      const swept = [];
+      const advRun = async (actions, answers) => {
+        const paceLines = [];
+        const file = join(dir, `pace-adv-${paceCase++}.jsonl`);
+        const r = await run(base(actions), answers, { file, pace: { ...paceFor(file), log: (l) => paceLines.push(l) } });
+        swept.push({ r, paceLines, answers });
+        return r;
+      };
+      const notSent = (r) => [r.exit, writes(r.seen).length, r.rows[0]?.status, /REFUSED at the relay's fence/.test(r.rows[0]?.result ?? '')];
+
+      // ── advisory_report
+      const filed = await advRun([report({ severity: 'high', cwe_ids: ['CWE-79'] })], { ...allowed, [REPORTS]: advisory({ state: 'triage' }, 201) });
+      t('⭐ report: the sender gate, then ONE POST to the reports endpoint — nothing read first — whose body is exactly the summary, description, severity and cwe_ids sent; exit 0', [filed.exit, filed.seen.map((s) => s.call), writes(filed.seen)[0]?.body], [EXIT_OK, [PERM, REPORTS], { summary: `${MARKER} — the summary`, description: `${MARKER} — the description`, severity: 'high', cwe_ids: ['CWE-79'] }], filed.logs.join(' | '));
+      const REPORTED = `reported ${GHSA} · state triage — add whoever works it with advisory_collaborators_add`;
+      t('…its row names the id the platform gave and the state, and nothing else of the answer; the summary row carries it', [filed.rows.map((r) => [r.call, r.status, r.result]), filed.summary.includes(`| 1 | \`advisory_report\` | \`${REPORTS}\` | 201 | ${REPORTED} |`)], [[[REPORTS, 201, REPORTED]], true], filed.summary);
+      t('…and ONE notice annotation names that id for the seat, which the reader\'s own parser reads back', [filed.annotations, filed.logs.filter((l) => l.startsWith('::')), parseRelayAdvisoryAnnotation(relayAdvisoryAnnotationMessage(filed.annotations[0] ?? {}))], [[{ action: 1, op: 'advisory_report', ghsaId: GHSA }], [`::notice title=fleet-write advisory_report::fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`], { action: 1, op: 'advisory_report', ghsaId: GHSA }]);
+      const noId = await advRun([report()], { ...allowed, [REPORTS]: advisory({ ghsa_id: MARKER }, 201) });
+      t('⛔ a 2xx carrying no id in its shape is UNCONFIRMED, never landed: exit 5, ONE write, no annotation, and the sentence says do not re-send', [noId.exit, writes(noId.seen).length, noId.annotations, /UNCONFIRMED: a report may have been filed; ⛔ do not re-send/.test(noId.rows[0]?.result ?? '')], [EXIT_ACTION_FAILED, 1, [], true], noId.rows[0]?.result);
+      const reportRefused = await advRun([report()], { ...allowed, [REPORTS]: refusal(422, 'Validation Failed') });
+      const reportForbidden = await advRun([report()], { ...allowed, [REPORTS]: refusal(403, MARKER) });
+      t('⛔ a refused report is a FAILED action: its status, a platform message only when the relay names it, and the remedy — never a wider token', [reportRefused.exit, reportRefused.rows[0]?.result, reportForbidden.rows[0]?.result], [EXIT_ACTION_FAILED, `FAILED: HTTP 422 (the platform: Validation Failed); ${ADVISORY_ACCESS_REMEDY}`, `FAILED: HTTP 403; ${ADVISORY_ACCESS_REMEDY}`]);
+
+      // ── advisory_collaborators_add
+      const added = await advRun([add(['OS-DEV-A', 'os-dev-b'])], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ collaborating_users: logins('os-dev-a', 'os-dev-b') }) });
+      t('⭐ collaborators: the advisory read first, then ONE PATCH whose body is exactly { collaborating_users } — the existing login kept, the one already there not added twice (case-insensitively), the missing one added; exit 0', [added.exit, added.seen.map((s) => s.call), writes(added.seen).map((s) => s.body)], [EXIT_OK, [PERM, A_GET, A_PATCH], [{ collaborating_users: ['os-dev-a', 'os-dev-b'] }]], added.logs.join(' | '));
+      t('…the row names the id, the state and the logins as the answer lists them, and no annotation is emitted', [added.rows[0]?.result, added.annotations, added.logs.filter((l) => l.startsWith('::'))], [`${GHSA} · state draft · collaborators os-dev-a, os-dev-b · added os-dev-b`, [], []]);
+      const kept = await advRun([add(['os-dev-c'])], { ...allowed, [A_GET]: advisory({ collaborating_users: logins('os-dev-a', 'Os-Dev-B') }), [A_PATCH]: advisory({ collaborating_users: logins('os-dev-a', 'Os-Dev-B', 'os-dev-c') }) });
+      t('⭐ existing collaborators survive the PATCH: the body sends every one of them, as the advisory spells them, before the new one', [kept.exit, writes(kept.seen).map((s) => s.body)], [EXIT_OK, [{ collaborating_users: ['os-dev-a', 'Os-Dev-B', 'os-dev-c'] }]]);
+      const present = await advRun([add(['OS-DEV-A'])], { ...allowed, [A_GET]: advisory() });
+      t('⭐ an all-present list sends NO PATCH: the read, then a not-sent no-op row, exit 0', [present.exit, present.seen.map((s) => s.call), present.rows[0]?.status, present.rows[0]?.result], [EXIT_OK, [PERM, A_GET], 'not sent', `no-op, nothing sent: ${GHSA} · state draft · collaborators os-dev-a — every login asked for is already a collaborator`]);
+      const shut = [];
+      for (const state of ['published', 'closed', 'withdrawn']) shut.push(notSent(await advRun([add()], { ...allowed, [A_GET]: advisory({ state }) })));
+      t('⛔ a published, closed or withdrawn advisory sends NO PATCH: each refused at the state fence, not sent, exit 5', shut, [0, 1, 2].map(() => [EXIT_ACTION_FAILED, 0, 'not sent', true]));
+      const other = await advRun([add()], { ...allowed, [A_GET]: advisory({ ghsa_id: OTHER }) });
+      const unread = await advRun([add()], { ...allowed, [A_GET]: refusal(404, 'Not Found') });
+      t('⛔ an answer naming another advisory, or a read the platform refuses, sends NO PATCH — the refusal quoting a message the relay names, with the remedy', [notSent(other), notSent(unread), unread.rows[0]?.result.includes('(the platform: Not Found)') && unread.rows[0]?.result.includes(ADVISORY_ACCESS_REMEDY)], [[EXIT_ACTION_FAILED, 0, 'not sent', true], [EXIT_ACTION_FAILED, 0, 'not sent', true], true]);
+      const lacking = await advRun([add(['os-dev-b'])], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory() });
+      const dropping = await advRun([add(['os-dev-b'])], { ...allowed, [A_GET]: advisory(), [A_PATCH]: advisory({ collaborating_users: logins('os-dev-b') }) });
+      t('⛔ a PATCH answer that does not list a login fails the action: a requested one not added, an existing one dropped — each named, ⛔ never re-sent', [lacking.exit, lacking.rows[0]?.result, dropping.exit, dropping.rows[0]?.result], [EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer lists os-dev-a — os-dev-b not added — read the advisory before anything else, ⛔ do not re-send', EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer lists os-dev-b — os-dev-a dropped — a collaborator before this PATCH and missing from its answer — read the advisory before anything else, ⛔ do not re-send']);
+      const patchRefused = await advRun([add()], { ...allowed, [A_GET]: advisory(), [A_PATCH]: refusal(403, 'Resource not accessible by integration') });
+      t('⛔ a refused PATCH is a FAILED action with the remedy', [patchRefused.exit, writes(patchRefused.seen).length, patchRefused.rows[0]?.result], [EXIT_ACTION_FAILED, 1, `FAILED: HTTP 403 (the platform: Resource not accessible by integration); ${ADVISORY_ACCESS_REMEDY}`]);
+
+      // ── advisory_state
+      const accepted = await advRun([move('draft')], { ...allowed, [A_GET]: advisory({ state: 'triage' }), [A_PATCH]: advisory({ state: 'draft' }) });
+      t('⭐ accept: the advisory read in triage, then ONE PATCH whose body is exactly { state: draft }; the row names the move; exit 0, no annotation', [accepted.exit, accepted.seen.map((s) => s.call), writes(accepted.seen).map((s) => s.body), accepted.rows[0]?.result, accepted.annotations], [EXIT_OK, [PERM, A_GET, A_PATCH], [{ state: 'draft' }], `${GHSA} · state triage → draft`, []], accepted.logs.join(' | '));
+      const closes = [];
+      for (const from of ['triage', 'draft']) {
+        const r = await advRun([move('closed')], { ...allowed, [A_GET]: advisory({ state: from }), [A_PATCH]: advisory({ state: 'closed' }) });
+        closes.push([r.exit, writes(r.seen).map((s) => s.body), r.rows[0]?.result]);
+      }
+      t('⭐ close: from triage and from draft, ONE PATCH of { state: closed } each', closes, [[EXIT_OK, [{ state: 'closed' }], `${GHSA} · state triage → closed`], [EXIT_OK, [{ state: 'closed' }], `${GHSA} · state draft → closed`]]);
+      const illegal = [];
+      for (const [to, from] of [['draft', 'draft'], ['draft', 'closed'], ['draft', 'published'], ['draft', 'withdrawn'], ['closed', 'closed'], ['closed', 'published'], ['closed', 'withdrawn']]) {
+        illegal.push([`${from}→${to}`, ...notSent(await advRun([move(to)], { ...allowed, [A_GET]: advisory({ state: from }) }))]);
+      }
+      t('⛔ each illegal transition sends NO PATCH: draft from anything but triage, closed from closed, published or withdrawn — refused at the state fence, not sent, exit 5', illegal, illegal.map(([m]) => [m, EXIT_ACTION_FAILED, 0, 'not sent', true]));
+      const wrongState = await advRun([move('draft')], { ...allowed, [A_GET]: advisory({ state: 'triage' }), [A_PATCH]: advisory({ state: 'triage' }) });
+      const stateRefused = await advRun([move('closed')], { ...allowed, [A_GET]: advisory(), [A_PATCH]: refusal(422, MARKER) });
+      t('⛔ a PATCH answer that does not show the state asked for fails the action, naming what it shows; a refused one carries the remedy', [wrongState.exit, wrongState.rows[0]?.result, stateRefused.exit, stateRefused.rows[0]?.result], [EXIT_ACTION_FAILED, 'FAILED: HTTP 200, but the answer reads state triage, not draft — read the advisory before anything else, ⛔ do not re-send', EXIT_ACTION_FAILED, `FAILED: HTTP 422; ${ADVISORY_ACCESS_REMEDY}`]);
+
+      // ── the validator's gate, inside the executor: zero requests
+      const gated = [];
+      for (const actions of [[add(['os-dev-b'], { ghsa_id: `${GHSA}/cve` })], [move('published')], [report(), { op: 'comment', issue: 1, body: 'x' }], [report({ vulnerabilities: [MARKER] })], [report({ description: `${MARKER} ${'x'.repeat(60_000)}` })]]) {
+        const r = await advRun(actions, { ...allowed });
+        gated.push([r.exit, r.seen.length]);
+      }
+      t('⛔ refused before ANY request, the sender gate included: a malformed id, published, a report beside another action, an unknown vulnerabilities key and an over-cap description — exit 2', gated, [0, 1, 2, 3, 4].map(() => [EXIT_REFUSED, 0]));
+
+      // ── ⛔ the marker sweep: every run above, every channel this file emits on
+      const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), JSON.stringify(r.annotations ?? []), ...paceLines].join('\n'));
+      const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
+      t('⛔ THE MARKER TEST: across every run of this battery — filed, unconfirmed and refused reports, landed, no-op, fenced, lacking and refused PATCHes, legal and illegal moves, refused payloads — the marker reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [32, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      // Positive controls: the marker was there to leak, and the needle finds it where it is.
+      t('…positive control: every answer served carried the marker, the report\'s POST carried it to the platform — where it belongs — and the fenced runs made their GET', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') || Object.keys(answers).length === 1), JSON.stringify(writes(filed.seen)[0]?.body).includes('ADVISORY MARKER'), [other, unread, ...[added, kept, present]].every((r) => r.seen.some((s) => s.call === A_GET))], [true, true, true]);
+      t('…positive control: the generic row printer, given the same answer, WOULD print it — the advisory rows never reach it', resultOf({}, advisory().json).includes('ADVISORY MARKER'), true);
+      // The CLI: the real processes, the payload from an event file, every byte of their output read.
+      const markerEvent = (name, payload) => {
+        const f = join(dir, name);
+        writeFileSync(f, JSON.stringify({ action: 'fleet-write', client_payload: payload }), 'utf8');
+        return f;
+      };
+      const VALID = markerEvent('event-marker.json', base([report({ severity: 'low' })]));
+      const REFUSED = markerEvent('event-marker-refused.json', base([report({ vulnerabilities: [{ package: MARKER }], credits: MARKER })]));
+      const cli = (script, args, extra) => {
+        const out = join(dir, `cli-out-${paceCase++}.txt`);
+        const summary = join(dir, `cli-summary-${paceCase++}.md`);
+        writeFileSync(out, '', 'utf8');
+        writeFileSync(summary, '', 'utf8');
+        const r = spawnSync(process.execPath, [script, ...args], { encoding: 'utf8', env: { ...process.env, GITHUB_TOKEN: '', GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '', GITHUB_OUTPUT: out, GITHUB_STEP_SUMMARY: summary, OS_PM_WRITE_PACE_FILE: join(dir, 'cli-marker-pace.jsonl'), ...extra } });
+        return { status: r.status, text: `${r.stdout}${r.stderr}${readReal(out, 'utf8')}${readReal(summary, 'utf8')}` };
+      };
+      const VALIDATE = fileURLToPath(new URL('./validate.mjs', import.meta.url));
+      const cliRuns = [
+        cli(VALIDATE, ['--from-event', '--github-output'], { [EVENT_PATH_ENV]: VALID }),
+        cli(VALIDATE, ['--from-event', '--github-output'], { [EVENT_PATH_ENV]: REFUSED }),
+        cli(SELF_PATH, [], { [EVENT_PATH_ENV]: VALID, [SENDER_ENV]: 'os-dev-a' }),
+        cli(SELF_PATH, [], { [EVENT_PATH_ENV]: REFUSED, [SENDER_ENV]: 'os-dev-a' }),
+      ];
+      t('⛔ …and the real processes, reading the payload from an event file as the runner does: the validator accepting and refusing a report and the executor stopping at its prerequisite and its refusal print the marker NOWHERE — stdout, stderr, GITHUB_OUTPUT or the step summary', cliRuns.map((r) => [r.status, r.text.includes('ADVISORY MARKER')]), [[EXIT_OK, false], [EXIT_REFUSED, false], [EXIT_PREREQUISITE, false], [EXIT_REFUSED, false]], cliRuns.map((r) => r.text.slice(0, 200)).join(' | '));
+    }
+
+    // ── the CLI ─────────────────────────────────────────────────────────────
+    battery('the CLI: the event file, environment inputs, the payload refusal, the exit ladder');
+    {
+      const env = (extra) => ({ ...process.env, GITHUB_TOKEN: '', GH_TOKEN: '', HTTPS_PROXY: '', https_proxy: '', [EVENT_PATH_ENV]: '', OS_PM_WRITE_PACE_FILE: join(dir, 'cli-pace.jsonl'), GITHUB_STEP_SUMMARY: join(dir, 'summary.md'), ...extra });
       const spawn = (args, extra) => spawnSync(process.execPath, [SELF_PATH, ...args], { encoding: 'utf8', env: env(extra) });
       const good = JSON.stringify(base([{ op: 'comment', issue: 1, body: 'a' }]));
-      const noPayload = spawn([], { [PAYLOAD_ENV]: '', [SENDER_ENV]: 'x', GITHUB_TOKEN: TOKEN });
-      t('no payload is exit 3 naming the variable', [noPayload.status, noPayload.stderr.includes(PAYLOAD_ENV)], [EXIT_PREREQUISITE, true]);
-      const refused = spawn([], { [PAYLOAD_ENV]: JSON.stringify({ request_id: 'x' }), [SENDER_ENV]: 'x', GITHUB_TOKEN: TOKEN });
+      // The runner's event file: the payload is its client_payload (header) — never a step's env.
+      const eventFile = (name, payload) => {
+        const f = join(dir, name);
+        writeFileSync(f, JSON.stringify({ action: 'fleet-write', client_payload: payload, sender: { login: 'os-dev-a' } }), 'utf8');
+        return f;
+      };
+      const GOOD_EVENT = eventFile('event-good.json', JSON.parse(good));
+      const noPayload = spawn([], { [SENDER_ENV]: 'x', GITHUB_TOKEN: TOKEN });
+      t('no event file is exit 3 naming GITHUB_EVENT_PATH', [noPayload.status, noPayload.stderr.includes(EVENT_PATH_ENV)], [EXIT_PREREQUISITE, true]);
+      const oldRoute = spawn([], { FLEET_WRITE_PAYLOAD: good, [SENDER_ENV]: 'x', GITHUB_TOKEN: TOKEN });
+      t('⛔ the old route through a step\'s logged env reads nothing: a payload in FLEET_WRITE_PAYLOAD and no event file is exit 3', [oldRoute.status, oldRoute.stderr.includes(EVENT_PATH_ENV)], [EXIT_PREREQUISITE, true]);
+      const refused = spawn([], { [EVENT_PATH_ENV]: eventFile('event-refused.json', { request_id: 'x' }), [SENDER_ENV]: 'x', GITHUB_TOKEN: TOKEN });
       t('a refused payload is exit 2, the reasons on stderr, the summary written', [refused.status, refused.stderr.includes('REFUSED'), readReal(join(dir, 'summary.md'), 'utf8').includes('zero writes')], [EXIT_REFUSED, true, true]);
       writeFileSync(join(dir, 'summary.md'), '', 'utf8');
-      const noToken = spawn([], { [PAYLOAD_ENV]: good, [SENDER_ENV]: 'x' });
-      t('no token is exit 3 before any request', [noToken.status, noToken.stderr.includes('no GITHUB_TOKEN')], [EXIT_PREREQUISITE, true]);
-      const noSender = spawn([], { [PAYLOAD_ENV]: good, GITHUB_TOKEN: TOKEN });
+      const noToken = spawn([], { [EVENT_PATH_ENV]: GOOD_EVENT, [SENDER_ENV]: 'x' });
+      t('no token is exit 3 before any request — the event file read first', [noToken.status, noToken.stderr.includes('no GITHUB_TOKEN')], [EXIT_PREREQUISITE, true]);
+      const noSender = spawn([], { [EVENT_PATH_ENV]: GOOD_EVENT, GITHUB_TOKEN: TOKEN });
       t('no sender is exit 3 before any request', [noSender.status, noSender.stderr.includes(SENDER_ENV)], [EXIT_PREREQUISITE, true]);
       writeFileSync(join(dir, 'p.json'), good, 'utf8');
       const fromFile = spawn(['--payload-file', join(dir, 'p.json')], { GITHUB_TOKEN: TOKEN });
       t('--payload-file reads the payload from disk (and still needs a sender)', [fromFile.status, fromFile.stderr.includes(SENDER_ENV)], [EXIT_PREREQUISITE, true]);
       t('an unknown flag is usage (2)', spawn(['--bogus']).status, EXIT_REFUSED);
-      t('⛔ no spawned run printed the token', [noPayload, refused, noToken, noSender, fromFile].some((r) => `${r.stdout}${r.stderr}`.includes(TOKEN)), false);
+      t('⛔ no spawned run printed the token', [noPayload, oldRoute, refused, noToken, noSender, fromFile].some((r) => `${r.stdout}${r.stderr}`.includes(TOKEN)), false);
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -2108,7 +2404,9 @@ export async function selfTest() {
       'ops behind a node-id read, a pull mutation landing only when its answer shows the state it asked for (armed or queued, off, ready, draft), a base sync confirmed by the head leaving its expected sha or measured as a no-op, an assignees leg sent to the number the create answered and landing only when its answer lists every login sent, ' +
       'a governed-review follow-up after pr_ready alone (the draft open summons nobody — a human is asked at the seat\'s hand-off) that reads the pull\'s whole file list and, on a Tier H hit alone, requests every GOVERNED_APPROVERS account not already covered (the author assigned instead), zero writes when covered and a FAILED action when the list cannot be read whole, a transfer gated on both repositories and landing only on its target, ' +
       "a failed-jobs re-run fenced on the run and its pull's own current head, read just before its one POST (zero writes on any fence), and landing only when attempt 2 reads back with its failed jobs queued or in progress, " +
-      "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, one summary row per request, " +
+      "an issue-hierarchy link fenced on its two cards, sent as the child's REST id and landing only when the parent's list reads it back, " +
+      "the payload read from the event file, three advisory rows — a report landed on the id it was given, collaborators and a state fenced on the advisory's own read and landed on the PATCH answer — " +
+      'whose marker in a summary, a description and a vulnerability reached no log line, row, summary or annotation, one summary row per request, ' +
       "one annotation per created or moved card carrying the number the platform answered, read back by the reader's own parser, a stroke at or " +
       'above the batch threshold announced as ONE rule ⑤ batch and paced at the batch gap (one the job cannot hold refused with zero requests), and a known ' +
       'token that came back out of NO summary, log or error.',
@@ -2125,7 +2423,7 @@ export const KNOWN_FLAGS = Object.freeze(['--payload-file', '--self-test', '--he
 
 const USAGE = [
   'usage:',
-  `  ${PAYLOAD_ENV}='{…}' ${SENDER_ENV}=<login> GITHUB_TOKEN=<App token> node scripts/pm/fleet-write/execute.mjs`,
+  `  ${EVENT_PATH_ENV}=<event.json> ${SENDER_ENV}=<login> GITHUB_TOKEN=<App token> node scripts/pm/fleet-write/execute.mjs   # client_payload from the event file`,
   '  node scripts/pm/fleet-write/execute.mjs --payload-file <payload.json>     # the same, payload from disk',
   '  node scripts/pm/fleet-write/execute.mjs --self-test',
   `  Exits: ${EXIT_OK} every action landed · ${EXIT_REFUSED} payload refused or usage · ${EXIT_PREREQUISITE} prerequisite not met ·`,
@@ -2161,27 +2459,30 @@ export async function main(argv) {
     console.error(USAGE);
     return EXIT_REFUSED;
   }
-  let text;
+  let payload;
   if (opts.payloadFile !== null) {
+    let text;
     try {
       text = readFileSync(opts.payloadFile, 'utf8');
     } catch (e) {
-      console.error(`fleet-write/execute: PREREQUISITE NOT MET — --payload-file ${opts.payloadFile} cannot be read (${e?.message ?? 'unreadable'}). ⛔ zero writes.`);
+      console.error(`fleet-write/execute: PREREQUISITE NOT MET — --payload-file ${opts.payloadFile} cannot be read (${e?.code ?? 'unreadable'}). ⛔ zero writes.`);
+      return EXIT_PREREQUISITE;
+    }
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      // ⛔ Never the parser's message: it quotes the text, which may be a report's.
+      console.error('fleet-write/execute: PREREQUISITE NOT MET — the payload is not JSON. ⛔ zero writes.');
       return EXIT_PREREQUISITE;
     }
   } else {
-    text = process.env[PAYLOAD_ENV];
-    if (typeof text !== 'string' || text.trim() === '' || text.trim() === 'null') {
-      console.error(`fleet-write/execute: PREREQUISITE NOT MET — ${PAYLOAD_ENV} is absent or empty. ⛔ zero writes.`);
+    // The runner's event file, never a step's env: GitHub prints a step's env into the public log (header).
+    try {
+      payload = readEventPayload(process.env);
+    } catch (e) {
+      console.error(`fleet-write/execute: PREREQUISITE NOT MET — ${e.message}. ⛔ zero writes.`);
       return EXIT_PREREQUISITE;
     }
-  }
-  let payload;
-  try {
-    payload = JSON.parse(text);
-  } catch (e) {
-    console.error(`fleet-write/execute: PREREQUISITE NOT MET — the payload is not JSON (${e?.message ?? 'parse failed'}). ⛔ zero writes.`);
-    return EXIT_PREREQUISITE;
   }
   const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? '';
   const sender = process.env[SENDER_ENV] ?? '';
