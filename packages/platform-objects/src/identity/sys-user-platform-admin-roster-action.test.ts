@@ -45,7 +45,7 @@ describe('[ADR-0095 D3] sys_user list_platform_admins', () => {
     expect(action()).toMatchObject({
       type: 'api',
       locations: ['list_toolbar'],
-      visible: 'current_user.isPlatformAdmin == true',
+      visible: { dialect: 'cel', source: 'current_user.isPlatformAdmin == true' },
       refreshAfter: false,
     });
     expect(action()?.method ?? 'POST').toBe('POST');
