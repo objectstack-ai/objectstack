@@ -273,7 +273,7 @@ export const PackageExportBundleSchema = lazySchema(() => z.object({
   '[PLANNED — not yet served] Whole-deployment export: every installed package but the platform\'s own, as '
   + 'installable packages in dependency order. Carries no credential value. Declared ahead of its producer '
   + '(ADR-0049): no runtime serves `GET /packages/export` yet. The server half of the whole-deployment package '
-  + 'export mounts it and the `os package export` command that calls it; until then this is the contract that '
+  + 'export mounts it, together with a future CLI command that calls it; until then this is the contract that '
   + 'door must answer, not a read a client can make.',
 ));
 
