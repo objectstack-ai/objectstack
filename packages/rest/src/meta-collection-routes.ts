@@ -648,6 +648,16 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // [#23214] The list lives beside the shared decision, so the
                     // runtime dispatcher's twin refuses the same names.
                     if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.list)) return;
+                    // A bracketed `package` key (`?package[]=`) is read by no
+                    // binding below, so it scoped nothing: refused here, by the
+                    // decision the dispatcher's twin asks too.
+                    const bracketedPackage = metaReadGate.metaBracketedPackageRefusal('list', req.query);
+                    if (bracketedPackage) {
+                        res.status(bracketedPackage.status).json({
+                            error: { code: bracketedPackage.code, message: bracketedPackage.message },
+                        });
+                        return;
+                    }
                     // [#22188] Read through {@link metaItemPackageBinding}:
                     // `all`, this list's "show everything" scope, names no package.
                     const packageId = metaItemPackageBinding(req.query?.package);
