@@ -48,10 +48,11 @@
  * the name without a word, so a caller who meant the saved dataset got the
  * draft's numbers. No producer sends both (measured as above), so both is
  * refused as the same class: a body whose meaning the door would otherwise
- * have to guess. The test is the one the handler's branch makes — the inline
- * definition is truthy, so it would win — beside a `datasetName` that was
- * actually supplied (`null` / absent is no name). A `null` or absent `dataset`
- * beside a name still runs the saved dataset, as it always did.
+ * have to guess. The test is the handler's own truthiness on BOTH keys
+ * (`if (!dataset && body.datasetName)`): a truthy inline definition would win
+ * over a truthy name. A falsy `datasetName` (`''`, `null`, absent) was never a
+ * name to that branch, so `dataset` beside it still runs inline, and a falsy
+ * `dataset` beside a name still runs the saved dataset, as both always did.
  *
  * ## The envelope
  *
@@ -150,7 +151,7 @@ export async function datasetQueryBodyRefusal(
         return { status: 400, body: { code: 'VALIDATION_FAILED', message, details: { fields } } };
     }
 
-    if (record.dataset && record.datasetName !== undefined && record.datasetName !== null) {
+    if (record.dataset && record.datasetName) {
         const message = 'Ambiguous dataset query: the body names both `dataset` (an inline definition) '
             + 'and `datasetName` (a saved dataset). Send exactly one — `dataset` to run a draft, '
             + '`datasetName` to run the saved definition.';

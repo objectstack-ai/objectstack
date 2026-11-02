@@ -181,6 +181,18 @@ describe('#29156 §2 — `dataset` beside `datasetName` is refused instead of th
         expect(getMetaItems).not.toHaveBeenCalled();
     });
 
+    // The handler's branch reads both keys by truthiness, so a falsy name was
+    // never a name: `dataset` beside it ran inline, and still does.
+    for (const datasetName of ['', null] as const) {
+        it(`CONTROL: \`dataset\` beside a falsy \`datasetName\` (${JSON.stringify(datasetName)}) still runs inline, as it did`, async () => {
+            const { res, queryDataset, getMetaItems } = await post({ dataset: inlineDataset, datasetName, selection });
+            expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+            expect(queryDataset).toHaveBeenCalledTimes(1);
+            expect(queryDataset.mock.calls[0][0].measures[0].name).toBe('revenue');
+            expect(getMetaItems).not.toHaveBeenCalled();
+        });
+    }
+
     it('CONTROL: a null `dataset` beside `datasetName` still runs the saved dataset, as it did', async () => {
         const { res, queryDataset } = await post({ dataset: null, datasetName: 'sales', selection });
         expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
