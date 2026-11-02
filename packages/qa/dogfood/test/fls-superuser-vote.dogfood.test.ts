@@ -115,14 +115,20 @@ describe('[ruling 6573563853] a super-user set reads every field an app set mask
     for (const f of MASKED) expect(fields?.[`${OBJ}.${f}`], f).toEqual({ readable: false, editable: false });
   });
 
+  // Each door is asked in two cases, the admin's and the member's, so an
+  // ablation of the vote reds the admin half while the member control stays
+  // green on its own.
+
   // ── list projection ─────────────────────────────────────────────────────────
-  it('list: the admin is served every masked field; the member is served none of them', async () => {
+  it('list: the admin is served every masked field', async () => {
     const a = await stack.apiAs(adminTok, 'GET', `/data/${OBJ}`);
     expect(a.status).toBe(200);
     const adminRow = rowsOf(await a.json()).find((r: any) => r.id === UNIT);
     expect(adminRow, 'the admin lists the seeded unit').toBeTruthy();
     for (const f of ['code', 'kind', 'active']) expect(has(adminRow, f), `admin list carries ${f}`).toBe(true);
+  });
 
+  it('[control] list: the member is served none of the masked fields', async () => {
     const m = await stack.apiAs(memberTok, 'GET', `/data/${OBJ}`);
     expect(m.status).toBe(200);
     const memberRows = rowsOf(await m.json());
@@ -134,63 +140,64 @@ describe('[ruling 6573563853] a super-user set reads every field an app set mask
   });
 
   // ── record read ─────────────────────────────────────────────────────────────
-  it('record read: the admin gets the stored values; the member gets name only', async () => {
+  it('record read: the admin gets the stored values', async () => {
     const stored = await ql.findOne(OBJ, { where: { id: UNIT }, context: SYS });
     const a = await stack.apiAs(adminTok, 'GET', `/data/${OBJ}/${UNIT}`);
     expect(a.status).toBe(200);
     const adminRecord = recordOf(await a.json());
     expect(adminRecord.code).toBe(stored.code);
     expect(adminRecord.kind).toBe(stored.kind);
+  });
 
+  it('[control] record read: the member gets name only', async () => {
+    const stored = await ql.findOne(OBJ, { where: { id: UNIT }, context: SYS });
     const m = await stack.apiAs(memberTok, 'GET', `/data/${OBJ}/${UNIT}`);
-    if (m.status === 200) {
-      const memberRecord = recordOf(await m.json());
-      expect(memberRecord.name).toBe(stored.name);
-      for (const f of MASKED) expect(has(memberRecord, f), `member record strips ${f}`).toBe(false);
-    } else {
-      // A member outside the unit's organization is refused the row itself,
-      // which also serves none of the masked values.
-      expect(m.status).toBe(404);
-    }
+    expect(m.status).toBe(200);
+    const memberRecord = recordOf(await m.json());
+    expect(memberRecord.name).toBe(stored.name);
+    for (const f of MASKED) expect(has(memberRecord, f), `member record strips ${f}`).toBe(false);
   });
 
   // ── sort / filter gate ─────────────────────────────────────────────────────
-  it('sort on a masked field: 200 for the admin, 403 naming the field for the member', async () => {
-    const a = await stack.apiAs(adminTok, 'GET', `/data/${OBJ}?sort=code`);
-    expect(a.status, `admin sort: ${await a.clone().text()}`).toBe(200);
-    expect(rowsOf(await a.json()).length).toBeGreaterThan(0);
+  const FILTER = encodeURIComponent(JSON.stringify({ code: 'ACME' }));
 
-    const m = await stack.apiAs(memberTok, 'GET', `/data/${OBJ}?sort=code`);
-    expect(m.status).toBe(403);
-    const body: any = await m.json();
-    expect(body?.code ?? body?.error?.code).toBe('PERMISSION_DENIED');
-    expect(JSON.stringify(body)).toContain('code');
+  it('sort and filter on a masked field: 200 for the admin', async () => {
+    const sorted = await stack.apiAs(adminTok, 'GET', `/data/${OBJ}?sort=code`);
+    expect(sorted.status, `admin sort: ${await sorted.clone().text()}`).toBe(200);
+    expect(rowsOf(await sorted.json()).length).toBeGreaterThan(0);
+    const filtered = await stack.apiAs(adminTok, 'GET', `/data/${OBJ}?$filter=${FILTER}`);
+    expect(filtered.status, `admin filter: ${await filtered.clone().text()}`).toBe(200);
+    expect(rowsOf(await filtered.json()).map((r: any) => r.id)).toContain(UNIT);
   });
 
-  it('filter on a masked field: 200 for the admin, 403 for the member', async () => {
-    const filter = encodeURIComponent(JSON.stringify({ code: 'ACME' }));
-    const a = await stack.apiAs(adminTok, 'GET', `/data/${OBJ}?$filter=${filter}`);
-    expect(a.status, `admin filter: ${await a.clone().text()}`).toBe(200);
-    expect(rowsOf(await a.json()).map((r: any) => r.id)).toContain(UNIT);
-
-    const m = await stack.apiAs(memberTok, 'GET', `/data/${OBJ}?$filter=${filter}`);
-    expect(m.status).toBe(403);
+  it('[control] sort and filter on a masked field: 403 PERMISSION_DENIED naming the field for the member', async () => {
+    for (const query of ['sort=code', `$filter=${FILTER}`]) {
+      const m = await stack.apiAs(memberTok, 'GET', `/data/${OBJ}?${query}`);
+      expect(m.status, query).toBe(403);
+      const body: any = await m.json();
+      expect(body?.code ?? body?.error?.code, query).toBe('PERMISSION_DENIED');
+      expect(String(body?.error?.message ?? body?.error ?? ''), query).toContain('code');
+    }
   });
 
   // ── explain ─────────────────────────────────────────────────────────────────
-  it('explain: the fls layer masks nothing for the admin and names the masked fields for the member', async () => {
-    const flsOf = async (body: Record<string, unknown>) => {
-      const r = await stack.apiAs(adminTok, 'POST', '/security/explain', body);
-      const text = await r.text();
-      expect(r.status, text).toBe(200);
-      const json: any = JSON.parse(text);
-      const layers = json?.layers ?? json?.data?.layers ?? [];
-      const fls = layers.find((l: any) => l.layer === 'fls');
-      expect(fls, `an fls layer: ${text}`).toBeTruthy();
-      return fls;
-    };
+  const flsOf = async (body: Record<string, unknown>) => {
+    const r = await stack.apiAs(adminTok, 'POST', '/security/explain', body);
+    const text = await r.text();
+    expect(r.status, text).toBe(200);
+    const json: any = JSON.parse(text);
+    const layers = json?.layers ?? json?.data?.layers ?? [];
+    const fls = layers.find((l: any) => l.layer === 'fls');
+    expect(fls, `an fls layer: ${text}`).toBeTruthy();
+    return fls;
+  };
+
+  it('explain: the fls layer masks nothing for the admin', async () => {
     const admin = await flsOf({ object: OBJ, operation: 'read' });
     expect(admin.verdict, admin.detail).toBe('not_applicable');
+  });
+
+  it('[control] explain: the fls layer names every masked field for the member', async () => {
     const member = await flsOf({ object: OBJ, operation: 'read', userId: memberId });
     expect(member.verdict, member.detail).toBe('narrows');
     for (const f of MASKED) expect(member.detail).toContain(f);
