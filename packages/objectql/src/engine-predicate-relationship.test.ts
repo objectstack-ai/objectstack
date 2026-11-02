@@ -138,7 +138,14 @@ describe('#18682 — engine-produced relationship bindings', () => {
     d.storeFor('crm_account').set('acc_empty', { id: 'acc_empty', name: 'E', secret: 's' });
   });
 
-  const relatedReads = () => d.calls.filter((c) => c.object === 'crm_account');
+  // [#29029] The write's reference check asks the caller's read door for each
+  // lookup value it names, projected to `id` alone: that read is the
+  // reference check's, not a rule's related read, so it is not counted here.
+  const isReferenceCheckRead = (c: { ast: any }) => {
+    const fields = c.ast?.fields;
+    return Array.isArray(fields) && fields.length === 1 && fields[0] === 'id';
+  };
+  const relatedReads = () => d.calls.filter((c) => c.object === 'crm_account' && !isReferenceCheckRead(c));
 
   it('projects id plus only the fields the rules name — not the whole row', async () => {
     await engine.insert('crm_opportunity', { name: 'A', amount: 10, account: 'acc_d' }, { context: ACTING } as any);
@@ -488,7 +495,7 @@ describe('#18682 — engine-produced relationship bindings', () => {
     } as any, 'test-package');
     d.calls.length = 0;
     await engine.insert('plain', { name: 'A', account: 'acc_p' }, { context: ACTING } as any);
-    expect(d.calls.filter((c) => c.object === 'crm_account')).toHaveLength(0);
+    expect(relatedReads()).toHaveLength(0);
   });
 });
 

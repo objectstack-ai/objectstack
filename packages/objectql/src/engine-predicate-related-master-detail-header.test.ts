@@ -87,6 +87,7 @@ const LOOKUP_LINE_OBJECT = {
   label: 'Lookup line',
   fields: {
     invoice_ref: { name: 'invoice_ref', label: 'Invoice', type: 'lookup', reference: HEADER },
+    memo: { name: 'memo', label: 'Memo', type: 'text' },
   },
   validations: [{
     name: 'no_refs_to_locked', type: 'script', severity: 'error',
@@ -368,10 +369,15 @@ describe('[#22892] a predicate rule reading its master through the master-detail
     });
 
     it('a plain lookup traversal to the same object is unchanged: the header\'s stored state is judged, and no read door is asked', async () => {
-      const err = await refusalOf(() => engine.insert(LOOKUP_LINE, { invoice_ref: 'h_other_locked' }, { context: ALICE } as any));
+      // [#29029] A non-system write may no longer NAME a header the caller
+      // cannot read through a lookup either, so the rows that already store
+      // one are seeded and the write edits another column of them.
+      storeFor(LOOKUP_LINE).set('ll_locked', { id: 'll_locked', invoice_ref: 'h_other_locked', memo: 'a' });
+      storeFor(LOOKUP_LINE).set('ll_open', { id: 'll_open', invoice_ref: 'h_other_open', memo: 'a' });
+      const err = await refusalOf(() => engine.update(LOOKUP_LINE, { memo: 'b' }, { where: { id: 'll_locked' }, context: ALICE } as any));
       expectRuleVerdict(answerOf(err, 'h_other_locked'));
-      await engine.insert(LOOKUP_LINE, { invoice_ref: 'h_other_open' }, { context: ALICE } as any);
-      expect([...storeFor(LOOKUP_LINE).values()].map((r) => r.invoice_ref)).toEqual(['h_other_open']);
+      await engine.update(LOOKUP_LINE, { memo: 'b' }, { where: { id: 'll_open' }, context: ALICE } as any);
+      expect([...storeFor(LOOKUP_LINE).values()].map((r) => [r.invoice_ref, r.memo])).toEqual([['h_other_locked', 'a'], ['h_other_open', 'b']]);
       expect(headerReads.length).toBeGreaterThan(0);
       expect(headerReads.filter((r) => !r.elevated)).toEqual([]);
     });

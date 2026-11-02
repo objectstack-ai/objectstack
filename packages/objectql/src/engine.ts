@@ -10555,7 +10555,15 @@ export class ObjectQL implements IObjectQLEngine {
     id: unknown,
     context: ExecutionContext | undefined,
   ): Promise<boolean | null> {
-    const master = this.resolveObjectName(target);
+    // [#29029] An unresolvable target fails open here exactly as it does in
+    // {@link referenceExists}: an integrity check that cannot run invents no
+    // rejection.
+    let master: string;
+    try {
+      master = this.resolveObjectName(target);
+    } catch {
+      return null;
+    }
     if (!this._registry.getObject(master)) return null;
     const readable = await this.masterDetailHeadersCallerReads(master, [id], context);
     if (!readable.has(String(id))) return false;
