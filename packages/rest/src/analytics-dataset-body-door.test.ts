@@ -102,9 +102,11 @@ function expectUnknownKeyRefusal(
     expect(res.statusCode, JSON.stringify(res.body)).toBe(400);
     expect(res.body.code).toBe('VALIDATION_FAILED');
     const message = String(res.body.message);
-    expect(message.startsWith(
-        `Unrecognized key(s) on this dataset query: ${keys.map((k) => `\`${k}\``).join(', ')}`,
-    ), message).toBe(true);
+    expect(message.startsWith(`Unrecognized key(s) on this dataset query: \`${keys[0]}\``), message).toBe(true);
+    // Every key named, in the sorted order the field entries carry.
+    const at = keys.map((k) => message.indexOf(`\`${k}\``));
+    expect(at.every((i) => i > 0), message).toBe(true);
+    expect([...at].sort((a, b) => a - b)).toEqual(at);
     const fields: FieldEntry[] = res.body.details?.fields ?? [];
     expect(fields.map((f) => f.field)).toEqual(keys);
     for (const f of fields) expect(f.code).toBe('unknown_field');
