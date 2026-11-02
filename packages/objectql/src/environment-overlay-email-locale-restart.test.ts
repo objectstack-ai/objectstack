@@ -401,7 +401,12 @@ const T = 'email_template';
 const subjectOf = async (protocol: ObjectStackProtocolImplementation, member?: string) =>
     ((await protocol.getMetaItem({ type: T, name: NAME, ...(member !== undefined ? { member } : {}) })) as any)?.item?.subject;
 
-/** The registry's own entry for one member — what a peer, a send or a bare-name engine read is served. */
+/**
+ * The registry's own entry for one member — what a bare-name engine read is
+ * served. [#29600] A pair's override of a member the package ships is not
+ * registered (it is served from its row, which the send reads through the
+ * execution list), so this answers the package's member there.
+ */
 const registrySubject = (engine: ObjectQL, member: string) =>
     (engine.registry.getItem<any>(T, NAME, undefined, member))?.subject;
 
@@ -445,21 +450,25 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
     it('DELETE by member: resetting zh-CN removes its row only, and the en-US overlay stays served — the registry included', async () => {
         const stores = new Map<string, Map<string, Record<string, unknown>>>();
         const { engine, protocol } = await bootWithBothSaved(stores);
-        expect(registrySubject(engine, 'en-US')).toBe('ADMIN en');
-        expect(registrySubject(engine, 'zh-CN')).toBe('ADMIN zh');
+        expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'ADMIN zh' });
+        // [#29600] The pair's override of a member the package ships is served
+        // from its row and never registered under the package's envelope: the
+        // registry's entry is the package's own member.
+        expect(registrySubject(engine, 'en-US')).toBe('PKG en');
+        expect(registrySubject(engine, 'zh-CN')).toBe('PKG zh');
 
         expect(await protocol.deleteMetaItem({ type: T, name: NAME, member: 'zh-CN' })).toMatchObject({ success: true, reset: true });
         expect(overlayRows(stores).map((r) => r.bundle_member ?? null)).toEqual([null]);
         // The reset member is back on the package wording; the other member's
-        // overlay is still the registry's entry — not swept with the group.
+        // overlay is still served — not swept with the group.
         expect(registrySubject(engine, 'zh-CN')).toBe('PKG zh');
-        expect(registrySubject(engine, 'en-US')).toBe('ADMIN en');
+        expect(await subjectOf(protocol, 'en-US')).toBe('ADMIN en');
         expect(await servedSubjects(protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
         expect(await subjectOf(protocol, 'zh-CN')).toBe('PKG zh');
 
         const after = await boot(stores);
         expect(await servedSubjects(after.protocol)).toEqual({ 'en-US': 'ADMIN en', 'zh-CN': 'PKG zh' });
-        expect(registrySubject(after.engine, 'en-US')).toBe('ADMIN en');
+        expect(await subjectOf(after.protocol, 'en-US')).toBe('ADMIN en');
     });
 
     it('DELETE by member of a member NO artifact ships: its overlay leaves the registry, and the canonical overlay stays', async () => {
@@ -479,7 +488,10 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
 
         expect(await protocol.deleteMetaItem({ type: T, name: DIGEST, member: 'zh-CN' })).toMatchObject({ success: true, reset: true });
         expect(digestEntry('zh-CN')).toBeUndefined();
-        expect(digestEntry('en-US')).toBe('ADMIN digest en');
+        // [#29600] The canonical member's override (a member the package
+        // ships) is served from its row; the registry holds the package's.
+        expect(((await protocol.getMetaItem({ type: T, name: DIGEST, member: 'en-US' })) as any)?.item?.subject).toBe('ADMIN digest en');
+        expect(digestEntry('en-US')).toBe('PKG digest en');
         const listed: any = await protocol.getMetaItemsForExecution({ type: T });
         const digest = (listed?.items ?? []).filter((it: any) => it?.name === DIGEST).map((it: any) => `${it.locale}:${it.subject}`);
         expect(digest).toEqual(['en-US:ADMIN digest en']);
@@ -491,7 +503,8 @@ describe('the by-name doors address ONE member by the selector (#22877, stage 2)
         expect(await protocol.deleteMetaItem({ type: T, name: NAME })).toMatchObject({ success: true, reset: true });
         expect(overlayRows(stores).map((r) => r.bundle_member)).toEqual(['zh-CN']);
         expect(registrySubject(engine, 'en-US')).toBe('PKG en');
-        expect(registrySubject(engine, 'zh-CN')).toBe('ADMIN zh');
+        // [#29600] The zh-CN override stays served, from its row.
+        expect(await subjectOf(protocol, 'zh-CN')).toBe('ADMIN zh');
         expect(await subjectOf(protocol)).toBe('PKG en');
     });
 
@@ -739,12 +752,18 @@ describe('the package-batch doors and the cluster fan-out carry the member (#228
 
         await writer.protocol.saveMetaItem({ type: T, name: NAME, item: template('en-US', 'ADMIN en') });
         await writer.protocol.saveMetaItem({ type: T, name: NAME, item: template('zh-CN', 'ADMIN zh') });
-        await vi.waitFor(() => expect(registrySubject(peer.engine, 'zh-CN')).toBe('ADMIN zh'));
-        expect(registrySubject(peer.engine, 'en-US')).toBe('ADMIN en');
+        // [#29600] A pair's override of a shipped member is served from its
+        // row and never enters the registry, so the peer converges on its
+        // served read, and its registry keeps the package's own members.
+        await vi.waitFor(async () => expect(await subjectOf(peer.protocol, 'zh-CN')).toBe('ADMIN zh'));
+        expect(await subjectOf(peer.protocol, 'en-US')).toBe('ADMIN en');
+        expect(registrySubject(peer.engine, 'zh-CN')).toBe('PKG zh');
+        expect(registrySubject(peer.engine, 'en-US')).toBe('PKG en');
 
         await writer.protocol.deleteMetaItem({ type: T, name: NAME, member: 'zh-CN' });
-        await vi.waitFor(() => expect(registrySubject(peer.engine, 'zh-CN')).toBe('PKG zh'));
-        expect(registrySubject(peer.engine, 'en-US')).toBe('ADMIN en');
+        await vi.waitFor(async () => expect(await subjectOf(peer.protocol, 'zh-CN')).toBe('PKG zh'));
+        expect(await subjectOf(peer.protocol, 'en-US')).toBe('ADMIN en');
+        expect(registrySubject(peer.engine, 'zh-CN')).toBe('PKG zh');
     });
 });
 
