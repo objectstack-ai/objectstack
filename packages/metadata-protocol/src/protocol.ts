@@ -397,13 +397,21 @@ import { discardDraftInItsScope, listDrafts } from './protocol-drafts.js';
 // [#25467 cut 13] The package door's save refusal and the origin-gated removal verdict.
 import {
     isPairRowRemoval,
+    namedBaseCloseSubject,
+    namedBaseOverlayWriteRefusal,
     originGatedRemovalRefusal,
     overrideWriteRefusalError,
     overrideWriteVerdict,
     packagelessOverlayWriteRefusal,
     refusePackagedBaseOverride,
 } from './protocol-packaged-base-refusal.js';
-import type { OverrideWriteSubject, OverrideWriteVerdict, PackagelessWriteOperation } from './protocol-packaged-base-refusal.js';
+import type {
+    NamedBaseWriteOperation,
+    NamedBaseWriteSubject,
+    OverrideWriteSubject,
+    OverrideWriteVerdict,
+    PackagelessWriteOperation,
+} from './protocol-packaged-base-refusal.js';
 // [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge.
 import {
     extensionFieldSuffixRefusalError,
@@ -17285,7 +17293,9 @@ export class ObjectStackProtocolImplementation implements
      *
      * `null` — the write stays open, as on `main` — when it names a package
      * (`?package=<base>.custom` stays open, as does every other package's own
-     * door); when no read-only package ships the name (environment metadata);
+     * door; [#28905] the write naming the read-only base itself is closed by
+     * {@link namedBaseOverlayWriteRefusal}, not here); when no read-only
+     * package ships the name (environment metadata);
      * and for every row the ceremony lists and does not move: a name several
      * packages ship (`multi_shipped`), a base with no pair id (`no_pair`), a
      * stored row whose `overrides` names another package
@@ -17325,6 +17335,50 @@ export class ObjectStackProtocolImplementation implements
         };
         const closed = await packagelessCloseSubject.call(host, request);
         return closed ? packagelessOverlayWriteRefusal(request, closed, operation) : null;
+    }
+
+    /**
+     * [#28905, ADR-0146 D1, D11] The write NAMING the read-only base itself
+     * (`?package=<base>`) onto an item of one of the five overlay types that
+     * base ships: the refusal of a save (draft or active), a publish (both
+     * {@link publishMetaItem} and {@link publishPackageDrafts}, through
+     * {@link promoteDraftForPublish}) or a rollback that would land a row bound
+     * to the base. D1 puts a read-only package's customizations in its paired
+     * `<base>.custom`; such a row is served at the base's address with no
+     * declaration, outside the pair, and `os migrate packageless-overlays`
+     * never sees it (its census reads package-less rows only). Refused with
+     * the fix the package-less close names ({@link packagelessOverlayWriteRefusal},
+     * one spelling): write it into the pair, declaring the override.
+     *
+     * Closed on the package-less close's reading of "packaged" — a READ-ONLY
+     * code package among {@link overlayBaseShippers} — and only where that fix
+     * can be taken (a pair id, the ensure door, a base version, the override
+     * write gate admitting the declared body): `namedBaseCloseSubject` in
+     * `protocol-packaged-base-refusal.ts`. `null` — the write stays open, as on
+     * `main` — for a writable package, a package that does not ship the name,
+     * a body carrying `overrides` (the D2 gate's), any other type, and a fix
+     * that could not be taken.
+     *
+     * ⛔ Not a delete: removing a row bound to the base writes nothing, and it
+     * is the only way to clear such a row stored before the close (the
+     * ceremony moves package-less rows only). A row stored before it stays
+     * served until the pair declares the override, which is served over it.
+     *
+     * Authoring writes only: the server-stated rewrites (`source` set, the
+     * `package-duplicate` write face) name the row they rewrite. Registry
+     * reads only.
+     */
+    private namedBaseOverlayWriteRefusal(
+        request: NamedBaseWriteSubject,
+        operation: NamedBaseWriteOperation,
+    ): Error | null {
+        const host: ThisParameterType<typeof namedBaseCloseSubject> = {
+            engine: this.engine,
+            overlayBaseShippers: (...a) => this.overlayBaseShippers(...a),
+            overrideWriteVerdict: (...a) => this.overrideWriteVerdict(...a),
+        };
+        const closed = namedBaseCloseSubject.call(host, request);
+        return closed ? namedBaseOverlayWriteRefusal(request, closed, operation) : null;
     }
 
     /**
@@ -21574,6 +21628,13 @@ export class ObjectStackProtocolImplementation implements
         // This retires the migration window's allowance (a package-less save
         // landing on a pair row the ceremony moved kept that row's
         // declaration): such a save is this refusal now.
+        //
+        // [#28905, ADR-0146 D1, D11] …and the save NAMING the read-only base
+        // itself (`?package=<base>`, draft or active), of an item of one of the
+        // five overlay types it ships: refused with the same fix, the pair
+        // ({@link namedBaseOverlayWriteRefusal}; registry reads only). Before
+        // it, such a save landed an undeclared row bound to the base, served
+        // in place of the base's document and never seen by the ceremony.
         if (request.source === undefined && request.writeFace !== 'package-duplicate') {
             const closed = await this.packagelessOverlayWriteRefusal({
                 type: request.type,
@@ -21583,6 +21644,13 @@ export class ObjectStackProtocolImplementation implements
                 item: request.item,
             }, 'save');
             if (closed) throw closed;
+            const namedBase = this.namedBaseOverlayWriteRefusal({
+                type: request.type,
+                name: request.name,
+                packageId: request.packageId,
+                item: request.item,
+            }, 'save');
+            if (namedBase) throw namedBase;
         }
         const overrideVerdict = this.overrideWriteVerdict(request);
         if (overrideVerdict.verdict === 'refuse' && overrideVerdict.rule !== 'undeclared_same_name') {
@@ -22842,6 +22910,13 @@ export class ObjectStackProtocolImplementation implements
         // Left untouched (the binding survives):
         //   • `override-artifact` writes — an org overlay OF a packaged item
         //     must keep pointing at the package it customizes (ADR-0005).
+        //     [#28905, ADR-0146 D1] Of the five overlay types, an authoring
+        //     write naming the READ-ONLY base that ships the item no longer
+        //     reaches here: {@link namedBaseOverlayWriteRefusal} refused it
+        //     above, naming the pair. What still arrives is a writable
+        //     package's overlay, a server-stated rewrite, a body carrying
+        //     `overrides` (the D2 gate's) and a close whose fix could not be
+        //     taken.
         //   • a project-scoped base, or a bare ADR-0048 authoring-workspace
         //     id — both are writable; `isWritablePackage` returns true.
         // A `null` packageId is still accepted here (legacy org-overlay
@@ -24426,6 +24501,22 @@ export class ObjectStackProtocolImplementation implements
                 singularType, request.name, promoteInto, 'publish',
             );
             if (nameCollision) throw nameCollision;
+        }
+        // [#28905, ADR-0146 D1, D11] …and the promotion INTO the read-only
+        // base itself, of an item of one of the five overlay types it ships:
+        // the active row it writes is bound to the base, outside the pair D1
+        // puts every customization in, as the save naming the base would be,
+        // and is refused with that save's sentence
+        // ({@link namedBaseOverlayWriteRefusal}) before `repo.promoteDraft`
+        // writes, so a batch publish aborts on it as on the refusals above.
+        // Judged on `promoteInto`, the package the active row is written
+        // under; the draft stays a draft, for a delete to discard.
+        if (draftForGate) {
+            const namedBase = this.namedBaseOverlayWriteRefusal({
+                type: singularType, name: request.name, packageId: promoteInto,
+                item: draftForGate.body, ...memberOption(request.member),
+            }, 'publish');
+            if (namedBase) throw namedBase;
         }
         // [ADR-0146 D2] …and the override write gate, on the draft's body and
         // the package it is promoted into, with the save door's judge and
@@ -28563,12 +28654,24 @@ export class ObjectStackProtocolImplementation implements
         // ({@link packagelessOverlayWriteRefusal}): rollback, like source save
         // and reset, is offered on the writable package — the base's paired
         // `.custom`, where `os migrate packageless-overlays` moves the row.
+        //
+        // [#28905, ADR-0146 D1, D11] …and so is the rollback of a row bound to
+        // the read-only base itself (a save naming the base stored it before
+        // that save was closed): the restore writes the base-bound row again,
+        // so it is refused as that save is ({@link namedBaseOverlayWriteRefusal}),
+        // naming the pair a version's body is saved into. The row stays
+        // served; a delete naming the base removes it.
         {
             const closed = await this.packagelessOverlayWriteRefusal(
                 { type: singularType, name: request.name, packageId: rollbackPackageId, state: 'active', ...memberOption(member) },
                 'rollback',
             );
             if (closed) throw closed;
+            const namedBase = this.namedBaseOverlayWriteRefusal(
+                { type: singularType, name: request.name, packageId: rollbackPackageId, ...memberOption(member) },
+                'rollback',
+            );
+            if (namedBase) throw namedBase;
         }
         // [ADR-0146 D2] A rollback of the base's paired `.custom` row is the
         // pair's declared override, as its save is: it edits no managed item,
