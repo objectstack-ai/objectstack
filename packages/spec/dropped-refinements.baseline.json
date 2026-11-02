@@ -3,7 +3,7 @@
   "measured": {
     "zod": "4.4.3",
     "publishedSchemasWithDroppedRefinements": 248,
-    "droppedRefinementSites": 988,
+    "droppedRefinementSites": 993,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -115,6 +115,7 @@
         "manifest.objects.element.membershipKeys",
         "manifest.objects.element.membershipKeys.valueType",
         "manifest.pages.element",
+        "manifest.pages.element.apps",
         "manifest.pages.element.slots.header.options[0].type",
         "manifest.permissions.element.fields.valueType",
         "manifest.permissions.element.objects.valueType.out.out",
@@ -259,6 +260,7 @@
         "data.options[1].manifest.objects.element.membershipKeys",
         "data.options[1].manifest.objects.element.membershipKeys.valueType",
         "data.options[1].manifest.pages.element",
+        "data.options[1].manifest.pages.element.apps",
         "data.options[1].manifest.pages.element.slots.header.options[0].type",
         "data.options[1].manifest.permissions.element.fields.valueType",
         "data.options[1].manifest.permissions.element.objects.valueType.out.out",
@@ -398,6 +400,7 @@
         "options[1].manifest.objects.element.membershipKeys",
         "options[1].manifest.objects.element.membershipKeys.valueType",
         "options[1].manifest.pages.element",
+        "options[1].manifest.pages.element.apps",
         "options[1].manifest.pages.element.slots.header.options[0].type",
         "options[1].manifest.permissions.element.fields.valueType",
         "options[1].manifest.permissions.element.objects.valueType.out.out",
@@ -477,6 +480,7 @@
         "data.packages.element.options[1].manifest.objects.element.membershipKeys",
         "data.packages.element.options[1].manifest.objects.element.membershipKeys.valueType",
         "data.packages.element.options[1].manifest.pages.element",
+        "data.packages.element.options[1].manifest.pages.element.apps",
         "data.packages.element.options[1].manifest.pages.element.slots.header.options[0].type",
         "data.packages.element.options[1].manifest.permissions.element.fields.valueType",
         "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out.out",
@@ -1840,6 +1844,7 @@
     "ui/Page": {
       "sites": [
         "",
+        "apps",
         "interfaceConfig.emptyState.link.url",
         "record.filter.element",
         "record.filter.element.options[0]",
