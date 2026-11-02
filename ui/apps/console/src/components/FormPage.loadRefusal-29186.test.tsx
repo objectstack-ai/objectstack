@@ -43,7 +43,10 @@ const OBJECT = {
 
 const RECORD_ID = 'rec_7Hq2Kx9';
 
-/** A `GET /data/:object/:id` the caller may not read. */
+/**
+ * A `GET /data/:object/:id` on an object the caller has no read right on, as
+ * a showcase member measured it on `showcase_contact`.
+ */
 const PERMISSION_DENIED = {
   status: 403,
   body: {
@@ -133,9 +136,15 @@ describe('a refused edit-form record read draws a localized line (#29186)', () =
   });
 
   it('a 404 says "doesn\'t exist, or you don\'t have access"', async () => {
+    // The body a showcase member measured for an inquiry the private OWD hides
+    // from them — the same shape a missing id answers.
     openEdit({
       status: 404,
-      body: { error: `Record ${RECORD_ID} not found in showcase_task`, code: 'NOT_FOUND' },
+      body: {
+        error: `Record ${RECORD_ID} not found in showcase_task`,
+        code: 'RECORD_NOT_FOUND',
+        object: 'showcase_task',
+      },
     });
     await expectLoadBanner("This record doesn't exist, or you don't have access to it.", 404);
   });
@@ -145,7 +154,7 @@ describe('a refused edit-form record read draws a localized line (#29186)', () =
     // says, the line must not tell "hidden" from "missing".
     openEdit({
       status: 404,
-      body: { error: 'Access denied by row-level security policy', code: 'NOT_FOUND' },
+      body: { error: 'Access denied by row-level security policy', code: 'RECORD_NOT_FOUND' },
     });
     await expectLoadBanner("This record doesn't exist, or you don't have access to it.", 404);
   });
