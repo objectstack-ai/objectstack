@@ -318,6 +318,7 @@ describe('a computed filter operand is a value, never filter structure', () => {
         stages: ['lost', 'won'],
         range: [10, 90],
         mixed: ['r1', { id: 'r2' }],
+        holes: ['r1', null],
         conds: [{ status: 'open' }],
     };
 
@@ -360,6 +361,7 @@ describe('a computed filter operand is a value, never filter structure', () => {
         ['a list where one value belongs', { id: CEL('record.ids') }, 'filter.id', 'a list'],
         ['a list at a list operator\'s element', { id: { $in: [CEL('record.ids')] } }, 'filter.id.$in[0]', 'a list'],
         ['a list operator\'s list holding a non-value', { id: { $in: CEL('record.mixed') } }, 'filter.id.$in', 'a list whose entry [1] is an object'],
+        ['a list operator\'s list holding an empty entry', { id: { $nin: CEL('record.holes') } }, 'filter.id.$nin', 'a list whose entry [1] is nothing'],
     ])('delete_record: an evaluated non-scalar at %s is refused, located at the operand', async (_label, filter, at, kind) => {
         const { result } = await run('delete_record', { objectName: 'deal', filter, multi: true });
 

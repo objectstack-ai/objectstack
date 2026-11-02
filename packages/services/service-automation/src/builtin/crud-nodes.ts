@@ -77,13 +77,16 @@ import { staleSummaryAnswerLines, staleSummaryRefusalOrThrow } from '@objectstac
  * conditions — is what the author wrote; an operand envelope supplies only
  * what a condition compares against. So an operand must evaluate to a value
  * the query takes as a literal ({@link operandValueRefusal}): a string, a
- * number, a boolean or a date, and, at the comparand of an operator whose
- * comparand is a list (`$in`, `$nin`, `$between`), a list of them. Anything
- * else — an object, a list where one value belongs, a list holding anything
- * but values — REFUSES the node before any query, whatever the value's origin
- * (a start input, an assignment, a node output) and whatever the key: handed
- * to the query, a plain object at an operand position is read as structure
- * (an operator map, a nested condition, a field reference), which changes
+ * number, a bigint, a boolean or a date, and, at the comparand of an operator
+ * whose comparand is a list (`$in`, `$nin`, `$between`), a list of them with
+ * no empty entry. Anything else — an object, a list where one value belongs,
+ * a list holding anything but values, a list with an entry that is nothing
+ * (like an operand that is nothing, it adds "the field is empty" to a
+ * condition the author never wrote that way) — REFUSES the node before any
+ * query, whatever the value's origin (a start input, an assignment, a node
+ * output) and whatever the key: handed to the query, a plain object at an
+ * operand position is read as structure (an operator map, a nested
+ * condition, a field reference), which changes
  * which rows the filter matches instead of what it compares against. It is
  * refused as the nothing guard above is, a guard {@link refuseNode}: the
  * filter the author wrote is not the filter that would run. An operand the
@@ -137,10 +140,10 @@ function resolveNodeFilter(
             error:
                 `${nodeType}: refusing to run — ${notValues.length} filter operand(s) evaluated to something other ` +
                 `than a value: ${detail}. A computed filter operand is the value a condition compares against — a ` +
-                `string, number, boolean or date, or a list of them at an \`$in\` / \`$nin\` / \`$between\` ` +
-                `comparand — and is never read as part of the filter's structure, so the query was not run. Make ` +
-                `the expression evaluate to that value (for a record, read its \`id\`), and check the input that ` +
-                `feeds it; a condition the flow needs is written in the filter itself.`,
+                `string, number, bigint, boolean or date, or a list of them with no empty entry at an \`$in\` / ` +
+                `\`$nin\` / \`$between\` comparand — and is never read as part of the filter's structure, so the ` +
+                `query was not run. Make the expression evaluate to that value (for a record, read its \`id\`), and ` +
+                `check the input that feeds it; a condition the flow needs is written in the filter itself.`,
         };
     }
     return { filter };
@@ -163,9 +166,13 @@ const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$
  *
  * A value is a literal comparand of the accepted set
  * (`isAcceptedFilterComparand`, `@objectstack/spec/data`: a string, number,
- * bigint, boolean, `null` or `Date`). At the comparand of a list operator
+ * bigint, boolean, `null` or `Date`); an operand that IS `null` never gets
+ * here, the nothing guard owns it. At the comparand of a list operator
  * ({@link LIST_COMPARAND_OPERATORS}: the operand's path ends in that
- * operator) a list of such values is one too. Every other position takes one
+ * operator) a list of such values is one too, provided no entry is `null`:
+ * an entry that is nothing is refused as the nothing guard refuses an operand
+ * that is nothing, since it adds "the field is empty" to the condition, a
+ * match the author never wrote. Every other position takes one
  * value: a field's implicit equality, a scalar operator's comparand, a list
  * operator's single element, and a combinator's member or `$not`, which take
  * a condition: a condition is written in the filter, never supplied by an
@@ -178,15 +185,16 @@ function operandValueRefusal(value: unknown, path: readonly (string | number)[])
     if (!Array.isArray(value)) return kindOfOperand(value);
     const last = path[path.length - 1];
     if (typeof last !== 'string' || !LIST_COMPARAND_OPERATORS.has(last)) return 'a list';
-    const index = value.findIndex((member) => !isAcceptedFilterComparand(member));
+    const index = value.findIndex((member) => member === null || !isAcceptedFilterComparand(member));
     return index < 0 ? undefined : `a list whose entry [${index}] is ${kindOfOperand(value[index])}`;
 }
 
-/** A non-value's kind, in words (`an object`, `a list`, `a function`). */
+/** A non-value's kind, in words (`nothing`, `an object`, `a list`, `a function`). */
 function kindOfOperand(value: unknown): string {
+    if (value === null || value === undefined) return 'nothing';
     if (Array.isArray(value)) return 'a list';
-    if (typeof value === 'object' && value !== null) return 'an object';
-    return typeof value === 'undefined' ? 'nothing' : `a ${typeof value}`;
+    if (typeof value === 'object') return 'an object';
+    return `a ${typeof value}`;
 }
 
 /** A filter operand's path, in the ledger's spelling (`filter.id.$in[0]`). */
