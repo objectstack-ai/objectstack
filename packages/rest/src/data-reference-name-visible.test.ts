@@ -285,6 +285,19 @@ describe('[#29460] referenceNameVisible — a refused target is served by name a
     expect(users.map((r: any) => r.id).sort()).toEqual(['usr_member', 'usr_peer']);
   });
 
+  it('the engine read itself serves the values the REST reads below carry (ObjectQL over the real driver)', async () => {
+    const rows = await engine.find('rnv_case', {
+      where: { id: { $in: ['c1', 'c2'] } },
+      expand: { account: { object: 'rnv_account' }, vault: { object: 'rnv_vault' }, assignee: { object: 'sys_user' } },
+      context: MEMBER_CTX,
+    } as never);
+    const byId = new Map((rows as any[]).map((r) => [r.id, r]));
+    expect(byId.get('c2').account).toEqual(refused('a2', 'Hidden Co'));
+    expect(byId.get('c1').vault).toEqual(refused('v1', 'Vault One'));
+    expect(byId.get('c2').assignee).toEqual(refused('usr_stranger', 'Sam Stranger'));
+    expect(byId.get('c1').account).toMatchObject({ id: 'a1', secret: 'acme-secret' });
+  });
+
   describe('the key and a target the reader is refused', () => {
     it('a target its row scope hides is served by name and id only', () => {
       expect(c2.account).toEqual(refused('a2', 'Hidden Co'));
