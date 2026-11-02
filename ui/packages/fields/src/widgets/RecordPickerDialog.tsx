@@ -47,6 +47,7 @@ import { RelatedRecordActionsProvider, useRelatedRecordActions } from '@object-u
 import { useFieldTranslation } from './useFieldTranslation.js';
 import { useRecordQuery } from './useRecordQuery.js';
 import { objectResolvesSearch } from './searchOffer.js';
+import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 // The one place a lookup column's display value is decided — shared with the
 // inline dropdown in LookupField so a single `lookupColumns` declaration
 // cannot render two different ways (objectui#5492).
@@ -1234,7 +1235,7 @@ export function RecordPickerDialog({
               placeholder={t('table.search')}
               value={searchQuery}
               onChange={(e) => handleSearchChange(e.target.value)}
-              className="pl-9 pr-9"
+              className={cn('pl-9 pr-9', PHONE_TOUCH_HEIGHT)}
               data-testid="record-picker-search"
             />
             {loading && (
@@ -1268,7 +1269,7 @@ export function RecordPickerDialog({
                     type="button"
                     variant={activeFilterCount > 0 ? 'secondary' : 'outline'}
                     size="sm"
-                    className="gap-1.5 shrink-0"
+                    className={cn('gap-1.5 shrink-0', PHONE_TOUCH_HEIGHT)}
                     onClick={() => setFilterBarOpen(prev => !prev)}
                   >
                     <SlidersHorizontal className="size-3.5" />

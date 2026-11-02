@@ -2,6 +2,8 @@
 
 import type { BetterAuthRateLimitStorage } from '@better-auth/core';
 
+import { serializePerKey } from './per-key-serial.js';
+
 /**
  * The slice of `ICacheService` a fixed-window counter needs. Declared
  * structurally so the in-process fallback below satisfies the SAME contract
@@ -62,17 +64,35 @@ function parseCounter(raw: unknown): Counter | null {
  * each re-set is given only the REMAINING seconds. The envelope is private to
  * this module — every reader goes through {@link parseCounter}.
  *
- * Without an atomic INCR this stays read-modify-write: two nodes can read the
- * same count and both admit a request, so a limit can over-admit slightly
- * under concurrency. That is strictly better than per-node independent
- * counters (ADR-0069 D2); a cache adapter that grows an atomic INCR should be
- * plumbed through `ICacheService` and used here.
+ * Concurrency, inside one process: increments of one key are serialised
+ * ({@link serializePerKey}), so each reads the count the previous one wrote.
+ * A burst of N concurrent increments against one key returns exactly the
+ * counts 1…N, and a limit of `max` admits exactly `max` of them — in the
+ * per-process store and in the kernel cache alike, because the read and the
+ * write are separate awaited calls on both.
+ *
+ * Concurrency, across processes: `ICacheService` carries no atomic increment,
+ * so two NODES counting in one shared cache still read-modify-write against
+ * each other and a limit can over-admit slightly between them. That is
+ * strictly better than per-node independent counters (ADR-0069 D2); a cache
+ * contract that grows an atomic INCR should be plumbed through
+ * `ICacheService` and used here.
  */
-export async function incrementFixedWindow(
+export function incrementFixedWindow(
   store: CounterStore,
   key: string,
   windowSeconds: number,
   now: number = Date.now(),
+): Promise<FixedWindowCount> {
+  return serializePerKey(key, () => incrementFixedWindowOnce(store, key, windowSeconds, now));
+}
+
+/** One read → compute → write; callers reach it only through {@link incrementFixedWindow}. */
+async function incrementFixedWindowOnce(
+  store: CounterStore,
+  key: string,
+  windowSeconds: number,
+  now: number,
 ): Promise<FixedWindowCount> {
   const ttl = Math.max(1, Math.floor(windowSeconds) || 1);
   const current = parseCounter(await store.get<unknown>(key));

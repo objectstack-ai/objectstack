@@ -799,7 +799,11 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
                     // A real Tab stop, so it is revealed on keyboard focus as
                     // well as on hover — itself, or anything in its field
                     // (objectstack#25883). The Button's own ring marks it.
-                    className="h-6 w-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+                    // A touch screen has no hover, so there it is always
+                    // drawn, and below `sm` it is a 44 px target
+                    // (objectstack#29071): otherwise a phone has no way into
+                    // inline edit it can see.
+                    className="h-6 w-6 min-h-[44px] min-w-[44px] sm:min-h-0 sm:min-w-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100 transition-opacity shrink-0"
                     aria-label={t('detail.editInlineHint')}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -927,7 +931,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
             variant="ghost"
             size="sm"
             onClick={toggleShowEmpty}
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+            className="h-11 sm:h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
           >
             {showEmptyOverride ? (
               <EyeOff className="h-3.5 w-3.5 mr-1.5" />
@@ -951,7 +955,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
   // plain heading — the author's declaration holds on every face. An untitled
   // section is the grid alone.
   if (frameless) {
-    const titleRow = 'flex min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground';
+    const titleRow = 'flex min-h-11 sm:min-h-9 w-full items-center justify-between gap-2 py-1.5 text-left text-[13px] font-semibold text-foreground';
     return (
       <section className={cn('@container min-w-0', className)} data-detail-section-face="frameless">
         {section.title && !section.collapsible && (

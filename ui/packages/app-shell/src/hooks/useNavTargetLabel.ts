@@ -71,6 +71,7 @@ import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import type { NavLabelTarget, NavTargetLabelResolver } from '@object-ui/layout';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { bundledFirst, useBundledReads } from '../providers/bundledReads.js';
+import { readObjectsByName } from './useObjectPresence.js';
 
 /**
  * A metadata label (plain string or inline locale map) as display text, or
@@ -138,8 +139,22 @@ function listViewsOf(def: LabelledRecord | undefined): Record<string, LabelledRe
   return views && typeof views === 'object' ? (views as Record<string, LabelledRecord | undefined>) : {};
 }
 
-export function useNavTargetLabel(): NavTargetLabelResolver {
+/**
+ * How the resolver reads an object (objectstack#29121). By default from the
+ * whole `objects` list, as the sidebar and every other caller does. With
+ * `byName`, an `object` or `view` target reads its object by name
+ * (`readObjectsByName`) while nothing has loaded the whole list, so a surface
+ * that names a few objects (Home's recent rows) never loads the registry for
+ * their labels; a `view` target's object is read with its views, which its
+ * label is.
+ */
+export interface NavTargetLabelOptions {
+  byName?: boolean;
+}
+
+export function useNavTargetLabel(options?: NavTargetLabelOptions): NavTargetLabelResolver {
   const metadata = useMetadata();
+  const byName = options?.byName === true;
   const bundledReads = useBundledReads();
   const { objectLabel, viewLabel, dashboardLabel } = useObjectLabel();
   const { language, t } = useObjectTranslation();
@@ -149,13 +164,15 @@ export function useNavTargetLabel(): NavTargetLabelResolver {
     () => (target: NavLabelTarget) => {
       switch (target.kind) {
         case 'object': {
-          const def = findByName(metadata.objects, target.objectName);
+          const objects = byName ? readObjectsByName(metadata, [target.objectName]) : metadata.objects;
+          const def = findByName(objects, target.objectName);
           const text =
             metadataText(def?.label, language) ?? draftText(drafts, 'object', target.objectName, language);
           return nonEmpty(objectLabel({ name: target.objectName, label: text ?? '' }));
         }
         case 'view': {
-          const views = listViewsOf(findByName(metadata.objects, target.objectName));
+          const objects = byName ? readObjectsByName(metadata, [target.objectName], { views: true }) : metadata.objects;
+          const views = listViewsOf(findByName(objects, target.objectName));
           const id = resolveViewId(target.viewName, Object.keys(views), target.objectName);
           const text = metadataText(id ? views[id]?.label : undefined, language);
           return nonEmpty(viewLabel(target.objectName, target.viewName, text ?? ''));
@@ -174,6 +191,6 @@ export function useNavTargetLabel(): NavTargetLabelResolver {
           return undefined;
       }
     },
-    [metadata, bundledReads, objectLabel, viewLabel, dashboardLabel, language, t, drafts],
+    [metadata, byName, bundledReads, objectLabel, viewLabel, dashboardLabel, language, t, drafts],
   );
 }

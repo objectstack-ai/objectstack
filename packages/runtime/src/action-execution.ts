@@ -65,7 +65,8 @@ import {
 // Who may START a flow by name — the one rule the trigger door, this door and
 // the declared endpoint share (the maintainer's rulings, letters B and A, and
 // the flow's own `requiredPermissions`).
-import { flowStartRefusal } from './flow-start-admission.js';
+import { flowRunsElevated, flowStartRefusal } from './flow-start-admission.js';
+import { validationFailure } from './validation-failure.js';
 // [ADR-0066 D4] The capability arithmetic the action gate and the flow start
 // gate share.
 import { missingCapabilities } from './required-capabilities.js';
@@ -1493,8 +1494,16 @@ export function buildApiActionRequest(
     // left out. Without a row (a record-less dispatch) only `id` can be seeded,
     // from the routed `recordId`; anything else has no source and the request
     // goes without it, exactly as a console click from a record-less location.
+    //
+    // [#29173] "Record-less" has ONE meaning here, the one the path half above
+    // uses: the dispatch names no record (`routedRecordId` is empty). The
+    // subject load hands a record-less dispatch an EMPTY object as its
+    // `ctx.record`, and that `{}` is not a row: read as one, every
+    // `execution: 'aggregate'` api action declaring `recordIdParam` was refused
+    // for lacking `id`, and its target never ran. A dispatch that names a record
+    // keeps both #8018 refusals for a row that lacks the field or holds null.
     const recordIdParam: string | undefined = typeof action?.recordIdParam === 'string' && action.recordIdParam ? action.recordIdParam : undefined;
-    if (recordIdParam) {
+    if (recordIdParam && routedRecordId) {
         const field: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
         const row: Record<string, unknown> | undefined =
             input.record && typeof input.record === 'object' ? input.record
@@ -2340,6 +2349,41 @@ function flowActionCallerParamKeys(action: any, objectName: string, params: Reco
 }
 
 /**
+ * The row slots the CALLER's own `params` fill at this door, as flow start
+ * admission's third question reads them ({@link refuseUnreadableFlowStartRecords}):
+ * each row-id key ({@link flowActionRowIdKeys}) the caller's bag names, whose
+ * value reaches the run over the seeded id because the caller's params win
+ * ({@link seedFlowActionParams}). Two cases name none:
+ *
+ *  - an action whose `recordIdField` names a field other than `id`: the door
+ *    seeds every row slot with that field's VALUE, never an id of this
+ *    object, so there is no row of this object to load a slot's value as;
+ *  - a value equal to the routed `recordId` this door's subject load already
+ *    delivered (an object-bound action): that row was judged by that load.
+ */
+function flowActionCallerRecordKeys(
+    action: any,
+    objectName: string,
+    params: Record<string, unknown>,
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): Array<readonly [string, unknown]> {
+    const idField: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+    if (idField !== 'id') return [];
+    const judged = recordId !== undefined && recordId !== '' && !isObjectLessActionKey(objectName) && !subject.recordLoadDenied
+        ? recordId
+        : undefined;
+    const keys: Array<readonly [string, unknown]> = [];
+    for (const key of flowActionRowIdKeys(action, objectName)) {
+        if (!Object.prototype.hasOwnProperty.call(params, key)) continue;
+        const value = params[key];
+        if (judged !== undefined && (typeof value === 'string' || typeof value === 'number') && String(value) === judged) continue;
+        keys.push([key, value]);
+    }
+    return keys;
+}
+
+/**
  * Brand for {@link FlowActionRefusal} — `Symbol.for`, so recognition keeps
  * working even if two module instances of this file ever coexist (src vs
  * dist), where an `instanceof` would silently answer false.
@@ -2555,6 +2599,21 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
             code: startRefusal.code,
         });
     }
+    // Flow start admission's third question, the row the start addresses
+    // (`flow-start-admission.ts`): the routed row was judged by this door's
+    // subject load upstream, so what is asked here is every row slot the
+    // CALLER's own params fill, whose value reaches the run over that row's id.
+    // Each is loaded in the caller's scope by the read the subject load makes
+    // (the request's own driver, environment and identity, as both entrances
+    // load the routed row), and refused with that load's 404 before the run
+    // exists. Thrown with `code` + `status`, like the refusals above.
+    await refuseUnreadableFlowStartRecords(
+        automation,
+        action.target,
+        { objectName, recordKeys: flowActionCallerRecordKeys(action, objectName, params, recordId, subject) },
+        ec,
+        (object, id) => callData(deps, requestContext, 'get', { object, id }, requestContext?.dataDriver, envId, ec),
+    );
     // Pass a proper AutomationContext (the engine never read the former
     // `triggerData` envelope).
     const result: any = await automation.execute(action.target, {
@@ -3627,6 +3686,95 @@ export function apiForwardSubjectRecord(
 ): Record<string, unknown> {
     if (!subject.recordLoadDenied) return subject.record;
     return recordId ? { id: recordId } : {};
+}
+
+/**
+ * The row-slot keys a start hands a run, each with the value the run will
+ * receive under it — what {@link refuseUnreadableFlowStartRecords} loads.
+ */
+export type FlowStartRecordKeys = ReadonlyArray<readonly [key: string, value: unknown]>;
+
+/**
+ * Flow start admission's THIRD question, the row a start addresses
+ * (`flow-start-admission.ts`), as the ONE function every door that starts a
+ * flow by name calls after `flowStartRefusal` and before `execute()`.
+ *
+ * ## The rule
+ *
+ * Every record key a door hands the run in a row slot the door defines
+ * (`recordId`, the `<object>Id` alias, an action's declared `recordIdParam`)
+ * is loaded first, in the CALLER's own scope, through
+ * {@link loadActionSubjectRecord}, and a key that scope does not deliver is
+ * refused by {@link refuseDeniedSubjectLoad}: the action door's own
+ * `404 RECORD_NOT_FOUND`, one envelope for a row the caller cannot read and an
+ * id that names nothing, so no door is an existence oracle the action door
+ * declines to be. Before `execute()`, so a refused start persists no run.
+ *
+ * It holds for every run, as the action door's load does: a persisted run is
+ * built only on a row the caller has shown it can read. A `runAs: 'system'`
+ * run is where the rule bites, because its nodes read and write past the
+ * caller's own access.
+ *
+ * ## The object a key is loaded from
+ *
+ * `objectName` is the object the start names: the action's own object at the
+ * action door, the request's `objectName` (or `object`) at the trigger routes
+ * and a declared endpoint, the object the door hands the run as `object` and
+ * derives the `<object>Id` alias from. A start whose keys come with no object
+ * to load them from (none named, or an object-less action key) cannot be
+ * judged:
+ *
+ *  - an ELEVATED run ({@link flowRunsElevated}) is refused
+ *    `400 VALIDATION_FAILED` naming `objectName`, the one thing the caller
+ *    adds to be judged;
+ *  - a user run starts as before: it reads in the caller's own scope.
+ *
+ * A key whose value is not one record id (a string or a number) is never
+ * loaded and is refused `400 VALIDATION_FAILED` naming the key: only an id
+ * names one row.
+ *
+ * ## What stays as it was
+ *
+ *  - **The system principal** (`isSystem`, never set on inbound HTTP) starts
+ *    every flow on every row, as the two admission rules let it.
+ *  - **A start that names no record key** loads nothing.
+ *  - **A key the door already loaded** is not passed here: the action door's
+ *    subject load judged the routed id, and its tests stay as they are.
+ *
+ * `readRecord` is the door's own caller-scope read, the `callData('get', …)`
+ * its subject load uses, so there is no second loader.
+ */
+export async function refuseUnreadableFlowStartRecords(
+    automation: unknown,
+    flowName: string,
+    start: { objectName: unknown; recordKeys: FlowStartRecordKeys },
+    executionContext: { isSystem?: boolean } | null | undefined,
+    readRecord: (objectName: string, recordId: string) => Promise<unknown>,
+): Promise<void> {
+    if (executionContext?.isSystem === true) return;
+    const named = start.recordKeys.filter(([, value]) => value !== undefined && value !== null && value !== '');
+    if (named.length === 0) return;
+    const objectName = typeof start.objectName === 'string' && start.objectName !== '' && !isObjectLessActionKey(start.objectName)
+        ? start.objectName
+        : undefined;
+    if (objectName === undefined) {
+        if (!(await flowRunsElevated(automation, flowName))) return;
+        const message = 'A start that names a record must also name the record\'s object (`objectName`), '
+            + 'so the caller\'s access to that record can be checked before the flow starts.';
+        throw validationFailure(message, [{ field: 'objectName', code: 'required', message }]);
+    }
+    const loaded = new Set<string>();
+    for (const [key, value] of named) {
+        if (typeof value !== 'string' && typeof value !== 'number') {
+            const message = `The record key \`${key}\` must name one record by its id.`;
+            throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
+        }
+        const recordId = String(value);
+        if (loaded.has(recordId)) continue;
+        const subject = await loadActionSubjectRecord(objectName, recordId, () => readRecord(objectName, recordId));
+        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        loaded.add(recordId);
+    }
 }
 
 /**

@@ -358,6 +358,67 @@ describe('shadcn local patches — application to fresh upstream (objectstack#55
     ]);
   });
 
+  /**
+   * The sixth family: the dialog Close's phone touch target (objectstack#29107).
+   * One patch; the classes are `max-sm:` scoped, so the desktop button keeps
+   * upstream's class list untouched.
+   */
+  it('dialog declares the phone close touch-target patch', () => {
+    const ids = LOCAL_PATCHES.dialog
+      .filter((p: { issue: string }) => p.issue === 'objectstack#29107')
+      .map((p: { id: string }) => p.id);
+    expect(ids).toEqual(['dialog-phone-close-touch-target']);
+  });
+
+  it('gives the upstream dialog Close a 44 px phone box and leaves its desktop classes alone', () => {
+    const result = applyLocalPatches('dialog', UPSTREAM_DIALOG);
+    expect(result.failed).toEqual([]);
+
+    const closeTag = (src: string) => {
+      const m = src.match(/<DialogPrimitive\.Close className="([^"]*)">/);
+      expect(m, 'no DialogPrimitive.Close class list found').not.toBeNull();
+      return m![1].split(/\s+/).filter(Boolean);
+    };
+    const before = closeTag(UPSTREAM_DIALOG);
+    const after = closeTag(result.content);
+
+    for (const c of [
+      'max-sm:size-11',
+      'max-sm:flex',
+      'max-sm:items-center',
+      'max-sm:justify-center',
+      'max-sm:right-1',
+      'max-sm:top-1',
+    ]) {
+      expect(after).toContain(c);
+    }
+    // Every added class is phone-scoped; the rest is upstream, token for token.
+    expect(after.filter((c) => !c.startsWith('max-sm:'))).toEqual(before);
+    // The glyph keeps its 16 px size.
+    expect(result.content).toContain('<X className="h-4 w-4" />');
+  });
+
+  it('refuses when upstream moves the dialog Close off its corner placement', () => {
+    // The anchor names the Close's opening class list. If upstream re-places
+    // the button, the phone box would be computed against a corner that no
+    // longer exists, so the family must refuse rather than land somewhere new.
+    const moved = UPSTREAM_DIALOG.replace(
+      '<DialogPrimitive.Close className="absolute right-4 top-4 ',
+      '<DialogPrimitive.Close className="absolute right-3 top-3 ',
+    );
+    expect(moved).not.toBe(UPSTREAM_DIALOG);
+
+    const result = applyLocalPatches('dialog', moved);
+
+    expect(result.failed.map((p: { id: string }) => p.id)).toEqual([
+      'dialog-phone-close-touch-target',
+    ]);
+    expect(result.failed[0].found).toBe(0);
+    // The close-label family is independent of the class list and still lands.
+    expect(result.applied).toHaveLength(2);
+    expect(result.content).not.toContain('max-sm:size-11');
+  });
+
   it('applies the slider family to fresh upstream, and is idempotent', () => {
     const once = applyLocalPatches('slider', UPSTREAM_SLIDER);
 
@@ -444,7 +505,11 @@ describe('shadcn local patches — application to fresh upstream (objectstack#55
     const result = applyLocalPatches('dialog', UPSTREAM_DIALOG);
 
     expect(result.failed).toEqual([]);
-    expect(result.applied).toHaveLength(2);
+    // Scoped to the close-label family: dialog carries a second family since
+    // objectstack#29107 (the phone close touch target), asserted on its own.
+    expect(
+      result.applied.filter((p: { issue: string }) => p.issue === 'objectstack#5505'),
+    ).toHaveLength(2);
     // The English literal is GONE — this is the actual user-visible defect.
     expect(result.content).not.toContain('<span className="sr-only">Close</span>');
     expect(result.content).toContain('<CloseSrLabel />');
@@ -459,7 +524,7 @@ describe('shadcn local patches — application to fresh upstream (objectstack#55
 
     expect(twice.content).toBe(once.content);
     expect(twice.applied).toEqual([]);
-    expect(twice.already).toHaveLength(2);
+    expect(twice.already).toHaveLength(LOCAL_PATCHES.dialog.length);
     expect(twice.failed).toEqual([]);
   });
 
