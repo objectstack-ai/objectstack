@@ -56,7 +56,6 @@ export const SysPersonalView = ObjectSchema.create({
   managedBy: 'system-data',
   description: "A reader's own named list views (My Views). Visible only to the owner.",
   nameField: 'label', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{label}',
   highlightFields: ['object_name'],
 
   // [ADR-0066 D2] `private`: a plain (non-superuser) `'*'` wildcard grant
