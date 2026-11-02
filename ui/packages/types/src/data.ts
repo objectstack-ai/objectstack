@@ -422,6 +422,12 @@ export interface RecordPagePayload {
   activity?: { total: number; records: Record<string, any>[] } | { error: RecordPagePartRefusal };
   /** The record's newest attachments and their count, or their read's refusal (objectstack#28470). */
   attachments?: { total: number; records: Record<string, any>[] } | { error: RecordPagePartRefusal };
+  /**
+   * How many entries the record's 动态 stream holds over the sources the
+   * request named (objectstack#28737), or the refusal of a comment or
+   * activity read.
+   */
+  timeline?: { total: number } | { error: RecordPagePartRefusal };
 }
 
 /**

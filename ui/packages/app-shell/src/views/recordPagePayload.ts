@@ -31,7 +31,10 @@
  *   - the discussion and the activity → the page's feed, which takes them
  *     from the payload (`recordPageComments` / `recordPageActivity`) instead
  *     of reading `sys_comment`, `sys_comment_reaction` and `sys_activity`
- *     (objectstack#28470).
+ *     (objectstack#28470);
+ *   - the 动态 stream's count → the page's 动态 count (`recordPageTimeline`),
+ *     so the page asks only the activity rows the 动态 panel draws
+ *     (objectstack#28737).
  *
  * Each related list names the lookups of its rows to resolve (`expand`), as
  * the list's own read does, so the rows carry the names the list draws and no
@@ -70,10 +73,12 @@ import { seedRecordApprovals, type ApprovalRequestLite } from '../hooks/useRecor
 const MAX_RELATED = 50;
 
 /**
- * How many activity rows the page asks (objectstack#28470): the window the
- * record feed always read (`$top: 200`). The 动态 panel draws the newest few,
- * but its count and the 动态 tab are the whole merged stream the page holds,
- * so the page asks the window the stream is drawn from, not the panel's peek.
+ * The activity window the record feed reads (`$top: 200`, objectstack#28470):
+ * what the 动态 tab draws in full, and what a page asks when it opens on a
+ * face that draws the whole stream. A page that opens on the 动态 panel asks
+ * only the rows the panel draws, and the stream's count comes with it
+ * (`timeline`, objectstack#28737); the 动态 tab reads this window when it
+ * opens.
  */
 export const RECORD_PAGE_ACTIVITY_ROWS = 200;
 
@@ -210,6 +215,8 @@ export function recordPageRequestOf(plan: {
   activity?: number;
   /** How many attachments, when the page draws them. */
   attachments?: number;
+  /** The sources the page's 动态 stream merges, when it draws the stream's count (objectstack#28737). */
+  timeline?: { discussion: boolean; activity: boolean; fieldChanges: boolean };
 }): RecordPageRequest {
   return {
     ...(plan.expand.length > 0 ? { expand: plan.expand } : {}),
@@ -227,6 +234,7 @@ export function recordPageRequestOf(plan: {
     ...(plan.discussion ? { discussion: true } : {}),
     ...(plan.activity !== undefined ? { activity: { top: plan.activity } } : {}),
     ...(plan.attachments !== undefined ? { attachments: { top: plan.attachments } } : {}),
+    ...(plan.timeline ? { timeline: plan.timeline } : {}),
   };
 }
 
@@ -290,19 +298,43 @@ export function recordPageComments(payload: Promise<RecordPagePayload | null>): 
 
 /**
  * The payload's activity as the record feed's activity read answers it
- * (`{ data }`): rejects with that read's refusal.
+ * (`{ data }`), with how many rows the record holds (`total`), so the feed
+ * knows whether it holds them all: rejects with that read's refusal.
  */
-export function recordPageActivity(payload: Promise<RecordPagePayload | null>): Promise<{ data: Record<string, any>[] }> {
+export function recordPageActivity(
+  payload: Promise<RecordPagePayload | null>,
+): Promise<{ data: Record<string, any>[]; total: number }> {
   return payload.then((page) => {
     const part = page?.activity;
-    if (!page || !part) return { data: [] };
+    if (!page || !part) return { data: [], total: 0 };
     if (isRefused(part)) {
       const thrown = streamRefusal(part.error, 'Activity refused');
       if (thrown) throw thrown;
-      return { data: [] };
+      return { data: [], total: 0 };
     }
-    return { data: part.records ?? [] };
+    const data = part.records ?? [];
+    return { data, total: typeof part.total === 'number' ? part.total : data.length };
   });
+}
+
+/**
+ * The 动态 stream's count as the payload answers it (objectstack#28737):
+ * `total`, and how many of its entries are the comments the payload's
+ * discussion carried (`comments`) — the comment half the feed holds whole and
+ * keeps current through its own writes, so the page's count is
+ * `total - comments + the comments it holds`. `null` when the payload carries
+ * no count or a read behind it was refused: the feed's own refusal says so.
+ */
+export function recordPageTimeline(
+  payload: Promise<RecordPagePayload | null>,
+): Promise<{ total: number; comments: number } | null> {
+  return payload.then((page) => {
+    const part = page?.timeline;
+    if (!page || !part || isRefused(part)) return null;
+    const discussion = page.discussion;
+    const comments = discussion && !isRefused(discussion) ? (discussion.comments ?? []).length : 0;
+    return { total: part.total, comments };
+  }, () => null);
 }
 
 /**

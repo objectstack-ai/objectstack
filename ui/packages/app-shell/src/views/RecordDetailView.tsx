@@ -10,7 +10,7 @@
 
 import { useState, useEffect, useLayoutEffect, useCallback, useContext, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useLocation, useSearchParams, Link } from 'react-router-dom';
-import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RecordFieldChangesContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
+import { activityRowToFeedItem, auditEntriesToFeedItems, bodyTableIdsOf, claimQueuedRecord, RECORD_PAGE_TIMELINE_PANEL, RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordFieldChangesContext, RecordTimelineTotalContext, DefaultRecordPageContext, EMPTY_RELATED_ARRANGEMENT, InlineEditSaveBar, RecordBodyTablesContext, RecordMetaFooter, RecordPageColumns, buildDefaultPageColumns, buildDefaultPageSchema, extractMentions, isRefusedFeedRead, recordPageTierHasRightColumn, recordSitsInQueue, resolveTitleField, useQueueClaimOffered, useRecordEditable, useRecordPageTier } from '@object-ui/plugin-detail';
 import { Empty, EmptyTitle, EmptyDescription, Button, PageHeaderActions, PageHeaderPhoneContext, PageHeaderTrailingContext, PanelToggles, RecordTopBar, cn, useRecordStepKeys, type PanelToggleItem, type RecordTopBarStepper } from '@object-ui/components';
 import { useAuth, createAuthenticatedFetch } from '@object-ui/auth';
 import { usePermissions } from '@object-ui/permissions';
@@ -44,6 +44,7 @@ import {
   recordPageComments,
   recordPageRelatedLists,
   recordPageRequestOf,
+  recordPageTimeline,
   seedRecordPageReaders,
 } from './recordPagePayload.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
@@ -400,6 +401,41 @@ function mergeFeedRows(prev: readonly FeedItem[], incoming: readonly FeedItem[])
     const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
     return ta - tb;
   });
+}
+
+/**
+ * The record feed's own read of the activity window (`$top:
+ * RECORD_PAGE_ACTIVITY_ROWS`, newest first): the feed's read where the page
+ * payload carries no activity, and the 动态 tab's when it opens on a feed that
+ * holds only the 动态 panel's rows (objectstack#28737). The actor's record in
+ * place of its id, so a row with no `actor_name` names its user instead of
+ * reading "System" (objectui#12067); the `record:activity` block's own read
+ * passes the same expand.
+ */
+function activityWindowQuery(objectName: string, recordId: string) {
+  return {
+    $filter: { object_name: objectName, record_id: recordId },
+    $orderby: { timestamp: 'desc' as const },
+    $top: RECORD_PAGE_ACTIVITY_ROWS,
+    $expand: ['actor_id'],
+  };
+}
+
+/**
+ * `sys_activity` rows as feed items, through `record:activity`'s own reading
+ * (`activityRowToFeedItem`). `null` is the ONE outcome that drops a row, and
+ * it means exactly one thing: a type the shared table maps to no entry ON
+ * PURPOSE (`RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES` — their content lives in
+ * `sys_comment`, or they are account events rather than record activity).
+ * Everything else comes back as an item, including a type nobody has mapped.
+ */
+function activityRowsToFeedItems(rows: readonly any[], systemActorLabel: string): FeedItem[] {
+  const mapped: FeedItem[] = [];
+  for (const row of rows) {
+    const item = activityRowToFeedItem(row, systemActorLabel);
+    if (item) mapped.push(item);
+  }
+  return mapped;
 }
 
 /**
@@ -831,6 +867,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // rows (objectui#11195), so a refusal on record A never reaches record B's
   // panel.
   const [feedRefusalByRecord, setFeedRefusalByRecord] = useState<Record<string, FeedRefusal>>({});
+  // objectstack#28737 — the 动态 stream's count the page payload answered, per
+  // record (`recordPageTimeline`): `null` when it carried none.
+  const [timelineCountByRecord, setTimelineCountByRecord] = useState<Record<string, { total: number; comments: number } | null>>({});
+  // objectstack#28737 — the records whose feed holds only the 动态 panel's
+  // activity rows of more: the 动态 tab reads the window when it opens.
+  const [activityPeekByRecord, setActivityPeekByRecord] = useState<Record<string, boolean>>({});
   const [mentionSuggestions, setMentionSuggestions] = useState<MentionSuggestion[]>([]);
   // Screen-flow runtime: a paused `screen`-node flow launched from a record action.
   const [screenFlow, setScreenFlow] = useState<ScreenFlowState | null>(null);
@@ -1099,6 +1141,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     feedKey: string;
     discussion: boolean;
     activity: boolean;
+    /**
+     * objectstack#28737 — how many activity rows the payload asked (fewer
+     * than the window when it asked the 动态 panel's), and whether it asked
+     * the stream's count.
+     */
+    activityRows: number;
+    timeline: boolean;
   } | null>(null);
   // objectstack#26589 — the record this viewer just decided an approval on,
   // as `objectName` + `recordId`. A pending approver with no standing access
@@ -2244,13 +2293,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // list names the lookups of its rows to resolve, as `RelatedList`'s own read
   // expands them (every declared reference of the child but the parent's,
   // gated by field-level security), so its rows carry the names the list draws.
+  // The audit history gate (the audit read below explains its three
+  // preconditions), read here first: the 动态 stream's count names the field
+  // changes as one of its sources (objectstack#28737).
+  const historyEnabled = useMemo(() => {
+    if (!objectDef) return false;
+    if (objectDef.name === 'sys_audit_log') return false;
+    if (objectDef.enable?.trackHistory !== true) return false;
+    return objects.some((o: any) => o.name === 'sys_audit_log');
+  }, [objectDef, objects]);
+  const feedPageOnOpen = useMemo(
+    () => (!effectivePage ? null : objectDef?.enable?.feeds !== false ? effectivePage : stripDiscussionNodes(effectivePage)),
+    [effectivePage, objectDef],
+  );
   const feedOnOpen = useMemo(() => {
-    if (!effectivePage) return false;
-    const page = objectDef?.enable?.feeds !== false ? effectivePage : stripDiscussionNodes(effectivePage);
+    const page = feedPageOnOpen;
     if (page == null) return false;
     return (pageColumnsEligible && buildDefaultPageColumns(page) !== null)
       || pageShowsNodeOnOpen(page, FEED_CONSUMER_TYPES, activeTabParam);
-  }, [effectivePage, objectDef, pageColumnsEligible, activeTabParam]);
+  }, [feedPageOnOpen, pageColumnsEligible, activeTabParam]);
   const recordPagePlan = useMemo(() => {
     if (!hasPage || !objectName || !pureRecordId || typeof dataSource?.getRecordPage !== 'function') return '';
     if (objectName === SYS_APPROVAL_REQUEST_OBJECT) return '';
@@ -2279,11 +2340,25 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // draws the 动态 panel the assigned one may not) changes them and asks nothing
   // again (objectui#11699). The feed effect reads which streams the payload
   // carries off `recordPageRead`, and asks the rest itself.
+  //
+  // objectstack#28737 — a page that draws the 动态 panel (the synthesized page
+  // laid out in columns) draws the stream's count beside it: the payload counts
+  // the stream (`timeline`, over the sources the stream merges), so the page
+  // asks only the activity rows the panel draws, unless it opens on the 动态
+  // tab, which draws the whole window. The tab reads that window itself when
+  // it opens later (the window effect below).
+  const timelineDrawnOnOpen = feedOnOpen && pageColumnsEligible && !!feedPageOnOpen && buildDefaultPageColumns(feedPageOnOpen) !== null;
+  const timelinePeekOnOpen = timelineDrawnOnOpen && enlargedRelatedParam !== RECORD_PAGE_TIMELINE_PANEL;
+  const streamDiscussion = feedOnOpen && objectDef?.enable?.feeds !== false;
+  const streamActivity = feedOnOpen && objectDef?.enable?.activities !== false;
   const recordPageStreams = {
-    ...(feedOnOpen && objectDef?.enable?.feeds !== false ? { discussion: true } : {}),
-    ...(feedOnOpen && objectDef?.enable?.activities !== false ? { activity: RECORD_PAGE_ACTIVITY_ROWS } : {}),
+    ...(streamDiscussion ? { discussion: true } : {}),
+    ...(streamActivity ? { activity: timelinePeekOnOpen ? RECORD_TIMELINE_PANEL_MAX_ENTRIES : RECORD_PAGE_ACTIVITY_ROWS } : {}),
     ...(objectDef?.enable?.files === true || hasExplicitAttachments(effectivePage as any)
       ? { attachments: RECORD_PAGE_ATTACHMENT_ROWS }
+      : {}),
+    ...(timelineDrawnOnOpen && (streamDiscussion || streamActivity)
+      ? { timeline: { discussion: streamDiscussion, activity: streamActivity, fieldChanges: historyEnabled } }
       : {}),
   };
   const recordPageStreamsRef = useRef(recordPageStreams);
@@ -2316,6 +2391,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       feedKey: `${objectName}:${pureRecordId}`,
       discussion: plan.discussion === true,
       activity: plan.activity !== undefined,
+      activityRows: plan.activity ?? 0,
+      timeline: plan.timeline !== undefined,
     };
     seedRecordPageReaders({ payload, objectName, recordId: pureRecordId, principal: recordPagePrincipal, ...plan });
   }, [recordPagePlan, objectName, pureRecordId, dataSource, recordPagePrincipal]);
@@ -2480,12 +2557,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // browser never receives serialized old_value/new_value payloads, which
   // can contain restricted fields. Field-level redaction in PR2 will harden
   // this further once a backend-scoped audit endpoint exists.
-  const historyEnabled = useMemo(() => {
-    if (!objectDef) return false;
-    if (objectDef.name === 'sys_audit_log') return false;
-    if (objectDef.enable?.trackHistory !== true) return false;
-    return objects.some((o: any) => o.name === 'sys_audit_log');
-  }, [objectDef, objects]);
+  // (`historyEnabled` itself is read further up, where the page payload's
+  // `timeline` part names the field changes as a source of the 动态 stream.)
 
   // ── Capability gates: enable.feeds / enable.activities (objectstack-ai/objectstack#2707) ─────
   // Both are opt-OUT capabilities (spec default `true`): absent enable
@@ -3109,35 +3182,34 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     const activityRead: Promise<any> | null = !activitiesEnabled
       ? null
       : fromPage?.activity
-        // objectstack#28470 — the payload's activity: the newest
-        // RECORD_PAGE_ACTIVITY_ROWS rows, the actor expanded.
+        // objectstack#28470 — the payload's activity: the newest rows it
+        // asked (the window, or the 动态 panel's, objectstack#28737), the
+        // actor expanded.
         ? recordPageActivity(fromPage.payload)
-        : dataSource.find('sys_activity', {
-            $filter: { object_name: objectName, record_id: pureRecordId },
-            $orderby: { timestamp: 'desc' },
-            $top: RECORD_PAGE_ACTIVITY_ROWS,
-            // The actor's record in place of its id, so a row with no `actor_name`
-            // names its user instead of reading "System" (objectui#12067). The
-            // shared constructor reads it; the `record:activity` block's own read
-            // passes the same expand.
-            $expand: ['actor_id'],
-          });
+        : dataSource.find('sys_activity', activityWindowQuery(objectName, pureRecordId));
+    // objectstack#28737 — the stream's count, when the payload asked it.
+    // Collected with the reads, so the panel leaves its loading state with the
+    // count it names. A read without the payload holds the whole window and
+    // counts its own rows.
+    if (fromPage?.timeline) {
+      inFlight.push(recordPageTimeline(fromPage.payload).then((count) => {
+        setTimelineCountByRecord(prev => ({ ...prev, [threadId]: count }));
+      }));
+    } else {
+      setTimelineCountByRecord(prev => (prev[threadId] == null ? prev : { ...prev, [threadId]: null }));
+    }
     if (activityRead) inFlight.push(activityRead
       .then((res: any) => {
         recordRefusal('activity', false);
+        // objectstack#28737 — the payload asked only the 动态 panel's rows and
+        // the record holds more: the 动态 tab reads the window when it opens.
+        const peek = !!fromPage?.activity
+          && fromPage.activityRows < RECORD_PAGE_ACTIVITY_ROWS
+          && typeof res?.total === 'number'
+          && res.total > (res?.data?.length ?? 0);
+        setActivityPeekByRecord(prev => ((prev[threadId] ?? false) === peek ? prev : { ...prev, [threadId]: peek }));
         if (!res?.data?.length) return;
-        const systemActorLabel = t('detail.systemActor', { defaultValue: 'System' });
-        const mapped: FeedItem[] = [];
-        for (const row of res.data) {
-          // `null` is the ONE outcome that drops a row, and it means exactly
-          // one thing: a type the shared table maps to `undefined` ON PURPOSE
-          // (`commented` / `mentioned` / `login` / `logout` — their content
-          // lives in `sys_comment`, or they are account events rather than
-          // record activity). Everything else comes back as an item, including
-          // a type nobody has mapped yet.
-          const item = activityRowToFeedItem(row, systemActorLabel);
-          if (item) mapped.push(item);
-        }
+        const mapped = activityRowsToFeedItems(res.data, t('detail.systemActor', { defaultValue: 'System' }));
         if (!mapped.length) return;
         // Merge by id into THIS record's slice (timeline events are
         // append-only); `mergeFeedRows` sorts by createdAt ascending so the
@@ -3164,6 +3236,50 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
     return () => { cancelled = true; };
   }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady]);
+
+  // ── The 动态 tab's activity window (objectstack#28737) ─────────────────
+  //
+  // A page that opened on the 动态 panel asked only the activity rows the
+  // panel draws. The 动态 tab draws the whole stream, so when it opens on a
+  // record whose feed holds fewer activity rows than the record has, the
+  // window is read here — once per record, merged into its slice by id as the
+  // feed's own read merges. A record whose rows the payload held whole (none,
+  // or fewer than the panel's) reads nothing.
+  const timelineTabOpen = enlargedRelatedParam === RECORD_PAGE_TIMELINE_PANEL;
+  const activityPeekHeld = feedRecordKey ? activityPeekByRecord[feedRecordKey] === true : false;
+  useEffect(() => {
+    if (!timelineTabOpen || !activityPeekHeld || !dataSource || !objectName || !pureRecordId || !activitiesEnabled) return;
+    const threadId = `${objectName}:${pureRecordId}`;
+    setActivityPeekByRecord(prev => ({ ...prev, [threadId]: false }));
+    // Written under the record it was read for, so an answer landing after a
+    // step to another record fills this one's slice, never the one on screen.
+    Promise.resolve(dataSource.find('sys_activity', activityWindowQuery(objectName, pureRecordId)))
+      .then((res: any) => {
+        const mapped = activityRowsToFeedItems(res?.data ?? [], t('detail.systemActor', { defaultValue: 'System' }));
+        if (!mapped.length) return;
+        setFeedItemsByRecord(prev => ({
+          ...prev,
+          [threadId]: mergeFeedRows(prev[threadId] ?? EMPTY_FEED, mapped),
+        }));
+      })
+      .catch((err: unknown) => {
+        // The tab keeps the panel's rows; the stream's count stays the
+        // payload's, so it still names the whole stream.
+        console.warn('[RecordDetailView] Failed to read the activity window for the 动态 tab:', err);
+      });
+    // `t` is identity-stable per language.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timelineTabOpen, activityPeekHeld, dataSource, objectName, pureRecordId, activitiesEnabled]);
+
+  // The 动态 stream's count where the payload answered one (objectstack#28737):
+  // its total with the comments it counted replaced by the comments the feed
+  // holds now, which this view keeps whole and current through its own
+  // comment writes. `null` (no count answered): the stream counts its rows.
+  const timelineServed = feedRecordKey ? timelineCountByRecord[feedRecordKey] ?? null : null;
+  const heldCommentCount = useMemo(() => feedItems.filter((item) => item.type === 'comment').length, [feedItems]);
+  const timelineTotal = timelineServed
+    ? Math.max(0, timelineServed.total - timelineServed.comments + heldCommentCount)
+    : null;
 
   /**
    * Note: comment-mention → notification fan-out lives on the server
@@ -4730,6 +4846,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`. */}
         <RecordFieldChangesContext.Provider value={assignedPage ? null : timelineFieldChanges}>
+        {/* objectstack#28737 — the whole stream's count, for the 动态 panel,
+            its tab and the tab row's probe. */}
+        <RecordTimelineTotalContext.Provider value={assignedPage ? null : timelineTotal}>
         {/* No `approval` handler in the set below (objectui#3055): the record
             page has no bespoke approval action TYPE any more. A decision is an
             ordinary `type:'api'` action declared on `sys_approval_request` and
@@ -5001,6 +5120,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           )}
           {modalElement}
         </ActionProvider>
+        </RecordTimelineTotalContext.Provider>
         </RecordFieldChangesContext.Provider>
         </DiscussionContextProvider>
         </HighlightFieldsProvider>
