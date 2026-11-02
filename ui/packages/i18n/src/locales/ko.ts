@@ -262,6 +262,11 @@ const ko = {
       show: 'QR 코드 표시',
       hide: 'QR 코드 숨기기',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: '코드 스캔',
+      failed: '스캔하지 못했습니다',
+    },
     image: {
       upload: "이미지 업로드",
       addMore: "이미지 더 추가",
@@ -4871,6 +4876,18 @@ const ko = {
     retry: "다시 시도",
     emptyTitle: "연결이 필요한 커넥터가 없습니다",
     emptyBody: "설치된 앱 중 관리자가 OAuth로 로그인하는 커넥터가 없습니다.",
+    clientKeptWithSecret: "OAuth 클라이언트 {{clientId}}, 시크릿 저장됨",
+    clientKept: "OAuth 클라이언트 {{clientId}}, 시크릿 없음",
+    clientTitle: "{{name}}의 OAuth 클라이언트",
+    clientIntro: "이 커넥터는 조직이 이 배포용으로 공급업체에 등록한 OAuth 클라이언트로 로그인합니다. 클라이언트 ID와, 공급업체가 발급한 경우 클라이언트 시크릿을 입력한 후 공급업체 로그인으로 계속하세요. 클라이언트에 등록할 리디렉션 URI는 커넥터 문서에 설명되어 있습니다.",
+    clientStored: "저장된 클라이언트: {{clientId}}",
+    clientStoredSecret: "클라이언트 시크릿이 함께 저장되어 있습니다. 표시되지 않습니다.",
+    clientStoredNoSecret: "저장된 클라이언트 시크릿이 없습니다.",
+    clientResend: "다시 연결하면 클라이언트를 다시 보냅니다. 클라이언트 ID는 그대로 두고 시크릿이 있으면 다시 입력하거나, 다른 클라이언트를 입력해 교체하세요.",
+    clientId: "클라이언트 ID",
+    clientSecret: "클라이언트 시크릿",
+    clientSecretHint: "공개 클라이언트는 비워 두세요. 시크릿은 연결과 함께 암호화되어 저장되며 다시 표시되지 않습니다.",
+    clientContinue: "로그인으로 계속",
   },
   setupAssignments: {
     positionsTitle: "직책 보유자",
