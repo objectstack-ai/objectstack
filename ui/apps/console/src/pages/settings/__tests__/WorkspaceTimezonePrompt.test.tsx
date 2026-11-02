@@ -341,6 +341,10 @@ describe('a browser zone the door would refuse is never offered (objectui#11758)
 
   it('no browser zone at all → no prompt and no request', async () => {
     browserZone = undefined;
+    // Nor a currency to offer (objectstack#28872): a language with no country
+    // region maps to none, so the prompt has nothing to ask about either key.
+    vi.spyOn(window.navigator, 'languages', 'get').mockReturnValue(['es-419']);
+    vi.spyOn(window.navigator, 'language', 'get').mockReturnValue('es-419');
     renderPrompt(ADMIN);
     await settle();
     expect(screen.queryByRole('dialog')).toBeNull();

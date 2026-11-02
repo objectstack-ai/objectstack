@@ -5215,6 +5215,13 @@ export class AutomationEngine implements IAutomationService {
      * `engine.execute`. Scanning only `subflow` would let a `map` caller break
      * exactly the way §7.3 exists to prevent.
      *
+     * [#28846] At EVERY region depth: a `subflow` / `map` node inside a
+     * `loop` body, a `parallel` branch or a `try_catch` slot calls its child
+     * on each pass exactly as a top-level one does, so a guard that read only
+     * the top-level `nodes` armed a caller onto a disabled child and let that
+     * child be switched off under it. The regions are read through
+     * `collectFlowGraphs`, the spec's one region walk, never a second walker.
+     *
      * ⛔ The historical `flow` alias for `config.flowName` is NOT read here.
      * ADR-0087 D2's conversion `flow-node-subflow-flow-alias` canonicalizes it
      * at load, so only the canonical key reaches a registered definition;

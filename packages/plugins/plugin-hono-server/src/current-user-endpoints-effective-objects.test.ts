@@ -17,7 +17,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
-import { buildEffectiveObjectPermissions } from '@objectstack/core';
+import { buildEffectiveObjectPermissions, registryObjectPackageDisabled } from '@objectstack/core';
 import { registerCurrentUserEndpoints } from './current-user-endpoints';
 
 const ME_PERMISSIONS = '/api/v1/auth/me/permissions';
@@ -50,9 +50,16 @@ const SCHEMAS: Record<string, any> = {
     vault: { name: 'vault', access: { default: 'private' } },
 };
 
+/** [#28877] Objects whose owning package the registry reports disabled — empty but in one case. */
+const DISABLED = new Set<string>();
+
 const ql = {
     find: async () => [],
-    registry: { getAllApps: () => [], getAllObjects: () => Object.values(SCHEMAS) },
+    registry: {
+        getAllApps: () => [],
+        getAllObjects: () => Object.values(SCHEMAS),
+        isObjectPackageDisabled: (name: string) => DISABLED.has(name),
+    },
     getSchema: (name: string) => SCHEMAS[name],
 };
 
@@ -166,6 +173,28 @@ describe('[#18783] /auth/me/permissions `objects` is the one effective-map funct
         expect(body.objects.report.allowTransfer).not.toBe(true);
         // …while an object it does not name takes its wildcard, every bit the wildcard grants.
         expect(body.objects.deal).toMatchObject({ allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true, allowTransfer: true });
+    });
+
+    it('[#28877] leaves out an object of a disabled package, as the data plane refuses it — the same bytes', async () => {
+        DISABLED.add('report').add('deal');
+        try {
+            const body: any = await (await mount().request(`http://localhost${ME_PERMISSIONS}`)).json();
+            const expected = buildEffectiveObjectPermissions(RESOLVED, {
+                allSchemas: () => ql.registry.getAllObjects(),
+                schemaOf: (name) => ql.getSchema(name),
+                isObjectPackageDisabled: registryObjectPackageDisabled(ql.registry),
+            });
+            expect(JSON.stringify(body.objects)).toBe(JSON.stringify(expected));
+            // `report` reached the map by the super-user seed, `deal` by an explicit grant.
+            expect(Object.keys(body.objects)).not.toContain('report');
+            expect(Object.keys(body.objects)).not.toContain('deal');
+            expect(body.objects.sys_member).toMatchObject({ allowRead: true });
+        } finally {
+            DISABLED.clear();
+        }
+        // Re-enabled: back on the next request.
+        const again: any = await (await mount().request(`http://localhost${ME_PERMISSIONS}`)).json();
+        expect(again.objects.deal).toMatchObject({ allowEdit: true });
     });
 
     it('keeps the rest of the envelope on its own merges', async () => {

@@ -109,6 +109,12 @@ const TREE_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // pack. This control is a tree-GRID — a table of rows re-read in place — so
   // it takes the name `ObjectGrid` gives the very same bar.
   'grid.refreshing': 'Refreshing…',
+  // The loading and empty placeholders read the bundle's `common.*` pair, the
+  // keys the sibling renderers (`element:repeater`, `element:record_picker`)
+  // read for theirs, so a zh-CN page never shows English here. The object-tree
+  // contract declares no empty-text key, so nothing authored overrides them.
+  'common.loading': 'Loading…',
+  'common.noData': 'No data',
 };
 
 const useTreeTranslation = createSafeTranslation(
@@ -1157,8 +1163,9 @@ export const ObjectTree: React.FC<ObjectTreeProps> = ({
     onRowClick,
   });
 
-  // Heading of the record-detail overlay rendered at the bottom of this file.
-  // Must stay above the conditional returns below — rules-of-hooks.
+  // The placeholders below and the record-detail overlay heading rendered at
+  // the bottom of this file. Must stay above the conditional returns below —
+  // rules-of-hooks.
   const { t } = useTreeTranslation();
 
   if (error) {
@@ -1181,7 +1188,7 @@ export const ObjectTree: React.FC<ObjectTreeProps> = ({
   if (records === null || (loading && records.length === 0)) {
     return (
       <div className={cn('flex items-center justify-center h-40 text-muted-foreground', className)}>
-        <p>Loading…</p>
+        <p>{t('common.loading')}</p>
       </div>
     );
   }
@@ -1189,7 +1196,7 @@ export const ObjectTree: React.FC<ObjectTreeProps> = ({
   if (records.length === 0) {
     return (
       <div className={cn('flex items-center justify-center h-40 text-muted-foreground', className)}>
-        <p>No records</p>
+        <p>{t('common.noData')}</p>
       </div>
     );
   }
