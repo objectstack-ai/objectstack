@@ -1753,6 +1753,36 @@ describe('ListView', () => {
       expect(screen.getByText('Hide fields')).toBeInTheDocument();
     });
 
+    // objectstack#28912: `hideFields` defaults ON, matching the spec default
+    // (`UserActionsConfigSchema`). A view that says nothing offers the
+    // control; `hideFields: false` withholds it.
+    it('should show Hide fields when userActions omits hideFields (default ON)', () => {
+      const schema = {
+        type: 'list-view',
+        compactToolbar: false,
+        objectName: 'contacts',
+        viewType: 'grid',
+        columns: ['name', 'email'],
+      } as unknown as ListViewSchema;
+
+      renderWithProvider(<ListView schema={schema} />);
+      expect(screen.getByText('Hide fields')).toBeInTheDocument();
+    });
+
+    it('should not show Hide fields when userActions.hideFields is false', () => {
+      const schema = {
+        type: 'list-view',
+        compactToolbar: false,
+        objectName: 'contacts',
+        viewType: 'grid',
+        columns: ['name', 'email'],
+        userActions: { hideFields: false },
+      } as unknown as ListViewSchema;
+
+      renderWithProvider(<ListView schema={schema} />);
+      expect(screen.queryByText('Hide fields')).not.toBeInTheDocument();
+    });
+
     it('should hide Group when userActions.group is false', () => {
       const schema = {
         type: 'list-view',
@@ -1768,17 +1798,19 @@ describe('ListView', () => {
 
     it('should keep the legacy show* flags working — stored views carry them', () => {
       // Folded by normalizeListViewSchema, so the renderer sees only userActions.
+      // Since `hideFields` defaults ON (objectstack#28912) a legacy `true` is
+      // indistinguishable from silence, so the fold is pinned by its `false`.
       const schema = {
         type: 'list-view',
         compactToolbar: false,
         objectName: 'contacts',
         viewType: 'grid',
         columns: ['name', 'email'],
-        showHideFields: true,
+        showHideFields: false,
       } as unknown as ListViewSchema;
 
       renderWithProvider(<ListView schema={schema} />);
-      expect(screen.getByText('Hide fields')).toBeInTheDocument();
+      expect(screen.queryByText('Hide fields')).not.toBeInTheDocument();
     });
 
     it('should let userActions win over a conflicting legacy flag', () => {

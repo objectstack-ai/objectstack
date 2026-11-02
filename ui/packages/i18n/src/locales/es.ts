@@ -897,7 +897,6 @@ const es = {
     resetToViewDefault: "Restablecer los valores predeterminados de la vista",
     recordOpen: "Abrir registros",
     recordOpenDrawer: "Panel lateral",
-    recordOpenSplit: "Dividido",
     recordOpenPage: "Página completa",
     recordOpenNote: "Tu preferencia personal, no forma parte de la declaración del objeto. El ↗ de un registro siempre abre la página completa.",
     recordOpenDeclaredPage: "Este objeto está declarado para abrirse como página completa",
