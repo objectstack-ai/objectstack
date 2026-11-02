@@ -807,6 +807,32 @@ interface StudioSavedDraft {
   name: string;
 }
 
+/**
+ * objectstack#28984 — a landed draft AUTOSAVE says what it saved, by the
+ * item's label, as Studio's other writes do (publish names what went live,
+ * discard says "Draft discarded: LABEL"). The top bar's "Saved HH:MM" stays,
+ * but it names nothing, and only feedback that names the item counts as write
+ * feedback (ruling 6545938831 ② on #28345).
+ *
+ * The autosave lands after every editing pause, so the toast carries one
+ * sonner id per item: a later save of the same item UPDATES the toast already
+ * on screen instead of stacking another (the `PACKAGE_LIST_TOAST_ID` pattern
+ * above). Typing a label is one live toast, not one per pause; another item
+ * saved meanwhile gets its own. Called only once the save has landed: a
+ * refused save keeps its refusal strip and says nothing about saving, and a
+ * conflict the author settled by reloading saved nothing.
+ */
+function announceDraftSaved(saved: StudioSavedDraft, label: string, locale: string): void {
+  toast.success(tFormat('engine.studio.draftSaved', locale, { item: label || saved.name }), {
+    id: draftSavedToastId(saved),
+  });
+}
+
+/** The one sonner id a draft save of this item announces under. */
+function draftSavedToastId(saved: StudioSavedDraft): string {
+  return `studio-draft-saved:${saved.type}:${saved.name}`;
+}
+
 /** Top-bar package switcher: list app packages (writable base vs read-only
  * code), switch by navigation, create a new writable base via the standard
  * CreatePackageDialog, and open the standard PackageDetailSheet (info +
@@ -5309,6 +5335,8 @@ export function InterfacesPillar({
       setLeafRefusedFor(null);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setIfDirty(false);
+      // objectstack#28984 — named as the rail names the leaf.
+      announceDraftSaved({ type: current.type, name: current.name }, current.label, locale);
       onDraftSaved?.({ type: current.type, name: current.name });
     } catch (e) {
       // objectui#11785 — a page's issue paths (its blocks) name no input this
@@ -5570,6 +5598,8 @@ export function InterfacesPillar({
       // and a clean buffer would let the re-read this save signals install the
       // served draft over it. Binding it is the edit that sends it.
       if (sent.unmoved() && !leftOut) setNavDirty(false);
+      // objectstack#28984 — the navigation is the app's: named by its label.
+      announceDraftSaved({ type: 'app', name: appName }, navItemLabelText(appLabel, locale), locale);
       onDraftSaved?.({ type: 'app', name: appName });
     } catch (e) {
       setNavError(
@@ -5582,7 +5612,7 @@ export function InterfacesPillar({
     } finally {
       setNavSaving(false);
     }
-  }, [saveNavDraft, appName, appDraft, onDraftSaved, packageId, publishNonce, locale]);
+  }, [saveNavDraft, appName, appDraft, appLabel, onDraftSaved, packageId, publishNonce, locale]);
   // objectui#5813 — nav edits auto-save while edit mode is open.
   const { flush: flushNavSave, sending: navSending } = useDraftAutoSave({
     // objectui#11232 — the app `doNavSave` addresses. The package is this
@@ -8250,8 +8280,13 @@ export function DataPillar({
         setObjVerdict(draftEnvelopeDiagnostics(read.answer));
         setObjVerdictBody(extractDraftBody(read.answer) ?? undefined);
       });
-      // No success toast: with auto-save (objectui#5813) it would fire after
-      // every editing pause — the quiet last-saved hint is the affordance.
+      // objectstack#28984 — named by the label this save stored; one toast per
+      // object however many editing pauses save it (`announceDraftSaved`).
+      announceDraftSaved(
+        { type: 'object', name: current.name },
+        typeof body.label === 'string' && body.label ? body.label : current.label,
+        locale,
+      );
       onDraftSaved?.({ type: 'object', name: current.name });
     } catch (e) {
       setError(objectSaveRefusal(e, body, locale));
@@ -8316,6 +8351,9 @@ export function DataPillar({
         setExtHasDraft(true);
         if (sent.unmoved()) setExtDirty(false);
         setSavedAt(new Date());
+        // objectstack#28984 — the extension customizes the open object, so it
+        // is named by that object's label.
+        announceDraftSaved({ type: OBJECT_EXTENSION_TYPE, name }, current?.label ?? '', locale);
         onDraftSaved?.({ type: OBJECT_EXTENSION_TYPE, name });
       } catch (e) {
         setError(plainRefusal(e));
@@ -8323,7 +8361,7 @@ export function DataPillar({
         setSaving(false);
       }
     },
-    [extOpen, customization, extPairFor, saveExtDraft, onDraftSaved],
+    [extOpen, customization, extPairFor, saveExtDraft, onDraftSaved, current, locale],
   );
   const { flush: flushExtSave } = useDraftAutoSave({
     target: `${OBJECT_EXTENSION_TYPE}:${current?.name ?? ''}`,
@@ -10414,6 +10452,8 @@ export function AutomationsPillar({
       rereadFlowVerdict(current.name, target.packageId);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setAutoDirty(false);
+      // objectstack#28984 — named as the rail names the flow.
+      announceDraftSaved({ type: 'flow', name: current.name }, current.label, locale);
       onDraftSaved?.({ type: 'flow', name: current.name });
     } catch (e) {
       // objectui#11785 — read against `draft`, the body this save sent.
