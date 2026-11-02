@@ -217,7 +217,7 @@ describe('a stored object_extension row whose extend folds to a legacy key lands
             await engine.update('sys_metadata', {
                 id: stored[0].id,
                 name: LEGACY_SHORT,
-                metadata: JSON.stringify({ ...body, name: LEGACY_SHORT, extend: LEGACY_SHORT }),
+                metadata: JSON.stringify({ ...body, extend: LEGACY_SHORT }),
             }, { context: { isSystem: true } });
             // A fresh process: the registry holds no contribution of the pair.
             engine.registry.withdrawObjectExtension(LEGACY_KEY, PAIR);
