@@ -40,6 +40,7 @@ type Row = Record<string, unknown>;
 
 const OBJECT = 'search_non_text_29394';
 const ONLY_NON_TEXT = 'search_only_non_text_29394';
+const AUTO_FLAGGED = 'search_auto_flagged_29394';
 
 const FIELDS = {
   name: { type: 'text' },
@@ -101,7 +102,7 @@ function makeDriver() {
   const reads: Array<{ object: string; where: unknown }> = [];
   const read = (object: string, ast: any) => {
     reads.push({ object, where: ast?.where });
-    const rows = (object === OBJECT || object === ONLY_NON_TEXT ? ROWS : []).filter((r) => matches(r, ast?.where));
+    const rows = ([OBJECT, ONLY_NON_TEXT, AUTO_FLAGGED].includes(object) ? ROWS : []).filter((r) => matches(r, ast?.where));
     return typeof ast?.limit === 'number' ? rows.slice(0, ast.limit) : rows;
   };
   const driver: any = {
@@ -143,6 +144,19 @@ describe('[#29394] $search emits no text clause over a never-string-capable colu
       name: ONLY_NON_TEXT,
       searchableFields: ['qty', 'born', 'active', 'meta'],
       fields: FIELDS,
+    }, 'test');
+    // The AUTO branch (ruling 6573569376 letter A): no `searchableFields`, so
+    // every field marked `searchable: true` joins the set, of any type. The
+    // resolver admits the flagged number / date / json fields; the expansion
+    // must still emit no text clause for them.
+    registry.registerObject({
+      name: AUTO_FLAGGED,
+      fields: {
+        name: { type: 'text' },
+        qty: { type: 'number', searchable: true },
+        born: { type: 'date', searchable: true },
+        meta: { type: 'json', searchable: true },
+      },
     }, 'test');
     registry.registerObject({
       ...TEXT_OPERATOR_DOOR_FIXTURE,
@@ -206,6 +220,19 @@ describe('[#29394] $search emits no text clause over a never-string-capable colu
     const rows = await engine.find(OBJECT, { search: 'qq9', searchFields: ['qty', 'name'] });
     expect(rows.map((r) => r.id)).toEqual(['r1', 'r2']);
     expect(scannedFields(lastWhere())).toEqual(['name']);
+  });
+
+  it('the auto branch: flagged searchable: true number / date / json fields get no clause; the text control is still scanned', async () => {
+    const rows = await engine.find(AUTO_FLAGGED, { search: 'qq9' });
+    expect(scannedFields(lastWhere(AUTO_FLAGGED))).toEqual(['name']);
+    expect(rows.map((r) => r.id)).toEqual(['r1', 'r2']);
+    for (const term of ['42', '2026']) {
+      expect(await engine.find(AUTO_FLAGGED, { search: term }), term).toEqual([]);
+    }
+    // The flag still admits them into the set: naming one is honoured, not
+    // refused, and answers no rows.
+    expect(await engine.find(AUTO_FLAGGED, { search: '42', searchFields: ['qty'] })).toEqual([]);
+    expect(lastWhere(AUTO_FLAGGED)).toEqual({ $or: [] });
   });
 
   it('control: an override outside the declared set is still refused, judged on the unchanged set', async () => {

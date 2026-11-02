@@ -33,6 +33,7 @@ import { installDefaultOrganization } from './default-organization.testkit.js';
 
 const MIXED = 'rest_search_non_text_mixed_29394';
 const ONLY_NON_TEXT = 'rest_search_non_text_only_29394';
+const AUTO_FLAGGED = 'rest_search_non_text_auto_29394';
 
 const FIELDS = {
   name: { name: 'name', type: 'text' as const },
@@ -83,11 +84,25 @@ describe('[#29394] $search over a declared non-text column on the Data API door 
       searchableFields: ['qty', 'born', 'active', 'meta'],
       fields: FIELDS,
     } as any);
+    // The auto branch: no `searchableFields`, flagged non-text fields join the
+    // set (ruling 6573569376 letter A) and must still contribute no clause.
+    engine.registry.registerObject({
+      name: AUTO_FLAGGED, label: 'Auto flagged 29394',
+      fields: {
+        name: FIELDS.name,
+        qty: { ...FIELDS.qty, searchable: true },
+        born: { ...FIELDS.born, searchable: true },
+        meta: { ...FIELDS.meta, searchable: true },
+      },
+    } as any);
     await engine.syncSchemas();
     // A real `single` install's Default Organization (ADR-0131 D9, D1).
     await installDefaultOrganization(engine);
-    for (const object of [MIXED, ONLY_NON_TEXT]) {
-      for (const row of ROWS) await engine.insert(object, { ...row } as any);
+    for (const object of [MIXED, ONLY_NON_TEXT, AUTO_FLAGGED]) {
+      for (const row of ROWS) {
+        const { active: _active, ...rest } = row;
+        await engine.insert(object, (object === AUTO_FLAGGED ? rest : { ...row }) as any);
+      }
     }
 
     const protocol = new ObjectStackProtocolImplementation(engine as any);
@@ -156,6 +171,19 @@ describe('[#29394] $search over a declared non-text column on the Data API door 
     const both = await list(MIXED, { $search: 'qq9', $searchFields: 'meta,name' });
     expect(both.status, JSON.stringify(both.body)).toBe(200);
     expect(ids(both.body)).toEqual(['r1', 'r2']);
+  });
+
+  it('the auto branch: flagged searchable: true number / date / json fields add no clause — the text column matches, 200', async () => {
+    const got = await list(AUTO_FLAGGED, { $search: 'qq9' });
+    expect(got.status, JSON.stringify(got.body)).toBe(200);
+    expect(ids(got.body)).toEqual(['r1', 'r2']);
+    const rendered = await list(AUTO_FLAGGED, { $search: '2026' });
+    expect(rendered.status, JSON.stringify(rendered.body)).toBe(200);
+    expect(ids(rendered.body)).toEqual([]);
+    // The flag admits the field at the ingress door: naming it is accepted, and matches nothing.
+    const named = await list(AUTO_FLAGGED, { $search: 'qq9', $searchFields: 'meta' });
+    expect(named.status, JSON.stringify(named.body)).toBe(200);
+    expect(ids(named.body)).toEqual([]);
   });
 
   it('control: the caller\'s own text operator on a non-text column is still refused by the #15661 door', async () => {
