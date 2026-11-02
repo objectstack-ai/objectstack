@@ -525,6 +525,10 @@ const PARAM_PROBES: ReadonlyArray<{ label: string; param?: string; query: Record
     // [#28548] An EMPTY app name is refused (400 VALIDATION_ERROR) on both
     // transports, never read as absent.
     { label: '?id= (empty)', param: 'id', query: { id: '' } },
+    // …and so is a BRACKETED `id` key (a qs-style array spelling), never
+    // read as no filter.
+    { label: '?id[]=crm', param: 'id', query: { 'id[]': 'crm' } },
+    { label: '?id[0]=crm', param: 'id', query: { 'id[0]': 'crm' } },
     { label: '?object=lead', param: 'object', query: { object: 'lead' } },
     { label: '?object=nope', param: 'object', query: { object: 'nope' } },
     // [#28548] …and so is an EMPTY view object.
@@ -687,6 +691,8 @@ describe('[#20320] row A: the reference moves — each probe changes RestServer\
         expect((await read('/meta/app', { id: 'nope' })).items).toEqual([]);
         const blank = await read('/meta/app', { id: '' });
         expect({ status: blank.status, code: blank.code, items: blank.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
+        const bracketed = await read('/meta/app', { 'id[]': 'crm' });
+        expect({ status: bracketed.status, code: bracketed.code, items: bracketed.items }).toEqual({ status: 400, code: 'VALIDATION_ERROR', items: undefined });
         expect(names((await read('/meta/view', { object: 'lead' })).items)).toEqual(['lead_mine', 'lead_all']);
         expect((await read('/meta/views', { object: 'nope' })).items).toEqual([]);
         const blankObject = await read('/meta/views', { object: '' });

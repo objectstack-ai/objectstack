@@ -5929,12 +5929,18 @@ const warnedEmailTemplateFloors = new Set<string>();
  *
  * ## What goes wrong without this
  *
- * `IEmailService.sendTemplate` matches `(name, locale)` EXACTLY and, for a call
- * that NAMES a locale, retries exactly one rung — the literal `en-US` — and
- * stops. There is no language-subtag folding, so a bundle whose English row is
- * tagged `en` is unreachable from `en-US` and from every other tag it does not
- * itself carry: each such delivery raises `TEMPLATE_NOT_FOUND`, which
- * classifies **permanent**, so it dead-letters with no retry. `sys_user.locale`
+ * `IEmailService.sendTemplate` reads one row at one tag exactly. For a call
+ * that NAMES a locale, over the built-in registry template loader, it folds
+ * that locale against the bundle's tags (`resolveBundleLocale`: exact,
+ * case-insensitive, base language, variant expansion), then the stack's
+ * declared fallback locale (`i18n.fallbackLocale`, else `defaultLocale`) the
+ * same way, then the literal `en-US` (#28880); a replacement `TemplateLoader`
+ * matches the named tag exactly and retries only `en-US`. So a bundle with no
+ * `en-US` row is reachable from a recipient tag only when that tag or the
+ * declared fallback folds to one of its rows, and behind a replacement loader
+ * only from the tags it carries exactly. Every other delivery raises
+ * `TEMPLATE_NOT_FOUND`, which classifies **permanent**, so it dead-letters
+ * with no retry. `sys_user.locale`
  * is user-editable free-text BCP-47 and is NOT constrained to
  * `supportedLocales`, so the locales that can reach the lookup are not the ones
  * the author enumerated — a recipient can break their own mail by setting a
@@ -5944,15 +5950,17 @@ const warnedEmailTemplateFloors = new Set<string>();
  * starts at `en-US` by name and, when the bundle carries no `en-US` row, drops
  * to that bundle's lowest locale tag and renders it silently. So one floorless
  * bundle dead-letters the recipients whose locale was named and quietly fills
- * for the ones whose was not. The full three-rung ladder is on
+ * for the ones whose was not. The full ladders are on
  * `SendTemplateInput.locale` in `packages/spec/src/contracts/email-service.ts`
- * and is not restated here.
+ * and are not restated here.
  *
- * ⭐ The trap is that the author does the CONSISTENT thing: a stack declaring
- * `defaultLocale: 'en'` whose English row says `locale: 'en'` agrees with
- * itself everywhere, validates, builds and installs clean, and still ships a
- * bundle with no floor. The stack's own declared default locale is the wrong
- * answer whenever it is not spelled `en-US`.
+ * ⭐ The CONSISTENT thing an author writes, a stack declaring
+ * `defaultLocale: 'en'` whose English row says `locale: 'en'`, validates,
+ * builds and installs clean. Over the built-in loader, on a host whose i18n
+ * service answers that declared fallback, it reaches every recipient; behind
+ * a replacement loader, or on a host that declares no fallback, it still has
+ * no floor. This report reads the bundle alone, so it fires for that shape
+ * whichever host serves it: `en-US` is the one rung every loader retries.
  *
  * ## Posture — advisory, and deliberately so
  *
@@ -6030,15 +6038,17 @@ function warnEmailTemplateLocaleFloor(data: ObjectStackDefinition): void {
     warnedEmailTemplateFloors.add(key);
     console.warn(
       `defineStack: emailTemplates '${name}' carries rows for ${declared.map((t) => `'${t}'`).join(', ')} ` +
-      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor for a ` +
-      `send that names a locale. sendTemplate matches (name, locale) exactly and retries only the ` +
-      `literal '${EMAIL_TEMPLATE_FLOOR_LOCALE}' — there is no language-subtag folding, so every ` +
-      `recipient locale this bundle does not carry a row for raises TEMPLATE_NOT_FOUND, which is ` +
-      `permanent (dead-letter, no retry). A send naming NO locale does not fail: it drops to this ` +
-      `bundle's lowest tag and renders that silently, so one gap is loud for some recipients and ` +
-      `invisible for others. Your stack's own i18n.defaultLocale is the wrong tag here unless ` +
-      `it is spelled '${EMAIL_TEMPLATE_FLOOR_LOCALE}': tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' ` +
-      `and keep the other tags beside it.`,
+      `but none tagged '${EMAIL_TEMPLATE_FLOOR_LOCALE}', so this bundle has no fallback floor that ` +
+      `holds for every send naming a locale. With the built-in template loader such a send folds its ` +
+      `locale against these rows (exact, case-insensitive, base language, variant expansion), then ` +
+      `tries the stack's declared fallback locale (i18n.fallbackLocale, else defaultLocale) folded ` +
+      `the same way; a replacement TemplateLoader matches exactly and retries only ` +
+      `'${EMAIL_TEMPLATE_FLOOR_LOCALE}'. When no rung lands on a row the send raises ` +
+      `TEMPLATE_NOT_FOUND, which is permanent (dead-letter, no retry). A send naming NO locale does ` +
+      `not fail: it drops to this bundle's lowest tag and renders that silently, so one gap is loud ` +
+      `for some recipients and invisible for others. '${EMAIL_TEMPLATE_FLOOR_LOCALE}' is the one rung ` +
+      `every loader retries: tag the English row '${EMAIL_TEMPLATE_FLOOR_LOCALE}' and keep the other ` +
+      `tags beside it.`,
     );
   }
 }
