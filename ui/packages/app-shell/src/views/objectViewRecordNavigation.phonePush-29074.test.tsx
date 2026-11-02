@@ -221,14 +221,14 @@ describe('the record page a phone list pushes (objectstack#29074)', () => {
   it('「‹ Leads」 goes back to the list entry, and Back then leaves the list for home', async () => {
     mountHistory(['/home', `/apps/${APP}/${LEAD}?view=all`]);
     fireEvent.click(screen.getByTestId('row'));
-    expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`);
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`));
     await waitFor(() => expect(backLink()).toBeTruthy(), { timeout: 5000 });
     expect(backLink()!.tagName).toBe('BUTTON');
     expect(backLink()!.textContent).toBe('Leads');
     fireEvent.click(backLink()!);
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}?view=all`));
     fireEvent.click(screen.getByTestId('browser-back'));
-    expect(where()).toBe('/home');
+    await waitFor(() => expect(where()).toBe('/home'));
   });
 
   it('control, the push unmarked (a desktop list): 「‹」 is a link forward, and Back then opens the record again', async () => {
@@ -239,8 +239,10 @@ describe('the record page a phone list pushes (objectstack#29074)', () => {
     expect(backLink()!.textContent).toBe('Leads');
     fireEvent.click(backLink()!);
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}?view=all`));
+    // MemoryRouter commits a location change in a transition, so the record
+    // page coming back is awaited, as every other step here is.
     fireEvent.click(screen.getByTestId('browser-back'));
-    expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`);
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`));
   });
 
   it('a lead pushed from another lead\'s page still reads that record, not the plural', async () => {
