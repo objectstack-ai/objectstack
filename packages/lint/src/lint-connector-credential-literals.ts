@@ -1,0 +1,168 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+/**
+ * `connector-credential-literal` — a credential typed into a declarative
+ * connector's header or environment map as a LITERAL.
+ *
+ * ## What it reports
+ *
+ * One advisory per credential-shaped literal ({@link isCredentialShapedLiteral},
+ * `credential-literal.ts` — the one predicate; this file holds no name list) in
+ * each of the four maps a provider sends upstream as written:
+ *
+ *  - `providerConfig.headers`;
+ *  - `providerConfig.defaultHeaders` (`rest`);
+ *  - `providerConfig.transport.headers` (`mcp` over http);
+ *  - `providerConfig.transport.env` (`mcp` over stdio).
+ *
+ * They are the four maps the connector read path withholds whole
+ * (`CONNECTOR_CREDENTIAL_MAP_PATHS`, `@objectstack/spec`'s connector redactor),
+ * because a map's entries cannot be told apart there. Withholding answers the
+ * READ; it does not move the value out of metadata. A literal in one of these
+ * maps is still stored in `sys_metadata`, carried by every build artifact and
+ * every source checkout of the stack, and rotated only by editing metadata.
+ *
+ * ## Why an advisory, and why it names the connector route
+ *
+ * The supported home for an outbound credential is the connector's own
+ * `auth: { type, credentialRef }`, whose reference is resolved through the
+ * secrets layer when the instance materializes and is never stored in metadata
+ * (ADR-0097 §3). The `rest` provider and an `mcp` http transport both send the
+ * resolved credential themselves, so a header literal moves there by shape.
+ *
+ * ⛔ A stdio MCP server takes NO `auth`: the provider folds a resolved
+ * credential into an http transport's headers only, and a stdio server's
+ * credentials ride `transport.env` (the connector guide says so). So no text
+ * here may promise that `credentialRef` reaches a stdio server — an author
+ * cannot follow it. The env finding names the route with its condition: an
+ * http transport.
+ *
+ * The predicate is a heuristic (a key named `token` can hold something that is
+ * not a secret), so the finding is a `warning`, always: a false positive costs
+ * the author a line of reading, never a blocked save. The registry entry is
+ * `tier: 'advisory'`, which `authoring-rule-wiring.test.ts` verifies by reading
+ * this function's body for an `error` severity. Making it a refusal is a
+ * triage decision, not an edit here.
+ *
+ * ## What a finding carries — and what it must not
+ *
+ * The name the value sits under and where it sits; ⛔ never the value. The
+ * finding travels into CI logs, the runtime gate's server log line and the save
+ * response, so echoing the literal would copy the credential into three more
+ * places while telling the author to take it out of one.
+ */
+
+import { isCredentialShapedLiteral } from './credential-literal.js';
+import { recordsOf } from './object-graph.js';
+
+type AnyRec = Record<string, unknown>;
+
+const isRec = (v: unknown): v is AnyRec => !!v && typeof v === 'object' && !Array.isArray(v);
+
+/** The rule id every finding of this rule carries. */
+export const CONNECTOR_CREDENTIAL_LITERAL = 'connector-credential-literal';
+
+export interface ConnectorCredentialLiteralFinding {
+  /** Always a warning — see the module note. The type keeps it that way. */
+  severity: 'warning';
+  rule: typeof CONNECTOR_CREDENTIAL_LITERAL;
+  /** `connector 'x'`. */
+  where: string;
+  /** Config path of the entry, e.g. `connectors[0].providerConfig.defaultHeaders.Authorization`. */
+  path: string;
+  message: string;
+  hint: string;
+}
+
+/**
+ * Why a literal here is worth a line: the read path withholds the map, but the
+ * value is still metadata. Why each map is withheld is `os explain
+ * connector-credential-literal`.
+ */
+const KEPT = 'kept in metadata, not the secrets layer';
+
+/** The route, short, in the VERDICT as well as in the hint (see the flow rule's note). */
+const STEER_HEADER = "move it to the connector's `auth.credentialRef`";
+const STEER_ENV = 'a stdio server takes no `auth`; `auth.credentialRef` reaches it only over http';
+
+const HEADER_ROUTE =
+  "Give the entry `auth: { type: 'bearer', credentialRef }` (or `{ type: 'api-key', headerName, credentialRef }`) " +
+  'and drop the header: the provider sends the resolved credential itself';
+
+const ENV_ROUTE =
+  "Reach the MCP server over `transport: { kind: 'http', url }` with `auth: { type: 'bearer', credentialRef }`; " +
+  "a stdio server's credentials ride `transport.env` only";
+
+/** One judged map: where it sits under the entry, what an entry of it is called, and its route. */
+interface JudgedMap {
+  path: readonly string[];
+  entry: 'header' | 'env';
+}
+
+/**
+ * The four maps, in the order the redactor names them. ⚠️ A mirror of the
+ * spec's `CONNECTOR_CREDENTIAL_MAP_PATHS`, which the spec does not export;
+ * `lint-connector-credential-literals.test.ts` holds the two equal by reading
+ * that list through the redactor's own answer.
+ */
+const JUDGED_MAPS: readonly JudgedMap[] = [
+  { path: ['providerConfig', 'headers'], entry: 'header' },
+  { path: ['providerConfig', 'defaultHeaders'], entry: 'header' },
+  { path: ['providerConfig', 'transport', 'headers'], entry: 'header' },
+  { path: ['providerConfig', 'transport', 'env'], entry: 'env' },
+];
+
+/** The judged map paths, dotted, for a test or a caller that names them. */
+export const CONNECTOR_CREDENTIAL_LITERAL_MAPS: readonly string[] = Object.freeze(
+  JUDGED_MAPS.map((m) => m.path.join('.')),
+);
+
+/** A config-path segment for a map key: `.key` when it is an identifier, `["x-key"]` otherwise. */
+function keySegment(key: string): string {
+  return /^[A-Za-z_$][\w$]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`;
+}
+
+/** The value at `path` under `entry`, when every step is a record. */
+function mapAt(entry: AnyRec, path: readonly string[]): AnyRec | undefined {
+  let at: unknown = entry;
+  for (const step of path) {
+    if (!isRec(at)) return undefined;
+    at = at[step];
+  }
+  return isRec(at) ? at : undefined;
+}
+
+/**
+ * Every credential-shaped literal a connector entry carries in one of its four
+ * header/env maps, one advisory each. Pure; never throws on a malformed stack
+ * (a non-record connector or map is skipped, not dereferenced).
+ */
+export function lintConnectorCredentialLiterals(stack: AnyRec): ConnectorCredentialLiteralFinding[] {
+  const findings: ConnectorCredentialLiteralFinding[] = [];
+
+  recordsOf(stack.connectors).forEach((connector, index) => {
+    const name = typeof connector.name === 'string' && connector.name ? connector.name : `#${index}`;
+    for (const judged of JUDGED_MAPS) {
+      const map = mapAt(connector, judged.path);
+      if (!map) continue;
+      const label = judged.path.join('.');
+      for (const [key, value] of Object.entries(map)) {
+        if (!isCredentialShapedLiteral(key, value)) continue;
+        const steer = judged.entry === 'env' ? STEER_ENV : STEER_HEADER;
+        findings.push({
+          severity: 'warning',
+          rule: CONNECTOR_CREDENTIAL_LITERAL,
+          where: `connector '${name}'`,
+          path: `connectors[${index}].${label}${keySegment(key)}`,
+          // One verdict sentence; why the map is withheld on read but still
+          // worth moving, and the auth variants, are
+          // `os explain connector-credential-literal`.
+          message: `${judged.entry} '${key}' in ${label} holds a credential-shaped literal, ${KEPT}; ${steer}`,
+          hint: judged.entry === 'env' ? ENV_ROUTE : HEADER_ROUTE,
+        });
+      }
+    }
+  });
+
+  return findings;
+}

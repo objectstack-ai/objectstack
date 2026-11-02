@@ -4837,6 +4837,40 @@ const FLOW_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Connector credential literals (`lint-connector-credential-literals.ts`) ──
+
+const CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION: RuleExplanation = {
+  rule: 'connector-credential-literal',
+  covers: 'which connector maps are judged, and where a credential goes',
+  paragraphs: [
+    // The four maps are held to the rule and to the connector redactor by the rule's test.
+    'A declarative connector entry carries four maps a provider sends upstream as written: ' +
+      '`providerConfig.headers`, `providerConfig.defaultHeaders` (the `rest` provider), ' +
+      '`providerConfig.transport.headers` (an `mcp` http transport) and `providerConfig.transport.env` ' +
+      '(an `mcp` stdio transport). The metadata read path withholds each of them whole, because one ' +
+      'entry of a map cannot be told from another, but withholding answers the read only: a literal ' +
+      'credential in one of them is still stored in metadata, carried by every build artifact and ' +
+      'source checkout of the stack, and rotated only by editing metadata.',
+    'The supported home for an outbound credential is the connector\'s own `auth`, whose ' +
+      '`credentialRef` names a secrets-layer reference resolved when the instance materializes (an ' +
+      'environment variable in the open tier) and never stored in metadata (ADR-0097 §3). The `rest` ' +
+      'provider and an `mcp` http transport send the resolved credential themselves, so a header ' +
+      'literal moves by shape: an `Authorization` bearer value to `auth: { type: \'bearer\', credentialRef }`, ' +
+      'a key header to `{ type: \'api-key\', headerName, credentialRef }`, a Basic pair to ' +
+      '`{ type: \'basic\', username, credentialRef }`.',
+    'A stdio MCP server takes no `auth`: the provider folds a resolved credential into an http ' +
+      'transport\'s headers only, and a stdio server\'s credentials ride `transport.env`. So the env ' +
+      'finding names `auth.credentialRef` with its condition, an http transport, and promises nothing ' +
+      'for stdio. The connector guide is content/docs/automation/connectors.mdx.',
+    'Always a warning, and nothing is refused: the predicate is a heuristic (a value under a name ' +
+      'that reads as a credential, or a value that opens with an auth scheme), so a key named ' +
+      '`token` can hold something that is not a secret, and a false positive costs a line of ' +
+      'reading, never a blocked save. A `{variable}` template is not a literal and draws nothing. ' +
+      'The finding names where the value sits and never the value itself, because it travels into ' +
+      'CI logs, the runtime gate\'s server log line and the save response.',
+  ],
+};
+
 // ── AI agent ↔ skill ↔ tool references (`validate-ai-surface-affinity.ts`, `validate-ai-tool-references.ts`) ──
 
 const AI_SKILL_SURFACE_MISMATCH_EXPLANATION: RuleExplanation = {
@@ -5604,6 +5638,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION.rule]: PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION,
   [PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION.rule]: PAGE_VISUALIZATION_WITHOUT_BINDING_EXPLANATION,
   [FLOW_CREDENTIAL_LITERAL_EXPLANATION.rule]: FLOW_CREDENTIAL_LITERAL_EXPLANATION,
+  [CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION.rule]: CONNECTOR_CREDENTIAL_LITERAL_EXPLANATION,
   [AI_SKILL_SURFACE_MISMATCH_EXPLANATION.rule]: AI_SKILL_SURFACE_MISMATCH_EXPLANATION,
   [AI_SKILL_TOOL_UNRESOLVED_EXPLANATION.rule]: AI_SKILL_TOOL_UNRESOLVED_EXPLANATION,
   [MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION.rule]: MANAGED_API_METHOD_UNAFFORDABLE_EXPLANATION,

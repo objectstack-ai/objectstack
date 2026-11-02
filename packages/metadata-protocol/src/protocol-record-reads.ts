@@ -21,7 +21,10 @@
  * re-indented one level and otherwise unedited: the same reads, made as the
  * same principal, refusing exactly where they did with the same codes and
  * messages. The module-level declarations only these bodies read (the OCC
- * version-token reading) moved with them, also unedited.
+ * version-token reading) moved with them, also unedited. One body has changed
+ * since: `assertVersionOf`'s mismatch branch now hands a row the caller's own
+ * read returns no row for to the write door instead of answering it (its
+ * docblock in `protocol.ts` says why); a read that throws still propagates.
  *
  * ## How the moved bodies reach the class
  *
@@ -227,8 +230,14 @@ export async function assertVersionOf(
         // it names, turning a resolvable conflict into an unresolvable one.
         const currentVersion = currentToken.instant ?? currentToken.token;
         const expectedVersionText = expected.instant ?? expected.token;
+        // A row the caller's own read RETURNS NO ROW for is no conflict this
+        // gate may report, and no answer of its own either: the comparison is
+        // dropped and the write door answers, as it answers the same request
+        // without a token. ONLY an absent row: a read that throws — a refusal
+        // or a fault — propagates as raised. The method's docblock in
+        // `protocol.ts` carries the reasoning.
         const visible = await this.readAsCaller(object, id, context);
-        if (!visible) throw recordNotFoundError(object, id);
+        if (!visible) return;
         throw new ConcurrentUpdateError({
             currentVersion,
             currentRecord: visible,

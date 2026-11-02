@@ -8778,8 +8778,10 @@ export class ObjectStackProtocolImplementation implements
         //
         // OCC is asked the way `deleteData` asks it — a probe only when the
         // caller sent a token ({@link assertVersionMatch}) — and a row that
-        // probe does not find is left to the engine's answer: OCC has never
-        // treated a missing record as a concurrency conflict.
+        // probe does not find, or that the caller's own read returns no row
+        // for, is left to the engine's answer: OCC has never treated a missing
+        // record as a concurrency conflict, and a row absent from the caller's
+        // read answers what a missing one does ({@link assertVersionOf}).
         await this.assertVersionMatch(request.object, request.id, request.expectedVersion, request.context);
         const opts: any = { where: { id: request.id } };
         if (request.context !== undefined) opts.context = request.context;
@@ -9010,13 +9012,15 @@ export class ObjectStackProtocolImplementation implements
      * where it was. The one behaviour this adds is the 404 the issue asked for:
      * an id that names no row at all.
      *
-     * ⛔ And it is never asked IN FRONT of the write's authorization. Its
-     * readers are OCC's `updated_at` comparison, asked only when the caller sent
-     * a token ({@link assertVersionMatch}), and the by-id update's existence
-     * check, asked only after `engine.update` has judged and resolved the write
-     * (`updateData`, and the bulk faces through {@link assertRecordExists}) —
-     * so an update by id answers the same refusal whether or not the id
-     * exists, as delete does.
+     * ⛔ And what it finds never answers IN FRONT of the write's
+     * authorization. Its readers are OCC's `updated_at` comparison, asked only
+     * when the caller sent a token ({@link assertVersionMatch}) and answering
+     * only for a row the caller's own read returns ({@link assertVersionOf}),
+     * and the by-id update's existence check, asked only after `engine.update`
+     * has judged and resolved the write (`updateData`, and the bulk faces
+     * through {@link assertRecordExists}) — so an update by id answers the same
+     * refusal whether or not the id exists, as delete does. With a mismatched
+     * token, a caller whose read of the row is refused gets that read refusal.
      */
     private async probeRecord(object: string, id: string): Promise<any> {
         return this.engine.findOne(object, { where: { id }, context: { isSystem: true } } as any);
@@ -9119,18 +9123,33 @@ export class ObjectStackProtocolImplementation implements
      * from it. It re-reads the row under the caller's own `context`, the read
      * door's question (every RLS and FLS rule applies):
      *
-     *  - no row → `recordNotFoundError`, the producer the security layer's
-     *    by-id write gate answers a row the caller cannot read with. The stale
-     *    token then gets exactly the answer the same request without a token
-     *    gets: no `currentVersion`, no `currentRecord`, so the `409` no longer
-     *    tells a caller that a hidden row exists or when it was last written;
      *  - a row → the `409`, with THAT row as `currentRecord`, field-masked as
      *    the caller's own read is. `currentVersion` stays the token this
-     *    comparison ran on.
+     *    comparison ran on. A caller who reads the row but may not write it
+     *    gets this `409` too: the row it is shown is one it can GET anyway;
+     *  - no row — the read RETURNS none → no answer from this gate at all.
+     *    The comparison is dropped and the request goes on to the write,
+     *    whose door answers it: the stale token then gets exactly the answer
+     *    the same request without a token gets, and so does a token on an id
+     *    that names no row ("Record not found → no check" above). That is the
+     *    governing text for the write doors (ruling of record 5985885287): a
+     *    row the caller cannot read answers what a nonexistent id answers, on
+     *    update and delete alike;
+     *  - a read that THROWS — a refusal (the caller's read grant withheld) or
+     *    a fault — propagates as raised, exactly as it did before the
+     *    absent-row handover existed. A refused read is not an absent row,
+     *    and only an absent row is handed over.
+     *
+     * Why the write door's answer for an absent row, and not one of this
+     * gate's own: this gate runs BEFORE the write is authorized, so a `404` of
+     * its own differs from the write door's answer for every caller the write
+     * door refuses first (no update or delete grant), and from what an id
+     * naming no row gets. For an absent row the write door holds the guard
+     * itself: it asks the caller's read question ahead of a by-id write, and a
+     * row that read does not return is answered `recordNotFoundError`.
      *
      * The read is issued only on a mismatch: a request whose token agrees, or
-     * that sends none, reads exactly what it read before. A read that throws
-     * (the caller's read grant withheld, a store fault) propagates as raised.
+     * that sends none, reads exactly what it read before.
      */
     private assertVersionOf(
         object: string,
