@@ -550,6 +550,8 @@ metadata is read-only. What you author (`sort`, filters, columns, `rowHeight`,
 `hiddenFields`, the views' order) is the default for every user with no state of their own.
 
 - A link carrying list state (`uf_*` parameters) wins over the stored state.
+- When a session ends, the sign-in page's return link keeps the list's path but never its
+  `uf_*` state, so whoever signs in next opens their own stored state or the view's default.
 - A user's hidden fields only subtract from the columns the view shows, never add one.
 - While a user's list differs from the view, a **Personalized** marker sits beside the list
   title (an icon alone on a phone). Opening it names what differs: filters, search, sort,
