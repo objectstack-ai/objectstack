@@ -86,6 +86,7 @@ import {
   type CurrencySettingsDoor,
 } from './organization-default-currency.js';
 import type { CounterStore } from './rate-limit-storage.js';
+import { resolveKernelCache } from './kernel-cache.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
 import {
@@ -670,20 +671,12 @@ export class AuthPlugin implements Plugin {
     // The currency there is paid SMS, so an N-node deployment was billed for up
     // to N× the declared budget.
     //
-    // The `cache` service is registered ASYNC — `getService` throws for it, so
-    // resolve via `getServiceAsync` and treat any failure (not registered, or
-    // not yet ready) as "no shared cache, ask again later".
-    const resolveCache = async (): Promise<CounterStore | undefined> => {
-      let cache: any;
-      try {
-        cache = await (ctx as { getServiceAsync?: (n: string) => Promise<unknown> })
-          .getServiceAsync?.('cache');
-      } catch {
-        return undefined;
-      }
-      if (cache && typeof cache.get === 'function' && typeof cache.set === 'function') return cache;
-      return undefined;
-    };
+    // The `cache` service may be registered as a value or as a factory, and
+    // the plugin context carries no `getServiceAsync` of its own: resolve it
+    // through the kernel the context hands out (`resolveKernelCache`), and
+    // treat any failure (not registered, or not yet ready) as "no shared cache,
+    // ask again later".
+    const resolveCache = (): Promise<CounterStore | undefined> => resolveKernelCache(ctx);
 
     {
       const { createLazyCacheRateLimitStorage, createLazyCounterStore } = await import(
