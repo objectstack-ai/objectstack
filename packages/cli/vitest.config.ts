@@ -875,6 +875,19 @@ export default defineConfig({
         find: /^create-objectstack\/created-summary$/,
         replacement: path.resolve(__dirname, '../create-objectstack/src/created-summary.ts'),
       },
+      // [#29051] `FLOW_CYCLE_CORPUS`, the case table the flow-cycle judge, the
+      // engine's registration and the publish gate are driven from, pins
+      // `os validate` / `os build` to the same graphs
+      // (`src/utils/flow-undeclared-cycle.test.ts`,
+      // `test/validate-flow-region-shape.test.ts`). The subpath's `exports`
+      // entry is built from `src/testing.ts`; aliased so the corpus the tests
+      // read is the checkout's, not a stale `dist/testing.js`. The bare
+      // `@objectstack/metadata-core` specifier has its own anchored entry
+      // below (the #20158 block); this one covers only the `/testing` subpath.
+      {
+        find: /^@objectstack\/metadata-core\/testing$/,
+        replacement: path.resolve(__dirname, '../metadata-core/src/testing.ts'),
+      },
       // `test/serve-node-env-production-default.e2e.test.ts` (#11113) writes a
       // FIXTURE config file whose text is `import { AuthPlugin } from
       // '@objectstack/plugin-auth'` — real code, but code the fixture's own
