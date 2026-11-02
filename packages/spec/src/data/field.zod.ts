@@ -1415,7 +1415,9 @@ export const FieldSchema = lazySchema(() => {
     + 'set a `$searchFields` override may name, is then the type-based default (the text-like and '
     + 'select columns) plus every field marked `searchable: true`, of any type except '
     + '`secret`, `password` and `vector`, which stay excluded (a virtual `formula` field has no stored '
-    + 'column, so it is never scanned either). When the object declares `searchableFields`, that list '
+    + 'column, so it is never scanned either). `false`, the default, does not remove a field the '
+    + 'type-based default already scans; to choose the set, declare `searchableFields`. '
+    + 'When the object declares `searchableFields`, that list '
     + 'is the whole search set and this flag is not read (ADR-0061).',
   ),
   /**
