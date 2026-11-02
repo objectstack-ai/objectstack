@@ -284,7 +284,8 @@ describe('[#29408] selectedStoredColumns — the set a row is answered on', () =
   });
 
   it('a local object keeps the provisioned three whatever systemFields says: driver-sql builds them on every table', () => {
-    expect([...selectedStoredColumns({ systemFields: false, fields: { name: { type: 'text' } } }, undefined)!].sort()).toEqual(
+    const optedOut = { systemFields: false, fields: { name: { type: 'text' } } };
+    expect([...selectedStoredColumns(optedOut, undefined)!].sort()).toEqual(
       ['created_at', 'id', 'name', 'updated_at'],
     );
   });
