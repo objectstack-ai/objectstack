@@ -66,6 +66,15 @@ export interface MetadataInspectorProps {
   onBlockingIssuesChange?: (count: number) => void;
   /** Whether the host is in edit mode. False → disable inputs. */
   readOnly: boolean;
+  /**
+   * Why the inspector is read-only, as the sentence to show, when the host
+   * knows it. The cause is the host's (a read-only package, view mode, a
+   * walled item), so the host says it; an inspector that honours it explains
+   * its disabled controls on hover, on keyboard focus and as an accessible
+   * description. Omitted, the inspector draws no reason. Ignored while
+   * `readOnly` is false.
+   */
+  readOnlyReason?: string;
   /** Active UI locale for i18n. */
   locale: SupportedLocale;
 }

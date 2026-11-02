@@ -347,6 +347,12 @@ describe('Studio adds a field to a read-only base object as an extension in its 
       expect(sentence).toHaveTextContent(t(name, 'en'));
     }
     expect(sentence).toHaveTextContent(t('designer.field.basePatchOnly.optionLabels', 'en'));
+    // objectstack#28986 — the locked box explains itself: a focusable wrapper
+    // described by that sentence; an editable input carries no reason.
+    const lock = within(inspector).getByRole('checkbox', { name: t('designer.field.required', 'en') }).closest('[data-disabled-reason]');
+    expect(lock).toHaveAttribute('tabindex', '0');
+    expect(lock).toHaveAttribute('aria-describedby', sentence.id);
+    expect(within(inspector).getByTestId('field-label-input').closest('[data-disabled-reason]')).toBeNull();
   });
 
   it('a refusal is shown as the server sent it: the ensure door’s, and the save door’s', async () => {

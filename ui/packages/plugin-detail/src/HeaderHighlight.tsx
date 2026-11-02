@@ -124,7 +124,15 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
       >
         <div
           data-highlights-face={gridFace ? 'grid' : undefined}
-          className={gridFace ? 'grid grid-cols-2 gap-x-4 gap-y-3 @lg:grid-cols-3 @3xl:grid-cols-6' : cn(
+          // The edit face stops at three columns: an editor needs the room a
+          // value does not, a lookup's picker drawing the chosen name beside
+          // its clear and browse buttons, and six cells in one row leave it a
+          // letter of the name. Six fields wrap to two rows of three instead.
+          // Only the read face widens to six in one row.
+          className={gridFace ? cn(
+            'grid grid-cols-2 gap-x-4 gap-y-3 @lg:grid-cols-3',
+            !editing && '@3xl:grid-cols-6',
+          ) : cn(
             'flex flex-wrap gap-y-4',
             // A chip's left border separates it from the chip BEFORE it on its
             // line (objectui#12523). The first chip of every WRAPPED line used
