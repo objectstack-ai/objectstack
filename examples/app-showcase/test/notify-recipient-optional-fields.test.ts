@@ -97,28 +97,34 @@ async function boot(flows: readonly unknown[]): Promise<Booted> {
 interface Run { result: any; run: any; steps: any[]; record: any }
 
 /**
- * Write a row, apply `update` to it, and run `flow` on the row as stored, the
- * way the record-change trigger hands it. `previous` is the row before the
- * update; with no `update` the run is the create leg (no `previous`).
+ * Write a row, apply `updates` to it in turn, and run `flow` on the row as
+ * stored, the way the record-change trigger hands it. `previous` is the row
+ * before the last update; with no update the run is the create leg (no
+ * `previous`). The trigger runs a flow inside the write, so the run holds a
+ * save-notice channel, as the trigger's would.
  */
 async function runOnRow(
   booted: Booted,
   flow: { name: string },
   object: string,
   fields: Record<string, unknown>,
-  update?: Record<string, unknown>,
+  updates: Array<Record<string, unknown>> = [],
   extra: Record<string, unknown> = {},
 ): Promise<Run> {
   const id = insertedId(await booted.data.insert(object, fields, SYS));
-  const before = await booted.data.findOne(object, { where: { id }, ...SYS });
-  if (update) await booted.data.update(object, { id, ...update }, SYS);
+  let before = await booted.data.findOne(object, { where: { id }, ...SYS });
+  for (const update of updates) {
+    before = await booted.data.findOne(object, { where: { id }, ...SYS });
+    await booted.data.update(object, { id, ...update }, SYS);
+  }
   const record = await booted.data.findOne(object, { where: { id }, ...SYS });
   const result = await booted.automation.execute(flow.name, {
     record,
-    ...(update ? { previous: before } : {}),
+    ...(updates.length ? { previous: before } : {}),
     object,
-    event: update ? 'update' : 'insert',
+    event: updates.length ? 'update' : 'insert',
     organizationId: null,
+    saveNotice: { set() {} },
     ...extra,
   } as any);
   return { result, record, ...(await latestRun(booted, flow.name)) };
@@ -138,7 +144,7 @@ function expectCompleted(result: any): void {
 describe('showcase_task_completed (notify the assignee that the task is done)', () => {
   it('a task with NO assignee completes and tells the organization owners', async () => {
     const booted = await boot([TaskCompletedFlow]);
-    const { result, record, steps } = await runOnRow(booted, TaskCompletedFlow, 'showcase_task', task(booted, {}), { status: 'done' });
+    const { result, record, steps } = await runOnRow(booted, TaskCompletedFlow, 'showcase_task', task(booted, {}), [{ status: 'done' }]);
 
     expect(record).toHaveProperty('assignee', null);
     expectCompleted(result);
@@ -148,7 +154,7 @@ describe('showcase_task_completed (notify the assignee that the task is done)', 
 
   it('control: a task with an assignee still tells the assignee', async () => {
     const booted = await boot([TaskCompletedFlow]);
-    const { result } = await runOnRow(booted, TaskCompletedFlow, 'showcase_task', task(booted, { assignee: OWNER_EMAIL }), { status: 'done' });
+    const { result } = await runOnRow(booted, TaskCompletedFlow, 'showcase_task', task(booted, { assignee: OWNER_EMAIL }), [{ status: 'done' }]);
 
     expectCompleted(result);
     expect(audiences(booted)).toEqual([[OWNER_EMAIL]]);
@@ -159,7 +165,7 @@ describe('showcase_task_assigned_notify (tell the new assignee)', () => {
   it('unassigning a task completes without a notify: there is nobody to tell', async () => {
     const booted = await boot([TaskAssignedNotifyFlow]);
     const { result, record, steps } = await runOnRow(
-      booted, TaskAssignedNotifyFlow, 'showcase_task', task(booted, { assignee: OWNER_EMAIL }), { assignee: null },
+      booted, TaskAssignedNotifyFlow, 'showcase_task', task(booted, { assignee: OWNER_EMAIL }), [{ assignee: null }],
     );
 
     expect(record).toHaveProperty('assignee', null);
@@ -171,7 +177,7 @@ describe('showcase_task_assigned_notify (tell the new assignee)', () => {
   it('control: assigning a task still tells the new assignee', async () => {
     const booted = await boot([TaskAssignedNotifyFlow]);
     const { result, steps } = await runOnRow(
-      booted, TaskAssignedNotifyFlow, 'showcase_task', task(booted, {}), { assignee: OWNER_EMAIL },
+      booted, TaskAssignedNotifyFlow, 'showcase_task', task(booted, {}), [{ assignee: OWNER_EMAIL }],
     );
 
     expectCompleted(result);
@@ -212,7 +218,8 @@ describe('showcase_project_closure (tell the owner the sign-off decision)', () =
   async function complete(booted: Booted, fields: Record<string, unknown>) {
     return runOnRow(
       booted, ProjectClosureFlow, 'showcase_project',
-      { name: 'closing', account: booted.accountId, status: 'active', ...fields }, { status: 'completed' },
+      { name: 'closing', account: booted.accountId, status: 'planned', ...fields },
+      [{ status: 'active' }, { status: 'completed' }],
     );
   }
 
@@ -238,7 +245,7 @@ describe('showcase_project_closure (tell the owner the sign-off decision)', () =
 describe('showcase_fan_out_notify (tell the owner, in parallel with Slack)', () => {
   it('a task with NO assignee completes and tells the organization owners', async () => {
     const booted = await boot([FanOutNotifyFlow]);
-    const { result, record, steps } = await runOnRow(booted, FanOutNotifyFlow, 'showcase_task', task(booted, {}), { status: 'done' });
+    const { result, record, steps } = await runOnRow(booted, FanOutNotifyFlow, 'showcase_task', task(booted, {}), [{ status: 'done' }]);
 
     expect(record).toHaveProperty('assignee', null);
     expectCompleted(result);
@@ -248,7 +255,7 @@ describe('showcase_fan_out_notify (tell the owner, in parallel with Slack)', () 
 
   it('control: a task with an assignee still tells the assignee', async () => {
     const booted = await boot([FanOutNotifyFlow]);
-    const { result } = await runOnRow(booted, FanOutNotifyFlow, 'showcase_task', task(booted, { assignee: OWNER_EMAIL }), { status: 'done' });
+    const { result } = await runOnRow(booted, FanOutNotifyFlow, 'showcase_task', task(booted, { assignee: OWNER_EMAIL }), [{ status: 'done' }]);
 
     expectCompleted(result);
     expect(audiences(booted)).toEqual([[OWNER_EMAIL]]);
@@ -279,7 +286,7 @@ describe('showcase_urgent_task_alert (the assignee and whoever raised it)', () =
   it('a user raising an unassigned task to urgent completes and alerts that user', async () => {
     const booted = await boot([UrgentTaskAlertFlow]);
     const { result, record } = await runOnRow(
-      booted, UrgentTaskAlertFlow, 'showcase_task', task(booted, {}), { priority: 'urgent' }, { userId: 'usr_admin' },
+      booted, UrgentTaskAlertFlow, 'showcase_task', task(booted, {}), [{ priority: 'urgent' }], { userId: 'usr_admin' },
     );
 
     expect(record).toHaveProperty('assignee', null);
@@ -289,7 +296,7 @@ describe('showcase_urgent_task_alert (the assignee and whoever raised it)', () =
 
   it('a system write raising an unassigned task to urgent completes and alerts the organization owners', async () => {
     const booted = await boot([UrgentTaskAlertFlow]);
-    const { result, record } = await runOnRow(booted, UrgentTaskAlertFlow, 'showcase_task', task(booted, {}), { priority: 'urgent' });
+    const { result, record } = await runOnRow(booted, UrgentTaskAlertFlow, 'showcase_task', task(booted, {}), [{ priority: 'urgent' }]);
 
     expect(record).toHaveProperty('assignee', null);
     expectCompleted(result);
@@ -299,7 +306,7 @@ describe('showcase_urgent_task_alert (the assignee and whoever raised it)', () =
   it('control: an assigned task alerts the assignee and the user who raised it', async () => {
     const booted = await boot([UrgentTaskAlertFlow]);
     const { result } = await runOnRow(
-      booted, UrgentTaskAlertFlow, 'showcase_task', task(booted, { assignee: OWNER_EMAIL }), { priority: 'urgent' }, { userId: 'usr_admin' },
+      booted, UrgentTaskAlertFlow, 'showcase_task', task(booted, { assignee: OWNER_EMAIL }), [{ priority: 'urgent' }], { userId: 'usr_admin' },
     );
 
     expectCompleted(result);
@@ -352,13 +359,15 @@ describe('start conditions on an empty number', () => {
     expect(result.output).toMatchObject({ skipped: true });
   });
 
-  it('showcase_committee_quorum: submitting a report with no lines completes as not started', async () => {
+  it('showcase_committee_quorum: a report with no lines sums to 0, so it completes as not started', async () => {
+    // Fine as written: the sum summary reads 0 on a report with no lines, not
+    // `null`, so `total_amount >= 5000` never meets a null.
     const booted = await boot([CommitteeQuorumFlow]);
     const { result, record } = await runOnRow(
-      booted, CommitteeQuorumFlow, 'showcase_expense_report', { name: 'empty', status: 'draft' }, { status: 'submitted' },
+      booted, CommitteeQuorumFlow, 'showcase_expense_report', { name: 'empty', status: 'draft' }, [{ status: 'submitted' }],
     );
 
-    expect(record.total_amount ?? null).toBeNull();
+    expect(record).toHaveProperty('total_amount', 0);
     expectCompleted(result);
     expect(result.output).toMatchObject({ skipped: true });
   });
