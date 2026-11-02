@@ -203,6 +203,27 @@ const REGISTRY_FIXTURES: Record<string, RegistryFixture> = {
     // `shadcn-components.json`, and no `month_grid` class entry.
     roundTrip: 'ships undeclared local edits (the Tailwind v4 `(--cell-size)` spelling, no `month_grid` entry)',
   },
+  'dropdown-menu': {
+    url: 'https://ui.shadcn.com/r/styles/default/dropdown-menu.json',
+    repoPath: 'apps/v4/public/r/styles/default/dropdown-menu.json',
+    // Captured for objectstack#29215 at the same commit as the families above,
+    // from `raw.githubusercontent.com`; the same capture reproduces `dialog`'s
+    // recorded sha256 byte for byte.
+    headSha: '8a7701ec27eb9cb8e0377db769fbe6d744113c52',
+    sha256: 'd735ab9c4f2d438ef0ebb20954fd22a04d86d40c83ca61aa4f706a5628b7d592',
+    // `dropdown-menu.tsx` carries the undeclared Tailwind v4
+    // `origin-[--radix-…]` → `origin-(--radix-…)` migration documented in
+    // `shadcn-components.json`, on both content elements.
+    roundTrip: 'ships the undeclared Tailwind v4 `origin-(--radix-…)` spelling (shadcn-components.json)',
+  },
+  tabs: {
+    url: 'https://ui.shadcn.com/r/styles/default/tabs.json',
+    repoPath: 'apps/v4/public/r/styles/default/tabs.json',
+    // Captured for objectstack#29215, as `dropdown-menu` above.
+    headSha: '8a7701ec27eb9cb8e0377db769fbe6d744113c52',
+    sha256: '0a16955983c96c27e2a315ac3c930f624ff28f41a2815aa17151aa3bc574ebba',
+    roundTrip: true,
+  },
 };
 
 /** The captured registry bytes for `name`, exactly as served (pre-rewrite). */
@@ -629,6 +650,125 @@ describe('shipped primitives still carry every declared patch (objectstack#5505)
   /** The derivation above must never silently select nothing. */
   it('still covers the close-label primitives', () => {
     expect(closeLabelComponents).toEqual(['sheet', 'dialog']);
+  });
+});
+
+/**
+ * objectstack#29215 — menu rows and tabs reach a 44 px touch target on a phone.
+ *
+ * Both families add one `max-sm:` class per class string and nothing else, so
+ * from `sm` up every string is upstream's, token for token. The assertions
+ * below read every double-quoted class string of the patched upstream file and
+ * compare it with the same string before patching, in order.
+ */
+describe('phone touch targets on menu rows and tabs (objectstack#29215)', () => {
+  /** Every double-quoted string that looks like a class list, in file order. */
+  const classStrings = (src: string) =>
+    [...src.matchAll(/"([^"\n]*\s[^"\n]*)"/g)].map((m) => m[1].split(/\s+/).filter(Boolean));
+
+  const UPSTREAM_DROPDOWN_MENU = upstreamFor('dropdown-menu');
+  const UPSTREAM_TABS = upstreamFor('tabs');
+
+  it('dropdown-menu declares the three row patches', () => {
+    expect(LOCAL_PATCHES['dropdown-menu'].map((p: { id: string }) => p.id)).toEqual([
+      'dropdown-menu-sub-trigger-phone-touch-target',
+      'dropdown-menu-item-phone-touch-target',
+      'dropdown-menu-choice-item-phone-touch-target',
+    ]);
+  });
+
+  it('tabs declares the list and trigger patches', () => {
+    expect(LOCAL_PATCHES.tabs.map((p: { id: string }) => p.id)).toEqual([
+      'tabs-list-phone-auto-height',
+      'tabs-trigger-phone-touch-target',
+    ]);
+  });
+
+  it.each([
+    ['dropdown-menu', () => UPSTREAM_DROPDOWN_MENU, { 'max-sm:min-h-11': 4 }],
+    ['tabs', () => UPSTREAM_TABS, { 'max-sm:min-h-11': 1, 'max-sm:h-auto': 1 }],
+  ] as const)(
+    '%s: adds only phone-scoped classes; from sm up every class list is upstream',
+    (name, upstream, wanted) => {
+      const result = applyLocalPatches(name, upstream());
+      expect(result.failed).toEqual([]);
+
+      const before = classStrings(upstream());
+      const after = classStrings(result.content);
+      expect(after).toHaveLength(before.length);
+      after.forEach((tokens, i) => {
+        expect(tokens.filter((c) => !c.startsWith('max-sm:'))).toEqual(before[i]);
+      });
+
+      const added = after.flat().filter((c) => c.startsWith('max-sm:'));
+      const counts = Object.fromEntries([...new Set(added)].map((c) => [c, added.filter((a) => a === c).length]));
+      expect(counts).toEqual(wanted);
+    },
+  );
+
+  it('puts the 44 px floor on every dropdown-menu row and on nothing else', () => {
+    const { content } = applyLocalPatches('dropdown-menu', UPSTREAM_DROPDOWN_MENU);
+    const rowOf = (component: string) => {
+      const start = content.indexOf(`const ${component} = `);
+      expect(start, `${component} not found`).toBeGreaterThan(-1);
+      return content.slice(start, content.indexOf('displayName', start));
+    };
+
+    for (const row of [
+      'DropdownMenuSubTrigger',
+      'DropdownMenuItem',
+      'DropdownMenuCheckboxItem',
+      'DropdownMenuRadioItem',
+    ]) {
+      expect(rowOf(row), row).toContain('py-1.5 max-sm:min-h-11');
+    }
+    // A label is not a control; the containers and separator are not rows.
+    for (const other of [
+      'DropdownMenuLabel',
+      'DropdownMenuContent',
+      'DropdownMenuSubContent',
+      'DropdownMenuSeparator',
+    ]) {
+      expect(rowOf(other), other).not.toContain('max-sm:');
+    }
+  });
+
+  it('gives the tab trigger the floor and lets the list grow with it on a phone', () => {
+    const { content } = applyLocalPatches('tabs', UPSTREAM_TABS);
+
+    expect(content).toContain('px-3 py-1.5 max-sm:min-h-11 text-sm font-medium');
+    // The list keeps its desktop `h-10` and opens with it, so readers that find
+    // the string by its opening (`e2e/approvals-inbox-phone.spec.ts`) still do.
+    expect(content).toContain(
+      '"inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground max-sm:h-auto"',
+    );
+    expect(content.slice(content.indexOf('const TabsContent'))).not.toContain('max-sm:');
+  });
+
+  it('refuses when upstream re-pads the menu item rather than landing somewhere new', () => {
+    const repadded = UPSTREAM_DROPDOWN_MENU.replace(
+      'px-2 py-1.5 text-sm outline-none transition-colors',
+      'px-2 py-2 text-sm outline-none transition-colors',
+    );
+    expect(repadded).not.toBe(UPSTREAM_DROPDOWN_MENU);
+
+    const result = applyLocalPatches('dropdown-menu', repadded);
+
+    expect(result.failed.map((p: { id: string; found: number }) => `${p.id} (found ${p.found}x)`)).toEqual([
+      'dropdown-menu-item-phone-touch-target (found 0x)',
+    ]);
+    expect(result.applied).toHaveLength(2);
+  });
+
+  it('refuses when the checkbox and radio items stop sharing their class string', () => {
+    // The choice-item anchor counts two hits; one hit means upstream split the
+    // two rows, and patching only one of them must not pass for patching both.
+    const split = UPSTREAM_DROPDOWN_MENU.replace('py-1.5 pl-8 pr-2 text-sm', 'py-2 pl-8 pr-2 text-sm');
+    const result = applyLocalPatches('dropdown-menu', split);
+
+    expect(result.failed.map((p: { id: string; found: number }) => `${p.id} (found ${p.found}x)`)).toEqual([
+      'dropdown-menu-choice-item-phone-touch-target (found 1x)',
+    ]);
   });
 });
 

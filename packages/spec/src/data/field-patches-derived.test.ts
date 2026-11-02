@@ -56,4 +56,23 @@ describe('a widened whitelist widens the field patch slot', () => {
     expect(message).toContain('`rows`');
     expect(message).toContain('`color`');
   });
+
+  it('the slot\'s description lists the widened members, read from the constant', () => {
+    const description = (ObjectExtensionSchema as unknown as { shape: Record<string, { description?: string }> })
+      .shape.fieldPatches!.description ?? '';
+    expect(description).toContain('`rows`');
+    expect(description).toContain('`color`');
+  });
+
+  it('a rename onto a widened member is carried by filter: the option\'s `colour` → `color` reaches the patch', () => {
+    const r = ObjectExtensionSchema.safeParse({
+      extend: 'crm_account',
+      fieldPatches: { industry: { options: { tech: { colour: '#2563eb' } } } },
+    });
+    expect(r.success).toBe(false);
+    const issue = r.success ? undefined : r.error.issues[0];
+    expect(issue?.code).toBe('unrecognized_keys');
+    expect(issue?.path).toEqual(['fieldPatches', 'industry', 'options', 'tech']);
+    expect(issue?.message).toContain('`colour` → `color`');
+  });
 });

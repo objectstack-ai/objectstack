@@ -22,6 +22,11 @@
  * | a cube dimension over `region` declaring one granularity, asked raw | the bucket |
  * | text `region` by month at `America/New_York` | `NOT_IMPLEMENTED` / 501 saying the query is served |
  *
+ * [#29167] …and a bucket over a `formula` (virtual: no stored column), which
+ * the dry run rendered as `strftime('%Y-%m', calc)` while the query refused it
+ * from the SQL driver's missing-column backstop: both now answer the engine's
+ * virtual-field refusal, field for field.
+ *
  * It now judges the keys `execute()` hands the engine with the service's one
  * reading of it (`dataset-date-bucket-door.ts`, #28852), after the `dateRange`
  * read and the column-asked-twice door as `query()` refuses, so it answers the
@@ -99,6 +104,8 @@ describe('[#28977] the /analytics/sql dry run refuses a date bucket over a colum
         closed_at: { name: 'closed_at', type: 'datetime' },
         closed_on: { name: 'closed_on', type: 'date' },
         account: { name: 'account', type: 'lookup', reference: ACCOUNT },
+        // [#29167] A formula the table stores no column for, whose result is a date.
+        calc: { name: 'calc', type: 'formula', expression: 'closed_on', returnType: 'date' },
       },
     } as never);
     await engine.syncSchemas();
@@ -152,6 +159,25 @@ describe('[#28977] the /analytics/sql dry run refuses a date bucket over a colum
   ])('refuses a bucket over a %s column with the query\'s refusal, field for field', async (_label, query, expected) => {
     const { asQuery, asSql } = await bothRefusals(query);
     expect(asQuery).toEqual(refusalFor(...expected));
+    expect(asSql, 'the dry run vs the query').toEqual(asQuery);
+  });
+
+  it.each<[string, Query, string]>([
+    ['by month', onObject({ timeDimensions: [td('calc', 'month')] }), 'groupBy.0.dateGranularity'],
+    ['after a datetime bucket', onObject({ timeDimensions: [td('closed_at', 'year'), td('calc', 'month')] }), 'groupBy.1.dateGranularity'],
+    ['at a non-UTC zone', onObject({ timeDimensions: [td('calc', 'month')], timezone: 'America/New_York' }), 'groupBy.0.dateGranularity'],
+  ])('[#29167] refuses a bucket over a formula (virtual: no stored column) %s with the query\'s refusal, where the dry run rendered strftime', async (_label, query, path) => {
+    const { asQuery, asSql } = await bothRefusals(query);
+    expect(asQuery).toEqual({
+      message:
+        `aggregate('${DEAL}'): ${path} buckets 'calc' by 'month', but 'calc' is a formula field — its value is computed `
+        + 'on read and never stored, so no driver materialises a column to bucket. The query was NOT run. Denormalise '
+        + `the value onto '${DEAL}' (a stored date or datetime field, written when the source changes) and bucket that. `
+        + 'A formula field is virtual: with no column behind it the bucket reached the driver as a column that does not '
+        + 'exist, and an engine that aggregates in memory put every row into one null group while the answer looked served.',
+      code: 'INVALID_FIELD', status: 400, httpStatus: 400,
+      object: DEAL, param: 'groupBy', path, field: 'calc', fields: ['calc'],
+    });
     expect(asSql, 'the dry run vs the query').toEqual(asQuery);
   });
 

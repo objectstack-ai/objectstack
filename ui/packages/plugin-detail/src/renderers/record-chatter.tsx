@@ -302,6 +302,11 @@ export const RecordChatterRenderer: React.FC<RecordChatterRendererProps> = ({
         // decides `loading` above; the panel only renders it.
         activityDenied={discussion?.activityDenied}
         commentsDenied={discussion?.commentsDenied}
+        // objectstack#29188: which of them FAILED (5xx, network), and the
+        // host's re-read of those; the panel only renders it.
+        activityFailed={discussion?.activityFailed}
+        commentsFailed={discussion?.commentsFailed}
+        onRetryFeed={discussion?.onRetryFeed}
       />
     </div>
   );
