@@ -71,6 +71,9 @@ const FIELD_DEFAULTS: Record<string, string> = {
   // second key for the same name. Same values as the `en` pack.
   'fields.image.cropPreview': 'Image crop preview',
   'fields.percent.slider': 'Percentage',
+  // The scan button text and lookup fields show inside the mobile shell.
+  'fields.scan.button': 'Scan code',
+  'fields.scan.failed': 'Could not scan',
   'console.commandPalette.records': 'Records',
   // objectui#4026 — the separator between the controlling-field names that
   // fill `{{fields}}` of the two gate sentences above/below (`lookup.

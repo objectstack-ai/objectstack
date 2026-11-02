@@ -424,6 +424,11 @@ const en = {
       restricted: 'Restricted file',
       restrictedHint: 'You do not have access to the details of this file',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Scan code',
+      failed: 'Could not scan',
+    },
     image: {
       upload: 'Upload image',
       addMore: 'Add more images',

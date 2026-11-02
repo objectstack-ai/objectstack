@@ -292,6 +292,11 @@ const zh = {
       restricted: '受限文件',
       restrictedHint: '你无权查看此文件的详细信息',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: '扫码',
+      failed: '扫码失败',
+    },
     image: {
       upload: '上传图片',
       addMore: '添加更多图片',

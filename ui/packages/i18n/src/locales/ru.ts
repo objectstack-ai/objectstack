@@ -269,6 +269,11 @@ const ru = {
       show: 'Показать QR-код',
       hide: 'Скрыть QR-код',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Сканировать код',
+      failed: 'Не удалось отсканировать',
+    },
     image: {
       upload: "Загрузить изображение",
       addMore: "Добавить ещё изображения",
