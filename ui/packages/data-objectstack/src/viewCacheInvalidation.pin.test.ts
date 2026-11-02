@@ -133,6 +133,8 @@ function makeDS(opts: {
       invalidated.push(key);
     },
     getCachedSync: () => undefined,
+    // objectstack#29550: no whole view list is ever on the wire here.
+    peekInflight: () => undefined,
     getStats: () => ({}),
   };
 
