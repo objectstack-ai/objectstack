@@ -32,7 +32,8 @@
  * row; a package-less row is laid down as a release before the close stored
  * it (`seedPackagelessRow`), served until the ceremony moves it; a shipped
  * member's package-less write is refused, and an unshipped member's, which
- * the ceremony cannot move (#28904), stays open.
+ * the ceremony moves as the pair's own member declaring nothing (#28904, the
+ * last section), stays open.
  *
  * ## The harness
  *
@@ -865,8 +866,10 @@ describe('[#23074] the artifact envelope is stamped only on the member the packa
      * the by-name read then serve, or `'closed'`: the ceremony moves a shipped
      * member's unmigrated row, so its package-less reset is refused naming the
      * ceremony and the row keeps serving its member. A member the base does
-     * not ship cannot be moved (the pair's save refuses it, #28777; #28904),
-     * so its package-less reset stays open, as before the close.
+     * not ship moves as the pair's own member, declaring nothing (a declared
+     * override of it is refused, #28777; #28904), and the close reaches only
+     * the declared-override moves, so its package-less reset stays open, as
+     * before the close.
      */
     async function resetZh(name: string, verbs: { shadow: boolean; overlayEntry: boolean }, after: string | undefined | 'closed') {
         const shadowBoot = (await bootWithOverlays(new Map(), name)).engine;
