@@ -455,7 +455,8 @@ import { withRefusalAudit } from './protocol-refusal-audit.js';
 // [#28665] The null-master rows a `controlled_by_parent` detail stops serving, counted into the finding that makes its master required.
 import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
 // [#25467 E0] The module preamble that stood here moved, verbatim, into the themed
-// `protocol-*.ts` modules below. What this file exported from it, it still exports.
+// `protocol-*.ts` modules below. What this file exported from it, it still exports;
+// the module order below is the order the rolled-up `.d.ts` keeps their declarations in.
 import {
     HAND_CRAFTED_SCHEMAS,
     TYPE_TO_FORM,
@@ -596,15 +597,6 @@ export {
 } from './protocol-client-failures.js';
 export type { BatchDataLoopOutcome, BatchDataRowResult } from './protocol-client-failures.js';
 import {
-    destructiveChangeRemedy,
-    detectDestructiveObjectChanges,
-    diffShallow,
-    specValidationFindings,
-} from './protocol-write-face.js';
-import type { MetadataWriteFace } from './protocol-write-face.js';
-export { specValidationFindings } from './protocol-write-face.js';
-export type { MetadataWriteFace } from './protocol-write-face.js';
-import {
     RESERVED_LIST_QUERY_PARAMS,
     assertQueryParamArity,
     collectStoredMetadataFilterFields,
@@ -631,6 +623,15 @@ export {
 export type { StoredMetadataSearchSchema } from './protocol-list-query-params.js';
 import { SERVICE_CONFIG } from './protocol-discovery-services.js';
 import { collectCompositeKeyHeadHits, collectReferenceHits } from './protocol-reference-hits.js';
+import {
+    destructiveChangeRemedy,
+    detectDestructiveObjectChanges,
+    diffShallow,
+    specValidationFindings,
+} from './protocol-write-face.js';
+import type { MetadataWriteFace } from './protocol-write-face.js';
+export { specValidationFindings } from './protocol-write-face.js';
+export type { MetadataWriteFace } from './protocol-write-face.js';
 import type {
     DeletePackageRequest,
     DeletePackageResponse,
