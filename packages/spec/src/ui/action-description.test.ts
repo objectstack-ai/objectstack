@@ -148,7 +148,9 @@ describe('the surfaces the action `description` key deliberately does NOT widen'
     expect(issue?.code).toBe('unrecognized_keys');
     expect(issue?.message).toContain('helpText');
   });
+});
 
+describe('the INLINE action surface took the key once its renderer forwarded it', () => {
   it('an INLINE action takes it too — the pick widened once element:button forwarded it', () => {
     // `InlineActionSchema` forwards exactly what `element:button`'s renderer
     // honours, and that renderer now hands `description` to the runner, whose
