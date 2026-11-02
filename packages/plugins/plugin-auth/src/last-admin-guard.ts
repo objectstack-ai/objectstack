@@ -1039,22 +1039,76 @@ export interface LastAdminGuardHandle {
   judgeOrganizationDelete(organizationId: string): Promise<void>;
 }
 
-export function registerLastAdminGuard(
-  engine: LastAdminGuardEngine,
-  opts: LastAdminGuardOptions,
-): LastAdminGuardHandle {
-  const { packageId, logger } = opts;
-  const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
+/**
+ * [ADR-0095 D3] The read a caller that judges no write makes: the platform-admin
+ * roster (`platform-admin-roster.ts`). It has no write to name in a refusal, so
+ * an overflowing read is answered as a read fault rather than as a refused write.
+ */
+const ROSTER_READ = 'roster-read';
 
+/** A guarded write, or the roster read. */
+type StandingReadOp = GuardedOp | typeof ROSTER_READ;
+
+/** Which administrators {@link resolveAdminUserIds} enumerates. */
+export type AdminStanding = 'administrators' | 'platform-admins';
+
+export interface ResolveAdminUserIdsOptions {
+  /**
+   * `'administrators'` (the default) is the population this guard protects:
+   * platform administrators AND organization owners and admins.
+   * `'platform-admins'` drops the organization half and keeps the two sources
+   * of platform-admin standing, the Default Organization's `admin_full_access`
+   * grants and the `OS_PLATFORM_OWNER_EMAIL` list
+   * (`ADMIN_STANDING_PLATFORM_ENUMERATION` in `@objectstack/core`).
+   */
+  standing?: AdminStanding;
+  /** The read ceiling. An overflowing read throws (fail-closed). Default 1000. */
+  maxScan?: number;
+}
+
+/**
+ * [ADR-0095 D3] The guard's ONE enumerator of who administers this environment,
+ * exported for the reader that asks the population question, "who holds
+ * platform-admin standing". It is the code the guard judges its writes by
+ * ({@link createStandingReader}), never a second copy.
+ *
+ * The answer is a CANDIDATE set: a caller that serves it as standing confirms
+ * each id through `hasPlatformAdminStanding` (`@objectstack/core`), the one
+ * per-user predicate, so a rounding error in this enumeration can only leave a
+ * name out, never put one in. Reads run under system context; a read error is
+ * thrown, and an overflowing read throws a 503 `SERVICE_UNAVAILABLE`.
+ */
+export function resolveAdminUserIds(
+  engine: Pick<LastAdminGuardEngine, 'find'>,
+  opts: ResolveAdminUserIdsOptions = {},
+): Promise<Set<string>> {
+  const reader = createStandingReader(engine, opts.maxScan ?? DEFAULT_MAX_SCAN);
+  return reader.resolveAdminUserIds(ROSTER_READ, undefined, opts.standing);
+}
+
+/**
+ * The standing reads, closed over one engine and one read ceiling. The guard
+ * registered by {@link registerLastAdminGuard} and the exported
+ * {@link resolveAdminUserIds} both read through it, so the two cannot drift.
+ */
+function createStandingReader(engine: Pick<LastAdminGuardEngine, 'find'>, maxScan: number) {
   /** Enumerate `object` under a hard ceiling; overflow proves nothing → refuse. */
   const scan = async (
-    op: GuardedOp,
+    op: StandingReadOp,
     object: string,
     query: EngineQueryOptions,
   ): Promise<Array<Record<string, unknown>>> => {
     const rows = await engine.find(object, { ...query, limit: maxScan + 1 }, SYSTEM_READ);
     const list = Array.isArray(rows) ? rows : [];
     if (list.length > maxScan) {
+      if (op === ROSTER_READ) {
+        throw readFault(
+          `The administrator roster could not be read completely: '${object}' returned more than ` +
+            `${maxScan} rows, so the answer would leave administrators out.`,
+          object,
+          undefined,
+        );
+      }
       const words = OP_WORDS[op];
       throw refuse(
         `Refusing this ${words.noun}: '${object}' returned more than ${maxScan} rows, so the ` +
@@ -1093,7 +1147,7 @@ export function registerLastAdminGuard(
    * provisioned holds none either. Any other failed read throws, and the write
    * is refused by {@link failClosed}.
    */
-  const scanLedger = async (op: GuardedOp, query: EngineQueryOptions): Promise<Array<Record<string, unknown>>> => {
+  const scanLedger = async (op: StandingReadOp, query: EngineQueryOptions): Promise<Array<Record<string, unknown>>> => {
     const registry = (engine as { registry?: { getObject?: (name: string) => unknown } }).registry;
     if (typeof registry?.getObject === 'function' && !registry.getObject(METADATA_ACTIVATION)) return [];
     try {
@@ -1112,7 +1166,7 @@ export function registerLastAdminGuard(
    * well — an update can move a row ONTO that pair — and an inserted row is
    * judged with them.
    */
-  const readAdminSetSwitchedOff = async (op: GuardedOp, pending?: PendingStandingWrite): Promise<boolean> => {
+  const readAdminSetSwitchedOff = async (op: StandingReadOp, pending?: PendingStandingWrite): Promise<boolean> => {
     const fields = ['id', 'metadata_type', 'name', 'active'];
     const rows = await scanLedger(op, { where: { metadata_type: 'permission', name: ADMIN_FULL_ACCESS }, fields });
     const ledgerWrite = pendingFor(pending, METADATA_ACTIVATION);
@@ -1147,7 +1201,7 @@ export function registerLastAdminGuard(
    * not issued).
    */
   const readDefaultOrganizationId = async (
-    op: GuardedOp,
+    op: StandingReadOp,
     pending?: PendingStandingWrite,
   ): Promise<string | undefined> => {
     const registry = (engine as { registry?: { getObject?: (name: string) => unknown } }).registry;
@@ -1202,7 +1256,7 @@ export function registerLastAdminGuard(
    * by design; the rule takes the organization already normalized.
    */
   const anchorOwnerTest = async (
-    op: GuardedOp,
+    op: StandingReadOp,
     links: Array<Record<string, unknown>>,
     pending?: PendingStandingWrite,
   ): Promise<(link: Record<string, unknown>) => boolean> => {
@@ -1222,10 +1276,15 @@ export function registerLastAdminGuard(
    * they would read once that write lands — one code path answers both "who
    * administers this environment now" and "who would administer it after", so
    * the two answers can never drift apart the way two separate readers would.
+   *
+   * `standing: 'platform-admins'` skips half 2 (organization owners and
+   * admins), which is no platform-admin standing; the guard always reads all
+   * three halves.
    */
   const resolveAdminUserIds = async (
-    op: GuardedOp,
+    op: StandingReadOp,
     pending?: PendingStandingWrite,
+    standing: AdminStanding = 'administrators',
   ): Promise<Set<string>> => {
     const ids = new Set<string>();
     const now = Date.now();
@@ -1323,7 +1382,8 @@ export function registerLastAdminGuard(
     //    only owner for an ordinary member. Narrowed to non-plain-member rows
     //    so a large membership table is not read wholesale; the grade test
     //    itself still runs in memory, over every row that narrowing kept.
-    const members = await scan(op, SystemObjectName.MEMBER, {
+    //    Not read at all for the platform-admin population.
+    const members = standing === 'platform-admins' ? [] : await scan(op, SystemObjectName.MEMBER, {
       where: { role: { $ne: MEMBERSHIP_ROLE_MEMBER } },
     });
     for (const raw of members) {
@@ -1397,6 +1457,29 @@ export function registerLastAdminGuard(
     ids.delete(SystemUserId.SYSTEM);
     return ids;
   };
+
+  return {
+    scan,
+    catalogSetNames,
+    readAdminSetSwitchedOff,
+    anchorOwnerTest,
+    resolveAdminUserIds,
+  };
+}
+
+export function registerLastAdminGuard(
+  engine: LastAdminGuardEngine,
+  opts: LastAdminGuardOptions,
+): LastAdminGuardHandle {
+  const { packageId, logger } = opts;
+  const maxScan = opts.maxScan ?? DEFAULT_MAX_SCAN;
+  const {
+    scan,
+    catalogSetNames,
+    readAdminSetSwitchedOff,
+    anchorOwnerTest,
+    resolveAdminUserIds,
+  } = createStandingReader(engine, maxScan);
 
   /** Of `adminIds`, those whose `sys_user` row is present and not banned. */
   const resolveUnbannedAdmins = async (

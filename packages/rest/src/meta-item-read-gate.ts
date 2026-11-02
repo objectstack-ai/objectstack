@@ -2417,7 +2417,7 @@ const LAYERED_VIEW_MEMBER_MESSAGE =
  * everywhere; `rule` names which of the three refused, because `RestServer`'s
  * item read answers the third at a different point (see
  * {@link metaItemQueryRefusal}). The arity doors answer a fourth,
- * `bracketed-parameter` ({@link metaBracketedPackageRefusal}).
+ * `bracketed-parameter` ({@link metaBracketedFilterRefusal}).
  */
 export interface MetaItemQueryRefusal {
     readonly status: 400;
@@ -2558,7 +2558,7 @@ export const META_QUERY_ARITY_DOORS: Readonly<Record<MetaQueryArityDoor, readonl
  * door's {@link META_QUERY_ARITY_DOORS} entry that was supplied more than once,
  * as `400 VALIDATION_ERROR` with `repeatedQueryParamMessage`'s sentence, which
  * is the answer `RestServer`'s door gives through `refuseRepeatedQueryParams`;
- * then a bracketed `package` key ({@link metaBracketedPackageRefusal}), which
+ * then a bracketed narrowing filter ({@link metaBracketedFilterRefusal}), which
  * `RestServer`'s door asks right after its multiplicity gate. It returns
  * `undefined` otherwise, and has then unwrapped a one-element array in place.
  * ⛔ Ask it before any read of the door's query.
@@ -2566,42 +2566,80 @@ export const META_QUERY_ARITY_DOORS: Readonly<Record<MetaQueryArityDoor, readonl
 export function metaQueryArityRefusal(door: MetaQueryArityDoor, query: unknown): MetaItemQueryRefusal | undefined {
     if (!query || typeof query !== 'object') return undefined;
     return repeatedOnceRefusal(query as Record<string, unknown>, META_QUERY_ARITY_DOORS[door])
-        ?? metaBracketedPackageRefusal(door, query);
+        ?? metaBracketedFilterRefusal(door, query);
 }
 
 /**
- * The answer of the two arity doors that read `?package=` — the list and the
- * book tree — to a BRACKETED spelling of it: `?package[]=ID`, `?package[0]=ID`,
- * any key that opens `package[`. A client that serialises arrays qs-style sends
- * it; every adapter hands the key through as spelled, so the door's
- * `metaItemPackageBinding(query.package)` read no package, and a caller who
- * named ONE package was answered across every package. `400
- * VALIDATION_ERROR`, in the list chain's narrowing-filter frame
- * ({@link listFilterRefusalMessage}), naming the key as sent; beside a plain
- * `?package=` too (two spellings of one scope). Asked at the door's entry,
- * before any read — where the binding is read — by both transports:
+ * One filter an arity door judges for a BRACKETED spelling: the name as the
+ * door reads it, what one value of it names, how one value is spelled, what the
+ * door serves, and what leaving the parameter out reads. Every field goes into
+ * {@link listFilterRefusalMessage}'s one sentence frame.
+ */
+interface MetaBracketedFilter {
+    readonly param: string;
+    readonly names: string;
+    readonly takes: string;
+    readonly served: 'list' | 'tree';
+    readonly unscoped: string;
+}
+
+const PACKAGE_ID_TAKES = 'one package id, spelled';
+
+/**
+ * The single-valued filters each arity door judges for a bracketed spelling, in
+ * the order asked: the names these doors read at their entry whose absence
+ * WIDENS the answer (no package is every package, no type is every type). The
+ * list's `id` and `object` are judged a step later, in the list chain
+ * ({@link refuseBracketedListFilter}).
+ */
+const META_BRACKETED_FILTERS: Readonly<Partial<Record<MetaQueryArityDoor, readonly MetaBracketedFilter[]>>> = Object.freeze({
+    list: Object.freeze([
+        { param: 'package', names: 'package', takes: `${PACKAGE_ID_TAKES} ?package=ID`, served: 'list', unscoped: 'list across every package' },
+    ] as const),
+    'book-tree': Object.freeze([
+        { param: 'package', names: 'package', takes: `${PACKAGE_ID_TAKES} ?package=ID`, served: 'tree', unscoped: 'read the tree across every package' },
+    ] as const),
+    drafts: Object.freeze([
+        { param: 'packageId', names: 'package', takes: `${PACKAGE_ID_TAKES} ?packageId=ID`, served: 'list', unscoped: 'list the drafts of every package' },
+        { param: 'type', names: 'metadata type', takes: 'one metadata type, spelled ?type=TYPE', served: 'list', unscoped: 'list the drafts of every type' },
+    ] as const),
+});
+
+/**
+ * The answer of an arity door to a BRACKETED spelling of one of its narrowing
+ * filters ({@link META_BRACKETED_FILTERS}): `?package[]=ID` or `?package[0]=ID`
+ * on the list and the book tree, `?packageId[]=ID` or `?type[]=TYPE` on
+ * `_drafts` — any key that opens `param[`. A client that serialises arrays
+ * qs-style sends it; every adapter hands the key through as spelled
+ * (`readQuery` in `plugin-hono-server`, `readDispatchQuery` in
+ * `@objectstack/hono`), so the door, which reads `query[param]`, read no
+ * filter, and a caller who named ONE package (or one type) was answered across
+ * every package (or type). `400 VALIDATION_ERROR`, rule `bracketed-parameter`,
+ * in the list chain's narrowing-filter frame ({@link listFilterRefusalMessage}),
+ * naming the key as sent; beside a plain spelling too (two spellings of one
+ * filter). Asked at the door's entry, before any read, by both transports:
  * {@link metaQueryArityRefusal} for the dispatcher, after
  * `refuseRepeatedQueryParams` for `RestServer`.
  *
  * Every by-name `/meta` door (the item read, `/layers`, the save, the reset,
- * `/publish`) and the diagnostics sweep already refuse the key: it is not in
- * their closed set (route rule 5). `_drafts` and `state` read no `package`.
+ * `/publish`) and the diagnostics sweep already refuse such a key: it is not in
+ * their closed set (route rule 5).
  */
-export function metaBracketedPackageRefusal(door: MetaQueryArityDoor, query: unknown): MetaItemQueryRefusal | undefined {
-    if (!META_QUERY_ARITY_DOORS[door].includes('package')) return undefined;
-    const key = bracketedKeyOf(query, 'package');
-    if (key === undefined) return undefined;
-    const tree = door === 'book-tree';
-    return {
-        status: 400,
-        code: 'VALIDATION_ERROR',
-        message: listFilterRefusalMessage(
-            key, 'package', "the 'package' filter takes exactly one package id, spelled ?package=ID",
-            "a bracketed 'package' key", tree ? 'tree' : 'list',
-            tree ? 'read the tree across every package' : 'list across every package',
-        ),
-        rule: 'bracketed-parameter',
-    };
+export function metaBracketedFilterRefusal(door: MetaQueryArityDoor, query: unknown): MetaItemQueryRefusal | undefined {
+    for (const filter of META_BRACKETED_FILTERS[door] ?? []) {
+        const key = bracketedKeyOf(query, filter.param);
+        if (key === undefined) continue;
+        return {
+            status: 400,
+            code: 'VALIDATION_ERROR',
+            message: listFilterRefusalMessage(
+                key, filter.names, `the '${filter.param}' filter takes exactly ${filter.takes}`,
+                `a bracketed '${filter.param}' key`, filter.served, filter.unscoped,
+            ),
+            rule: 'bracketed-parameter',
+        };
+    }
+    return undefined;
 }
 
 /**
