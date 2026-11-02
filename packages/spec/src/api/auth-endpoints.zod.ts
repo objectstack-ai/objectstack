@@ -230,6 +230,15 @@ export const AuthFeaturesConfigSchema = lazySchema(() => z.object({
   passkeys: retiredKey(PASSKEYS_UNADVERTISED),
   magicLink: retiredKey(MAGIC_LINK_UNADVERTISED),
   organization: z.boolean().default(false).describe('Multi-tenant organization support enabled'),
+  // Served by plugin-auth (`getPublicConfig()`, refined by `isSsoUsable()` in
+  // the `/config` route) and by the hono adapter's `/auth/config` route, which
+  // applies the same refinement; read by the console LoginForm (#29344).
+  sso: z.boolean().optional().describe(
+    'Enterprise SSO sign-in usable: the domain-routed SSO plugin is wired AND at least one SSO provider is configured, so the login UI offers its "Sign in with SSO" entry; '
+    + 'false when SSO is off, or on with no provider yet. The served value is that usable answer (isSsoUsable), not the coarse wired flag: '
+    + 'GET /auth/config refines it before answering, and falls open to the wired flag when providers cannot be counted. '
+    + 'Unlike ssoEnforced, which takes the password form away, this only says whether the SSO entry exists; absent means not usable',
+  ),
   ssoEnforced: z.boolean().optional().describe(
     'SSO-only login enforced: the UI hides the local password form + self-registration (a break-glass "use a password" link remains)',
   ),
