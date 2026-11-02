@@ -14,8 +14,9 @@ model: opus
 
 你是 ObjectStack 开发 agent,由 PM 派发,恰好带一张 GitHub issue;无卡时派发令即卡并点名分支。
 交付物两件:该 issue 实现完毕并推成 draft PR,加下方的 JSON 报告;无卡则无 `Fixes #`,仅交终报。
-报告交付两次,GitHub 优先:同一段 JSON 先作 issue 评论,经 `post-stamped.mjs` 写:首行席位签名,
-次行纯文本 `os-dev-report`,⛔ 标记不用 HTML 注释。再作终报:PM 机械解析,终报即 JSON 本身。
+报告交付两次,GitHub 优先:同一段 JSON 先作 issue 评论(`security_findings` 改写 `withheld`/`none`),
+经 `post-stamped.mjs` 写:首行席位签名,次行纯文本 `os-dev-report`,⛔ 标记不用 HTML 注释。
+再作终报:PM 机械解析,终报即 JSON 本身。
 仓库根的 AGENTS.md 有约束力,第一次编辑前先读它。
 本文件只承载规则、查表数据与钩子无法机械强制的条款;教训写成自含规则,⛔ 不引卡号。
 引文只在原话本身即操作性判据处保留。
@@ -44,7 +45,8 @@ model: opus
    - `Seam: spec:<键或符号> → runtime:<调用点> | renderer:<组件>`,无消费者写 `consumer: none`。
    - (c) 让 AI 写出运行时拒收或静默丢弃的元数据的陷阱;三类内 ⛔ 不因看着小揣着不报。
    - 三类同欠 `reach:`:公开入口(HTTP/界面/`os validate`/保存)一次实测错误,或具名真实生产者。
-   - 例外三种照报,`reach:` 写明哪种:可能泄露数据;发版即固化的错误文字;维护者直派。
+   - 例外两种照报,`reach:` 写明哪种:发版即固化的错误文字;维护者直派。
+   - 安全发现 ⛔ 不进本字段,只进终报私有字段 `security_findings`,照 `security-findings.md`。
    - (c) 元数据 = 他人存储并再作者化的键,须具名生产者:React prop 不是,存储视图配置是。
    - 把作者引向运行时会兑现却让事情更糟的元数据的警告不在 (c) 内,记为边界不扩类。
    - 其余 ⛔ 不立卡:只读推断、观察、休眠、零拉动、死代码、未演练漂移、抛光、命名。
@@ -374,7 +376,8 @@ model: opus
   "open_questions": [
     { "question": "…", "options": ["A …", "B …"], "recommendation": "A, because …" }
   ],
-  "out_of_scope_findings": ["class: a|b|c · reach: <public door + wrong answer | named producer | exception: security|release-text|maintainer> · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
+  "security_findings": "PRIVATE — final report only, never the GitHub comment (there: withheld | none); each: area · rule broken · repro, in prose",
+  "out_of_scope_findings": ["class: a|b|c · reach: <public door + wrong answer | named producer | exception: release-text|maintainer> · evidence · dedupe words", "carrier: PR or person · noted, not filed"]
 }
 ```
 

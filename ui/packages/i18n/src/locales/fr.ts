@@ -1855,7 +1855,9 @@ const fr = {
       title: "Paramètres",
       subtitle: "Configurez votre système, vos intégrations et vos indicateurs de fonctionnalité.",
       loadError: "Échec du chargement des paramètres",
-      empty: "Aucun paramètre enregistré. Les plugins peuvent enregistrer des manifestes de paramètres via le SettingsService.",
+      empty: "Aucune page de paramètres n'est encore disponible. Elles apparaissent ici lorsqu'une application installée en fournit.",
+      adminManaged: "Les paramètres sont gérés par votre administrateur",
+      adminManagedDescription: "Votre compte ne peut ni afficher ni modifier ces paramètres. Adressez-vous à un administrateur si quelque chose doit changer.",
       settingsCount: "{{n}} paramètres",
       beta: "Bêta",
       categories: {
@@ -2735,6 +2737,7 @@ const fr = {
       orText: "ou continuer avec l'e-mail",
       ssoButton: "Se connecter avec le SSO",
       ssoOnlyDescription: "Connectez-vous avec l'authentification unique de votre organisation",
+      noSignInMethodText: "Aucune méthode de connexion n'est disponible. Contactez votre administrateur.",
       usePasswordText: "Utiliser un mot de passe à la place",
       backToSsoText: "Revenir à l'authentification unique",
       // objectui#12600 — the console login card's own header, the password

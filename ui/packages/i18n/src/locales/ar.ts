@@ -2018,7 +2018,9 @@ const ar = {
       title: "الإعدادات",
       subtitle: "اضبط النظام والتكاملات وأعلام الميزات.",
       loadError: "تعذّر تحميل الإعدادات",
-      empty: "لا توجد إعدادات مسجّلة. يمكن للإضافات تسجيل بيانات الإعدادات عبر SettingsService.",
+      empty: "لا توجد صفحات إعدادات متاحة بعد. تظهر هنا عندما يوفّرها تطبيق مثبّت.",
+      adminManaged: "يدير المسؤول الإعدادات",
+      adminManagedDescription: "لا يمكن لحسابك عرض هذه الإعدادات أو تغييرها. اطلب من المسؤول إجراء أي تغيير تحتاج إليه.",
       settingsCount: "{{n}} من الإعدادات",
       beta: "إصدار تجريبي",
       categories: {
@@ -2922,6 +2924,7 @@ const ar = {
       orText: "أو تابع باستخدام البريد الإلكتروني",
       ssoButton: "تسجيل الدخول باستخدام SSO",
       ssoOnlyDescription: "سجّل الدخول عبر الدخول الموحّد لمؤسستك",
+      noSignInMethodText: "لا تتوفر أي طريقة لتسجيل الدخول. تواصل مع المسؤول.",
       usePasswordText: "استخدام كلمة المرور بدلاً من ذلك",
       backToSsoText: "العودة إلى الدخول الموحّد",
       // objectui#12600 — the console login card's own header, the password

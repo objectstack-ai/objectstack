@@ -25,6 +25,7 @@ import { FileCell } from './FileField.js';
 import { toDateInputValue, toDateTimeInputValue, fromDateTimeInputValue, isImpossibleStoredDay } from './nativeDateValue.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
 import { toDomProps } from './toDomProps.js';
+import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import { toHostGroupProps } from './toHostGroupProps.js';
 import type { InlineGridColumn } from '@objectstack/spec/data';
 import { GRID_FIELD_RETIRED_KEYS, type GridFieldMetadata, type GridFieldRetiredKey } from '@object-ui/types';
@@ -1246,7 +1247,7 @@ function GridFieldBody({
       return (
         <Select value={val != null ? String(val) : ''} onValueChange={(v) => setCell(rowIdx, c, v)} disabled={locked}>
           <SelectTrigger
-            className="h-8 rounded-none border-0 bg-transparent px-2 shadow-none focus:ring-1 focus:ring-ring/60"
+            className={cn('h-8 rounded-none border-0 bg-transparent px-2 shadow-none focus:ring-1 focus:ring-ring/60', PHONE_TOUCH_HEIGHT)}
             aria-label={c.label || c.name}
             aria-invalid={invalid || undefined}
           >
@@ -1254,7 +1255,7 @@ function GridFieldBody({
           </SelectTrigger>
           <SelectContent>
             {(c.options || []).map((o) => (
-              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              <SelectItem key={o.value} value={o.value} className={PHONE_TOUCH_HEIGHT}>{o.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -1284,6 +1285,7 @@ function GridFieldBody({
           onKeyDown={(e) => onCellKeyDown(e, rowIdx, colIdx)}
           className={cn(
             'h-8 rounded-none border-0 bg-transparent px-2 shadow-none focus-visible:ring-1 focus-visible:ring-ring/60',
+            PHONE_TOUCH_HEIGHT,
             adornment && 'pl-6',
             isNumeric(c.type) && 'text-right tabular-nums',
           )}
@@ -1471,7 +1473,7 @@ function GridFieldBody({
                               type="button"
                               variant="ghost"
                               size="icon"
-                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                              className={cn('h-8 w-8 text-muted-foreground hover:text-foreground', PHONE_TOUCH_SQUARE)}
                               aria-label={openRowLabel}
                               title={openRowLabel}
                               data-testid={`line-items-expand-${rowIdx}`}
@@ -1489,7 +1491,7 @@ function GridFieldBody({
                               // discoverable and reachable on touch/coarse-pointer devices,
                               // which have no hover. The action column width is reserved
                               // regardless, so this adds no layout shift.
-                              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                              className={cn('h-8 w-8 text-muted-foreground hover:text-foreground', PHONE_TOUCH_SQUARE)}
                               aria-label={duplicateRowLabel}
                               title={duplicateRowLabel}
                               data-testid={`line-items-duplicate-${rowIdx}`}
@@ -1505,7 +1507,7 @@ function GridFieldBody({
                               variant="ghost"
                               size="icon"
                               // Always visible — see the duplicate button above.
-                              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                              className={cn('h-8 w-8 text-muted-foreground hover:text-destructive', PHONE_TOUCH_SQUARE)}
                               aria-label={removeRowLabel}
                               data-testid={`line-items-remove-${rowIdx}`}
                               onClick={() => removeRow(rowIdx)}
@@ -1548,6 +1550,7 @@ function GridFieldBody({
           type="button"
           variant="outline"
           size="sm"
+          className={PHONE_TOUCH_HEIGHT}
           onClick={isList && onAdd ? onAdd : addRow}
           disabled={maxRows != null && rows.length >= maxRows}
           data-testid="line-items-add"

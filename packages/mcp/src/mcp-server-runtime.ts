@@ -26,6 +26,7 @@ import {
   metadataPartialListingSentence,
 } from './metadata-completeness.js';
 import { DEFAULT_SERVER_VERSION } from './package-version.js';
+import { createPlatformMcpServer } from './request-params.js';
 import { protocolStdout } from './protocol-stdout.js';
 import { renderSkillMarkdown, type RenderSkillOptions } from './skill-md.js';
 import {
@@ -778,6 +779,63 @@ export async function buildAgentPromptResult(
 }
 
 /**
+ * [#28940] What the agent roster read at bridge time lets `agent_prompt` claim.
+ *
+ * - `agents` — the read named at least one agent: the prompt is advertised and
+ *   its `agentName` argument names those agents.
+ * - `none` — the read answered completely and named no agent: nothing on this
+ *   boot can answer the prompt, so it is not advertised.
+ * - `unknown` — the read was degraded or threw: whether an agent exists is not
+ *   known, so the prompt is advertised as before (an outage is not absence,
+ *   the #6055 discipline) and its argument names no agent.
+ */
+type AgentRoster =
+  | { state: 'agents'; names: string[] }
+  | { state: 'none' }
+  | { state: 'unknown'; errors: string[] };
+
+/**
+ * [#28940] Read which agents this boot holds, for the `agent_prompt`
+ * advertisement.
+ *
+ * The roster is read from the metadata service — the same layer
+ * {@link buildAgentPromptResult} resolves a name from — so the names the
+ * argument teaches are names a `prompts/get` can answer. `agent` is a
+ * code-only type (ADR-0063 §2 closes `*.agent.ts` to third parties, and the
+ * save door refuses a runtime create), so no runtime write grows the set after
+ * boot, and the merged overlay read the skill snapshot uses has nothing to add.
+ */
+async function readAgentRoster(metadataService: IMetadataService): Promise<AgentRoster> {
+  let read: DiagnosedListRead;
+  try {
+    read = await diagnosedList(metadataService, 'agent');
+  } catch (err) {
+    return { state: 'unknown', errors: [err instanceof Error ? err.message : String(err)] };
+  }
+  const names = read.items
+    .map((item) => (item as { name?: unknown } | null | undefined)?.name)
+    .filter((name): name is string => typeof name === 'string' && name.length > 0);
+  if (names.length > 0) return { state: 'agents', names };
+  if (read.degraded) return { state: 'unknown', errors: read.errors };
+  return { state: 'none' };
+}
+
+/**
+ * [#28940] The `agentName` argument description: example names drawn from the
+ * agents this boot holds, never a fixed pair.
+ *
+ * It used to read `e.g. "ask", "build"` on every boot. On the open framework,
+ * which registers no agent, that taught two names that resolve to nothing.
+ * [#14461]'s concern — that the suggestion an author copies is a canonical id,
+ * never a retired alias — holds by construction: a registered agent's name is
+ * its canonical id.
+ */
+function agentNameArgumentDescription(names: readonly string[]): string {
+  if (names.length === 0) return 'Name of the agent to load';
+  return `Name of the agent to load (e.g. ${names.slice(0, 2).map((n) => `"${n}"`).join(', ')})`;
+}
+
+/**
  * What MCP's `resources/read` answers with — the text-content subset of the
  * SDK's `ReadResourceResult`. Carries an index signature for the same reason
  * {@link AgentPromptResult} does.
@@ -1223,7 +1281,9 @@ export class MCPServerRuntime {
       ...config,
     };
 
-    this.mcpServer = new McpServer(
+    // [#29135] Built through the one seam both transports share, so malformed
+    // params answer -32602 Invalid params rather than -32603 (see request-params.ts).
+    this.mcpServer = createPlatformMcpServer(
       {
         name: this.config.name,
         version: this.config.version,
@@ -1505,6 +1565,7 @@ export class MCPServerRuntime {
    *
    * 1. `agent_prompt` — one dynamic prompt that loads an agent's system prompt
    *    by name, with optional UI context (objectName, recordId, viewName).
+   *    Advertised only on a boot that holds an agent (#28940).
    * 2. One prompt per authored `skill` that carries `instructions` (#3905).
    *    This is the open distribution's consumer for skill metadata: a tenant
    *    writes `*.skill.ts`, and its instructions become a prompt any MCP client
@@ -1539,33 +1600,58 @@ export class MCPServerRuntime {
   ): Promise<void> {
     const logger = this.config.logger;
 
-    // Register a dynamic prompt that loads agents at call time
-    this.mcpServer.registerPrompt(
-      'agent_prompt',
-      {
-        description: 'Load an agent\'s system prompt with optional UI context. ' +
-          'Use the agentName argument to select which agent\'s instructions to use.',
-        argsSchema: {
-          // [#14461] The example names the two CANONICAL platform agent ids.
-          // It used to read `"data_chat", "metadata_assistant"` — both retired
-          // aliases, neither canonical id present — so every MCP client asking
-          // what to pass was taught the exact two spellings
-          // `skills/objectstack-ai` forbids. The aliases still resolve (cloud's
-          // one-way alias registry), so nothing broke; what was wrong is that
-          // this is the suggestion an author copies.
-          agentName: z.string().describe('Name of the agent to load (e.g. "ask", "build")'),
-          objectName: z.string().optional().describe('Current object the user is viewing'),
-          recordId: z.string().optional().describe('Currently selected record ID'),
-          viewName: z.string().optional().describe('Current view name'),
+    // [#28940] Declared IS served, the rule the skill projection below already
+    // follows: `agent_prompt` is advertised only when this boot holds an agent
+    // that can answer it. Before this it was registered unconditionally, so a
+    // boot with no agent (the open framework registers none) listed a prompt
+    // whose every get was a SUCCESSFUL result reading `Error: Agent "X" not
+    // found`, text an MCP client hands its model as instructions. The roster is
+    // a snapshot taken here, at the same moment as the skill list and for the
+    // same reason: this server's `prompts/list` belongs to the SDK and is fixed
+    // once the transport attaches. A roster read that cannot say (degraded, or
+    // it threw) keeps the prompt, which then answers the honest #6055 outage
+    // text at get time.
+    const roster = await readAgentRoster(metadataService);
+    if (roster.state === 'none') {
+      logger?.info(
+        '[MCP] agent_prompt not advertised — this boot registers no agent, so nothing could answer it. '
+          + 'It is listed on a boot whose metadata service holds at least one agent.',
+      );
+    } else {
+      if (roster.state === 'unknown') {
+        logger?.warn(
+          '[MCP] agent_prompt advertised without knowing whether any agent exists — the agent metadata '
+            + 'could not be fully read, so its argument names no agent and a get answers '
+            + 'SERVICE_UNAVAILABLE while the read stays down. '
+            + 'Fix: check the loaders behind the metadata service (datasource connection, credentials, table).',
+          { errors: roster.errors },
+        );
+      }
+      // A dynamic prompt that loads the named agent at call time.
+      this.mcpServer.registerPrompt(
+        'agent_prompt',
+        {
+          description: 'Load an agent\'s system prompt with optional UI context. ' +
+            'Use the agentName argument to select which agent\'s instructions to use.',
+          argsSchema: {
+            // [#28940] Examples come from the roster, never a fixed pair: see
+            // {@link agentNameArgumentDescription}.
+            agentName: z.string().describe(
+              agentNameArgumentDescription(roster.state === 'agents' ? roster.names : []),
+            ),
+            objectName: z.string().optional().describe('Current object the user is viewing'),
+            recordId: z.string().optional().describe('Currently selected record ID'),
+            viewName: z.string().optional().describe('Current view name'),
+          },
         },
-      },
-      async (args) =>
-        // [#6055] Outage vs. miss lives in the builder — see
-        // {@link buildAgentPromptResult}.
-        buildAgentPromptResult(metadataService, args, logger),
-    );
+        async (args) =>
+          // [#6055] Outage vs. miss lives in the builder — see
+          // {@link buildAgentPromptResult}.
+          buildAgentPromptResult(metadataService, args, logger),
+      );
 
-    logger?.info('[MCP] Agent prompts bridged');
+      logger?.info('[MCP] Agent prompts bridged');
+    }
 
     // ── Skill metadata → MCP prompts (#3905) ──
     // [#6504] This consumer is a SNAPSHOT, not a mis-describing surface, and is
@@ -1830,7 +1916,8 @@ export class MCPServerRuntime {
         : undefined;
 
     // Fresh, isolated server per request (stateless).
-    const server = new McpServer(
+    // [#29135] The same seam as the long-lived server: malformed params answer -32602.
+    const server = createPlatformMcpServer(
       { name: this.config.name, version: this.config.version },
       {
         // [#8034] `tools` is DERIVED, exactly as on the long-lived server:

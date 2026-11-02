@@ -77,6 +77,7 @@ const base: ServerReadyOptions = {
 const summaryWith = (armed: Contender, shadowedCount = 1): AutomationReadySummary => ({
   enabled: true,
   declaredFlowCount: 1,
+  refusedCount: 0,
   flowCount: 1,
   boundCount: 1,
   triggerTypes: ['record_change'],

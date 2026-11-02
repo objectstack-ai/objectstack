@@ -67,6 +67,23 @@
  * `failed` outcome; the next row is still tried. A second run finds nothing to
  * move (idempotent).
  *
+ * ## …a bundle member the base does not ship (#28904)
+ *
+ * For a type whose identity is a pair (`ITEM_KEY_DISCRIMINATORS`: an
+ * `email_template` is one item per `(name, locale)`), the base may ship the
+ * name and not the row's member — a `zh-CN` translation of a template shipped
+ * `en-US` only. Such a row overrides nothing the base ships: the pair holds it
+ * as its OWN member, declaring nothing (ADR-0146 D2; a declared override of it
+ * is refused, `declared_package_ships_no_such_item`, #28777), and the base's
+ * address serves it as the pair's addition (#28802). The census names that
+ * member on the `movable` row (`addedMember`), from the shipped artifacts at
+ * that member as the write gate counts them ({@link addedMemberOf}), and
+ * the move differs in steps 2 and 3 only: the body is saved into the pair
+ * WITHOUT `overrides` (one it carries naming the base is dropped), so no
+ * `basedOn` is recorded and none is needed; the pair's row read back must be
+ * that member's own row, declaring nothing. Its outcome is `moved`, naming
+ * the `addedMember` in place of a `basedOn`.
+ *
  * ## …and the stored declarations missing `basedOn`
  *
  * A row of a pair whose body declares `overrides: { package: <base> }` with no
@@ -91,8 +108,8 @@ import { storedRowDocument } from './item-lock.js';
 import { OVERLAY_MEMBER_COLUMN, overlayMemberField, overlayMemberOfBody, overlayMemberValue } from './migrations/overlay-index.js';
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { customizationPairEnsureRefusal, type PairRegistry } from './protocol-customization-package.js';
-import type { OverrideWriteSubject, OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
-import { readOnlyShippingPackages } from './protocol-environment-rows.js';
+import { overrideWriteMemberOf, type OverrideWriteSubject, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+import { readOnlyShippingPackages, shippingPackageIds } from './protocol-environment-rows.js';
 import { isServedOverrideRowOf } from './served-override.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
 
@@ -138,6 +155,13 @@ export interface PackagelessOverlayRow {
     readonly pair?: string;
     /** `shadowed` only: whether the pair's row declares the override of the base. */
     readonly shadowDeclares?: boolean;
+    /**
+     * [#28904] `movable` only, for a type whose identity is a pair: the bundle
+     * member (the row's discriminator value, e.g. its locale) the base does
+     * not ship. The row moves in as the pair's own member at it, declaring no
+     * override (module header, "a bundle member the base does not ship").
+     */
+    readonly addedMember?: string;
 }
 
 /** One pair row whose declaration lacks `basedOn` (module header, last section). */
@@ -164,7 +188,9 @@ export interface PackagelessOverlayCensus {
 
 /** What {@link migratePackagelessOverlays} did with one movable row or one incomplete declaration. */
 export type PackagelessOverlayOutcome =
-    | { readonly id: string; readonly outcome: 'moved' | 'declaration_completed'; readonly packageId: string; readonly basedOn: string }
+    | { readonly id: string; readonly outcome: 'moved' | 'declaration_completed'; readonly packageId: string; readonly basedOn: string; readonly addedMember?: undefined }
+    /** [#28904] Moved as the pair's own member the base does not ship: no declaration, so no `basedOn`. */
+    | { readonly id: string; readonly outcome: 'moved'; readonly packageId: string; readonly addedMember: string; readonly basedOn?: undefined }
     | { readonly id: string; readonly outcome: 'failed'; readonly error: string };
 
 /** One base's line of the report. */
@@ -261,6 +287,28 @@ function baseVersionOf(host: Pick<PackagelessOverlayMigrationHost, 'engine'>, ba
 }
 
 /**
+ * [#28904, ADR-0146 D2] The bundle member `body` is, when `base` ships the
+ * name `name` but not that member — the member the row adds to the pair; `undefined` for a type whose identity is
+ * its name alone, and for a member `base` ships. Counted as the override
+ * write gate counts a shipper (`overrideWriteVerdict`): the artifacts at that
+ * member, less any another member answers (a registry that ignores `member`
+ * can answer one), bound to `base` — ⛔ never a second reading.
+ */
+function addedMemberOf(
+    host: Pick<PackagelessOverlayMigrationHost, 'shippedArtifactsOf'>,
+    type: string,
+    name: string,
+    base: string,
+    body: unknown,
+): string | undefined {
+    const member = overrideWriteMemberOf(type, body);
+    if (member === undefined) return undefined;
+    const atMember = host.shippedArtifactsOf(type, name, undefined, member)
+        .filter((artifact) => overrideWriteMemberOf(type, artifact) === member);
+    return shippingPackageIds(atMember).has(base) ? undefined : member;
+}
+
+/**
  * [#28576] How the census classifies ONE package-less row of a name some
  * read-only code package ships (module header, "The population"), from the
  * shippers ({@link readOnlyShippingPackages}), the row's body and the pair's
@@ -345,8 +393,12 @@ export async function listPackagelessOverlays(
             ...(member !== undefined ? { member } : {}),
             shippers,
         };
-        const classified = classifyPackagelessRow(shippers, bodyOf(row), (pair) => shadowOf(pair, type, name, member, state));
-        listed.push({ ...common, ...classified });
+        const body = bodyOf(row);
+        const classified = classifyPackagelessRow(shippers, body, (pair) => shadowOf(pair, type, name, member, state));
+        const addedMember = classified.disposition === 'movable' && classified.base !== undefined
+            ? addedMemberOf(this, type, name, classified.base, body)
+            : undefined;
+        listed.push({ ...common, ...classified, ...(addedMember !== undefined ? { addedMember } : {}) });
     }
 
     // Every type a declaration applies to, not only the five the move acts on.
@@ -391,6 +443,12 @@ async function storedPairRow(
         context: SYSTEM,
     });
     return (rows ?? []).find((row) => memberOf(row) === item.member);
+}
+
+/** [#28904] Whether a pair's stored row is its own item: a document that declares no override. */
+function isOwnMemberRow(row: unknown): boolean {
+    const body = row === undefined ? undefined : bodyOf(row);
+    return body !== undefined && !('overrides' in body);
 }
 
 /**
@@ -451,25 +509,33 @@ export async function migratePackagelessOverlays(
         };
         const ensuredPair = await ensure(row.base, row.pair);
         if (!ensuredPair.ok) { fail(ensuredPair.error); continue; }
-        const basedOn = baseVersionOf(this, row.base);
-        if (basedOn === undefined) { fail(`The installed package '${row.base}' declares no version, so no basedOn can be recorded.`); continue; }
+        // [#28904] A member the base does not ship is the pair's own: no
+        // declaration, so no `basedOn` to record.
+        const { addedMember } = row;
+        const basedOn = addedMember === undefined ? baseVersionOf(this, row.base) : undefined;
+        if (addedMember === undefined && basedOn === undefined) { fail(`The installed package '${row.base}' declares no version, so no basedOn can be recorded.`); continue; }
         const stored = rowsById.get(row.id);
         const body = stored === undefined ? undefined : bodyOf(stored);
         if (body === undefined) { fail('The stored body could not be read as a document.'); continue; }
         try {
-            // Step 2: the declared body, saved into the pair through the save door.
+            // Step 2: the declared body — or, for an added member, the body
+            // with no `overrides` — saved into the pair through the save door.
+            const { overrides: _declared, ...undeclared } = body;
             await this.saveMetaItem({
                 type: row.type,
                 name: row.name,
-                item: { ...body, overrides: { package: row.base, basedOn } },
+                item: addedMember === undefined ? { ...body, overrides: { package: row.base, basedOn } } : undeclared,
                 packageId: row.pair,
                 mode: row.state === 'draft' ? 'draft' : 'publish',
                 actor: request.actor,
             } as never);
-            // Step 3: read back — the pair's row must be the served override.
+            // Step 3: read back — the pair's row must be the served override,
+            // or, for an added member, that member's own row declaring nothing.
             const written = await storedPairRow(this, row, row.pair);
-            if (!isServedOverrideRowOf(written, row.base)) {
-                fail(`The row saved into '${row.pair}' does not read back as the declared override of '${row.base}'; the unbound row is kept.`);
+            if (addedMember === undefined ? !isServedOverrideRowOf(written, row.base) : !isOwnMemberRow(written)) {
+                fail(addedMember === undefined
+                    ? `The row saved into '${row.pair}' does not read back as the declared override of '${row.base}'; the unbound row is kept.`
+                    : `The row saved into '${row.pair}' does not read back as its own member '${addedMember}', declaring no override; the unbound row is kept.`);
                 continue;
             }
             // Step 4: only now, the unbound row, by its own address.
@@ -479,7 +545,9 @@ export async function migratePackagelessOverlays(
                     parentVersion: (typeof stored.checksum === 'string' ? stored.checksum : null) as string,
                     actor: request.actor,
                     source: request.actor,
-                    message: `Moved into '${row.pair}' as a declared override of '${row.base}' (ADR-0146 D11)`,
+                    message: addedMember === undefined
+                        ? `Moved into '${row.pair}' as a declared override of '${row.base}' (ADR-0146 D11)`
+                        : `Moved into '${row.pair}' as its own member '${addedMember}', which '${row.base}' does not ship (ADR-0146 D2, D11)`,
                     intent: 'override-artifact',
                     state: row.state,
                     packageId: null,
@@ -487,7 +555,9 @@ export async function migratePackagelessOverlays(
                 } as never,
             );
             line.moved += 1;
-            outcomes.push({ id: row.id, outcome: 'moved', packageId: row.pair, basedOn });
+            outcomes.push(addedMember === undefined
+                ? { id: row.id, outcome: 'moved', packageId: row.pair, basedOn: basedOn! }
+                : { id: row.id, outcome: 'moved', packageId: row.pair, addedMember });
         } catch (error) {
             fail(messageOf(error));
         }
@@ -584,8 +654,11 @@ export interface PackagelessWriteSubject {
  *    takes: the ensure door would ensure the pair
  *    ({@link customizationPairEnsureRefusal}), the base records a version
  *    (`basedOn`), and the override write gate admits the declared body into
- *    the pair (an `email_template` member at a locale the base does not ship
- *    is refused there, #28777, and stays open: #28904).
+ *    the pair. An `email_template` member at a locale the base does not ship
+ *    is refused there (#28777) and stays open: the ceremony moves such a row
+ *    as the pair's own member, declaring nothing (#28904), and the close
+ *    reaches only the declared-override moves, so its package-less write is
+ *    the one it had before the close.
  *
  * Registry reads first; the one store read (the item's rows) only for a name
  * the registry has not already left open.

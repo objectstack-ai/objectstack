@@ -56,6 +56,17 @@
  * state (`takePreflightSession` in `@object-ui/auth`'s `createAuthClient.ts`)
  * instead of issuing a second `get-session`. A stale or unanswered token leaves
  * nothing behind, and every later session read asks the server as before.
+ *
+ * # The request starts at parse time (objectstack#29118)
+ *
+ * Asked from here, the check waited for the main bundle to download and
+ * evaluate, though it needs nothing from it. `index.html`'s inline
+ * `startEarlySessionCheck` script now sends this exact request during parse,
+ * beside the `runtime/config` prefetch, and leaves its pending answer under
+ * `Symbol.for('objectui.earlySessionCheck')` with the auth URL and the token it
+ * sent. The preflight takes it once, when both match what it would send
+ * itself, and reads that answer instead of asking again. A failed or non-OK
+ * early request is not reused: the preflight then fetches as it always did.
  */
 
 const TOKEN_KEY = 'auth-session-token';
@@ -71,6 +82,62 @@ const TOKEN_KEY = 'auth-session-token';
 const ACTIVE_ORG_KEY_BASE = 'auth-active-organization-id';
 /** Where the valid answer is handed to `AuthProvider` — see the header. */
 const PREFLIGHT_SESSION_KEY = Symbol.for('objectui.authPreflightSession');
+/** Where `index.html`'s parse-time request leaves its answer — see the header. */
+const EARLY_SESSION_KEY = Symbol.for('objectui.earlySessionCheck');
+
+/**
+ * The slot `index.html`'s `startEarlySessionCheck` script fills. `body` is the
+ * parsed answer of an OK response, and rejects for a failed or non-OK one.
+ * Spelled by hand on both sides: a classic inline script cannot import.
+ */
+interface EarlySessionSlot {
+  authUrl: string;
+  token: string;
+  body: Promise<unknown>;
+  taken?: boolean;
+}
+
+/** One `get-session` answer: the parsed body of an OK response, or not OK. */
+type SessionAnswer = { ok: true; body: unknown } | { ok: false };
+
+/**
+ * Take the parse-time answer, once per page load, when it was asked exactly
+ * as this preflight would ask: the same auth URL and the same Bearer. Anything
+ * else — no slot, a second call, a mismatch, a failed or non-OK request —
+ * answers `null`, and the caller asks the server itself.
+ */
+async function takeEarlySessionAnswer(
+  authBaseUrl: string,
+  token: string,
+): Promise<SessionAnswer | null> {
+  const holder = globalThis as unknown as Record<symbol, EarlySessionSlot | undefined>;
+  const slot = holder[EARLY_SESSION_KEY];
+  if (!slot || slot.taken) return null;
+  slot.taken = true;
+  if (slot.authUrl !== authBaseUrl || slot.token !== token) return null;
+  try {
+    return { ok: true, body: await slot.body };
+  } catch {
+    return null;
+  }
+}
+
+/** Ask the server — the request `index.html` sends early, byte for byte. */
+async function askSession(authBaseUrl: string, token: string): Promise<SessionAnswer> {
+  const res = await fetch(`${authBaseUrl}/get-session`, {
+    method: 'GET',
+    // The cookie rides along so a renewed `Set-Cookie` is stored; the
+    // server reads the Bearer over it, so a stale token still answers null
+    // (header, objectui#12892).
+    credentials: 'include',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+    },
+  });
+  if (!res.ok) return { ok: false };
+  return { ok: true, body: await res.json().catch(() => null) };
+}
 
 /**
  * Remove the stale active-organization id under every spelling — the bare
@@ -111,20 +178,11 @@ export async function preflightAuth(authBaseUrl: string): Promise<void> {
   if (!token) return;
 
   try {
-    const res = await fetch(`${authBaseUrl}/get-session`, {
-      method: 'GET',
-      // The cookie rides along so a renewed `Set-Cookie` is stored; the
-      // server reads the Bearer over it, so a stale token still answers null
-      // (header, objectui#12892).
-      credentials: 'include',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/json',
-      },
-    });
+    const answer =
+      (await takeEarlySessionAnswer(authBaseUrl, token)) ?? (await askSession(authBaseUrl, token));
 
-    if (res.ok) {
-      const body = await res.json().catch(() => null);
+    if (answer.ok) {
+      const body = answer.body as { user?: unknown; data?: { user?: unknown } } | null;
       const user = body?.user ?? body?.data?.user ?? null;
       if (user) {
         // Token valid — leave localStorage alone, and hand the answer on, as

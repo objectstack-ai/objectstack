@@ -214,6 +214,18 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
     };
   }, [isMobile, setOpenMobile]);
 
+  // On a phone the sidebar is a drawer over the page, so a route change closes
+  // it: an entry tapped in the drawer opens its page uncovered, whichever row
+  // (navigation, favorite, recent) it was (objectstack#29075). Keyed on the
+  // route, not on any one row's handler, so a row added later closes it too.
+  const routeKey = `${location.pathname}${location.search}`;
+  const lastRouteKey = React.useRef(routeKey);
+  React.useEffect(() => {
+    if (lastRouteKey.current === routeKey) return;
+    lastRouteKey.current = routeKey;
+    if (isMobile) setOpenMobile(false);
+  }, [routeKey, isMobile, setOpenMobile]);
+
   const { recentItems: allRecentItems } = useRecentItems();
   // A Studio package entry is labelled from the package list (objectui#11863),
   // which this sidebar does not load, so it is left out here rather than drawn

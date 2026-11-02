@@ -1803,7 +1803,9 @@ const ja = {
       title: "設定",
       subtitle: "システム、連携、機能フラグを設定します。",
       loadError: "設定の読み込みに失敗しました",
-      empty: "登録された設定はありません。プラグインは SettingsService 経由で設定マニフェストを登録できます。",
+      empty: "利用できる設定ページはまだありません。インストールされたアプリが設定ページを提供すると、ここに表示されます。",
+      adminManaged: "設定は管理者が管理しています",
+      adminManagedDescription: "お使いのアカウントではこれらの設定を表示・変更できません。変更が必要な場合は管理者に依頼してください。",
       settingsCount: "{{n}} 件の設定",
       beta: "ベータ",
       categories: {
@@ -2678,6 +2680,7 @@ const ja = {
       orText: "またはメールアドレスで続行",
       ssoButton: "SSO でサインイン",
       ssoOnlyDescription: "所属組織のシングルサインオンでサインインしてください",
+      noSignInMethodText: "利用できるサインイン方法がありません。管理者にお問い合わせください。",
       usePasswordText: "パスワードを使用する",
       backToSsoText: "シングルサインオンに戻る",
       // objectui#12600 — the console login card's own header, the password
