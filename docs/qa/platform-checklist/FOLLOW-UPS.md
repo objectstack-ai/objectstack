@@ -779,3 +779,43 @@ non-numeric fields) and `expression-editors` knownGaps[4] (the RLS editor reads 
 CEL' on a formula-field predicate). These three were read from source, not measured.
 `app-and-nav-properties` scores acceptance[5]'s `requiresObject` cell as not judged:
 neither Studio nor Setup edits that key, and no ruling says Studio must.
+
+## 13. Scoped re-point 2026-11-02 — the Setup-designer items to the Studio door (#28579 slice 1, ADR-0146 N-29)
+
+**Not a sweep, and no new items.** Sixteen named items were re-measured against `main`
+(`dfbe34d887`) after N-28 (#28818, with #28785) and N-30 (#29264), using the measured notes
+on #28579 (QA runs #28981, #29002, #29124) as inputs. Each changed item's `history` row says
+what moved and why. Left untouched, with the reason in the slice's report:
+`integration-system.external-datasource-federated-read` and `external-schema-browser-ui`
+(the datasource is the one metadata type ADR-0146 D1 keeps in Setup, and its routes still
+render there) and `platform-core.packaged-object-extend-only` (API-only; both write doors
+answer as before).
+
+### 13a. Transitional, and why
+
+- **`studio-authoring.packaged-display-class-direct-edit`** carries `blocked`
+  (`dependency`, #28579 slice 2), and **`studio-authoring.org-override-registry-gate`**
+  scores acceptance[1] and [4] `blocked(dependency)`: both prove a package-less overlay on a
+  packaged view or dashboard, which #28850 closed (403 `NOT_OVERRIDABLE` naming the
+  `.custom` pair). The replacement — Customize as a declared override in the pair, and
+  Restore package original — is slice 2's new items.
+- **The switched-off sentence's remedy** in `api-backend.packaged-action-disabled-dispatch`
+  and `automation.packaged-flow-disable-durable`: see 13b. The clauses keep the served text.
+
+### 13b. Product finding — reported, not filed here
+
+- `describeTurnedOffPackagedItem` (`packages/types/src/packaged-item-turned-off.ts`), the one
+  sentence the `ACTION_DISABLED` and `FLOW_DISABLED` 409s read, still tells the end user an
+  administrator can turn the item on again "under Setup › Packaged automation" (and, for a
+  flow, "copy it there under a new name"). That page is retired (ADR-0146 D4/D11): an
+  action's switch is Setup › Packaged actions, and a flow's switch and New similar are on the
+  flow in Studio. The finding is in the slice's report for the seat to card.
+
+### 13c. Other items still naming a retired Setup door (outside this slice's list)
+
+`platform-core.metadata-authoring-roundtrip` steps[7] and `studio-authoring.record-page-roundtrip`
+steps[0]/[3] (`/apps/showcase_app/metadata/page/…`), `studio-authoring.permission-matrix-editor-ux`
+steps[0] (`/apps/com.objectstack.setup/metadata/permission/…`) and
+`automation.packaged-flow-subflow-disable-refusal` steps[7] (the retired Setup
+packaged-automation page as the UI half). Those Setup URLs redirect to Studio since #28818,
+so the items still reach a page; their text was not re-measured here.
