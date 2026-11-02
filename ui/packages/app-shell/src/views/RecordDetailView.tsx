@@ -4066,7 +4066,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // stack has no right column), no ⤡ (there is no drawer to collapse to).
   const phonePushed = phonePage && isRecordPagePushed(location.state);
   const phoneBackClass =
-    'inline-flex min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+    'inline-flex min-h-[44px] min-w-0 items-center gap-0.5 rounded-md py-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-accent focus:outline-none focus-visible:ring-2 focus-visible:ring-ring';
   const phoneBack = phonePage ? (() => {
     const plural = objectDef ? objectPluralLabel(objectDef) : objectName;
     const parent = pageTrail.length > 0 ? pageTrail[pageTrail.length - 1] : undefined;
@@ -4094,8 +4094,13 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       : originFromState?.pathname
         ? (originIsObjectList ? withoutPaneParam(originFromState.pathname) : originFromState.pathname)
         : objectListPath;
+    // objectstack#29071 — the way back replaces the record's own history
+    // entry, so the browser's Back after 「‹」 does not open the record again.
+    // A page pushed from a parent goes back in the history (above); a page a
+    // list opened carries no mark that its list is the entry below it, so it
+    // cannot pop safely and replaces instead.
     return to ? (
-      <Link to={to} className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
+      <Link to={to} replace className={phoneBackClass} title={goBack} data-record-crumb-back="">{face}</Link>
     ) : (
       <span className={phoneBackClass}>{face}</span>
     );

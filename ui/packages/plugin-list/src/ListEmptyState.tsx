@@ -128,8 +128,8 @@ export interface ListEmptyStateProps {
   /**
    * Draws "Clear filters" as the primary action when supplied
    * (objectstack#28908): the caller hands it only while a filter the READER
-   * applied (the filter panel's conditions, the "In a queue" toggle) is part of
-   * the query that came back empty. It removes the reader's whole query, the
+   * applied (the filter panel's conditions, the user-filter chips, the "In a
+   * queue" toggle) is part of the query that came back empty. It removes the reader's whole query, the
    * search included, and never the view's declared filter. It is the one clear
    * action: supplied, it replaces "Clear search", and the add-record action
    * steps down to the secondary style.
