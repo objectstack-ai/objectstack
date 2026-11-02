@@ -30,6 +30,7 @@ import { ConsoleNotificationBanners } from './ConsoleNotificationBanners.js';
 import { UnifiedSidebar } from './UnifiedSidebar.js';
 import { AppHeader } from './AppHeader.js';
 import { useResponsiveSidebar } from '../hooks/useResponsiveSidebar.js';
+import { usePhoneNavDrawerHistory } from './usePhoneNavDrawerHistory.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { primeConsoleSidebarOpen } from './consoleSidebarRail.js';
 import { useAiSurfaceEnabled } from '../hooks/useAiSurface.js';
@@ -131,6 +132,7 @@ export function isRecordPagePath(pathname: string): boolean {
 /** Inner component that can access SidebarProvider context */
 function ConsoleLayoutInner({ children }: { children: React.ReactNode }) {
   useResponsiveSidebar();
+  usePhoneNavDrawerHistory();
   useAdvertiseShortcut(TOGGLE_SIDEBAR_SHORTCUT);
   return <>{children}</>;
 }
