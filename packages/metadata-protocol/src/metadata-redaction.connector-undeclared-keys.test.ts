@@ -8,7 +8,12 @@
 // Every value below is an obviously-fake placeholder.
 
 import { describe, it, expect } from 'vitest';
-import { carryForwardRedactedValues, redactMetadataItem } from './metadata-redaction.js';
+import {
+  carryForwardRedactedValues,
+  carryForwardRedactedValuesReportingDrops,
+  redactMetadataItem,
+  redactedPathsCarriedForward,
+} from './metadata-redaction.js';
 
 const P = (n: number) => `TEST_PLACEHOLDER_UNDECLARED_${n}`;
 
@@ -82,5 +87,57 @@ describe('carry-forward of the keys a connector does not declare', () => {
     expect(JSON.stringify(body)).not.toContain('TEST_PLACEHOLDER_UNDECLARED_');
     const out = carryForwardRedactedValues('connector', { ...body, label: 'Vendor catalog (edited)' }, malformed);
     expect(out).toEqual({ ...malformed, label: 'Vendor catalog (edited)' });
+  });
+});
+
+// [#28640 ②B] An undeclared `auth` key is withheld AND not carried forward: a
+// save of the served form drops it, and the drop is reported.
+describe('an undeclared `auth` key is not carried forward', () => {
+  const legacy = {
+    name: 'vendor_catalog',
+    label: 'Vendor catalog',
+    type: 'api',
+    provider: 'rest',
+    apiKey: P(1),
+    providerConfig: { baseUrl: 'https://api.vendor.example/v1', headers: { Authorization: P(6) } },
+    auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', token: P(7) },
+  };
+  const servedLegacy = () => JSON.parse(JSON.stringify(redactMetadataItem('connector', legacy))) as Record<string, any>;
+
+  it('the save drops it, names it, and still carries every other withheld position (undeclared root key, header map)', () => {
+    const { item, dropped } = carryForwardRedactedValuesReportingDrops('connector', servedLegacy(), legacy);
+    expect(item).toEqual({ ...legacy, auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN' } });
+    expect(dropped).toEqual(['auth.token']);
+    expect(carryForwardRedactedValues('connector', servedLegacy(), legacy)).toEqual(item);
+  });
+
+  it('the runtime gate is never told it will be restored', () => {
+    expect(redactedPathsCarriedForward('connector', servedLegacy(), legacy).sort())
+      .toEqual(['apiKey', 'providerConfig.headers']);
+  });
+
+  it('a value the incoming body holds at that position is the author\'s word, not a drop', () => {
+    // `headerName` is undeclared on `bearer` and declared on `api-key`: the
+    // author switched kinds and wrote it.
+    const atRest = { ...legacy, auth: { type: 'bearer', credentialRef: 'VENDOR_TOKEN', headerName: P(8) } };
+    const body = JSON.parse(JSON.stringify(redactMetadataItem('connector', atRest))) as Record<string, any>;
+    expect(body.auth).toEqual({ type: 'bearer', credentialRef: 'VENDOR_TOKEN' });
+    body.auth = { type: 'api-key', credentialRef: 'VENDOR_KEY', headerName: 'X-Key' };
+    const { item, dropped } = carryForwardRedactedValuesReportingDrops('connector', body, atRest);
+    expect(dropped).toEqual([]);
+    expect((item as Record<string, any>).auth).toEqual({ type: 'api-key', credentialRef: 'VENDOR_KEY', headerName: 'X-Key' });
+  });
+
+  it('a body that removes `auth` drops it too, and says so', () => {
+    const body = servedLegacy();
+    delete body.auth;
+    const { item, dropped } = carryForwardRedactedValuesReportingDrops('connector', body, legacy);
+    expect(item).not.toHaveProperty('auth');
+    expect(dropped).toEqual(['auth.token']);
+  });
+
+  it('CONTROL: a row with no undeclared `auth` key reports no drop', () => {
+    const { dropped } = carryForwardRedactedValuesReportingDrops('connector', served(), stored);
+    expect(dropped).toEqual([]);
   });
 });
