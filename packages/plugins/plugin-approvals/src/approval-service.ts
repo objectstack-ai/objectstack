@@ -2691,9 +2691,10 @@ export class ApprovalService implements IApprovalService {
       if (directoryFailure !== undefined) {
         // [#29362] A failed read is not an unstaffed approver: say which one
         // this is, and carry the error, so an operator does not go staffing a
-        // position whose holders simply could not be read.
+        // position whose holders simply could not be read. The try above also
+        // wraps the cross-org read filter (`bounded`), so the line names both.
         this.logger?.warn?.(
-          `[approvals] approver '${type}:${a.value}' could not be expanded — a directory read failed, so the `
+          `[approvals] approver '${type}:${a.value}' could not be expanded — a directory or read-filter lookup failed, so the `
           + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
           + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
           { type, value: a.value, organizationId: organizationId ?? null, error: directoryFailure },

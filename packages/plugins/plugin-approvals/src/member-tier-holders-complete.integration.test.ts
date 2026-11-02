@@ -177,7 +177,7 @@ describe('[#29362] approvals membership-tier expansion reads every holder (drive
     const failed = rig.warn.mock.calls.filter(([, meta]) => typeof meta?.error === 'string');
     expect(failed.map(([, meta]) => meta.type)).toEqual(['position', 'org_membership_level']);
     for (const [line, meta] of failed) {
-      expect(line).toMatch(/could not be expanded/);
+      expect(line).toMatch(/could not be expanded — a directory or read-filter lookup failed/);
       expect(meta.error).toMatch(/SQLITE_IOERR/);
     }
   });
