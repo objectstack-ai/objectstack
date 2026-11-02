@@ -72,6 +72,9 @@ describe('[#7287] resolveTitleField delegates to the shared ADR-0079 ladder', ()
     it('does not let `primaryField` keep the H1 field out of the highlight strip', () => {
       const def = {
         primaryField: 'ref_no',
+        // The strip is the declared list only (objectstack#28868), so every
+        // field is declared and the title skip is what decides.
+        highlightFields: ['ref_no', 'name', 'priority'],
         fields: {
           ref_no: { type: 'text' },
           name: { type: 'text' },
@@ -134,6 +137,7 @@ describe('[#7287] resolveTitleField delegates to the shared ADR-0079 ladder', ()
      */
     it('the strip stops repeating a DERIVED title field under the H1', () => {
       const def = {
+        highlightFields: ['stage', 'headline', 'priority'],
         fields: {
           stage: { type: 'select' },
           headline: { type: 'text' },
@@ -171,8 +175,8 @@ describe('[#7287] resolveTitleField delegates to the shared ADR-0079 ladder', ()
      * skipped now, deliberately: `getRecordDisplayName` reads that same
      * ladder and renders `headline`'s value, so `legacy_title` is an ordinary
      * field the heading never shows, and hiding it spent a strip slot for
-     * nothing. This also makes the heuristic branch agree with the DECLARED
-     * branch, which has only ever filtered a single title field.
+     * nothing. The strip is the declared list only since objectstack#28868,
+     * so the fixture declares every field and the title skip decides.
      *
      * Goes red if the three raw reads come back, which is the shape this card
      * exists to remove — so the pin is on the BEHAVIOUR, not on the spelling.
@@ -181,6 +185,7 @@ describe('[#7287] resolveTitleField delegates to the shared ADR-0079 ladder', ()
       const def = {
         nameField: 'headline',
         displayNameField: 'legacy_title',
+        highlightFields: ['headline', 'legacy_title', 'priority'],
         fields: {
           headline: { type: 'text' },
           legacy_title: { type: 'text' },

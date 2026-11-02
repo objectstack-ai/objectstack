@@ -144,7 +144,7 @@ const ZH_CN = {
     created_by: '创建人',
     updated_at: '更新时间',
     updated_by: '更新人',
-    owner_id: '所有者',
+    owner_id: '负责人',
     owning_business_unit_id: '所属业务单元',
     queue: '队列',
 };
