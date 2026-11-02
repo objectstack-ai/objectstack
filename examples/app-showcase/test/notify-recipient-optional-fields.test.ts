@@ -351,7 +351,7 @@ describe('start conditions on an empty number', () => {
     const booted = await boot([BudgetApprovalFlow]);
     const { result, record } = await runOnRow(
       booted, BudgetApprovalFlow, 'showcase_project',
-      { name: 'budgeted', account: booted.accountId, status: 'planned', budget: 250_000 }, { budget: null },
+      { name: 'budgeted', account: booted.accountId, status: 'planned', budget: 250_000 }, [{ budget: null }],
     );
 
     expect(record).toHaveProperty('budget', null);
