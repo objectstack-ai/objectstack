@@ -418,8 +418,8 @@ export function readAppObjectScope(
     // names by name through the names-only scope (the route's object, its
     // lookup targets and the app's `requiresObject` entries), as an app whose
     // package holds no objects does below. The app's root keeps the whole
-    // registry, as there.
-    if (!route.objectName) return { candidate, scope: null, ready: false, ...NOT_READ };
+    // registry, as there. Until the app list names the app, nothing is read.
+    if (!app || !route.objectName) return { candidate, scope: null, ready: false, ...NOT_READ };
     return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, undefined) };
   }
   // The package list first: no name is asked until it has answered.
