@@ -10402,6 +10402,13 @@ export class ObjectQL implements IObjectQLEngine {
    *   would turn an ordering detail into a boot failure. This leaves a real
    *   residual — an `isSystem` caller can still write a dangling reference —
    *   which is recorded on the issue rather than silently accepted.
+   *   [#28881] ⛔ Except a flow run's elevated write (`runAs: 'system'`):
+   *   its context carries the flow-write mark (`keepsFlowWriteReferenceCheck`,
+   *   `@objectstack/core`, set by `resolveRunDataContext` in
+   *   service-automation) and is checked like a user write. Its elevation is
+   *   for authorization (other people's rows, past RLS and FLS), never for a
+   *   link to a row that does not exist, and it keeps every authorization
+   *   exemption `isSystem` gives it.
    * - **Empty values are not references.** `null` / `undefined` / `''` mean
    *   "no link", which is what `deleteBehavior: 'set_null'` produces.
    * - **Already-expanded objects are skipped.** A read round-trip can hand back
@@ -10515,8 +10522,10 @@ export class ObjectQL implements IObjectQLEngine {
    * that exists nowhere.
    *
    * `null` (fail-open) only where {@link referenceExists} answers it, and for
-   * an unregistered master, which has no read door to ask either. Never reached
-   * by a SYSTEM caller: {@link assertReferencesResolve} returns before it.
+   * an unregistered master, which has no read door to ask either. A SYSTEM
+   * caller reaches it only as a flow run's elevated write (#28881): its read
+   * door returns every header ({@link masterDetailHeadersCallerReads}), so
+   * the header's existence in the caller's tenant is what is asked.
    *
    * ⛔ `master_detail` only — the plain `lookup` probe is not this rule's.
    */
