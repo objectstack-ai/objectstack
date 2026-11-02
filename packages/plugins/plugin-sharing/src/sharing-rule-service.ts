@@ -1410,12 +1410,25 @@ export class SharingRuleService implements ISharingRuleService {
     // deactivation is honoured immediately.
     const pass: RuleEvaluationPass = {};
     for (const rule of rules) {
-      // An inactive rule desires nothing; skip the criteria query entirely.
-      // [#15072] The match read answers with the ROW, not a boolean: for a
-      // `field` rule the recipients are on it, read by the per-record switch.
-      const matched = rule.active ? await this.matchRecord(rule, recordId) : null;
-      const users = matched ? await this.expandRecipientForRecord(rule, matched, pass) : [];
-      results.push(await this.reconcileForRecord(rule, recordId, matched !== null, users));
+      // [#29362] Best-effort per rule, as {@link evaluateAllRulesForObject} is:
+      // a rule whose recipients cannot be read (a membership read that failed
+      // now refuses instead of answering nobody) leaves ITS grants as they
+      // were and is reported, and the record's other rules still reconcile.
+      try {
+        // An inactive rule desires nothing; skip the criteria query entirely.
+        // [#15072] The match read answers with the ROW, not a boolean: for a
+        // `field` rule the recipients are on it, read by the per-record switch.
+        const matched = rule.active ? await this.matchRecord(rule, recordId) : null;
+        const users = matched ? await this.expandRecipientForRecord(rule, matched, pass) : [];
+        results.push(await this.reconcileForRecord(rule, recordId, matched !== null, users));
+      } catch (err: any) {
+        this.logger?.warn?.('[sharing-rule] record reconcile failed for rule', {
+          object,
+          recordId,
+          rule: rule.name ?? rule.id,
+          error: err?.message,
+        });
+      }
     }
     return results;
   }

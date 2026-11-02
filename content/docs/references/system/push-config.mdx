@@ -1,0 +1,135 @@
+---
+title: Push Config schema — System Protocol reference
+navTitle: Push Config
+description: "Push Service Configuration Protocol — the push channel's transports. Declared ahead of its reader."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Push Service Configuration Protocol — the push channel's transports.
+
+**Declared ahead of its reader.** Every schema here carries a
+`[PLANNED — not yet read]` marker in its `.describe()`: nothing reads this
+shape until the push channel plugin lands, so a value written to it today
+changes nothing. The marker comes off with the change that wires the reader.
+
+Operator-facing configuration for the `push` channel ADR-0012 §4 ships in
+core: Apple Push Notification service with token-based auth, and Firebase
+Cloud Messaging over its HTTP v1 API. It sits beside
+`EmailServiceConfigSchema` (`email-config.zod.ts`), the declaration of
+the email channel's transport selection.
+
+**Secrets are references, never values (ADR-0143 D3, ADR-0097 §3).** Each
+transport has one secret — the APNs `.p8` signing key and the FCM
+service-account JSON — and each is named by a `credentialRef`, the same key
+every other secret an author names is written under (ADR-0143 D3), which
+the push channel resolves through the secrets layer when it sends (in the
+open tier, the name of an environment variable). An inline secret is
+refused two ways: written under a key an operator would reach for (`key`,
+`privateKey`, `serviceAccount`, …), it is refused by name with
+`credentialRef` as the prescription; written into the reference itself, it
+is refused because a reference is one token — a PEM block carries
+whitespace and a JSON document carries braces, and a name carries neither.
+
+**What reads it, and why it is not a stack key yet.** The push channel
+plugin (`plugin-notification-push`, ADR-0012 §11) is its one reader, and it
+is a later change than this declaration. The email transport selection it
+sits beside is read from `config.email` of the stack definition
+(`StackEmailConfigSchema`) and `OS_EMAIL_*`; this shape gets its own
+configuration door in the change that ships the reader, not here, so a key
+is never authorable before something honours it.
+
+Out of scope here: a hosted (cloud-side) configuration surface, and the
+other vendors ADR-0012 §6 routes to alternate channel plugins (HMS,
+Xiaomi, OPPO, vivo).
+
+<Callout type="info">
+**Source:** `packages/spec/src/system/push-config.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { ApnsTransportConfigSchema, FcmTransportConfigSchema, PushServiceConfigSchema, PushVendorSchema } from '@objectstack/spec/system';
+import type { ApnsTransportConfig, FcmTransportConfig, PushServiceConfig, PushVendor } from '@objectstack/spec/system';
+
+// Validate data
+const result = ApnsTransportConfigSchema.parse(data);
+```
+
+---
+
+## ApnsTransportConfig
+
+[PLANNED — not yet read] APNs transport with token-based auth (.p8 signing key by reference)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **teamId** | `string` | ✅ | Apple Developer Team ID (10 characters) that issued the signing key |
+| **keyId** | `string` | ✅ | Key ID of the APNs auth key (10 characters) |
+| **topic** | `string` | ✅ | APNs topic: the app bundle ID the pushes are for |
+| **environment** | `Enum<'sandbox' \| 'production'>` | ✅ | APNs gateway: sandbox (development builds) or production (TestFlight and App Store builds) |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference to the .p8 signing key (an environment-variable name in the open tier). Never the key itself |
+
+
+---
+
+## FcmTransportConfig
+
+[PLANNED — not yet read] FCM HTTP v1 transport (service-account JSON by reference)
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **projectId** | `string` | ✅ | Firebase project ID the HTTP v1 send endpoint is addressed to |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference to the service-account JSON (an environment-variable name in the open tier). Never the JSON itself |
+
+
+---
+
+## PushServiceConfig
+
+[PLANNED — not yet read] Push channel transport configuration: one optional block per vendor (apns, fcm). Nothing reads it until the push channel plugin ships
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **apns** | `{ teamId: string; keyId: string; topic: string; environment: Enum<'sandbox' \| 'production'>; … }` | optional | APNs transport (token-based auth). Absent: no delivery to apns devices |
+| **fcm** | `{ projectId: string; credentialRef: string }` | optional | FCM HTTP v1 transport. Absent: no delivery to fcm devices |
+
+### Nested Shape: `PushServiceConfig.apns`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **teamId** | `string` | ✅ | Apple Developer Team ID (10 characters) that issued the signing key |
+| **keyId** | `string` | ✅ | Key ID of the APNs auth key (10 characters) |
+| **topic** | `string` | ✅ | APNs topic: the app bundle ID the pushes are for |
+| **environment** | `Enum<'sandbox' \| 'production'>` | ✅ | APNs gateway: sandbox (development builds) or production (TestFlight and App Store builds) |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference to the .p8 signing key (an environment-variable name in the open tier). Never the key itself |
+
+### Nested Shape: `PushServiceConfig.fcm`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **projectId** | `string` | ✅ | Firebase project ID the HTTP v1 send endpoint is addressed to |
+| **credentialRef** | `string` | ✅ | Secrets-layer reference to the service-account JSON (an environment-variable name in the open tier). Never the JSON itself |
+
+
+---
+
+## PushVendor
+
+Push vendor core delivers through: apns (Apple Push Notification service) or fcm (Firebase Cloud Messaging HTTP v1)
+
+### Allowed Values
+
+* `apns`
+* `fcm`
+
+
+---
+

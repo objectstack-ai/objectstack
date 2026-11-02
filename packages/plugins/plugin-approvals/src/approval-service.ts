@@ -21,7 +21,7 @@ import { ExpressionEngine, collectCelRootIdentifiers } from '@objectstack/formul
 // writer-local re-derivation here was rejected by name (Option B): it would be
 // a third answer to a question the codebase already answered two ways.
 import { createRecordOrganizationResolver, type RecordOrganizationResolver } from '@objectstack/metadata-core';
-import { keysetWalk, strandedDecisionFailure } from '@objectstack/types';
+import { isMissingTableError, keysetWalk, strandedDecisionFailure } from '@objectstack/types';
 // [#15981 / #16166] Every built-in identity NAME is deliberately absent here:
 // both arms of `isOverrideActor` read an ADR-0095 capability rung, never a name.
 // `BUILTIN_IDENTITY_PLATFORM_ADMIN` went with the platform arm's name read and
@@ -1117,6 +1117,31 @@ const OOO_MAX_CHAIN = 8;
  * fail-open threshold, never a silent trim of the slate.
  */
 const MEMBER_SCREEN_READ_LIMIT = 50000;
+
+/**
+ * [#29362] Rows per page of the membership-tier read
+ * ({@link ApprovalService.expandMembershipTierUsers}) — the bound the read
+ * always carried, so a tier held by fewer people issues the one read it always
+ * did, and a tier held by more is read in further pages rather than cut.
+ */
+const MEMBER_TIER_PAGE_ROWS = 10000;
+
+/**
+ * [#29362] Did a `sys_member` read fail because this stack has no membership
+ * object at all — the one failure whose empty answer is the truth? Two
+ * spellings of the same absence, each attributed to `sys_member` so a failure
+ * about another object is not evidence about this one: the driver's
+ * missing-table refusal (the shared `isMissingTableError`, the table
+ * registered but never created), and the engine's `OBJECT_NOT_FOUND` (a
+ * composition that never registers the object, refused before any driver is
+ * asked — the reading `sys-metadata-repository.ts` gives its own history
+ * object). Anything else is an outage and stays loud.
+ */
+function membershipObjectAbsent(err: unknown): boolean {
+  if (isMissingTableError(err, 'sys_member')) return true;
+  const refused = err as { code?: unknown; object?: unknown } | null | undefined;
+  return refused?.code === 'OBJECT_NOT_FOUND' && refused.object === 'sys_member';
+}
 
 /**
  * Approver types resolved by QUERYING a graph rather than by taking `value`
@@ -2551,6 +2576,9 @@ export class ApprovalService implements IApprovalService {
     // The user a `manager` approver resolved FROM, kept for the warning below
     // when no manager comes back.
     let managerSubject: unknown;
+    // [#29362] The directory failure the catch below took, kept so the warning
+    // can say the read FAILED rather than that the slot expanded to nobody.
+    let directoryFailure: string | undefined;
     try {
       if (type === 'team') {
         // #10230: the request's OWN organization, not `directoryOrg`. They are
@@ -2589,7 +2617,11 @@ export class ApprovalService implements IApprovalService {
           if (mgr) return this.applyOooDelegation(mgr, now, organizationId, substitutions);
         }
       }
-    } catch { /* a directory lookup failed → handled below as resolving to nobody */ }
+    } catch (err) {
+      // A directory lookup failed → handled below as resolving to nobody, and
+      // the graph-type warning names the failure (#29362).
+      directoryFailure = err instanceof Error ? err.message : String(err);
+    }
     // #22558: a PERSON type that resolved to nobody contributes NO slot — see
     // PERSON_APPROVER_TYPES for why its `type:value` literal could never be
     // taken. With nothing else on the slate, the request reaches the node's
@@ -2656,12 +2688,25 @@ export class ApprovalService implements IApprovalService {
       // follows. The old ending ("the request cannot advance until someone is
       // added") restated a fate this resolver cannot know, and was false on
       // the default path.
-      this.logger?.warn?.(
-        `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot names no one, so no one is `
-        + `asked through it. Staff it or re-point the approver; a slate left naming no one is decided by the `
-        + `node's onEmptyApprovers.`,
-        { type, value: a.value, organizationId: organizationId ?? null },
-      );
+      if (directoryFailure !== undefined) {
+        // [#29362] A failed read is not an unstaffed approver: say which one
+        // this is, and carry the error, so an operator does not go staffing a
+        // position whose holders simply could not be read. The try above also
+        // wraps the cross-org read filter (`bounded`), so the line names both.
+        this.logger?.warn?.(
+          `[approvals] approver '${type}:${a.value}' could not be expanded — a directory or read-filter lookup failed, so the `
+          + `slot falls back to its literal rather than route to part of its people. Fix the read (see error); `
+          + `a slate left naming no one is decided by the node's onEmptyApprovers.`,
+          { type, value: a.value, organizationId: organizationId ?? null, error: directoryFailure },
+        );
+      } else {
+        this.logger?.warn?.(
+          `[approvals] approver '${type}:${a.value}' expanded to nobody — the slot names no one, so no one is `
+          + `asked through it. Staff it or re-point the approver; a slate left naming no one is decided by the `
+          + `node's onEmptyApprovers.`,
+          { type, value: a.value, organizationId: organizationId ?? null },
+        );
+      }
     }
     // #27397: a `user` that resolved to no one adds no slot — `user:<value>`
     // is no acting address (`approver-address.ts`), and the bare value is the
@@ -3355,16 +3400,54 @@ export class ApprovalService implements IApprovalService {
    * {@link expandPositionUsers} carries the ruling both reads inherit
    * (#8613 / commit 04d03c3a0) — this method is also the second limb of that union, so a
    * change here changes position routing too.
+   *
+   * [#29362] Read to COMPLETION, or refused — never a shortened or an invented
+   * empty slate. Pages of {@link MEMBER_TIER_PAGE_ROWS} through the platform's
+   * one keyset walk (`keysetWalk`, `@objectstack/types`), ordered by `id`, so a
+   * tier held past the bound routes to every holder rather than the first
+   * 10,000 rows. A read that fails, or a walk that cannot vouch for completion
+   * (a row without an `id`, a page that did not honour the cursor), THROWS:
+   * {@link resolveApproverSpec}'s directory catch then lets the slot fall back
+   * to its literal and says the read failed. Answering `[]` instead routed a
+   * `position` approver to its assignment holders alone — a shrunk slate that
+   * looks complete — and logged an `org_membership_level` one as "expanded to
+   * nobody", indistinguishable from a tier no one holds. A membership object
+   * that does not exist is the one failure that IS an answer (a stack that never
+   * materialises `sys_member` has no tier holders) and keeps answering `[]`;
+   * see {@link membershipObjectAbsent}.
    */
   private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
     if (!tier) return [];
-    const filter: any = { role: tier };
+    const filter: Record<string, unknown> = { role: tier };
     if (organizationId) filter.organization_id = organizationId;
-    let rows: any[] = [];
+    const scope = `the holders of membership tier '${tier}'${organizationId ? ` in organization '${organizationId}'` : ''}`;
+    const users = new Set<string>();
+    const walk = keysetWalk<Record<string, unknown>>(
+      (page) => this.engine.find('sys_member', { ...page, fields: ['id', 'user_id'], context: SYSTEM_CTX }),
+      { where: filter, pageSize: MEMBER_TIER_PAGE_ROWS },
+    );
     try {
-      rows = await this.engine.find('sys_member', { filter, fields: ['user_id'], limit: 10000, context: SYSTEM_CTX } as any);
-    } catch { rows = []; }
-    return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+      for await (const page of walk.pages()) {
+        for (const row of page) {
+          const uid = String(row?.user_id ?? '');
+          if (uid) users.add(uid);
+        }
+      }
+    } catch (err) {
+      if (membershipObjectAbsent(err)) return [];
+      throw Object.assign(new Error(
+        `[approvals] ${scope} could not be read: ${err instanceof Error ? err.message : String(err)}. `
+        + 'Routing to a shortened slate would leave holders unasked, so the expansion refuses instead.',
+      ), { cause: err });
+    }
+    if (walk.truncated) {
+      throw new Error(
+        `[approvals] ${scope} could not be read to completion: the read by id could not continue past a page `
+        + '(a row without an id, or a page that repeated the cursor). Routing to a shortened slate would leave '
+        + 'holders unasked, so the expansion refuses instead.',
+      );
+    }
+    return Array.from(users);
   }
 
   /**
