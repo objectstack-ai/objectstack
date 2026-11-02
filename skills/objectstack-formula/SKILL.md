@@ -119,13 +119,15 @@ or hook predicate that applies an ordering (`< <= > >=`) or arithmetic
 no `defaultValue`, no default option — unless an explicit `!= null` / `== null` /
 `!isBlank()` test dominates it in the same boolean branch. `has()` deliberately
 does not satisfy that gate. `has()` over an **undeclared** key stays legal: that
-is its real use — telling "absent from this PATCH" apart from "explicitly null".
+is its use there — telling "absent from this PATCH" apart from "explicitly null".
 
 **The exception: action `visible` / `disabled` are client-side and sparse.**
-They bind the row the client already holds, and a `list_item` row lacks a key
-when the column is outside the view's projection, when field-level security
-refuses it, or when it was never written (the mongo and memory drivers).
-Reading an absent key faults `No such key` and the action silently vanishes.
+They bind the row the client already holds, and that row — a `list_item` row
+above all — lacks a key when the column is outside the view's projection, when
+field-level security refuses it, or when it was never written (the mongo and
+memory drivers).
+Reading an absent key faults `No such key`: a `visible` predicate hides the
+action, a `disabled` one leaves it refused, silently either way.
 There the guard is `has(record.x) && record.x != null`; `has()` alone is enough
 beside a literal `==` / `!=`; a nested path takes one `has()` per segment:
 
