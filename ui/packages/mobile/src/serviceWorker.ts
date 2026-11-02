@@ -6,6 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import { SERVICE_WORKER_CACHE_URLS_MESSAGE } from './serviceWorkerSource.js';
+
 export interface ServiceWorkerConfig {
   /** URL of the service worker script */
   url?: string;
@@ -60,4 +62,17 @@ export async function registerServiceWorker(
     config.onError?.(err);
     return null;
   }
+}
+
+/**
+ * Asks an `'app-shell'` worker (`getServiceWorkerSource({ strategy: 'app-shell' })`)
+ * to cache the files this page loaded before the worker controlled it, so the
+ * first visit's lazy chunks are there for an offline start. The worker keeps
+ * only same-origin files in its scope and never one under its API prefix.
+ * No-op without a worker or the Performance API.
+ */
+export function cacheLoadedResources(worker: ServiceWorker | null | undefined): void {
+  if (!worker || typeof performance === 'undefined' || typeof performance.getEntriesByType !== 'function') return;
+  const urls = performance.getEntriesByType('resource').map((entry) => entry.name);
+  worker.postMessage({ type: SERVICE_WORKER_CACHE_URLS_MESSAGE, urls });
 }

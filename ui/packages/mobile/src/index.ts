@@ -35,7 +35,7 @@ export { usePullToRefresh, type PullToRefreshOptions } from './usePullToRefresh.
 export { MobileProvider, type MobileProviderProps } from './MobileProvider.js';
 export { ResponsiveContainer, type ResponsiveContainerProps } from './ResponsiveContainer.js';
 export { generatePWAManifest } from './pwa.js';
-export { registerServiceWorker, type ServiceWorkerConfig } from './serviceWorker.js';
+export { registerServiceWorker, cacheLoadedResources, type ServiceWorkerConfig } from './serviceWorker.js';
 export {
   createOfflineQueue,
   IndexedDbOfflineQueue,
@@ -52,7 +52,9 @@ export {
 } from './createOfflineDataSource.js';
 export {
   getServiceWorkerSource,
+  SERVICE_WORKER_CACHE_URLS_MESSAGE,
   type ServiceWorkerSourceOptions,
+  type ServiceWorkerStrategy,
 } from './serviceWorkerSource.js';
 export { BREAKPOINTS } from './breakpoints.js';
 
