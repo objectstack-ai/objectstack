@@ -69,9 +69,11 @@ const CALLEE = 'lookupArtifactItem(';
  */
 const BINDINGS_FILE = 'protocol-package-bindings.ts';
 const BINDINGS = readFileSync(fileURLToPath(new URL(`./${BINDINGS_FILE}`, import.meta.url)), 'utf8');
+/** [#25467 E2 cut 1a] The module the list read's body (`readFlattenedMetaItems`) moved to. */
+const LIST_READS_FILE = 'protocol-meta-list-reads.ts';
 
 /** A class member's header in `protocol.ts`: four spaces, optional modifiers, its name, its parameter list. */
-const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
+const MEMBER_HEADER = /^ {4}(?:(?:private|public|protected|static|async|override|readonly)\s+)*([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(|^ {4}(static) \{$/;
 /** A module function's header in a split module: optional `export` and `async`, `function`, its name, its parameter list. */
 const FUNCTION_HEADER = /^(?:export )?(?:async )?function ([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\(/;
 
@@ -99,7 +101,8 @@ function sitesOf(source: string, header: RegExp): Site[] {
         let member = '(no member)';
         for (let line = source.slice(0, at).split('\n').length - 1; line >= 0; line--) {
             const found = header.exec(lines[line]);
-            if (found) { member = found[1]; break; }
+            // [#25467 E2] The class's `static {}` block (the host factory) is a member too.
+            if (found) { member = found[1] ?? found[2]; break; }
         }
         sites.push({ member, args });
     }
@@ -120,7 +123,7 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: '[#25467 cut 15] the definition\'s body, the function the class member delegates to' },
     { member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
         why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule); [#23074] at the served item\'s own bundle member' },
-    { member: 'readFlattenedMetaItems', args: 'request.type, itemName, itemPackageId, bundleMemberOf(request.type, it)', noPackage: true, disposition: 'served-package envelope',
+    { file: LIST_READS_FILE, member: 'readFlattenedMetaItems', args: 'request.type, itemName, itemPackageId, bundleMemberOf(request.type, it)', noPackage: true, disposition: 'served-package envelope',
         why: 'the list\'s envelope: each item\'s own package, the rule the by-name read shares; [#23074] at each item\'s own bundle member' },
     { member: 'readMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the shipped-flow arm: the served body IS this artifact, and the envelope is looked up at its own package' },
@@ -142,6 +145,8 @@ const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly dispos
         why: 'the lock\'s artifact layer (the one item-lock resolution), never an envelope on a served body; [#28746] at the override write gate\'s bundle member when it names one' },
     { file: SEAM_FILE, member: 'shippedArtifactsOf', args: 'type, name, packageId, member', noPackage: false, disposition: 'no',
         why: 'scoped to a named package, and kept only when it is that package\'s own; [#28746] at the override write gate\'s bundle member when it names one' },
+    { member: 'static', args: '...a', noPackage: true, disposition: 'no',
+        why: '[#25467 E2] the host factory\'s closure in the class\'s static block: it forwards the moved bodies\' calls (their rows above, in their modules) unchanged, so its disposition is theirs' },
     { member: 'shippedArtifactsOf', args: '...a', noPackage: true, disposition: 'no',
         why: '[#25467 cut 15] the class member\'s host closure: it forwards the moved body\'s two calls (the rows above) unchanged, so its disposition is theirs' },
     { member: 'hydrateOverlayIntoRegistry', args: 'type, (data as any).name, options.packageId ?? undefined, bundleMemberOf(type, data)', noPackage: true, disposition: 'no',
@@ -226,7 +231,12 @@ describe('[#22024] every lookupArtifactItem( in protocol.ts has a recorded dispo
         expect(BINDINGS).toMatch(/\nfunction envelopePackageId\(requestedPackageId: string \| undefined, served: unknown\): string \| undefined \{/);
         expect(SOURCE).not.toMatch(/\nfunction envelopePackageId\(/);
         expect(SOURCE).toMatch(/\nimport \{[^}]*\benvelopePackageId,[^}]*\} from '\.\/protocol-package-bindings\.js';/);
-        expect(SOURCE).toContain('const itemPackageId = envelopePackageId(packageId, it);');
+        // [#25467 E2 cut 1a] The list read's body moved: its envelope line is read
+        // where it now stands, and that module imports the same one definition.
+        const listReads = MODULE_SOURCES.get(LIST_READS_FILE)!;
+        expect(listReads).toContain('const itemPackageId = envelopePackageId(packageId, it);');
+        expect(listReads).not.toMatch(/\nfunction envelopePackageId\(/);
+        expect(listReads).toMatch(/\nimport \{[^}]*\benvelopePackageId,[^}]*\} from '\.\/protocol-package-bindings\.js';/);
         expect(SITES.filter((site) => site.disposition === 'served-package envelope').map((site) => site.member).sort())
             .toEqual(['readFlattenedMetaItems', 'readMetaItem']);
     });
