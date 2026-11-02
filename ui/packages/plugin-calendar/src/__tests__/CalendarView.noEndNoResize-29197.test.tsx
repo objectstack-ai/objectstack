@@ -41,7 +41,10 @@ const TITLE = 'Build homepage';
 const MONTH_HANDLE = 'Resize event end';
 const GRID_HANDLE = { top: 'Resize start', bottom: 'Resize end' } as const;
 
-/** Thursday January 15th, 2026: the month and the week of the 11th to the 17th. */
+/**
+ * Thursday January 15th, 2026: the day the day view opens on, inside the week
+ * of the 11th to the 17th. The `ObjectCalendar` records sit on it.
+ */
 const CLOCK = '2026-01-15T12:00:00.000Z';
 
 const OBJECT_SCHEMA = {
@@ -97,8 +100,7 @@ function mountObjectCalendar(
     type: 'object-calendar',
     objectName: 'task',
     defaultView,
-    // `initialDate`: the day the day view opens on, inside the week view's week.
-    calendar: { titleField: 'name', initialDate: '2026-01-12', ...calendar },
+    calendar: { titleField: 'name', ...calendar },
   } as never;
   render(
     <LocalizationProvider value={{ locale: 'en-US' }}>
@@ -139,7 +141,7 @@ describe('CalendarView endEditable={false}: no resize handle in the time grid (o
 describe('ObjectCalendar with no endDateField: no resize handle in the time grid (objectstack#29197)', () => {
   for (const view of ['week', 'day'] as const) {
     it(`${view} view: a view with no end field draws no top handle`, async () => {
-      mountObjectCalendar(TIMED_NO_END, { starts_at: '2026-01-12T09:00:00.000Z', all_day: false }, view);
+      mountObjectCalendar(TIMED_NO_END, { starts_at: '2026-01-15T09:00:00.000Z', all_day: false }, view);
       const { top, bottom } = handlesOn(await screen.findByTitle(TITLE));
       expect(top).toBeNull();
       expect(bottom).toBeNull();
@@ -148,7 +150,7 @@ describe('ObjectCalendar with no endDateField: no resize handle in the time grid
     it(`control: ${view} view, a view with an end field draws both handles`, async () => {
       mountObjectCalendar(
         { startDateField: 'starts_at', endDateField: 'ends_at' },
-        { starts_at: '2026-01-12T09:00:00.000Z', ends_at: '2026-01-12T11:00:00.000Z' },
+        { starts_at: '2026-01-15T09:00:00.000Z', ends_at: '2026-01-15T11:00:00.000Z' },
         view,
       );
       const { top, bottom } = handlesOn(await screen.findByTitle(TITLE));
