@@ -137,12 +137,14 @@ correct the block in the same edit** — ⛔ never route around it. What it deli
 Clocked windows measure behaviour, never loading — a test that boots a real plugin chain
 pays its first load at module top; `pnpm check:test-source-alias` gates it. A gate grading a
 duration reports and ⛔ never reds a required job, judges only on the run profile it measured,
-and when new soaks report-only a week before it grades; any seat flips a gate that reds untouched packages twice in an
-hour to report-only before any ruling. A suite-weight ceiling rises only by ruling (`RULED_CEILING_RAISES`); a test file
-over 10 s of wall, unless the file declares a measured budget with its class (ruling record 6181973363), is its lane's
-card, fixed and ⛔ never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
-layer at least as close to the code (ruling record 6120820653). A new pin for a component that already has a shared
-harness file goes into that file as a top-level `describe`, not a new file (ruling record 6583487846).
+and when new soaks report-only a week before it grades; any seat flips a gate that reds untouched
+packages twice in an hour to report-only before any ruling. A suite-weight ceiling rises only by
+ruling (`RULED_CEILING_RAISES`); a test file over 10 s of wall, unless the file declares a
+measured budget with its class (ruling record 6181973363), is its lane's card, fixed and ⛔
+never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
+layer at least as close to the code (ruling record 6120820653).
+A new pin for a component that already has a shared harness file goes into that file as a
+top-level `describe`, not a new file (ruling record 6583487846).
 
 ### Running the dev server
 
@@ -632,8 +634,6 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 |:---|:---|
 | `ObjectKernel` | Default production runtime. Full DI / EventBus / Plugin lifecycle. |
 | `LiteKernel` | Tests (vitest), serverless, edge (Workers). |
-
-`EnhancedObjectKernel` is deprecated — do not use.
 
 ---
 
