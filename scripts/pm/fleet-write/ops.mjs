@@ -1375,6 +1375,17 @@ export const ADVISORY_READ_ACCESS_REMEDY =
 /** What a read whose seal failed prints: nothing of the answer, and no part emitted. */
 export const ADVISORY_READ_SEAL_FAILED = 'the seal failed, so nothing of the answer was emitted — ⛔ the text never leaves another way; re-send the read with a fresh key';
 
+/**
+ * What a read whose GET never reached the platform prints — `rest` answers status 0 when the call threw before any
+ * answer — and the status its row carries in place of a number. The platform judged nothing, so there is no HTTP
+ * status to print and no grant to remedy (`ADVISORY_READ_ACCESS_REMEDY` is a refusal's, and none came); ⛔ nor the
+ * exception's message, which can carry the request's path and so the id.
+ */
+export const ADVISORY_READ_UNREACHED =
+  "REFUSED before any fence: the advisory's GET did not reach the platform (the runner's call threw before any answer), so no grant, " +
+  'advisory or sender was judged and nothing was sealed or emitted — re-send the read with a fresh key';
+export const ADVISORY_READ_UNREACHED_STATUS = 'not reached';
+
 /** What a read too large for the channel prints: the counts, and nothing of the answer. Pure. */
 export function advisoryReadOverCapText({ plaintextBytes, sealedChars }) {
   return (

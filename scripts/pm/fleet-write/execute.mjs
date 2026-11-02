@@ -243,8 +243,11 @@
  *
  * ## The read — `advisory_read`, sealed before anything leaves (`advisoryReadAction`)
  *
- * ONE `GET /repos/{repo}/security-advisories/{ghsa_id}`, nothing written. The
- * executor judges `ADVISORY_READ_FENCES` on that answer — a 200 advisory, the
+ * ONE `GET /repos/{repo}/security-advisories/{ghsa_id}`, nothing written. A
+ * GET that never reached the platform (the call threw: `rest`'s status 0) is a
+ * FAILED action with `ADVISORY_READ_UNREACHED` and the row status
+ * `not reached` — no HTTP status, no grant remedy, ⛔ never the exception's
+ * message. On an answer, the executor judges `ADVISORY_READ_FENCES` on it — a 200 advisory, the
  * one the action names, and a sender the row's `senderGate` admits (the
  * default, `collaborator`: the sender on the advisory's own
  * `collaborating_users`; `ops.mjs` records the ruling the maintainer owes) —
@@ -404,6 +407,8 @@ import {
   ADVISORY_READ_ACCESS_REMEDY,
   ADVISORY_READ_FIELDS,
   ADVISORY_READ_SEAL_FAILED,
+  ADVISORY_READ_UNREACHED,
+  ADVISORY_READ_UNREACHED_STATUS,
   advisoryReadAad,
   advisoryReadCall,
   advisoryReadFenceFailures,
@@ -924,6 +929,9 @@ export function confirmAdvisory(req, answer, pre) {
 export async function advisoryReadAction(req, { payload, index, sender, api, t, seal = sealAdvisoryRead, senderGate = OPS.advisory_read.senderGate }) {
   const { ghsaId, publicKey } = req.advisoryRead;
   const r = await rest(api, req.path, { method: 'GET' }, t);
+  // Status 0 is `rest`'s word for a call that threw before any answer: the platform judged nothing, so the row names no
+  // HTTP status and no grant remedy — and ⛔ never the exception's message, which can carry the path and so the id.
+  if (r.status === 0) return { ok: false, status: ADVISORY_READ_UNREACHED_STATUS, why: ADVISORY_READ_UNREACHED, notes: [] };
   const failures = advisoryReadFenceFailures({ ghsaId, answer: r, sender, gate: senderGate });
   if (failures.length) {
     const refused = !(r.status >= 200 && r.status < 300);
@@ -1452,7 +1460,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the run_rerun_failed: the five fences judged HERE on the run and its pull, read immediately before ONE bodiless POST — the pull's current head by its own GET, never the run's embedded copy, and a run naming no pull refused by name; each refused with the POST not sent and accepted on the measured run; a run, pull, baseline or fence that fails is zero writes; the 201 confirmed only by reading attempt 2 back with its failed jobs queued or in progress, naming their job ids; attempt 2 never seen, a failed job completed, or a job list unread is FAILED; no annotation": 21,
   "the hierarchy link: sub_issue_add and sub_issue_remove read the parent's and the child's own answers, then the child's parent (add) or the parent's whole list (remove), immediately before ONE write whose body is the child's REST id from its own answer — never its number, never replace_parent; a pull, a transferred or unread card, a child under another parent, one the parent does not list, or a read that is neither answer is zero writes; a child already under this parent is a no-op landed on the list; the answer confirmed only when the parent's list reads the child back (or no longer does) inside the window; a refused write, a list that never settles or never reads whole is FAILED; no annotation, and the rows ride a stroke beside other ops": 20,
   "the advisory rows: advisory_report and advisory_create are ONE POST of their body each, landed on a 2xx carrying an id — a draft's reading state draft — that the row and a notice annotation name; advisory_collaborators_add and advisory_state read the advisory first and send ONE PATCH whose body is the executor's — every existing login kept with the missing ones added, an all-present list a no-op, or the one state a legal transition reaches — or nothing at all on a fence: an unread, other or wrong-state advisory or an illegal move; each lands only when its answer shows the result; ⛔ the marker in a report's or a draft's summary, description and packages and in every advisory answer's summary, description and vulnerabilities reaches no log line, row, step summary or annotation": 27,
-  "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — collaborator by default, target-write by switch, an unknown gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 16,
+  "advisory_read: ONE GET after the sender gate and nothing written; the read, advisory and sender fences judged on that answer — collaborator by default, target-write by switch, an unknown gate closed — then the answer sealed to the seat's key and emitted as notice parts the reader parses back, opening byte for byte for that key and read alone; a failed or unsealed seal and an over-cap answer FAILED with nothing emitted; ⛔ the marker in the summary, description and vulnerabilities, and the advisory's id, reach no log line, row, step summary or annotation, and the sealed answer alone carries no marker": 17,
 });
 // Raised 17 → 18 with the governed-review follow-up battery, 18 → 19 with the run_rerun_failed battery, 19 → 20 with the
 // hierarchy link battery, 20 → 21 with the advisory rows' battery, 21 → 22 with advisory_read's: one battery, one row.
@@ -2551,6 +2559,10 @@ export async function selfTest() {
       const missing = await readRun([read()], { ...allowed, [A_GET]: { status: 404, json: { message: MARKER } } });
       const elsewhere = await readRun([read()], { ...allowed, [A_GET]: advisory({ ghsa_id: OTHER }) });
       t('⛔ fence read and advisory: a 403 quoting the one message the relay knows plus the read remedy, a 404 whose message is prose (not quoted), and an answer naming another advisory — each FAILED with nothing sealed, no part, and neither id in its row', [[forbidden, missing, elsewhere].map((r) => [r.exit, r.annotations.length, r.rows[0]?.status, [GHSA, OTHER].some((id) => JSON.stringify(r.rows).includes(id))]), forbidden.rows[0]?.result.includes('(the platform: Resource not accessible by integration); the relay token carries repository-advisories READ for this stroke alone'), missing.rows[0]?.result.includes('the platform'), elsewhere.rows[0]?.result.includes('fence `advisory`: the answer names another advisory')], [[[EXIT_ACTION_FAILED, 0, 403, false], [EXIT_ACTION_FAILED, 0, 404, false], [EXIT_ACTION_FAILED, 0, 200, false]], true, false, true]);
+      // ⛔ A GET that never reached the platform: the call threw, so `rest` answers status 0 — its message carrying the id and the marker.
+      const unreached = await readRun([read()], { ...allowed, [A_GET]: { throws: `fetch failed for ${ADV} holding ${MARKER}` } });
+      const unreachedText = [...unreached.logs, ...(unreached.lines ?? []), unreached.summary ?? '', JSON.stringify(unreached.rows)].join('\n');
+      t("⛔ a GET that never reached the platform (the call threw) is FAILED saying so: its row names no HTTP status and no grant remedy — no grant was judged — nothing sealed, no part, and the exception's message printed nowhere", [unreached.exit, unreached.seen.map((s) => s.call), unreached.annotations.length, notices(unreached).length, unreached.rows.map((x) => [x.status, x.result]), /HTTP 0\b/u.test(unreachedText), unreachedText.includes(ADVISORY_READ_ACCESS_REMEDY), unreachedText.includes('fetch failed')], [EXIT_ACTION_FAILED, [PERM, A_GET], 0, 0, [[ADVISORY_READ_UNREACHED_STATUS, `FAILED: ${ADVISORY_READ_UNREACHED}`]], false, false, false], unreachedText);
       // ⛔ A failed seal, and one too large.
       const thrown = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { seal: () => { throw new Error(`seal blew up holding ${MARKER}`); } } });
       const unsealed = await readRun([read()], { ...allowed, [A_GET]: advisory() }, { advisoryRead: { seal: ({ plaintext }) => plaintext } });
@@ -2568,7 +2580,7 @@ export async function selfTest() {
       // ⛔ The sweep: every run above, every channel this file emits on — no marker, and no advisory id.
       const emitted = swept.map(({ r, paceLines }) => [...(r.logs ?? []), ...(r.lines ?? []), r.summary ?? '', JSON.stringify(r.rows ?? []), ...(r.annotations ?? []).map((n) => relayAdvisoryReadAnnotationMessage(n)), ...paceLines].join('\n'));
       const leaks = emitted.map((text, i) => (text.includes('ADVISORY MARKER') ? i : null)).filter((i) => i !== null);
-      t('⛔ THE MARKER TEST: across every run of this battery — landed, long, refused at the sender, read and advisory fences, the switched and unknown gates, a seal that throws, one that does not seal, one too large, refused payloads — the marker served in the summary, the description and the vulnerabilities (and every other field) reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [18, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
+      t('⛔ THE MARKER TEST: across every run of this battery — landed, long, refused at the sender, read and advisory fences, the switched and unknown gates, a GET that never reached the platform, a seal that throws, one that does not seal, one too large, refused payloads — the marker served in the summary, the description and the vulnerabilities (and every other field) reaches NO log line, row, step summary, annotation or pace-log line', [swept.length, leaks], [19, []], leaks.map((i) => emitted[i].split('\n').find((l) => l.includes('ADVISORY MARKER'))).join(' | '));
       const named = emitted.map((text, i) => ([GHSA, OTHER].some((id) => text.includes(id)) ? i : null)).filter((i) => i !== null);
       t("⛔ …and NO advisory id: neither the one asked for nor the one answered appears on any line, row, summary or annotation of any run — the call's placeholder stands where every other row prints its path", named, [], named.map((i) => emitted[i].split('\n').find((l) => l.includes(GHSA) || l.includes(OTHER))).join(' | '));
       t('…positive control: every answer served carried the marker and the id, the request carried the id to the platform — where it belongs — and the generic row printer, given the same answer, WOULD print both', [swept.every(({ answers }) => JSON.stringify(answers).includes('ADVISORY MARKER') && JSON.stringify(answers).includes(GHSA)), landed.seen.some((s) => s.call === A_GET), resultOf({}, served.json).includes('ADVISORY MARKER') && resultOf({}, served.json).includes(GHSA)], [true, true, true]);
