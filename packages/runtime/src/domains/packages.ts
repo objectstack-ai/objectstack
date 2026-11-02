@@ -3245,7 +3245,9 @@ function readBaseContributions(
     pairId: string | undefined,
     registry: any,
 ): GetPackageCustomizationsResponse['contributions'] {
-    type Contribution = GetPackageCustomizationsResponse['contributions'][number];
+    // The `field` and `flow` entries: the `nav` kind is declared in the spec
+    // ahead of this producer (#27928) and is not listed here yet (#28722).
+    type Contribution = Exclude<GetPackageCustomizationsResponse['contributions'][number], { kind: 'nav' }>;
     const contributions: Contribution[] = [];
     if (typeof registry?.getAllObjects !== 'function') return contributions;
     // The one stamp reading both kinds share: the package `packageId` names
