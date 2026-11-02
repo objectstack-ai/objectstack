@@ -19,6 +19,7 @@ import {
   buildEffectiveFieldPermissions,
   buildEffectiveObjectPermissions,
   fieldPermissionVote,
+  registryObjectPackageDisabled,
 } from './effective-object-permissions.js';
 
 describe('buildEffectiveObjectPermissions', () => {
@@ -475,6 +476,52 @@ describe('[#20135] apiOperations says what the REST door serves', () => {
 // ── [#25866 / ruling of record 6408558941] A field permission entry's row
 // condition (`when`): the ONE vote per verdict, and the row-blind merge behind
 // `/auth/me/permissions`' `fields` slot.
+
+describe('[#28877] an object of a disabled package leaves the map', () => {
+  const SCHEMAS = [{ name: 'lead' }, { name: 'campaign_member' }];
+  const disabled = (name: string) => name === 'campaign_member';
+
+  it('an explicit grant, a plain wildcard\'s coverage and a super-user seed are all left out', () => {
+    for (const sets of [
+      [{ objects: { campaign_member: { allowRead: true, allowCreate: true }, lead: { allowRead: true } } }],
+      [{ objects: { '*': { allowRead: true, allowCreate: true } } }],
+      [{ objects: { '*': { allowRead: true, viewAllRecords: true, modifyAllRecords: true } } }],
+    ]) {
+      const map: any = buildEffectiveObjectPermissions(sets, { allSchemas: () => SCHEMAS, isObjectPackageDisabled: disabled });
+      expect(Object.keys(map), JSON.stringify(sets)).not.toContain('campaign_member');
+      expect(objectPermissionGrants(map.lead, 'allowRead'), JSON.stringify(sets)).toBe(true);
+    }
+  });
+
+  it('the `*` entry is kept: it is not an object', () => {
+    const map: any = buildEffectiveObjectPermissions(
+      [{ objects: { '*': { allowRead: true } } }],
+      { allSchemas: () => SCHEMAS, isObjectPackageDisabled: () => true },
+    );
+    expect(map['*']).toEqual({ allowRead: true });
+    expect(Object.keys(map)).toEqual(['*']);
+  });
+
+  it('no accessor, or one that throws, leaves the map as the earlier steps built it', () => {
+    const sets = [{ objects: { campaign_member: { allowRead: true }, lead: { allowRead: true } } }];
+    const warnings: string[] = [];
+    const thrown: any = buildEffectiveObjectPermissions(sets, {
+      isObjectPackageDisabled: (name) => { if (name === 'lead') throw new Error('registry offline'); return true; },
+      logger: { warn: (message) => warnings.push(message) },
+    });
+    expect(Object.keys(thrown).sort()).toEqual(['campaign_member', 'lead']);
+    expect(warnings).toEqual(['[effective-permissions] disabled-package omission failed']);
+    expect(Object.keys(buildEffectiveObjectPermissions(sets) as any).sort()).toEqual(['campaign_member', 'lead']);
+  });
+
+  it('registryObjectPackageDisabled asks the registry\'s own predicate, and a registry without it disables nothing', () => {
+    const registry = { isObjectPackageDisabled(name: string) { return this === registry && name === 'campaign_member'; } };
+    expect(registryObjectPackageDisabled(registry)('campaign_member')).toBe(true);
+    expect(registryObjectPackageDisabled(registry)('lead')).toBe(false);
+    expect(registryObjectPackageDisabled({})('campaign_member')).toBe(false);
+    expect(registryObjectPackageDisabled(undefined)('campaign_member')).toBe(false);
+  });
+});
 
 describe('fieldPermissionVote (#25866)', () => {
   it('an entry without a `when` votes as declared under every verdict, `=== true` as the merges always read it', () => {

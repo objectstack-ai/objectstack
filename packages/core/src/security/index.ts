@@ -308,6 +308,8 @@ export {
 // plugin-hono-server, which re-exports them under the same names.
 export {
   buildEffectiveObjectPermissions,
+  // [#28877] The map's disabled-package accessor over an engine registry.
+  registryObjectPackageDisabled,
   foldWildcardSuperUser,
   clampManagedObjectWrites,
   seedSuperUserRestrictedObjects,
