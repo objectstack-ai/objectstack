@@ -302,6 +302,13 @@ record is deleted; the integrity check above governs what may be **written**
 here in the first place. They are two halves of the same relationship contract.
 </Callout>
 
+A `user` field takes part only when it declares a `deleteBehavior`. Declared, it
+works as it does on a `lookup` when the user is deleted: `cascade` deletes the
+records holding that user, `set_null` clears the field (a `multiple: true` field
+loses only that member), and `restrict` refuses the user delete with
+`409 DELETE_RESTRICTED`; a `set_null` on a `required` user field refuses it too. A
+`user` field that declares none keeps the deleted user's id, as it always has.
+
 ### File & Media Types
 
 | Type | Factory | Description |

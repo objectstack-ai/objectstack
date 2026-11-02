@@ -19,7 +19,7 @@ import { ListView, type ListViewProps } from '@object-ui/plugin-list';
 import type { ListViewSchema, TreeViewConfig } from '@object-ui/types';
 import type { useAuth } from '@object-ui/auth';
 import type { useActionTextLocalizer } from '@object-ui/react';
-import type { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
+import { useLocalization, type useObjectLabel, type useObjectTranslation } from '@object-ui/i18n';
 import { resolveManagedByEmptyState } from '../utils/managedByEmptyState.js';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
@@ -167,6 +167,11 @@ export function useObjectViewListRenderer({
     const actionsRef = useRef(actions);
     actionsRef.current = actions;
     const createRecord = useCallback(() => actionsRef.current.create(), []);
+    // The workspace zone the authored filter's date macros resolve in
+    // (`resolveDateMacros` reads it from core). It is served after the first
+    // render, so it is a dependency of the callback below: when it lands, the
+    // view's filter is resolved again and a changed day reaches the list.
+    const { timezone: workspaceTimeZone } = useLocalization();
 
     const renderListView = useCallback(({ schema: listSchema, dataSource: ds, onEdit: editHandler, className, refreshKey: pluginRefreshKey }: any) => {
         // Combine local refreshKey with the plugin ObjectView's refreshKey for full propagation
@@ -531,7 +536,8 @@ export function useObjectViewListRenderer({
                 // objectui#7237 — equal content keeps the identity `ListView`
                 // names (and hands the self-querying views); a real change —
                 // another URL filter, another session scope, a date macro that
-                // resolves differently — still hands over the new value.
+                // resolves differently (a new day, or the workspace zone
+                // arriving) — still hands over the new value.
                 if (isSameOptionsValue(heldListFilter.current, resolved)) {
                     return heldListFilter.current;
                 }
@@ -973,7 +979,7 @@ export function useObjectViewListRenderer({
                 dataSource={ds}
             />
         );
-    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange]);
+    }, [inSetup, activeView, activeViewDeclaresColumns, activeViewIsSaved, objectDef, objectName, refreshKey, createRecord, urlFilters, initialUfSelections, handleUserFilterSelectionsChange, writeListUrlState, user?.id, pageOffersCreate, listAddRecordOpensCreate, listIdentityKey, listPrefs.ready, listPrefs.preference, listPrefs.patchView, handleListTotalChange, managedUsers, managedUserMarker, recordOpen, openAsPage, handleListRowsChange, phoneTitle, handleListPersonalizationChange, workspaceTimeZone]);
 
     return { renderListView };
 }
