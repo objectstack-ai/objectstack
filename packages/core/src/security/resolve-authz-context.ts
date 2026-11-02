@@ -1060,7 +1060,11 @@ async function readOrganizationMembersToCompletion(ql: any, organizationId: stri
     if (!full) break;
     after = page[page.length - 1].id;
   }
-  warnOrganizationMembersOutgrewFirstRead(ql, organizationId, members.length, reads);
+  // A membership of exactly the bound filled the first read without outgrowing
+  // it: its list was already complete, and there is nothing to say.
+  if (members.length > ORG_MEMBERS_FIRST_READ_ROWS) {
+    warnOrganizationMembersOutgrewFirstRead(ql, organizationId, members.length, reads);
+  }
   return members;
 }
 

@@ -138,6 +138,18 @@ describe('[#29281] org_user_ids holds the whole active organization', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  it('exactly 1,000 members: the same members, one completion read that comes back short, and nothing said', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const tables = tablesOf(FIRST_READ_BOUND);
+    const ql = makeQl(tables);
+    const grants = await resolveUserAuthzGrants(ql, ME, { tenantId: ORG });
+
+    expect([...grants.org_user_ids].sort()).toEqual(membersOf(tables));
+    // The first read cannot tell 1,000 from more, so one page is read — and it is the whole membership.
+    expect(orgReads(ql.reads)).toHaveLength(2);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it('a first read at its bound is said once per organization and engine, naming the organization and the count', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const tables = tablesOf(FIRST_READ_BOUND + 5);
