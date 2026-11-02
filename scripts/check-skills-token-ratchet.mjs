@@ -490,7 +490,7 @@ export const CEILINGS = new Map([
   // request signing, which the built-in providers serve (recipe 6 and the
   // `signed` kind in references/integration-recipes.md). Re-locked AT the
   // measurement, headroom 0 tokens.
-  ['skills/objectstack-automation/SKILL.md', 6450],
+  ['skills/objectstack-automation/SKILL.md', 6449],
   // 13783 -> 13892 (2026-08-31 app-repo-principles raise, see the block above).
   // The invariant-vs-transition-gate choice, placed in the field-conditional-rule
   // bullet list where the tool is actually picked. Both wrong picks are silent:
@@ -581,7 +581,7 @@ export const CEILINGS = new Map([
   // absorbed and the ceiling moves 5997 -> 6014 (+17), the measured
   // remainder only. Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-platform/SKILL.md) - 20) / 4) == ceil(24055 / 4)
-  ['skills/objectstack-platform/SKILL.md', 6012],
+  ['skills/objectstack-platform/SKILL.md', 6011],
   // `skills/objectstack-pm-dispatch/SKILL.md` (9708) and its
   // `rules/dev-template.md` (1838) left this table on 2026-09-10 with the files:
   // the maintainer deleted the published PM skill whole (verbatim:
@@ -981,7 +981,7 @@ export const CEILINGS = new Map([
   // stale `{ type: 'lookup', reference: 'user' }` fields (an object that does
   // not exist) became `type: 'user'`; -10 tokens, the row follows the
   // measurement down, zero headroom.
-  ['skills/objectstack-data/references/examples-objects.md', 1769],
+  ['skills/objectstack-data/references/examples-objects.md', 1756],
   ['skills/objectstack-data/references/lint-rules.md', 970],
   // 1299 -> 1566 (#26297): the `columns` dataset key and `applyOn: 'create'`
   // — a column a job or an admin owns after the first load is written on

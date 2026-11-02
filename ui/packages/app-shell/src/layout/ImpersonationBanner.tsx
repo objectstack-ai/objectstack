@@ -23,6 +23,24 @@
  * whose `/home` showed no sign of impersonation at all, so a home that could
  * not carry the indicator would have reproduced the bug.
  *
+ * ## The administrator is named by a person's name, never by an id
+ *
+ * The session carries the administrator only as `impersonatedBy`, a `sys_user`
+ * id, which tells neither the administrator nor anyone watching the screen who
+ * started this. The banner therefore reads that one `sys_user` row and names it
+ * by its name, else its email. The read is made AS the impersonated user (that
+ * is the session the console holds), and their row scope may not reach the
+ * administrator's row: a refused, missing or failed read says "an
+ * administrator" instead. ⛔ The raw id is never shown, and nothing is shown for
+ * the administrator until the read has answered, so the sentence never flips
+ * from an id or a guess to the name.
+ *
+ * The read is a raw authenticated `GET` on the `/api/v1` lane, the lane the
+ * exit uses: this banner mounts in `ConsoleShell`, above `AdapterProvider`, so
+ * the data adapter does not exist here. It lives in the banner rather than in
+ * `useImpersonationExit` because the remediation overlay shares that hook and
+ * names nobody, so it must not issue the read.
+ *
  * ## The exit fails LOUDLY
  *
  * `POST /auth/admin/stop-impersonating` restores the administrator from the
@@ -34,10 +52,61 @@
  * the operator would go back to ordinary work believing they were themselves.
  */
 
+import { useEffect, useState } from 'react';
 import { UserCog } from 'lucide-react';
 import { Button } from '@object-ui/components';
+import { createAuthenticatedFetch } from '@object-ui/auth';
+import { GetDataResponseSchema } from '@objectstack/spec/api';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { PERSON_DISPLAY_FIELDS, rowLabel } from '../utils/approverIdentity.js';
 import { useImpersonationExit } from './useImpersonationExit.js';
+
+/**
+ * How the banner names the administrator: `{ name }` once the `sys_user` read
+ * answered with a name or email, `null` once it answered without one (refused,
+ * missing, failed), `undefined` while it is still being asked.
+ */
+type AdministratorName = { name: string } | null | undefined;
+
+/**
+ * Read the administrator's `sys_user` row once per administrator id. See the
+ * module header for why the read is made here and how a refusal reads.
+ */
+function useAdministratorName(adminId: string | undefined): AdministratorName {
+  // The answer is kept with the id it answers for, so a later impersonation by
+  // another administrator never shows the previous one's name.
+  const [answer, setAnswer] = useState<{ id: string; name: { name: string } | null } | null>(null);
+
+  useEffect(() => {
+    if (!adminId) return;
+    let cancelled = false;
+    void (async () => {
+      let name: string | null = null;
+      try {
+        const baseUrl = import.meta.env.VITE_SERVER_URL || '';
+        const res = await createAuthenticatedFetch()(
+          `${baseUrl}/api/v1/data/sys_user/${encodeURIComponent(adminId)}`,
+          { method: 'GET', headers: { Accept: 'application/json' }, credentials: 'include' },
+        );
+        if (res.ok) {
+          // The data route answers the spec's `GetDataResponse` body; anything
+          // else names nobody.
+          const body = GetDataResponseSchema.safeParse(await res.json());
+          if (body.success) name = rowLabel(body.data.record, PERSON_DISPLAY_FIELDS) || null;
+        }
+      } catch {
+        // A failed read names nobody; the banner says "an administrator".
+      }
+      if (!cancelled) setAnswer({ id: adminId, name: name ? { name } : null });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [adminId]);
+
+  if (!adminId || answer === null || answer.id !== adminId) return undefined;
+  return answer.name;
+}
 
 export function ImpersonationBanner() {
   const { t } = useObjectTranslation();
@@ -46,6 +115,7 @@ export function ImpersonationBanner() {
   // (objectui#13208). See `useImpersonationExit`.
   const { impersonatedBy, impersonatedName, stop, stopping, stopError, notRestored } =
     useImpersonationExit();
+  const administrator = useAdministratorName(impersonatedBy);
 
   // Nothing to say on an ordinary session. Below every hook, so the hook order
   // is stable across the transition out of impersonation.
@@ -65,12 +135,18 @@ export function ImpersonationBanner() {
             user: impersonatedName,
           })}
         </span>{' '}
-        <span className="opacity-80">
-          {t('impersonation.banner.startedBy', {
-            defaultValue: 'Started by administrator {{admin}}.',
-            admin: impersonatedBy,
-          })}
-        </span>
+        {administrator === undefined ? null : (
+          <span className="opacity-80" data-testid="impersonation-started-by">
+            {administrator
+              ? t('impersonation.banner.startedBy', {
+                  defaultValue: 'Started by administrator {{admin}}.',
+                  admin: administrator.name,
+                })
+              : t('impersonation.banner.startedByUnnamed', {
+                  defaultValue: 'Started by an administrator.',
+                })}
+          </span>
+        )}
       </p>
       <Button
         size="sm"

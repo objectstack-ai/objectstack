@@ -100,9 +100,8 @@ describe('detail WIDE_FIELD_TYPES — keyed on the spec vocabulary (#4250)', () 
     // `grid` is absent from this assertion by construction: it is not a spec
     // FieldType but a sanctioned objectui-local key (`GridFieldMetadata` in
     // `@object-ui/types`), so it is not part of the spec-facing surface.
-    // `repeater` — the spec type whose widget IS `field:grid` — is deliberately
-    // NOT wide here; that asymmetry is filed separately rather than fixed under
-    // this card.
+    // `repeater` is not wide either: it resolves to the JSON editor
+    // (`field:object`), not to the line-items grid, so no surface spans it.
     const wideSpecTypes = SPEC_TYPES.filter((t) => isWideFieldType(t));
     expect([...wideSpecTypes].sort()).toEqual([...WIDE_SPEC_TYPES].sort());
   });

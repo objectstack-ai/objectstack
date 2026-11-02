@@ -119,6 +119,11 @@ export function ObjectHooksPanel({
   // the curated surface in if it is registered later (objectui#11939).
   const HookInspector = useRegisteredMetadataDefaultInspector('hook');
   const [hooks, setHooks] = React.useState<HookItem[]>([]);
+  // objectstack#29148 — the listed hooks whose pending draft the server refused
+  // to read (`403`), with the refusal as thrown. Such a hook opens no buffer:
+  // one seeded from its published row would be saved over the draft it never
+  // read. The other hooks of the list load as before.
+  const [refusedHooks, setRefusedHooks] = React.useState<ReadonlyMap<string, unknown>>(() => new Map());
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
@@ -243,6 +248,7 @@ export function ObjectHooksPanel({
         // address — when the ledger was read at all: an unreadable ledger says
         // nothing, and pins nothing.
         const pins = new Map<string, DraftPin | null>();
+        const refused = new Map<string, unknown>();
         for (const h of pub || []) {
           if (h?.name && targetsObject(h, objectName)) {
             byName.set(String(h.name), h);
@@ -250,11 +256,23 @@ export function ObjectHooksPanel({
           }
         }
         draftNames.forEach((n, i) => {
-          const body = draftBody(reads[i]!.answer);
+          const read = reads[i]!;
+          // A refused draft is not this hook's absence. Its published row stays
+          // listed and pins nothing; a hook known only by its refused draft is
+          // not listed, since nothing says it fires on this object.
+          if ('refused' in read) {
+            if (byName.has(n)) {
+              refused.set(n, read.refused);
+              pins.set(n, null);
+            }
+            return;
+          }
+          const body = draftBody(read.answer);
           if (body && targetsObject(body, objectName)) byName.set(n, body);
           if (byName.has(n)) pins.set(n, reads[i]!.pin);
         });
         setHooks([...byName.values()]);
+        setRefusedHooks(refused);
         // A hook whose buffer holds an unsent edit keeps the pin that edit was
         // built on: the install below does not replace that buffer either.
         const open = bufferRef.current;
@@ -279,11 +297,12 @@ export function ObjectHooksPanel({
   // edit the author took meanwhile is newer than it (`bufferRef`, above).
   React.useEffect(() => {
     if (selected !== null && bufferRef.current.hook === selected && bufferRef.current.dirty) return;
-    const hook = hooks.find((h) => h.name === selected) ?? null;
+    // objectstack#29148 — no buffer over a draft the server refused to read.
+    const hook = selected !== null && refusedHooks.has(selected) ? null : (hooks.find((h) => h.name === selected) ?? null);
     setDraft(hook ? { ...hook } : null);
     setDraftFor(hook ? selected : null);
     setDirty(false);
-  }, [selected, hooks]);
+  }, [selected, hooks, refusedHooks]);
 
   const save = React.useCallback(async (sent: DraftSend) => {
     if (!draft?.name) return;
@@ -459,7 +478,24 @@ export function ObjectHooksPanel({
             {error}
           </div>
         )}
-        {!draft ? (
+        {!draft && selected !== null && refusedHooks.has(selected) ? (
+          // objectstack#29148 — why this hook opens nothing to edit, the
+          // server's own sentence behind Details (the Studio refusal strip's look).
+          <div
+            data-testid="hooks-draft-unreadable"
+            className="m-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[11px] text-destructive"
+          >
+            <p role="alert" className="whitespace-pre-line">
+              {t('engine.studio.refusal.draftUnreadable', locale)}
+            </p>
+            <details className="mt-1">
+              <summary className="cursor-pointer select-none opacity-80">{t('engine.studio.refusal.details', locale)}</summary>
+              <pre className="mt-1 whitespace-pre-wrap break-words font-mono opacity-90">
+                {formatMetadataError(refusedHooks.get(selected))}
+              </pre>
+            </details>
+          </div>
+        ) : !draft ? (
           <div className="flex flex-1 items-center justify-center p-6 text-center text-[12px] text-muted-foreground">
             {t('engine.studio.hooks.pick', locale)}
           </div>
