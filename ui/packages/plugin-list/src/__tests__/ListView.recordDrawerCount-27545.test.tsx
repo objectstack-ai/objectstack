@@ -7,14 +7,15 @@
  */
 
 /**
- * objectstack#27545 — a list beside a record pane counts its records once.
+ * objectstack#27545 — a list under an open record counts its records once,
+ * and objectstack#28915 — that count is the list's own.
  *
- * The console prints the count under the list it hands the pane (its
- * `record-count-footer`, objectui#10636), so `ListView`'s own record-count bar
- * does not print it again while a pane narrows the list (`useRecordListFace()`
- * is `columns` or `cards`). The rest of the row stays: the grid's column
- * summaries are still drawn. With no pane beside it (`full`) the bar is the
- * one it was.
+ * The split pane narrowed the list beside it and printed the count under it
+ * (its `record-count-footer`, objectui#10636), so `ListView`'s bar held its
+ * count back while a pane narrowed the list. The split pane retired: a record
+ * opens in the drawer over the list, which keeps its full width, so the bar
+ * prints the count whether or not a record is open (the drawer publishes the
+ * open row, `ActiveListRecordProvider`), beside the grid's column summaries.
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
@@ -22,7 +23,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
 import { I18nProvider, SchemaRendererProvider } from '@object-ui/react';
-import { RecordListFaceProvider, type RecordListFace } from '@object-ui/components';
+import { ActiveListRecordProvider } from '@object-ui/components';
 import type { ListViewSchema } from '@object-ui/types';
 import { ListView } from '../ListView';
 
@@ -56,7 +57,7 @@ afterEach(() => {
   cleanup();
 });
 
-function renderList(face: RecordListFace) {
+function renderList(openRecordId: string | null) {
   const ds = {
     find: vi.fn(async () => ({ data: ROWS, total: ROWS.length, hasMore: false })),
     findOne: vi.fn(),
@@ -74,38 +75,33 @@ function renderList(face: RecordListFace) {
   render(
     <I18nProvider config={{ defaultLanguage: 'en', detectBrowserLanguage: false }}>
       <SchemaRendererProvider dataSource={ds as never}>
-        <RecordListFaceProvider value={face}>
+        <ActiveListRecordProvider recordId={openRecordId}>
           <ListView schema={schema} dataSource={ds as never} />
-        </RecordListFaceProvider>
+        </ActiveListRecordProvider>
       </SchemaRendererProvider>
     </I18nProvider>,
   );
   return ds;
 }
 
-describe('ListView beside a record pane counts its records once (objectstack#27545)', () => {
-  it('CONTROL — `full` (no pane): the bar prints the count', async () => {
-    renderList('full');
+describe('ListView under the record drawer counts its records once (objectstack#27545, objectstack#28915)', () => {
+  it('CONTROL — no record open: the bar prints the count', async () => {
+    renderList(null);
     const bar = await screen.findByTestId('record-count-bar');
     await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
   });
 
-  it.each(['columns', 'cards'] as const)('`%s`: the bar prints no count, and draws no empty row', async (face) => {
-    const ds = renderList(face);
-    await screen.findByTestId('grid-probe');
-    // The rows are in, and still no bar: with no count there is nothing else to draw.
-    await waitFor(() => expect(ds.find).toHaveBeenCalled());
-    await ds.find.mock.results[0].value;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(screen.queryByText('4 records')).toBeNull();
-    expect(screen.queryByTestId('record-count-bar')).toBeNull();
+  it('a record open in the drawer: the bar still prints the count', async () => {
+    renderList('a1');
+    const bar = await screen.findByTestId('record-count-bar');
+    await waitFor(() => expect(within(bar).getByText('4 records')).toBeInTheDocument());
   });
 
-  it('`columns`: the rest of the row stays — the column summaries are drawn, without the count', async () => {
-    renderList('columns');
+  it('a record open in the drawer: the column summaries are drawn beside the count', async () => {
+    renderList('a1');
     (await screen.findByTestId('grid-probe')).click();
     const bar = await screen.findByTestId('record-count-bar');
     await waitFor(() => expect(within(bar).getByTestId('record-count-summaries')).toHaveTextContent('Number of Employees: Avg: 10'));
-    expect(within(bar).queryByText('4 records')).toBeNull();
+    expect(within(bar).getByText('4 records')).toBeInTheDocument();
   });
 });

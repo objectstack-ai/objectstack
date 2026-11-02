@@ -7,12 +7,15 @@
  */
 
 /**
- * objectstack#27545 — the console object page's record pane v4, end to end
- * through `ObjectView` (maintainer rulings of 2026-10-29):
+ * objectstack#27545 — the console object page's record drawer, end to end
+ * through `ObjectView` (maintainer rulings of 2026-10-29), and objectstack#28915
+ * (「默认改抽屉，分屏彻底退役，只留抽屉和整页」):
  *
- * - Target 1: with no choice made the record opens BESIDE the list; the list
- *   stays clickable, a click on another row swaps the record, and the open
- *   row is marked and follows `↓` `↑`.
+ * - objectstack#28915 Target 1: with no choice made the record opens in the
+ *   drawer OVER the list, and the list keeps its full width — every view
+ *   column; it stays clickable, a click on another row swaps the record, and
+ *   the open row is marked and follows `↓` `↑`. A stored `split` opens the
+ *   drawer too.
  * - Target 3: `⤢` maximizes in place — same `?recordId=` URL, no history
  *   entry — and `Esc` restores.
  * - Target 5: a `?recordId=` change (a row click, a step) does not re-render
@@ -99,10 +102,12 @@ import { RECORD_OPEN_PREFERENCE_KEY } from '../utils/recordOpenPreference';
 const OBJECT_NAME = 'duly_task';
 const VIEW_ID = `${OBJECT_NAME}.all`;
 const ROWS = [
-  { id: 'r1', name: 'Alpha' },
-  { id: 'r2', name: 'Beta' },
-  { id: 'r3', name: 'Gamma' },
+  { id: 'r1', name: 'Alpha', status: 'Open', priority: 'High', owner_name: 'Ada', due: 'Mon' },
+  { id: 'r2', name: 'Beta', status: 'Done', priority: 'Low', owner_name: 'Bo', due: 'Tue' },
+  { id: 'r3', name: 'Gamma', status: 'Open', priority: 'Mid', owner_name: 'Cy', due: 'Wed' },
 ];
+/** The view's five columns: the retired split pane narrowed a list to three. */
+const COLUMN_LABELS = ['Name', 'Status', 'Priority', 'Owner', 'Due'];
 
 const objects = [
   {
@@ -111,9 +116,13 @@ const objects = [
     fields: {
       id: { type: 'text', label: 'Id' },
       name: { type: 'text', label: 'Name' },
+      status: { type: 'text', label: 'Status' },
+      priority: { type: 'text', label: 'Priority' },
+      owner_name: { type: 'text', label: 'Owner' },
+      due: { type: 'text', label: 'Due' },
     },
     listViews: {
-      [VIEW_ID]: { name: VIEW_ID, label: 'Everything', type: 'grid', columns: ['name'] },
+      [VIEW_ID]: { name: VIEW_ID, label: 'Everything', type: 'grid', columns: ['name', 'status', 'priority', 'owner_name', 'due'] },
     },
   },
 ];
@@ -177,8 +186,8 @@ async function openPage(search = '?recordId=r1') {
     </I18nProvider>,
   );
   await screen.findByText('Gamma', undefined, { timeout: 5000 });
-  await screen.findByTestId('record-split-pane', undefined, { timeout: 5000 });
-  // The list reports its rows; the pane's ↑ ↓ step through them.
+  await screen.findByRole('dialog', undefined, { timeout: 5000 });
+  // The list reports its rows; the drawer's ↑ ↓ step through them.
   await waitFor(() => expect((screen.getByRole('button', { name: 'Next record' }) as HTMLButtonElement).disabled).toBe(false));
   await act(async () => {
     await new Promise((settle) => setTimeout(settle, 50));
@@ -189,13 +198,29 @@ const search = () => screen.getByTestId('location-search').textContent;
 const historyKey = () => screen.getByTestId('location-key').textContent;
 const rowOf = (name: string) => screen.getByText(name).closest('tr') as HTMLElement;
 const isOpenRow = (name: string) => rowOf(name).hasAttribute('data-active-record');
+const columnHeaders = () => screen.getAllByRole('columnheader').map((th) => th.textContent?.trim() ?? '');
 
-describe('Target 1 — the record opens beside a readable, clickable list', () => {
-  it('with no choice made: the pane beside the list, the open row marked, no dialog', async () => {
+describe('objectstack#28915 Target 1 — the record opens in the drawer over a full-width, clickable list', () => {
+  it('with no choice made: the drawer over the list, every view column kept, the open row marked', async () => {
     await openPage();
-    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.queryByTestId('record-split-pane')).toBeNull();
+    for (const label of COLUMN_LABELS) {
+      expect(columnHeaders().some((text) => text.includes(label))).toBe(true);
+    }
+    expect(screen.getByTestId('record-list-host').hasAttribute('inert')).toBe(false);
     expect(isOpenRow('Alpha')).toBe(true);
     expect(isOpenRow('Beta')).toBe(false);
+  });
+
+  it('a stored `split` reads as the default: the drawer, no pane beside the list', async () => {
+    window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
+    await openPage();
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.queryByTestId('record-split-pane')).toBeNull();
+    for (const label of COLUMN_LABELS) {
+      expect(columnHeaders().some((text) => text.includes(label))).toBe(true);
+    }
   });
 
   it('a click on another row swaps the record, and the mark moves with it', async () => {
@@ -204,7 +229,7 @@ describe('Target 1 — the record opens beside a readable, clickable list', () =
     await waitFor(() => expect(search()).toBe('?recordId=r3'));
     expect(isOpenRow('Gamma')).toBe(true);
     expect(isOpenRow('Alpha')).toBe(false);
-    expect(screen.getByTestId('record-split-pane')).toBeTruthy();
+    expect(screen.getByRole('dialog')).toBeTruthy();
   });
 });
 
@@ -233,9 +258,9 @@ describe('Target 3 — ⤢ maximizes in place', () => {
     await openPage();
     const keyBefore = historyKey();
     fireEvent.click(screen.getByRole('button', { name: 'Maximize' }));
-    const pane = screen.getByTestId('record-split-pane');
+    const pane = screen.getByRole('dialog');
     expect(pane.hasAttribute('data-maximized')).toBe(true);
-    expect(screen.getByTestId('record-split-list').hasAttribute('inert')).toBe(true);
+    expect(screen.getByTestId('record-list-host').hasAttribute('inert')).toBe(true);
     expect(search()).toBe('?recordId=r1');
     expect(historyKey()).toBe(keyBefore);
 
