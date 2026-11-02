@@ -13,6 +13,7 @@
  * no longer `async`: it returns the promise the moved function makes.
  */
 
+import { collectFlowGraphs } from '@objectstack/spec/automation';
 import type { FlowParsed } from '@objectstack/spec/automation';
 import { describeTurnedOffPackagedItem } from '@objectstack/types';
 import type { AutomationEngine } from './engine.js';
@@ -57,15 +58,16 @@ export function describeDisabledFlow(this: Pick<SubflowGuardsHost, 'flowLedgerDi
     return `Flow '${flowName}' is disabled`;
 }
 
-/** The body of {@link AutomationEngine.subflowTargets}, moved unedited; that method's docblock is its contract. */
+/** The body of {@link AutomationEngine.subflowTargets}; that method's docblock is its contract. */
 export function subflowTargets(flow: FlowParsed): string[] {
-    const nodes = (flow as { nodes?: unknown }).nodes;
-    if (!Array.isArray(nodes)) return [];
     const targets: string[] = [];
-    for (const node of nodes) {
-        const n = node as { type?: unknown; config?: { flowName?: unknown } } | null;
-        if (!n || (n.type !== 'subflow' && n.type !== 'map')) continue;
-        if (typeof n.config?.flowName === 'string') targets.push(n.config.flowName);
+    // [#28846] The top-level graph and every region body, in walk order.
+    for (const graph of collectFlowGraphs(flow)) {
+        for (const node of graph.nodes) {
+            const n = node as { type?: unknown; config?: { flowName?: unknown } } | null;
+            if (!n || (n.type !== 'subflow' && n.type !== 'map')) continue;
+            if (typeof n.config?.flowName === 'string') targets.push(n.config.flowName);
+        }
     }
     return targets;
 }
