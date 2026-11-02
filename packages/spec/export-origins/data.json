@@ -616,6 +616,7 @@
     "RETIRED_FILTER_OPERATORS": "src/data/filter.zod.ts#RETIRED_FILTER_OPERATORS (const)",
     "RETIRED_SUB_DAY_INTERVALS": "src/data/analytics.zod.ts#RETIRED_SUB_DAY_INTERVALS (const)",
     "RLS_DENY_FILTER": "src/data/readable-ids.ts#RLS_DENY_FILTER (const)",
+    "ROUTE_SHADOWED_DATASOURCE_NAMES": "src/data/datasource.zod.ts#ROUTE_SHADOWED_DATASOURCE_NAMES (const)",
     "RPC_QUERY_ALIAS_SLOTS": "src/data/data-engine.zod.ts#RPC_QUERY_ALIAS_SLOTS (const)",
     "RUNTIME_OWNED_FIELD_TYPES": "src/data/field.zod.ts#RUNTIME_OWNED_FIELD_TYPES (const)",
     "RangeOperatorSchema": "src/data/filter.zod.ts#RangeOperatorSchema (const)",
