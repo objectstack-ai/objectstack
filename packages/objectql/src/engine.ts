@@ -10426,15 +10426,14 @@ export class ObjectQL implements IObjectQLEngine {
    *   to answer for. A value new to any of the rows is refused as before, and
    *   an insert has no stored rows, so every value it supplies is judged.
    *
-   * ## Why the probe bypasses RLS — and why it keeps the tenant wall
+   * ## Why the existence probe bypasses RLS — and why it keeps the tenant wall
    *
    * Existence is a fact about the database, not about the caller's ROW-LEVEL
-   * visibility — the same distinction the #4435 existence probe turns on. A
-   * probe under the caller's own context would refuse a link to a permission
-   * set the caller cannot READ, which is ordinary in an RLS-scoped deployment
-   * and would make the platform's own admin flows fail. Whether the caller may
-   * create the binding at all is the RBAC/RLS layer's decision, made where it
-   * already is. So the probe is elevated: `isSystem` bypasses RBAC, RLS and FLS.
+   * visibility — the same distinction the #4435 existence probe turns on. So
+   * the existence probe ({@link referenceExists}) is elevated: `isSystem`
+   * bypasses RBAC, RLS and FLS. Whether a NON-system caller may name the row is
+   * the separate question the next section answers, and it is asked first, of
+   * the caller's own read door, for every reference type but `tree`.
    *
    * That argument is about visibility, never about TENANCY, and the elevation
    * is therefore `sudo()`-shaped — `{ ...context, isSystem: true }`, see
@@ -10453,17 +10452,25 @@ export class ObjectQL implements IObjectQLEngine {
    * tenant's (ADR-0131 D1): the driver's scope is the organization equality,
    * with no `IS NULL` arm, so an org-bound caller's probe does not find one.
    *
-   * ## …except a master-detail header, which the caller must be able to read (#22519)
+   * ## A non-system caller may name only a row its own read door returns (#22519, #29029)
    *
-   * A `master_detail` field names the detail's HEADER, and a write of a detail
-   * whose header the caller cannot read answers exactly what a write naming a
-   * header that exists nowhere answers. Nothing upstream of this check settles
-   * that: ADR-0055 §3 gates a detail write on its header (master edit) only for
-   * a `controlled_by_parent` detail, so an elevated probe alone would tell such
-   * a caller "exists" apart from "exists nowhere". So for a `master_detail`
-   * field the caller's read door is asked first ({@link masterDetailHeaderExists}),
-   * and a header it does not return is `reference_not_found`. ⛔ A plain
-   * `lookup` keeps the elevated probe above, unchanged.
+   * A `master_detail`, `lookup` or `user` value a non-system caller supplies
+   * must name a row the caller's own read door returns; a write naming a row
+   * the caller cannot read answers exactly what a write naming a row that
+   * exists nowhere answers: `reference_not_found`. So for those three types the
+   * caller's read door is asked first ({@link callerReadableReferenceExists}),
+   * then the elevated, tenant-kept existence probe for a row it returned. A
+   * multi-valued field is judged per member: one unreadable member refuses the
+   * write. Nothing upstream of this check settles it: ADR-0055 §3 gates a
+   * detail write on its header (master edit) only for a `controlled_by_parent`
+   * detail, and nothing gates a lookup on its target, so an elevated probe
+   * alone would let a caller bind its row to a row it has no access to, and
+   * tell "exists" apart from "exists nowhere". #22519 (ruling A) set the rule
+   * for `master_detail`; ruling record 6573561091 extended it to `lookup` and
+   * `user` as the default, with no field-level opt-out. A system caller keeps
+   * the exemption above (its read door returns every row), and a value the
+   * row already stores is not judged again (#29062). `tree` keeps the
+   * elevated probe alone.
    *
    * Fails OPEN when the target cannot be checked (unregistered object, no
    * driver, a probe that throws): an integrity check that cannot run must not
@@ -10483,7 +10490,7 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
     const host: ThisParameterType<typeof assertReferencesResolve> = {
-      masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
+      callerReadableReferenceExists: (...a) => this.callerReadableReferenceExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
     };
     return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
@@ -10526,24 +10533,24 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
-   * [#22519] The write's reference check for a `master_detail` field: does `id`
-   * name a header THIS CALLER can read? The write's two header reads, as
-   * {@link resolveMasterDetailParent} reads them: the caller's read door
-   * ({@link masterDetailHeadersCallerReads}), then the elevated, tenant-kept
-   * {@link referenceExists} for a header it returned. A header the read door
-   * does not return is `false` — `reference_not_found`, exactly as a header
-   * that exists nowhere.
+   * [#22519, #29029] The write's reference check for a `master_detail`,
+   * `lookup` or `user` field: does `id` name a row THIS CALLER can read? The
+   * two reads {@link resolveMasterDetailParent} reads a header with: the
+   * caller's read door ({@link masterDetailHeadersCallerReads}), then the
+   * elevated, tenant-kept {@link referenceExists} for a row it returned. A row
+   * the read door does not return is `false` — `reference_not_found`, exactly
+   * as a row that exists nowhere.
    *
    * `null` (fail-open) only where {@link referenceExists} answers it, and for
-   * an unregistered master, which has no read door to ask either. A SYSTEM
+   * an unregistered target, which has no read door to ask either. A SYSTEM
    * caller reaches it only as a flow run's elevated write, or a write that
-   * write sets off (#28881): its read door returns every header
-   * ({@link masterDetailHeadersCallerReads}), so the header's existence in the
+   * write sets off (#28881): its read door returns every row
+   * ({@link masterDetailHeadersCallerReads}), so the row's existence in the
    * caller's tenant is what is asked.
    *
-   * ⛔ `master_detail` only — the plain `lookup` probe is not this rule's.
+   * ⛔ Not `tree` — its value keeps the elevated existence probe alone.
    */
-  private async masterDetailHeaderExists(
+  private async callerReadableReferenceExists(
     target: string,
     id: unknown,
     context: ExecutionContext | undefined,
@@ -10565,7 +10572,7 @@ export class ObjectQL implements IObjectQLEngine {
    *
    * A header it does not return binds as a header that exists nowhere binds:
    * the reference check answers `reference_not_found` for it
-   * ({@link masterDetailHeaderExists}), and the write's header resolution
+   * ({@link callerReadableReferenceExists}), and the write's header resolution
    * leaves `parent` unbound for it ({@link resolveMasterDetailParent},
    * {@link resolveMasterDetailParents}). A read that fails — a refusal of the
    * read itself included — returned no header, so every header binds as
@@ -10696,7 +10703,7 @@ export class ObjectQL implements IObjectQLEngine {
    *     not return binds as a missing header binds: `null`, so a parent-scoped
    *     `requiredWhen` / `readonlyWhen` meets an unbound `parent`, and the
    *     reference check answers `reference_not_found` for it
-   *     ({@link masterDetailHeaderExists}).
+   *     ({@link callerReadableReferenceExists}).
    *  2. WHAT THE HEADER HOLDS — the write's own ELEVATED read below, for a
    *     header read 1 returned only. The lock is a data-integrity property of
    *     the header's state, so a header the caller can read is judged on its

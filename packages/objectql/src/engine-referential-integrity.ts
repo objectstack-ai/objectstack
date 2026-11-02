@@ -24,7 +24,7 @@
  * that call a module helper `engine.ts` still needs elsewhere
  * (`settleMasterDetailLanding`, `resolvePreviewParents`,
  * `resolvePredicateRelated`, `resolveOneHopRelated`); and
- * `masterDetailHeaderExists`, `materializeParentHeader` and
+ * `callerReadableReferenceExists`, `materializeParentHeader` and
  * `masterDeclaredFields`, whose bodies are no longer than the host literal
  * moving them would cost.
  *
@@ -36,7 +36,7 @@
  * literal of exactly the {@link ReferentialIntegrityHost} members that method
  * reads, plus a `.call`. The one field a body reads (`logger`) goes as a
  * GETTER, so the read happens when the body makes it, as it did. The methods
- * they call (`find`, `masterDetailHeaderExists`, `referenceExists`) go as
+ * they call (`find`, `callerReadableReferenceExists`, `referenceExists`) go as
  * late-bound closures over the instance, so a double or spy set on the engine
  * is still the one a call reaches.
  *
@@ -62,7 +62,7 @@ import type { ObjectQL } from './engine.js';
 export interface ReferentialIntegrityHost {
   readonly logger: ObjectQL['logger'];
   find: ObjectQL['find'];
-  masterDetailHeaderExists: ObjectQL['masterDetailHeaderExists'];
+  callerReadableReferenceExists: ObjectQL['callerReadableReferenceExists'];
   referenceExists: ObjectQL['referenceExists'];
 }
 
@@ -79,9 +79,19 @@ function isEmptyReferenceValue(v: unknown): boolean {
   return false;
 }
 
+/**
+ * [#29029] The reference types whose target a non-system write may name only
+ * when the caller's own read door returns it: `master_detail` (#22519), and
+ * `lookup` and `user` with it. A target the caller cannot read answers
+ * `reference_not_found`, exactly as a target that exists nowhere. `tree`, the
+ * one other reference type, keeps the elevated existence probe: the ruling
+ * that tightened this set (record 6573561091) names `lookup` and `user` only.
+ */
+const CALLER_READ_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'user']);
+
 /** The body of `ObjectQL#assertReferencesResolve`; the method's docblock there is its contract. */
 export async function assertReferencesResolve(
-  this: Pick<ReferentialIntegrityHost, 'masterDetailHeaderExists' | 'referenceExists'>,
+  this: Pick<ReferentialIntegrityHost, 'callerReadableReferenceExists' | 'referenceExists'>,
   schema: any,
   data: Record<string, unknown> | null | undefined,
   supplied: Record<string, unknown> | null | undefined,
@@ -152,9 +162,10 @@ export async function assertReferencesResolve(
     for (const v of values) {
       if (v === null || v === undefined || v === '') continue;
       if (typeof v === 'object') continue;
-      // [#22519] A master-detail header must also be one the caller can read.
-      const resolved = def?.type === 'master_detail'
-        ? await this.masterDetailHeaderExists(target, v, context)
+      // [#22519, #29029] A master-detail header, a lookup target and a user
+      // must also be one the caller can read.
+      const resolved = CALLER_READ_REFERENCE_TYPES.has(def?.type)
+        ? await this.callerReadableReferenceExists(target, v, context)
         : await this.referenceExists(target, v, context);
       if (resolved === false) refused.push({ name, def, value: v, target });
     }
