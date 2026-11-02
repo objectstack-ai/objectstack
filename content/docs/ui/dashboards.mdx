@@ -415,6 +415,9 @@ under as a dashboard-level variable (readable in widget expressions as
 to `field`; the name `dateRange` is reserved for the built-in date range. The
 filter above names itself `region` for exactly that reason — left to default it
 would be keyed `account.region`, dots and all, in every expression and binding.
+On a dashboard that declares `dateRange`, an entry keyed `dateRange` (by `name`,
+or by `field` when unnamed) is refused: it would replace the date range's control
+and every widget's `filterBindings.dateRange` binding.
 
 ### Filter controls and options
 
