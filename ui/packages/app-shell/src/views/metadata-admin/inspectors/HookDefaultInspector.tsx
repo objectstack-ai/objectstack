@@ -442,12 +442,6 @@ export function HookDefaultInspector({
             testId="hook-body-capabilities"
           />
         )}
-                </div>
-              ))}
-            </div>
-            <div className="text-[11px] text-muted-foreground/70">{tr('engine.inspector.hook.capabilitiesHint')}</div>
-          </div>
-        )}
       </div>
 
       {/* 4 ─ Options */}
