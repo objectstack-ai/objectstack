@@ -151,7 +151,7 @@ describe('the federation pair rides the bridge only for an envelope that can cal
     expect(ec.systemPermissions).toEqual([]);
     const service = fakeService();
     const { bridge, lookups } = bridgeOver(ec, service);
-    // `registerAllTools` registers the pair only on a bridge carrying both
+    // `wireBridgeTools` registers the pair only on a bridge carrying both
     // members, so absence here is `tools/list` omitting them.
     expect(typeof bridge.listRemoteTables).toBe('undefined');
     expect(typeof bridge.importObject).toBe('undefined');

@@ -920,11 +920,39 @@ export function buildMcpBridge(deps: DomainHandlerDeps, context: HttpProtocolCon
         // The `external-datasource` service Studio's datasource page reaches
         // through `…/external/tables` and `…/tables/:remote/import`, refused
         // on the same two capabilities those routes gate on.
-        listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
-            (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
-        importObject: async (datasource: string, remoteName: string, opts: { name?: string; writable?: boolean }) =>
-            (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
+        //
+        // [#28938] Carried only for an envelope holding one of those two
+        // capabilities. `wireBridgeTools` (`@objectstack/mcp`) registers the
+        // pair only on a bridge carrying both members, so without them
+        // `tools/list` omits the pair —
+        // the shape `list_actions` already has, which hides an action its
+        // caller may not run. The case that made this matter: the `/mcp` door
+        // hands an OAuth agent the user's system capabilities only under
+        // `actions:execute`, so a `metadata:write`-only grant holds none and
+        // was listed two tools whose every call answered 403, for an
+        // administrator too. Read off the SAME envelope the per-call gate
+        // reads ({@link heldFederationCapabilities}), so listing and calling
+        // cannot disagree; nothing a grant can do changes.
+        ...(heldFederationCapabilities(ec).length > 0
+            ? {
+                listRemoteTables: async (datasource: string, opts: { schema?: string }) =>
+                    (await federationService(deps, context, ec, 'read')).listRemoteTables(datasource, opts),
+                importObject: async (datasource: string, remoteName: string, opts: { name?: string; writable?: boolean }) =>
+                    (await federationService(deps, context, ec, 'write')).importObject(datasource, remoteName, opts),
+            }
+            : {}),
     };
+}
+
+/**
+ * [#28938] The federation capabilities this request's envelope holds — the
+ * one read both the bridge's listing decision and {@link federationService}'s
+ * per-call gate make, so a tool is listed exactly where some call of the pair
+ * can pass.
+ */
+function heldFederationCapabilities(ec: any): string[] {
+    const held: unknown[] = Array.isArray(ec?.systemPermissions) ? ec.systemPermissions : [];
+    return [FEDERATION_READ_CAPABILITY, FEDERATION_WRITE_CAPABILITY].filter((cap) => held.includes(cap));
 }
 
 /**
@@ -941,8 +969,7 @@ async function federationService(
     kind: 'read' | 'write',
 ): Promise<IExternalDatasourceService> {
     const required = kind === 'write' ? FEDERATION_WRITE_CAPABILITY : FEDERATION_READ_CAPABILITY;
-    const held: unknown[] = Array.isArray(ec?.systemPermissions) ? ec.systemPermissions : [];
-    if (!held.includes(required)) {
+    if (!heldFederationCapabilities(ec).includes(required)) {
         throw Object.assign(
             new Error(
                 kind === 'write'
