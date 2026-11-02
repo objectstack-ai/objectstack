@@ -67,6 +67,7 @@ import {
     wiredEngineOrLoud,
     type RestServer,
 } from './rest-server.js';
+import { earnedAnswerLogged } from './stale-summary-answer.js';
 
 /**
  * The `RestServer` members {@link registerBatchEndpoints} reads — every one of
@@ -540,6 +541,9 @@ export function registerBatchEndpoints(this: BatchRouteHost, basePath: string): 
                     const result = await p.createManyData!(createManyRequest);
                     res.status(201).json(result);
                 } catch (error: any) {
+                    // [#28782] Rows stored under a failing roll-up: the answer they earned, 201.
+                    const earned = earnedAnswerLogged(error, req.params?.object);
+                    if (earned) { res.status(201).json(earned); return; }
                     handleRouteError(res, error, req.params?.object);
                 }
             },

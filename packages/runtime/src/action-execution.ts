@@ -89,6 +89,7 @@ import {
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
 } from '@objectstack/objectql';
+import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
 // @objectstack/objectql (the engine owns the map they describe, and its
@@ -596,7 +597,15 @@ export async function callData(deps: ActionExecutionDeps,
             return await protocol.createData({ object: params.object, data: params.data, ...(scopeId ? { environmentId: scopeId } : {}), context: executionContext });
         }
         if (ql && typeof ql.insert === 'function') {
-            const res = await ql.insert(params.object, params.data, qlOpts);
+            // [#28782] A row stored under a parent roll-up the engine could
+            // not recompute (`ERR_SUMMARY_RECOMPUTE`, "the triggering records
+            // WERE written") builds this arm's answer from the refusal's
+            // `written` and carries it on the refusal, as the protocol's
+            // `createData` does since #28781 (`withEarnedAnswer`), so a door
+            // reading `earnedAnswerOf` answers the write's success here too.
+            let stale: SummaryRecomputeRefusal | undefined;
+            const res = await ql.insert(params.object, params.data, qlOpts)
+                .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
             const record = { ...params.data, ...res };
             // The engine's write result keeps the stored row whole, so this
             // fallback mouth owes the same write-response rules the protocol
@@ -604,9 +613,15 @@ export async function callData(deps: ActionExecutionDeps,
             // Fail closed: with no schema to judge the fields by, no record
             // is echoed at all — only the receipt.
             const schema = await writeResponseSchema();
-            if (!schema) return { object: params.object, id: record.id };
+            if (!schema) {
+                const receipt = { object: params.object, id: record.id };
+                if (stale) throw withEarnedAnswer(stale, receipt);
+                return receipt;
+            }
             omitInternalFieldsFromWriteResponse(schema, record);
-            return { object: params.object, id: record.id, record };
+            const answer = { object: params.object, id: record.id, record };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -676,15 +691,24 @@ export async function callData(deps: ActionExecutionDeps,
             // reported as an internal fault and taken to the error reporter
             // with it.
             if (!existing) throw recordNotFoundError(params.object, params.id);
-            await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }));
+            // [#28782] The create arm's carrier, for an update that landed.
+            let stale: SummaryRecomputeRefusal | undefined;
+            await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }))
+                .catch((e: unknown) => { stale = staleSummaryRefusalOrThrow(e); });
             const record = { ...existing, ...params.data };
             // The echo carries the caller's own patch: a credential-class value
             // in it is masked like a read of the stored row would be. Fail
             // closed, as on create: no schema ⇒ the receipt only.
             const schema = await writeResponseSchema();
-            if (!schema) return { object: params.object, id: params.id };
+            if (!schema) {
+                const receipt = { object: params.object, id: params.id };
+                if (stale) throw withEarnedAnswer(stale, receipt);
+                return receipt;
+            }
             omitInternalFieldsFromWriteResponse(schema, record);
-            return { object: params.object, id: params.id, record };
+            const answer = { object: params.object, id: params.id, record };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -743,7 +767,10 @@ export async function callData(deps: ActionExecutionDeps,
             if (!all) all = [];
             const existing = (all as any[]).find((i: any) => i.id === params.id);
             if (!existing) throw recordNotFoundError(params.object, params.id);
-            await ql.delete(params.object, findOpts({ where: { id: params.id } }));
+            // [#28782] The create arm's carrier, for a delete that landed.
+            let stale: SummaryRecomputeRefusal | undefined;
+            await ql.delete(params.object, findOpts({ where: { id: params.id } }))
+                .catch((e: unknown) => { stale = staleSummaryRefusalOrThrow(e); });
             // [#5581] `success`, not `deleted`. The success body was the other
             // half of the same "one `callData`, two answers" defect #5138 fixed
             // on the not-found side: the protocol path returns the SPEC's shape
@@ -762,7 +789,9 @@ export async function callData(deps: ActionExecutionDeps,
             // Teaching consumers to read `success ?? deleted` would have been
             // the contract-first-forbidden shape — two spellings of one fact,
             // kept alive by every reader.
-            return { object: params.object, id: params.id, success: true };
+            const answer = { object: params.object, id: params.id, success: true };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
