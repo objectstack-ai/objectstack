@@ -397,3 +397,60 @@ describe('form-section-group-unknown on the read, and both findings on save and 
         expect(formLayoutAdvisories(published)).toEqual([]);
     });
 });
+
+// ---------------------------------------------------------------------------
+// #29309 — the Studio-saved form ViewItem on the save and publish answers.
+//
+// Measured on a real showcase boot before the lint's view walk learned the
+// `config` rung: `PUT /meta/view/showcase_account.probe_e` (a `viewKind: 'form'`
+// item naming `no_such_field`) answered no advisory, while its read warned.
+// ---------------------------------------------------------------------------
+
+describe('a form ViewItem is judged on save and publish too (#29309)', () => {
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => {
+        warn.mockRestore();
+    });
+
+    it('an active save and a publish of a form item naming an unknown field answer it as a warning', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const item = formItem('task.form', 'task', ['title', 'no_such_field']);
+        const expected = validateFormLayout({
+            objects: [servedTask],
+            views: [{ name: item.name, object: item.object, form: item.config }],
+        }).filter((f) => f.rule === FORM_FIELD_UNKNOWN);
+        expect(expected).toHaveLength(1);
+        const want = [{ rule: FORM_FIELD_UNKNOWN, message: expected[0].message, hint: expected[0].hint, severity: 'warning' }];
+        const pick = (r: any) => formLayoutAdvisories(r).map(({ rule, message, hint, severity }) => ({ rule, message, hint, severity }));
+
+        const saved: any = await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG });
+        expect(saved).toMatchObject({ success: true });
+        expect(pick(saved)).toEqual(want);
+
+        await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG, mode: 'draft' });
+        const published: any = await protocol.publishMetaItem({ type: 'view', name: item.name, packageId: PKG } as any);
+        expect(published).toMatchObject({ success: true });
+        expect(pick(published)).toEqual(want);
+
+        // Once on the read, at the same `config` path #29196 pinned.
+        expect(await readDiagnostics(protocol, item.name, 'active')).toEqual({
+            valid: true,
+            warnings: [{ path: 'config.sections.0.fields.1', message: expected[0].message }],
+        });
+    });
+
+    it('control: a form item naming only real fields (an extension field among them) answers no advisory', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const item = formItem('task.form', 'task', ['title', 'region__c']);
+
+        const saved: any = await (protocol as any).saveMetaItem({ type: 'view', name: item.name, item, packageId: PKG });
+        expect(saved).toMatchObject({ success: true });
+        expect(formLayoutAdvisories(saved)).toEqual([]);
+        expect(await readDiagnostics(protocol, item.name, 'active')).toEqual({ valid: true });
+    });
+});

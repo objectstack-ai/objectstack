@@ -495,21 +495,6 @@ function isRec(value: unknown): value is Rec {
     return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/**
- * The record the lint's view walk reads for one served view body. A stored
- * form `ViewItem` (`viewKind: 'form'`) keeps its form under `config`, a rung
- * the walk does not descend (it reads `views[]` entries as authored), so it is
- * handed over as the container shape the walk does read: the item's `config`
- * as the default `form`, bound to the item's `object`. Every other shape (a
- * view container, a flattened form overlay) is the walk's own input already.
- */
-function formLayoutSubject(view: Rec): { subject: Rec; formKey: 'config' | 'form' } {
-    if (view.viewKind === 'form' && isRec(view.config)) {
-        return { subject: { name: view.name, object: view.object, form: view.config }, formKey: 'config' };
-    }
-    return { subject: view, formKey: 'form' };
-}
-
 /** Every object name the body spells (`object` / `objectName`), at any depth. */
 function spelledObjectNames(value: unknown, into: Set<string>, depth = 0): Set<string> {
     if (depth > 16) return into;
@@ -539,18 +524,20 @@ export async function withFormLayoutWarnings<T>(
     if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view' || !isRec(served) || !getObject) return served;
     const lint = await loadFormLayoutLint();
     if (!lint) return served;
-    const { subject, formKey } = formLayoutSubject(served);
+    // [#29309] The served body is the rule's input as it is: the rule reads a
+    // form `ViewItem`'s `config` rung itself, the same walk the save and
+    // publish gate runs, so the read needs no adapter of its own.
     const objects: Rec[] = [];
-    for (const name of spelledObjectNames(subject, new Set())) {
+    for (const name of spelledObjectNames(served, new Set())) {
         const object = getObject(name);
         if (isRec(object)) objects.push({ ...object, name });
     }
     if (objects.length === 0) return served;
     const name = typeof served.name === 'string' ? served.name : '';
-    const warnings = lint.validateFormLayout({ objects, views: [subject] })
+    const warnings = lint.validateFormLayout({ objects, views: [served] })
         .filter((finding) => lint.servedRules.has(finding.rule))
         .map((finding) => ({
-            path: itemRelativeIssuePath('view', name, finding.path).replace(/^form(?=\.|$)/, formKey),
+            path: itemRelativeIssuePath('view', name, finding.path),
             message: finding.message,
         }));
     if (warnings.length === 0) return served;
