@@ -2812,6 +2812,7 @@ const ru = {
       orText: "или продолжите с электронной почтой",
       ssoButton: "Войти через SSO",
       ssoOnlyDescription: "Войдите через единый вход вашей организации",
+      noSignInMethodText: "Нет доступного способа входа. Обратитесь к администратору.",
       usePasswordText: "Использовать пароль",
       backToSsoText: "Вернуться к единому входу",
       // objectui#12600 — the console login card's own header, the password

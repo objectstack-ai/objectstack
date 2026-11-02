@@ -2744,6 +2744,7 @@ const es = {
       orText: "o continúe con correo electrónico",
       ssoButton: "Iniciar sesión con SSO",
       ssoOnlyDescription: "Accede con el inicio de sesión único de tu organización",
+      noSignInMethodText: "No hay ningún método de inicio de sesión disponible. Ponte en contacto con tu administrador.",
       usePasswordText: "Usar una contraseña en su lugar",
       backToSsoText: "Volver al inicio de sesión único",
       // objectui#12600 — the console login card's own header, the password

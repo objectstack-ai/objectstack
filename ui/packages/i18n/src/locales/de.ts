@@ -2681,6 +2681,7 @@ const de = {
       orText: "oder mit E-Mail fortfahren",
       ssoButton: "Mit SSO anmelden",
       ssoOnlyDescription: "Melden Sie sich über das Single Sign-on Ihrer Organisation an",
+      noSignInMethodText: "Es ist keine Anmeldemethode verfügbar. Wenden Sie sich an Ihren Administrator.",
       usePasswordText: "Stattdessen ein Passwort verwenden",
       backToSsoText: "Zurück zum Single Sign-on",
       // objectui#12600 — the console login card's own header, the password

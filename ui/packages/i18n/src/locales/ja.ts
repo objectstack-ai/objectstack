@@ -2683,6 +2683,7 @@ const ja = {
       orText: "またはメールアドレスで続行",
       ssoButton: "SSO でサインイン",
       ssoOnlyDescription: "所属組織のシングルサインオンでサインインしてください",
+      noSignInMethodText: "利用できるサインイン方法がありません。管理者にお問い合わせください。",
       usePasswordText: "パスワードを使用する",
       backToSsoText: "シングルサインオンに戻る",
       // objectui#12600 — the console login card's own header, the password

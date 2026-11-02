@@ -2740,6 +2740,7 @@ const fr = {
       orText: "ou continuer avec l'e-mail",
       ssoButton: "Se connecter avec le SSO",
       ssoOnlyDescription: "Connectez-vous avec l'authentification unique de votre organisation",
+      noSignInMethodText: "Aucune méthode de connexion n'est disponible. Contactez votre administrateur.",
       usePasswordText: "Utiliser un mot de passe à la place",
       backToSsoText: "Revenir à l'authentification unique",
       // objectui#12600 — the console login card's own header, the password

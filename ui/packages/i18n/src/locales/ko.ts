@@ -2681,6 +2681,7 @@ const ko = {
       orText: "또는 이메일로 계속",
       ssoButton: "SSO로 로그인",
       ssoOnlyDescription: "소속 조직의 싱글 사인온으로 로그인하세요",
+      noSignInMethodText: "사용할 수 있는 로그인 방법이 없습니다. 관리자에게 문의하세요.",
       usePasswordText: "비밀번호 사용하기",
       backToSsoText: "싱글 사인온으로 돌아가기",
       // objectui#12600 — the console login card's own header, the password
