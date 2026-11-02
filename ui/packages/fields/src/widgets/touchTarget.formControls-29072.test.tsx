@@ -35,6 +35,7 @@ import { PercentField } from './PercentField';
 import { SelectField } from './SelectField';
 import { LookupField } from './LookupField';
 import { DatePickerField } from './date-picker/DatePickerField';
+import { FileField } from './FileField';
 
 const HEIGHT = PHONE_TOUCH_HEIGHT.split(' ');
 const SQUARE = PHONE_TOUCH_SQUARE.split(' ');
@@ -132,5 +133,22 @@ describe('form field controls carry the phone touch floor (objectstack#29072)', 
     const grid = await screen.findByRole('grid');
     const calendar = grid.closest('[class*="--cell-size"]')!;
     expectTokens(calendar, ['[--cell-size:2.75rem]', 'sm:[--cell-size:2rem]']);
+  });
+
+  // From #29071's run: the file field's "Take photo" button (36 px) and the
+  // per-file remove button (24 px) sit in the same create / edit form.
+  it('file: the camera button and the per-file remove button', () => {
+    render(
+      <FileField
+        {...base}
+        field={{ name: 'receipt', type: 'file', capture: 'environment' } as any}
+        value={[{ name: 'doc1.pdf', size: 1024 }]}
+      />,
+    );
+    expectTokens(screen.getByTestId('file-field-camera-button'), HEIGHT);
+    const row = screen.getByText('doc1.pdf').closest('[class*="justify-between"]');
+    const remove = row?.querySelector(':scope > button');
+    expect(remove, 'the remove button on the doc1.pdf row').toBeTruthy();
+    expectTokens(remove!, SQUARE);
   });
 });
