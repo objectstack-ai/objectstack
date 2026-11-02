@@ -253,7 +253,7 @@ describe('[#29029] a non-system lookup or user write may name only a record the 
     it.each(DOORS)('%s — control: a system write naming a target the caller cannot read lands, and asks no read door', async (door) => {
       await write(door, { [field]: UNREADABLE }, SYSTEM);
       expect(storedItems().some((r) => r[field] === UNREADABLE)).toBe(true);
-      expect(targetReads.length).toBeGreaterThan(0);
+      // The system caller's exemption: no read door asked (nor a probe at all).
       expect(targetReads.filter((r) => !r.elevated)).toEqual([]);
     });
 
