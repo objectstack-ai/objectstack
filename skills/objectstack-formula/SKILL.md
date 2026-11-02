@@ -95,11 +95,13 @@ ADR-0068 — spec field docs write predicates like `current_user.positions`.
 `null`. To check for "value present and non-blank" use the stdlib helper
 `isBlank()` or compare to `null` explicitly.
 
-Every predicate reads a `record` — and, where §5 binds it, a `previous` — that
-is **total over the object's declared fields**: a declared column the driver
-never returned reads as `null`, not as a fault. So `has(record.<declared_field>)`
-and `has(previous.<declared_field>)` are uniformly `true` and tell you nothing at
-all. The idiom that reads like a guard is not one:
+Every server-evaluated predicate — validation rules, `requiredWhen`, option
+`visibleWhen`, `readonlyWhen`, hook `condition`, the flow trigger record —
+reads a `record` (and, where §5 binds it, a `previous`) that is **total over
+the object's declared fields**: a declared column the driver never returned
+reads as `null`, not as a fault. There `has(record.<declared_field>)` and
+`has(previous.<declared_field>)` are uniformly `true`, and `!= null` is the
+whole guard. The idiom that reads like a guard is not one:
 
 ```text
 # WRONG — both has() calls are true on a NULL row, so this reaches `null < null`,
@@ -118,6 +120,20 @@ no `defaultValue`, no default option — unless an explicit `!= null` / `== null
 `!isBlank()` test dominates it in the same boolean branch. `has()` deliberately
 does not satisfy that gate. `has()` over an **undeclared** key stays legal: that
 is its real use — telling "absent from this PATCH" apart from "explicitly null".
+
+**The exception: action `visible` / `disabled` are client-side and sparse.**
+They bind the row the client already holds, and a `list_item` row lacks a key
+when the column is outside the view's projection, when field-level security
+refuses it, or when it was never written (the mongo and memory drivers).
+Reading an absent key faults `No such key` and the action silently vanishes.
+There the guard is `has(record.x) && record.x != null`; `has()` alone is enough
+beside a literal `==` / `!=`; a nested path takes one `has()` per segment:
+
+```text
+has(record.status) && record.status != 'resolved'
+has(record.amount) && record.amount != null && record.amount > 1000
+has(record.viewer) && has(record.viewer.can_approve) && record.viewer.can_approve == true
+```
 
 ### Null + string throws
 
@@ -407,7 +423,7 @@ to the envelope.
 | `View` / `Page` | `visibleWhen` (form section/field, page component) | cel |
 | `Field` | `defaultValue` (envelope only; bare string = literal) | cel |
 | `ConditionalValidation` | `when` | cel |
-| `Action` | `disabled` | cel (or boolean) |
+| `Action` | `visible` / `disabled` — client-side, sparse | cel (or boolean) |
 | `Hook` | `condition` | cel |
 | `SharingRule` | `condition` | cel |
 | `Flow.decision` | `expression` / edge `condition` | cel (use `vars.<step>.<key>`) |
