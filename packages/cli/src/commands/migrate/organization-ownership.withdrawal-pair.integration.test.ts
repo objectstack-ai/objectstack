@@ -23,7 +23,9 @@
  * carries the withdrawal into the pair, the pair is in `sys_packages`, its row
  * declares the override at the base's version, and the env-wide view list the
  * anonymous doors judge by serves the form withdrawn. A second `--apply` over
- * the same database carries nothing more.
+ * the same database finds the step checkpointed and writes nothing. (A re-run
+ * of the carry itself, with no checkpoint, is pinned in
+ * `organization-ownership-apply.test.ts`.)
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -233,8 +235,10 @@ describe('organization-ownership --apply: a withdrawal onto a read-only package\
     expect(after.base).toMatchObject({ enabled: false });
     expect(after.open).toEqual([]);
 
+    // A re-run finds the step checkpointed and writes nothing more.
+    const rows = storedForm(dbFile);
     const again = await applyOver(dbFile, 'again');
-    expect(promotion(again.report).summary.withdrawalsCarried ?? 0).toBe(0);
-    expect(storedForm(dbFile).filter((r) => r.pkg === PAIR)).toHaveLength(1);
+    expect(promotion(again.report).status).toBe('checkpointed');
+    expect(storedForm(dbFile)).toEqual(rows);
   }, CASE_TIMEOUT_MS);
 });
