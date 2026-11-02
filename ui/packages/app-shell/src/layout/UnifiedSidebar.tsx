@@ -52,7 +52,7 @@ import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
-import { matchAppBySegment, appRouteSegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { matchAppBySegment, appAddressSegment, resolveKeyedI18nLabel } from '../utils/index.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 // Aliased for symmetry with objectui's own `resolveKeyedI18nLabel` above (the
@@ -341,7 +341,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       ? {
           pathname: location.pathname,
           search: location.search,
-          basePath: `/apps/${appRouteSegment(activeApp)}`,
+          basePath: `/apps/${appAddressSegment(apps, activeApp)}`,
           templateContext: navTemplateContext,
         }
       : null;
@@ -430,7 +430,10 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
 
   // Determine which navigation to show based on context
   const navigationItems = context === 'home' ? homeNavigation : appNavigation;
-  const basePath = context === 'app' && activeApp ? `/apps/${appRouteSegment(activeApp)}` : '';
+  // ADR-0048 (A) — the app's one address among the full metadata list, the
+  // list `/apps/SEGMENT` resolves on: its package id when that reaches this
+  // app, else its name (a package's second app shares the first app's id).
+  const basePath = context === 'app' && activeApp ? `/apps/${appAddressSegment(apps, activeApp)}` : '';
   const isStudioApp = context === 'app' && activeApp?.name === 'studio';
   // Studio's package-management link carries the active package scope. Read
   // (and re-emit) it through the SAME per-selector key derivation the selector
