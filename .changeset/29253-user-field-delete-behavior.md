@@ -1,5 +1,5 @@
 ---
-'@objectstack/objectql': patch
+'@objectstack/objectql': minor
 ---
 
 fix(objectql)!: a `user` field's declared `deleteBehavior` takes effect when the user is deleted (#29253)
