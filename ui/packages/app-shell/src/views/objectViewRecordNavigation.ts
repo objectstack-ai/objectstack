@@ -315,7 +315,7 @@ export function useObjectViewRecordNavigation({
                         navigateTo(id);
                         return;
                     }
-                    // Drawer and split → URL is the source of truth. Push
+                    // Drawer → URL is the source of truth. Push
                     // `?recordId=…` and let the URL-sync effect open the pane;
                     // a row clicked while it is open swaps its root record.
                     const next = new URLSearchParams(params);
