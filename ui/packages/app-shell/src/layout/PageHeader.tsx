@@ -204,7 +204,7 @@ export function PageHeader({
       type="button"
       variant="ghost"
       size="icon"
-      className="h-8 w-8 shrink-0"
+      className="h-8 w-8 max-md:size-11 shrink-0"
       onClick={refresh.onRefresh}
       disabled={refresh.busy}
       aria-label={refresh.label}

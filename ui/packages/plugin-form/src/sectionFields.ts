@@ -287,10 +287,26 @@ export function warnSectionMemberExcludedByFields(
  * the flat (no-sections) containers need the identical mapping — see
  * `flatFields.ts`, and objectui#4755 for what a second hand-copied version
  * costs.
+ *
+ * `undefined` when the resolved object schema does not declare `fieldName`:
+ * a name the object does not have has no control to draw. It used to fall back
+ * to a bare `{ name, label: name, type: 'input' }` stub, so a form view section
+ * naming a field the object lacks (a typo, a field deleted later) drew a live
+ * text box labelled with the raw name — and what the user typed there was
+ * never sent, because the record save writes only declared fields. The lint
+ * reports that entry as `FORM_FIELD_UNKNOWN` ("never renders on the form");
+ * the form now agrees with it, as the default arm's pool and
+ * `buildFlatFields` already did.
+ *
+ * With NO object schema at all (a form mounted without a data source, whose
+ * host `submitHandler` owns the write) there is no object to judge the name
+ * against — the lint's rule likewise judges only a known object — so the bare
+ * stub stays: its value does reach that host.
  */
-export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): FormField {
+export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): FormField | undefined {
   const field = ctx.objectSchema?.fields?.[fieldName];
   if (!field) {
+    if (ctx.objectSchema != null) return undefined;
     return { name: fieldName, label: fieldName, type: 'input' } as FormField;
   }
   return {
@@ -342,11 +358,16 @@ export function sectionEntryName(fieldDef: unknown): string | undefined {
 /**
  * Normalize one section field definition (string | spec object | runtime
  * FormField) into a runtime FormField with a guaranteed `name`.
+ *
+ * `undefined` when the entry only NAMES a field — shape (1) or (2) — and
+ * nothing defines it: the resolved object schema does not declare it and no
+ * `customFields` member names it. Such an entry draws no control (see
+ * `fromObjectSchema`); {@link buildSectionFields} drops it.
  */
 export function normalizeSectionField(
   fieldDef: string | Record<string, any>,
   ctx: SectionFieldsContext,
-): FormField {
+): FormField | undefined {
   return resolveSectionEntry(fieldDef, ctx, undefined);
 }
 
@@ -360,7 +381,7 @@ function resolveSectionEntry(
   fieldDef: string | Record<string, any>,
   ctx: SectionFieldsContext,
   pooled: FormField | undefined,
-): FormField {
+): FormField | undefined {
   // (1) string shorthand → build entirely from the object schema, unless a
   // `customFields` member names the field: the member is then the whole
   // definition, drawn as shape (3) below (objectui#10254). A pooled field is
@@ -397,6 +418,9 @@ function resolveSectionEntry(
   const base = (
     pooled ? { ...pooled } : member ? { ...member } : fromObjectSchema(fieldName, ctx)
   ) as any;
+  // Nothing defines the named field: no control, whatever overrides the entry
+  // carries (an authored `type` or `label` does not make a field exist).
+  if (!base) return undefined;
 
   if (fd.widget != null) base.widget = fd.widget;
   if (fd.label != null) base.label = fd.label;
@@ -436,8 +460,6 @@ function resolveSectionEntry(
   //
   // `rawType` is the PRE-alias spelling, kept because `base.type` is already the
   // mapped id (`field:…`) and re-deciding from it would need an inverse mapping.
-  // Absent on both sides (a spec field naming nothing in the object schema and
-  // declaring no type) it stays untouched — `fromObjectSchema`'s `input`.
   // Over a MEMBER base only the entry's own `type` re-decides: the object
   // schema's type is the generated definition's, which the member replaces
   // whole, and the member's `type` is drawn as authored, as the flat path
@@ -485,6 +507,12 @@ function resolveSectionEntry(
 /**
  * Normalize every field def in a section, in the section's AUTHORED order.
  *
+ * Without a pool, a name-only entry naming a field nothing defines — the
+ * resolved object schema does not declare it and no `customFields` member
+ * names it — is dropped: it draws no control, which is what the lint's `FORM_FIELD_UNKNOWN`
+ * tells the author ("never renders on the form"). A section left with no
+ * field this way is the same empty section any arm already handles.
+ *
  * With a {@link SectionFieldsContext.pool}, a name-only entry naming a field
  * the pool does not hold is dropped, and a pooled field is the base the entry
  * starts from; a self-describing inline entry is drawn as it stands, pooled
@@ -497,7 +525,14 @@ export function buildSectionFields(
 ): FormField[] {
   const entries = section.fields ?? [];
   const pool = ctx.pool;
-  if (!pool) return entries.map((fieldDef) => normalizeSectionField(fieldDef, ctx));
+  if (!pool) {
+    const drawn: FormField[] = [];
+    for (const fieldDef of entries) {
+      const field = normalizeSectionField(fieldDef, ctx);
+      if (field) drawn.push(field);
+    }
+    return drawn;
+  }
 
   // First pooled field of a name wins, the precedence `findCustomFieldMember`
   // gives a member.
@@ -510,13 +545,15 @@ export function buildSectionFields(
     // A self-describing inline entry needs nothing the pool holds: drawn the
     // way the pool-less branch above draws it (objectui#11615).
     if (isInlineFieldDef(fieldDef)) {
-      drawn.push(normalizeSectionField(fieldDef, ctx));
+      const inline = normalizeSectionField(fieldDef, ctx);
+      if (inline) drawn.push(inline);
       continue;
     }
     const name = sectionEntryName(fieldDef);
     const pooled = name === undefined ? undefined : pooledByName.get(name);
     if (!pooled) continue;
-    drawn.push(resolveSectionEntry(fieldDef, ctx, pooled));
+    const field = resolveSectionEntry(fieldDef, ctx, pooled);
+    if (field) drawn.push(field);
   }
   return drawn;
 }
