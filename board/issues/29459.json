@@ -1,0 +1,34 @@
+{
+  "number": 29459,
+  "kind": "pull_request",
+  "title": "docs(adr): ADR-0066 D2 ⑧ note — a super-user set votes on every field of its object",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/xs",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T15:46:49Z",
+  "updated_at": "2026-11-02T17:26:00Z",
+  "closed_at": "2026-11-02T16:55:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-02T16:55:29Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29459",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9A6kAUSDc7TXDVUJeUigpMx)_\n\nFixes #29106. This is the card's second PR: the ADR note for the runtime change that landed in #29387. It is governed (`docs/adr/**`, Tier H) and stays a draft for a governed approver.\n\nClause-②: no\nMetadata-protocol: none\nRuling-ref: 6573563853\n\n## 维护者速读\n\n- 改了什么：只在 ADR-0066 D2 ⑧ 下追加一条 2026-11-02 的说明，记录裁决 6573563853 选 A:持「查看全部 / 修改全部」的权限集在字段合并中对该对象每个字段投票。Status 行不动。\n- 为什么改：运行时改动已由 #29387 合入，ADR 需要如实记录现行规则。\n- 风险与回滚：纯文档，无运行时影响；回滚 = revert 本 PR。\n- 需要你做的：治理审批人(GOVERNED_APPROVERS)审阅并批准；本 PR 保持草稿，席位不会自行转为就绪。\n\n## What changes\n\n- `docs/adr/0066-unified-authorization-model.md`: one append-only note under D2 ⑧, after the 2026-10-28 note. It records that a set holding `viewAllRecords` on an object votes `readable: true` on every field of it, and that `modifyAllRecords` votes `readable: true` and `editable: true`. View All never grants an edit. Who holds the bypass is the row-level answer, read through one function (`holdsSuperuserBypass`, `@objectstack/core`). Union without deny is otherwise unchanged. The note also names the one consequence: a set can no longer withhold a field from its own View All / Modify All holders.\n- The Status line is untouched. Seat 2 ruled \"note only\", because earlier ⑧ notes (2026-10-26, 2026-10-28) left it alone.\n- No changeset: a docs-only change publishes nothing.\n\n## Why\n\nThe ruling of record 6573563853 (letter A) amended ⑧'s field-merge posture. #29387 shipped the runtime half, and this records it where the posture is written.\n\n## Verification\n\n- Branch restarted from `main` at `aca58cdb6`, which includes #29387 (`4138ce862`). The diff is 1 file, +2 lines.\n- `node scripts/pm/dispatch-gates.mjs --commands` on this diff derived 21 families: `check-adr-links` (+ `--self-test`), `check:adr-anchors`, `check:adr-index`, `check:adr-symbol-anchors`, `check-closing-keyword-parity` (+ `--self-test`), `check:doc-authoring`, `check:pm-governed-merges`, `check:pm-prior-rulings`, `check:closed-ceremony-text` and the rest. All 21 exit 0.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01ADHkmSgjH5Vi4jT3KVJpvt\n"
+}

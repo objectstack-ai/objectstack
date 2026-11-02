@@ -2,24 +2,33 @@
   "number": 29364,
   "kind": "issue",
   "title": "analytics: on a host whose engine cannot aggregate, the in-memory fallback buckets a time dimension over a formula field into one null group, with no date-bucket door in front",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
     "id": 332303061,
     "type": "Bot"
   },
-  "labels": [],
-  "assignees": [],
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T12:58:53Z",
-  "updated_at": "2026-11-02T12:58:53Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T17:22:05Z",
+  "closed_at": "2026-11-02T17:20:52Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29364",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① should-fix finding of the `CONTRACT_REVIEW_TIER` review of PR #29347 (#29167) at head `cae03ff5`, source reading only, not reproduced. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 · reached only on hosts whose engine cannot aggregate.\n\nReach: a cube or analytics query with a bucketed time dimension over a `formula` field (or any non-date field), on a host where the ObjectQL strategy cannot serve and `FallbackDelegateStrategy` (priority 30) delegates to `MemoryAnalyticsService`.\nReader who acts: a `domain:server` seat (`packages/services/service-analytics`, `packages/drivers/driver-memory/src/memory-analytics.ts`).\n\n## What happens (source reading)\n\n- #29167 (PR #29347) refuses a date bucket over a virtual field at the engine door (`aggregate-query-shape-door.ts`) and at the service's copy (`dataset-date-bucket-door.ts`). Every face that goes through the engine or the service door answers that refusal.\n- `FallbackDelegateStrategy` hands a cube query to `MemoryAnalyticsService`, which folds time dimensions itself (`memory-analytics.ts` ~L1172 onward) with no field-type reading. Neither door sits in front of it, so a formula bucket there still lands in one `null` group. A text bucket answers whatever the fold makes of it.\n\n## Wanted\n\nMeasure first on a no-engine host. Then put the same door in front of the fallback (reuse `dataset-date-bucket-door.ts`; don't copy it), so this face answers the same refusal, field for field. If the fallback cannot read field types, say so and give options.\n\nDedupe: searched `FallbackDelegateStrategy date bucket`, `memory-analytics time dimension formula`; nearest #29167, #28977, #29304. **New.**\n\nLinks back: #29167, PR #29347, #29304."

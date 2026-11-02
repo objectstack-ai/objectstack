@@ -2,8 +2,8 @@
   "number": 29050,
   "kind": "issue",
   "title": "automation: the trigger door starts an elevated screen flow on a recordId the caller cannot read — the action door refuses the same row (#16370)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:automation",
     "domain:server",
-    "pm:dispatched",
     "priority:p1",
     "security",
     "target:v18"
@@ -24,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:26:24Z",
-  "updated_at": "2026-11-02T08:14:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T17:07:33Z",
+  "closed_at": "2026-11-02T11:32:04Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 18,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29050",
   "body": "repo:hotsrm#1 · marchtian · session_017ihL2eFDUqnMy95b1fqMKJ\n\nFiling gate: ① product defect with reach (the trigger door, `POST /automation/:name/trigger`, measured on 18.1.0 with `@objectstack/verify`, sqlite; source read on `main` at `ab085a04`).\n\n**Business reason.** hotsrm's supplier portal gives external members `runAs: 'system'` screen flows (submit a change request, respond to a claim, resubmit an application) because those flows write fields the member may not edit. Launched from the record page, they are safe: since #16370 the action door loads `recordId` in the caller's scope and answers `404 RECORD_NOT_FOUND` for another supplier's row. Started by name through the trigger door with the same `recordId`, the run starts anyway, the elevated `get_record` reads the other tenant's row, and the screen shows it. So the action door's record check is only as strong as the weakest door, and every app with an elevated record-keyed screen flow has to re-implement row access inside the flow (hotsrm now checks its portal roster in four flows, hotsrm PRs #90/#91). #25580 gave flows a declaration of *who* may start them; nothing yet says *on which row*.\n\n**Who acts.** The seat owning the flow start doors (`domains/automation.ts` trigger routes, `flow-start-admission.ts`, `action-execution.ts` `refuseDeniedSubjectLoad`).\n\n## Repro (18.1.0)\n\nExternal member P (role `external`) belongs to supplier A only; RLS narrows `srm_supplier` to `id in current_user.portal_supplier_ids`. Flow `srm_change_submit`: `type: 'screen'`, `runAs: 'system'`, first node `get_record srm_supplier {id: recordId}`, screen title `Submit change request: {{ supplier.name }}`; for the probe its in-flow gate was removed. B is another supplier.\n\n| call, as P, `recordId` = B | answer |\n|---|---|\n| `GET /data/srm_supplier/B` | `404 RECORD_NOT_FOUND` |\n| `POST /actions/srm_supplier/srm_change_submit` | `Record … not found in srm_supplier` (the #16370 refusal) |\n| `POST /automation/srm_change_submit/trigger {recordId: B}` | `success: true, status: paused`, screen title `Submit change request: Example B Secret Co` |\n| resume that run with the screen inputs | `success: true`; a change request on supplier B now exists, `created_by` = P |\n\nOn `main` the trigger route's context builder copies `recordId` into `params` and the admission check (`flowStartRefusal`) reads only `type`, `runAs` and `requiredPermissions`; no caller-scope load of the row happens at this door.\n\n## Expected\n\nWhen a start door is given a `recordId` (plus an `objectName`, or an object the flow declares), it loads that row in the caller's scope and refuses with the same `RECORD_NOT_FOUND` as the action door (`refuseDeniedSubjectLoad`) before any run is persisted, at least for `runAs: 'system'` flows. Parity of the three doors is the point; `flow-start-admission.ts` already states that \"a door left out is the defect\". If a flow needs no row object (a plain id parameter), a flow-level declaration of the record's object would let the door know what to load.\n\n## Dedupe\n\nSearched objectstack-ai/objectstack issues (open + closed): \"trigger door recordId caller cannot read\" (66 hits, QA runs plus #28657, #25580, none about this door), \"automation trigger recordId record load denied\" (47 hits, QA runs and sweeps only), \"trigger recordLoadDenied screen flow runAs system\" (2 hits: #16370 fixed the MCP and REST action doors only; #15705 screen pause). Related: #25580 (who may start, closed, landed in #25643), #22310 (self-triggered elevated flows at the trigger door).\n\nWorkaround in hotsrm (temporary, documented in each flow header): every portal-startable system flow reads the contact roster itself (`portal_user` = caller, `active == true`, same as the membership key) and refuses otherwise; a metadata test keeps that check equal to the membership key."

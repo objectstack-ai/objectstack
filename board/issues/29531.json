@@ -1,0 +1,36 @@
+{
+  "number": 29531,
+  "kind": "pull_request",
+  "title": "fix(spec): check:variant-docs reads a z.enum discriminator arm's members into the union key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T17:51:31Z",
+  "updated_at": "2026-11-02T19:07:15Z",
+  "closed_at": "2026-11-02T18:46:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T18:46:56Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29531",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ898KToLEMsyis22XxZA8ZTu)_\nFixes #29412\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`check:variant-docs` 现在把 `z.enum` 判别臂的全部成员读进联合的台账键;唯一受影响的条目从 `kind:nav` 改键为 `kind:field|flow|nav`,并在 `api/metadata-api.mdx` 补一句点名 `field` / `flow` 两个 kind。\n- 为什么改:旧的遍历只读字面量臂,枚举臂整个不进键,枚举增删成员时键不动,门禁就不会把作者送回文档。\n- 风险与回滚:只动门禁脚本、它的台账和一句文档,不发布任何包;回滚即 revert 本 PR。\n- 先看:`packages/spec/scripts/check-variant-docs.mts` 的 `armVariants()`;再看 `packages/spec/scripts/check-variant-docs.test.ts`;最后 `packages/spec/variant-docs.json` 的改键。\n- 两分钟验证:`pnpm --filter @objectstack/spec check:variant-docs`,预期打印 24 个联合全部通过;`--list` 里 contributions 的键是 `kind:field|flow|nav`。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `packages/spec/scripts/check-variant-docs.mts`: a new exported `armVariants()` reads the values one arm's discriminator matches. A literal keeps them in the def's `values`; a zod 4 `z.enum` keeps its members in `entries`, and the walker never read that field, so an enum arm was left out of the key entirely. `armVariants()` now reads zod's own parse set (`_zod.values`, which drops a numeric TypeScript enum's reverse-mapping keys) and falls back to the entries' values. The per-union key building moved into an exported `unionKey()`. The sweep moved into `main()` and runs only when the file is invoked as a script, so the test can import the two helpers without sweeping `src/` or setting `OS_EAGER_SCHEMAS` in its worker.\n- `packages/spec/variant-docs.json`: re-keyed the one entry this moves, `kind:nav` to `kind:field|flow|nav` (GetPackageCustomizationsResponseSchema `contributions`). Its note is kept, with the sentence saying the walker cannot read the enum arm replaced by one saying it now does.\n- `content/docs/api/metadata-api.mdx` (bounded in-place fix, file surface amended in Claim amendment 6582783172): once re-keyed, the gate found that the bound doc never mentions `field`, and that `flow` passed only through an unrelated row (the `type` column at line 33). That is the doc owing a re-read, which this change is what surfaces. One sentence now names the kinds: \"the fields (kind `field`) and flows (kind `flow`) other installed packages contribute to `hotcrm`'s objects\".\n- `packages/spec/scripts/check-variant-docs.test.ts` (new): pins a fixture union with one enum arm and one literal arm, keyed on all three members; adding a member to the enum arm moves the key; a literal-only control keys as before; non-discriminated schemas answer null; an object-built enum reads its values, not its keys.\n\n## Why\n\nA discriminated union's ledger key exists so that adding or dropping a variant changes the key and sends the author back to the bound doc. An enum arm's members were never in the key, so a `page` kind added to the `field` / `flow` enum would have left the key at `kind:nav` and the gate green.\n\n## Tests\n\n- `check:variant-docs --list` on `origin/main` 94d3e254 vs this head: 24 discriminated unions both times; exactly one key differs (`kind:nav` became `kind:field|flow|nav`). Measured, not assumed: no other union in `src/` has an enum arm.\n- New `scripts/check-variant-docs.test.ts`: 7/7 pass.\n- `pnpm --filter @objectstack/spec test` (local project) at 314f4b34: Test Files 793 passed (793), Tests 23526 passed, 1 todo.\n- `pnpm --filter @objectstack/spec typecheck` at 314f4b34 (tsc, `check:scripts-typecheck`, `check:test-typecheck`): exit 0.\n- No ablation: the diff changes a gate script, which os-dev does not ablate. The before/after `--list` reading above is the evidence that the reading changed.\n\n## Acceptance notes\n\n- No changeset, `skip-changeset`: `@objectstack/spec`'s `files[]` ships `dist`, `json-schema`, `src/**/*.zod.ts` and others, not `scripts/` or `variant-docs.json`; `content/docs/` is no package.\n- No `packages/spec/src/**/*.zod.ts` file and no strictness-ledger file is touched.\n- The match for a variant in a doc stays as loose as before; the gate still proves only that the page says the word.\n\n## Verification\n\n<details><summary>dispatch-gates at 314f4b34: 86 derived, 86 run, all exit 0</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 86 families. 76 exited 0 on the first run; 10 exited 3 (PREREQUISITE NOT MET) on the fresh worktree, the one `check:docs` exit 1 being the missing `json-schema` tree, a prerequisite and not a finding. After `git fetch origin 621a4876` and `turbo run build --filter='@objectstack/lint...' --filter=@objectstack/objectql --filter=@objectstack/formula --filter='@objectstack/client-react...' --filter=@objectstack/spec`, all ten re-ran to exit 0, `check:variant-docs` among them on the first run. Reconciliation: \"dispatch-gates --ran: 86 derived famil(ies) accounted for — 86 run, 0 NOT-MEASURED\".\n\n</details>\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes (eslint on the two changed scripts files: exit 0; the repo-wide run is CI's).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset (nothing publishes here).\n- [x] 6. `packages/spec` touched: no generated artifact moves (`check:docs` green).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\nDispatched by `domain:spec#3 · os-warren · session_01JQwxbahe4v7GBD94QeSnir`; dev = card thread `session_01JQwxbZYuv4NM4LDCUNP3cK`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbZYuv4NM4LDCUNP3cK\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZYuv4NM4LDCUNP3cK)_\n"
+}

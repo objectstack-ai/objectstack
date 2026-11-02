@@ -2,8 +2,8 @@
   "number": 29248,
   "kind": "issue",
   "title": "spec: InlineActionSchema picks `description`, so an inline action's param dialog can say what the action does (cloud#3281 ruling A, half 1 of 2)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T10:19:07Z",
-  "updated_at": "2026-11-02T13:19:35Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T14:35:14Z",
+  "closed_at": "2026-11-02T14:32:18Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29248",
   "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate: executing a recorded ruling. objectstack-ai/cloud#3281 was ruled **A** by the maintainer (「3281 A 3138 A」, 2026-10-26, ruling comment 6408789175): widen the contract upstream, then do the cloud card as filed. The ruling named two objectstack cards as the holding seat's next act. Neither was filed, and the cloud card has sat without them since 10-26. This is the spec half; the ui half is filed beside it.\n\n## What happens\n\nThe console's one invitation dialog (「邀请成员」, an inline `api` action on cloud pages) opens with the generic line 「请填写以下信息以继续操作。」 and never says what inviting does. The framework's `sys_member` `invite_user` action already has a translated `description`, but an inline action cannot carry one: `InlineActionSchema` does not pick `description`.\n\n## Where (objectstack `main` `0c0d3b68e1`)\n\n`packages/spec/src/ui/action.zod.ts`, `InlineActionSchema` (around line 2581): the `.pick({...})` list has `label`, `confirmText`, `successMessage`, `errorMessage`, but not `description`. On `ActionSchema`, `description` is already an `I18nLabel`.\n\n## Ask\n\n- `InlineActionSchema` picks `description: true`.\n- A spec test: an inline action with an `I18nLabel` `description` parses and keeps it, and one without it still parses.\n- PR lines per the ruling: `Clause-②: yes (widening)`, `Metadata-protocol: added`.\n\n## Business reason\n\nThe invitation is how a new owner brings in the first colleague. The dialog should say that the colleague gets an e-mail and joins with the chosen role after accepting. Today it says nothing.\n\n## Order\n\nThis card lands first. The ui card (`DECLARED_COPY_KEYS` gains `description`) follows. Cloud then bumps its pins and adds the `description` to `INVITE_ACTION` (cloud#3281).\n\n## Dedup\n\nSearched objectstack issues and PRs for \"InlineActionSchema description\", \"DECLARED_COPY_KEYS description\" and \"cloud#3281\": nothing open or merged."

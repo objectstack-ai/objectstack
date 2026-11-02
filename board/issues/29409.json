@@ -1,0 +1,35 @@
+{
+  "number": 29409,
+  "kind": "issue",
+  "title": "ui predicate harvest: `record.?x` (CEL optional) is not harvested, and kanban/calendar/gantt queries may not take the harvest at all",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:18:33Z",
+  "updated_at": "2026-11-02T16:44:57Z",
+  "closed_at": "2026-11-02T16:43:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29409",
+  "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a measured gap in the view projection harvest, named as follow-up D.2 of the #29094 ruling (option A, maintainer 「同意」, ruling comment 6579342813). It does not block anything, so it is filed as p3.\nReader: `domain:ui`, `ui/packages/core/src/utils/predicate-fields.ts` and the views that build their own queries.\nDedupe (open AND closed): \"harvest record.?\" and \"predicate-fields harvest kanban\" → #28542 (open, cloud invitations page projection), #28960 (closed, docs). Neither covers these two gaps.\nreach: a list or board view whose action `visible` / `disabled` reads a field the view does not show.\ntype: Bug\n\nBusiness reason: the harvest is what keeps a sparse list row from hiding a button by accident. A predicate it does not read, or a view that does not use it, puts the author back on the `has()` guard without any sign that this happened.\n\n## What the code does on `main`\n- `RECORD_REF = /\\b(?:record|data)\\.([A-Za-z_][A-Za-z0-9_]*)/g` (`ui/packages/core/src/utils/predicate-fields.ts` line 91). The CEL optional spelling `record.?status` does not match it, so `status` is not harvested.\n- The decision analysis for #29094 (§2.2 item 4) notes that kanban, calendar and gantt build their own queries, and that whether they take the harvest is not verified.\n\n## Wanted\n1. Make the regex accept `record.?x` and `data.?x`, and pin it.\n2. Read the kanban, calendar and gantt views' queries. Wherever a view that renders row actions does not take the harvest, wire it in, or file the gap. Keep the field-level-security filter, because a harvest is not a read grant."
+}

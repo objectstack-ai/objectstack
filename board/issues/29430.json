@@ -1,0 +1,34 @@
+{
+  "number": 29430,
+  "kind": "pull_request",
+  "title": "fix(app-shell): inside a package's second app, the sidebar and nav:menu links stay in that app",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:47:16Z",
+  "updated_at": "2026-11-02T15:23:42Z",
+  "closed_at": "2026-11-02T15:23:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T15:23:40Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29430",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbTegR38X4FfcBaaoy3Z2DJy)_\n\nFixes #29328\n\nClause-②: no\nMetadata-protocol: none\n\nThe two lines are copied from the claim (comment 6577088246).\n\n## 维护者速读\n\n- 改了什么：侧边栏的导航链接、侧边栏按路由选区（area）时读的路径前缀，以及 `nav:menu` 页面块的链接前缀，改为用应用自己的地址 `appAddressSegment`（在完整应用元数据列表中求值）：包 ID 能回到这个应用时用包 ID，否则用应用名。\n- 为什么改：`/apps/包ID` 总是打开该包的第一个应用。一个包里有两个应用（例如 `crm` 与 `crm_service`）时，在第二个应用里点侧边栏任何一项，都会跳进第一个应用，换成别的应用的导航、顶栏和首页。#29024 已经修了头像菜单、⌘K、应用切换器、首页磁贴和报表索引，侧边栏还是旧算法。\n- 风险与回滚：只改链接前缀的计算；包内第一个或唯一应用的链接逐字节不变（测试钉住了这两种对照）。`appAddressSegment` 是 `AppContent` 已在用的现有函数，不新增导出。回滚即撤销本 PR。\n- 先看：`layout/UnifiedSidebar.tsx` 的两处 `basePath`（`areaRoute` 与导航）；`views/nav-menu-renderer.tsx` 的 `basePath`；新测试 `UnifiedSidebar.packageAppAddress-29328.test.tsx`。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/app-shell/src/layout/__tests__/UnifiedSidebar.packageAppAddress-29328.test.tsx packages/app-shell/src/views/__tests__/nav-menu.packageAppAddress-29328.render.test.tsx`，预期 7 个用例通过（在 main 上其中 3 个第二应用用例为红）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **Sidebar** (`layout/UnifiedSidebar.tsx`): the nav `basePath` every entry link is built on, and the `basePath` of the route the area election reads, are `/apps/` plus `appAddressSegment(apps, activeApp)` over the full metadata app list (the list `AppContent` resolves `/apps/SEGMENT` on), instead of `appRouteSegment(activeApp)`, the package id. Inside a package's second app the area holding the routed entry is now elected too: with the package-id prefix no entry of the second app matched the route.\n- **`nav:menu` block** (`views/nav-menu-renderer.tsx`): its `basePath` is built the same way.\n- Both import `appAddressSegment` from `utils/appRoute.js`, as `AppContent` and `CommandPalette` do; the `utils` barrel does not re-export it, and the sidebar tests that mock the barrel keep working unchanged.\n- A package's first or only app keeps its package-id links byte for byte.\n\n## Tests\n\n- `layout/__tests__/UnifiedSidebar.packageAppAddress-29328.test.tsx`, through the real `UnifiedSidebar`, `NavigationRenderer` and route helpers (the `utils` module is not mocked): `com.example.crm` ships `crm` (first) and `crm_service` (two areas); `com.example.hr` ships `hr` alone. Inside `crm_service` an entry links to `/apps/crm_service/crm_queue`; at `/apps/crm_service/crm_case` the Casework area is elected and its object and dashboard entries link into `crm_service`. Controls: `crm` keeps `/apps/com.example.crm/...`, `hr` keeps `/apps/com.example.hr/...`.\n- `views/__tests__/nav-menu.packageAppAddress-29328.render.test.tsx`, through the real `nav:menu` block under `SchemaRenderer` and `MePermissionsProvider`: inside `crm_service` its object and dashboard links carry `/apps/crm_service/...`; the same two controls.\n- Red on main: both files run against `origin/main` `2f7977cd` before the fix: 3 failed (the three second-app cases; received `/apps/com.example.crm/crm_queue`, `/apps/com.example.crm/crm_case` and the first area elected), 4 passed (the controls).\n\n## Acceptance notes\n\n- Real browser: NOT MEASURED. No two-app package was staged on a running Console; the jsdom tests above go through the real sidebar and block.\n- Noted by the card, not measured here and not changed: other `appRouteSegment(app)` link builders (AppSwitcher's setup path, the marketplace deploy button, ConsoleShell's setup alias).\n\n## Verification\n\nHead `ada58c18`. The fix is commits `23551407` and `c1354524` (based on `origin/main` `2f7977cd`); `ada58c18` merges `origin/main` after PR #29327 and PR #29325 landed (none of this PR's files changed; clean). The branch's delta against `main` is the five files above. Readings name their head; the final head's are CI's check-runs.\n\n<details><summary>Tests</summary>\n\n- `ada58c18`, after rebuilding the app-shell dependency closure: every ui test file naming `UnifiedSidebar`, `nav-menu-renderer` or `NavMenuRenderer` (70 files, the two new ones included): 70 passed, 553 tests passed, at `--maxWorkers=2` under the verification lock. The same set on the fix head before the merge: 69 files, 546 tests passed.\n- `turbo run type-check --filter=@object-ui/app-shell` (`tsc --noEmit` and the test tsconfig): 65 of 65 tasks successful on the fix head and again on `ada58c18`.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `ada58c18`: `node scripts/pm/dispatch-gates.mjs --commands` derived 34 families for this diff (the same list as on the fix head); all 34 ran with exit 0, `pnpm --dir ui exec vitest run scripts/` among them (169 files passed, 2 skipped; 4921 tests passed). `--ran` reconciled 34 derived, 34 run, 0 NOT-MEASURED. The changeset, ADR-0087, closing-keyword and Part-of gates ran against this body.\n- `node scripts/check-sdui-manifest.mjs`: exit 0 (no registry change).\n- `pnpm check:new-line-citations` (under `ui/`): 0 new citations.\n- The CI-only type-check lanes and the whole-tree families are CI's; their check-runs on this PR are the reading.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jUtBT7bo7SPANQh2LX)_\n"
+}

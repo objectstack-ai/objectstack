@@ -1,0 +1,37 @@
+{
+  "number": 29410,
+  "kind": "issue",
+  "title": "pm/fleet-write: a relay op that creates a DRAFT repository security advisory (POST /security-advisories) under the stroke-scoped advisories token, so security findings are not capped by the one-report-a-day private-report limit",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "enhancement",
+    "pm:dispatched",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:18:33Z",
+  "updated_at": "2026-11-02T16:00:56Z",
+  "closed_at": "2026-11-02T15:51:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29410",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbWBtYWqaV8NhvUrShB\n\nFiling gate: ③ a maintainer-directed task. Maintainer word, verbatim: 「立一张 skills 卡，我现在就派发，然后你再试」 (Warren, project thread \"Plan the release checklist run\", 2026-11-02 14:17 UTC), answering the proposal below; it is also his naming of this pm-rule change (filing-gate: a card that adds or changes a pm rule is filed only when the maintainer names it).\nBusiness reason: security findings now go to private advisories through the relay (#29178, #29222). GitHub caps NEW private vulnerability reports per account per day (https://github.blog/changelog/2026-10-01-rate-limits-for-private-vulnerability-reports), and every relay report is filed as the one fleet App account, so the whole fleet gets about one report a day; on 2026-11-02 the first report landed and the next eight, from two sessions, were refused 403 (#29402). The App cannot be put on the trusted-reporter allow list. Without this op, findings back up for days or fall back to hand delivery.\nReader who acts: the `domain:skills` seat (owner of `scripts/pm/**` relay tooling and `.claude/skills/pm-dispatch/**`), dispatched by the maintainer now.\nDuplicate search: `is:issue advisory_create` → 0 hits; `is:issue \"draft advisory\" relay` → 18 hits, the nearest are #29160 and #29111 (both closed: they built the report/collaborator/state rows and the security rule), none adds draft creation.\nRelated: #29402 (write-pace reads the 403 as an egress-proxy refusal; the relay hides GitHub's message).\n\n## Platform reading this rests on\n\n`POST /repos/{owner}/{repo}/security-advisories` (\"Create a repository security advisory\") creates an advisory in `draft`. Per the REST docs (https://docs.github.com/en/rest/security-advisories/repository-advisories) it accepts GitHub App installation access tokens with the \"Repository security advisories\" repository permission (write); the rate limit in the changelog applies to new private reports only. ⚠️ Both are documentation readings: the first live run decides, as #29222's Acceptance notes did for the report row.\n\n## Scope\n\n1. **Relay row `advisory_create`** in `scripts/pm/fleet-write/ops.mjs` (+ `validate.mjs`, `execute.mjs`), shaped like `advisory_report`: `alone`; mints `repository-advisories: write` for its stroke only (`STROKE_SCOPED_PERMISSIONS`); payload read from the event file; closed keys `summary`, `description`, `severity`, `cwe_ids`, and the minimum `vulnerabilities` entry the endpoint requires (ecosystem `npm`, package name, ⛔ no version ranges unless the endpoint refuses without them — measure); ⛔ no `state` other than the endpoint's default `draft`, ⛔ `published` unreachable, ⛔ no `credits`, CVE request or private fork. Lands on a 2xx carrying a `ghsa_id`; prints only the id and state, never summary, description or vulnerability text. `REFUSED_PATH_FAMILIES` opens exactly this one POST path (no GET list, no PATCH of text).\n2. **Follow-up stroke unchanged:** `advisory_collaborators_add` then names the finding seat's account on the draft (its fence already admits `draft`).\n3. **Skill text** (governed, `.claude/skills/pm-dispatch/references/security-findings.md` §3 and `references/rest-channel.md`): replace \"建草稿公告须管理员或安全经理,中继无此操作 ⇒ 草稿由维护者建\" with: the seat files a finding as a DRAFT advisory through `advisory_create` (preferred), `advisory_report` stays for repos where the App lacks the permission; record the per-account daily limit on reports. Keep \"⛔ 席位永不以自身账号私报或写公告\" (writes stay App-only), and \"发布归维护者\".\n4. **Self-tests** in `validate.mjs` for the new row (closed keys, published unreachable, no value echoed in refusals), and the step-summary / log no-leak marker test extended to it.\n\n## Acceptance\n\n- One live `advisory_create` from a cloud seat lands a `draft` advisory on objectstack-ai/objectstack, its id in the run annotation, nothing of its text in the public run log; a second and third in the same hour also land (the measurement that it is not under the report limit).\n- `advisory_collaborators_add` on that draft lands.\n- `pnpm check:pm-skill-ratchet` and the fleet-write self-tests green; Tier H path (governed `.claude/**`), contract review before any approver is asked.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"
+}

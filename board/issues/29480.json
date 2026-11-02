@@ -1,0 +1,35 @@
+{
+  "number": 29480,
+  "kind": "pull_request",
+  "title": "fix(core): harvest the CEL optional record.?x spelling into the view projection",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T16:05:37Z",
+  "updated_at": "2026-11-02T16:43:26Z",
+  "closed_at": "2026-11-02T16:43:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T16:43:23Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29480",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9UbbTF7tv1zcjHRWm9NDK1VGvy)_\n\nFixes #29409\n\nClause-②: no\nMetadata-protocol: none\n\nThe two lines are copied from the claim (comment 6581111452).\n\n## 维护者速读\n\n- 改了什么：列表视图把谓词读到的字段补进 `$select`（字段采集）。采集正则原先只认 `record.x` / `data.x`，现在也认 CEL 可选字段写法 `record.?x` / `data.?x`。\n- 为什么改：#29094 裁决（选项 A）后续 D.2。作者在稀疏行上写 `record.?status.orValue('')` 时，`status` 不进投影，行上永远没有这个键，按钮按\"字段为空\"处理，没有任何迹象指向投影。\n- 风险与回滚：只改一行正则；采集名仍要过\"对象已声明或平台列\"和字段级读权限两道过滤，采集不是读授权。`record.?` 单独出现、`record.?.x`、JS 写法 `record?.x` 仍不采集（测试钉住）。回滚即撤销本 PR。\n- 先看：`ui/packages/core/src/utils/predicate-fields.ts` 的 `RECORD_REF`；测试 `predicate-fields.test.ts` 新增的 7 个用例。\n- 两分钟验证：`pnpm --dir ui exec vitest run packages/core/src/utils/__tests__/predicate-fields.test.ts`，预期 39 个用例通过（正则还原为 main 时其中 5 个转红）。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **`RECORD_REF`** (`@object-ui/core`, `utils/predicate-fields.ts`), the one regex behind `collectPredicateFieldRefs`, accepts an optional `?` between the record dot and the field name, so the CEL optional-field selector `record.?x` / `data.?x` is harvested as the field `x`, beside the plain spelling. Every harvest consumer (the grid row load, the list view, the related list) reads through this function, so all of them pick it up with no change of their own.\n- Unchanged: a harvested name still reaches `$select` only when the object declares it or it is a platform column, and only when the principal may read it. A selector that names no field (`record.?` alone, `record.?.x`, `record.?1x`), a longer identifier ending in `record` and the JavaScript spelling `record?.x` contribute nothing.\n\n## Tests\n\n`ui/packages/core/src/utils/__tests__/predicate-fields.test.ts`, seven new cases:\n\n- `record.?x` and `data.?x` are harvested; an optional selector inside the `{ dialect, source }` envelope is harvested; the optional and plain spellings of one field dedupe in first-seen order.\n- Through `listViewPredicates`: an optional operand on a row action `visible`, an object action `disabled` and a CRUD `visibleWhen` override is harvested.\n- Negatives: `record.? == null`, `record.?.status`, `data.?1st`, `myrecord.?status` and `record?.status` harvest nothing.\n- Ablation: with `RECORD_REF` restored to the main spelling (through `scripts/ablation-replace.mjs`; anchor 1 to 0, restored to the HEAD blob, `git diff HEAD` empty), the five positive optional-selector cases go red and the 34 others stay green.\n\n## Acceptance notes\n\n- **Kanban, calendar and gantt need no wiring.** The card asked whether these views take the harvest. None of the three sends a `$select`: each fetches whole rows (the board's query and its lane-paging params, the calendar's range query and its record-anchor query, the gantt's ceiling query carry filter, order, limit, expand and search only), so a predicate operand already arrives unless field-level security strips it server-side. None of the three renders row or card actions with `visible` / `disabled` predicates either (no action-predicate evaluation in their sources). No view file is edited.\n- **String literals are not masked.** The harvester reads `record.x` inside a CEL string literal today, and this PR keeps that for the optional spelling too: the file's own rule is that an extra declared column costs bytes while a missing one fails the predicate closed, and masking literals would under-harvest on an unbalanced quote.\n- The bracket spelling `record['x']` and the optional index `record[?'x']` are not harvested, as before; not in this card's scope.\n\n## Verification\n\nHead `5e043f9a`. The fix is commit `592019e4` (based on `origin/main` `5f7d554c`); `5e043f9a` merges `origin/main` `cafe8ee6` (none of this PR's files and nothing under `ui/packages/core/` changed; clean). The branch's delta against `main` is the three files above. Readings name their head; the final head's are CI's check-runs.\n\n<details><summary>Tests</summary>\n\n- `592019e4`: `pnpm --dir ui exec vitest run packages/core/` at `--maxWorkers=2` under the verification lock: 232 files passed, 4294 tests passed, 27 skipped.\n- `592019e4`: `turbo run type-check --filter=@object-ui/core` (`tsc --noEmit` and the test tsconfig): 4 of 4 tasks successful.\n- `5e043f9a`: `packages/core/src/utils/` (113 files, the touched test included): 113 passed, 2001 tests passed.\n\n</details>\n\n<details><summary>Gates</summary>\n\n- `592019e4`: `node scripts/pm/dispatch-gates.mjs --commands` derived 34 families for this diff; all 34 ran with exit 0, `pnpm --dir ui exec vitest run scripts/` among them (169 files passed, 2 skipped; 4921 tests passed). `--ran` reconciled 34 derived, 34 run, 0 NOT-MEASURED.\n- `node scripts/check-sdui-manifest.mjs`: exit 0 (no registry change).\n- `pnpm check:new-line-citations` (under `ui/`): 0 new citations.\n- The changeset, ADR-0087 and closing-keyword gates ran against this body.\n- The CI-only type-check lanes and the whole-tree families are CI's; their check-runs on this PR are the reading.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jTLzhrs8dyC8QCdCKg)_\n"
+}

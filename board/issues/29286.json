@@ -1,0 +1,35 @@
+{
+  "number": 29286,
+  "kind": "issue",
+  "title": "spec(i18n-resolver): a field that authors both inlineHelpText and a different description gets the inlineHelpText translation on description",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T11:00:41Z",
+  "updated_at": "2026-11-02T14:39:49Z",
+  "closed_at": "2026-11-02T14:22:24Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29286",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① Edge 2 of #29221, split out because PR #29280 fixes #29221's Edge 1 (the extractor) and closes that card. The #29221 dev measured it (os-dev-report 6575406411, open_questions[0]), and server seat 5 handed it to this lane. This card also carries the two should-fixes from the contract review on PR #29217 (addendum on #29221). ⛔ Not a claim. No grade: triage sets it.\nBlocked-by: PR #29217 (same function, `translateObject` in `packages/spec/src/system/i18n-resolver.ts`).\n\n## What happens\n\nThe extractor seeds a field's `help` entry from `help ?? inlineHelpText ?? description`. After PR #29217, the resolver serves that entry on `description` and also on an authored non-empty `inlineHelpText`. So when a field authors `inlineHelpText: 'A'` and `description: 'B'`, every reader of `description` gets the translation of A where the source says B. The dev measured that the readers showing the wrong text are the Studio/designer surfaces (the console's help line draws `inlineHelpText` first and is right).\n\n## Seat's direction (option A from the dev's reading)\n\n`description` takes the `help` entry only when the field has no non-empty `inlineHelpText`, which is when the extractor seeded the entry from `description`. A field that authors both texts keeps its source-language `description` until a description-specific bundle key exists. Option B, a new bundle key for `description`, is a new spec contract key and needs the maintainer, so it is not this card. This revisits the spec seat's own #29153 delta ruling (\"keeps serving `description` as today\"); the seat makes that call here, with no new public name.\n\n## Also on this card (contract review on PR #29217, should-fix)\n\n- **S1.** Declare `inlineHelpText?: string` on `ObjectFieldLike` beside `inlineTitle` (≈L3604). The translator writes it, and today it is reached only through the index signature.\n- **S2.** The test \"CONTROL: the source locale serves the authored `inlineHelpText` untouched\" can't fail on what it names, because the `en` bundle entry equals the authored text. Rename it, or drop the `en` `help` entry so the control is real.\n\nReader who acts: `domain:spec`. Served-read change: `Clause-②: no` · `Metadata-protocol: none`, spec patch, one contract review.\n\nDedupe: #29221 (Edge 1, closing via PR #29280), #29153 / PR #29217. **New.**"
+}

@@ -2,8 +2,8 @@
   "number": 29330,
   "kind": "issue",
   "title": "Native host: make `ObjectStackNative.platform` an open set and pin it with an App-level test (follow-up to #29140)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:ui",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T12:08:54Z",
-  "updated_at": "2026-11-02T13:22:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T17:22:11Z",
+  "closed_at": "2026-11-02T17:04:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29330",
   "body": "## Context\n\nobjectstack-ai/objectstack#29140 (card #29039) merged the Console's shell mode. An acceptance review checked it against the shell (objectstack-ai/mobile `main` 8c6f13a). The bridge contract matches item by item: the global, event name, methods, haptic kinds, argument shapes, push token, errors and events.\n\nOne acceptance item, from a maintainer comment on #29039, is met at runtime but has no test, and the type contradicts it: **the platform is an open set**. The desktop shell will report a value other than `ios` or `android`.\n\n- **Runtime:** `getNativeHost` has no platform check, the root attribute takes the value verbatim, and wrappers gate on `has()` only (`ui/packages/mobile/src/nativeHost.ts:109-123`, `ui/apps/console/src/App.tsx:160-164`).\n- **Type:** `readonly platform: 'ios' | 'android'` (`nativeHost.ts:65`) is a closed union. A consumer can write an exhaustive `never` switch that silently misses `desktop`.\n- **Tests:** both fake bridges hard-code `ios`/`android` (`nativeHost.test.tsx:53`, `App.nativeShellMode-29039.test.tsx:105`), and both announce every capability (`has: () => true`).\n\n## Ask\n\n1. **Widen the type** to `'ios' | 'android' | (string & {})`. Update the README and changeset wording (`data-os-native-shell=\"ios|android\"`).\n2. **Add an App-level test** with `platform: 'desktop'` and a subset of capabilities. Assert that:\n   - shell mode is on;\n   - `ready` is posted once;\n   - the root attribute is `desktop`;\n   - a method that is not announced is never called.\n3. **Settle what `ready` means.** Today `ready()` fires at the first commit of the router tree (`App.tsx:244-245`). On a cold start to a protected route, that commit is `AuthGuard`'s loading fallback (`ProtectedRoute.tsx:55-61`). Either:\n   - document `ready` as \"the Console has painted its own UI, possibly a loading fallback\", or\n   - post it after `AuthGuard` settles.\n\n   Say which in the PR. The shell will start relying on `ready` in objectstack-ai/mobile#162.\n4. **Version gate.** Nothing reads `ObjectStackNative.version`. Treat a host with `version > 1` as no shell (a safe browser fallback), or record why not.\n5. **README nit.** `ui/packages/mobile/README.md:314` changes button text on host presence (`host ? 'Save' : 'Save changes'`), which breaks the \"viewport and capability, not host\" rule. Use a capability check or drop the branch.\n\n## Acceptance\n\n- `pnpm --filter @objectstack/mobile test` and the console test pass, including the new desktop/subset case.\n- The type change compiles across `ui/` with no new casts."

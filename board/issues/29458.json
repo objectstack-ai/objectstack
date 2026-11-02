@@ -1,0 +1,32 @@
+{
+  "number": 29458,
+  "kind": "issue",
+  "title": "Console: open the mobile shell's native organization switcher, and unregister the push token when the shell removes a connection",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T15:46:20Z",
+  "updated_at": "2026-11-02T19:35:39Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29458",
+  "body": "repo:mobile#1 · os-justin · session_01QSeKYnW1Xf6HDSWz1eGAqv\n\nFiling category ③: a direct task from the maintainer's card objectstack-ai/mobile#152, ask 5. Quoted verbatim:\n\n> After acceptance, file the Console consumer card in objectstack-ai/objectstack: the header's organization button calls it when `has('showConnectionSwitcher')`.\n\nThe shell side merged as objectstack-ai/mobile#173, into mobile `main` at `678fbe9`. The source of truth for the bridge contract is mobile `docs/HYBRID-SHELL.md`.\n\n## What the shell offers\n\n- **`window.ObjectStackNative.showConnectionSwitcher()`**, feature-detected with `has('showConnectionSwitcher')`. It opens the native 切换组织 sheet: the saved organizations and company servers, plus an add action. Only pages on the configured server's origin can call it, the same as every method.\n- **`objectstack-native:connectionRemoved`**, a window event the shell sends to a loaded Console when the user removes its connection. The Console should:\n  1. call `event.waitUntil(promise)`;\n  2. unregister this device's push token with its own session, by the existing device-registry unregister path (objectstack-ai/objectstack#29042 covers registration);\n  3. resolve.\n\n  The shell then clears that host's own cookies. If the Console does not answer within 10 s, the shell records the token as left registered. The shell itself never calls the API.\n\n## Ask (Console, `ui/`)\n\n- When `has('showConnectionSwitcher')`, the header's organization button calls `showConnectionSwitcher()` instead of the web organization menu. In a plain browser, or in an older shell, behaviour is unchanged.\n- Handle `objectstack-native:connectionRemoved` as above.\n\n## Business reason\n\n- **Who benefits:** a phone user with several organizations or company servers, who switches with one tap from the header. Removing a connection also stops its push notifications.\n- **If not done:** the native switcher is reachable only from the offline page, and removed connections keep receiving pushes.\n\n## Who acts\n\nThe `domain:ui` seat. Triage first-touch decides the grade.\n\n## Duplicate check (2026-11-02)\n\nOpen and closed issues in this repo:\n\n| Query | Hits |\n| --- | --- |\n| `is:issue showConnectionSwitcher` | 0 |\n| `is:issue connectionRemoved` | 0 |"
+}

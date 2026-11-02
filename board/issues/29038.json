@@ -2,8 +2,8 @@
   "number": 29038,
   "kind": "issue",
   "title": "docs(adr): record the #28971 ruling at ADR-0131 D13 and in ADR-0017 — named personal views are a user-owned data object",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:spec",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:21:09Z",
-  "updated_at": "2026-11-02T11:53:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T15:50:11Z",
+  "closed_at": "2026-11-02T15:16:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29038",
   "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat as an execution step of the ruling on #28971. The maintainer answered 「同意」 (2026-11-02) to the seat's recommendation of option C. Readings are on `main` `ab085a0482`. No `domain:*` label is set: triage routes this card.\n\nThis is a dated note only. It changes `docs/adr/**`, so it follows the governed-surface path and waits for a maintainer approval.\n\n## Reading\n\n- `docs/adr/0131-total-organization-ownership-no-null-organization-id.md`, D13 (around line 909): \"a per-user 'personal view' scope stays the parked v18 direction … if pulled, it returns as a user-owned D3 object, not as this table.\"\n- `docs/adr/0017-object-has-many-view.md`, line 71: the `personal` layer, \"visible only to its `owner`\". This ADR carries the amendment note.\n\n## Target\n\nAdd one dated note at each place, citing #28971, saying:\n\n- Named personal views are a user-owned D3 object, as D13 anticipated. The direction is ruled, no longer parked.\n- They are not view items, and they do not reuse `scope: 'personal'`.\n- The first version follows #28949, #28948, #28950 and #28912.\n\nDo not rewrite the ADRs' existing text.\n\n## Acceptance\n\nBoth notes are present and cite #28971, and no other text in either ADR changes."

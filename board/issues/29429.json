@@ -1,0 +1,34 @@
+{
+  "number": 29429,
+  "kind": "issue",
+  "title": "pm-dispatch `lanes/mobile.md`: record the maintainer ruling that the mobile seat lands non-governed PRs through the merge queue",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:46:50Z",
+  "updated_at": "2026-11-02T20:00:22Z",
+  "closed_at": "2026-11-02T20:00:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29429",
+  "body": "repo:mobile#1 · os-justin · session_01QSeKYnW1Xf6HDSWz1eGAqv\n\nFiling category ③: a direct task carrying a maintainer ruling. The ruling is recorded on objectstack-ai/mobile#160, comment 6578710331.\n\n## The ruling, verbatim\n\nThe maintainer answered three things, in the session `session_01QSeKYnW1Xf6HDSWz1eGAqv` on 2026-11-02:\n- 「非受管 PR 由席位落地」. The question was: must every mobile PR wait for the maintainer's merge? Option 2 was \"the seat lands non-governed PRs after ACCEPT\".\n- 「我改了配置 Allow auto-merge」\n- 「合并对立额已经开了」, meaning the merge queue on `main` is on.\n\n## What the charter says today\n\n`.claude/skills/pm-dispatch/references/lanes/mobile.md`, under 常设承诺, says that a merge to `main` runs `eas-build.yml` and `eas-update.yml`, which are treated as release actions. It concludes: 「本仓 PR 的合并恒归维护者」.\n\n## What changed on the platform (measured on objectstack-ai/mobile)\n\n| Item | State |\n| --- | --- |\n| `allow_auto_merge` | `true` |\n| Ruleset on `main` | `merge_queue` plus required check `Lint & Type Check` |\n| `merge_group` triggers in `ci.yml` and `lint-typecheck.yml` | Added by objectstack-ai/mobile#172 |\n| First seat landing | objectstack-ai/mobile#166 merged through the queue as `0fd7113` |\n| EAS Build and EAS Update on `main` | Every build and publish step is `skipped`, because `EXPO_TOKEN` is unset |\n\n## Ask\n\nAmend `lanes/mobile.md` so the charter states the ruling and its terms. These are the terms the seat has operated under since the ruling (seat post comment above):\n\n1. After ACCEPT, the seat lands a PR whose path surface is not governed and whose checks are green on the current head. It marks the PR ready and enables auto-merge, which enqueues it.\n2. These PRs stay with the maintainer:\n   - governed-surface PRs;\n   - `.github/workflows/**` PRs, even though the register does not list mobile's workflows.\n3. Release actions stay human: `eas-submit.yml`, store submission and version cuts.\n4. Guard: before each landing, the seat reads the latest EAS Build and Update runs on `main`. If any build or publish step actually ran, which means `EXPO_TOKEN` is configured and a merge now pushes OTA to installed apps, the seat stops landing and asks the maintainer for a new ruling.\n5. Device checks still go to the maintainer in 维护者速读. Landing does not mean device-verified.\n\nRemove or rewrite the 「本仓 PR 的合并恒归维护者」 conclusion accordingly. The id-lint rule applies: no issue numbers in the operational text.\n\n## Who acts\n\nThe `domain:skills` seat. `.claude/**` is Tier S under the governed rules (contract-review-tier review, then the queue). The mobile seat does not edit this file.\n\n## Duplicate check (2026-11-02)\n\n`is:issue \"lanes/mobile.md\"` in this repo returned 0 hits. The lane was registered the same day."
+}

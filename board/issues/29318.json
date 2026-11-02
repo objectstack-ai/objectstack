@@ -2,8 +2,8 @@
   "number": 29318,
   "kind": "issue",
   "title": "spec(security): tenancy-posture.ts still says \"open code does not mean free activation\" and keeps the pre-ADR-0132 \"not by giving the posture away\" paragraph",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T11:45:02Z",
-  "updated_at": "2026-11-02T12:03:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T18:51:44Z",
+  "closed_at": "2026-11-02T18:43:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29318",
   "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ② should-fixes 1 and 2 of the spec seat's post-merge contract review on PR #29239 (#28826), at its landing head `e6a8c4d7`. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec`, prose only in `packages/spec/src/security/tenancy-posture.ts` (the file has no `.describe()`, so nothing generated moves).\n\n## What is left after PR #29239\n\n- **\"open code does not mean free activation\"** is kept, in the file header and repeated unchanged in the `postureStampsOrganization` docblock. It now sits next to \"That runtime is open code too\". On an open install, activation is gate-free by construction: `organizations-plugin.ts` ≈L243 has no licence gate, ≈L236 entitles `supportedPostures: ['group','isolated']`, and ADR-0132 D4 says the same. ADR-0105 D12's amendment carries the qualifier this sentence lacks: \"on the commercial side\".\n- **The Cloud ADR-0016 铁律 paragraph** (header ≈L35–38, \"not by giving the posture away\") predates ADR-0132 and now contradicts the paragraph PR #29239 rewrote above it. The PR recorded it as \"noted, not filed\".\n\n## Done when\n\nBoth sentences say what is true on each side: free activation on an open install (ADR-0132 D4), the licence gate on a commercial host (D2, D3). Spec patch, `Clause-②: no` · `Metadata-protocol: none`.\n\nDedupe: #28826 / PR #29239 (the \"enterprise\" wording, landed). **New.**"

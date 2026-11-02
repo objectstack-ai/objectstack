@@ -1,0 +1,34 @@
+{
+  "number": 29514,
+  "kind": "pull_request",
+  "title": "docs(spec): TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL names the readers of top-level datasets the tree has",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T17:17:43Z",
+  "updated_at": "2026-11-02T18:46:49Z",
+  "closed_at": "2026-11-02T18:42:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T18:42:19Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29514",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8NmLWYcxwHxEWCS68XFHnin)_\nFixes #29335\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改 `packages/spec/src/stack.zod.ts` 里 `TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL` 的注释，外加一个 patch changeset。\n- 为什么改：注释说顶层 `datasets` 由 `AppPlugin` 直接从 bundle 读取，树上没有这个读者；包体的 `datasets` 实际由引擎 `registerApp` 的 `METADATA_ARRAY_KEYS` 循环读取。\n- 风险与回滚：零运行时风险，没有代码、类型或导出变化；回滚即 revert 本 PR。\n- 先看：`packages/spec/src/stack.zod.ts` 的那段注释（约 360 行）。\n- 两分钟验证：`git grep -n \"No boot reader takes a top-level\" packages/spec/src/stack.zod.ts`，预期命中 1 行。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- The `TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL` docblock now names the readers the tree has. Seed `data` and `jobs` are read off the stack whole, top level merged with every body (`resolveArtifactCollections`, `@objectstack/runtime`): `AppPlugin` hands the seed `data` to the seed loader and schedules the `jobs`. `datasets` are read off the package bodies only, by the engine's `registerApp` (`METADATA_ARRAY_KEYS`, `@objectstack/objectql`), and no boot reader takes a top-level `datasets` item that no body declares.\n- The constant, the rule it encodes and every caller are unchanged.\n- `.changeset/29335-residual-datasets-docblock.md`: `@objectstack/spec` patch. The package ships `src/**/*.zod.ts` as source (`files[]`), so the comment publishes even though `dist/` carries none of it (measured: the new sentence has 0 hits in `dist/`; the constant's name, the positive control, has hits in `dist/`).\n\nReaders measured on the tree at `94d3e254` (the branch's base before the merge of `origin/main`):\n\n- `packages/runtime/src/app-plugin.ts`: no read of `datasets` off the bundle or its collections. Each `datasets` word there is the seed `data` collector (`seedDatasets`, `readSeedDatasets`, `mergeSeedDatasets`).\n- `packages/objectql/src/engine.ts`: `METADATA_ARRAY_KEYS` lists `datasets`; `registerApp` runs `packageBodyCollectionRefusal` and then `registerMetadataCollections` over the body's keys.\n- `packages/metadata/src/plugin.ts`: `ARTIFACT_FIELD_TO_TYPE` has no `datasets` row, so `unclaimedTopLevel` never lists one.\n\n## Tests\n\n- No test changed: the diff is a comment. `pnpm --filter @objectstack/metadata exec vitest run --maxWorkers=2 src/owner-stamp-residual-build-boot.test.ts` (the test that pins the constant equal to the boot's rule): 1 file, 27 tests passed, at head `061f69c58`.\n- `pnpm --filter @objectstack/spec typecheck`: exit 0, at head `061f69c58`.\n\n## Acceptance notes\n\n- The boot-side half of the card (a `packages[]` stack's top-level `datasets` item that no body declares) is not fixed here, per triage's scope. It was measured on a kernel boot and is handed to the spec seat to file as a `domain:server` card: the item is dropped with no refusal and no warning.\n- The same wrong attribution sits in a gate waiver: `scripts/check-stack-collection-maps.mjs`, the `ARTIFACT_FIELD_TO_TYPE` row for `datasets`, `jobs`, `datasources` and `translations`, says all four are consumed functionally by AppPlugin straight off the bundle. For `datasets` that is not so. Outside this card's file surface; reported to the seat, not edited.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on this diff derived 74 families at `061f69c5`. All 74 were run; 73 exit 0. `pnpm check:dual-build-cjs-loads` exits 3 (PREREQUISITE NOT MET: it needs every workspace package built), so it is NOT MEASURED locally and left to CI. `--ran` reconciliation: \"74 derived famil(ies) accounted for — 73 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)\".\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. (No formatter ran. `pnpm lint` is the repo-wide scan CI owns; not run locally.)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01JQwxbad6xiDCcLYXcBsEa6\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbad6xiDCcLYXcBsEa6)_\n"
+}

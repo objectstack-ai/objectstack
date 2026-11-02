@@ -1,0 +1,36 @@
+{
+  "number": 29447,
+  "kind": "pull_request",
+  "title": "feat(spec)!: a view no longer declares itself personal — scope 'personal' and sharing.type retire",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ui",
+    "size/xl",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T15:09:49Z",
+  "updated_at": "2026-11-02T16:55:31Z",
+  "closed_at": "2026-11-02T16:55:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T16:55:29Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29447",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9FHuKppFm22FnTZqw5cbJzG)_\n\nFixes #29037\n\nClause-②: no (narrowing)\nMetadata-protocol: narrowed\n\n## 维护者速读\n\n- 改了什么：视图不能再自称\"个人视图\"。`scope: 'personal'` 和列表视图的 `sharing.type` 都被拒收并给出改法；控制台列表工具栏不再显示\"个人视图 / 共享视图\"标签，只保留\"由谁锁定\"。\n- 为什么改：这两个声明从来没有限制过谁能看到视图，标成个人的视图其实所有能读这个对象的人都看得到，标签在说假话（#28971 裁决 C：个人视图将来是用户自有记录，不复用这两个键）。\n- 风险与回滚：BREAKING 的 spec minor（只收窄）。已存的行和组装产物在读取时自动转换，旧版本写入的默认值 `collaborative` 照收并丢弃，所以现有视图不用改就能加载；回滚就是 revert 本 PR。\n- 先看：`packages/spec/src/ui/view.zod.ts`（两处退役与改法文案）和 `packages/spec/src/conversions/registry.ts` 的 `personalViewDeclarationsRemoved` 转换。\n- 两分钟验证：`pnpm --filter @objectstack/spec exec vitest run --project repo src/ui/view-personal-declarations-retirement.test.ts`，看 `personal` 两处被拒、`collaborative` 被丢弃、转换后的行能通过。\n- 需要你做的：看 open questions 里 `collaborative` 残留是照收丢弃还是一起拒收（默认按 #12840 惯例照收丢弃）。\n\n## What changes\n\nPer ADR-0049 enforce-or-remove and ADR-0087, the two inert `personal` declarations retire.\n\n- **`view.scope: 'personal'`** is refused by `enumWithRetiredValues` with a prescription at every door that reads a view item's `scope`: `ViewItemSchema`, the wire schema, the `ViewMetadataSchema` record and overlay arms, and `AssembledViewArtifactSchema`. `package` and `shared` are unchanged.\n- **`view.list.sharing.type`** retires as a whole key with a `retiredKey` tombstone, not just its `personal` value. Once `personal` goes, `collaborative` is the only value left, and the only reader was the console badge. A measured `git grep` over packages/ and ui/ finds no server, runtime or service reader. `lockedBy` stays.\n- The emitted default `type: 'collaborative'`, which a released toolchain wrote into every parsed `sharing` block, is accepted and stripped through `acceptRetiredDefaultResidue` (house rule #12840). `type: 'personal'` is refused.\n- **D2 conversion** `view-personal-declarations-removed` (identifier `personalViewDeclarationsRemoved`, `retiredFromLoadPath: true`, `retiredAfter: '18.2.0'`) serves stored-row rehydration, assembled artifacts and `os migrate meta`. It strips `scope: 'personal'` from `views` / `viewItems` rows, and `sharing.type` from list payloads, list view item configs, flattened list overlays and `objects[].listViews.*`. **Route:** it deletes the declaration and does not invent `shared`, because nothing a reader sees changes.\n- **D3 entry** `ui-view-personal-declarations-retired` carries the part a migration cannot decide (keep the view as everyone-visible, delete it, or wait for user-owned personal views). One ADR-0087 marker sits in the changeset. There is also a `RETIRED_KEYS_BY_MAJOR` entry `ui/ViewSharing:type` and a STEP18 rationale fragment.\n- The docblocks that called per-user views a \"parked direction\" now point at #28971 letter C and the ADR notes in PR #29321.\n- **Console (in surface, the target-2 reading):**\n  - `ui/packages/plugin-list/src/ListView.tsx`: the personal/shared badge is gone, and a view with `sharing.lockedBy` still shows \"Locked by …\" (`data-testid=\"sharing-locked-by\"`).\n  - `ui/packages/core/src/utils/normalize-list-view.ts`: drops the legacy `sharing: { visibility, enabled }` pair instead of folding it onto the retired `type`.\n  - `list.sharingPersonal` / `list.sharingCollaborative` are removed from all 10 locales.\n- **Docs:** `content/docs/ui/audience-based-interfaces.mdx` now says per-user list preferences instead of personal views. The liveness row `view.json#list.sharing` is re-cited to the lock reader.\n- **Regenerated, riding this PR:** `authorable-surface/ui.json`, `authorable-defaults/ui.json`, and `content/docs/references/{api/protocol,data/object,ui/view}.mdx`.\n\n## Forced test edits\n\nThese are existing tests that pinned the retired values, and each one changes only its fixture:\n\n- `packages/spec/src/ui/view.test.ts`: the `ViewSharingSchema` describe was rewritten (an empty block parses to `{}`, and the lock is accepted). Three list-view literals change from `sharing.type` to `sharing.lockedBy`.\n- `packages/spec/src/ui/view-item-owner-hidden-retirement.test.ts`: the bystander row's `scope: 'personal'` changes to `'shared'`. The owner/hidden conversion fixture in `conversions/registry.ts` gets the same edit.\n- `packages/spec/src/ui/view-overlay-viewkind-arm.test.ts`: `{ sharing: { lockedBy: 'admin' } }`.\n- `packages/metadata-protocol/src/protocol.graft-folded-form-sections.test.ts`: `{ sharing: { lockedBy: 'admin' } }`.\n- `ui/packages/plugin-list/src/__tests__/ListView.test.tsx`: the sharing tests were rewritten around `sharing-locked-by`.\n- `ui/packages/plugin-list/src/__tests__/ListViewBlock.inertKeys-13074.test.tsx` and `ListViewBlock.specInputs-13047.test.tsx`: they mount `{ sharing: { lockedBy: 'admin' } }` and assert `sharing-locked-by`.\n- `ui/packages/core/src/utils/__tests__/normalize-list-view.test.ts`: the legacy pair is dropped, and no `type` is written.\n- `ui/packages/plugin-view/src/__tests__/ObjectView.namedViewProtocolKeys-8980.test.tsx`: `lockedBy` values.\n- `ui/packages/types/src/__tests__/p1-spec-alignment.test.ts`: `{ lockedBy }` only.\n- `ui/apps/console/src/__tests__/registry-inputs-spec-parity.test.ts`: the `list-view.sharing` reason prose.\n\nNew test file: `packages/spec/src/ui/view-personal-declarations-retirement.test.ts`. It covers every door, `defineStack` 422, the type-level pins, the D2 conversion and the D3 entry, plus a tree-scoped absence walk.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmTHDhPHuivpyvN8gfF)_\n"
+}

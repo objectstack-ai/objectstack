@@ -1,0 +1,35 @@
+{
+  "number": 29403,
+  "kind": "pull_request",
+  "title": "fix(service-automation): the region refusal walks the child's suspension chain strictly and names the link it cannot read",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:10:50Z",
+  "updated_at": "2026-11-02T15:01:32Z",
+  "closed_at": "2026-11-02T15:01:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T15:01:30Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29403",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9JeMXnsbKRJxMbW9ZUq9nDf)_\nFixes #29333\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：区域（loop / parallel / try_catch）内子流程挂起被拒绝时，取消子运行挂起链改用严格读取；链中间某一环读不到时，已读到的环照常取消，读不到的那一环仍交给 `cancelRun`，并记一条 `error` 点名该运行。\n- 为什么改：原来用降级读取，中间环读不到就当作\"没有挂起\"，遍历停在那里，它和它下面的运行一直停在存储里，只留一条 warn。\n- 风险与回滚：只改取消路径的读取方式；恢复门禁等其它读者仍用原来的降级遍历，未改。拒绝本身（文字、不可路由）不变。回滚即还原 `dag-traversal.ts` 这一段和 `engine.ts` 新增的方法。\n- 先看：`packages/services/service-automation/src/dag-traversal.ts`（`runRegion` 的取消段），再看 `engine.ts` 的 `resolveSuspensionChainForCancel` / `walkSuspensionChain`，最后看测试文件末尾新增的两例。\n- 两分钟验证：`pnpm --filter @objectstack/service-automation exec vitest run src/subflow-region-suspension.test.ts`，预期 24 例全过。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `engine.ts`: the chain walk behind `resolveSuspensionChain` moves into `walkSuspensionChain(runId, load)`; only the loader is a parameter, so there is still one walk with the same depth bound and cycle guard. `resolveSuspensionChain` calls it with the degrading `loadSuspendedRun`, exactly as before, so the resume gate and its other readers see no change. New `resolveSuspensionChainForCancel` calls it with the strict `loadSuspendedRunStrict` (the read `cancelRun` already takes) and returns `{ chain, unreadable? }`, where `unreadable` names the link whose read threw, with the cause. A link that is simply not found still ends the chain.\n- `dag-traversal.ts` `runRegion`: the region refusal's cancel now walks through `resolveSuspensionChainForCancel`. Every link it read is cancelled, deepest first. If a link could not be read, that run is still handed to `cancelRun` first (it reads again, owns the `error` record for that run if the store is still unreadable, and is a no-op if the run is gone), and one `error` record names it: any run it is itself parked on was never reached and may still be parked. The refusal is thrown after, unchanged.\n- #29329's empty-chain branch is subsumed, not dropped: an unreadable child now comes back as `unreadable` = the child, so it gets the same single `cancelRun`. A child that is truly not found (the strict store answered \"no row\") gets no cancel, where #29329 sent a `cancelRun` that returned `false`. #29329's two tests pass unedited.\n- Changeset: `.changeset/29333-region-refusal-deeper-chain-cancel.md`, `@objectstack/service-automation` patch.\n\n## Tests\n\nTwo cases added at the end of `src/subflow-region-suspension.test.ts` (no existing test edited), on a three-run chain caller → `loop` → `deal_review` → `deal_mid` → `deal_ask` (parks at `wait`):\n\n- **middle link unreadable** (the store's `load` always throws for `deal_mid` rows): the refusal text is unchanged; `deal_review` ends `cancelled`; exactly one chain `error` record names `deal_mid`'s run id; `cancelRun` is called for `deal_mid` then `deal_review`, deepest first. `deal_mid` and `deal_ask` are still in the store, asserted as such.\n- **CONTROL, all readable**: all three runs end `cancelled`, `cancelRun` is called deepest first, and nothing is logged at `error`.\n\n## Acceptance notes\n\n- `deal_ask` (below the unreadable link) stays parked. Its id is only recorded in `deal_mid`'s row (`subflow:` correlation), and a `SuspendedRun` carries no parent pointer, so nothing can reach it while that row cannot be read. The `error` record says so and tells the operator to cancel the remaining runs once the store answers.\n- When the unreadable link's store is still down, two `error` records appear for it: `cancelRun`'s own skipped-cancellation line for that run, and the chain record for the runs below it. They say different things, so both stay.\n\n## Verification\n\n<details><summary>Ablation (scripts/ablation-replace.mjs, on-disk proof): the cancel walk read through the degrading loader again</summary>\n\n```\nablation-replace: anchor \"return await this.loadSuspendedRunStrict(id);\" x1 -> x0\nablation-replace: ok mutation landed: anchor 1 -> 0, blob c937469c8834 -> ebabde87953c\n  × an unreadable store: … the child run gets exactly one cancelRun, …          (#29166)\n  × a store that answers again by the cancel: …                                  (#29166)\n  × the middle link cannot be read: the child is cancelled, one `error` record names the middle run, …\n  AssertionError: one record names the unreadable link: expected [] to have a length of 1 but got +0\n  Tests  3 failed | 21 passed (24)\nablation-replace: ok restored: blob == HEAD (c937469c8834) and `git diff HEAD` is empty\n```\nThe CONTROL stays green under the mutation, as it should. The test imports `./engine.js` from `src`, so no `dist` leg applies.\n</details>\n\n<details><summary>Final head a06cb531</summary>\n\n```\nhead a06cb531 (merge of main 5924e500, which carries #29329, onto e6d2696f):\npnpm --filter '@objectstack/service-automation...' build, typecheck, test   under os-verify-lock, VERDICT command-exit 0\n  typecheck exit 0 · Test Files 260 passed (260) · Tests 3342 passed (3342)\nvitest run src/subflow-region-suspension.test.ts                              Tests 24 passed (24)\nturbo build ./packages/** (78/78) then pnpm check:dual-build-cjs-loads and pnpm lint   VERDICT command-exit 0\ndispatch-gates --ran: 62 derived, 62 run, 0 NOT-MEASURED (all exit 0)\n\nTwo first answered exit 3 (prerequisite, nothing measured) and were re-run green:\ncheck-plugin-teardown-shape --self-test (after git fetch origin 621a4876…, its pinned fixture commit)\ncheck:dual-build-cjs-loads (after the ./packages/** build above)\n```\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmS5997viAw9y7Jknnz)_\n\n<!-- signed: domain:server#3 · os-steve · session_01ADHkmS5997viAw9y7Jknnz -->\n"
+}

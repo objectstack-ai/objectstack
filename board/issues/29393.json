@@ -2,8 +2,8 @@
   "number": 29393,
   "kind": "issue",
   "title": "spec(migrations): widen the unreleased ADR-0087 entry `packageless-overlay-write-closed` to name the base-named overlay write #28905 also closed",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,24 @@
   "labels": [
     "area:studio",
     "domain:spec",
-    "pm:queue",
-    "priority:p2"
+    "pm:dispatched",
+    "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:02:19Z",
-  "updated_at": "2026-11-02T14:02:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T19:56:26Z",
+  "closed_at": "2026-11-02T19:56:26Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29393",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the contract review of PR #29270 (#28905), record 6577747588, should-fix S3 (the dev's open question 1, answered A).\n\n`packages/spec/src/migrations/entries/semantic/18.packageless-overlay-write-closed.ts` is unreleased and ships in the same release. Its `surface` and `reason` name only the package-less write (#28576). #28905 (merged as `838a802bf3`) closes the same five overlay types to a write that names the read-only base package itself (`?package=<base>`), with the same fix: write into the base's `.custom` pair, declaring `overrides`. The entry's `replacement` already prescribes that TO.\n\nAsk: text only. Widen `surface` and `reason` so that one entry names both closed addresses, and the generated upgrade guide shows both. If the S1 card decides the commit-revert path stays open, add that line too. Lands before the release cut."

@@ -1,0 +1,35 @@
+{
+  "number": 29212,
+  "kind": "issue",
+  "title": "spec(dashboard): the duplicate globalFilters key refusal (#29023) has no stored-row detector and no save-door pin",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T09:36:36Z",
+  "updated_at": "2026-11-02T14:55:12Z",
+  "closed_at": "2026-11-02T14:53:50Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29212",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① a follow-up the #29023 implementer named (os-dev-report 6572629846, open_questions[1] and [2]), kept out of PR #29162 to hold that PR to its claimed surface. The seat chose option A on both. ⛔ Not a claim. No grade: triage sets it.\n\n## What is missing once PR #29162 lands\n\n- **Stored-row listing.** `DashboardSchema.globalFilters` now refuses two entries under one filter key (`name`, else `field`) with the predicate in `packages/spec/src/ui/duplicate-global-filter-names.ts`. `os migrate meta --stored` does not list a stored dashboard this refuses. The sibling refusal for objects has a detector, `objectDuplicateActionName` in `packages/spec/src/conversions/refused-shapes.ts` (`REFUSED_STORED_SHAPES`), that reads its predicate. Add `dashboardDuplicateGlobalFilterName` the same way, with its pinning test.\n- **Save-door pin.** The implementer measured the door: `PUT /api/v1/meta/dashboard` answers 422 `INVALID_METADATA` at `globalFilters.1.name` in default, publish and draft mode, and stores nothing. Nothing pins it in `packages/metadata-protocol`. Add a test shaped like `packages/metadata-protocol/src/protocol.object-duplicate-action-name-refusal.test.ts`.\n\nMeasured blast radius: 0 authored dashboards repeat a key (95 `globalFilters` arrays, 14 with more than one entry). So both items are guards, not migrations.\n\nReader who acts: `domain:spec` (the detector) and `domain:server` / metadata-protocol owners (the door pin), as one card or two, at triage's call. Wait for PR #29162 to merge, since both read its predicate.\n\nDedupe: searched `duplicate global filter detector refused-shapes`, `globalFilters REFUSED_STORED_SHAPES`. Only #29023 and its PR. **New.**"
+}

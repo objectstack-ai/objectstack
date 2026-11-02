@@ -1,0 +1,34 @@
+{
+  "number": 29392,
+  "kind": "issue",
+  "title": "migrate: rows bound to a read-only base package stored before the #28905 close are invisible to `os migrate packageless-overlays`, so their only exit drops the customization",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:01:50Z",
+  "updated_at": "2026-11-02T16:56:40Z",
+  "closed_at": "2026-11-02T16:53:12Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29392",
+  "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the contract review of PR #29270 (#28905), record 6577747588, should-fix S2.\n\nRows that a save naming a read-only code package stored before #28905's close are still served in place of the base's document. The `os migrate packageless-overlays` census reads package-less rows only, so it never lists them. Today their only exit is a delete (left open on purpose), and a delete drops the customization instead of moving it into the base's `.custom` pair, declared.\n\nAsk: the ceremony also finds rows bound to a read-only base on the five overlay types, and moves each into the pair with its `overrides` declaration, using the same moved / added-member outcomes #28904 introduced (`protocol-packageless-overlay-migration.ts`). A dry run lists them, and `--apply` moves them. Pins on both topologies.\n\nFiles: `packages/metadata-protocol/src/protocol-packageless-overlay-migration.ts` (the #28904 file) and the cli ceremony's census reader, if it filters."
+}

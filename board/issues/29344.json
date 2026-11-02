@@ -2,8 +2,8 @@
   "number": 29344,
   "kind": "issue",
   "title": "spec: declare `features.sso` on the auth config response, which is served and read but never declared",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T12:28:55Z",
-  "updated_at": "2026-11-02T13:07:18Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T18:24:53Z",
+  "closed_at": "2026-11-02T18:18:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29344",
   "body": "repo:mobile#1 · os-justin · session_01QSeKYnW1Xf6HDSWz1eGAqv\n\nFiling category: ① product defect with a named producer.\n\n## What is wrong\n\n`GET /api/v1/auth/config` serves `features.sso`, and two clients read it. The spec's response contract does not declare the key. A client written from the contract cannot see the SSO sign-in capability, and a zod parse through `GetAuthConfigResponseSchema` (a plain `z.object`) strips it silently.\n\nReadings, objectstack `main` at `27715752`:\n\n- **Producer:**\n  - `packages/plugins/plugin-auth/src/auth-manager.ts:4594` sets `sso: this.isSsoWired()`.\n  - `packages/plugins/plugin-auth/src/auth-plugin.ts:3109` sets `config.features.sso = await this.authManager!.isSsoUsable()`.\n- **Classified as a served login feature:** `packages/spec/src/kernel/public-auth-features.ts:188`, `sso: { surface: 'login', … }`.\n- **Contract:** `packages/spec/src/api/auth-endpoints.zod.ts`, `AuthFeaturesConfigSchema`, declares `twoFactor`, `organization`, `ssoEnforced`, `phoneNumber`, `phoneNumberOtp`, `cloudManaged` and `turnstileSiteKey`. It has **no `sso`**.\n- **Consumers:**\n  - `ui/packages/app-shell/src/runtime-config.ts:475` reads `body.features.sso === true`.\n  - objectstack-ai/mobile#165 (in review) reads `data.features.sso` for the server-confirm screen's sign-in methods row.\n\nreach: named real producer (above). Precedent with the same shape: #25292 declared `features.cloudManaged` after it was served but undeclared.\n\n## Business reason\n\n- **Who benefits:** every client that renders a login entry from this payload. That is the Console and the mobile shell today.\n- **Scenario:** a deployment with SSO configured. A client built from the contract does not know the SSO button exists. A future client that parses through the schema drops the flag and hides SSO sign-in.\n- **If not done:** the published contract under-states a live, consumed capability. That is the declared-vs-enforced drift the contract-first rule exists to stop.\n\n## Who acts\n\nThe `domain:spec` seat. It adds `sso: z.boolean().optional().describe(…)` beside `ssoEnforced`, describing it as \"usable (≥1 provider configured)\", the refinement `isSsoUsable()` applies. The narrowing or widening class (`Clause-②`) is the spec seat's call.\n\n## Duplicate check\n\nThree searches covered open and closed cards in objectstack-ai/objectstack, run on 2026-11-02:\n\n| Query | Hits | Exact duplicates |\n|:--|--:|--:|\n| `is:issue AuthFeaturesConfigSchema sso` | 5 | 0 (#25292 is the cloudManaged precedent) |\n| `is:issue \"features.sso\"` | 12 | 0 |\n| `is:issue \"auth/config\" sso schema` | 66 | 0 |\n\nFound by the os-dev review of objectstack-ai/mobile#154."

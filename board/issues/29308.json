@@ -2,8 +2,8 @@
   "number": 29308,
   "kind": "issue",
   "title": "spec(data): `DatasourceSchema.name` accepts `drivers` (and the metadata save door stores it), a name the datasource admin routes can never serve by name",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,7 +12,6 @@
   },
   "labels": [
     "domain:spec",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -21,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T11:36:18Z",
-  "updated_at": "2026-11-02T13:28:13Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T18:24:16Z",
+  "closed_at": "2026-11-02T18:18:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29308",
   "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① out-of-scope finding of the #29164 dev (os-dev-report 6576046193), confirmed by the `CONTRACT_REVIEW_TIER` review of PR #29262 at head `a5f6f0cf` (read, not run). Filed by `domain:server` seat 3 for the `domain:spec` lane. ⛔ Not a claim. Suggested-grade: p3 · same defect class as #29164, on the metadata accept surface.\n\nReach: a code-declared datasource named `drivers`, or `PUT /api/v1/meta/datasource/drivers` through the metadata save door.\nReader who acts: the `domain:spec` lane (`packages/spec/src/data/datasource.zod.ts`, `DatasourceSchema.name`); the server lane only if the ruling puts the refusal at the meta door instead.\n\n## What happens (source reading)\n\n- PR #29262 (#29164) refuses `drivers` at the admin create door (`POST /api/v1/datasources`), because the registrar mounts `GET /api/v1/datasources/drivers` (the driver catalog) before `GET /api/v1/datasources/:name`, so a datasource of that name can never be read by name.\n- `DatasourceSchema.name` (`datasource.zod.ts` ~L652) still accepts `drivers`, and the metadata save door parses only the schema (service-datasource ~L1298), never the admin door's `assertValidName`. So the same unreachable name can still be minted from code or the meta door.\n\n## Wanted\n\nA ruling on where the reservation lives for the metadata surface: refuse at the spec (`DatasourceSchema.name`), naming the reserved set from one exported constant the admin routes also mount from; or leave it to code-wins collision as `default` is handled today, and document it. If the spec refuses, it is a narrowing of an authorable value (`Metadata-protocol: narrowed`).\n\nDedupe: searched `DatasourceSchema name drivers reserved`, `datasource name reserved spec`; nearest #23634 / #23768 (`default`, closed). **New.**\n\nLinks back: #29164, PR #29262."

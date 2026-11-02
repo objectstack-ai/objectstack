@@ -2,8 +2,8 @@
   "number": 29171,
   "kind": "issue",
   "title": "Portal UX: let a lookup show the target's name when the viewer cannot read the target (decision)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:access",
     "domain:spec",
-    "pm:dispatched",
     "priority:p1"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T08:42:56Z",
-  "updated_at": "2026-11-02T12:33:48Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T15:47:16Z",
+  "closed_at": "2026-11-02T15:23:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29171",
   "body": "director#1 · zhuangjianguo · session_01QsR2jV5sBSzCYNEDgpYLJw\n\nRuled: 6574398310 · letter B · 2026-11-02T10:06Z\n\nFiling gate: ② maintainer decision (a product/security trade-off only the maintainer can make).\n\n## 维护者速读\n\n- 一句话：外部门户用户能看到自己的记录，但记录上指向他读不到的对象（品类、物料、内部员工）的关联字段只显示「受限记录」，供应商看不懂这条记录是哪个物料、找谁。\n- 要你定：平台是否提供「引用目标不可读时仍显示其名称」的能力（按字段或按对象声明），还是维持现状，由应用自己加只读文本快照。\n- 不做会怎样：每个有门户的应用都要为每个这样的关联字段加冗余文本字段和写入 flow，并且各自保证不泄露。\n\n## Problem\n\nAn `external` portal user reads a record they are allowed to see (an admission application, a corrective action request) and the record carries lookups to objects they must not read in full: `srm_category`, `srm_material` (product catalogue with no supplier field, so no membership-key RLS can narrow it), and `sys_user` (portal users may only read themselves). Since objectui#13335 these lookups render as \"Restricted record\". That is safe, but the supplier cannot tell which material a corrective action is about or which category they applied for.\n\nReach: measured on 18.1.0 in the hotsrm v0.6 portal exit test (local `objectstack dev`, two `external` portal users): the record page shows the raw id for these lookups on 18.1.0; current objectui shows \"Restricted record\" (objectui#13335).\n\n## Business reason\n\nWho benefits: every app with a supplier/customer portal (hotsrm today). Scenario: the portal user must act on a record whose meaning lives in a lookup name (which material failed inspection, which category is under review). Without it: each app adds a read-only text snapshot per lookup plus a record_change flow to keep it, and each re-derives that it does not leak.\n\n## Options\n\n| Option | What it does | Customer-visible effect | Effort |\n| --- | --- | --- | --- |\n| A. Keep as is | Lookups to unreadable targets stay \"Restricted record\" | Apps add snapshot text fields (hotsrm does this now: objectstack-ai/hotsrm#95) | none on platform |\n| B. Declared name exposure | A field-level (or object-level) declaration that the target's name field may be shown to anyone who can read the referencing record, resolved elevated for the name only | Portal shows \"PCB-1001 Main board\" instead of \"Restricted record\"; nothing else of the target is readable | spec key + objectql/REST expand + renderer; no precedent |\n| C. Denormalized name on read | The engine returns the target's name for every lookup regardless of target access | Simplest for apps, but silently leaks names (e.g. internal user names, other suppliers' material names) | small, but reverses the #13335 stance |\n\nRecommendation: B, if the platform wants to own portal UX; otherwise A. C is not recommended: it leaks silently.\n\nos-decision-facets\n- ① Long-term soundness: B adds one declared key but removes a per-app pattern (snapshot field + sync flow) that every portal app would otherwise repeat.\n- ② Real business pull: one app today (hotsrm v0.6 portal, 3 lookups found; more expected on portal pages for contracts and performance reviews).\n- ③ AI-error resistance: B is an explicit, closed declaration per field; the failure mode of A is a missing snapshot (visible \"Restricted record\"), the failure mode of C is a silent leak.\n- ④ Startup-stage restraint: A declares nothing on the platform; B is a permanent key.\n\nPrior rulings read: \"Restricted record\" lookup, \"lookup unreadable target\" → objectui#13335 (closed, the current stance), objectui#13377 (closed, tooltip id); objectstack 0 direct hits; ADR none found; thread: none.\n\n## Who acts\n\nMaintainer decides A/B. If B: a platform seat implements spec + objectql + objectui renderer. If A: nothing on the platform; hotsrm keeps its snapshot fields (objectstack-ai/hotsrm#95).\n\nDedupe: `repo:objectstack-ai/objectstack is:issue lookup name unreadable target` (156 hits incl. closed, none on this ask), `… lookup display name restricted record permission` (35, none), `repo:objectstack-ai/objectui is:issue lookup restricted` (closest: objectui#13335, #13377, both closed and about hiding, not exposing).\n\nFiled from the hotsrm project (requested by 田騏). Session: session_017ihL2fedQbjJWWSwaVb31Q\n\n"

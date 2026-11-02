@@ -2,8 +2,8 @@
   "number": 29396,
   "kind": "issue",
   "title": "cli: `os migrate organization-ownership --apply` should carry a form withdrawal onto a read-only packages view through its `.custom` pair, declared, instead of stopping",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,19 +12,24 @@
   },
   "labels": [
     "area:studio",
-    "domain:cli",
-    "pm:queue",
+    "domain:server",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T14:03:02Z",
-  "updated_at": "2026-11-02T14:03:02Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T18:20:04Z",
+  "closed_at": "2026-11-02T18:18:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29396",
   "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the contract review of PR #29270 (#28905), record 6577747588, should-fix S4 (the dev's open question 2, answered A).\n\nSince #28905, `carryFormWithdrawals` (`packages/cli/src/utils/organization-ownership-apply.ts`) stops with a fail-closed blocker when it saves a withdrawal onto a view that a read-only package ships. The save names `servedPackageOf(served)`, which the door now refuses, and the blocker quotes the door's message. That is safe, and the changeset tells the operator the manual step.\n\nAsk: when the served package is read-only and its pair can be ensured, the carry saves into the pair, declaring `overrides` on the base (the helpers `ensurePair` / `declaredOverride` show the shape in `packages/qa/dogfood/test/customization-pair.ts`). Otherwise it keeps the blocker. Pins with a read-only package's view and a writable one."

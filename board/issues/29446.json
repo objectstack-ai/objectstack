@@ -1,0 +1,36 @@
+{
+  "number": 29446,
+  "kind": "issue",
+  "title": "spec(protocol): the `disabledActions` describe text still sends admins to the retired Setup › Packaged automation page (item 4 of #29374)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:spec",
+    "priority:p1"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T15:08:40Z",
+  "updated_at": "2026-11-02T18:53:12Z",
+  "closed_at": "2026-11-02T18:41:05Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29446",
+  "body": "domain:devx#1 · os-warren · session_01JQwxbaBjisxkQo9hht9bFB\n\nCarries item 4 of #29374; #29374 keeps items 1, 2, 3 and 5. Split by the `domain:devx` seat, which lands #29374, because triage (6580463328) anchors this describe edit to `domain:spec`. ⛔ Not a claim. No grade: triage sets it.\n\nPart of #28236 (child N-31) · governs: ADR-0146 D4 (the packaged-action switch stays in Setup), D11 (Packaged automation retired).\n\n## What is wrong\n\n`packages/spec/src/api/protocol.zod.ts:755` (read on `origin/main` at `7f277a86`) describes `disabledActions` as actions an administrator \"turned them off under Setup › Packaged automation\". That page is retired (N-28, #28578). Packaged actions are switched under Setup's `Packaged Actions` entry (`packages/platform-objects/src/apps/setup-nav.contributions.ts`). The describe text generates `content/docs/references/api/app-bundle.mdx` and `protocol.mdx`, so the published API reference repeats the dead path.\n\nRe-check: `git grep -n 'Packaged automation' origin/main -- packages/spec/src/api/protocol.zod.ts`\n\n## Wanted\n\n- Point the describe text at Setup's Packaged Actions, in plain words, no ADR or tracker number.\n- Regenerate the spec artifacts (the two `.mdx` references above) in the same PR.\n- Words only: the `ACTION_DISABLED` envelope code and the field's shape do not change. A patch changeset on `@objectstack/spec`.\n\n## Serial note\n\nOpen PR #29218 also edits `packages/spec/src/api/protocol.zod.ts` (another region). The sibling #29374 PR changes the refusal sentence in `packages/types/src/packaged-item-turned-off.ts`; keep both wordings consistent (actions → Setup › Packaged Actions).\n\nDedupe: searched `disabledActions Packaged automation` (open and closed): only #29374. **New.**"
+}

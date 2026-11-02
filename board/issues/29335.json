@@ -2,8 +2,8 @@
   "number": 29335,
   "kind": "issue",
   "title": "spec(owner-stamp gate): TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL says AppPlugin consumes top-level `datasets`, but no boot reader touches a packages[] top-level datasets item",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:spec",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T12:15:01Z",
-  "updated_at": "2026-11-02T13:07:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T18:46:08Z",
+  "closed_at": "2026-11-02T18:42:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29335",
   "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ② should-fix 1 and ③ candidate card of the spec seat's contract review on PR #29303 (#28695), record 6576835730 at head `2562bce2`. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec` for the docblock; the boot-side question may belong to `domain:server` (triage decides).\n\n## What the review found\n\n- **Docblock attribution (should-fix, prose).** `packages/spec/src/stack.zod.ts`, the `TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL` docblock, says `datasets` is \"consumed by `AppPlugin` straight off the bundle\". On the tree it is not: `packages/runtime/src/app-plugin.ts` never reads `datasets` (each `datasets` mention there is the seed `data` collector). A package body's `datasets` are registered and stamp-judged by the engine's `registerApp` `METADATA_ARRAY_KEYS` loop. The rule the constant encodes is right and pinned by the metadata equality test (`owner-stamp-residual-build-boot.test.ts`); only the explanation is wrong.\n- **A silent drop at boot (candidate, pre-existing, outside PR #29303).** A `packages[]` artifact's top-level residual `datasets` item is touched by no registrar at boot: `ARTIFACT_FIELD_TO_TYPE` has no `datasets` row, so `unclaimedTopLevel` never lists it, and the engine runs on the bodies only. The item is dropped with no refusal and no registration. That is the silent class ADR-0130 D4's residual rule exists to remove.\n\n## Done when\n\n- The docblock names the readers that are true on the tree (spec patch, `Clause-②: no` · `Metadata-protocol: none`).\n- The `datasets` residual is either registered like the other residual collections, or refused at both doors with a named error, or the drop is ruled acceptable and written down. Measure first: confirm the drop on a built boot before choosing.\n\nDedupe: #28695 / PR #29303 (the build door's residual walk, in the merge queue). **New.**"

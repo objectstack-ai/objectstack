@@ -1,0 +1,34 @@
+{
+  "number": 29483,
+  "kind": "pull_request",
+  "title": "docs(adr-0143): note that the installer-client server slice landed (PR #29097)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T16:08:25Z",
+  "updated_at": "2026-11-02T17:26:25Z",
+  "closed_at": "2026-11-02T16:55:29Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-02T16:55:29Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29483",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9R78d9rMi7xMzr2YvZvjWfQ)_\nFixes #29256\n\nClause-②: no\nMetadata-protocol: none\n\ndomain:server#2 · os-steve · session_01ADHkmPosotet8HaKtCv2id\n\n## 维护者速读\n\n- 改了什么:在 ADR-0143 D2 的「Slices」条下追加一条 2026-11-02 修订注记，记录服务端半边已随 PR #29097 落地;原句一字未改。\n- 为什么改:原句写着「服务端未落地前，声明 `clientSource: 'installer'` 的实例会因缺 `clientId` 被判为降级」,#29097 合并后这已不是现状，读者会误以为该键仍不生效。\n- 风险与回滚：只改文档，不发布任何包、不改行为;回滚即撤掉本 PR。\n- 先看:`docs/adr/0143-outbound-connector-auth-is-open-tier.md` D2.1 修订注记末尾「Slices」条下新增的引用块(仅此一处)。\n- 两分钟验证:`node scripts/check-adr-symbol-anchors.mjs`,应看到全部锚点解析通过(比 main 多 4 个符号锚、2 个文件锚)。\n- 需要你做的：批准本 PR(受治理 Tier H 文档面，草稿状态等待 GOVERNED_APPROVERS 批准)。\n\n## What changes\n\n- `docs/adr/0143-outbound-connector-auth-is-open-tier.md`: one append-only amendment note, a nested blockquote under the \"Slices\" bullet of the 2026-11-02 D2.1 note. It records that the server slice landed in PR #29097 (`ec0316ea44`): the connect door takes the installer's client as the closed body `{ clientId, clientSecret? }`; the grant handle uses it for authorize, the code exchange and every refresh; the connection state answers `client { source, clientId, hasSecret }` and never the secret; an instance declaring `clientSource: 'installer'` is no longer held degraded for a missing `clientId`. It names the ui slice, #28869 (open), and what the Console does until it lands.\n- The sentence beginning \"Until the server slice lands\" is not rewritten. The Status line and the `Amends` header are untouched (the card's acceptance asks for the note only).\n- Every fact in the note is read off `origin/main` source at `aca58cdb` (route ledger row, the service's begin rule, `grant-handle.ts#endpointOf`'s kind match, the contract interface, the `clientSource` schema description) and PR #29097's body. Key names: ruling of record `6580268872`, letter A.\n\n## Tests\n\nDocs only: no test, no ablation (os-dev: docs are not ablated). The note's six new anchors are checked by `check:adr-symbol-anchors`.\n\n## Acceptance notes\n\n- `skip-changeset`: `docs/adr/**` publishes nothing.\n- No ADR index regeneration was owed: `check:adr-index` reports `docs/adr/README.md` current.\n- The #29106 card's governed note is on ADR-0066; no shared index file is touched by either.\n- Governed Tier H: this PR stays a draft until a `GOVERNED_APPROVERS` approval.\n\n## Verification\n\nHead `0a3e4078` (the note commit `794155db` plus a merge of `origin/main` `8ca9dd7b`, a `scripts/pm` change). The derived gate list is identical on both heads, and all 21 were re-run on `0a3e4078`.\n\n<details><summary>Symbol anchors: main vs this head</summary>\n\n- `origin/main` `aca58cdb`: `2977 anchors across 148 records resolve — 702 symbol (675 declaration, 27 literal), 2228 file-level`.\n- `0a3e4078`: `2983 anchors across 148 records resolve — 706 symbol (679 declaration, 27 literal), 2230 file-level` — the four new symbol anchors (`installerClientOfBegin`, `parseKeptConnectionClient`, `endpointOf`, `ConnectorConnectionState`) and the two test-file anchors all resolve.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 21 commands)</summary>\n\nAll 21 exit 0 on `794155db` and again on `0a3e4078`: `check-adr-links` (+ `--self-test`), `check-closing-keyword-parity` (+ `--self-test`), `check-comment-mask-corpus`, `plan-test-core-shards --self-test`, `@objectstack/lint check:doc-formula-expressions` (after `turbo run build --filter=@objectstack/formula --filter=@objectstack/lint` under `os-verify-lock.sh`, VERDICT command-exit 0), `check:adr-anchors`, `check:adr-index`, `check:adr-symbol-anchors`, `check:ci-filter-parity`, `check:closed-ceremony-text`, `check:cross-package-test-inputs`, `check:doc-authoring`, `check:driver-memory-census`, `check:gitlink-declared`, `check:nul-bytes`, `check:pm-governed-merges`, `check:pm-prior-rulings`, `check:refd-timer-probe`, `check:watch-hint-literal`.\n\n`dispatch-gates --ran`: 21 derived, 21 run, 0 NOT-MEASURED, 0 UNRUN.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPosotet8HaKtCv2id)_\n"
+}

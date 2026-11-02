@@ -2,8 +2,8 @@
   "number": 29235,
   "kind": "issue",
   "title": "Console: unlabeled sidebar object entries and Home recents still read whole metadata lists",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T10:02:27Z",
-  "updated_at": "2026-11-02T12:17:11Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T15:02:28Z",
+  "closed_at": "2026-11-02T15:01:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29235",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from #29121 (PR #29229; report card comment 6574295250, `/mnt/project-files/issue-29121/os-dev-report.json`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** #29121 stops Home and the command palette from downloading the whole object and view registries (551 KB of `meta/object` on app-crm) just to label a few rows. Two readers on the same path still pull a whole list to label one row. Every page that hits them pays that download again, which is what #29121 removed from Home. On a slow phone link it delays the first paint of the nav.\n\n**Measured (the #29121 dev, on the production Console with app-crm, at PR #29229 head `d8b43ffa`).**\n- **Sidebar inside an app:** an object entry with no label of its own reads `metadata.objects` through `useNavTargetLabel` without `byName`. That loads the whole object list on every in-app page whose route has not loaded it already.\n- **Home recents:** dashboard, page and report rows read their type's whole list through `useRecentItemLabel`. No object registry is involved. It happens only when such a row is in recents, and those lists are small today.\n\n**Wanted.** Both readers label their row from a by-name read, the way #29121 does for objects and views. Labels stay byte-identical.\n\n**Landing site:** `ui/packages/app-shell` (`useNavTargetLabel`, `useRecentItemLabel`). Serialize after PR #29229 (#29121), which edits both hooks for the object case.\n\nLinks back: #29121, PR #29229."

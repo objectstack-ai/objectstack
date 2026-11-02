@@ -2,8 +2,8 @@
   "number": 29095,
   "kind": "issue",
   "title": "plugin-email: the email template context has no deployment base URL, so a template cannot render a clickable record link",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:automation",
     "domain:server",
-    "needs-user-decision",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T07:16:23Z",
-  "updated_at": "2026-11-02T09:26:56Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T16:41:10Z",
+  "closed_at": "2026-11-02T16:39:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29095",
   "body": "director#1 · zhuangjianguo · session_01QsR2jV5sBSzCYNEDgpYLJw\nRuled: 6573566446 · letter A · 2026-11-02T09:26Z\n\n**Filing-gate category: ② maintainer decision** (a capability the email template context does not offer; the choice of carrier is the platform's).\n\n## What is missing\n\nAn email rendered from a declared `emailTemplates` entry (e.g. by a flow `notify` node with `template` + `templateData`) gets a default template context that holds `appName` only (`packages/plugins/plugin-email/src/capability-arg.ts`: `OS_APP_NAME` > `config.email.appName` > `config.email.defaultTemplateContext.appName` > …). There is no key for the URL the deployment is served at, and `config.email.defaultTemplateContext` has no env carrier, so a metadata-only app cannot put one there per deployment. `OS_BASE_URL` / `OS_AUTH_URL` are already read by `serve` and by service-automation (connector OAuth redirect), but they never reach the template context.\n\nResult: a template can render a record path (`/srm_quality_issue/<id>`) but not a link a recipient can click from their mail client.\n\n## Business reason\n\nhotsrm (supplier relationship management on ObjectStack) now emails supplier portal users directly: new corrective-action requests, returned/overdue ones, certificate expiry, performance published, application results (hotsrm v0.6 U6). Each email is meant to carry a link and no content (amounts, accounts, scores stay in the app). Without a base URL the email can only say \"sign in to the portal and open <number>\", which works but costs every external recipient a manual search. The in-app inbox entry links correctly through `sourceObject` / `sourceId`; only email is affected. Any app that sends record notifications by email has the same gap.\n\n## Who acts\n\nA plugin-email maintainer decides whether to expose the deployment URL to templates (for example a `baseUrl` key resolved from `OS_BASE_URL`, or an env carrier for `defaultTemplateContext`). hotsrm would then switch its 21 supplier templates to `{{baseUrl}}{{path}}`; until then it keeps the \"sign in and open <number>\" wording (hotsrm docs/design/07-delivery-plan.md §6.3 PF20).\n\n## Dedupe\n\n`repo:objectstack-ai/objectstack is:issue` searches, 2026-11-02: `defaultTemplateContext` → 6 hits, all closed and about other keys (#5448 appName precedence, #5307 / #22748 / #5447 schema carriers); `OS_BASE_URL email` → 5 hits, none about template context; `email template base url` → 199 and `email deep link` → 150, first pages unrelated (QA runs, sweeps, ADR epics). No open or closed issue asks for a base URL in the email template context.\n\n"

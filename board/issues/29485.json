@@ -1,0 +1,35 @@
+{
+  "number": 29485,
+  "kind": "issue",
+  "title": "spec: the `email.defaultTemplateContext` describe() still says only `appName` is resolved; `baseUrl` is now resolved too (#29095)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T16:16:03Z",
+  "updated_at": "2026-11-02T19:36:12Z",
+  "closed_at": "2026-11-02T19:28:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29485",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① an out-of-scope finding of the #29095 dev (os-dev-report `6581879408`, open question 2), confirmed by the contract review on PR #29478 and ruled A by the seat. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 (reference text only; behaviour is already shipped and documented on the authoring page).\n\n## What happens\n\nPR #29478 (#29095) makes the email plugin resolve a fixed `baseUrl` in the template context, next to `appName`. The chain is `OS_AUTH_URL` (legacy `BETTER_AUTH_URL`) > `OS_BASE_URL` > `config.email.defaultTemplateContext.baseUrl` > `http://localhost:PORT`, with the trailing slash trimmed. A send's own `data.baseUrl` still wins.\n\nThe spec's `.describe()` on `defaultTemplateContext` (`packages/spec/src/system/email-config.zod.ts`, around line 221) still reads \"Passed through unchanged except appName, which is resolved by its own chain\". The generated reference `content/docs/references/system/email-config.mdx` repeats it. Both are now incomplete. Ruling A on #29095 barred a spec change in that card, so the text was left for the spec lane.\n\n## Wanted\n\n- Amend the describe() text to name `baseUrl` beside `appName`, with its chain in one short clause (env first, then the value written here, then the local default; no trailing slash).\n- Update the docblock above the key if it states the same \"only appName\" reading.\n- Regenerate `email-config.mdx` with the repo's docs generator.\n- ⛔ No schema change: the key stays a free-form record.\n\nLands after PR #29478 merges.\n\nDedupe: searched `defaultTemplateContext`; nearest #29095 (the source card). **New.**\n\nLinks back: #29095, #29478."
+}

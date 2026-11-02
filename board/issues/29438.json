@@ -1,0 +1,34 @@
+{
+  "number": 29438,
+  "kind": "pull_request",
+  "title": "docs(qa): platform checklist items follow the Studio door after ADR-0146 (#28579 slice 1)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "skip-changeset"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:56:32Z",
+  "updated_at": "2026-11-02T15:29:24Z",
+  "closed_at": "2026-11-02T15:29:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T15:29:22Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29438",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"marchtian\"} -->\n_Requested by **田騏** · [project thread](https://claude.ai/code/project/chan_01VmuUhXU9SSUzqJYyXSmYSi?thread=cmsg_01VmuUhXU9SSUzqJYyXSmYSi9paTx1Lu8ENYwwssthfK3h)_\n\nPart of #28579 (slice 1 of 3)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 改了什么:平台验收清单里 13 条仍指向已下线的 Setup 入口(Packaged automation、Setup 元数据目录、无包覆盖写入)的条目:9 条改为走 Studio 入口(账本开关、New similar 进 `.custom` 配对包、All metadata 设计器),4 条暂无替代入口的标为过渡态;未新增条目。\n- 为什么改:ADR-0146 已把这些编辑能力从 Setup 移到 Studio(#28785、#28818、#28850 等已合入),QA 按旧清单走会在已不存在的页面上判失败,结果失真。\n- 风险与回滚:只改 `docs/qa/platform-checklist` 下的 JSON 与 FOLLOW-UPS.md,不碰产品代码;每条改动 revision +1 且历史行引用 #28579,回滚即 revert 本 PR。\n- 先看:`areas/automation.json` 的 `setup-packaged-automation-board` 与 `packaged-flow-clone-contract`——改动最大的两条。\n- 两分钟验证:`pnpm check:platform-checklist` 退出 0(352 条,锚点 1096/1106)。\n- 需要你做的:无,席位落地\n\n## What changes\nSlice 1 of #28579 (ADR-0146 N-29) moves the platform checklist's items off the retired Setup doors onto the Studio doors that replaced them. No new items, no e2e spec, no product code.\n\nRe-pointed to the Studio door (revision +1, one history row each citing #28579):\n- `automation.setup-packaged-automation-board` r10→11 — Setup › Packaged actions (`nav_packaged_actions`) plus the Studio ledger switch (`auto-ledger-switch`), New similar on flows, no lineage, and A5 now scores the `studio-refusal-message` announced with `role=alert` (#29139 / #29224, `StudioRefusalStrip.tsx#StudioRefusalStrip`).\n- `automation.packaged-flow-clone-contract` r10→11 — the copy lands in `com.example.showcase.custom` with status `obsolete`; A2 is now \"no double-fire\"; new A7 scores the `package` refusal arms (`new-similar-target.ts#newSimilarTargetRefusal`).\n- `automation.flow-node-type-matrix` r12→13 — the writable copy comes from Studio New similar.\n- `studio-authoring.packaged-automation-studio-lock` r6→7 — New lands in the pair; the ledger switch toggles with no metadata write; Customize is not pressed.\n- `studio-authoring.access-permission-set-lifecycle` r4→5 — New on a read-only package goes through ensure-customization into the `.custom` pair.\n- `studio-authoring.object-designer-roundtrip` r11→12 — F2–F4 open `/studio/PKG/metadata/object/new?package=PKG`.\n- `studio-authoring.authoring-validation-not-persisted` r5→6 — the Source tab on `/_console/studio/~all/metadata/object/NAME`.\n- `platform-core.home-admin-cluster-links` r5→6 — 8 Administration targets (sys-objects gone); legacy role/permission catalog URLs land in Studio via `setupMetadataStudioPath`.\n- `ux-conventions.write-feedback` r9→10 — the discard variant runs on the All metadata item page.\n\nMarked transitional (no clause weakened; the reason is written into each revision row):\n- `automation.packaged-flow-disable-durable` r8→9 and `api-backend.packaged-action-disabled-dispatch` r11→12 — the served switched-off sentence still names \"Setup › Packaged automation\" (a product-side finding, written up in FOLLOW-UPS §13b).\n- `studio-authoring.packaged-display-class-direct-edit` r5→6 — `blocked: dependency` on slice 2; the package-less overlay it proves was closed by #28850.\n- `studio-authoring.org-override-registry-gate` r7→8 — the package-less overlay steps are scored blocked (dependency).\n\nLeft untouched on purpose: `integration-system.external-datasource-federated-read` and `external-schema-browser-ui` (the datasource stays in Setup per ADR-0146 D1), and `platform-core.packaged-object-extend-only` (API-only; its refusal doors did not change).\n\n`FOLLOW-UPS.md` gains §13. `coverage.json` is unchanged.\n\n## Tests\nNo tests were added (docs-only). The unit pins that the rewritten `automated.ref`s name were run:\n- ui (`pnpm exec vitest run --maxWorkers=1`): 9 files, 174 tests passed — ledgerSwitch-28148, newSimilar-28567, refusalAnnounced-29139, automationsReadOnly-11124, PackagedActionsSection, PackagedActionsPage.navContribution, AppContent.setupMetadataStudio-28578, console systemHubRoutes, legacyRedirects.\n- platform-objects: setup-packaged-actions-nav, setup-nav-dead-key-tombstone — 2 files, 14 tests passed.\n- runtime: automation-flow-clone-custom-package, automation-flow-clone — 2 files, 36 tests passed.\n\n## Acceptance notes\n- Main's history is a prefix of every changed item; revisions only go up.\n- Symbol anchors only, no line numbers; the validator reports 1096/1106 anchors resolved, the other 10 on the named #16898 residual.\n- Out of scope, recorded in FOLLOW-UPS §13c for a later slice: four items still name retired Setup doors in a step (`platform-core.metadata-authoring-roundtrip`, `studio-authoring.record-page-roundtrip`, `studio-authoring.permission-matrix-editor-ux`, `automation.packaged-flow-subflow-disable-refusal`).\n- skip-changeset: docs only.\n\n## Verification\n- `pnpm check:platform-checklist` — exit 0 (352 items).\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` — all 16 derived gates exit 0; `--ran` reconciliation: 16 derived, 16 run, 0 NOT-MEASURED. The first runs exited 3 (no `node_modules`, then `@objectstack/formula` and `lint` not built) and passed after install and build.\n- Not measured locally (CI's job): the Plan Test Core shards and the type-check lanes.\n- origin/main was merged once before opening.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n"
+}

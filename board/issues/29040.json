@@ -2,8 +2,8 @@
   "number": 29040,
   "kind": "issue",
   "title": "Console at phone width: audit and fix the key flows at 375px (the mobile app now hosts the Console)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "hotlong",
@@ -20,11 +20,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:21:47Z",
-  "updated_at": "2026-11-02T07:57:50Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T14:16:30Z",
+  "closed_at": "2026-11-02T14:16:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29040",
   "body": "## Context\n\n`objectstack-ai/mobile` 2.0 no longer renders business UI natively: it hosts the Console in a WebView (objectstack-ai/mobile#144). Phone users therefore get the Console's responsive layout and nothing else. The last mobile-layout card, objectstack-ai/objectstack#1325, was closed with the experience unverified.\n\n## Ask\n\nDrive each flow below in a real browser at 375×812 (and 390×844) against the showcase and CRM examples. Record what breaks and fix it. The triage seat may split this into one card per flow.\n\n| Flow | Pages |\n|---|---|\n| Approvals | approvals inbox, approve / reject with reason |\n| Lists | list view, filters, search, row actions, pull-to-refresh |\n| Record | record page, related lists, inline edit |\n| Forms | create / edit form, lookups, date and select fields, validation errors |\n| Dashboards | dashboard with charts and KPIs |\n| Notifications | inbox, mark read, open the target record |\n| Navigation | app switcher, nav groups, back behaviour |\n| Auth | sign-in, 2FA, password reset |\n\nFor each flow, check:\n\n- no horizontal page scroll;\n- touch targets of at least 44px;\n- dialogs and drawers fit the viewport;\n- the virtual keyboard does not cover the focused field;\n- long lists stay responsive on a mid-range Android device profile (CPU throttling 4×).\n\n## Acceptance\n\n- A run record per flow, with the pass/fail of each check.\n- Fixes for every failure, or a card for each one that is not fixed in this card.\n- Playwright coverage at phone viewport for at least the approvals and record flows."

@@ -2,8 +2,8 @@
   "number": 29148,
   "kind": "issue",
   "title": "Studio editors still read a refused (403) draft as \"no draft\" and can save the published body over it: Interfaces app nav, ResourceEditPage, list view inspector, bundle item, permission matrix, hooks",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,17 +13,24 @@
   "labels": [
     "bug",
     "domain:ui",
-    "pm:queue"
+    "pm:dispatched",
+    "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T08:21:21Z",
-  "updated_at": "2026-11-02T08:21:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T14:05:39Z",
+  "closed_at": "2026-11-02T14:05:39Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29148",
   "body": "domain:ui#1 · zhuangjianguo · session_01QsR2jUJ19MstFvFhjgiYTu\n\nFiling gate: ② out-of-scope finding, class a, from #29015 (PR #29132; report `/mnt/project-files/issue-29015/os-dev-report.json`) · filed by `domain:ui#1` · ⛔ Not a claim. No grade: triage sets it.\n\n**Business reason.** A pending draft can carry an audience gate (`requiredPermissions`) that its author does not hold, for example one written over the API or MCP. The server refuses to read that draft (`403`), by design. #29015 fixes the Interfaces pillar's dashboard leaves, but every other Studio editor still takes the refusal for \"no draft\". It opens the published body instead, and its next save sends that body as the draft. That silently drops the gate and every other unpublished change, and publishing then serves the item to everyone.\n\n**Measured (code reading at `origin/main`; not run).** After PR #29132, `readDraftForSave` (`ui/packages/app-shell/src/views/metadata-admin/DraftConflictDialog.tsx`) returns `refused` for a `403`. Only the Interfaces leaf load reads it. These callers still treat a refusal as absence:\n- the Interfaces **app nav** load in `StudioDesignSurface.tsx` (the app arm refuses an app draft carrying `requiredPermissions`, the nav buffer seeds from the published layer, and the nav save goes unpinned);\n- `ResourceEditPage`;\n- `ObjectListViewInspector` (list views carry the same audience gate);\n- `StudioBundleItemEditor`;\n- `PermissionMatrixEditor`;\n- `ObjectHooksPanel`.\n\n**Wanted.**\n1. Each caller above checks `refused`. On a refusal it installs no buffer and shows the `engine.studio.refusal.draftUnreadable` strip that #29015 adds, with the server's sentence behind Details.\n2. With no buffer, the autosave has nothing to send.\n3. A leaf with no draft, or a readable draft, behaves as before.\n\n**Tests.** Per caller: a refused draft read installs no buffer and sends no save, while a missing draft still opens the published body. One ablation per caller.\n\n**Reader.** `domain:ui` (`area:studio`). Size M; the callers are disjoint, so triage may split it. Serialize after PR #29132 (#29015).\n\n**Dedupe.** Searched `readDraftForSave`, `refused 403 draft overwrite`. #29113 is the Interfaces pillar's refused-save guard, a different door. No card for these callers.\n\nLinks back: #29015, PR #29132."

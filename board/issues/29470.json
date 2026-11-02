@@ -1,0 +1,35 @@
+{
+  "number": 29470,
+  "kind": "pull_request",
+  "title": "feat(spec): ExplainAccessRequest declares recordIds, the batch selector the explain wire schema already carries",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T15:55:02Z",
+  "updated_at": "2026-11-02T17:02:13Z",
+  "closed_at": "2026-11-02T17:02:11Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T17:02:11Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29470",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi99U9EnFooYs4VpVTYdtMEsX)_\nFixes #29297\n\nClause-②: yes (widening)\nMetadata-protocol: none\nSkills-docs: none — no page under `skills/` or `content/docs/` spells the members of the `ExplainAccessRequest` contract type; `content/docs/permissions/explain.mdx` shows the kernel call with `object`/`operation`/`userId` only, and the batch form is already a wire-schema fact of `ExplainRequestSchema` (grep `explain` and `recordIds` in both trees, on 29000bb1).\n\n## 维护者速读\n\n- 改了什么:`security` 服务契约的 explain 请求类型 `ExplainAccessRequest` 补上可选的 `recordIds`(批量记录 id),类型直接取自线上 schema `ExplainRequestSchema` 的同名成员。\n- 为什么改:线上 schema、REST 解释路由和参考安全服务早已支持批量形态,唯独它们之间的 TypeScript 契约没声明,调用方只能强转才能传批量请求。\n- 风险与回滚:仅类型放宽,无运行时改动;此前能编译的调用照常编译。回滚即撤销本 PR。\n- 先看:`packages/spec/src/contracts/security-service.ts`(新成员与文档注释)、`packages/spec/src/contracts/security-service.test.ts`(类型钉)。\n- 两分钟验证:`pnpm --filter @objectstack/spec check:test-typecheck`,预期 OK;把新成员改成 `readonly string[]` 再跑,预期该测试文件报 3 个类型错误。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `ExplainAccessRequest` (`packages/spec/src/contracts/security-service.ts`) gains `recordIds?: ExplainRequest['recordIds']`, with a doc comment: mutually exclusive with `recordId`; at least one and at most `EXPLAIN_BATCH_MAX_RECORD_IDS` ids (linked, not spelled); answered by `ExplainDecision.records` in the same order; an implementation may ignore it and answer only the object-level decision, and the caller then asks each id singularly, as the REST explain route does.\n- The member's type is the wire schema's own (`ExplainRequest` = `z.input<typeof ExplainRequestSchema>`), not a hand-written `string[]`. Only this member is derived: tying the whole interface to the schema would change `operation` (the contract's `ExplainOperation | string` against the schema's closed enum) and replace the contract's member docs.\n- The last doc sentence is measured against both readers on 29000bb1: the REST door hands the service the batch and falls back per id when the answer carries no `records` of the right length (`packages/rest/src/security-routes.ts` L256–299, the call at L279, the check at L280, the per-id loop at L289–296); the reference service reads the member and refuses it beside `recordId` (`packages/plugins/plugin-security/src/security-plugin-explain-access.ts` L128, L142–145, L526–527).\n- No runtime change. `check:api-surface` agrees with no regeneration (it records export names; no export was added or removed).\n- Changeset: `.changeset/29297-explain-access-request-record-ids.md`, `@objectstack/spec` patch.\n\n## Tests\n\n- New in `packages/spec/src/contracts/security-service.test.ts` (no existing test was edited):\n  - `ExplainRecordIdsIsOptional`: a type alias that reds if the member becomes required.\n  - `ExplainRecordIdsMatchesWire`: a type alias holding `ExplainAccessRequest['recordIds']` equal to `z.input<typeof ExplainRequestSchema>['recordIds']`.\n  - `explain accepts a batch request…`: the same equality through `expectTypeOf`, a batch literal reaching the service, and a `@ts-expect-error` that a bare string is not a batch.\n- The file is compiled by `check:test-typecheck` (`tsconfig.test.json`) and is not in `test-typecheck-debt.json` (0 hits), so the aliases are live checks.\n\n<details><summary>Ablation (type pin)</summary>\n\n`node scripts/ablation-replace.mjs --file packages/spec/src/contracts/security-service.ts --anchor \"recordIds?: ExplainRequest['recordIds'];\" --replacement 'recordIds?: readonly string[];' -- pnpm --filter @objectstack/spec check:test-typecheck`\n\n- mutation landed: anchor 1 → 0, blob `ea8eb5b53fb0` → `f7a8cee931f6`\n- `src/contracts/security-service.test.ts: 3 type error(s) in a file the ledger does not cover` · command exited 1\n- restored: blob == HEAD (`ea8eb5b53fb0`), `git diff HEAD` empty\n\n</details>\n\n<details><summary>Package suites on 29000bb1 (os-verify-lock)</summary>\n\n- closure build `--filter '@objectstack/plugin-security^...' --filter '@objectstack/rest^...'`: VERDICT command-exit 0\n- `@objectstack/spec` test: Test Files 791 passed (791) · Tests 23470 passed, 1 todo · exit 0\n- `@objectstack/spec` typecheck (tsc + scripts + test layer): exit 0 · `check:test-typecheck: OK — 52 file(s) / 240 error(s) / 131 pinned signature(s) held`\n- `@objectstack/plugin-security` test: Test Files 240 passed (240) · Tests 5175 passed, 45 skipped · exit 0\n- `@objectstack/plugin-security` typecheck: exit 0\n- `@objectstack/rest` test: Test Files 371 passed (371) · Tests 7032 passed, 332 skipped · exit 0\n- `@objectstack/rest` typecheck: exit 0\n- eslint `--no-inline-config` on both changed files: exit 0\n\n</details>\n\n## Acceptance notes\n\n- `@objectstack/plugin-sharing`, `@objectstack/service-storage` and `@objectstack/plugin-audit` also import `ExplainAccessRequest`; the change only adds an optional member, so their code and test doubles stay assignable. Not run locally; CI's Test Core and TypeScript Type Check cover them.\n\n## Verification\n\n- Gates on 29000bb1: `dispatch-gates.mjs --commands` derived 79; `--ran` reconciles 79 derived, 78 run, 1 NOT-MEASURED, 0 UNRUN. 78 exit 0.\n  - `check-plugin-teardown-shape.mjs --self-test` first exited 3 on this shallow clone (its positive-control fixture is pinned to a commit the clone lacked); after fetching that one commit it exits 0 (`48 cases pass`).\n  - `pnpm check:dual-build-cjs-loads` exits 3, `PREREQUISITE NOT MET` (48 packages have no `dist/`; it needs a whole-repo build). NOT MEASURED locally; this diff changes one declared type member and no emitted JavaScript. CI's Lint & Repo Gates runs it.\n- `check-changeset-no-major.mjs --base origin/main --event` against this body, offline: exit 0, `LEVEL AXIS … clause-② yes (widening) and metadata-protocol none … a non-protocol change at patch`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQS1wrCba8FkVowBLy)_\n"
+}

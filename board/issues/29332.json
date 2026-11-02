@@ -1,0 +1,35 @@
+{
+  "number": 29332,
+  "kind": "issue",
+  "title": "Console PWA manifest: declare the branded icon's real type and offer 192/512 PNG icons so a branded Console stays installable",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "hotlong",
+    "id": 50353452,
+    "type": "User"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T12:11:06Z",
+  "updated_at": "2026-11-02T14:47:15Z",
+  "closed_at": "2026-11-02T14:46:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29332",
+  "body": "## Context\n\nThis was found in the acceptance review of objectstack-ai/objectstack#29326 (card #29155). It predates that PR: `main` has the same code.\n\nThe Console's web app manifest declares its icon as `type: 'image/svg+xml', sizes: 'any'` (`ui/apps/console/src/main.tsx`, the manifest block). The favicon `<link>` a few lines earlier already tells SVG from PNG.\n\nWhen Setup branding sets a PNG or ICO favicon, the manifest mis-declares it. Such a favicon is also likely below Chrome's 144 px minimum for the install prompt. So a branded Console may not be installable, although card #29155 asks for the branded icon.\n\n## Ask\n\n1. Derive the manifest icon `type` and `sizes` from the configured branding asset, as the favicon link does.\n2. When the branded asset is not SVG and not at least 192 px, add 192 px and 512 px PNG icons to the manifest. Use the platform default icons, or a server-rendered resize if one exists. Say which in the PR.\n3. Keep `start_url` and `scope` as they are.\n\n## Acceptance\n\n- A unit test covers the manifest for SVG, PNG and ICO branding, and for no branding.\n- A Playwright or CDP reading shows no manifest installability errors with a PNG favicon configured."
+}

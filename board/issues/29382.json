@@ -2,8 +2,8 @@
   "number": 29382,
   "kind": "issue",
   "title": "lint(dashboard-filter-binding-unknown): its explanation says a dateRange binding on a dashboard with no dateRange is always reported, but a globalFilters entry named dateRange is a declared filter there",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,24 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "domain:spec",
+    "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T13:35:47Z",
-  "updated_at": "2026-11-02T13:35:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T18:47:03Z",
+  "closed_at": "2026-11-02T18:43:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29382",
   "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ① a should-fix named by the `CONTRACT_REVIEW_TIER` review of PR #29370 (#29213), record 6578522383, kept out of that PR to hold it to its claimed surface. ⛔ Not a claim. No grade: triage sets it.\n\n## What the text says\n\n`packages/lint/src/rule-explanations.ts`, rule `dashboard-filter-binding-unknown` (≈L407–409 on `main`): \"A `dateRange` key on a dashboard that declares no `dateRange` is reported the same way: there is no date range for it to bind.\"\n\n## Why it may be wrong\n\nThe same explanation's first paragraph says the names a widget may bind are each `globalFilters` entry under its `name` (its `field` when unnamed) and the reserved `dateRange` when the dashboard declares `dateRange`. PR #29370 keeps a `globalFilters` entry keyed `dateRange` ACCEPTED on a dashboard that declares no `dateRange` (the seat's answer to that PR's open question, Q1 = A: it is a working filter there). On such a dashboard a widget's `filterBindings.dateRange` names a declared filter, so \"is reported the same way\" reads false, or the rule reports a valid binding. Not measured: which of the two it is.\n\n## Wanted\n\nMeasure `dashboard-filter-binding-unknown` on a dashboard with no `dateRange`, a `globalFilters` entry named `dateRange`, and a widget binding `dateRange`. If the rule accepts it, correct the sentence (prose only). If it reports it, that is a false positive on a valid board: fix the rule to read the declared name set, with a test.\n\nReader who acts: the `packages/lint` owner (`domain:spec` by the anchoring rule).\n\nDedupe: searched `dashboard-filter-binding-unknown dateRange`, `filterBindings dateRange globalFilters`: only #29213 / PR #29370 and #29023. **New.**"

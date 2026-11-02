@@ -1,0 +1,35 @@
+{
+  "number": 29545,
+  "kind": "pull_request",
+  "title": "fix(core): the fellow-org peer list keeps every member the first membership read returned",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T18:25:19Z",
+  "updated_at": "2026-11-02T19:31:59Z",
+  "closed_at": "2026-11-02T19:31:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T19:31:56Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29545",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8UqrAZsJzxmjyAzE8Z3mZR1)_\n\nRefs #29398 (item 2)\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:组织成员数达到 1,000 时,解析器会先读一次 1,000 行、再按 id 分页读完整成员;现在两次读的结果取并集,而不是用第二次的结果替换第一次。\n- 为什么改:若补全读看到的成员比第一次少(另一连接上的旧快照),同组织成员列表 `org_user_ids` 会比第一次读本身还短,这些成员在普通成员的 `sys_user` 读取里悄悄消失。\n- 风险与回滚:两次读都按当前组织过滤,并集不会加入组织外的人;不增加也不改变任何读;回滚即 revert 本 PR。\n- 先看:`packages/core/src/security/resolve-authz-context.ts` 第 5 步(`orgMembers` 的并集一行),再看同目录 `resolve-authz-context.org-members-past-first-read.test.ts` 的新用例。\n- 两分钟验证:`pnpm --filter @objectstack/core exec vitest run src/security/resolve-authz-context.org-members-past-first-read.test.ts`,预期 9/9 通过。\n- 需要你做的:无,席位落地。卡的第 1 项(按 id 顺序的逐页校验)不在本 PR,卡保持打开,见 Acceptance notes。\n\n## What changes\n\n`resolveUserAuthzGrants` step 5 builds `org_user_ids` from Leg 1's `sys_member` read (`orgMembersLeg`, bounded at 1,000 rows). When that read comes back at its bound, `readOrganizationMembersToCompletion` reads the whole membership in id order. Its rows used to replace `orgMembersLeg`. They are now unioned with it, so a completion that sees fewer members than Leg 1 already held cannot shorten the list. Both reads filter on the active organization, so the union adds nobody outside it. No read is added, removed or changed, and the batch-equivalence goldens do not move.\n\nOne `patch` changeset for `@objectstack/core`.\n\n## Why\n\nThis is item 2 of the card: a completion that answers from an older snapshot on another connection returned a shorter list than the first read alone. Item 1 (the per-page order check) is held back. The Acceptance notes say why.\n\n## Tests\n\n- New case in `resolve-authz-context.org-members-past-first-read.test.ts`: 1,005 members, and the completion's ordered reads cannot see five members the unordered first read returned. Every one of the five, and the whole membership, is still in `org_user_ids`, and nobody from the other organization is.\n- The fake driver gains `staleForOrderedReads`, a set of user ids that its ordered `sys_member` reads (the completion's) do not return.\n\n<details><summary>Ablation (head 3c6ddc2d)</summary>\n\nThe union was reverted on disk with `scripts/ablation-replace.mjs`: anchor `[...orgMembersLeg, ...await ` changed to `[...await ` (anchor x1 to x0, replacement x0 to x1, blob c3eddd26 to 93bebcf0). The test imports the resolver from `src/`, so no build is involved.\n\n- Mutated: `Tests 1 failed | 8 passed (9)`. The new case is the only red: `expected [ 'u000000', 'u000884', …(998) ] to include 'u000001'`.\n- Restored: blob back to c3eddd26, equal to HEAD, and `git diff HEAD` is empty.\n</details>\n\n<details><summary>Suites (head 3c6ddc2d)</summary>\n\n- `pnpm --filter @objectstack/core test`: Test Files 131 passed (131), Tests 2927 passed (2927).\n- `pnpm --filter @objectstack/core typecheck`: exit 0.\n- The past-first-read suite plus the batch-equivalence suite: Test Files 2 passed (2), Tests 45 passed (45).\n</details>\n\n## Verification\n\n<details><summary>Gates (head 3c6ddc2d)</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands` derived 61 commands. All were run locally, exit codes were captured before any pipe, and `--ran` reconciled them: 61 derived, 60 run, 1 NOT-MEASURED, 0 UNRUN.\n- `pnpm check:dual-build-cjs-loads` exited 3 (PREREQUISITE NOT MET, it needs every package built). It is NOT MEASURED locally and left to CI.\n- `check-plugin-teardown-shape --self-test` passed after `git fetch --unshallow` (its fixture is pinned to an old commit). `check:lean-entry-closure` passed after building `@objectstack/objectql`.\n- `pnpm lint` exited 0.\n</details>\n\n## Acceptance notes\n\n**Item 1 of the card is held back, as the seat ruled.** The card's suggested per-page check (\"each id strictly greater than the row before it\") would compare ids in JavaScript code-point order. `driver-sql` emits a plain `ORDER BY id` and `id > ?`, so the database collation decides the order. The keyset itself is sound under any collation, because the cursor and the order use the same comparison. A JavaScript check would not be. Measured on a local PostgreSQL 16, sorting seven nanoid-shaped values:\n\n- `C.UTF-8` database: `AC Ab9 B-2 a-c aB3 ab b_1`, which matches JavaScript.\n- ICU `en-US` database (`CREATE DATABASE ... LOCALE_PROVIDER icu ICU_LOCALE 'en-US'`): `a-c ab aB3 Ab9 AC b_1 B-2`.\n\nMember ids are mixed-case (nanoid in the drivers, better-auth's generator through plugin-auth). On such a database, every correctly ordered completion page would fail the check, and every request in an organization past the first read's bound would get a 503. MySQL's default `utf8mb4_0900_ai_ci` collation is case-insensitive and differs from code-point order in the same way (not measured here). Collation-safe designs are left on the card for a decision.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (No spec change.)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbZDZLmVprAaL7DLh1K)_\n"
+}

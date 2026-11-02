@@ -1,0 +1,35 @@
+{
+  "number": 29525,
+  "kind": "pull_request",
+  "title": "docs(lint): dashboard-filter-binding-unknown explanation counts a globalFilters entry named dateRange as declared",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T17:36:44Z",
+  "updated_at": "2026-11-02T18:43:44Z",
+  "closed_at": "2026-11-02T18:43:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T18:43:42Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29525",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8UFVez1aipH3zDDpgxd3umQ)_\nFixes #29382\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`os explain dashboard-filter-binding-unknown` 的一句说明,和 `validate-widget-bindings.ts` 里两段注释;规则代码不变,新增一个测试。\n- 为什么改:旧说明称「没声明 `dateRange` 的仪表盘上,`dateRange` 绑定一律报错」;实测规则接受名为 `dateRange` 的 `globalFilters` 条目,说明与行为不符。\n- 风险与回滚:只改说明文字与注释,行为零变化;回滚即 revert 本 PR。\n- 先看:`packages/lint/src/rule-explanations.ts`(第 407–410 行那句)、`packages/lint/src/validate-widget-bindings.test.ts`(新测试)。\n- 两分钟验证:`pnpm --filter @objectstack/lint exec vitest run src/validate-widget-bindings.test.ts -t dashboard-filter-binding-unknown`,预期 13 个用例全绿。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `packages/lint/src/rule-explanations.ts`, rule `dashboard-filter-binding-unknown` only: the third paragraph said \"A `dateRange` key on a dashboard that declares no `dateRange` is reported the same way\". It now says a `dateRange` key is reported only when the dashboard declares neither `dateRange` nor a `globalFilters` entry named `dateRange`, because either one is a declared filter under that name.\n- `packages/lint/src/validate-widget-bindings.ts`: the rule family docblock and the `DASHBOARD_FILTER_BINDING_UNKNOWN` docblock say the same. No code line changed.\n- `packages/lint/src/validate-widget-bindings.test.ts`: one new case in the `dashboard-filter-binding-unknown` block. The dashboard has no `dateRange`, a `globalFilters` entry `{ name: 'dateRange', field: 'signed_at', type: 'date' }`, and a widget with `filterBindings: { dateRange: false }`. It expects zero findings.\n- `.changeset/29382-filter-binding-daterange-prose.md`: a patch for `@objectstack/lint`, because the explanation text ships in its `dist/`.\n\n## Why\n\nThe card asked for a measurement first. The rule takes its declared names from `dashboardFilterDefs`, which adds every `globalFilters` entry under its `name`. So a `globalFilters` entry named `dateRange` is declared even when the dashboard has no `dateRange`. The new test measured it on `origin/main` 94d3e254 before any prose edit: the case passed with zero findings. The rule accepts the binding, so this PR takes the prose-only arm and leaves the rule body alone. The runtime agrees: objectui `resolveDashboardFilterDefs` (`ui/packages/core/src/utils/dashboard-filters.ts`) builds the same name set.\n\n## Tests\n\n- Measurement, before any prose edit, tree 94d3e254 plus the new test only: `pnpm --filter @objectstack/lint exec vitest run --maxWorkers=2 src/validate-widget-bindings.test.ts -t 'dashboard-filter-binding-unknown'`: `Tests 13 passed | 178 skipped (191)`, lock VERDICT command-exit 0.\n- Final head: see Verification.\n\n## Acceptance notes\n\n- `packages/spec/src/ui/dashboard.zod.ts` still says `dateRange` is \"reserved for the built-in dashboard date range\" (the `globalFilters[].name` TSDoc) and \"(dateRange only when declared)\" (the `filterBindings` describe). Both are on the spec side that open PR #29370 owns, which keeps a `globalFilters` entry named `dateRange` accepted on a dashboard without `dateRange`. They are outside this card's file surface. carrier: PR #29370.\n- The finding's hint for an undeclared `dateRange` key still reads \"Declare `dateRange` on the dashboard, or delete the `dateRange` entry.\" It is reached only when neither declaration exists, so it is accurate; it does not mention the `globalFilters` spelling. Not changed, because the claim limits the rule body to the false-positive arm.\n\n## Verification\n\nAll readings are on head `abff9a05` (`b6d1ad0e` plus a merge of `origin/main` 86d36e99).\n\n<details><summary>Package tests and typecheck</summary>\n\n- `pnpm --filter @objectstack/lint test`: `Test Files 190 passed (190)`, `Tests 7858 passed (7858)`, lock VERDICT command-exit 0.\n- `pnpm --filter @objectstack/lint typecheck`: lock VERDICT command-exit 0.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 58 families)</summary>\n\n- 57 of 58 exit 0, each captured before any pipe.\n- `pnpm check:dual-build-cjs-loads`: exit 3, PREREQUISITE NOT MET (it needs every package's `dist/`). NOT MEASURED locally; CI's `Lint & Repo Gates` runs it on a full build.\n- `dispatch-gates --ran`: \"58 derived famil(ies) accounted for, 57 run, 1 NOT-MEASURED\".\n- `node scripts/check-nul-bytes.mjs`: exit 0.\n\n</details>\n\nRepo-wide `pnpm lint` and every other CI family: read from this PR's check-runs.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (no spec change)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (repo-wide lint is CI's run)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: not touched.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the maintainer brief is Chinese by the repo's communication rule).\n\nBranch `claude/project-thread-xi96xf` is the card thread's platform-assigned branch, as the Claim records. Written by `domain:spec#5 · os-warren · session_01JQwxbaAMsVe1WU74CypjTZ`.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbaAMsVe1WU74CypjTZ)_\n"
+}

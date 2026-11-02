@@ -2,8 +2,8 @@
   "number": 29284,
   "kind": "issue",
   "title": "ui(types): DashboardComponentSchema rebuilds `globalFilters` itself, so spec's duplicate-filter-key refusal (#29023) does not reach the published ui mirror",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,24 @@
   },
   "labels": [
     "domain:ui",
-    "pm:blocked",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T10:59:20Z",
-  "updated_at": "2026-11-02T11:50:19Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T17:47:32Z",
+  "closed_at": "2026-11-02T17:47:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29284",
   "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ② should-fix 1 of the spec seat's contract review on PR #29162 (#29023), carried out so the reviewed head lands unchanged. ⛔ Not a claim. No grade: triage sets it.\n\n## What happens\n\n- PR #29162 attaches `refuseDuplicateGlobalFilterNames` to `DashboardSchema`'s `globalFilters` ARRAY in `packages/spec/src/ui/dashboard.zod.ts`, so that a mirror spreading `DashboardSchema.shape.globalFilters` carries the rule.\n- `ui/packages/types/src/zod/complex.zod.ts`: `DashboardComponentSchema` lists `globalFilters` in `DASHBOARD_SPEC_EXCLUDED` and rebuilds the array itself. So the one published ui mirror accepts two filters under one key, which the spec door now refuses.\n- The PR's docblock sentence \"the rule travels with `DashboardSchema.shape.globalFilters` into any mirror that spreads the shape\" holds only for a mirror that spreads that slot.\n\n## Wanted\n\nIn the `ui/` lane, take `SpecDashboardSchema.shape.globalFilters` by reference, or export the refinement by identifier and apply it, following the `checkGlobalFilterDateDefaultValue` precedent in the same file. Pin it with a ui test that refuses a duplicate key. Next time someone touches `dashboard.zod.ts`, soften that docblock sentence too.\n\nReader who acts: `domain:ui` (and `domain:spec` for the sentence). Wait for PR #29162 to merge.\n\nDedupe: searched `DashboardComponentSchema globalFilters DASHBOARD_SPEC_EXCLUDED`. Only #29023 and its PR. **New.**"

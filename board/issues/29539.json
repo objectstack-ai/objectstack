@@ -1,0 +1,35 @@
+{
+  "number": 29539,
+  "kind": "pull_request",
+  "title": "docs(spec): email.defaultTemplateContext names baseUrl beside appName as a resolved key",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T18:15:44Z",
+  "updated_at": "2026-11-02T19:28:58Z",
+  "closed_at": "2026-11-02T19:28:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T19:28:56Z",
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29539",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-warren\"} -->\n_Requested by **Warren** · [project thread](https://claude.ai/code/project/chan_01U5RdnAAmkSQmZbqh6FtqZ8?thread=cmsg_01U5RdnAAmkSQmZbqh6FtqZ8CSZ7Bi88n61fRQQZfZQA16)_\nFixes #29485\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：`email.defaultTemplateContext` 的 `.describe()` 与 TSDoc 把 `baseUrl` 和 `appName` 并列为运行时自行解析的键，并写出 `baseUrl` 的解析链；重新生成 `email-config.mdx`。\n- 为什么改：#29478 已让邮件插件解析 `baseUrl`，规范文字仍说只有 `appName` 例外，读 `/meta/types` 或参考页的作者会被误导。\n- 风险与回滚：只改文字，无 schema 变化，键仍是自由 record；回滚即 revert 本 PR。\n- 先看：`packages/spec/src/system/email-config.zod.ts`（`defaultTemplateContext` 的文档块与 describe）。\n- 两分钟验证：`pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated`，预期 14 个产物全部最新。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/spec/src/system/email-config.zod.ts`: the `defaultTemplateContext` docblock and `.describe()` now name `baseUrl` beside `appName` as the two keys the runtime resolves itself. The `baseUrl` chain is read from the merged plugin code (`resolveDeploymentBaseUrl` in `packages/plugins/plugin-email/src/capability-arg.ts`, landed by #29478 at `73c24394e2`): `OS_AUTH_URL` (legacy `BETTER_AUTH_URL`), then `OS_BASE_URL`, then `defaultTemplateContext.baseUrl`, then `http://localhost:` plus the serve port (`OS_PORT`, legacy `PORT`, else `3000`), with any trailing slash trimmed. The docblock also records that a send's own `data` wins over both keys (`EmailService` spreads the send's data over this context).\n- `content/docs/references/system/email-config.mdx`: regenerated with `pnpm --filter @objectstack/spec gen:docs` (two table rows: the service schema and the stack `email` schema).\n- `.changeset/29485-email-template-baseurl-describe.md`: `@objectstack/spec` patch. `packages/spec` ships `src/**/*.zod.ts` as source, so the docblock publishes.\n\nNo schema change: the key stays `z.record(z.string(), z.unknown()).optional()`, as the card requires.\n\n## Why\n\nRuling A on #29095 kept the spec out of that card and left this text to the spec lane. The describe still read \"Passed through unchanged except appName\", which is now incomplete.\n\n## Tests\n\nNo test pinned the old wording (`git grep` over the tree for the old describe and docblock sentences: only the generated mdx hit). Local runs on head `cc250df8`:\n\n- `pnpm --filter @objectstack/spec typecheck`: exit 0.\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/system`: 66 files, 2096 tests passed.\n- `pnpm --filter @objectstack/spec check:generated`: all 14 generated artifacts up to date after `gen:docs`.\n\n## Acceptance notes\n\n- The file-top docblock of `email-config.zod.ts` still says \"`appName` is the one key whose env layer is not `OS_EMAIL_*`\". That sentence is about the schema's own keys, and `baseUrl` is a key inside `defaultTemplateContext`, not a schema key, so it stays true and is outside the claimed file surface. Noted, not filed.\n\n## Verification\n\n`node scripts/pm/dispatch-gates.mjs --commands` derived 97 gates for this diff on `cc250df8`; all were run and reconciled with `--ran`: 96 exit 0, 1 NOT MEASURED.\n\n- NOT MEASURED: `pnpm check:dual-build-cjs-loads`, reason: exit 3, it needs every package built; left to CI.\n- `node scripts/check-plugin-teardown-shape.mjs --self-test` first exited 3 (pinned fixture commit not in the shallow clone); after fetching that commit it exited 0 (48 cases).\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [ ] 3. No formatter ran; `pnpm lint` passes. Not run locally: the repo-wide lint run is CI's.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01JQwxbafZoFFmxkFb9fzVPa)_\n"
+}

@@ -1,0 +1,30 @@
+{
+  "number": 29467,
+  "kind": "issue",
+  "title": "Daily summary and candidate order: show how much of the week's work answers outside demand, and put cards from non-fleet authors first within a priority",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T15:54:21Z",
+  "updated_at": "2026-11-02T19:54:41Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29467",
+  "body": "director#1 · os-support-ai · session_01WGufzg12BtjFc5rHp7YD1J\n\n**Filing gate ③, a task the maintainer set.** After the director's project assessment named 「车队在给自己造活」 and offered a card that splits user-reachable from fleet-internal work and puts outside demand first, the maintainer answered 「同意」. ⛔ Not a claim. **Reader who acts:** the `domain:skills` seat (pm-dispatch text and `scripts/pm`).\n\n## What was measured (issues created 2026-10-26 → 11-02)\n\n| reading | value |\n|:--|--:|\n| issues created | 1,675 |\n| … by `objectstack-fleet[bot]` | 1,623 |\n| of the fleet's: closed `completed` / `not_planned` / `duplicate` / still open | 1,417 / 17 / 7 / 182 |\n| of the fleet's, by filing-gate line: ① product defect / ② decision / ③ maintainer-directed / ④ coordination / no gate line | 639 / 202 / 291 / 64 / 427 |\n| of the fleet's, `area:devpath` (developer path, not an end-user surface) | 313 |\n| open issues by non-fleet authors (excluding seat posts) | 31 |\n| … of those with no `pm:*` state and no `needs-user-decision` | 17 |\n\nA random read of 25 category-① cards: most describe a real wrong result at a public door (for example #26713, a dry-run publish that really publishes; #26871, a predicate bulk delete that skips the referential walk), and a minority are wording, docblock or log-text corrections at p3. The cards are mostly worth doing; what is not measured anywhere is how much of the week's work answers demand from outside the fleet, and the 17 outside cards with no state are the clearest sign it is not first in line.\n\n## Change\n\n1. **Daily summary** (director duty four): one line with three numbers, read by query at summary time: cards opened in the window by non-fleet authors, the share of the window's closed cards that were opened by non-fleet authors, and the open non-fleet cards with no `pm:*` state, each named with its age.\n2. **Candidate order** (execution duties): within one priority, a card opened by a non-fleet author sorts before a fleet-opened card. ⛔ It does not raise priority and does not jump `priority:p0`.\n3. ⛔ Not in scope: changing the filing gate, or any new gate or patrol row. Any added line in a ratcheted file is paid by a deletion in the same file.\n\n## Done when\n\n- The summary line appears in the next daily summary with the three numbers and their queries.\n- The candidate order text names the non-fleet tie-break, and the selection code (if any reads author) follows it; a self-test pins the order on two cards of one priority."
+}

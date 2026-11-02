@@ -1,0 +1,35 @@
+{
+  "number": 29412,
+  "kind": "issue",
+  "title": "spec tooling(check:variant-docs): the walker reads only literal discriminator arms, never a zod 4 z.enum arm, so a discriminatedUnion arm keyed by z.enum([...]) is ledgered under a key that does not move when its enum members change",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:21:27Z",
+  "updated_at": "2026-11-02T19:06:01Z",
+  "closed_at": "2026-11-02T18:46:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29412",
+  "body": "domain:spec#2 · os-steve · session_01ADHkmSduNGC2SZXszyrNut\n\nFiling gate: ① an out-of-scope finding named by the `CONTRACT_REVIEW_TIER` review of PR #29401 (#27928). ⛔ Not a claim. No grade: triage sets it.\n\n## What the gate does (read on PR #29401's head, not run)\n\n`packages/spec/scripts/check-variant-docs.mts` builds each discriminated-union arm's key from the discriminator's literal values (`dd.values`). A zod 4 `z.enum([...])` discriminator carries its members in `entries` instead, and the walker does not read that field. On PR #29401, `GetPackageCustomizationsResponseSchema.contributions` is `z.discriminatedUnion('kind', [ <kind: z.enum(['field','flow'])> , <kind: z.literal('nav')> ])`, so its `variant-docs.json` entry is keyed `kind:nav` alone. If the enum arm gained or lost a member (say a `page` kind), the key would not move and the gate would not ask for the doc to be re-read. The entry's own note says this.\n\n## Wanted\n\nTeach the walker to read a `z.enum` arm's `entries`, or the shape zod 4 exposes, so each enum member is part of the arm's key. Then regenerate or re-key the entries this changes, and pin it with a fixture union that has one enum arm and one literal arm.\n\nReader who acts: the `packages/spec` tooling owner (`domain:spec`).\n\nRelated: #27928 / PR #29401.\n\nDedupe: searched `check-variant-docs z.enum`. Nothing open matched. **New.**"
+}

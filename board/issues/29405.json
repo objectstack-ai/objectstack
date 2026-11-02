@@ -1,0 +1,35 @@
+{
+  "number": 29405,
+  "kind": "pull_request",
+  "title": "fix(console): PWA manifest declares the branding icon's real type and size, with 192/512 PNG fallbacks",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:13:58Z",
+  "updated_at": "2026-11-02T14:46:17Z",
+  "closed_at": "2026-11-02T14:46:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T14:46:15Z",
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29405",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"zhuangjianguo\"} -->\n_Requested by **Steedos** · [project thread](https://claude.ai/code/project/chan_018ETKaNwMZCNRYD7D8Q9Ubb?thread=cmsg_018ETKaNwMZCNRYD7D8Q9Ubb6KFUEBv4xhM1GGBkDXW4oV)_\n\nFixes #29332\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**:Console 运行时 PWA manifest 的图标不再一律写成 `image/svg+xml` + `sizes: 'any'`。品牌 favicon 是 SVG 时照旧;是 PNG/ICO 等位图时按真实类型与实测像素尺寸声明;没有 ≥192 px 正方形位图时,补上平台默认的 192/512 PNG(由现有 `favicon.svg` 渲染,新增两个静态文件)。\n- **为什么改**:配了小尺寸 PNG favicon 的品牌 Console 在 Chrome 里不可安装(实测 `no-acceptable-icon`,最低 144 px),与 #29155 要的「品牌化可安装」相悖。\n- **风险与回滚**:风险低,只动 Console 入口的 manifest 生成;manifest 链接改为在位图测量完成后才挂上(不阻塞首屏,最长 10 秒超时)。回滚即 revert 本 PR。取舍:小尺寸品牌 PNG 安装后,启动器图标显示的是平台默认图标而非品牌图标。\n- **先看**:`ui/apps/console/src/pwaManifestIcons.ts`(`resolveManifestIcons` 的判定);`ui/apps/console/src/main.tsx`(`injectPwaManifest`,异步注入)。\n- **两分钟验证**:`pnpm --dir ui exec vitest run apps/console/src/pwaManifestIcons.test.ts`,预期 23 个用例全绿。\n- **需要你做的**:无,席位落地。\n\n## What changes\n\n- `ui/apps/console/src/pwaManifestIcons.ts` (new, console-local): `resolveManifestIcons(faviconUrl, baseURI)` builds the manifest icon entries.\n  - SVG favicon, or no branding (the default `favicon.svg`): one entry, `image/svg+xml`, `sizes: 'any'`, as before. Nothing is loaded.\n  - Raster favicon (PNG, ICO, WebP, JPEG, GIF, AVIF, by path extension or `data:` media type): the image is measured through `HTMLImageElement` and declared with its own type and `WIDTHxHEIGHT`. A favicon whose type is unknown, or that fails to load, measures zero or does not answer within 10 s, is left out rather than guessed.\n  - Whenever the result has no square raster of at least 192 px, `icon-192.png` and `icon-512.png` are appended.\n- `ui/apps/console/public/icon-192.png`, `icon-512.png` (new): the platform default icons, rendered once with Chromium from the existing `public/favicon.svg`. No default PNG icon existed anywhere in the repository and no server-rendered resize exists, so these are the card's \"platform default icons\" option (seat approved before the assets were added).\n- `ui/apps/console/src/main.tsx`: the manifest block moves into `injectPwaManifest`, called without `await`. The static manifest is still removed synchronously, the native-host check is unchanged, and the Blob manifest link lands once the icon measurement settles, so first paint is never held for it. `start_url`, `scope` and the absolute icon URLs from #29326 are unchanged.\n- Changeset: `@object-ui/console` patch.\n\nTrade-off: a branding with a small raster favicon installs with the platform default icon at launcher sizes, since browsers pick the icon closest to the size they need. Upscaling a 32 px favicon client-side would look worse and needs canvas and CSP work, so the branded icon stays in the manifest at its true size and the defaults cover the large sizes.\n\n## Tests\n\n- `pnpm --dir ui exec vitest run apps/console/src/pwaManifestIcons.test.ts`: 23/23 passed. Covers the manifest (through `generatePWAManifest`) for no branding, SVG, small PNG, large square PNG, large non-square PNG, ICO, an unmeasurable raster and an unknown type, plus `iconTypeOf` and the browser measurement (load, error, zero size, timeout).\n- Ablation (back to the hard-coded `image/svg+xml` declaration, `scripts/ablation-replace.mjs` on `const type = iconTypeOf(src);`): 6 failed / 17 passed, the PNG, ICO, unmeasurable and unknown-type cases red; no branding and SVG stay green, as they should. Restored, blob equal to HEAD, `git diff HEAD` empty.\n- `turbo run type-check --filter=@object-ui/console`: 71/71 tasks successful.\n- Derived gates (`dispatch-gates --commands`): 33/33 exit 0 at `29065950`, reconciled with `--ran` (0 NOT-MEASURED, 0 UNRUN), `vitest run scripts/` included (169 files passed). `origin/main` was merged afterwards (`1b6eb74f`); none of the merged commits touch these files, and the unit test re-ran green there (23/23).\n\n## Acceptance notes\n\n- The favicon link a few lines above the manifest block (and the same line in `index.html`) still labels every non-SVG favicon `image/png`, an ICO included. Out of this card's surface; browsers sniff favicon bytes, so nothing visible follows from it.\n\n## Verification\n\nInstallability, read with CDP (`Page.getInstallabilityErrors`, `Page.getAppManifest`) in full Chromium (`launchPersistentContext`, `channel: 'chromium'`), on a `vite build` of the Console served under `/console/` with its `base` tag and a stubbed `GET /api/v1/runtime/config` carrying `branding.faviconUrl`.\n\n| branding favicon | before (main's manifest block) | after (this branch) |\n|:--|:--|:--|\n| 32 px PNG | `no-acceptable-icon` (minimum 144 px); icon declared `image/svg+xml`, `any` | no errors; icons `32x32` PNG + `192x192` + `512x512` |\n| 256 px PNG | no errors; icon declared `image/svg+xml`, `any` | no errors; one icon `256x256` `image/png` |\n| SVG | no errors; one SVG `any` | no errors; one SVG `any` |\n| none | no errors; default SVG `any` | no errors; default SVG `any` |\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01QsR2jSqNEXXfJECHQqN7mG)_\n"
+}

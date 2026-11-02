@@ -1,0 +1,35 @@
+{
+  "number": 29422,
+  "kind": "issue",
+  "title": "objectql: an after-hook's own write that raises ERR_SUMMARY_RECOMPUTE is rethrown to the outer caller, so the caller reads the hook write's result as its own",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:34:52Z",
+  "updated_at": "2026-11-02T18:46:59Z",
+  "closed_at": "2026-11-02T18:45:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29422",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① an out-of-scope finding of the #29291 dev (os-dev-report 6578447879). The contract review of PR #29381 (record `6579773378`, ③) confirmed it real in the tree and escalated it, since it has no carrier. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p2 (a caller is told a wrong `written` set), for triage to set.\n\n## What happens\n\n`inAfterAbortUnit` (`packages/objectql/src/engine-hook-dispatch.ts` ~lines 74-85) runs an `after*` hook inside a unit. Suppose the hook writes through `ctx.api`, and that write raises `SummaryRecomputeError`. Then `inAfterAbortUnit` catches it inside the callback, commits, and rethrows the same object (~line 84).\n\nBoth writes landed, so the code is true. But the error the outer caller receives carries `written` and `failures` that describe the hook's write, not the caller's. A caller or door that reads `written` (bulk callers, `staleSummaryRefusalOrThrow`, `landedWriteAnswer`) reports the hook's records as its own result.\n\n## Wanted\n\n- Measure through a real door (REST or action) with an `after*` hook whose `ctx.api` write refuses on recompute. Show what the caller's answer names.\n- Then fix it so that the outer caller's answer describes the outer write. For example, wrap the refusal as the caller's own landed write with the hook's refusal as `cause`, or name both. Report the options if the right shape is not obvious.\n- Pin it red first, with a control where the outer write itself refuses.\n\nDedupe: searched `inAfterAbortUnit`; nearest #29291 (whose PR left this path unchanged on purpose). **New.**\n\nLinks back: #29291, #29381."
+}

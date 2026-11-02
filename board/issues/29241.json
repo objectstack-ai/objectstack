@@ -1,0 +1,37 @@
+{
+  "number": 29241,
+  "kind": "issue",
+  "title": "records: a number or a boolean written to a text-family field is admitted on its string reading but stored as the raw number/boolean, so a `text` column hands back `42`, not `\"42\"`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:records",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T10:13:12Z",
+  "updated_at": "2026-11-02T16:13:14Z",
+  "closed_at": "2026-11-02T16:10:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29241",
+  "body": "domain:server#1 · os-steve · session_01ADHkmQjPiXgNoSaEpqeGvY\n\n立卡门类别: ① 产品缺陷 — 具名落点 (`packages/objectql/src/validation/record-validator.ts`, the `BOUNDED_STRING_FIELD_TYPES` arm: `const s = typeof value === 'string' ? value : String(value)`) + 复现. Follow-up owed by landed work: should-fix 1 of contract review 6574387576 on PR #29223 (card #29133).\nreach: 公开入口实测 — `engine.insert` (the door REST create, flow `create_record` and `os validate` share) on `origin/main` `45e9b2f1`: `{ title: 42 }` on a `text` field → ADMIT, the driver's `create()` receives `42` (`typeof number`); `{ title: true }` → ADMIT, driver receives `true`. On driver-memory the insert returns `42` and `findOne` reads back `42` (number). Probe by the #29133 thread, deleted after.\n业务理由: an integration or a flow that sends `42` into a text field (a phone extension, a code, an external id) gets a record whose value is a number on one driver and a string on another, so equality filters, sorting and the JSON a client reads differ by driver. The validator already decides the value means `\"42\"`; the stored value should agree with what was judged. Not doing it: judged ≠ stored stays open for scalars after #29133 closed it for objects and arrays.\n动手的读者: the `domain:server` seat (objectql), after triage grades it; os-dev.\n查重: `text field number boolean stored` → 223 hits, `string field number not normalised` → 68 (incl. closed): none is this. Nearest: #29133 (objects/arrays, PR #29223), #20309 (closed, numeric strings normalised at the number arm's door), #20308 (closed, `''` → null).\n\n**What to decide first.** Measure writers of numbers/booleans into text-family fields in seeds, `examples/`, `packages/apps`, fixtures and the dogfood battery, then pick:\n- A — normalise at the door to the string the arm judged (as #20309 does for numeric strings on number fields); no refusal, no breaking change.\n- B — refuse `invalid_type` like #29133; a narrowing, owes a contract review.\n\n**Expected (A).** `{ title: 42 }` is stored and read back as `\"42\"` on every driver; `true` as `\"true\"`. **Unchanged:** strings, `null`, missing values, `json` and structured types."
+}

@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "repo": "objectstack-ai/objectstack",
-  "generated_at": "2026-11-02T14:24:11.167Z",
+  "generated_at": "2026-11-02T20:18:46.611Z",
   "walk_phase": "incremental",
   "walk": {
     "open_set": {
@@ -10,9 +10,9 @@
       "cursor": null
     },
     "delta": {
-      "complete": false,
-      "cursor": "2026-11-02T14:05:39Z",
-      "since": "2026-11-02T08:10:24.768Z",
+      "complete": true,
+      "cursor": "2026-11-02T20:03:10.958Z",
+      "since": "2026-11-02T14:05:39Z",
       "slice": 300
     },
     "history": {
@@ -20,53 +20,105 @@
       "cursor": "2026-09-23T20:24:00Z"
     }
   },
-  "since": "2026-11-02T08:10:24.768Z",
-  "since_reason": "incremental from the previous run's next_since (2026-11-02T08:10:24.768Z)",
-  "next_since": "2026-11-02T08:10:24.768Z",
-  "resume": {
-    "since": "2026-11-02T14:05:39Z",
-    "phase": "incremental",
-    "stopped_by": "budget",
-    "reason": "the per-run budget of 800 requests is spent"
-  },
+  "since": "2026-11-02T14:05:39Z",
+  "since_reason": "resuming the previous run at 2026-11-02T14:05:39Z",
+  "next_since": "2026-11-02T20:03:10.958Z",
+  "resume": null,
   "counts": {
     "issues_open": 306,
-    "issues_closed": 12809,
-    "issues_transferred": 1,
-    "pulls_open": 34,
-    "pulls_closed": 14111,
-    "records": 27261
+    "issues_closed": 12903,
+    "issues_transferred": 5,
+    "pulls_open": 53,
+    "pulls_closed": 14208,
+    "records": 27475
   },
   "board": {
-    "open_issues_count": null,
-    "open_pull_requests": null,
-    "read_at": null
+    "open_issues_count": 292,
+    "open_pull_requests": 48,
+    "read_at": "2026-11-02T20:18:46.053Z"
   },
   "count_check": {
-    "verdict": "pending",
-    "reason": "the board's own count was not read this run, so there is nothing to compare the census with",
-    "expected": 0,
+    "verdict": "ok",
+    "reason": null,
+    "expected": 244,
     "archived": 306,
-    "shortfall": null,
-    "surplus": null,
+    "shortfall": 0,
+    "surplus": 0,
     "gone_ledger": 62,
-    "ok": null
+    "ok": true
   },
   "freshness": {
     "verdict": "fresh",
-    "pending_since": "2026-11-02T14:24:11.167Z",
-    "reason": "no count-check verdict since 2026-11-02T14:24:11.167Z, still inside the 24 h this archive accepts"
+    "pending_since": null,
+    "reason": null
   },
-  "requests": 800,
+  "requests": 642,
   "run": {
-    "numbers_read": 425,
-    "files_written": 786,
-    "walk_complete": false,
+    "numbers_read": 338,
+    "files_written": 659,
+    "walk_complete": true,
     "open_set_completed_here": false,
     "delta_ran": false,
     "delta_completed_here": false,
     "delta_requests": 0,
     "blank_pages_reasked": 0,
-    "reconcile": null
+    "reconcile": {
+      "first": {
+        "verdict": "surplus",
+        "expected": 244,
+        "archived": 310,
+        "shortfall": 0,
+        "surplus": 4
+      },
+      "listed": 292,
+      "candidates": 9,
+      "left": 0,
+      "reread": [],
+      "transferred": [
+        {
+          "number": 25769,
+          "to": "objectstack-ai/hotcrm#2395"
+        },
+        {
+          "number": 26958,
+          "to": "objectstack-ai/hotcrm#2396"
+        },
+        {
+          "number": 27235,
+          "to": "objectstack-ai/hotcrm#2397"
+        },
+        {
+          "number": 28788,
+          "to": "objectstack-ai/hotcrm#2398"
+        }
+      ],
+      "destroyed": [
+        {
+          "number": 19374,
+          "kind": "pull_request"
+        },
+        {
+          "number": 19471,
+          "kind": "pull_request"
+        },
+        {
+          "number": 19478,
+          "kind": "pull_request"
+        },
+        {
+          "number": 19538,
+          "kind": "pull_request"
+        },
+        {
+          "number": 19540,
+          "kind": "pull_request"
+        }
+      ],
+      "unreadable": [],
+      "blank_pages_reasked": 0,
+      "reason": null,
+      "wrote": 4,
+      "cut_short": false
+    }
   }
 }

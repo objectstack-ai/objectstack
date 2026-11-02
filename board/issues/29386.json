@@ -2,8 +2,8 @@
   "number": 29386,
   "kind": "issue",
   "title": "pm-dispatch: a ruled decision card waits in the inbox until its lane happens to look — the ruling knock is skipped and the declared patrol flag one is unwired",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,22 @@
   },
   "labels": [
     "domain:skills",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T13:45:35Z",
-  "updated_at": "2026-11-02T13:48:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T18:43:44Z",
+  "closed_at": "2026-11-02T18:43:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29386",
   "body": "director#1 · os-support-ai · session_01WGufzg12BtjFc5rHp7YD1J\n\n**Filing gate ③: a task the maintainer set in the director session.** Summon #56 (seat post #12708, opening mark 6576665878). The director asked: 「请回一个字母,我立卡;或回「不改」」 with A recommended and B listed; the maintainer answered 「立卡」. The seat reads that as the recommended letter **A** and files A's scope only. ⛔ B (the director relabels on ruling) is not in scope; if the maintainer meant B, they say so on this card and the scope is rewritten before any claim.\n\n## 维护者速读\n\n- **问题**:总监录裁后不动标签,退箱靠车道席自己发现;录裁席应敲的 `Notify: ruling` 被漏掉时,已裁卡在决策箱里无限期挂着。\n- **实测**:2026-11-02 01:14Z–10:06Z 录裁的 12 张卡,录裁当时逐卡敲门 0 条;11 小时后 12 张仍挂 `needs-user-decision`,由第 56 场补敲。\n- **改什么**:录裁与敲门同一笔;把 dispatch-runbook 已声明但未接线的「旗一」接进半状态巡查。\n- **不改什么**:标签转换仍归车道席(单写者),总监不跨车道写状态。\n\n## What happens\n\nThe director records a ruling as a `Ruling:` comment plus a `Ruled:` line on the body, and by charter changes no label (`lanes/director.md`: 「录裁同笔改正文 … ⛔ 不新增标签与状态」). The exit stroke out of the inbox (`needs-user-decision` → `pm:queue` / `pm:blocked` / close) is the lane seat's. The lane learns of the ruling through a `Notify: ruling` knock on its mailbox (`project-forms.md`: 「记裁决席→被改席 `Notify: ruling`」), or by reading its own inbox on patrol.\n\nMeasured on 2026-11-02 (REST, label `needs-user-decision`, `state=open`, read at 11:56Z and again at 12:08Z):\n\n| Reading | Value |\n|---|---|\n| Cards ruled 01:14Z–10:06Z (batches #450–#454), `Ruled:` on the body | 12 |\n| Per-card `Notify: ruling` knocks on any mailbox for those 12, before 12:10Z | 0 |\n| Of the 12, still carrying `needs-user-decision` at 12:08Z | 12 |\n| Oldest ruling still in the box at 12:08Z | 10 h 54 min (#28658, 01:15Z) |\n\nWhat would have made the knock count non-zero: a knock of the shape `To: <seat>` / `Notify: ruling · #N · <letter> · record <id>`. One exists for #29160 (coordinator, 08:57Z, mailbox PR #28900), so the reading can see the shape. The director's summon #56 then sent the 12 missing knocks (comments 6576849200 through 6576964462 on mailbox PRs #29128, #29129, #29125, #28646, #28741).\n\nThe patrol does not catch it either. `dispatch-runbook.md` declares 「旗一:open 卡标题带决策标记或线程含裁决记录,却仍挂 `needs-user-decision`」 and says 「接线是另一张卡的事」. No row in `scripts/pm/check-half-states.mjs` reads a `Ruled:` line against a `needs-user-decision` label: the nearest, H54, reports the reverse case (`pm:queue` under a `[Decision]` title), and H25's map names `needs-user-decision` only as a conflict with `pm:awaiting-maintainer`. This card is that \"other card\".\n\n## Governing text\n\n- `.claude/skills/pm-dispatch/references/project-forms.md`: 「移卡入队者→车道:… 记裁决席→被改席 `Notify: ruling`」.\n- `.claude/skills/pm-dispatch/references/lanes/director.md`: 「录裁同笔改正文:首行加 `Ruled: …`;⛔ 不新增标签与状态」 and 「漏此笔 ⇒ 接卡者先读正文退决策箱」.\n- `.claude/skills/pm-dispatch/references/dispatch-runbook.md`: 「机械两旗 report-only,归半状态巡查;接线是另一张卡的事」 and 「旗一 …」.\n- `.claude/skills/pm-dispatch/references/instrument-discipline.md`: 「新增门禁、巡查行或棘轮须在卡上引维护者原话」. The maintainer's words for this card are quoted in the first paragraph; the row wires a flag the runbook already declares, it does not invent one.\n\n## Change (letter A)\n\n1. **Same stroke.** In `lanes/director.md`, the recording line says the ruling, the `Ruled:` body line and the `Notify: ruling` knock to the card's lane seat land in one act; a ruling recorded without its knock is a half state the recorder owes. The knock shape stays the one `project-forms.md` and `record-recognisers.mjs --mailbox-keys` already spell. ⛔ No new label, no new state, and the director still writes no label on the card.\n2. **Wire flag one.** One report-only row in `scripts/pm/check-half-states.mjs`: an open issue whose body carries a line-leading `Ruled: <comment id>` while it still carries `needs-user-decision`, older than a threshold, reported with the card, the ruling id, the age and the `domain:*` seat that owes the exit. Report-only like every row there: it writes nothing. The daily summary (director duty four) lists the rows.\n3. ⛔ Out of scope: the reverse direction (a card moved out of the box with no retrievable ruling id), which the runbook already assigns to the dispatch-time 决策复读; option B.\n\n## Premises, each with its re-check\n\n- The box still holds ruled cards with no exit: `gh api -X GET 'repos/objectstack-ai/objectstack/issues' -f state=open -f labels=needs-user-decision -f per_page=50 --jq '.[] | select(.body|test(\"(?m)^Ruled:\")) | .number'` (12 at 12:08Z; fewer is fine, the defect is the missing mechanism).\n- No patrol row reads `Ruled:` against the label: `git grep -n -E 'Ruled:' origin/main -- scripts/pm/check-half-states.mjs` (one hit at 12:20Z, a test fixture body, not a row).\n- The three governed files are at their ratchet ceilings: `lanes/director.md` 86, `dispatch-runbook.md` 245, `project-forms.md` 55 (`wc -l` against `scripts/pm/check-skill-line-ratchet.mjs`). Any added line is paid by a deletion in the same file; ⛔ no ceiling raise is authorised by this card.\n\n## Surface and tier\n\n`.claude/skills/pm-dispatch/references/lanes/director.md` (Tier S, `.claude/**`) and `scripts/pm/check-half-states.mjs` with its self-test. Both sit in the skills lane. Triage sets `domain:*`, `area:*`, the level and the queue.\n\n## Done when\n\n- A ruling recorded by any director session lands its knock in the same act, stated in the charter.\n- The patrol prints one row per ruled card still in the box past the threshold, with a positive control in the self-test (a body with `Ruled:` plus the label reports; the same body without the label does not; a `Ruled:` inside a code fence does not)."

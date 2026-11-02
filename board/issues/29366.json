@@ -2,8 +2,8 @@
   "number": 29366,
   "kind": "issue",
   "title": "spec(object-extension `fieldPatches`): the record key is a bare `z.string()`, so `fieldPatches: { Industry: {…} }` parses and is refused only downstream by the target judge",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -11,17 +11,24 @@
     "type": "Bot"
   },
   "labels": [
-    "finding"
+    "domain:spec",
+    "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T13:04:00Z",
-  "updated_at": "2026-11-02T13:04:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T19:09:13Z",
+  "closed_at": "2026-11-02T19:07:47Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29366",
   "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ② should-fix 1 of the spec seat's contract review on PR #29331 (#28655), at head `5f8d7494`. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec`, `packages/spec/src/data/object.zod.ts` (`ObjectExtensionSchema.fieldPatches`).\n\n## What happens\n\nPR #29331 keys a field patch's `options` map by `SelectOptionSchema.shape.value`, so an option key that can never be an option value is refused at the schema. `fieldPatches`' own record key is still `z.string()`, while a field name has a grammar (`FieldSchema.name` and the `ObjectSchema.fields` keys are snake_case). So `fieldPatches: { Industry: { label: 'Sector' } }` parses at the schema and is refused only later, by the target judge, as an unknown target. It is the same class as #28655's item B, and the same derivation is available: key the record by the schema that keys `ObjectSchema.fields`.\n\n## Done when\n\n`fieldPatches` is keyed by the field-name key schema `ObjectSchema.fields` uses, with an `invalid_key` issue and a prescription for a key outside the grammar. Measure first whether any authored form in examples, skills, docs or templates would newly refuse (if any: `Clause-②: no (narrowing)` / `Metadata-protocol: narrowed`, BREAKING; if the target judge already refuses every such key at every door, say so — the change may then be a location-only `semantic`).\n\nDedupe: #28655 / PR #29331 (items A–D, landing). **New.**"

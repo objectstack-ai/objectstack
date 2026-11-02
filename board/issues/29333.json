@@ -1,0 +1,33 @@
+{
+  "number": 29333,
+  "kind": "issue",
+  "title": "automation: the region refusal leaves a deeper suspended run uncancelled when a middle link of the suspension chain cannot be read",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T12:12:25Z",
+  "updated_at": "2026-11-02T15:05:10Z",
+  "closed_at": "2026-11-02T15:01:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29333",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: ① out-of-scope finding of the #29166 dev (os-dev-report 6576781813, open_questions[1]), confirmed by the seat reading `resolveSuspensionChain` on `main` (read, not run). Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3 · same defect class as #29166 item (1), one link deeper.\n\nReach: a region whose body calls a subflow or map whose child run suspends through a chain of two or more linked runs, while the store answers for the child but fails for a deeper link.\nReader who acts: the `domain:server` lane (`packages/services/service-automation/src/engine.ts` `resolveSuspensionChain`, `dag-traversal.ts` `runRegion`).\n\n## What happens (source reading)\n\n- #29166 item (1) (PR #29329) makes `runRegion` call `cancelRun(childRunId, reason)` once when `resolveSuspensionChain(childRunId)` comes back empty, so the strict loader owns the `error` record.\n- `resolveSuspensionChain` (`engine.ts` ~L6975) walks the chain with the degrading `loadSuspendedRun`, which turns a store read failure into `null`. When the child is readable but a deeper link's read fails, the walk stops early and returns a partial chain. The deeper run is then neither cancelled nor recorded at `error`; only the degrading read's `warn` remains.\n\n## Wanted\n\nWhen `runRegion` cancels the chain, walk it with the strict loader (the shape `cancelRun` already uses), cancel every link it can read, and record at `error` each link it cannot read, naming the run id. The region refusal itself is unchanged and still thrown after.\nTests: a three-run chain whose middle link's store read fails; the readable links are cancelled; one `error` record names the unreadable link; ablation.\nClause-② expected: `no` (cancels that should have happened now happen). `Metadata-protocol: none`.\n\nDedupe: searched `resolveSuspensionChain`, `region suspension chain cancel`, `partial chain deeper run not cancelled`; nearest #29166 (empty chain only), #28897 (closed). **New.**\n\nLinks back: #29166, PR #29329."
+}

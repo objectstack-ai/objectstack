@@ -1,0 +1,34 @@
+{
+  "number": 29371,
+  "kind": "pull_request",
+  "title": "docs(spec): document typed approval decision outputs as enforced at the decision, not a widget hint",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T13:19:16Z",
+  "updated_at": "2026-11-02T15:01:32Z",
+  "closed_at": "2026-11-02T15:01:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T15:01:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29371",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9SVUDueboMTukTWyoTJh412)_\nFixes #29340\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：审批节点「决策输出」的 spec 注释(三处)和审批文档一段，改成「`type`/`multiple` 在决策时强制校验」，删掉「只影响输入控件」的旧说法。\n- 为什么改：#28658 裁决 A 要求运行时按声明校验决策输出；旧文字与 ADR-0104 2026-10-30 修订矛盾，且服务端 PR(席 5)要等这条文字先落地。\n- 风险与回滚：只改注释和文档，无 schema、键、describe、导出变化；回滚即 revert 本 PR。\n- 先看：`packages/spec/src/automation/approval.zod.ts`(DecisionOutputDefSchema 注释块)、`content/docs/automation/approvals.mdx`(typed declaration 段落)。\n- 两分钟验证：`git grep -n \"only shape\" packages/spec/src/automation/approval.zod.ts content/docs/automation/approvals.mdx` 应无输出。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- `packages/spec/src/automation/approval.zod.ts`, three docblocks (no code, no `.describe()` string):\n  - `DecisionOutputDefSchema`: replaces \"`type` and `multiple` only shape the INPUT WIDGET, never the accepted value\" with the enforced contract: a picker output is judged by record id (`user`, `department`, `team`) or by machine name (`position`), through the lookup the matching `expression` approver's `resolveAs` uses; `multiple: true` takes a list with no entry twice, absent/false takes one value; a mismatch is refused with `400 VALIDATION_FAILED` naming `outputs.KEY` before any write, the request staying pending; `multiple` binds every entry, text and bare keys included; text is judged by shape only.\n  - `required`: \"Unlike `type`/`multiple` — which only shape the input widget\" becomes \"`type`/`multiple` judge the SHAPE of a supplied value; this one judges PRESENCE\".\n  - `decisionOutputs` on the approval node config (a third copy the card did not name): \"The type describes the INPUT WIDGET only — the runtime accepts whatever value shape arrives … verbatim\" is rewritten to the same contract.\n- `content/docs/automation/approvals.mdx`: the typed-declaration paragraph drops \"The type shapes only the input widget\" and gains the enforced rule (a short list), and the `required` paragraph no longer contrasts against an unenforced `type`/`multiple`.\n- `content/docs/automation/approvals.mdx` `next_reviewers` example now declares `{ key: 'next_reviewers', multiple: true }` (the bare key fed a list, which #28658's server PR refuses).\n- `.changeset/29340-decision-output-enforced-docs.md`: `@objectstack/spec` patch (the docblocks ship in the published `src/**/*.zod.ts`).\n\nNo `.describe()` string carried the contradiction (checked: the `type`, `multiple` and `decisionOutputs` describes only say what the approver answers with), so nothing regenerates. Forced test edits: none.\n\nOrdering: the runtime enforcement is #28658's `domain:server` PR (branch `claude/project-thread-rsqu0h`), which merges after this one; the text is written as the contract, in the present tense, as ADR-0104's amendment is.\n\n## Acceptance notes\n\n- **Error code: `VALIDATION_FAILED`, not the card's `VALIDATION_ERROR`.** The approvals door answers `400 VALIDATION_FAILED` for a malformed decision (the guide's own error-code table; the existing `required` refusal throws `VALIDATION_FAILED:`), and the enforcement branch for #28658 (head `88c96ad6`) throws `VALIDATION_FAILED` naming each `outputs.KEY`. `VALIDATION_ERROR` is the action-params gate's code from ADR-0104 D2. The text names the code the door answers.\n- **Approve and reject alike.** The guide says the typed check runs on an approve and a reject alike, matching the enforcement branch (\"each admitted output is judged … on an approve and on a reject alike\"). If that PR changes its reject choice, this sentence moves with it.\n- `plugin-approvals/src/approval-service.ts` carries the same \"only shape the input widget\" comment beside the `required` check; that file is the server half's, so it is left to that PR.\n\n## Verification\n\nRun on head `fc024e80` (round 2: two text-only commits over `821642ea`).\n\n- `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated`: `✓ All 14 generated artifacts are up to date`, lock VERDICT command-exit 0.\n- Offline changeset check of this body: `node scripts/check-changeset-no-major.mjs --base origin/main --event FILE` exit 0, `✓ LEVEL AXIS` (clause-② no, metadata-protocol none: a non-protocol change at patch). The card's `Clause-②: no (narrowing)` was also measured: the gate accepts it too (exit 0), but reads the arm as BREAKING, which a text-only diff is not, so this body declares bare `no` as the seat's claim does.\n- Derived gate list (`dispatch-gates --commands`, 96 commands): 96/96 exit 0 after a full `turbo run build --filter=./packages/**` (lock VERDICT command-exit 0); `dispatch-gates --ran`: `96 derived famil(ies) accounted for — 96 run, 0 NOT-MEASURED`.\n- `pnpm --filter @objectstack/spec typecheck && pnpm --filter @objectstack/spec test`: `Test Files  791 passed (791)`, `Tests  23391 passed | 1 todo`, lock VERDICT command-exit 0.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind. (No name added.)\n- [x] 3. No formatter ran; `pnpm lint` passes (CI).\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: its generated artifacts are regenerated and committed (none stale).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English (the 维护者速读 block is the maintainer's Chinese summary).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmP8ELNFNfBHmk387wA)_\n\n"
+}

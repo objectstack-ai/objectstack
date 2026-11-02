@@ -1,0 +1,35 @@
+{
+  "number": 29419,
+  "kind": "issue",
+  "title": "spec(data): export the list-comparand operator split from @objectstack/spec/data so the flow executor reads it instead of a local copy (#29404)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:29:37Z",
+  "updated_at": "2026-11-02T20:01:52Z",
+  "closed_at": "2026-11-02T20:00:22Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29419",
+  "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\nSource: the contract review of PR #29404 (card #29050), should-fix 2 / boundary (c).\n\n`packages/spec/src/data/filter-comparand-operators.ts` keeps `LIST_COMPARAND_OPERATORS` (`$in`, `$nin`, `$between`) out of the `data` barrel because \"no reader exists\". PR #29404 is a reader: `packages/services/service-automation/src/builtin/crud-nodes.ts` holds a local copy, kept equal by a behavioural reconciliation test.\n\nAsk: export the split, or a predicate over it, from `@objectstack/spec/data`, with a one-line describe. Then a server follow-up (the same card can name it) switches the executor to the import and retires the local copy and its reconciliation test. Additive export: `Clause-②: yes (widening)`, `Metadata-protocol: none`.\n\nLands after #29404 merges."
+}

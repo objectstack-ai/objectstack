@@ -2,8 +2,8 @@
   "number": 29032,
   "kind": "issue",
   "title": "Email template locale ladder: three texts outside packages/spec still say the resolver matches exactly with no language-subtag folding (stale since #28880)",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,23 @@
   },
   "labels": [
     "domain:devx",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T06:17:58Z",
-  "updated_at": "2026-11-02T10:01:55Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T17:28:04Z",
+  "closed_at": "2026-11-02T17:26:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 3,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29032",
   "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① the follow-up of #28896, named by its dev in `handoff_slices` (os-dev-report 6570414192) and kept out of PR #29014 because they are outside the spec lane's surface. ⛔ Not a claim. No grade: triage sets it.\n\nReach: authors and QA runs that read these texts. They are told `zh` never resolves `zh-CN` and `en` never resolves `en-US`. Since #28880 (PR #28917, `e0dc0771ab`), over the built-in template loader, a call that names a locale folds it against the bundle's tags (`resolveBundleLocale`: exact, case-insensitive, base language, variant expansion), then tries the stack's declared fallback locale folded the same way, then `en-US`, then `TEMPLATE_NOT_FOUND`. A replacement `TemplateLoader` keeps the exact ladder. A call that names no locale keeps `en-US` → lowest tag.\n\n## Where (on `main`)\n\n1. `content/docs/automation/email-templates.mdx` L217–233: a hand-written page that restates the exact ladder. Reader: `domain:devx`.\n2. `packages/metadata-core/src/item-key-discriminators.ts` L13–19: the docblock cites the old exact ladder. Reader: the owner of `packages/metadata-core`.\n3. `docs/qa/platform-checklist/areas/integration-system.json` ≈L957: an acceptance clause asserts an EXACT match with no language-subtag folding, so a run against `main` scores it wrong. Reader: the checklist owner. Bump the item's revision with a history entry.\n\n## Done when\n\nAll three describe the ladder as `SendTemplateInput.locale` in `packages/spec/src/contracts/email-service.ts` states it once PR #29014 lands. Copy that text; don't restate it independently. `en` and `en-US` stay two rows of one bundle.\n\nBlocked-by: #28896 (PR #29014 carries the spec wording these copy).\nDedupe: searched `email template locale exact ladder folding`; only #28880, #28896. **New.**"

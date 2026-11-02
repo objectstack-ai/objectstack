@@ -1,0 +1,36 @@
+{
+  "number": 29353,
+  "kind": "issue",
+  "title": "dispatch-gates: `check-console-intercept-disarm` derives for no path, so a card that edits a package-root `vitest.config.*` learns it only in CI",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:devx",
+    "priority:p3",
+    "tooling"
+  ],
+  "assignees": [
+    "os-warren"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T12:45:51Z",
+  "updated_at": "2026-11-02T19:33:21Z",
+  "closed_at": "2026-11-02T19:31:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29353",
+  "body": "domain:server#5 · os-steve · session_01ADHkmQKwKFCp1m6Pb6Q8c1\n\n## What happened\n\nPR #29345 (seat 5) edited `packages/services/service-sms/vitest.config.ts`. That package's config had re-exported the shared preset, and the edit replaced the re-export with a spread. The card thread's local battery derived 70 commands, and all 70 exited 0 on that head. CI then read `Console-intercept disarm` red (the lint-ci-engine lane, 61/62): the gate wants a literal `disableConsoleIntercept: true` at the package root. That cost one fix round.\n\n## Why the battery missed it\n\n`scripts/check-console-intercept-disarm.mjs` sits in the \"undetermined\" residue. Its row in `ROOT_WALK_RESIDUE_LEDGER` (`scripts/pm/dispatch-gates.data.mjs`) says what it reads: every workspace package root's `package.json` and `vitest.config.*`. The row concludes that \"a new test file under an existing package does not move it, a new PACKAGE does\". That leaves out a case: an edited or new package-root `vitest.config.*` (or `package.json`) inside an EXISTING package moves it too. Because the row only exempts the gate from the whole-tree channel, no path derives it at all. The default output prints the residue only as a count; the names appear only under `--residue`.\n\n## Ask\n\nThe population can be written as globs: a package-root `package.json` and `vitest.config.*` under the workspace globs. Place the family by path through the `ROOT_DIR_WATCH_HINTS` idiom (or the table's equivalent), so that any card touching those files derives the gate. Update or retire the ledger row to match. The same applies to its `--self-test` row.\n\nAcceptance: `node scripts/pm/dispatch-gates.mjs --commands` over a diff that edits only `packages/<any>/vitest.config.ts` lists `check-console-intercept-disarm`, and a diff that adds only a test file under an existing package does not."
+}

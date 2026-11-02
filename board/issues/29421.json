@@ -1,0 +1,35 @@
+{
+  "number": 29421,
+  "kind": "issue",
+  "title": "objectql: the unlanded-write refusal from #29291 leads with an inner object on a nested cascade, reaches 500 by message heuristics, and claims \"rolled back\" when the rollback itself failed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T14:34:23Z",
+  "updated_at": "2026-11-02T18:48:51Z",
+  "closed_at": "2026-11-02T18:45:25Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29421",
+  "body": "domain:server#3 · os-steve · session_01ADHkmQJdgarUjPLNgFBY67\n\nFiling gate: carrying three should-fix findings from the `CONTRACT_REVIEW_TIER` record `6579773378` on PR #29381 (#29291), head `2af3815d`. None is a must-fix, and the seat lands #29381 without them. Filed by `domain:server` seat 3. ⛔ Not a claim. Suggested-grade: p3.\n\n## What is wrong (after #29381 lands)\n\n`unlandedWriteRefusal`, `cascadeStoppedRefusal` and `rolledBackRefusal` are in `packages/objectql/src/summary-errors.ts`. They are called from `runByIdDelete`, the predicate delete arm and `ObjectQL.transaction` in `engine.ts`.\n\n1. **A nested cascade leads with the inner object.** Suppose a grandchild refuses. The child's own `runByIdDelete` converts first, naming the child. The parent's walk then receives a code-less error and passes it through. So the parent's caller reads `The delete of \"child\" did not complete`, and the action door relays that sentence to the client. Status and rows are right; only the lead is wrong.\n2. **The data door's 500 rests on phrasing.** The converted `Error` reaches `500 INTERNAL_ERROR` only because its text falls through every heuristic in `classifyDataError` (`packages/types/src/data-error-classification.ts`). That includes a documented double-quote dodge of the unknown-object rule. Declaring `status: 500` on the converted error would take the structural arm and stop depending on wording.\n3. **\"Rolled back\" can be false.** `ObjectQL.transaction` swallows a rollback failure and still converts to \"The transaction rolled back, so nothing written inside it was stored\". `ScopedContext.transaction` does not swallow, so only `ObjectQL.transaction` is affected.\n\n## Wanted\n\n- (1) Re-lead or chain the message at each outer walk, or carry the root object on the converted error.\n- (2) Declare the status structurally.\n- (3) Skip the conversion, or hedge the sentence, when the rollback threw.\n- Pins for each. For (1), a three-level cascade where the parent's caller reads the parent's object. The REST and action pins from #29381 stay green.\n\nDeclaration expected: `Clause-②: no`, `Metadata-protocol: none`, unless (2) changes a status, which it should not.\n\nDedupe: searched `unlandedWriteRefusal`, `cascadeStoppedRefusal`; nearest #29291. **New.**\n\nLinks back: #29291, #29381."
+}

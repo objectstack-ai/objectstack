@@ -1,0 +1,35 @@
+{
+  "number": 29489,
+  "kind": "issue",
+  "title": "Studio landing: the description and read-only hint still say to customize a read-only package \"with an environment overlay\", which ADR-0146 closed",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "priority:p2"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T16:20:33Z",
+  "updated_at": "2026-11-02T19:03:43Z",
+  "closed_at": "2026-11-02T19:01:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/29489",
+  "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① user-facing copy that contradicts a landed decision. Found by #28579 slice 2 (PR #29487, `FOLLOW-UPS.md` §14c) and confirmed by the seat on `main`.\nReader: `domain:ui`. The copy is in `ui/packages/i18n/src/namespaces/studio/en.ts` and its locale twins. The pin is `ui/packages/app-shell/src/views/studio-design/BuilderLanding.environmentOverlayCopy-12171.test.ts`.\nDedupe (open AND closed): `\"environment overlay\" studio landing` → no copy card. #29374 (N-31, open) covers docs and the turned-off sentence, and its \"Not here\" leaves the Studio i18n strings out. #28576 (closed) closed the package-less write itself.\nreach: every Studio visitor. It is the landing page of the builder.\ntype: Bug\n\nBusiness reason: the first thing Studio tells a user about a read-only package is to customize it \"with an environment overlay\". Since ADR-0146 D11 (#28576 / #28850), a package-less write onto a packaged view or dashboard answers 403 `NOT_OVERRIDABLE` and names the `<base>.custom` pair. The route the landing page teaches is now refused.\n\n## Where (read on `main`)\n- `engine.studio.landing.description` (`en.ts` line 3237): \"…Code and installed packages are read-only: browse them here, and customize them with an environment overlay.\"\n- `engine.studio.landing.readonlyHint` (`en.ts` line 3250): \"…Customize one with an environment overlay, for the metadata types that accept one.\"\n- `BuilderLanding.environmentOverlayCopy-12171.test.ts` requires that phrase, so the copy cannot change without changing the pin.\n\n## Wanted\nPoint both strings, and their locale twins, at the ADR-0146 route: customize in the package's `.custom` pair (Customize / New similar), with upgrades still flowing to the base. Re-pin the test on the new wording, and say whether any metadata type still takes a package-less environment overlay. Copy and pin only, with no behaviour change."
+}

@@ -2,8 +2,8 @@
   "number": 29374,
   "kind": "issue",
   "title": "N-31: docs and the turned-off sentence stop sending people to the Setup pages N-28 retired",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,19 +14,23 @@
     "area:studio",
     "documentation",
     "domain:devx",
-    "pm:queue",
-    "pm:retriage",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-warren"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-02T13:24:00Z",
-  "updated_at": "2026-11-02T13:24:00Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-02T17:29:23Z",
+  "closed_at": "2026-11-02T17:26:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/29374",
   "body": "epic:#28130#1 · hotlong · session_040dfd80c4c9411b895c698e785a6848\n\nFiling gate: ④ child of epic #28236, filed on the maintainer's word in direct chat with the epic PM seat, 2026-11-02: 「立卡」, answering \"should the stale documentation found after N-28 and N-30 be filed\". ⛔ Not a claim.\n\nPart of #28236 (child **N-31**) · governs: ADR-0146 D1 (Setup carries no metadata editor and no metadata catalog), D4 (a packaged flow's switch is on the item in Studio; the packaged-action switch stays in Setup), D11 (Packaged automation retired); M-1 ruling 6554738464 (the catalog items and their switches moved to Studio).\n\n**Business reason.** N-28 #28578 removed these Setup entries, and N-30 #28577 did not cover the pages below. An administrator who follows them looks for a menu that is gone. A person refused a switched-off flow or action is told, in their error toast, to send an administrator to a page that no longer exists. All of this is correct on the published 18.2.0 and goes wrong with the next release, so it is best landed before that release.\n\n**Measured (`eef116e4d1`).**\n\n| Where | What it says | Why it is wrong |\n|:--|:--|:--|\n| `packages/types/src/packaged-item-turned-off.ts:40` | `Setup › Packaged automation` in the sentence both refusal engines send (`describeTurnedOffPackagedItem`) | The page is retired. Actions are under Setup's `Packaged Actions` entry (`packages/platform-objects/src/apps/setup-nav.contributions.ts:64`). A flow's switch and New similar are in the package's Automations pillar in Studio (`ui/packages/app-shell/src/views/studio-design/setupMetadataRedirect.ts:57-59`) |\n| `packages/spec/src/api/protocol.zod.ts:755` | `disabledActions` \"turned them off under Setup › Packaged automation\" | Same page. It generates `content/docs/references/api/app-bundle.mdx` and `protocol.mdx` |\n| `content/docs/permissions/authorization.mdx:251-253` | Setup → Access Control → Permission Sets, `/apps/setup/metadata/permission?scope=environment` | The entry is gone; the catalog is at `/studio/~all/metadata/permission?scope=environment` (`permission-sets.mdx:386` already says so) |\n| `content/docs/permissions/access-recipes.mdx:50` | Setup → Access Control → Permission Sets | Same |\n| `content/docs/permissions/administrator-guide.mdx:107` | Setup → Access Control → Positions | Same; Setup keeps only `Position Holders` and `Permission Set Assignment` (`packages/plugins/plugin-security/src/security-plugin.ts:1655-1656`) |\n| `content/docs/permissions/administrator-guide.mdx:117`, `:151` | Setup → Access Control → Permission Sets | Same |\n\nRe-check, each on `origin/main`:\n\n```bash\ngit grep -nE 'Packaged [Aa]utomation' origin/main -- packages/types/src/packaged-item-turned-off.ts packages/spec/src/api/protocol.zod.ts\ngit grep -nE 'apps/setup/metadata|Setup *(→|>|›|->) *Access Control' origin/main -- content/docs skills\n```\n\nThe scan matched these literal path and arrow shapes only. A page that names the same entries in other words would not have matched, and the first step below is to look for those.\n\n**Wanted.**\n\n1. Sweep `content/docs/**` and `skills/**` once more in other words (for example \"Access Control\", \"Positions\", \"Permission Sets\" near \"Setup\"). Add any hit to this PR and name it in the PR body.\n2. Point each page in the table at where the task is done today. Before writing a step, confirm in the code that it exists there. In particular, confirm where `administrator-guide.mdx:107` (a position's assignments) and `:117` (a permission set's **Assigned Users** panel) now live: Studio's item page, or Setup's `Position Holders` and `Permission Set Assignment`.\n3. Rewrite the turned-off sentence by kind. An action names Setup's Packaged Actions; a flow names Studio and keeps its \"copy\" clause, now true of New similar there. Keep the file's rules: plain language, no ADR or tracker number, and no action-clone offer. Update the file's doc comment, which still calls the page live.\n4. Correct the `disabledActions` description to Setup's Packaged Actions and regenerate the spec artifacts.\n5. Update the tests that pin the sentence: `packages/types/src/packaged-item-turned-off.test.ts`, `packages/objectql/src/action-activation.test.ts`, `packages/runtime/src/domains/action-activation-dispatch.test.ts`, `packages/services/service-automation/src/flow-activation-ledger.test.ts`, `packages/qa/dogfood/test/api-action-door-forward.dogfood.test.ts`, `packages/qa/dogfood/test/packaged-action-disabled-dispatch-live.dogfood.test.ts`.\n\n**Tests.** The six files above green. Rebuild `@objectstack/types` first, because downstream tests read its `dist`. The docs build and link check stay green. The Re-check commands above, repeated on the PR's head, return no hit for the retired entries beyond what the PR body explains.\n\n**Release safety.** Words only: no route, permission or behaviour changes. The envelope codes `ACTION_DISABLED` and `FLOW_DISABLED` are unchanged, and a machine reads those, not the sentence. Patch changesets on `@objectstack/types` and `@objectstack/spec`; `Clause-②: no`, `Metadata-protocol: none`. No `skills/**` change is expected from the table; if the sweep in item 1 finds one, the PR becomes governed and waits for a human merge.\n\n**Routing, for triage.** Filed under `domain:devx` because most of the lines are `content/docs/**`. It also moves one line in `packages/spec` (`domain:spec`) and one sentence in `packages/types` (`domain:cli`). `pm:retriage` asks triage to confirm one lane for the single PR, or to split the card if it prefers.\n\n**Not here.** Code comments in `ui/packages/**` and historical notes that mention the old page. `permission-sets.mdx:387`, already correct. The i18n keys `packagedAutomation.title` and `.subtitle` (`ui/packages/i18n/src/locales/en.ts:5562`): whether they still have a reader is not measured here, and if they have none they belong with #28789's readerless keys.\n\n**Dedupe.** Searched open issues for `authorization.mdx`, `\"apps/setup/metadata\"`, and `\"Access Control\" Setup docs permission`: only QA run records, seat posts and PRs that merely mention them. N-30's review recorded the finding as out of scope (PR #29264 comment 6575375680). N-29 #28579 excludes docs.\n\nLinks back: #28236, #28578, #28577, #28579, #28789, PR #28818, PR #29264.\n\n---\n_Generated by [Claude Code](https://claude.ai/code)_"

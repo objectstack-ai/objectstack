@@ -1,0 +1,34 @@
+{
+  "number": 29454,
+  "kind": "pull_request",
+  "title": "docs(spec): tenancy-posture prose says which side of the open/commercial split gates activation",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T15:40:45Z",
+  "updated_at": "2026-11-02T18:43:44Z",
+  "closed_at": "2026-11-02T18:43:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T18:43:42Z",
+  "comments": 7,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/29454",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9RGv5iq3ShhcQehne7GnJDs)_\nFixes #29318\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改 `tenancy-posture.ts` 的两段注释（文件头「开源代码与激活授权」一节、`postureStampsOrganization` 的说明），外加一个 spec patch changeset；无代码、无 schema、无生成物变化。\n- 为什么改：原文「open code does not mean free activation」没说是哪一侧，读起来像开源安装也要许可证；按 ADR-0132，开源安装挂上 `@objectstack/organizations` 即可启用 group/isolated，只有商业侧子类才加许可证门。\n- 风险与回滚：纯注释，零运行时风险；回滚即 revert 本 PR。\n- 先看：`packages/spec/src/security/tenancy-posture.ts` 第 23–48 行（文件头一节）与 `postureStampsOrganization` 的说明块。\n- 两分钟验证：`git diff origin/main -- packages/spec/src/security/tenancy-posture.ts`，预期只见注释行变化，且每句激活相关的话都写明是开源侧还是商业侧。\n- 需要你做的：无，席位落地。\n\n## What changes\n\n- **Header section** (was \"Open code, entitled activation\", now \"Open code; activation is entitled only on a commercial host\"). It keeps the implementation-vs-entitlement separation and now says which side each sentence describes:\n  - On an open install, activation is gate-free: the open runtime carries no licence check (ADR-0132 D2) and entitles both walled postures by construction (ADR-0132 D4), so mounting it is enough. Measured on `origin/main`: `packages/plugins/organizations/src/organizations-plugin.ts` declares `supportedPostures = ['group', 'isolated']` with the \"NO LICENCE GATE HERE\" note beside it.\n  - On a commercial host, activation is entitled: the package of the same name subclasses the open one and answers its licence gate in its own constructor, and the host's manifest resolves the name to it (ADR-0132 D2, D3). \"Open code does not mean free activation\" is kept, scoped to that side, matching the ADR-0105 D12 amendment's \"on the commercial side\".\n- **Cloud ADR-0016 铁律 paragraph.** The guarantee no longer rests on \"not giving the posture away\". It now says the iron rule is satisfied by the wall itself on both sides: a multi-org shape never runs unwalled (ADR-0093 D5). Whether switching the posture on is free is the entitlement question, not the iron rule's. The Chinese quotation (强制免费、治理收费) is unchanged.\n- **`postureStampsOrganization` docblock.** \"Open code does not mean free activation\" is now scoped the same way: mounting the runtime is enough on an open install, and only a commercial host gates activation.\n- **Changeset** `.changeset/29318-tenancy-posture-activation-prose.md`: `@objectstack/spec` patch (the docblocks ship in the published `.d.ts`).\n\nNo forced test edits.\n\n## Tests\n\nComment-only diff. `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated`: all 14 generated artifacts up to date (the file has no `.describe()`, so nothing generated moves). Spec `typecheck` and `test` were run locally (readings under Verification).\n\n## Acceptance notes\n\n- The `OrgScopingEntitlement` docblock further down already scopes its \"packaging decision\" sentence to the commercial runtime and names ADR-0132 D4 for the open package, so it is left as it is.\n\n## Verification\n\nAll readings at head `e82aa69a` (the only commit), in `objectstack-ai/objectstack`.\n\n<details><summary>Spec build, generated artifacts, typecheck, test</summary>\n\n- `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated` under the verify lock: `VERDICT command-exit 0`, \"All 14 generated artifacts are up to date\".\n- `pnpm --filter @objectstack/spec typecheck`: exit 0.\n- `pnpm --filter @objectstack/spec test`: `VERDICT command-exit 0`, Test Files 791 passed (791), Tests 23469 passed, 1 todo.\n\n</details>\n\n<details><summary>Derived gates (dispatch-gates --commands, 73 families)</summary>\n\n- All 73 derived commands exit 0. Four first answered exit 3 (prerequisite not met, nothing measured): the teardown-shape self-test on the shallow clone, and `check:doc-formula-expressions`, `check:dual-build-cjs-loads`, `check:lean-entry-closure` on unbuilt packages. After fetching the self-test's control commit and `turbo run build --filter=./packages/**` (VERDICT command-exit 0), all four exit 0.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran FILE`: \"73 derived, 73 run, 0 NOT-MEASURED, 0 UNRUN\", exit 0.\n- `check-changeset-no-major.mjs --base origin/main --event FILE` on this body, offline: exit 0, level axis \"clause-② `no` and metadata-protocol `none` ... a non-protocol change at `patch`\".\n- Local-only `check:dev-prereqs`: its self-test passes; the scan exits 1 because 35 `ui/` workspace packages are not built in this container (an unmet local precondition, not a finding on this diff). NOT MEASURED for that half.\n\n</details>\n\nDogfood: n/a, no `!` in the title and no (narrowing) arm.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPErSzAW8P6oQg3W1k)_\n"
+}
