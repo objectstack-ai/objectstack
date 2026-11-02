@@ -7,6 +7,7 @@ const ko = {
     banner: {
       message: '{{user}} 계정을 대행하고 있습니다. 모든 작업이 해당 사용자로 기록됩니다.',
       startedBy: '관리자 {{admin}}이(가) 시작했습니다.',
+      startedByUnnamed: '관리자가 시작했습니다.',
       stop: '대행 종료',
       stopping: '종료하는 중…',
       stopFailed: '대행을 종료할 수 없습니다: {{reason}}',

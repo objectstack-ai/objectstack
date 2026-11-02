@@ -7,6 +7,7 @@ const pt = {
     banner: {
       message: 'Você está personificando {{user}} — todas as ações são registradas em nome dele.',
       startedBy: 'Iniciado pelo administrador {{admin}}.',
+      startedByUnnamed: 'Iniciado por um administrador.',
       stop: 'Parar personificação',
       stopping: 'Encerrando…',
       stopFailed: 'Não foi possível parar a personificação: {{reason}}',

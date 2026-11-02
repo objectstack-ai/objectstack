@@ -947,6 +947,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.graft-folded-form-sections.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4602,6 +4617,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/action-body-write-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-body-write-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/action-declarative-update-stale-summary.test.ts",
       "verb": "update",
       "pinned": 1
@@ -4867,6 +4892,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/sandbox/body-write-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/sandbox/body-write-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/security/resolve-execution-context.forward-credential.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4939,6 +4974,21 @@
     {
       "file": "packages/services/service-automation/src/builtin/crud-runas.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {

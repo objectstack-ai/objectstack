@@ -10,6 +10,7 @@ const en = {
     banner: {
       message: 'You are impersonating {{user}} — every action is recorded as them.',
       startedBy: 'Started by administrator {{admin}}.',
+      startedByUnnamed: 'Started by an administrator.',
       stop: 'Stop impersonating',
       stopping: 'Stopping…',
       stopFailed: 'Could not stop impersonating: {{reason}}',

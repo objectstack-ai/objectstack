@@ -7,6 +7,7 @@ const es = {
     banner: {
       message: 'Está suplantando a {{user}}: todas las acciones se registran a su nombre.',
       startedBy: 'Iniciado por el administrador {{admin}}.',
+      startedByUnnamed: 'Iniciado por un administrador.',
       stop: 'Dejar de suplantar',
       stopping: 'Finalizando…',
       stopFailed: 'No se pudo dejar de suplantar: {{reason}}',
