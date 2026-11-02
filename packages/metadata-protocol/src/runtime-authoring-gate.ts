@@ -61,17 +61,7 @@ import {
 // here rather than borrowed from `@objectstack/lint` because the runtime gate
 // may only reach that package through its kernel-safe `/runtime` entry (the
 // wiring guard's third invariant), and `walkFlowNodes` is not on it.
-//
-// [#29233] Beside it, the engine's region judge and the parse it reads:
-// `canonicalizeFlow` (service-automation) hands `validateControlFlow` the body
-// through `FlowSchema`, and so does the gate-local rule below, so the publish
-// and the registration refuse the same regions.
-import {
-    FLOW_REGION_SLOTS_BY_TYPE,
-    FlowSchema,
-    validateControlFlow,
-    type FlowNodeParsed,
-} from '@objectstack/spec/automation';
+import { FLOW_REGION_SLOTS_BY_TYPE } from '@objectstack/spec/automation';
 // [#20312] The ADR-0080 compiler itself — the function behind the CLI-only
 // `validateJsxPages` rule, imported rather than re-implemented, so the save
 // door and `os validate` judge a page's source with one compiler. Imported from
@@ -611,96 +601,6 @@ export function findFlowCycleGaps(args: { type: string; name: string; body: unkn
             + `redirect it. The automation engine registers a flow only when its graph minus the back edges `
             + `has no cycle, so this flow would publish and never run.`,
     }];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// #29233 — a flow whose loop / parallel / try_catch region is malformed.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * The rule id of the finding below: the automation engine refuses to register
- * a flow whose ADR-0031 region (a `loop` body, a `parallel` branch, a
- * `try_catch` try or catch region, at any depth) is malformed: no single entry
- * or exit node, a cycle inside the region, a region its own schema refuses, or
- * a `parallel` block with fewer than two branches.
- *
- * ## The defect this closes
- *
- * The engine's refusal ran at registration only (`canonicalizeFlow`). A flow
- * whose loop body closed on itself read `valid: true` as a draft, published
- * through the per-item and the package doors, and was then refused
- * registration, so the flow never ran and only the by-name read's
- * `registration` and the boot log said why.
- *
- * ## Why it is gate-local
- *
- * The sibling of {@link FLOW_UNDECLARED_CYCLE}, for the reason given there. The
- * judge is not restated: {@link validateControlFlow} (`@objectstack/spec`), the
- * function the engine's registration calls, on the input the engine hands it
- * (the body through `FlowSchema`), so the gate refuses exactly the regions the
- * engine refuses, in the engine's words.
- */
-export const FLOW_REGION_MALFORMED = 'flow-region-malformed';
-
-/** The engine's refusal of these nodes' regions, or `null` when it accepts them. */
-function controlFlowRefusal(nodes: FlowNodeParsed[]): string | null {
-    try {
-        validateControlFlow({ nodes });
-        return null;
-    } catch (e) {
-        return e instanceof Error ? e.message : String(e);
-    }
-}
-
-/**
- * Judge one about-to-be-published `flow` body for a malformed region: one
- * `error` finding per top-level node whose regions the engine refuses, located
- * on the innermost container the refusal names, with the engine's sentence.
- *
- * PURE. A body `FlowSchema` refuses is the schema's to report, so it takes no
- * part here. The engine throws on the first malformed region of the whole
- * flow; asking the same judge one top-level node at a time reports each
- * top-level container it would refuse, each in the sentence the engine throws
- * for it. Locating never judges: a nested container becomes the anchor only
- * when the judge, asked about it alone, answers the tail of the same sentence
- * (the engine prefixes a nested region's sentence with the path down to it).
- */
-export function findFlowRegionGaps(args: { type: string; name: string; body: unknown }): RuntimeAuthoringIssue[] {
-    if (args.type !== 'flow' || !isRec(args.body)) return [];
-    const parsed = FlowSchema.safeParse(args.body);
-    if (!parsed.success) return [];
-    const flow = parsed.data;
-    const flowName = flow.name || args.name;
-    // Every node at every depth over the parsed body, pre-order. Parsing keeps
-    // every list's order, so each path indexes the body as the author wrote it.
-    const walked = walkNodes(flow as unknown as AnyRec, 'flows[0]');
-    const issues: RuntimeAuthoringIssue[] = [];
-    flow.nodes.forEach((top, index) => {
-        const message = controlFlowRefusal([top]);
-        if (message === null) return;
-        const topPath = `flows[0].nodes[${index}]`;
-        let anchor = walked.find((w) => w.path === topPath)!;
-        // The containers that answer the same sentence form one chain down to
-        // the region at fault, and pre-order meets them outermost first.
-        for (const w of walked) {
-            if (!w.path.startsWith(`${topPath}.`)) continue;
-            const inner = controlFlowRefusal([w.node as unknown as FlowNodeParsed]);
-            if (inner !== null && (message === inner || message.endsWith(` → ${inner}`))) anchor = w;
-        }
-        issues.push({
-            severity: 'error',
-            rule: FLOW_REGION_MALFORMED,
-            where: `flow "${flowName}" · node "${nodeLabel(anchor.node, anchor.index)}"`,
-            path: anchor.path,
-            message,
-            hint:
-                `Give the region one entry node, one exit node and no cycle inside it; a parallel block `
-                + `needs at least two branches. The automation engine registers a flow only when every loop, `
-                + `parallel and try_catch region is well formed (ADR-0031), so this flow would publish and `
-                + `never run.`,
-        });
-    });
-    return issues;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1476,12 +1376,8 @@ export function evaluateRuntimeAuthoringGate(args: {
     // [#29025] The engine's registration refusal of an undeclared cycle, asked
     // of the same judge so the publish and the registration cannot disagree.
     const flowCycleGaps = findFlowCycleGaps({ type: args.type, name: args.name, body: args.body });
-    // [#29233] The engine's registration refusal of a malformed region, asked
-    // of the same judge, on the same parse, for the same reason.
-    const flowRegionGaps = findFlowRegionGaps({ type: args.type, name: args.name, body: args.body });
     const localIssues = [
         ...flowCycleGaps,
-        ...flowRegionGaps,
         ...scheduleOrgGaps,
         ...packagedRuleCopyGaps,
         ...hierarchyScopeGaps,
@@ -1544,7 +1440,7 @@ export function evaluateRuntimeAuthoringGate(args: {
     // here would reintroduce exactly the ambiguity it was added to remove.
     const rulesRun = [
         ...result.rulesRun,
-        ...(args.type === 'flow' ? [FLOW_UNDECLARED_CYCLE, FLOW_REGION_MALFORMED, PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
+        ...(args.type === 'flow' ? [FLOW_UNDECLARED_CYCLE, PLATFORM_SCHEDULE_CREATE_RECORD_ORG_MISSING] : []),
         ...(args.type === 'view' ? [PUBLIC_FORM_INTAKE_UNAVAILABLE] : []),
         ...(args.type === 'permission' && args.hierarchyResolverMounted !== undefined
             ? [HIERARCHY_SCOPE_CAPABILITY_REQUIRED]

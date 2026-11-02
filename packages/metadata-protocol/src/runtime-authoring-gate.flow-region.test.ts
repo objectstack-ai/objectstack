@@ -1,19 +1,23 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#29233] The gate-local `flow-region-malformed` rule, on the pure gate: the
- * gate refuses the ADR-0031 regions the engine's registration refuses (a loop
- * body, a parallel branch, a try or catch region, at any depth), with the
- * sentence the engine throws, located on the container it names. The judge is
- * `validateControlFlow`, the function `canonicalizeFlow` calls; every expected
- * message below is that function's own answer for the case, never a
- * restatement. The draft-read and publish doors over a real protocol are pinned
- * in `protocol.draft-publish-verdict.test.ts`.
+ * [#29233] The registry rule `flow-region-shape-invalid`
+ * (`validateFlowRegionShape`, `@objectstack/lint`) on the pure runtime gate:
+ * the gate refuses the ADR-0031 regions the engine's registration refuses (a
+ * loop body, a parallel branch, a try or catch region, at any depth), with the
+ * sentence the engine throws. The judge is `validateControlFlow`, the function
+ * `canonicalizeFlow` calls; every expected sentence below is that function's
+ * own answer for the case, never a restatement. The draft-read and publish
+ * doors over a real protocol are pinned in
+ * `protocol.draft-publish-verdict.test.ts`.
  */
 
 import { describe, expect, it } from 'vitest';
 import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
-import { evaluateRuntimeAuthoringGate, FLOW_REGION_MALFORMED } from './runtime-authoring-gate.js';
+import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
+
+/** The registry rule's id (`FLOW_REGION_SHAPE_INVALID` in `@objectstack/lint`). */
+const RULE = 'flow-region-shape-invalid';
 
 type Rec = Record<string, unknown>;
 
@@ -57,11 +61,14 @@ function engineRefusal(flow: unknown): string | null {
 function regionIssues(flow: { name: string }, state: 'active' | 'draft' = 'active') {
     const verdict = evaluateRuntimeAuthoringGate({ type: 'flow', name: flow.name, state, body: structuredClone(flow) });
     const err = verdict.error as (Error & { code: string; status: number; issues: any[]; rulesRun: string[] }) | null;
-    return { err, issues: (err?.issues ?? []).filter((i) => i.rule === FLOW_REGION_MALFORMED) };
+    return { err, issues: (err?.issues ?? []).filter((i) => i.rule === RULE) };
 }
 
-describe('[#29233] the publish gate refuses the regions the engine refuses', () => {
-    it('the card: a loop body a → b → a is refused on the loop, in the engine\'s sentence', () => {
+/** The registry rule's message: the engine's refusal behind the flow's name. */
+const refusedAt = (name: string, sentence: string | null) => `Flow '${name}' would be refused at registration: ${sentence}`;
+
+describe('[#29233] the publish gate refuses the regions the engine refuses, through the registry rule', () => {
+    it('the card: a loop body a → b → a is refused, in the engine\'s sentence', () => {
         const flow = flowOf('rgnprobe_loop', [loop('lp', closedBody('k'))]);
         const sentence = engineRefusal(flow);
         expect(sentence).toBe(
@@ -71,45 +78,41 @@ describe('[#29233] the publish gate refuses the regions the engine refuses', () 
         );
         const { err, issues } = regionIssues(flow);
         expect(err).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
-        expect(err!.rulesRun).toContain(FLOW_REGION_MALFORMED);
+        expect(err!.rulesRun).toContain('validateFlowRegionShape');
         expect(issues).toEqual([{
             severity: 'error',
-            rule: FLOW_REGION_MALFORMED,
-            where: 'flow "rgnprobe_loop" · node "Loop lp"',
-            path: 'flows[0].nodes[1]',
-            message: sentence,
+            rule: RULE,
+            where: "flow 'rgnprobe_loop'",
+            path: 'flows[0]',
+            message: refusedAt('rgnprobe_loop', sentence),
             hint: expect.any(String),
         }]);
     });
 
-    it('a parallel block with one branch is refused on the block', () => {
+    it('a parallel block with one branch is refused', () => {
         const flow = flowOf('one_branch', [{ id: 'fan', type: 'parallel', label: 'Fan', config: { branches: [oneStep('only')] } }]);
         expect(regionIssues(flow).issues).toEqual([
-            expect.objectContaining({ path: 'flows[0].nodes[1]', message: engineRefusal(flow) }),
+            expect.objectContaining({ path: 'flows[0]', message: refusedAt('one_branch', engineRefusal(flow)) }),
         ]);
     });
 
-    it('a try region that closes on itself is refused on the try_catch', () => {
+    it('a try region that closes on itself is refused', () => {
         const flow = flowOf('closed_try', [{
             id: 'guard', type: 'try_catch', label: 'Guard', config: { try: closedBody('t'), catch: oneStep('c') },
         }]);
         const sentence = engineRefusal(flow);
         expect(sentence).toMatch(/^try_catch 'guard' try: /);
-        expect(regionIssues(flow).issues).toEqual([
-            expect.objectContaining({ path: 'flows[0].nodes[1]', message: sentence }),
-        ]);
+        expect(regionIssues(flow).issues).toEqual([expect.objectContaining({ message: refusedAt('closed_try', sentence) })]);
     });
 
     it('a region its schema refuses is refused with the engine\'s "invalid region" sentence', () => {
         const flow = flowOf('shapeless', [loop('lp', { nodes: 'not a list' })]);
         const sentence = engineRefusal(flow);
         expect(sentence).toMatch(/^loop 'lp' body: invalid region — /);
-        expect(regionIssues(flow).issues).toEqual([
-            expect.objectContaining({ path: 'flows[0].nodes[1]', message: sentence }),
-        ]);
+        expect(regionIssues(flow).issues).toEqual([expect.objectContaining({ message: refusedAt('shapeless', sentence) })]);
     });
 
-    it('a malformed region nested in another names both levels and lands on the inner container', () => {
+    it('a malformed region nested in another is refused, its sentence naming both levels', () => {
         const flow = flowOf('nested', [{
             id: 'guard', type: 'try_catch', label: 'Guard',
             config: { try: { nodes: [loop('inner', closedBody('n'))], edges: [] }, catch: oneStep('c') },
@@ -117,17 +120,15 @@ describe('[#29233] the publish gate refuses the regions the engine refuses', () 
         const sentence = engineRefusal(flow)!;
         expect(sentence).toMatch(/^try_catch 'guard' try → loop 'inner' body: /);
         expect(regionIssues(flow).issues).toEqual([
-            expect.objectContaining({
-                where: 'flow "nested" · node "Loop inner"',
-                path: 'flows[0].nodes[1].config.try.nodes[0]',
-                message: sentence,
-            }),
+            expect.objectContaining({ path: 'flows[0]', message: refusedAt('nested', sentence) }),
         ]);
     });
 
-    it('two malformed top-level containers are reported one finding each', () => {
+    it('two malformed containers give one finding, the engine\'s first refusal', () => {
         const flow = flowOf('two_bad', [loop('first', closedBody('f')), loop('second', closedBody('s'))]);
-        expect(regionIssues(flow).issues.map((i) => i.path)).toEqual(['flows[0].nodes[1]', 'flows[0].nodes[2]']);
+        const sentence = engineRefusal(flow)!;
+        expect(sentence).toMatch(/^loop 'first' body: /);
+        expect(regionIssues(flow).issues).toEqual([expect.objectContaining({ message: refusedAt('two_bad', sentence) })]);
     });
 
     it('controls: a well-formed loop, parallel and try_catch region, nested too, raise nothing', () => {
@@ -140,18 +141,13 @@ describe('[#29233] the publish gate refuses the regions the engine refuses', () 
             },
         ]);
         expect(engineRefusal(flow)).toBeNull();
-        expect(regionIssues(flow).issues).toEqual([]);
+        const verdict = evaluateRuntimeAuthoringGate({ type: 'flow', name: flow.name, state: 'active', body: structuredClone(flow) });
+        expect(((verdict.error as any)?.issues ?? []).filter((i: any) => i.rule === RULE)).toEqual([]);
     });
 
     it('a draft is not gated (D1)', () => {
         const flow = flowOf('draft_loop', [loop('lp', closedBody('d'))]);
         expect(evaluateRuntimeAuthoringGate({ type: 'flow', name: flow.name, state: 'draft', body: structuredClone(flow) }).error)
             .toBeNull();
-    });
-
-    it('a body the flow schema refuses is the schema\'s to report: no region finding', () => {
-        const flow = { ...flowOf('no_label', [loop('lp', closedBody('x'))]), label: undefined };
-        expect(FlowSchema.safeParse(flow).success).toBe(false);
-        expect(regionIssues(flow).issues).toEqual([]);
     });
 });

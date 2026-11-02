@@ -464,7 +464,7 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
         // [#29233] A loop whose body closes on itself (body a → b → a, the
         // card's reproduction). It saved, read valid:true and PUBLISHED, and
         // the engine's region check then refused to register it.
-        rule: 'flow-region-malformed',
+        rule: 'flow-region-shape-invalid',
         type: 'flow',
         item: regionFlow('region_loop', {
             id: 'lp',
@@ -614,11 +614,13 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect(published).toMatchObject({ success: true, publishedCount: 3, failedCount: 0 });
     });
 
-    it('[#29233] the region verdict is located at the container, at its depth, on the draft read', async () => {
+    it('[#29233] the region verdict on the draft read is the registry rule\'s: the engine\'s sentence, at the item root', async () => {
         const { engine } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
-        // A one-branch parallel block nested in a try region: the engine names
-        // both levels, and the finding lands on the inner container.
+        // A one-branch parallel block nested in a try region. The registry rule
+        // judges the flow as one unit (as the engine does) and anchors the
+        // flow itself, so the item-relative path is the item root; the
+        // sentence names the region.
         const flow = regionFlow('nested_region', {
             id: 'guard', type: 'try_catch', label: 'Guard',
             config: {
@@ -633,10 +635,10 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
 
         const diagnostics = await draftDiagnostics(protocol, 'flow', flow.name);
         expect(diagnostics.valid).toBe(false);
-        expect((diagnostics.errors ?? []).filter((e) => e.code === 'flow-region-malformed')).toEqual([{
-            path: 'nodes.1.config.try.nodes.0',
-            message: "parallel 'fan': a parallel block needs at least 2 branches",
-            code: 'flow-region-malformed',
+        expect((diagnostics.errors ?? []).filter((e) => e.code === 'flow-region-shape-invalid')).toEqual([{
+            path: '',
+            message: "Flow 'nested_region' would be refused at registration: parallel 'fan': a parallel block needs at least 2 branches",
+            code: 'flow-region-shape-invalid',
         }]);
     });
 

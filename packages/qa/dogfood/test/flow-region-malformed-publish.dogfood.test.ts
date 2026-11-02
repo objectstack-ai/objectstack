@@ -16,7 +16,7 @@
 // ## What these cases pin
 //
 // The draft still saves (drafts are never gated). Its read answers
-// `valid: false` with the `flow-region-malformed` finding on the loop node, in
+// `valid: false` with the `flow-region-shape-invalid` finding on the flow, in
 // the engine's own sentence; `publish-drafts`, the per-item publish and a live
 // save each refuse it before any write. Control: a well-formed loop, parallel
 // and try_catch region each read valid, publish, and the engine registers them.
@@ -88,7 +88,7 @@ describe('dogfood: a flow with a malformed region is refused at publish, and its
     expect(res.status, JSON.stringify(res.json)).toBe(422);
     const text = JSON.stringify(res.json);
     expect(text).toContain('INVALID_METADATA');
-    expect(text).toContain('flow-region-malformed');
+    expect(text).toContain('flow-region-shape-invalid');
   };
 
   /** No active row was written: the by-name read serves nothing under that name. */
@@ -116,14 +116,15 @@ describe('dogfood: a flow with a malformed region is refused at publish, and its
     expect(read.status, JSON.stringify(read.json)).toBe(200);
     const diagnostics = JSON.stringify(read.json);
     expect(diagnostics).toContain('"valid":false');
-    expect(diagnostics).toContain('"code":"flow-region-malformed"');
-    expect(diagnostics).toContain('"path":"nodes.1"');
-    expect(diagnostics).toContain(JSON.stringify(REGION_SENTENCE));
+    expect(diagnostics).toContain('"code":"flow-region-shape-invalid"');
+    // The registry rule anchors the flow itself: the item root, in item-relative spelling.
+    expect(diagnostics).toContain('"path":""');
+    expect(diagnostics).toContain(JSON.stringify(`Flow 'rgnprobe_loop' would be refused at registration: ${REGION_SENTENCE}`));
 
     const published = await call('POST', `/packages/${PKG_BAD}/publish-drafts`, {});
     expect(published.status, JSON.stringify(published.json)).toBe(200);
     expect(published.json?.data).toMatchObject({ outcome: 'refused', publishedCount: 0 });
-    expect(JSON.stringify(published.json)).toContain('flow-region-malformed');
+    expect(JSON.stringify(published.json)).toContain('flow-region-shape-invalid');
     await expectNoActiveRow('rgnprobe_loop');
   }, 30_000);
 
