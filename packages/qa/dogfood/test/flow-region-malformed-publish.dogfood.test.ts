@@ -125,7 +125,7 @@ describe('dogfood: a flow with a malformed region is refused at publish, and its
     expect(published.json?.data).toMatchObject({ outcome: 'refused', publishedCount: 0 });
     expect(JSON.stringify(published.json)).toContain('flow-region-malformed');
     await expectNoActiveRow('rgnprobe_loop');
-  });
+  }, 30_000);
 
   it('the per-item publish and a live save refuse it too, before any write', async () => {
     const drafted = await call('PUT', '/meta/flow/rgnprobe_item?mode=draft', closedLoopFlow('rgnprobe_item', 'i'));
@@ -135,7 +135,7 @@ describe('dogfood: a flow with a malformed region is refused at publish, and its
 
     expectRegionRefusal(await call('PUT', '/meta/flow/rgnprobe_live', closedLoopFlow('rgnprobe_live', 'v')));
     await expectNoActiveRow('rgnprobe_live');
-  });
+  }, 30_000);
 
   it('control: a well-formed loop, parallel and try_catch region each read valid, publish, and register', async () => {
     const flows = [
@@ -173,5 +173,8 @@ describe('dogfood: a flow with a malformed region is refused at publish, and its
       }
       expect(served, flow.name).toContain('"registration":{"state":"registered"}');
     }
-  });
+    // Three saves, three reads, a package publish and up to three registration
+    // polls of 5 s each: the default 5 s per test was measured too tight inside
+    // the full battery on a shared box.
+  }, 60_000);
 });
