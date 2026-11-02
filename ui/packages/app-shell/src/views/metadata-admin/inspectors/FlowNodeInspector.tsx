@@ -22,7 +22,7 @@
 import * as React from 'react';
 import { Plus } from 'lucide-react';
 import { resolveFlowTriggerKind } from '@objectstack/spec/automation';
-import { Input, Label, Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@object-ui/components';
+import { Input, Label } from '@object-ui/components';
 import type { MetadataInspectorProps } from '../inspector-registry.js';
 import { t, tFormat } from '../i18n.js';
 import {
@@ -31,6 +31,7 @@ import {
   InspectorSelectField,
   InspectorRemoveButton,
   InspectorEmptyState,
+  InspectorReadOnlyReason,
 } from './_shared.js';
 import {
   mergeServerFlowFields,
@@ -294,7 +295,6 @@ export function FlowNodeInspector({
   readOnly,
   readOnlyReason,
 }: MetadataInspectorProps) {
-  const readOnlyReasonId = React.useId();
   // Resolve the selection to a node + how to write it back — a top-level draft
   // node, or a node nested inside a container region (#2670). Every edit goes
   // through loc.write, so the inspector never branches on where the node lives.
@@ -895,34 +895,16 @@ export function FlowNodeInspector({
     </InspectorShell>
   );
 
-  const reason = readOnly ? readOnlyReason?.trim() : undefined;
-  if (!reason) return shell;
   // Read-only with a reason from the host: every control above is disabled for
-  // that one reason, and a disabled control takes neither hover nor focus. The
-  // inspector body is the tooltip trigger, so hovering any of them shows it, and
-  // a tab stop described by an `sr-only` copy, so a keyboard or screen-reader
-  // user reaches it too. One trigger for the panel, not one per control: the
-  // reason is the same for all of them. Same treatment as Studio's field rail
-  // and validation-rule editor.
+  // that one reason, so the panel carries it (`InspectorReadOnlyReason`).
   return (
-    <TooltipProvider delayDuration={200}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <div
-            role="group"
-            aria-label={flowNodeDisplayName(node, locale)}
-            tabIndex={0}
-            aria-describedby={readOnlyReasonId}
-            data-disabled-reason=""
-            data-testid="flow-node-readonly-reason"
-            className="flex h-full min-h-0 flex-col focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-          >
-            {shell}
-            <span id={readOnlyReasonId} className="sr-only">{reason}</span>
-          </div>
-        </TooltipTrigger>
-        <TooltipContent side="left" align="start">{reason}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <InspectorReadOnlyReason
+      readOnly={readOnly}
+      reason={readOnlyReason}
+      label={flowNodeDisplayName(node, locale)}
+      testId="flow-node-readonly-reason"
+    >
+      {shell}
+    </InspectorReadOnlyReason>
   );
 }

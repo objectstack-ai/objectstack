@@ -2227,7 +2227,9 @@ const en = {
       title: 'Settings',
       subtitle: 'Configure your system, integrations, and feature flags.',
       loadError: 'Failed to load settings',
-      empty: 'No settings registered. Plugins can register settings manifests via the SettingsService.',
+      empty: 'No settings pages are available yet. They appear here when an installed app provides them.',
+      adminManaged: 'Settings are managed by your administrator',
+      adminManagedDescription: 'Your account cannot view or change these settings. Ask an administrator if something needs to change.',
       settingsCount: '{{n}} settings',
       beta: 'Beta',
       // Section headers, keyed by the manifest `category` value. Unknown
