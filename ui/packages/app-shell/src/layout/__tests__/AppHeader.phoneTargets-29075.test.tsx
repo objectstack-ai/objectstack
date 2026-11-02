@@ -202,8 +202,6 @@ function mountHome() {
   );
 }
 
-const follows = (a: Node, b: Node) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const source = (file: string) => readFileSync(path.resolve(HERE, '..', file), 'utf8');
 

@@ -107,8 +107,11 @@ let navigateTo: ((to: string) => void) | null = null;
 function Probe({ openDrawer }: { openDrawer: boolean }) {
   const { isMobile, openMobile, open, setOpenMobile } = useSidebar();
   const navigate = useNavigate();
-  navigateTo = navigate;
-  sidebarState = { isMobile, openMobile, open };
+  // Published after each commit, not during render (react-hooks/globals).
+  React.useEffect(() => {
+    navigateTo = navigate;
+    sidebarState = { isMobile, openMobile, open };
+  });
   React.useEffect(() => {
     if (openDrawer && isMobile) setOpenMobile(true);
   }, [openDrawer, isMobile, setOpenMobile]);
