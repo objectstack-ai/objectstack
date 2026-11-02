@@ -232,6 +232,12 @@ const en = {
     // allows it: sharing, ownership or row-level security (objectstack#27138).
     noPermissionToEditRecord: "You don't have permission to edit this record. The fields are read-only.",
     submitFailed: 'Could not save. Please try again.',
+    // The banner an edit form shows when its record read is refused: a
+    // denial, a not-found (which row-level security answers for a hidden row,
+    // so the line never tells the two apart), and any other failure.
+    noPermissionToOpenRecord: "You don't have access to this record.",
+    recordNotFoundOrHidden: "This record doesn't exist, or you don't have access to it.",
+    openRecordFailed: 'Could not open this record. Please try again.',
     uploadInFlight: 'Wait for the upload to finish before saving.',
     // The notice the record form raises when a field's own `visibleWhen` turns
     // it invisible and the form clears the value it held (objectui#8070 names
