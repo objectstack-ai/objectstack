@@ -29,7 +29,7 @@ describe('PushDeliveryDataSchema', () => {
     expect(PushRouteSchema.safeParse('/').success).toBe(true);
   });
 
-  it.each(['/apps/crm/.well-known', '/apps/crm/...', '/apps/crm/x?next=%2Fapps%2Fcrm', '/apps/crm/x#%2e%2e'])(
+  it.each(['/apps/crm/.well-known', '/apps/crm/...', '/apps/crm/x?next=%2Fapps%2Fcrm', '/apps/crm/x#%2e%2e', '/apps/crm/x?q=100%25'])(
     'accepts %j: no dot segment, and a query or fragment keeps its own encoding',
     (route) => {
       expect(PushRouteSchema.safeParse(route).success).toBe(true);
@@ -63,6 +63,10 @@ describe('PushDeliveryDataSchema', () => {
     '/apps/crm/..',
     '/a%2Fb',
     '/apps/crm/./x?tab=notes',
+    // Double-encoded: one decode leaves %2F / %2E / %5C for the next one.
+    '/a%252Fb',
+    '/%252e%252e/x',
+    '/a%255cb',
   ])('refuses route %j', (route) => {
     const parsed = PushDeliveryDataSchema.safeParse({ notificationId: 'ntf_1', route });
     expect(parsed.success).toBe(false);

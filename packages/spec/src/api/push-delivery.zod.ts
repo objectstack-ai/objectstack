@@ -39,6 +39,14 @@ import { lazySchema } from '../shared/lazy-schema';
  * `/apps/APP/` and passes an `/apps/…` route through. One resolver, so a
  * push and the inbox row open the same screen.
  *
+ * A shell with no app list of its own (a native shell that has not loaded
+ * the Console's catalog, say) does not guess either. It hands `route` to the
+ * Console to resolve, or hosts it under the segment the Console would answer
+ * (`resolveHostAppSegment` in the same file: the preferred app the user last
+ * had open, re-checked against the active apps, then the first active app,
+ * then `setup`). It never re-implements the resolver and never opens `route`
+ * verbatim.
+ *
  * Not to be confused with the `PushNotificationSchema` that `system/` once
  * declared and then removed (ADR-0049): that was an authoring template shape;
  * this is the wire data of a delivery, produced by the platform.
@@ -52,19 +60,23 @@ import { lazySchema } from '../shared/lazy-schema';
  * protocol-relative reference to another site.
  *
  * Its path (the part before any `?` or `#`) also carries no dot segment (`.`
- * or `..`) and no percent-encoded `/`, `\` or `.` (`%2F`, `%5C`, `%2E`, either
- * case): a router that normalises or decodes the path would move it somewhere
- * the notification did not point. Both rules are patterns, so the published
- * JSON Schema carries them too. A query or fragment keeps its own encoding.
+ * or `..`), no percent-encoded `/`, `\` or `.` (`%2F`, `%5C`, `%2E`, either
+ * case) and no encoded `%` (`%25`), which closes the double-encoded forms
+ * (`%252F`, `%252E`, `%255C`): a router that normalises or decodes the path,
+ * once or more, would move it somewhere the notification did not point. A
+ * path that needs a literal `%` is refused with them, so its push carries no
+ * `route` and the tap opens the shell's default screen. Both rules are
+ * patterns, so the published JSON Schema carries them too. A query or
+ * fragment keeps its own encoding.
  */
 export const PushRouteSchema = z.string()
   .regex(/^\/(?![/\\])[^\s\\\x00-\x1f\x7f]*$/, {
     message: 'A push route is a same-server relative path: it starts with a single "/" and carries no scheme, host, '
       + 'backslash, whitespace or control character.',
   })
-  .regex(/^(?![^?#]*(?:\/\.\.?(?:[/?#]|$)|%(?:2[eEfF]|5[cC])))/, {
-    message: 'A push route path carries no dot segment ("." or "..") and no percent-encoded "/", "\\" or "." '
-      + '(%2F, %5C, %2E): a router that normalises or decodes the path would open somewhere else.',
+  .regex(/^(?![^?#]*(?:\/\.\.?(?:[/?#]|$)|%(?:2[eEfF]|5[cC]|25)))/, {
+    message: 'A push route path carries no dot segment ("." or "..") and no percent-encoded "/", "\\", "." or "%" '
+      + '(%2F, %5C, %2E, %25): a router that normalises or decodes the path would open somewhere else.',
   })
   .describe(
     'The notification actionUrl as a same-server relative path: app-relative (/opportunity/123) or a Console route '

@@ -41,6 +41,14 @@ with its host app segment, which hosts an app-relative path under
 `/apps/APP/` and passes an `/apps/…` route through. One resolver, so a
 push and the inbox row open the same screen.
 
+A shell with no app list of its own (a native shell that has not loaded
+the Console's catalog, say) does not guess either. It hands `route` to the
+Console to resolve, or hosts it under the segment the Console would answer
+(`resolveHostAppSegment` in the same file: the preferred app the user last
+had open, re-checked against the active apps, then the first active app,
+then `setup`). It never re-implements the resolver and never opens `route`
+verbatim.
+
 Not to be confused with the `PushNotificationSchema` that `system/` once
 declared and then removed (ADR-0049): that was an authoring template shape;
 this is the wire data of a delivery, produced by the platform.
