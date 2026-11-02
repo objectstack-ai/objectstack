@@ -32,7 +32,7 @@ import { PLATFORM_OWNER_EMAIL_ENV, resolveTenancyPosture } from '@objectstack/ty
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
 import { CoreServiceName } from '@objectstack/spec/system';
-import type { AutomationResult, IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
+import type { AutomationResult, ConnectorConnectionRequest, IAutomationService, ISecurityService } from '@objectstack/spec/contracts';
 // [#23501] The served list read's contract — the facts a package refusal names.
 import type { MetadataProtocol } from '@objectstack/spec/api';
 import { isServiceServeable } from '../service-serveable.js';
@@ -252,17 +252,22 @@ function recordIdAlias(objectName: unknown): string | undefined {
  * judged, exactly as the run receives it. Read by the trigger routes and a
  * declared `type: 'flow'` endpoint, which share the builder, for flow start
  * admission's third question (`refuseUnreadableFlowStartRecords`).
+ *
+ * `inputs` is the whole built `params` bag, row slots included: every value
+ * the run's input variables are bound from, each judged against the object
+ * the flow's own definition reads it from, where it declares one.
  */
 export function flowStartRecordKeys(automationContext: Record<string, unknown>): {
     objectName: unknown;
     recordKeys: FlowStartRecordKeys;
+    inputs: FlowStartRecordKeys;
 } {
     const params = (automationContext.params ?? {}) as Record<string, unknown>;
     const objectName = automationContext.object;
     const alias = recordIdAlias(objectName);
     const recordKeys: Array<readonly [string, unknown]> = [['recordId', params.recordId]];
     if (alias !== undefined) recordKeys.push([alias, params[alias]]);
-    return { objectName, recordKeys };
+    return { objectName, recordKeys, inputs: Object.entries(params) };
 }
 
 export function createAutomationDomain(deps: DomainHandlerDeps): DomainRoute {
@@ -979,6 +984,46 @@ export const CONNECTOR_OAUTH_CALLBACK_QUERY_PARAMS: readonly string[] = Object.f
 ]);
 
 /**
+ * ADR-0143 D2.1 (2026-11-02 amendment) — the begin leg's closed body set: the
+ * OAuth client an administrator registered with the vendor, for an instance
+ * declaring `clientSource: 'installer'`. No body (or an empty object) begins
+ * with no client, as before; anything else is refused naming the key, never
+ * dropped. The automation service judges the values, and refuses a client
+ * on an instance that does not take one.
+ */
+export const CONNECTOR_CONNECTION_BEGIN_BODY_KEYS: readonly string[] = Object.freeze(['clientId', 'clientSecret']);
+
+/**
+ * The begin leg's body as the service's `client`, `undefined` for no client,
+ * or the refusal sentence. ⛔ The sentence names keys only, never a value the
+ * caller sent (the secret travels in this body).
+ */
+function connectorConnectionBeginClientOf(
+    connector: string,
+    body: unknown,
+): { client?: { clientId: string; clientSecret?: string } } | { refusal: string } {
+    if (body === undefined || body === null || body === '') return {};
+    if (typeof body !== 'object' || Array.isArray(body)) {
+        return { refusal: `Beginning a connect of connector instance '${connector}' takes a JSON object body, or none.` };
+    }
+    const keys = Object.keys(body);
+    if (keys.length === 0) return {};
+    const unknownKeys = keys.filter((k) => !CONNECTOR_CONNECTION_BEGIN_BODY_KEYS.includes(k)).sort();
+    if (unknownKeys.length > 0) {
+        return {
+            refusal: `Beginning a connect of connector instance '${connector}' takes only \`clientId\` and \`clientSecret\` in the `
+                + `body; unrecognised: ${unknownKeys.map((k) => `\`${k}\``).join(', ')}.`,
+        };
+    }
+    const fields = body as { clientId?: unknown; clientSecret?: unknown };
+    if (fields.clientId === undefined) {
+        return { refusal: `Beginning a connect of connector instance '${connector}' with \`clientSecret\` needs the \`clientId\` it belongs to.` };
+    }
+    // The values are the service's to judge (`beginConnectorConnection`).
+    return { client: fields as { clientId: string; clientSecret?: string } };
+}
+
+/**
  * ADR-0143 D5 — "who may connect, reconnect or revoke is a capability check
  * the server slice declares". The organization-scoped capability the spec
  * declares for exactly this door (`PLATFORM_CAPABILITIES`). Connecting a vendor
@@ -1084,6 +1129,7 @@ async function respondToConnectorConnectionDoor(
     automationService: unknown,
     parts: string[],
     method: string,
+    body: unknown,
     context: HttpProtocolContext,
     query: unknown,
 ): Promise<HttpDispatcherResult> {
@@ -1120,11 +1166,19 @@ async function respondToConnectorConnectionDoor(
             };
         }
         const member = method === 'GET' ? 'getConnectorConnection' : method === 'POST' ? 'beginConnectorConnection' : 'revokeConnectorConnection';
-        const call = svc[member] as ((request: { connector: string; context?: unknown }) => Promise<unknown>) | undefined;
+        const call = svc[member] as ((request: ConnectorConnectionRequest) => Promise<unknown>) | undefined;
         if (typeof call !== 'function') {
             return { handled: true, response: deps.error(CONNECTOR_CONNECTION_UNSUPPORTED_MESSAGE(member), 501) };
         }
-        const answer = await call.call(svc, { connector, context: executionContext });
+        // Only the begin leg reads a body (the installer's OAuth client); the
+        // read and revoke legs read none, as before.
+        let client: ConnectorConnectionRequest['client'];
+        if (method === 'POST') {
+            const read = connectorConnectionBeginClientOf(connector, body);
+            if ('refusal' in read) return { handled: true, response: deps.error(read.refusal, 400, { code: 'VALIDATION_ERROR' }) };
+            client = read.client;
+        }
+        const answer = await call.call(svc, { connector, context: executionContext, ...(client ? { client } : {}) });
         return { handled: true, response: deps.success(answer) };
     } catch (err) {
         const refusal = connectorCredentialRefusal(deps, err);
@@ -3602,7 +3656,7 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
     // ADR-0143 D5 — the connector connection door, ahead of `/:name` for the
     // reason `/connectors` is.
     if (isConnectorConnectionDoor(parts, m)) {
-        return respondToConnectorConnectionDoor(deps, automationService, parts, m, context, query);
+        return respondToConnectorConnectionDoor(deps, automationService, parts, m, body, context, query);
     }
 
     if (parts[0] === 'connectors' && parts.length === 1 && m === 'GET') {

@@ -548,7 +548,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **total** | `integer` | ✅ | How many entries the record's timeline stream holds for this caller, over the sources the request named. |
+| **total** | `integer` | ✅ | The rows of the sources the request named, counted as this caller may read them: an upper bound of the entries the timeline panel draws, not their number. The panel draws fewer where its `showCompleted` / `types` configuration filters entries out, and where a ledger row has no displayable diff. |
 
 ### Nested Shape: `RecordPageResponse.timeline[option 2]`
 
@@ -596,7 +596,7 @@ This schema accepts one of the following structures:
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **total** | `integer` | ✅ | How many entries the record's timeline stream holds for this caller, over the sources the request named. |
+| **total** | `integer` | ✅ | The rows of the sources the request named, counted as this caller may read them: an upper bound of the entries the timeline panel draws, not their number. The panel draws fewer where its `showCompleted` / `types` configuration filters entries out, and where a ledger row has no displayable diff. |
 
 
 ---

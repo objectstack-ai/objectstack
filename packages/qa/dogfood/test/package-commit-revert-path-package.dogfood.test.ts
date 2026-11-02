@@ -18,6 +18,10 @@
 // commit as not in the path's package, and writes nothing: the items are
 // untouched and the commit's own package keeps the history it had. An
 // unknown package id answers the sibling doors' `404 Package 'ID' not found`.
+// A package that was installed, committed to and then uninstalled is an
+// unknown id too: its commits stay in the trail (`GET /:id/commits` still
+// lists them), and its own revert and rollback paths answer that same 404
+// and write nothing.
 // Controls: the same revert and rollback through the commit's own package
 // still answer 200 and record their commits; a member without
 // `manage_metadata` is still refused 403 first.
@@ -30,16 +34,26 @@
 // reverting it through the showcase's own path removes the overlay. That is
 // the undo of an ADR-0131 D6 customization, which `POST /packages/:id/revert`
 // also answers for a read-only package (stored rows first), so the commit
-// doors take no read-only guard; the last case pins it.
+// doors take no read-only guard.
+//
+// [#28905, ADR-0146 D1] That draft naming the read-only showcase itself is
+// refused now (`403 NOT_OVERRIDABLE`, naming its `.custom` pair), so a fresh
+// boot can no longer give the showcase such a commit; one recorded before
+// keeps its revert, as the commit doors still take no read-only guard. The
+// last case pins the refusal, then the same customization written where D1
+// puts it, the showcase's pair: its commit reverts through the pair's own
+// path, and through no other.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 
 const SHOWCASE = 'com.example.showcase';
 const OVERLAY = 'showcase_task.default';
 const A = 'app.cmtprobe-a';
 const B = 'app.cmtprobe-b';
+const GONE = 'app.cmtprobe-gone';
 
 const object = (name: string, label: string) => ({
   name,
@@ -124,6 +138,35 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
     expect(JSON.stringify(rollback.json)).toContain("Package 'app.cmtprobe-nosuch' not found");
   });
 
+  it('an uninstalled package\'s commit is refused 404 through its own revert and rollback path, and writes nothing', async () => {
+    const created = await call('POST', '/packages', {
+      manifest: { id: GONE, name: 'Commit probe gone', version: '0.1.0', type: 'app', namespace: 'cmtpg' },
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    await publishObject(GONE, 'cmtpg_first', 'Gone first');
+    const before = await commitsOf(GONE);
+    const target = before.find((c) => c.operation === 'apply')!;
+    expect(target).toBeDefined();
+
+    const uninstalled = await call('DELETE', `/packages/${GONE}`);
+    expect(uninstalled.status, JSON.stringify(uninstalled.json)).toBe(200);
+    expect(await isServed('cmtpg_first')).toBe(false);
+    // The trail outlives the package's registry entry.
+    expect(await commitsOf(GONE)).toEqual(before);
+
+    const revert = await call('POST', `/packages/${GONE}/commits/${target.id}/revert`, {});
+    expect(revert.status, JSON.stringify(revert.json)).toBe(404);
+    expect(revert.json?.error?.code, JSON.stringify(revert.json)).toBe('RESOURCE_NOT_FOUND');
+    expect(revert.json?.error?.message).toBe(`Package '${GONE}' not found`);
+    const rollback = await call('POST', `/packages/${GONE}/rollback`, { commitId: target.id });
+    expect(rollback.status, JSON.stringify(rollback.json)).toBe(404);
+    expect(rollback.json?.error?.code, JSON.stringify(rollback.json)).toBe('RESOURCE_NOT_FOUND');
+    expect(rollback.json?.error?.message).toBe(`Package '${GONE}' not found`);
+
+    expect(await commitsOf(GONE)).toEqual(before);
+    expect(await isServed('cmtpg_first')).toBe(false);
+  });
+
   it('control: a member without manage_metadata is refused 403 first', async () => {
     const target = (await commitsOf(A))[0];
     expect((await call('POST', `/packages/${B}/commits/${target.id}/revert`, {}, member)).status).toBe(403);
@@ -154,26 +197,33 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
     expect(await isServed('cmtpb_first')).toBe(true);
   });
 
-  it('control: a read-only package\'s overlay commit reverts through its own path, and through no other', async () => {
-    const saved = await call('PUT', `/meta/view/${OVERLAY}?mode=draft&package=${SHOWCASE}`, {
+  it('control: the showcase\'s customization commit, in its pair, reverts through the pair\'s own path, and through no other', async () => {
+    const view = {
       name: OVERLAY, object: 'showcase_task', viewKind: 'list', label: 'Overlay probe',
       config: { type: 'grid', columns: [{ field: 'title' }] },
-    });
+    };
+    // [#28905] The draft naming the read-only showcase itself is closed, naming its pair.
+    const named = await call('PUT', `/meta/view/${OVERLAY}?mode=draft&package=${SHOWCASE}`, view);
+    expect(named.status, JSON.stringify(named.json)).toBe(403);
+    expect(JSON.stringify(named.json)).toContain(`?package=${SHOWCASE}.custom`);
+
+    const pair = await ensurePair(stack, admin, SHOWCASE);
+    const saved = await call('PUT', inPair(`/meta/view/${OVERLAY}?mode=draft`, SHOWCASE), declaredOverride(view, SHOWCASE, '0.1.0'));
     expect(saved.status, JSON.stringify(saved.json)).toBe(200);
-    const published = await call('POST', `/packages/${SHOWCASE}/publish-drafts`, {});
+    const published = await call('POST', `/packages/${pair}/publish-drafts`, {});
     expect(published.status, JSON.stringify(published.json)).toBe(200);
-    const before = await commitsOf(SHOWCASE);
+    const before = await commitsOf(pair);
     expect(before[0]).toMatchObject({ operation: 'apply', id: published.json?.data?.commitId });
 
     const cross = await call('POST', `/packages/${B}/commits/${before[0].id}/revert`, {});
     expect(cross.status, JSON.stringify(cross.json)).toBe(404);
-    expect(await commitsOf(SHOWCASE)).toEqual(before);
+    expect(await commitsOf(pair)).toEqual(before);
 
-    const res = await call('POST', `/packages/${SHOWCASE}/commits/${before[0].id}/revert`, {});
+    const res = await call('POST', `/packages/${pair}/commits/${before[0].id}/revert`, {});
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json?.data).toMatchObject({
       success: true, revertedCount: 1, reverted: [{ type: 'view', name: OVERLAY, action: 'removed' }],
     });
-    expect(await commitsOf(SHOWCASE)).toHaveLength(before.length + 1);
+    expect(await commitsOf(pair)).toHaveLength(before.length + 1);
   });
 });

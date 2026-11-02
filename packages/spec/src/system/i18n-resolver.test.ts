@@ -3944,6 +3944,10 @@ import { FieldSchema } from '../data/field.zod';
  * field authoring `inlineHelpText` showed its source text over a translation
  * served on `description` alone. The entry is served on that authored
  * `inlineHelpText` too, under the same per-slot divergence rule.
+ *
+ * #29286 — and on that `inlineHelpText` ONLY: the entry translates the text it
+ * was seeded from, so a field authoring both texts keeps its source-language
+ * `description` rather than show another sentence's translation there.
  */
 describe('translateObject — a field\'s translated help is served on `description`', () => {
   const TWO_FACTOR_EN =
@@ -4025,10 +4029,10 @@ describe('translateObject — a field\'s translated help is served on `descripti
     expect('help' in field).toBe(false);
   });
 
-  it('a field declaring both `description` and `inlineHelpText` gets the translation on both, the slot the console draws first included', () => {
+  it('a field declaring both `description` and `inlineHelpText` gets the translation on `inlineHelpText` only, the slot the entry was seeded from', () => {
     const field = fieldsOf(translateObject(clone(PACKAGED), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED })).phone;
     expect(field.inlineHelpText).toBe('请填写国家区号。');
-    expect(field.description).toBe('请填写国家区号。');
+    expect(field.description).toBe('Contact number.');
     expect('help' in field).toBe(false);
     expect(unrecognizedKeys(field)).toEqual([]);
   });
@@ -4045,7 +4049,7 @@ describe('translateObject — a field\'s translated help is served on `descripti
     }
     // Judged per field: the undiverged sibling is still translated…
     const zh = fieldsOf(translateMetadataDocument('object', clone(served), BUNDLE, { locale: 'zh-CN', packagedBase: PACKAGED }));
-    expect(zh.phone.description).toBe('请填写国家区号。');
+    expect(zh.phone.inlineHelpText).toBe('请填写国家区号。');
     // …and the field `label` stays a flat `catalog ?? document`, as before.
     expect(zh.two_factor_enabled.label).toBe('已启用双因素认证');
   });
@@ -4088,7 +4092,7 @@ describe('translateObject — a field\'s translated help is served on `descripti
     const out = translateObject(asArray(served) as any, BUNDLE, { locale: 'zh-CN', packagedBase: asArray(PACKAGED) });
     const byName = Object.fromEntries((out.fields as any[]).map((f) => [f.name, f]));
     expect(byName.two_factor_enabled.description).toBe('Edited by the tenant.');
-    expect(byName.phone.description).toBe('请填写国家区号。');
+    expect(byName.phone.inlineHelpText).toBe('请填写国家区号。');
     expect((out.fields as any[]).some((f) => 'help' in f)).toBe(false);
   });
 
@@ -4126,6 +4130,15 @@ describe('translateObject — a field\'s translated help reaches the slot the co
       email: { name: 'email', type: 'email', label: 'Email', description: 'Primary address.' },
       nickname: { name: 'nickname', type: 'text', label: 'Nickname', inlineHelpText: 'What friends call them.' },
       blank_inline: { name: 'blank_inline', type: 'text', label: 'Blank', inlineHelpText: '', description: 'Shown instead.' },
+      // Authors BOTH texts, and they differ: the extractor seeds `help` from the
+      // `inlineHelpText`, so the entry is no translation of the `description`.
+      vat_number: {
+        name: 'vat_number',
+        type: 'text',
+        label: 'VAT number',
+        inlineHelpText: 'Leave blank for private customers.',
+        description: 'Tax id used on invoices.',
+      },
     },
   };
   const LEAD_SCORE_ZH = '由评分规则计算,不可手动编辑。';
@@ -4134,7 +4147,10 @@ describe('translateObject — a field\'s translated help reaches the slot the co
       objects: {
         showcase_contact: {
           fields: {
-            lead_score: { label: 'Lead score', help: 'Computed by scoring rules — not user-editable.' },
+            // No `help` for `lead_score` here: the source-locale CONTROL below
+            // would pass on an entry that repeats the authored text whether or
+            // not the translator served it.
+            lead_score: { label: 'Lead score' },
             email: { label: 'Email', help: 'Primary address.' },
             blank_inline: { label: 'Blank', help: 'Shown instead.' },
           },
@@ -4150,6 +4166,7 @@ describe('translateObject — a field\'s translated help reaches the slot the co
             // `nickname` has a label entry and NO help entry.
             nickname: { label: '昵称' },
             blank_inline: { label: '空白', help: '改为显示此项。' },
+            vat_number: { label: '增值税号', help: '个人客户请留空。' },
           },
         },
       },
@@ -4164,17 +4181,19 @@ describe('translateObject — a field\'s translated help reaches the slot the co
   it('serves the showcase `lead_score` translation on its authored `inlineHelpText`, which the console draws', () => {
     const field = serve(SHOWCASE, 'zh-CN').lead_score;
     expect(field.inlineHelpText).toBe(LEAD_SCORE_ZH);
-    expect(field.description).toBe(LEAD_SCORE_ZH);
+    expect('description' in field).toBe(false);
     expect(consoleHelpLine(field)).toBe(LEAD_SCORE_ZH);
     expect('help' in field).toBe(false);
     const parsed = FieldSchema.safeParse(field);
     expect(parsed.success ? [] : parsed.error.issues.filter((i) => i.code === 'unrecognized_keys')).toEqual([]);
   });
 
-  it('CONTROL: the source locale serves the authored `inlineHelpText` untouched', () => {
+  it('CONTROL: the source locale, which carries no `help` entry for the field, serves the authored `inlineHelpText` untouched, never another locale\'s', () => {
     const field = serve(SHOWCASE, 'en').lead_score;
+    expect(field.label).toBe('Lead score');
     expect(field.inlineHelpText).toBe(SHOWCASE.fields.lead_score.inlineHelpText);
     expect(consoleHelpLine(field)).toBe(SHOWCASE.fields.lead_score.inlineHelpText);
+    expect('description' in field).toBe(false);
   });
 
   it('CONTROL: a locale with no `help` entry for the field serves its authored `inlineHelpText` untouched', () => {
@@ -4203,6 +4222,32 @@ describe('translateObject — a field\'s translated help reaches the slot the co
     expect(field.inlineHelpText).toBe('');
     expect(field.description).toBe('改为显示此项。');
     expect(consoleHelpLine(field)).toBe('改为显示此项。');
+  });
+
+  it('a field authoring both texts gets the translation on `inlineHelpText` and keeps its source-language `description`', () => {
+    // The entry translates the `inlineHelpText` it was seeded from; on
+    // `description` it would show another sentence's translation.
+    const field = serve(SHOWCASE, 'zh-CN').vat_number;
+    expect(field.inlineHelpText).toBe('个人客户请留空。');
+    expect(field.description).toBe('Tax id used on invoices.');
+    expect(consoleHelpLine(field)).toBe('个人客户请留空。');
+    expect('help' in field).toBe(false);
+  });
+
+  it('a served `inlineHelpText` blanked over a packaged one still keeps `description` in its source language', () => {
+    // The entry was seeded from the PACKAGED `inlineHelpText`, so it is still
+    // no translation of the `description`, whatever the served field says.
+    const served = clone(SHOWCASE);
+    served.fields.vat_number.inlineHelpText = '';
+    const field = serve(served, 'zh-CN').vat_number;
+    expect(field.inlineHelpText).toBe('');
+    expect(field.description).toBe('Tax id used on invoices.');
+  });
+
+  it('with no packaged base, a field authoring both texts still keeps its source-language `description`', () => {
+    const field = fieldsOf(translateObject(clone(SHOWCASE), BUNDLE, { locale: 'zh-CN' })).vat_number;
+    expect(field.inlineHelpText).toBe('个人客户请留空。');
+    expect(field.description).toBe('Tax id used on invoices.');
   });
 
   it('keeps an `inlineHelpText` that diverged from the packaged field, in every locale', () => {

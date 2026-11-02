@@ -126,10 +126,12 @@ import {
   isMissingForRequired,
   isRuntimeDefault,
   isServerOwnedValue,
+  resolveAffordance,
   resolveFieldRuleState,
   type FieldRuleFaults,
   type FieldRulePredicate,
 } from '@object-ui/core';
+import { usePermissions } from '@object-ui/permissions';
 import {
   omitServerResolvedDefaults,
   optionListDefault,
@@ -1902,11 +1904,10 @@ async function loadInternalForm(
       channel,
     );
     if (!recRes.ok) {
-      const detail = await recRes.text().catch(() => '');
-      throw new Error(
-        `Could not open record "${recordId}" of ${objectName} for editing (${recRes.status})` +
-          `${detail ? `: ${detail}` : recRes.statusText ? `: ${recRes.statusText}` : ''}`,
-      );
+      // The body rides on the refusal for a debugger; the banner draws only
+      // the localized line {@link refusalText} picks for a load.
+      const body = await recRes.text().catch(() => '');
+      throw new WriteRefusal('Load', recRes.status, body);
     }
     record = readLoadedRecord(await recRes.json(), objectName, recordId);
   }
@@ -1982,7 +1983,8 @@ function firstSentence(...vals: unknown[]): string | null {
 }
 
 /**
- * The error a refused submit throws (objectstack-ai/objectstack#27417): the
+ * The error a refused submit throws (objectstack-ai/objectstack#27417), and
+ * the one a refused edit-form record read throws (`verb` `'Load'`): the
  * response attached the way `@objectstack/client` attaches it to its own
  * errors — the HTTP `status`, the semantic `code`, `details` from the wrapped
  * envelope's `error.details` (else the whole flat body), and the producer's
@@ -2008,11 +2010,13 @@ class WriteRefusal extends Error {
   readonly body: string;
   /** The server's sentence for this refusal, or `null` when it gave none. */
   readonly reason: string | null;
+  /** What was refused: a write (`Submit`/`Create`/`Update`) or the record read. */
+  readonly verb: 'Submit' | 'Create' | 'Update' | 'Load';
   code?: string;
   details?: unknown;
   userMessage?: string;
 
-  constructor(verb: 'Submit' | 'Create' | 'Update', status: number, body: string) {
+  constructor(verb: 'Submit' | 'Create' | 'Update' | 'Load', status: number, body: string) {
     let parsed: unknown;
     try {
       parsed = JSON.parse(body);
@@ -2044,6 +2048,7 @@ class WriteRefusal extends Error {
     this.status = status;
     this.body = body;
     this.reason = reason;
+    this.verb = verb;
     if (!envelope) return;
     const code = firstSentence(envelope.code, wrapped?.code);
     if (code) this.code = code;
@@ -2056,6 +2061,16 @@ class WriteRefusal extends Error {
 }
 
 /**
+ * What the banner says for a refused record read (`verb` `'Load'`): one fixed
+ * localized line, never the server's text, the status or the record id —
+ *
+ *  - a `404` as "not found, or you can't see it": row-level security answers a
+ *    hidden row with the same `404` as a missing one, so the line must not
+ *    tell the two apart. Asked first, before any text-sniffing denial reader;
+ *  - any other denial (`403`, `PERMISSION_DENIED`, `FORBIDDEN`) as "you don't
+ *    have access to this record";
+ *  - anything else as the localized generic line.
+ *
  * What the banner and the toast say for a refused write — the record dialog's
  * reading (`@object-ui/components`' form renderer), so a refusal reads the same
  * on both surfaces:
@@ -2076,6 +2091,11 @@ function refusalText(
   unmarked: string[] | null,
   t: (key: string) => string,
 ): string | string[] {
+  if (err.verb === 'Load') {
+    if (err.status === 404) return t('form.recordNotFoundOrHidden');
+    if (isPermissionError(err)) return t('form.noPermissionToOpenRecord');
+    return t('form.openRecordFailed');
+  }
   const marked = declaredUserMessage(err) ?? delegationScopeMessage(err);
   if (marked) return marked;
   if (isPermissionError(err)) return t('form.noPermissionToSave');
@@ -2085,7 +2105,7 @@ function refusalText(
 }
 
 /**
- * A submit refusal as the banner and the toast draw it: one string as itself,
+ * A refusal as the banner and the toast draw it: one string as itself,
  * several reasons as one list item each.
  */
 function refusalContent(refusal: string | string[]): ReactNode {
@@ -2529,6 +2549,15 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
    */
   const hostApiFetch = useContext(SchemaRendererContext)?.apiFetch;
   const channel = mode === 'internal' ? hostApiFetch : undefined;
+  /**
+   * The caller's permissions, for the up-front write refusal below
+   * (objectstack-ai/objectstack#29187): the `/auth/me/permissions` answer the
+   * console's permissions layout holds over BOTH internal routes —
+   * `/forms/:name` and `/apps/:appName/forms/:name` (`App.tsx`). With no
+   * provider above (the public `/f/:slug`, a bare test harness) every grant
+   * reads open, so nothing changes there and the server still enforces.
+   */
+  const perms = usePermissions();
 
   const [loading, setLoading] = useState(true);
   /** One string, or one line per reason a server refusal marked on no row. */
@@ -2665,6 +2694,7 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
           setLoaded(null);
           if (e instanceof FormNotFoundError) setNotFound(true);
           else if (e instanceof PublicFormUnavailableError) setPublicUnavailable(true);
+          else if (e instanceof WriteRefusal) setError(refusalText(e, null, t));
           else setError(e?.message ?? String(e));
         }
       })
@@ -3096,6 +3126,36 @@ export function FormPage({ mode, recordPath, cancelPath }: FormPageProps) {
     );
   }
   if (!loaded) return null;
+
+  // A write this caller holds no grant for is refused BEFORE a field is drawn
+  // (objectstack-ai/objectstack#29187). The server refuses it at Submit anyway,
+  // and since #29019 says so in a sentence; but a create form offered to a
+  // member who may only read the object let them type the whole record first,
+  // and lose it. The verdict is the affordance map's form row, the one the
+  // app's own create and edit forms read (`createFormFields`, `editFormFields`):
+  // a create form asks the create grant, an edit form (`?recordId=`) the update
+  // grant, each intersected with the object's effective API operations. The sentence
+  // is the submit-time refusal's own (`refusalText`), so the two read alike.
+  // Internal mode only: `/f/:slug` is anonymous and has no grants to read.
+  if (
+    mode === 'internal' &&
+    !resolveAffordance(isCreateForm ? 'createFormFields' : 'editFormFields', {
+      objectName: loaded.object,
+      perms,
+    }).allowed
+  ) {
+    return (
+      <div className="mx-auto max-w-2xl p-6">
+        <div
+          role="alert"
+          className="rounded-md border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive"
+          data-testid="form-write-refused"
+        >
+          {t('form.noPermissionToSave')}
+        </div>
+      </div>
+    );
+  }
 
   // `created-record` reaches this branch only on the fallback path above (no
   // id in the response, or nowhere to land) — a successful redirect navigates

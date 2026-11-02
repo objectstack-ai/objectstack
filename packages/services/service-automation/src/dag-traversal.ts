@@ -142,7 +142,7 @@ export interface DagTraversalHost {
     readonly persistSuspendedRun: AutomationEngine['persistSuspendedRun'];
     readonly flowChecksumOf: AutomationEngine['flowChecksumOf'];
     readonly renderFlowTerminalMessage: AutomationEngine['renderFlowTerminalMessage'];
-    readonly resolveSuspensionChain: AutomationEngine['resolveSuspensionChain'];
+    readonly resolveSuspensionChainForCancel: AutomationEngine['resolveSuspensionChainForCancel'];
     readonly cancelRun: AutomationEngine['cancelRun'];
 }
 
@@ -751,7 +751,7 @@ export async function traverseNext(
 
 /** The body of {@link AutomationEngine.runRegion}; that method's docblock is its contract. */
 export async function runRegion(
-    this: Pick<DagTraversalHost, 'executeNode' | 'resolveSuspensionChain' | 'cancelRun' | 'logger'>,
+    this: Pick<DagTraversalHost, 'executeNode' | 'resolveSuspensionChainForCancel' | 'cancelRun' | 'logger'>,
     region: FlowRegionParsed,
     variables: Map<string, unknown>,
     context: AutomationContext,
@@ -858,8 +858,36 @@ export async function runRegion(
             const childRunId = nestedChildRunId(err.correlation);
             if (childRunId !== undefined) {
                 try {
-                    const chain = await this.resolveSuspensionChain(childRunId);
+                    // [#29333] The chain is read through the STRICT loader,
+                    // the read `cancelRun` itself takes. The degrading one
+                    // answered an unreadable link as "nothing suspended", so
+                    // the walk stopped there and every run below that link
+                    // stayed parked with only a `warn` said (#29166 covered
+                    // the case where the unreadable link is the child itself).
+                    const { chain, unreadable } = await this.resolveSuspensionChainForCancel(childRunId);
                     const reason = `the run that started it failed at a region boundary: ${refusal.message}`;
+                    if (unreadable) {
+                        // The deepest link the walk knows of. Its id is known
+                        // (the link above names it, or it is the child), so it
+                        // is cancelled anyway, deepest first: `cancelRun`
+                        // reads it again and owns the `error` record for THAT
+                        // run when the store still cannot be read, and it is a
+                        // no-op when the run is in fact gone.
+                        await this.cancelRun(unreadable.runId, reason);
+                        // What `cancelRun` cannot say: the walk never read
+                        // this link, so a run it is itself parked on was never
+                        // reached and may still be parked. #4632 verdict:
+                        // DURABILITY, `error`.
+                        this.logger.error(
+                            `[automation] node '${err.nodeId}' suspended inside region '${refusal.regionNodeId}', and ` +
+                                `the suspended run '${unreadable.runId}' in the chain of the child run '${childRunId}' could not be ` +
+                                `read while cancelling that chain, so any run '${unreadable.runId}' is itself parked on ` +
+                                `was not reached and may still be parked. Once the suspended-run store answers, cancel ` +
+                                `each with cancelRun(runId). The read failure is in this record's meta.`,
+                            undefined,
+                            describeThrownForLog(unreadable.cause),
+                        );
+                    }
                     for (const run of [...chain].reverse()) await this.cancelRun(run.runId, reason);
                 } catch (cancelErr) {
                     // #4632 verdict: DURABILITY, `error`, as `cancelRun`'s own

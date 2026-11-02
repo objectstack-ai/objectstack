@@ -236,7 +236,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
   // such entries through `useNavigationWrites`). A present
   // label renders as authored — an inline locale map in the viewer's `language`,
   // the locale the sidebar passes (objectui#11299).
-  const targetLabel = useNavTargetLabel();
+  const targetLabel = useNavTargetLabel(RECENT_ROW_LABELS);
   const navLabel = (item: NavigationItem) =>
     resolveNavItemLabel(item, t, targetLabel, language);
 
@@ -692,7 +692,7 @@ function CommandPaletteBody(props: CommandPaletteProps & { gates: NavMemberGates
                     <CommandItem
                       key={app.name}
                       value={`app ${resolveKeyedI18nLabel(app.label, t)} ${app.name}`}
-                      onSelect={() => runCommand(() => confirmUnsavedLeave(() => onAppChange(appRouteSegment(app) ?? app.name)))}
+                      onSelect={() => runCommand(() => confirmUnsavedLeave(() => onAppChange(appAddressSegment(apps, app) ?? app.name)))}
                     >
                       <Icon className="mr-2 h-4 w-4" />
                       <span>{resolveKeyedI18nLabel(app.label, t)}</span>

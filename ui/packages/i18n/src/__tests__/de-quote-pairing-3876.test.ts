@@ -376,7 +376,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // 104 once objectstack-ai/objectstack#28382 added `form.requiredForAction`,
     // the edit form's note that names the update action a field is required
     // for („{{action}}“) — one interpolated span, runtime data.
-    expect(okSpans, 'correctly paired spans').toBe(104);
+    // 103 once objectstack-ai/objectstack#28789 retired
+    // `packagedAutomation.cloneCreated` with the Packaged automation flows page
+    // it named a clone on — one interpolated span fewer.
+    expect(okSpans, 'correctly paired spans').toBe(103);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -452,8 +455,10 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // more matched pair. 103 / 103 / 0 after objectstack-ai/objectstack#27520
     // added `console.serverAction.fillRequiredThenRetry`, one more matched pair.
     // 104 / 104 / 0 after objectstack-ai/objectstack#28382 added
-    // `form.requiredForAction`, one more matched pair.
-    expect({ open, close, rdq }).toEqual({ open: 104, close: 104, rdq: 0 });
+    // `form.requiredForAction`, one more matched pair. 103 / 103 / 0 after
+    // objectstack-ai/objectstack#28789 retired `packagedAutomation.cloneCreated`,
+    // one matched pair fewer.
+    expect({ open, close, rdq }).toEqual({ open: 103, close: 103, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

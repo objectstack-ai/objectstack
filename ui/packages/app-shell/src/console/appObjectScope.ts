@@ -18,6 +18,11 @@
  * a block names outside that set is read by name when the block asks for it
  * (`PageView`).
  *
+ * A dashboard (`dashboard/:dashboardName`, objectstack#28784) reads only the
+ * objects its widgets require ({@link dashboardObjectNames}), by name, the
+ * way a page reads the ones it binds; its widgets' dataset queries wait for
+ * those names alone, and for nothing when it names none.
+ *
  * An object's list in an app whose package holds no objects of its own
  * (objectui#13046: cloud's control-plane app, whose package ships only the
  * app, and Setup, whose every entry opens another package's object) reads the
@@ -65,6 +70,7 @@ import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { APP_ROUTE_METADATA_READS } from './appRouteMetadataReads.js';
 import { matchAppBySegment } from '../utils/appRoute.js';
 import { COMMAND_PALETTE_PARAM, RECORD_FORM_OBJECT_PARAM, RECORD_FORM_PARAM } from '../urlParams.js';
+import type { ReadNamesWithoutViews } from '../hooks/useObjectPresence.js';
 
 type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
 export type AppObjectScope = ReturnType<ReadObjectScope>;
@@ -118,17 +124,23 @@ export const APP_OBJECT_SCOPE_ROUTES: readonly string[] = [
   'page/:pageName',
   ':objectName/record/:recordId',
   ':objectName/record/:recordId/page/:pageName',
+  'dashboard/:dashboardName',
 ];
 
 function matchObjectScopeRoute(
   subPath: string,
   hostPaths: readonly string[],
-): { objectName?: string; pageName?: string; recordId?: string } | null {
+): { objectName?: string; pageName?: string; recordId?: string; dashboardName?: string } | null {
   const routes = [...APP_ROUTE_METADATA_READS.map(({ path }) => ({ path })), ...hostPaths.map((path) => ({ path }))];
   const matches = matchRoutes(routes, `/${subPath.replace(/^\/+/, '')}`);
   const match = matches?.[matches.length - 1];
   if (!match || !APP_OBJECT_SCOPE_ROUTES.includes(match.route.path)) return null;
-  return { objectName: match.params.objectName, pageName: match.params.pageName, recordId: match.params.recordId };
+  return {
+    objectName: match.params.objectName,
+    pageName: match.params.pageName,
+    recordId: match.params.recordId,
+    dashboardName: match.params.dashboardName,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -248,6 +260,77 @@ export function readPageObjectScope(
     ready,
     failedNames: failedNamesOf(boundRead),
   };
+}
+
+/**
+ * objectstack#28784 — the objects a dashboard definition names: each widget's
+ * `requiresObject`, else its `object` (the pre-ADR-0021 inline arm), which is
+ * what `DashboardView`'s capability gate reads to hide a widget whose object
+ * this runtime does not register. Nothing else on a dashboard reads an object
+ * definition off the metadata context: a dataset-bound widget learns its base
+ * object from its query's answer, never from the registry.
+ */
+export function dashboardObjectNames(dashboard: unknown): string[] {
+  const widgets = isRecord(dashboard) && Array.isArray(dashboard.widgets) ? dashboard.widgets : [];
+  const out = new Set<string>();
+  for (const widget of widgets) {
+    if (!isRecord(widget)) continue;
+    const required = widget.requiresObject ?? widget.object;
+    if (typeof required === 'string' && required) out.add(required);
+  }
+  return [...out];
+}
+
+/**
+ * objectstack#28784 — whether this runtime registers the objects a
+ * dashboard's widgets require ({@link dashboardObjectNames}): those names
+ * alone, by name, riding the app's package scope when the app names a
+ * package, and without views (a presence answer: `missing` lists the names
+ * the server answered without a definition). No name asks nothing and is
+ * settled at once, so a dashboard that names none never waits for the
+ * package list.
+ */
+export function readDashboardWidgetObjects(
+  readObjectScope: ReadObjectScope,
+  app: Record<string, any> | undefined,
+  dashboard: unknown,
+): AppObjectScope {
+  const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
+  const names = dashboardObjectNames(dashboard);
+  if (names.length === 0) return NO_OBJECT_SCOPE;
+  const read = readObjectScope as ReadNamesWithoutViews;
+  return packageId ? read({ packageId, names, views: false }) : read({ names, views: false });
+}
+
+/**
+ * objectstack#28784 — the objects a dashboard route reads: the names its
+ * widgets require plus `extraNames` (the chrome's), by name, riding the app's
+ * package scope when the app names a package, as a page route's do. `ready`
+ * is true once the widgets' names have answered ({@link
+ * readDashboardWidgetObjects}): the widgets' dataset queries wait for nothing
+ * else. No lookup targets are asked: no widget reads them.
+ */
+export function readDashboardObjectScope(
+  readObjectScope: ReadObjectScope,
+  app: Record<string, any> | undefined,
+  dashboard: unknown,
+  extraNames: readonly string[] = [],
+): { scope: AppObjectScope; ready: boolean; failedNames: readonly string[] } {
+  const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
+  const widgetRead = readDashboardWidgetObjects(readObjectScope, app, dashboard);
+  const names = [...new Set([...dashboardObjectNames(dashboard), ...extraNames])];
+  const scope = packageId
+    ? readObjectScope({ packageId, names })
+    : names.length > 0
+      ? readObjectScope({ names })
+      : NO_OBJECT_SCOPE;
+  return { scope, ready: routeReadDone(widgetRead), failedNames: failedNamesOf(widgetRead) };
+}
+
+/** The dashboard a dashboard route resolves to, and whether it is known yet (objectstack#28784). */
+export interface DashboardRead {
+  dashboard: unknown;
+  settled: boolean;
 }
 
 /** The page list, and whether the `page` type has answered (objectui#13046). */
@@ -370,10 +453,29 @@ export function readAppObjectScope(
   hostPaths: readonly string[] = [],
   readPage?: (pageName: string) => PageRead,
   readPages?: () => PagesRead,
+  readDashboard?: (dashboardName: string) => DashboardRead,
 ): AppObjectScopeRead {
   const route = matchObjectScopeRoute(subPath, hostPaths);
   const candidate = !!route && !!readObjectScope && !hasRecordFormOverlay(search);
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
+  if (candidate && readObjectScope && route && route.dashboardName !== undefined) {
+    // objectstack#28784 — a dashboard route: the app list, then the dashboard
+    // (bundle-first), then the objects its widgets require, by name. Never
+    // the whole registry.
+    if (!app) return { candidate, scope: null, ready: false, ...NOT_READ };
+    const dashboardRead = readDashboard?.(route.dashboardName);
+    if (!dashboardRead?.dashboard) {
+      // Not known yet: the package list starts beside it. Known absent:
+      // `DashboardView` draws its not-found or its refusal, and reads no object.
+      if (dashboardRead?.settled) return { candidate, scope: NO_OBJECT_SCOPE, ready: true, ...NOT_READ };
+      return { candidate, scope: packageId ? readObjectScope({ packageId }) : PENDING_OBJECT_SCOPE, ready: false, ...NOT_READ };
+    }
+    const extra = appRequiredObjectNames(app);
+    if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
+      extra.push(...navigationNames(app.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
+    }
+    return { candidate, ...readDashboardObjectScope(readObjectScope, app, dashboardRead.dashboard, extra), routeObjectRefusal: null };
+  }
   if (candidate && readObjectScope && route && route.recordId !== undefined && route.objectName) {
     // objectui#13046 — a record route: the app list, then the page list, then
     // either the objects the record's declared page binds, by name, or the

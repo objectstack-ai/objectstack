@@ -5,6 +5,7 @@ import {
   resolveSearchFields,
   SEARCHABLE_ENUM_TYPES,
   SEARCHABLE_TEXTUAL_TYPES,
+  SEARCH_FLAG_EXCLUDED_TYPES,
   SEARCH_VIRTUAL_TYPES,
 } from '@objectstack/spec/data';
 import {
@@ -822,7 +823,76 @@ describe('validateSearchableFields — objectstack-ui SKILL.md parity (#6675)', 
     const refused = validateSearchableFields(viewStack(['account_id'], noDeclaration));
     expect(refused).toHaveLength(1);
     expect(refused[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
-    expect(refused[0].message).toContain("of type 'lookup', which 'search' cannot scan");
+    // [#29008] The verdict names the opt-in the field lacks: the runtime now
+    // admits a field of any type marked `searchable: true` (ruling record
+    // 6573569376), so "which 'search' cannot scan" stopped being true.
+    expect(refused[0].message).toContain("of type 'lookup' and not marked `searchable: true`");
+  });
+});
+
+/**
+ * [#29008] The field's own `searchable: true` — the lint resolves the allowed
+ * set with the runtime's function, so its field-meta projection must carry the
+ * flag, or a narrowing the ingress accepts would be refused here.
+ */
+describe('[#29008] validateSearchableFields — a field marked searchable: true', () => {
+  const noteStack = (fields: Record<string, unknown>, viewSet: string[], objectSet?: string[]) => ({
+    objects: [{ name: 'dev_note', ...(objectSet ? { searchableFields: objectSet } : {}), fields }],
+    views: [{
+      name: 'dev_note',
+      objectName: 'dev_note',
+      list: { label: 'All', type: 'grid', data: { provider: 'object', object: 'dev_note' }, columns: ['name'] },
+      listViews: {
+        code: {
+          label: 'Code', type: 'grid', data: { provider: 'object', object: 'dev_note' },
+          columns: ['name'], searchableFields: viewSet,
+        },
+      },
+    }],
+  });
+  const flagged = {
+    name: { type: 'text' },
+    snippet: { type: 'code', searchable: true },
+    body: { type: 'html', searchable: true },
+  };
+
+  it('with no object declaration, a view narrowing to flagged `code` / `html` fields lints clean', () => {
+    expect(validateSearchableFields(noteStack(flagged, ['snippet', 'body']))).toEqual([]);
+  });
+
+  it('CONTROL — the same fields unflagged are refused, and the fix line offers the flag', () => {
+    const refused = validateSearchableFields(noteStack(
+      { name: { type: 'text' }, snippet: { type: 'code' } },
+      ['snippet'],
+    ));
+    expect(refused).toHaveLength(1);
+    expect(refused[0].rule).toBe(SEARCHABLE_FIELD_UNSEARCHABLE);
+    expect(refused[0].message).toContain("of type 'code' and not marked `searchable: true`");
+    expect(refused[0].hint).toBe(
+      'Mark "snippet" `searchable: true` on "dev_note", drop it from this view, or target a text-like field instead',
+    );
+  });
+
+  it('CONTROL — a flagged `vector` stays refused, and the verdict says the flag cannot admit it', () => {
+    const refused = validateSearchableFields(noteStack(
+      { name: { type: 'text' }, embedding: { type: 'vector', searchable: true } },
+      ['embedding'],
+    ));
+    expect(refused).toHaveLength(1);
+    expect(refused[0].message).toContain("of type 'vector', never scanned even with `searchable: true`");
+    expect(refused[0].hint).toBe('Drop "embedding" from this view, or target a text-like field instead');
+  });
+
+  it('CONTROL — an object that DECLARES its set ignores the flag: outside the declaration is refused', () => {
+    const refused = validateSearchableFields(noteStack(flagged, ['snippet'], ['name']));
+    expect(refused).toHaveLength(1);
+    expect(refused[0].message).toContain('outside the declared searchableFields (name)');
+  });
+
+  it('the allowed set is the runtime\'s: indexObjectSearchTargets carries the flag into the resolution', () => {
+    const target = indexObjectSearchTargets(noteStack(flagged, ['snippet'])).get('dev_note');
+    expect(target?.fields.snippet).toEqual({ type: 'code', hidden: false, searchable: true });
+    expect(target?.fields.name).toEqual({ type: 'text', hidden: false, searchable: false });
   });
 });
 
@@ -1239,6 +1309,9 @@ describe('[#22161] one-line verdicts — the three searchable ids', () => {
     // the virtual-type claim it states are held to their spec sources here.
     const types = [...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ');
     expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain(`(${types})`);
+    // [#29008] …and the opt-in's hard exclusions, as the explanation spells them.
+    const flagExcluded = [...SEARCH_FLAG_EXCLUDED_TYPES].map((t) => `\`${t}\``).join(' / ');
+    expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain(`of any type but ${flagExcluded}`);
     expect([...SEARCH_VIRTUAL_TYPES]).toEqual(['formula']);
     expect(explanationOf(SEARCHABLE_FIELD_UNSEARCHABLE)).toContain('`formula` alone');
   });

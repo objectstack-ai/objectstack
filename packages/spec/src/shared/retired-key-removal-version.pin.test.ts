@@ -415,6 +415,11 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'form-view-buttons-reset-removed': [
     tombstone((FormViewSchema.shape.buttons as unknown as { unwrap: () => unknown }).unwrap(), 'view.form.buttons', 'reset'),
   ],
+  // #29012: the drawer keys, tombstoned on the form view.
+  'form-view-drawer-keys-removed': [
+    tombstone(FormViewSchema, 'view.form', 'drawerSide'),
+    tombstone(FormViewSchema, 'view.form', 'drawerWidth'),
+  ],
   // #27155: the form view `type` narrowed to the form's layout — each retired
   // member refused by the enum's own error map, plus the three split-only keys
   // tombstoned beside it.
