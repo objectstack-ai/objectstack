@@ -175,7 +175,10 @@ export function RecordPreviewCard({ objectName, recordId, dataSource, className 
   );
   // What the read SENDS, held as a string so the effect keys on the data it
   // sends rather than on the objects that data is derived from.
-  const expandable = def ? buildExpandFields(def.fields, highlightNames) : [];
+  // No key field, nothing to expand: `buildExpandFields` reads an empty column
+  // list as "every reference field", which a card that shows only the title
+  // never draws (an object with no declared highlights, objectstack#28868).
+  const expandable = def && highlightNames.length > 0 ? buildExpandFields(def.fields, highlightNames) : [];
   const expandKey = JSON.stringify(
     targetObject === null || !perms?.isLoaded
       ? expandable
