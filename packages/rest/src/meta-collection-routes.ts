@@ -465,6 +465,16 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // [#23214] The list lives beside the shared decision, so the
                     // runtime dispatcher's twin refuses the same names.
                     if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.drafts)) return;
+                    // A bracketed `packageId` or `type` key (`?type[]=`) is read
+                    // by neither filter below, so it narrowed nothing: refused
+                    // here, by the decision the dispatcher's twin asks too.
+                    const bracketedFilter = metaReadGate.metaBracketedFilterRefusal('drafts', req.query);
+                    if (bracketedFilter) {
+                        res.status(bracketedFilter.status).json({
+                            error: { code: bracketedFilter.code, message: bracketedFilter.message },
+                        });
+                        return;
+                    }
                     // [#29180] A `type` that names no metadata type narrowed the
                     // list to nothing and answered `200 {"drafts":[]}`, a
                     // confident "nothing pending". Refused by the list door's own
@@ -651,7 +661,7 @@ export function registerMetaCollectionRoutes(this: MetaCollectionRouteHost, scop
                     // A bracketed `package` key (`?package[]=`) is read by no
                     // binding below, so it scoped nothing: refused here, by the
                     // decision the dispatcher's twin asks too.
-                    const bracketedPackage = metaReadGate.metaBracketedPackageRefusal('list', req.query);
+                    const bracketedPackage = metaReadGate.metaBracketedFilterRefusal('list', req.query);
                     if (bracketedPackage) {
                         res.status(bracketedPackage.status).json({
                             error: { code: bracketedPackage.code, message: bracketedPackage.message },

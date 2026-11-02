@@ -448,10 +448,12 @@ export {
 export {
   ADMIN_STANDING_SURFACE,
   ADMIN_STANDING_NON_TABLE_INPUTS,
+  ADMIN_STANDING_PLATFORM_ENUMERATION,
   adminStandingTables,
   adminStandingColumns,
   type AdminStandingTable,
   type AdminStandingNonTableInput,
+  type AdminStandingPlatformEnumeration,
 } from './admin-standing-surface.js';
 
 // [#11663 L2] The DEPLOYMENT-CONFIG anchor for PLATFORM_ADMIN — parse,
