@@ -23,7 +23,7 @@ import { RelatedCardStack } from './RelatedCardStack';
 import { RecordTimelinePanel } from './RecordTimelinePanel';
 import { RECORD_TAB_OVERVIEW, RecordTabRow, type RecordTab } from './RecordTabRow';
 import { partitionRecordTabsByRecords } from './synth/recordTabRow';
-import { RecordTimelineCountContext } from './recordTimelineStream';
+import { RECORD_TIMELINE_PANEL_MAX_ENTRIES, RecordTimelineCountContext } from './recordTimelineStream';
 import { RecordTimelineCountProbe } from './renderers/record-activity';
 import {
   relatedCardId,
@@ -405,7 +405,7 @@ export const RecordPageColumns: React.FC<RecordPageColumnsProps> = ({
       {hasTimeline && (
         <RecordTimelinePanel
           nodes={columns.timeline}
-          entries={wide ? 5 : 3}
+          entries={wide ? RECORD_TIMELINE_PANEL_MAX_ENTRIES : 3}
           onViewAll={onEnlargeRelated ? viewAllTimeline : undefined}
           count={streamCount}
           onCount={reportTimelineCount}
