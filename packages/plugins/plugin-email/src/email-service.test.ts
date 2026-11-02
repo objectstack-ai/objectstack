@@ -73,6 +73,11 @@ describe('normalizeMessage — a malformed CALLER address is the caller\'s VALID
     ['a malformed `cc`', { to: 'a@b.com', cc: 'bad cc' }, 'invalid recipient address in `cc`: bad cc'],
     ['a malformed `bcc`', { to: 'a@b.com', bcc: ['c@d.com', 'x@'] }, 'invalid recipient address in `bcc`: x@'],
     ['a malformed `replyTo`', { to: 'a@b.com', replyTo: 'reply' }, 'invalid reply-to address in `replyTo`: reply'],
+    [
+      'a non-string display name',
+      { to: 'a@b.com', cc: { name: 5, address: 'c@d.com' } },
+      'invalid recipient address in `cc`: the display name of c@d.com must be a string',
+    ],
   ])('%s is refused VALIDATION_FAILED, naming the field', (_label, input, reason) => {
     expect(refusal(input)).toBe(`VALIDATION_FAILED: ${reason}`);
   });

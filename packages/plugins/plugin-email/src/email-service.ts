@@ -317,10 +317,19 @@ type CallerAddressField = 'to' | 'cc' | 'bcc' | 'replyTo';
  * server-side fault that a 400 would wrongly pin on the caller.
  */
 function formatCallerAddress(addr: EmailAddress, field: CallerAddressField): string {
+  const what = field === 'replyTo' ? 'reply-to address' : 'recipient address';
   if (!isSendableAddress(addr)) {
-    const what = field === 'replyTo' ? 'reply-to address' : 'recipient address';
     const shown = addr == null ? '' : addressPart(addr);
     throw new Error(`VALIDATION_FAILED: invalid ${what} in \`${field}\`: ${shown || '(empty)'}`);
+  }
+  // A JSON body can carry any value as the display name; a non-string one
+  // would otherwise fail inside `formatAddress` as a TypeError — a 500 for
+  // input the caller wrote.
+  const name: unknown = typeof addr === 'object' ? addr.name : undefined;
+  if (name !== undefined && name !== null && typeof name !== 'string') {
+    throw new Error(
+      `VALIDATION_FAILED: invalid ${what} in \`${field}\`: the display name of ${addressPart(addr)} must be a string`,
+    );
   }
   return formatAddress(addr);
 }
