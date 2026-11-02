@@ -4039,6 +4039,40 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     });
   });
 
+  describe('cancelText — the dismiss button of either pre-run dialog (#28519)', () => {
+    // `actionStack` declares no `confirmText` anywhere, so the confirm
+    // dialog's host is added here: a param-less action that asks first.
+    const withConfirmHost = (bundle: Record<string, unknown>) => {
+      const stack = actionStack(bundle);
+      (stack.actions as Array<Record<string, unknown>>).push({
+        name: 'retire_env',
+        label: 'Retire',
+        objectName: 'crm_env',
+        type: 'script',
+        target: 'retireEnv',
+        confirmText: 'Retire this environment?',
+      });
+      return stack;
+    };
+
+    it('errors on a `cancelText` under an action that declares neither confirmText nor params, at both addresses', () => {
+      const findings = validateTranslationReferences(
+        withConfirmHost({ ...onEnv({ plain_env: { cancelText: '保留' } }), globalActions: { mint_token: { cancelText: '保留' } } }),
+      );
+      expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${ENV}.plain_env.cancelText`],
+        [TRANSLATION_TARGET_UNKNOWN, 'error', `${GLOBAL}.mint_token.cancelText`],
+      ]);
+      expect(findings[0].message).toMatch(/^Translations carry a dialog `cancelText`, but action "plain_env" declares neither `confirmText` nor `params`/);
+    });
+
+    it('accepts it under the confirm dialog\'s host and under the param dialog\'s host (the controls)', () => {
+      expect(
+        validateTranslationReferences(withConfirmHost(onEnv({ retire_env: { cancelText: '保留' }, archive_env: { cancelText: '不归档' } }))),
+      ).toEqual([]);
+    });
+  });
+
   describe('params.<name>.options.<value>', () => {
     it('warns on an option key a declared param does not declare, as the field `options` leg does', () => {
       const findings = validateTranslationReferences(
@@ -4115,7 +4149,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
     };
 
     type Address = 'bound' | 'global';
-    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams';
+    type Host = 'outcome' | 'dialog' | 'noDialog' | 'noParams' | 'noPreRunDialog';
     /**
      * Which declared action a ghost is written under, per address. `noDialog`
      * names an action that declares no `resultDialog`: the dialog's leaves
@@ -4129,6 +4163,9 @@ describe('validateTranslationReferences — keyed children of an action entry (#
       // `submitText` has no button to land on (`coverageStack` gives
       // `check_updates` params, so the global host is `mint_token`).
       noParams: { bound: 'plain_env', global: 'mint_token' },
+      // [#28519] An action with neither `confirmText` nor `params` opens no
+      // dialog before it runs, so its `cancelText` has no button to land on.
+      noPreRunDialog: { bound: 'plain_env', global: 'mint_token' },
     };
     type Coverage =
       | { kind: 'reference-checked'; host: Host; ghost: Record<string, unknown>; suffix: string; rule: string }
@@ -4145,6 +4182,13 @@ describe('validateTranslationReferences — keyed children of an action entry (#
         host: 'noParams',
         ghost: { submitText: 'x' },
         suffix: '.submitText',
+        rule: TRANSLATION_TARGET_UNKNOWN,
+      },
+      cancelText: {
+        kind: 'reference-checked',
+        host: 'noPreRunDialog',
+        ghost: { cancelText: 'x' },
+        suffix: '.cancelText',
         rule: TRANSLATION_TARGET_UNKNOWN,
       },
       outcomeMessages: {
@@ -4250,6 +4294,7 @@ describe('validateTranslationReferences — keyed children of an action entry (#
             confirmText: 'x',
             successMessage: 'x',
             submitText: 'x',
+            cancelText: 'x',
             outcomeMessages: address === 'bound' ? { archived: 'x' } : { up_to_date: 'x' },
             params: { mode: { label: 'x', helpText: 'x', placeholder: 'x', options: { soft: 'x' } } },
           },

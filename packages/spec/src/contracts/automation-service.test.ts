@@ -60,7 +60,7 @@ export type FlowRuntimeStateUnboundCauseIsTheClosedTuple = Assert<
   Eq<FlowRuntimeState['unboundCause'], (typeof FLOW_UNBOUND_CAUSES)[number] | undefined>
 >;
 export type FlowUnboundCauseIsTheTupleUnion = Assert<
-  Eq<FlowUnboundCause, 'deployment_policy' | 'disabled_subflow' | 'missing_trigger' | 'binding_failure'>
+  Eq<FlowUnboundCause, 'deployment_policy' | 'disabled_subflow' | 'notice_after_suspending_subflow' | 'missing_trigger' | 'binding_failure'>
 >;
 
 describe('Automation Service Contract', () => {

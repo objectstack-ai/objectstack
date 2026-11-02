@@ -817,8 +817,12 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // `filePatterns`: the `*.extension.ts` convention a code package's
   // `defineObjectExtension` files follow (`examples/app-showcase/src/data/
   // extensions/`). A code package declares its extensions in
-  // `objectExtensions`, which the artifact loader already stores under this
-  // type name. `supportsOverlay` /
+  // `objectExtensions`, and they are never stored as items of this type: the
+  // ObjectQL engine's `registerApp` registers each one as an `'extend'`
+  // contributor of its target object. The artifact loader maps that collection
+  // to this type name but files no item from it, because an extension carries
+  // `extend` and no `name`. This type's items are the stored rows the
+  // `/api/v1/meta` doors write. `supportsOverlay` /
   // `allowEnvironmentOverlay: false`: an extension is never overlaid; a
   // package changes its own item, and a second package writes a second item.
   // The body is judged by the metadata-protocol doors with

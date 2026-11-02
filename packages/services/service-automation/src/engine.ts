@@ -221,6 +221,7 @@ import {
     rejudgeSubflowCallers,
     refuseCustomerAuthoredToggle,
 } from './subflow-guards.js';
+import { describeSubflowNoticeTrap, subflowNoticeTrap } from './subflow-notice-guard.js';
 // [#25222] The consumed-suspension restore's bodies: journaling a consumed
 // suspension, resolving its witnesses, and restoring, peeking at or inspecting
 // one. Each `AutomationEngine` method of the same name calls its body.
@@ -2904,6 +2905,16 @@ export class AutomationEngine implements IAutomationService {
      * {@link unregisterFlow} drops it with the flow.
      */
     private readonly subflowDeclinedFlows = new Map<string, string>();
+    /**
+     * [#28840] Flows {@link activateFlowTrigger} declined to arm because a
+     * `save_notice` of theirs runs after a `subflow` / `map` node whose child
+     * flow can suspend, each with the reason `/_status` and the binding audit
+     * read. A record for {@link subflowDeclinedFlows}'s reasons: deleted the
+     * moment the flow gets past the gate, re-asked by
+     * {@link rejudgeSubflowCallers} whenever a flow its calls reach is
+     * registered, and dropped with the flow by {@link withdrawFlow}.
+     */
+    private readonly subflowNoticeDeclinedFlows = new Map<string, string>();
     /** Connectors registered by integration plugins, keyed by connector name (ADR-0018 §Addendum). */
     private connectors = new Map<string, RegisteredConnector>();
     /** Connector provider factories keyed by provider name (ADR-0097 §2 — `openapi`/`mcp`/`rest`/…). */
@@ -3880,6 +3891,14 @@ export class AutomationEngine implements IAutomationService {
         // trigger would change nothing, so "no trigger registered" would name
         // a remedy that cannot work.
         if (this.declineOntoDisabledSubflows(flowName, resolved.triggerType)) return;
+        // [#28840] The save-notice half, a decline for the same reasons: a
+        // `save_notice` after a `subflow` / `map` node whose child can suspend
+        // is refused by name when the suspended run resumes, after the write
+        // answered, and a decision that resumes it is stranded. The flow parse
+        // cannot see the child (#28806), which may register after this flow,
+        // so the gate asks here and {@link rejudgeSubflowCallers} asks again
+        // when the child arrives or changes.
+        if (this.declineOntoSuspendingSubflowNotice(flowName, resolved.triggerType)) return;
         const trigger = this.triggers.get(resolved.triggerType);
         if (!trigger) return;
         try {
@@ -4629,6 +4648,7 @@ export class AutomationEngine implements IAutomationService {
             flowVersionHistory: this.flowVersionHistory,
             policyDisabledFlows: this.policyDisabledFlows,
             subflowDeclinedFlows: this.subflowDeclinedFlows,
+            subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
             flowRefusals: this.flowRefusals,
             logger: this.logger,
         };
@@ -4759,6 +4779,7 @@ export class AutomationEngine implements IAutomationService {
             boundFlowTriggers: this.boundFlowTriggers,
             policyDisabledFlows: this.policyDisabledFlows,
             subflowDeclinedFlows: this.subflowDeclinedFlows,
+            subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
             triggers: this.triggers,
         };
         return describeUnboundReason.call(host, name, resolved);
@@ -5490,6 +5511,48 @@ export class AutomationEngine implements IAutomationService {
     }
 
     /**
+     * [#28840] The arming gate's save-notice half, asked by
+     * {@link activateFlowTrigger} of an enabled flow it is about to arm: does a
+     * `save_notice` of it run after a `subflow` / `map` node whose child flow
+     * can suspend ({@link subflowNoticeTrap}: a pausing node reachable from the
+     * child's start, or a child of the child that can suspend, transitively)?
+     * Then it is declined: recorded on {@link subflowNoticeDeclinedFlows} for
+     * `/_status` and the binding audit, and said once as a `warn` naming the
+     * notice, the call node and where the child suspends.
+     *
+     * Any flow, packaged or authored here: the stranded decision is the same.
+     * ⛔ A decline, never a refusal, for {@link declineOntoDisabledSubflows}'s
+     * reason and one of its own: which flows suspend depends on what else is
+     * registered, so `registerFlow` cannot refuse it without depending on load
+     * order.
+     *
+     * #4632 verdict: FUNCTIONAL, `warn`, as the disabled-subflow decline: the
+     * flow is visibly smaller than declared and `/_status` says why. Said once
+     * per decline reason.
+     *
+     * @returns `true` when the flow is declined and must not be armed.
+     */
+    private declineOntoSuspendingSubflowNotice(flowName: string, triggerType: string): boolean {
+        const trap = subflowNoticeTrap(this.flows, flowName);
+        if (!trap) {
+            this.subflowNoticeDeclinedFlows.delete(flowName);
+            return false;
+        }
+        const why = describeSubflowNoticeTrap(trap);
+        const reason =
+            `not armed — ${why}, and it is armed; it is also armed once '${trap.child}' is republished without a ` +
+            `node that suspends`;
+        const previous = this.subflowNoticeDeclinedFlows.get(flowName);
+        this.subflowNoticeDeclinedFlows.set(flowName, reason);
+        if (previous === reason) return true;
+        this.logger.warn(
+            `Flow '${flowName}' is registered but NOT armed on trigger '${triggerType}' — ${why}. It is armed the ` +
+                `moment the \`save_notice\` moves, or '${trap.child}' is republished without a node that suspends.`,
+        );
+        return true;
+    }
+
+    /**
      * [#20725, ADR-0126 §7.3] `subflow` just changed state — (re)registered,
      * switched on or off, or read off the ledger at boot — so ask the arming
      * gate again for each packaged flow that calls it, where the answer can
@@ -5505,12 +5568,22 @@ export class AutomationEngine implements IAutomationService {
      * Every other caller is left exactly as it is: an armed caller whose
      * subflows are all enabled is not stopped and restarted, and a caller
      * unbound for a reason of its own is not re-offered here.
+     *
+     * [#28840] And the save-notice half of the gate, for every flow whose
+     * calls reach `subflow`, directly or through other flows, packaged or
+     * not: whether a child can suspend is read through its own calls, so a
+     * change two calls away moves the answer. A caller that half declined is
+     * re-offered, and an armed caller it would now decline is unbound and
+     * offered again, both through the one gate.
      */
     private rejudgeSubflowCallers(subflow: string): void {
         // The body lives in ./subflow-guards.ts (#25222).
         const host: ThisParameterType<typeof rejudgeSubflowCallers> = {
             boundFlowTriggers: this.boundFlowTriggers,
             subflowDeclinedFlows: this.subflowDeclinedFlows,
+            subflowNoticeDeclinedFlows: this.subflowNoticeDeclinedFlows,
+            flows: this.flows,
+            subflowTargets: (...a) => this.subflowTargets(...a),
             packagedSubflowCallers: (...a) => this.packagedSubflowCallers(...a),
             disabledPackagedSubflows: (...a) => this.disabledPackagedSubflows(...a),
             deactivateFlowTrigger: (...a) => this.deactivateFlowTrigger(...a),
