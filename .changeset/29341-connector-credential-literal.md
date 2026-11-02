@@ -4,7 +4,8 @@
 
 feat(lint): `connector-credential-literal` — `os validate`, `os build`, `os lint` and the connector save door warn on a credential-shaped literal in a connector's header or env map
 
-Clause-②: no — a warning only; nothing refused, nothing widened
+Clause-②: yes (widening)
+Three new exports on the `@objectstack/lint` entry and a new advisory on the connector save door; nothing is refused or narrowed.
 Metadata-protocol: none
 
 A declarative connector entry's four maps — `providerConfig.headers`, `providerConfig.defaultHeaders`, `providerConfig.transport.headers` and `providerConfig.transport.env` — are withheld whole on the metadata read path, but a literal credential in one of them is still stored in metadata. The same `credential-literal` predicate the `flow-credential-literal` advisory asks now judges those four maps and names each credential-shaped entry by its position (never its value), with the `auth.credentialRef` route:
