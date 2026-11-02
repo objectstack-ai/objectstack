@@ -415,7 +415,13 @@ function DevAdminRow({ seed }: { seed: DevSeedAdmin }) {
     setError(null);
     setPending(true);
     try {
-      await signIn(seed.email, seed.password);
+      const { twoFactorRequired } = await signIn(seed.email, seed.password);
+      // The seeded admin enrolled two-factor sign-in: the form beside this
+      // row now asks for the code (objectstack#29105), so this chip is idle.
+      if (twoFactorRequired) {
+        setPending(false);
+        return;
+      }
       // Signed in: `user` is set and the page swaps to its post-login state.
     } catch (err) {
       const authError = err instanceof Error ? err : new Error(String(err));
@@ -591,6 +597,18 @@ function LoginFormCard({
         }),
         usePasswordText: t('auth.login.usePasswordText', { defaultValue: 'Use a password instead' }),
         backToSsoText: t('auth.login.backToSsoText', { defaultValue: 'Back to single sign-on' }),
+        // The two-factor step a password sign-in leads to when the account
+        // has two-factor sign-in on (objectstack#29105).
+        twoFactorTitle: t('auth.login.twoFactorTitle', { defaultValue: 'Two-factor authentication' }),
+        twoFactorDescription: t('auth.login.twoFactorDescription', { defaultValue: 'Enter the 6-digit code from your authenticator app.' }),
+        twoFactorBackupDescription: t('auth.login.twoFactorBackupDescription', { defaultValue: 'Enter one of the backup codes you saved when you set up two-factor authentication.' }),
+        twoFactorCodeLabel: t('auth.login.twoFactorCodeLabel', { defaultValue: 'Authentication code' }),
+        twoFactorBackupCodeLabel: t('auth.login.twoFactorBackupCodeLabel', { defaultValue: 'Backup code' }),
+        twoFactorVerifyButton: t('auth.login.twoFactorVerifyButton', { defaultValue: 'Verify' }),
+        twoFactorVerifyingButton: t('auth.login.twoFactorVerifyingButton', { defaultValue: 'Verifying…' }),
+        twoFactorUseBackupCodeText: t('auth.login.twoFactorUseBackupCodeText', { defaultValue: 'Use a backup code instead' }),
+        twoFactorUseAuthenticatorText: t('auth.login.twoFactorUseAuthenticatorText', { defaultValue: 'Use your authenticator app instead' }),
+        twoFactorBackText: t('auth.login.twoFactorBackText', { defaultValue: 'Back to sign in' }),
       }}
     />
   );

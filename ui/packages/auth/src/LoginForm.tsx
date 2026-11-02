@@ -10,6 +10,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from './useAuth.js';
 import { SocialSignInButtons } from './SocialSignInButtons.js';
 import { looksLikePhoneIdentifier, normalizePhoneIdentifier } from './phone-identifier.js';
+import { TwoFactorChallengeForm } from './TwoFactorChallengeForm.js';
 import type { AuthLinkComponentProps } from './types.js';
 import {
   AUTH_FIELD_LABEL_CLASS,
@@ -81,6 +82,26 @@ export interface LoginFormLabels {
   showPasswordText?: string;
   /** Accessible name of the password field's reveal toggle while the password is shown (defaults to "Hide password"). */
   hidePasswordText?: string;
+  /** objectstack#29105 — Title of the two-factor step (defaults to "Two-factor authentication"). */
+  twoFactorTitle?: string;
+  /** objectstack#29105 — What the two-factor step asks for, authenticator mode. */
+  twoFactorDescription?: string;
+  /** objectstack#29105 — What the two-factor step asks for, backup-code mode. */
+  twoFactorBackupDescription?: string;
+  /** objectstack#29105 — Label of the authenticator code field (defaults to "Authentication code"). */
+  twoFactorCodeLabel?: string;
+  /** objectstack#29105 — Label of the backup code field (defaults to "Backup code"). */
+  twoFactorBackupCodeLabel?: string;
+  /** objectstack#29105 — The two-factor step's submit button (defaults to "Verify"). */
+  twoFactorVerifyButton?: string;
+  /** objectstack#29105 — The submit button while the code is checked (defaults to "Verifying…"). */
+  twoFactorVerifyingButton?: string;
+  /** objectstack#29105 — Link that switches the step to a backup code. */
+  twoFactorUseBackupCodeText?: string;
+  /** objectstack#29105 — Link that switches the step back to the authenticator code. */
+  twoFactorUseAuthenticatorText?: string;
+  /** objectstack#29105 — Link that abandons the two-factor step for the password step. */
+  twoFactorBackText?: string;
 }
 
 export interface LoginFormProps {
@@ -212,7 +233,15 @@ export function LoginForm({
   labels = {},
   errorMessages,
 }: LoginFormProps) {
-  const { signIn, isLoading, getAuthConfig, sendPhoneOtp, signInWithPhoneOtp, signInWithPhonePassword } = useAuth();
+  const {
+    signIn,
+    isLoading,
+    getAuthConfig,
+    sendPhoneOtp,
+    signInWithPhoneOtp,
+    signInWithPhonePassword,
+    twoFactorChallenge,
+  } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   // The password field's reveal toggle. Local and ephemeral on purpose: a
@@ -322,6 +351,16 @@ export function LoginForm({
     usePasswordSignInText: labels.usePasswordSignInText ?? 'Sign in with password instead',
     showPasswordText: labels.showPasswordText ?? 'Show password',
     hidePasswordText: labels.hidePasswordText ?? 'Hide password',
+    twoFactorTitle: labels.twoFactorTitle ?? 'Two-factor authentication',
+    twoFactorDescription: labels.twoFactorDescription ?? 'Enter the 6-digit code from your authenticator app.',
+    twoFactorBackupDescription: labels.twoFactorBackupDescription ?? 'Enter one of the backup codes you saved when you set up two-factor authentication.',
+    twoFactorCodeLabel: labels.twoFactorCodeLabel ?? 'Authentication code',
+    twoFactorBackupCodeLabel: labels.twoFactorBackupCodeLabel ?? 'Backup code',
+    twoFactorVerifyButton: labels.twoFactorVerifyButton ?? 'Verify',
+    twoFactorVerifyingButton: labels.twoFactorVerifyingButton ?? 'Verifying…',
+    twoFactorUseBackupCodeText: labels.twoFactorUseBackupCodeText ?? 'Use a backup code instead',
+    twoFactorUseAuthenticatorText: labels.twoFactorUseAuthenticatorText ?? 'Use your authenticator app instead',
+    twoFactorBackText: labels.twoFactorBackText ?? 'Back to sign in',
   };
 
   // Tick the resend cooldown down once per second while it's armed.
@@ -347,7 +386,16 @@ export function LoginForm({
         // code) or the phoneNumber lookup fails.
         await signInWithPhonePassword(normalizePhoneIdentifier(identifier) ?? identifier, password);
       } else {
-        await signIn(identifier, password);
+        const { twoFactorRequired } = await signIn(identifier, password);
+        if (twoFactorRequired) {
+          // Password accepted; the account has two-factor sign-in on. The
+          // provider now holds the challenge and this form draws the code
+          // step (objectstack#29105). Nothing is signed in yet, so the host
+          // hears `onSuccess` only once the code is verified.
+          setPassword('');
+          setPasswordVisible(false);
+          return;
+        }
       }
       onSuccess?.();
     } catch (err) {
@@ -426,6 +474,34 @@ export function LoginForm({
 
   // The SSO-only view: enforced mode with the break-glass form still closed.
   const ssoOnlyView = ssoEnforced && !showPasswordFallback;
+
+  // objectstack#29105 — a password sign-in waiting for its second factor,
+  // whoever started it (this form, or another `signIn` caller on the page).
+  if (twoFactorChallenge) {
+    return (
+      <TwoFactorChallengeForm
+        challenge={twoFactorChallenge}
+        hideHeader={hideHeader}
+        hideIcon={hideIcon}
+        errorMessages={errorMessages}
+        onSuccess={onSuccess}
+        onError={onError}
+        onChallengeEnded={setError}
+        strings={{
+          title: l.twoFactorTitle,
+          description: l.twoFactorDescription,
+          backupDescription: l.twoFactorBackupDescription,
+          codeLabel: l.twoFactorCodeLabel,
+          backupCodeLabel: l.twoFactorBackupCodeLabel,
+          verifyButton: l.twoFactorVerifyButton,
+          verifyingButton: l.twoFactorVerifyingButton,
+          useBackupCodeText: l.twoFactorUseBackupCodeText,
+          useAuthenticatorText: l.twoFactorUseAuthenticatorText,
+          backText: l.twoFactorBackText,
+        }}
+      />
+    );
+  }
 
   return (
     // `sm:max-w-[400px]`, not a fixed `sm:w-[400px]`: identical wherever the
