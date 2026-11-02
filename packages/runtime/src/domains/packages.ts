@@ -2418,8 +2418,19 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // POST /packages/:id/commits/:commitId/revert → revert ONE commit
         // (ADR-0067). Created artifacts are soft-removed, edited ones are
         // restored to their pre-commit version; the revert is itself a commit.
+        //
+        // The path's package decides: an unknown `:id` is the sibling doors'
+        // 404, and a commit of another package is the protocol's
+        // `COMMIT_NOT_FOUND` naming `:id` (it is handed `packageId`), so a
+        // commit id copied from the wrong package writes nothing. No
+        // `requireWritablePackage` here: the only commits a read-only package
+        // carries are its environment overlays' publishes (ADR-0131 D6, the
+        // `/publish` door refuses the rest), and undoing one stays open, as
+        // `POST /packages/:id/revert` answers a read-only package's stored
+        // rows before its own guard.
         if (parts.length === 4 && parts[1] === 'commits' && parts[3] === 'revert' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
+            const id = decodeURIComponent(parts[0]);
             const commitId = decodeURIComponent(parts[2]);
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
             const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Reverting commit "${commitId}"`);
@@ -2427,10 +2438,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
             if (protocol && typeof protocol.revertCommit === 'function') {
+                if (packageIsUnknown(registry, id)) {
+                    return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+                }
                 try {
                     const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.revertCommit({
                         commitId,
+                        packageId: id,
                         ...(actor !== undefined ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
@@ -2442,11 +2457,13 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         }
 
         // POST /packages/:id/rollback  body { commitId } → roll the package
-        // back THROUGH every commit newer than `commitId` (ADR-0067).
+        // back THROUGH every commit newer than `commitId` (ADR-0067). The
+        // path's package decides, as for the per-commit revert above.
         if (parts.length === 2 && parts[1] === 'rollback' && m === 'POST') {
             const denied = requireManageMetadata(deps, _context); if (denied) return denied;
+            const id = decodeURIComponent(parts[0]);
             // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
-            const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Rolling back package "${decodeURIComponent(parts[0])}"`);
+            const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Rolling back package "${id}"`);
             if (walled) return walled;
             const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
             const protocol = await resolveProtocol(deps, _context);
@@ -2454,10 +2471,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 if (!body?.commitId) {
                     return { handled: true, response: deps.error('Body { commitId } is required', 400) };
                 }
+                if (packageIsUnknown(registry, id)) {
+                    return { handled: true, response: deps.error(`Package '${id}' not found`, 404) };
+                }
                 try {
                     const actor = resolvePackageWriteActor(_context);
                     const result = await protocol.rollbackToPackageCommit({
                         commitId: String(body.commitId),
+                        packageId: id,
                         ...(actor !== undefined ? { actor } : {}),
                     });
                     return { handled: true, response: deps.success(result) };
