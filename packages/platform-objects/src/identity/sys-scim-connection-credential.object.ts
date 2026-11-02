@@ -53,7 +53,6 @@ export const SysScimConnectionCredential = ObjectSchema.create({
   description: 'Bearer credentials (one-way digests) that authenticate SCIM provisioning connections',
   displayNameField: 'connection_id',
   nameField: 'connection_id', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{connection_id}',
   highlightFields: ['connection_id', 'label', 'active', 'expires_at'],
 
   listViews: {

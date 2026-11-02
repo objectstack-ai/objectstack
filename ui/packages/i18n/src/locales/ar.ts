@@ -143,7 +143,6 @@ const ar = {
   actions: {
     decisionOutput: {
       help: 'يُمرَّر إلى التدفق كمخرج للقرار.',
-      helpMultiValue: 'يُمرَّر إلى التدفق كمخرج للقرار. افصل بين القيم المتعددة بفواصل.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.
