@@ -19,7 +19,8 @@
  * (`flow-region-shape-invalid`, `@objectstack/lint`), so `os lint` gives it
  * too: each fixture below is run through all three commands. A refusal is now
  * a rule finding (`rule`, `where`, `path`, `message`, `hint`) in the rule
- * table's `errors`, not a separate gate's `VALIDATION_ERROR` row.
+ * table's failure envelope (`errors` under `os validate --json`, `issues` under
+ * `os build --json`), not a separate gate's `VALIDATION_ERROR` row.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -196,7 +197,7 @@ describe('[#28893] validate, build and lint refuse a flow region the engine refu
       expect(built.code).toBe(1);
       const payload = json(built, `build ${label}`);
       expect(payload.success).toBe(false);
-      const builtRows = (payload.errors as Array<Record<string, unknown>>).filter((r) => String(r.message).includes(refusal!));
+      const builtRows = (payload.issues as Array<Record<string, unknown>>).filter((r) => String(r.message).includes(refusal!));
       expect(builtRows.map((r) => r.rule)).toEqual([RULE]);
       expect(existsSync(fixtures[label].dist)).toBe(false);
 
@@ -229,7 +230,7 @@ describe('[#28893] validate, build and lint refuse a flow region the engine refu
     expect(built.code, built.stdout).toBe(1);
     const payload = json(built, 'build assembled');
     expect(payload.success).toBe(false);
-    const builtRows = (payload.errors as Array<Record<string, unknown>>).filter((r) => String(r.message).includes(refusal!));
+    const builtRows = (payload.issues as Array<Record<string, unknown>>).filter((r) => String(r.message).includes(refusal!));
     expect(builtRows.map(({ rule, where, path }) => ({ rule, where, path }))).toEqual([expected]);
     expect(existsSync(fixtures.assembled.dist)).toBe(false);
 
