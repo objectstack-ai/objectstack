@@ -16686,6 +16686,17 @@ export class ObjectQL implements IObjectQLEngine {
         result = isBatch
           ? rowsWithDeclaredColumnsOnly(result as unknown[], declaredInsertColumns)
           : withDeclaredColumnsOnly(result, declaredInsertColumns);
+        // [#29538] …and answered on every stored declared column, as the next
+        // read of the row answers it (#29408): a column the driver did not
+        // echo (driver-mongodb and driver-memory store only written keys) is
+        // `null`. A write names no projection, so it selects the whole stored
+        // record. Before the formulas, so a formula over an unwritten column
+        // evaluates against `null` as the read's does; inside the verb, so the
+        // security middleware's field mask still deletes an FLS-refused key.
+        const insertAnswerColumns = selectedStoredColumns(schemaForValidation, undefined);
+        result = isBatch
+          ? rowsWithSelectedColumnsAnswered(result as unknown[], insertAnswerColumns)
+          : withSelectedColumnsAnswered(result, insertAnswerColumns);
 
         // Coerce `boolean` fields (SQLite/libsql return 0/1) to real booleans on
         // the after-hook view so flow trigger conditions (`record.is_escalated
@@ -18355,6 +18366,9 @@ export class ObjectQL implements IObjectQLEngine {
                // `data.record.updated` event and the door's ingress strip. A
                // `null` readback (the row left the caller's scope) stays `null`.
                result = withDeclaredColumnsOnly(result, declaredColumnSet(updateSchema));
+               // [#29538] Same answer on the stored declared columns as the
+               // insert result and the next read (#29408).
+               result = withSelectedColumnsAnswered(result, selectedStoredColumns(updateSchema, undefined));
                // [#27495] The handle the stored row named before, where this
                // statement cleared or replaced it.
                retiredSecrets = retiredSecretSlots(updateSchema, [priorRecord], hookContext.input.data);

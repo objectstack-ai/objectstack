@@ -159,7 +159,10 @@ export function rowsWithDeclaredColumnsOnly<T>(rows: T[], declared: ReadonlySet<
  *   engine's own widening (formula inputs, a file field's owner key, each cut
  *   back off the answer before the verb returns) are what count;
  * - no projection (a whole-record GET, a list read) selects every declared
- *   column.
+ *   column;
+ * - [#29538] a write's answer (the insert result, single or batch, and the
+ *   by-id update readback) names no projection either, so it is answered on
+ *   the whole stored record: the write answer equals the next read of the row.
  *
  * ## What stays absent, and why
  *
