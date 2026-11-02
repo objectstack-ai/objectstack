@@ -2034,16 +2034,22 @@ function refuseDishonestHomeAmount(
     // non-system write of it, and no `expression` competes with the engine.
     const refuseUnlessPlatformWritten = (key: 'field' | 'rateField', target: string, what: string): void => {
       const t = map[target];
-      if (t?.readonly === true && t.expression === undefined) return;
+      const writable = t?.readonly !== true;
+      const computed = t?.expression !== undefined;
+      if (!writable && !computed) return;
+      // Both faults on one field are named in one issue, so the author fixes
+      // the field once instead of meeting the second fault on the next parse.
+      const writableFault = 'does not declare `readonly: true`, so a client write could overwrite what the engine stored';
+      const computedFault = 'declares an `expression`, so the engine would store a second, computed value in the same column';
       ctx.addIssue({
         code: 'custom',
         path: [...base, key],
         message: `${at}.${key}\` names \`${target}\`, ${what} only the engine writes, but it `
-          + (t?.readonly === true
-            ? 'declares an `expression`, so the engine would store a second, computed value in the same column. '
-              + `Delete \`expression\` from \`${target}\`.`
-            : 'does not declare `readonly: true`, so a client write could overwrite what the engine stored. '
-              + `Add \`readonly: true\` to \`${target}\`.`),
+          + (writable && computed
+            ? `${writableFault}, and it ${computedFault}. Add \`readonly: true\` to \`${target}\` and delete its \`expression\`.`
+            : writable
+              ? `${writableFault}. Add \`readonly: true\` to \`${target}\`.`
+              : `${computedFault}. Delete \`expression\` from \`${target}\`.`),
       });
     };
 
