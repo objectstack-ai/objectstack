@@ -212,7 +212,8 @@ describe('[#29503] site 2 — PositionGraphService.expandPositionUsers reads eve
   }, 30_000);
 
   it('control — under the bound: one read, the same set as before', async () => {
-    const rig = await boot('position', PAGE - 1);
+    // 9,998 holders + the lapsed row = 9,999 rows the predicate matches.
+    const rig = await boot('position', PAGE - 2);
     const users = await positions(rig).expandPositionUsers(POSITION, ORG);
 
     expect([...users].sort()).toEqual(rig.holders);

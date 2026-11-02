@@ -104,13 +104,15 @@ function makeEngine(opts: {
 const SUPPORT_DECLARED = [{ name: 'support_tier1', label: 'Support Tier 1', members: [{ type: 'position', value: 'support_agent' }], _packageId: 'com.acme.support' }];
 
 const BASE_TABLES = (): Record<string, Row[]> => ({
+  // Every membership row carries its `id`, as a stored one does: the team and
+  // position reads page by it (#29503) and refuse a row they cannot resume after.
   sys_user_position: [
-    { position: 'support_agent', user_id: 'u_b', organization_id: 'org_a' },
-    { position: 'support_agent', user_id: 'u_a', organization_id: 'org_a' },
-    { position: 'support_agent', user_id: 'u_other_org', organization_id: 'org_b' },
-    { position: 'billing_clerk', user_id: 'u_c', organization_id: 'org_a' },
+    { id: 'up_1', position: 'support_agent', user_id: 'u_b', organization_id: 'org_a' },
+    { id: 'up_2', position: 'support_agent', user_id: 'u_a', organization_id: 'org_a' },
+    { id: 'up_3', position: 'support_agent', user_id: 'u_other_org', organization_id: 'org_b' },
+    { id: 'up_4', position: 'billing_clerk', user_id: 'u_c', organization_id: 'org_a' },
   ],
-  sys_team_member: [{ team_id: 't_night', user_id: 'u_d' }, { team_id: 't_night', user_id: 'u_a' }],
+  sys_team_member: [{ id: 'tm_1', team_id: 't_night', user_id: 'u_d' }, { id: 'tm_2', team_id: 't_night', user_id: 'u_a' }],
   sys_queue: [
     { id: 'q1', name: 'billing', label: 'Billing', organization_id: 'org_a' },
     { id: 'q2', name: 'billing', label: 'Billing B', organization_id: 'org_b' },
