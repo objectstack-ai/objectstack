@@ -226,7 +226,13 @@ describe('objectstack#28470 — one record open is one request', () => {
     // The request names what the page draws: the streams, and each related
     // list's lookups but the parent's.
     const [page] = held.filter(isPage);
-    expect(page.body).toMatchObject({ discussion: true, activity: { top: 200 }, attachments: { top: 100 } });
+    // objectstack#28737 — the 动态 panel's rows, and the stream's count.
+    expect(page.body).toMatchObject({
+      discussion: true,
+      activity: { top: 5 },
+      attachments: { top: 100 },
+      timeline: { discussion: true, activity: true, fieldChanges: false },
+    });
     expect(page.body.related).toEqual([expect.objectContaining({ object: CHILD, field: 'contact', expand: ['owner'] })]);
 
     // Every part is drawn from the payload: the comment, the attachment row

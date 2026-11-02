@@ -212,6 +212,7 @@ export {
   recordPageColumnOfTab,
   buildDefaultPageColumns,
   bodyTableIdsOf,
+  RECORD_PAGE_TIMELINE_PANEL,
 } from './synth/recordPageColumns';
 // objectstack#27069 — the one reading of a related-list entry.
 export { relatedListEntryNames } from './synth/relatedListEntry';
@@ -236,6 +237,10 @@ export type { RelatedCountTarget, RelatedCountsSource } from './useRelatedCounts
 // the record's field changes over through this context.
 export {
   RecordFieldChangesContext,
+  // objectstack#28737 — the stream's size as the host counts it, and the
+  // panel's most entries (the host asks that many activity rows at open).
+  RecordTimelineTotalContext,
+  RECORD_TIMELINE_PANEL_MAX_ENTRIES,
   auditEntriesToFeedItems,
   mergeTimelineStream,
   filterTimelineStream,
