@@ -205,7 +205,7 @@ the floor path the evaluator is handed `$in: S` and answers exactly as today. â›
 | `driver-odata` (`packages/drivers/driver-odata/src/odata-driver.ts`, which refuses `ReadableIds`) | **floor** |
 | a driver this repository does not ship | **floor**, unless it declares that it compiles the leaf |
 | an outer object bound to another datasource than `sys_member` | **floor**: no driver evaluates a subquery across two datasources (ADR-0139 D5.3's reason) |
-| the in-process judges: the write gate's `check` and a field permission's `when`, judged by `packages/formula/src/matches-filter.ts#matchesFilterCondition` through `packages/plugins/plugin-security/src/security-plugin-object-inputs.ts` | **floor** |
+| the in-process judges, the plugin-security callers of `packages/formula/src/matches-filter.ts#matchesFilterCondition` that judge a compiled RLS predicate: the write gate's `check` (`packages/plugins/plugin-security/src/rls-check-stored-form.ts`, `packages/plugins/plugin-security/src/security-plugin-rls-filter.ts`), a field permission's `when` (`packages/plugins/plugin-security/src/security-plugin-object-inputs.ts`) and the explainer (`packages/plugins/plugin-security/src/explain-engine.ts`) | **floor** |
 
 - **Chosen up front.** The engine picks the leaf or the floor before the driver call, from a declaration the driver
   makes and the engine consults. â›” It never catches a refusal and retries with the array (ADR-0139 D5: "the probe is
