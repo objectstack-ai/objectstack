@@ -302,6 +302,34 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
       expect(issues[0].message).toMatch(/daysBetween/);
     });
 
+    // #28944 — the bare subtraction, and a timestamp minus a date field: the
+    // runtime holds a date field as its text, so the first reads null and the
+    // second a Duration (`{}`). Both are refused by the stack gate, located at
+    // the formula's expression; the daysBetween form beside them stays clean.
+    it('flags bare date subtraction and a timestamp minus a date field in a formula field', () => {
+      const issues = validateStackExpressions({
+        objects: [{
+          name: 'qa_doctor_time_off',
+          fields: {
+            start_date: { type: 'date' },
+            end_date: { type: 'date' },
+            qa_span_bare: { type: 'formula', name: 'qa_span_bare', expression: 'record.end_date - record.start_date' },
+            qa_span_daysbetween: {
+              type: 'formula', name: 'qa_span_daysbetween', expression: 'daysBetween(record.start_date, record.end_date)',
+            },
+            qa_since_today: { type: 'formula', name: 'qa_since_today', expression: 'today() - record.start_date' },
+          },
+        }],
+      });
+      expect(issues.map((i) => [i.where, i.severity])).toEqual([
+        ["object 'qa_doctor_time_off' · field 'qa_span_bare' expression", 'error'],
+        ["object 'qa_doctor_time_off' · field 'qa_since_today' expression", 'error'],
+      ]);
+      expect(issues[0].message).toMatch(/evaluates to null/);
+      expect(issues[1].message).toMatch(/reads `\{\}`/);
+      for (const issue of issues) expect(issue.message).toMatch(/daysBetween\(a, b\)/);
+    });
+
     it('accepts the daysBetween rewrite of that formula', () => {
       const issues = validateStackExpressions({
         objects: [{
