@@ -659,9 +659,10 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
    * The runtime treats `key` as the whitelist entry either way, and it ENFORCES
    * `type` and `multiple` at the decision (ADR-0104 as amended 2026-10-30;
    * #28658 ruling A). `multiple: true` takes a list, with no entry twice;
-   * `multiple` absent or false takes one value — for every type, `text`
-   * included. A picker output's values are also resolved, through the lookup
-   * the `expression` approver with the matching `resolveAs` expands them with:
+   * `multiple` absent or false takes one value — for every entry, `text` and
+   * bare-string entries included. A picker output's values are also resolved,
+   * through the lookup the `expression` approver with the matching `resolveAs`
+   * expands them with:
    * `user`, `department` and `team` by record id, `position` by the machine
    * name of a position someone in the request's organization holds (a name
    * nobody holds is refused). A `text` output is judged by shape only. A
@@ -1211,8 +1212,9 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * next step's approvers" without a record-field detour. A decision carrying
    * undeclared keys is rejected; `decision` / `requestId` are reserved.
    *
-   * An entry is either a bare key (a plain text input in the decision UI) or a
-   * TYPED declaration — `{ key, type, multiple }` — that tells the decision UI
+   * An entry is either a bare key (a plain text input in the decision UI,
+   * taking one value) or a TYPED declaration — `{ key, type, multiple }` — that
+   * tells the decision UI
    * to render a picker instead of free text, sourced like the approver type of
    * the same name ({@link DecisionOutputDefSchema}'s `type`): `user` /
    * `department` / `team` → a record picker committing ids, `position` → the
@@ -1220,7 +1222,8 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * ARRAY of them (the natural fan-out shape for an `expression` approver
    * downstream). The runtime enforces the declaration at the decision:
    * `multiple: true` takes a list with no entry twice and an absent or false
-   * `multiple` takes one value, for every type; a picker value must also name
+   * `multiple` takes one value, for every entry (`text` and bare keys
+   * included, judged by shape only); a picker value must also name
    * a record id (`user` / `department` / `team`) or the machine name of a
    * position someone holds (`position`). A mismatch is refused with
    * `400 VALIDATION_FAILED` naming `outputs.<key>` before any write.

@@ -327,8 +327,10 @@ run is never killed — and the log says both that the fallback fired and that i
 found nobody.
 
 The "previous approver picks the next step's approvers" loop needs no record
-field at all: declare `decisionOutputs: ['next_reviewers']` on node A, have the
-approver decide with `{ outputs: { next_reviewers: ['u2', 'u3'] } }`, and let
+field at all: declare `decisionOutputs: [{ key: 'next_reviewers', multiple: true }]`
+on node A (`multiple: true` because the answer is a list; a bare
+`'next_reviewers'` takes one value), have the approver decide with
+`{ outputs: { next_reviewers: ['u2', 'u3'] } }`, and let
 node B's approver be
 `{ type: 'expression', value: 'vars.<nodeA-id>.next_reviewers' }`. The author
 declares output keys, approvers only fill values; undeclared keys reject the
@@ -342,12 +344,12 @@ the position registry and commits position machine names; `multiple` collects
 an array of them). The whitelist still works by `key`, so bare strings and
 typed declarations mix freely.
 
-The runtime enforces a typed declaration at the decision, on an approve and a
+The runtime enforces every declaration at the decision, on an approve and a
 reject alike, before anything is written:
 
 - `multiple: true` takes a list, and only a list, with no entry twice. An
-  absent or `false` `multiple` takes one value. This holds for every type,
-  `text` included.
+  absent or `false` `multiple` takes one value. This holds for every entry,
+  `text` and bare strings included.
 - A picker output's values are also resolved, the way the matching
   `expression` approver's `resolveAs` expands them, in the request's
   organization: `user`, `department` and `team` by record id, `position` by
