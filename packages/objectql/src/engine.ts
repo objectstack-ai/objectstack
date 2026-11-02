@@ -331,10 +331,7 @@ import {
 } from './home-amount-projection.js';
 import { assertAggregatedColumnsAreDistinct, assertDateBucketTargetsAreTemporal } from './aggregate-query-shape-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
-import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
-// [#28697] Whether an object's sitting owner is a tenant's own (ADR-0029 D9.6),
-// asked by `refusedRegistrationWithdrawable` before a refused body is withdrawn.
-import { isTenantAuthored } from '@objectstack/metadata-core';
+import { SchemaRegistry, type ArtifactInstallScope } from './registry.js';
 import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine, analyzeRelationshipTraversals, isUnparseableDate, type EvalError, type EvalOptionLabels, type EvalPermissions } from '@objectstack/formula';
@@ -5177,65 +5174,6 @@ export function assembledViewItemRefusal(
 }
 
 /**
- * [#28697] Whether a refused {@link ObjectQL.registerApp} of package `id` may
- * be withdrawn through the registry's uninstall, asked BEFORE anything of the
- * body is written. True only when withdrawing takes back exactly what the
- * refused call wrote and nothing else:
- *
- *  - no package record answers `id` yet. A refused re-register of an
- *    installed id is NOT withdrawn: the uninstall would take the installed
- *    version with it;
- *  - `id` is not the owner a stack's residual registers its items under
- *    (`recordResidualOwner`), whose items no package record covers;
- *  - no object the body or a nested plugin owns, nor any object it extends,
- *    already holds a contribution under `id`;
- *  - every object the body or a nested plugin owns is either unheld or owned
- *    by another code package (which `registerObject` refuses before it adds
- *    anything). A tenant-authored owner or an overlay or extension with no
- *    owner is left alone: `registerObject` re-classifies the tenant
- *    contribution as the package's overlay, and the uninstall drops an
- *    object's overlay with its owner (ADR-0029 D9.7) and refuses an object
- *    another package extends, so withdrawing would lose the tenant's layer in
- *    this process or be refused.
- */
-export function refusedRegistrationWithdrawable(
-  registry: SchemaRegistry,
-  id: string | undefined,
-  manifest: any,
-  residualOwners: ReadonlyMap<string, unknown>,
-): boolean {
-  if (!id || registry.getPackage(id) !== undefined || residualOwners.has(id)) return false;
-  // The object names as the registry files them (`computeFQN`, the call
-  // `registerObject` makes with the namespace each one registers under).
-  const owned: string[] = [];
-  const ownedNames = (body: any, namespace: string | undefined) => {
-    const objects = body?.objects;
-    if (!objects || typeof objects !== 'object') return;
-    const names = Array.isArray(objects) ? objects.map((def: any) => def?.name) : Object.keys(objects);
-    for (const name of names) if (typeof name === 'string' && name !== '') owned.push(computeFQN(namespace, name));
-  };
-  ownedNames(manifest, manifest?.namespace);
-  if (Array.isArray(manifest?.plugins)) {
-    for (const plugin of manifest.plugins) {
-      if (plugin && typeof plugin === 'object') ownedNames(plugin, plugin.namespace || manifest?.namespace);
-    }
-  }
-  const extended: string[] = Array.isArray(manifest?.objectExtensions)
-    ? manifest.objectExtensions.map((ext: any) => ext?.extend).filter((name: unknown): name is string => typeof name === 'string')
-    : [];
-  for (const fqn of [...owned, ...extended]) {
-    if (registry.getObjectContributors(fqn).some((c) => c.packageId === id)) return false;
-  }
-  for (const fqn of owned) {
-    const contributors = registry.getObjectContributors(fqn);
-    if (contributors.length === 0) continue;
-    const ownedByAnotherCodePackage = contributors.some((c) => c.ownership === 'own' && !isTenantAuthored(c.definition));
-    if (!ownedByAnotherCodePackage) return false;
-  }
-  return true;
-}
-
-/**
  * [#28697] Stamp an app object ({@link stampPackage}) and register it through
  * the registry's app verb, recording the stamp the registration writes onto
  * the caller's own object ({@link noteRegistrationStamp}): `stampPackage` (with
@@ -9324,28 +9262,16 @@ export class ObjectQL implements IObjectQLEngine {
 
       // [#28697] What remains can only be refused part-way, by the registry's
       // own verbs (an object another package owns, a field with no `type`, a
-      // picklist value already added, …). A first registration of this id is
-      // withdrawn when one throws, so the caller's refusal leaves no package
-      // record, object, app or item behind; asked here, before anything is
-      // written. See {@link refusedRegistrationWithdrawable}.
-      const withdrawable = refusedRegistrationWithdrawable(this._registry, id, manifest, this.residualOwnerSources);
-      // [#28697] A re-register of an installed id is an upgrade: refused
-      // part-way, the registry puts back exactly the entries it wrote, so the
-      // installed version keeps serving whole, with other packages'
-      // extensions of its objects and tenant overlays as they were. Never
-      // through uninstall, which refuses an extended object and drops a
-      // tenant's overlay. See {@link SchemaRegistry.restoringOnRefusal}.
-      const upgrade = Boolean(id) && this._registry.getPackage(id) !== undefined;
-      try {
-          if (upgrade) {
-              this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope));
-          } else {
-              this.registerPackageBody(manifest, id, namespace, version, source, scope);
-          }
-      } catch (err) {
-          if (withdrawable) this.withdrawRefusedRegistration(id, manifest, err);
-          throw err;
-      }
+      // picklist value already added, …). Refused, the registry puts back
+      // exactly the entries this registration wrote: a first install leaves no
+      // package record, object, app, item or namespace of itself, and a
+      // re-register of an installed id (an upgrade) leaves the installed
+      // version serving whole. Whatever sat there before — a tenant's object
+      // or overlay this package layers over (ADR-0029 D9 §6.1), another
+      // package's extension of its objects — reads as it did. Never through
+      // uninstall, which refuses an extended object and drops a tenant's
+      // overlay with its owner (D9.7). See {@link SchemaRegistry.restoringOnRefusal}.
+      this._registry.restoringOnRefusal(() => this.registerPackageBody(manifest, id, namespace, version, source, scope));
 
       // [#28697] Written only once nothing above threw, so a refused body
       // leaves none of them. Nothing above reads any of them.
@@ -9524,7 +9450,7 @@ export class ObjectQL implements IObjectQLEngine {
       }
 
       // (Contributed kinds register in `registerApp` once this body has
-      // registered whole: they belong to no package, so no withdrawal of a
+      // registered whole: they belong to no package, so no restore of a
       // refused body could take them back.)
 
       // 7. Recursively register nested plugins
@@ -9537,42 +9463,6 @@ export class ObjectQL implements IObjectQLEngine {
                   this.registerPlugin(plugin, id, namespace, version);
               }
           }
-      }
-  }
-
-  /**
-   * [#28697] Take back what a refused first registration of package `id`
-   * wrote, through the registry's own uninstall ({@link SchemaRegistry.uninstallPackage}):
-   * the package record and its namespace, its objects and extensions, its apps
-   * and items, its picklist extensions and catalog claims. Two things that verb
-   * does not reach are handled here: a nested plugin's own namespace (claimed
-   * for `id` by `registerObject`), and the boot seed, which an operator
-   * uninstall forgets with the row but a refused registration keeps, so a later
-   * install of the id still lands disabled when the persisted state says so.
-   *
-   * Nothing to do when the registry refused the package record itself: its
-   * refusals all precede its first write. A withdrawal that is itself refused
-   * is logged and the caller's refusal still propagates unchanged.
-   */
-  private withdrawRefusedRegistration(id: string, manifest: any, refusal: unknown): void {
-      if (this._registry.getPackage(id) === undefined) return;
-      try {
-          this._registry.uninstallPackage(id, { keepBootSeed: true });
-          if (Array.isArray(manifest.plugins)) {
-              for (const plugin of manifest.plugins) {
-                  const ns = plugin && typeof plugin === 'object' ? plugin.namespace : undefined;
-                  if (typeof ns === 'string' && ns !== '' && ns !== manifest.namespace) this._registry.unregisterNamespace(ns, id);
-              }
-          }
-          this.invalidateSummaryIndex();
-          this.logger.debug('Withdrew a refused package registration', { id });
-      } catch (withdrawal) {
-          this.logger.error(
-              `Package '${id}' was refused part-way through registering, and what it had registered could not be `
-              + 'withdrawn; it stays in this process until restart.',
-              withdrawal instanceof Error ? withdrawal : undefined,
-              { id, refusal: String((refusal as Error)?.message ?? refusal), withdrawal: String((withdrawal as Error)?.message ?? withdrawal) },
-          );
       }
   }
 

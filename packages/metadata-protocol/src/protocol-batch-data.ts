@@ -404,7 +404,9 @@ export async function runBatchDataLoop(
                         //    row — so a caller holding create learned that a
                         //    row it cannot read exists, which ruling
                         //    5985885287 closed on the by-id update and delete
-                        //    doors;
+                        //    doors — and that fork could reach the update arm
+                        //    for a principal the caller-read rule now sends
+                        //    to the create arm;
                         //  - the key collision #5187 called a misdirection is
                         //    the answer the maintainer ratified on 2026-11-01
                         //    as the accepted cost of a deployment-global key,

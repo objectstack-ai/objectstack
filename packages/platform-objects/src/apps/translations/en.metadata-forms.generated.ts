@@ -515,6 +515,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       }
     }
   },
+  object_extension: {
+    label: "Object Extension",
+    description: "Fields and rules a package adds to an object another package defines"
+  },
   field: {
     label: "Field",
     sections: {

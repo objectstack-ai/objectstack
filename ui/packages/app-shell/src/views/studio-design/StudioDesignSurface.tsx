@@ -4897,7 +4897,9 @@ export function InterfacesPillar({
         // objectui#11773 — the draft is read at the address the nav save writes
         // (`?package=` this package), so the version it serves pins that save.
         const [layRaw, appDraftRead] = await Promise.all([
-          saved ? client.layered<Record<string, unknown>>('app', name) : null,
+          // ADR-0048 — read at this package, the app's owner: a layered read
+          // naming no package is refused for a name two packages hold.
+          saved ? client.layered<Record<string, unknown>>('app', name, { packageId }) : null,
           readDraftForSave<Record<string, unknown>>(client, 'app', name, packageId),
         ]);
         if (cancelled) return;
@@ -5176,7 +5178,15 @@ export function InterfacesPillar({
         // objectui#11799 — the baseline is read only when it is used, for a
         // leaf with no pending draft. An unsaved leaf always has one, so it
         // never asks `/layers`, which answers 404 for a name with no layer.
-        const lay = body ? null : await client.layered<Record<string, unknown>>(current.type, current.name);
+        // ADR-0048 — read at the leaf's owner: a layered read naming no
+        // package is refused for a name two packages hold. That is the pair
+        // for an item the pair adds; else this package, whose read on a
+        // read-only base serves its declared override (ADR-0146 D8).
+        const lay = body
+          ? null
+          : await client.layered<Record<string, unknown>>(current.type, current.name, {
+              packageId: current.addedIn ?? packageId,
+            });
         if (cancelled) return;
         const baseline = ((lay as { effective?: unknown; code?: unknown } | null)?.effective ??
           (lay as { code?: unknown } | null)?.code ??
@@ -5235,7 +5245,8 @@ export function InterfacesPillar({
     if (!publishedPending || !currentType || !currentName) return;
     const key = leafKey;
     let cancelled = false;
-    client.layered<Record<string, unknown>>(currentType, currentName).then(
+    // ADR-0048 — at the leaf's owner, as the leaf's load reads its baseline.
+    client.layered<Record<string, unknown>>(currentType, currentName, { packageId: leafPackageId }).then(
       (lay) => {
         if (cancelled) return;
         const doc = ((lay as { effective?: unknown; code?: unknown } | null)?.effective ??
@@ -5251,7 +5262,7 @@ export function InterfacesPillar({
     return () => {
       cancelled = true;
     };
-  }, [publishedPending, client, currentType, currentName, leafKey]);
+  }, [publishedPending, client, currentType, currentName, leafKey, leafPackageId]);
   const servedWidgets = React.useMemo(
     () =>
       currentType === 'dashboard' && leafPublished.key === leafKey && leafPublished.read
@@ -7825,7 +7836,9 @@ export function DataPillar({
       try {
         // objectui#11773 — the draft is read at the address the object saves
         // write, so the version it serves pins the first of them.
-        const readLayers = () => client.layered<Record<string, unknown>>('object', current.name);
+        // ADR-0048 — and the layers at this package, the object's owner: a
+        // layered read naming no package is refused for a name two packages hold.
+        const readLayers = () => client.layered<Record<string, unknown>>('object', current.name, { packageId });
         const readDraft = () => readDraftForSave<Record<string, unknown>>(client, 'object', current.name, packageId);
         // objectui#12508 — a draft-only object (a pending draft, and no row in
         // the package's published list) has no layer, and `/layers` answers
@@ -10002,7 +10015,16 @@ export function AutomationsPillar({
         // objectui#11799 — the baseline is read only for a flow with no
         // pending draft, the one case it is used. An unsaved flow always has
         // one, so it never asks `/layers`, which answers 404 for it.
-        const layRaw = draftBody ? null : await client.layered<Record<string, unknown>>('flow', current.name);
+        // ADR-0048 — at the package the flow saves write, its owner here; with
+        // none, the read names none, and a name two packages hold is refused
+        // with the server's own sentence, shown as the load's error.
+        const layRaw = draftBody
+          ? null
+          : await client.layered<Record<string, unknown>>(
+              'flow',
+              current.name,
+              draftPackageId ? { packageId: draftPackageId } : {},
+            );
         if (cancelled) return;
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> } | null;
         const baseline = (lay?.effective ?? lay?.code ?? {}) as Record<string, unknown>;
