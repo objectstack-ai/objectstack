@@ -16,8 +16,8 @@
  * ## Which door deletes a user
  *
  * Every user delete reaches `ObjectQL.delete` by id: better-auth's own deletes
- * (admin remove-user, self delete-user, SCIM) go through the plugin-auth
- * adapter, which calls `engine.delete(model, { where: { id }, context: {
+ * of the user row (admin remove-user, self delete-user) go through the
+ * plugin-auth adapter, which calls `engine.delete(model, { where: { id }, context: {
  * isSystem: true, … } })`; the generic data doors refuse a caller-context
  * `sys_user` delete (ADR-0092 D2). So the pins below delete through the
  * engine, both without a context and with the adapter's system context.

@@ -1828,10 +1828,10 @@ const DELETE_SEMANTICS_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_d
  * a `set_null` on a REQUIRED `user` field escalates to that refusal as a
  * required `lookup`'s does.
  *
- * Every door that deletes a user reaches this walk: better-auth's user deletes
- * (the admin remove-user, a self delete-user, a SCIM deprovision) run through
- * the plugin-auth adapter's `engine.delete` by id, and the generic data doors
- * refuse a caller-context `sys_user` delete before it (ADR-0092 D2).
+ * Every door that deletes a user reaches this walk: better-auth deletes the
+ * user row (admin remove-user, self delete-user) through the plugin-auth
+ * adapter's `engine.delete` by id, and the generic data doors refuse a
+ * caller-context `sys_user` delete before it (ADR-0092 D2).
  *
  * ⛔ No default is invented here. "Absent" stays outside the walk, because the
  * spec's parse decides what a bare `user` field declares, not this file.
