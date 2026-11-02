@@ -171,7 +171,10 @@ export interface ExplainAccessRequest {
    * records of one `(object, operation)` pair, in one call. The type is the
    * wire schema's own member ({@link ExplainRequest}), so the two cannot drift.
    *
-   * - Mutually exclusive with `recordId`: a request carrying both is refused.
+   * - Mutually exclusive with `recordId`. The wire schema refuses a request
+   *   carrying both at the REST explain route, and the reference security
+   *   service refuses it too; an implementation that ignores `recordIds` does
+   *   not. A direct caller of `explain` sends one spelling, never both.
    * - At least one and at most {@link EXPLAIN_BATCH_MAX_RECORD_IDS} ids; the
    *   wire schema refuses an empty or a longer array.
    * - Answered by `ExplainDecision.records` in the same order: `records[i]`
