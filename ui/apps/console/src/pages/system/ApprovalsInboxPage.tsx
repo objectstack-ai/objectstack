@@ -29,7 +29,7 @@
  * an input is focused.
  */
 
-import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ConsolePageHeader } from '@object-ui/app-shell';
 import {
@@ -1137,9 +1137,15 @@ function ApprovalsQueue() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
 
+  // objectstack#29070: the list follows the search box at a deferred
+  // priority, so a keystroke repaints the box first and the rows after,
+  // interruptibly. With the rows memoised below (`rowFaces`), a keystroke on
+  // a phone at 4× CPU no longer blocks for the whole list's render.
+  const deferredQuery = useDeferredValue(query);
+
   /** Client-side filtered + sorted rows shown in table. */
   const filteredRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     const matched = rows.filter(r => {
       if (processFilter !== 'all' && processLabel(r) !== processFilter) return false;
       if (objectFilter !== 'all' && r.object_name !== objectFilter) return false;
@@ -1181,7 +1187,7 @@ function ApprovalsQueue() {
       sorted.sort((a, b) => (submittedAt(a) || '').localeCompare(submittedAt(b) || ''));
     }
     return sorted;
-  }, [rows, query, processFilter, objectFilter, statusFilter, tab, sortKey, hiddenFields, displayLocale]);
+  }, [rows, deferredQuery, processFilter, objectFilter, statusFilter, tab, sortKey, hiddenFields, displayLocale]);
 
   // Reset selection when underlying filtered list changes (avoid acting on hidden rows).
   useEffect(() => {
@@ -1233,7 +1239,7 @@ function ApprovalsQueue() {
     [filteredRows, selectedRowIds, quickDecidable],
   );
 
-  const allFilteredSelectable = filteredRows.filter(r => r.status === 'pending');
+  const allFilteredSelectable = useMemo(() => filteredRows.filter(r => r.status === 'pending'), [filteredRows]);
   const allSelected =
     allFilteredSelectable.length > 0 &&
     allFilteredSelectable.every(r => selectedRowIds.has(r.id));
@@ -1367,6 +1373,260 @@ function ApprovalsQueue() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [tab, openRequest, toggleRow, quickDecidable, openApprove, openReject]);
+
+  /**
+   * The rows, both faces: the desktop table and the phone cards.
+   *
+   * objectstack#29070: memoised on what the rows read, so a render the rows
+   * do not depend on — a keystroke in the search box before the deferred
+   * filter catches up, a filter popover opening, a toast — reuses them instead
+   * of re-rendering every row. At 200 rows on a phone at 4× CPU that render
+   * was a 300–500 ms long task per keystroke.
+   */
+  const rowFaces = useMemo(() => (
+    <>
+      {/* Desktop table */}
+      <Card className="hidden md:block">
+        <CardContent className="p-0">
+          {/* objectui#12708 — wider than the panel, the table scrolls
+              in the shared overflow box: a right-edge shadow while
+              columns remain to the right, its scrollbar on hover. */}
+          {/* objectui#12816 — `seam="pinned"`: the shadow moves from
+              the box's edge to the pinned Approve / Reject cells. */}
+          <HorizontalOverflowBox seam="pinned" outerClassName="rounded-lg overflow-hidden" data-testid="approvals-inbox-table-scroller">
+          <Table containerClassName="overflow-visible">
+            <TableHeader>
+              <TableRow>
+                {tab === 'pending' && (
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allSelected}
+                      onCheckedChange={toggleAll}
+                      aria-label={tr('selectAll', 'Select all')}
+                      disabled={allFilteredSelectable.length === 0}
+                    />
+                  </TableHead>
+                )}
+                {/* Column widths rebalanced (#2762 P2): the Record is the
+                    primary content so it gets the widest share, the
+                    Request a moderate one, and Status/Submitted fixed
+                    widths so they never crowd — instead of the browser
+                    spreading five auto columns evenly and leaving 审批事项
+                    over-wide next to a cramped 状态. */}
+                <TableHead className="w-[22%]">{tr('colRequest', 'Request')}</TableHead>
+                {/* objectui#12816 — the Record cells are `max-w-0` (below),
+                    so this floor is the column's only minimum: enough to
+                    tell one record from the next at 1024 px, however long
+                    the titles are. */}
+                <TableHead className="w-[30%] min-w-40">{tr('colRecord', 'Record')}</TableHead>
+                <TableHead className="w-[16%]">{tr('colRequester', 'Requester')}</TableHead>
+                <TableHead className="w-[110px] min-w-[96px] whitespace-nowrap">{tr('colStatus', 'Status')}</TableHead>
+                <TableHead className="w-[132px]">{tr('colWaiting', 'Submitted')}</TableHead>
+                <TableHead className={cn('w-20', PINNED_ACTIONS_CLASSES, 'after:bg-muted/50')} aria-label={tr('colActions', 'Actions')} />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredRows.map((r, i) => (
+                <TableRow
+                  key={r.id}
+                  className={cn(
+                    'group cursor-pointer hover:bg-accent/50',
+                    focusIndex === i && 'ring-2 ring-inset ring-ring bg-accent/30',
+                  )}
+                  onClick={() => { setFocusIndex(i); openRequest(r.id); }}
+                >
+                  {tab === 'pending' && (
+                    <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selectedRowIds.has(r.id)}
+                        onCheckedChange={() => toggleRow(r.id)}
+                        disabled={r.status !== 'pending'}
+                        aria-label={tr('selectRow', 'Select request')}
+                      />
+                    </TableCell>
+                  )}
+                  <TableCell><RequestCell r={r} tr={tr} /></TableCell>
+                  {/* objectui#12816 — `max-w-0` takes the record title's
+                      unbreakable width out of the auto-layout table's
+                      column sizing, so a long title truncates (full text
+                      in its `title`) instead of widening the table. */}
+                  <TableCell className="max-w-0">
+                    <RecordCell
+                      r={r}
+                      // A known-dead reference needs no probe: there is
+                      // nothing to link to, and the probe is async and
+                      // fails open, so leaving it to answer would render
+                      // a live-looking link for the first paint.
+                      href={deadLabelFor(r) !== null || readability.isUnreadable(r) ? null : recordHref(r)}
+                      linkState={recordLinkState}
+                      hiddenKeys={hiddenFields.forObject(r.object_name)}
+                      deadLabel={deadLabelFor(r)}
+                      unresolvableLabel={unresolvableLabelFor(r)}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    {isSystemSubmitter(r) ? (
+                      // Flow-/system-initiated: name the origin instead of a
+                      // bare person icon + "—" (#2762 P1-4).
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <Workflow className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate italic">{tr('flowOrigin', 'Flow-initiated')}</span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 text-sm">
+                        <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <span className="truncate" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
+                        {tab !== 'submitted' && r.viewer?.is_submitter === true && (
+                          <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
+                  <TableCell><StatusBadge status={r.status} label={statusLabel(r.status)} /></TableCell>
+                  <TableCell
+                    className={cn('text-xs whitespace-nowrap', agingClass(r, now))}
+                    title={formatDate(submittedAt(r), displayLocale)}
+                  >
+                    <Clock className="h-3 w-3 inline mr-1" />
+                    {formatRelative(submittedAt(r))}
+                    {r.status === 'pending' && (() => {
+                      const sla = slaState(r.sla_due_at, now);
+                      return sla ? (
+                        <div className={cn(
+                          'mt-0.5 text-[10px] font-medium',
+                          sla.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground',
+                        )}>
+                          {slaLabel(sla)}
+                        </div>
+                      ) : null;
+                    })()}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      'w-20',
+                      PINNED_ACTIONS_CLASSES,
+                      // The focused row's inset ring is drawn by the row,
+                      // under this opaque cell: the cell redraws the ring's
+                      // top, right and bottom edges itself.
+                      focusIndex === i
+                        ? 'after:bg-accent/30 after:opacity-100 in-[tr:hover]:after:bg-accent/50 shadow-[inset_0_2px_0_var(--color-ring),inset_-2px_0_0_var(--color-ring),inset_0_-2px_0_var(--color-ring)]'
+                        : 'after:bg-accent/50',
+                    )}
+                  >
+                    <InlineActions
+                      r={r}
+                      actionable={isActionable(r)}
+                      busy={inlineActing === r.id}
+                      needsInputs={needsDecisionInputs(r)}
+                      tr={tr}
+                      onApprove={openApprove}
+                      onReject={openReject}
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          </HorizontalOverflowBox>
+        </CardContent>
+      </Card>
+
+      {/* Mobile cards */}
+      <div className="md:hidden space-y-2">
+        {filteredRows.map((r) => (
+          <Card key={r.id} className="cursor-pointer active:bg-accent/50 [content-visibility:auto] [contain-intrinsic-size:auto_9rem]" onClick={() => openRequest(r.id)}>
+            <CardContent className="p-3 space-y-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <div className="font-medium text-sm truncate">{processLabel(r)}</div>
+                <StatusBadge status={r.status} label={statusLabel(r.status)} />
+              </div>
+              {/* objectui#7108: same tombstone as the desktop row —
+                  the mobile card renders the SAME reference for the
+                  same request, so fixing only the table would leave
+                  the bare id on every phone. */}
+              {/* objectui#8631: and the same cause-free affordance as
+                  the desktop row. This card used to consult NO probe at
+                  all, so a phone kept the opaque id after the table had
+                  stopped showing it — the dead end moved viewport, not
+                  away. */}
+              {(() => {
+                const deadLabel = deadLabelFor(r);
+                const unresolvableLabel = unresolvableLabelFor(r);
+                return (
+                  <div className="text-sm truncate">
+                    {deadLabel !== null ? (
+                      <span className="italic text-muted-foreground">{deadLabel}</span>
+                    ) : unresolvableLabel !== null ? (
+                      <span className="italic text-muted-foreground">{unresolvableLabel}</span>
+                    ) : (
+                      r.record_title || formatIdentity(r.record_id)
+                    )}
+                    <span className="text-muted-foreground text-xs ml-1.5">{objectDisplay(r)}</span>
+                    {deadLabel !== null && r.record_title && (
+                      <span className="text-muted-foreground text-xs ml-1.5">· {r.record_title}</span>
+                    )}
+                    {(() => {
+                      // objectui#6020: this row's OWN object decides.
+                      const amount = decisionAmountEntry(r, hiddenFields.forObject(r.object_name), displayLocale);
+                      return amount ? (
+                        <span className="text-xs ml-1.5 font-medium" title={amount.label}>· {amount.display}</span>
+                      ) : null;
+                    })()}
+                  </div>
+                );
+              })()}
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                {isSystemSubmitter(r) ? (
+                  <span className="inline-flex items-center gap-1 truncate italic">
+                    <Workflow className="h-3 w-3" />{tr('flowOrigin', 'Flow-initiated')}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 truncate">
+                    <UserIcon className="h-3 w-3" />{submitterDisplay(r)}
+                    {tab !== 'submitted' && r.viewer?.is_submitter === true && (
+                      <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
+                    )}
+                  </span>
+                )}
+                <span className={cn('inline-flex items-center gap-1 whitespace-nowrap', agingClass(r, now))}>
+                  <Clock className="h-3 w-3" />{formatRelative(submittedAt(r))}
+                </span>
+              </div>
+              {isActionable(r) && (
+                // #2829: outputs-declaring requests decide only via the
+                // request page's dialog — quick buttons disable with the hint.
+                <div
+                  className="flex gap-2 pt-1"
+                  onClick={(e) => e.stopPropagation()}
+                  title={needsDecisionInputs(r)
+                    ? tr('needsDecisionInputs', 'This approval collects decision outputs — open it to decide.')
+                    : undefined}
+                >
+                  {/* objectstack#29070: the phone card's decision
+                      buttons take the 44 px `lg` size (they were
+                      28 px); `px-3` keeps two side by side. */}
+                  <Button size="lg" className="flex-1 px-3" disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => openApprove(r)}>
+                    <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{tr('approve', 'Approve')}
+                  </Button>
+                  <Button
+                    size="lg" variant="outline" className="flex-1 px-3 border-destructive text-destructive"
+                    disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => openReject(r)}
+                  >
+                    <XCircle className="h-3.5 w-3.5 mr-1" />{tr('reject', 'Reject')}
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </>
+  ), [
+    tab, allSelected, toggleAll, allFilteredSelectable, tr, filteredRows, focusIndex, openRequest,
+    selectedRowIds, toggleRow, deadLabelFor, readability, recordHref, recordLinkState, hiddenFields,
+    unresolvableLabelFor, statusLabel, now, displayLocale, formatRelative, isActionable, inlineActing,
+    needsDecisionInputs, openApprove, openReject, slaLabel,
+  ]);
 
   const hasFilters = !!query || processFilter !== 'all' || objectFilter !== 'all' || statusFilter !== 'all';
 
@@ -1634,241 +1894,7 @@ function ApprovalsQueue() {
             </div>
           ) : (
             <>
-              {/* Desktop table */}
-              <Card className="hidden md:block">
-                <CardContent className="p-0">
-                  {/* objectui#12708 — wider than the panel, the table scrolls
-                      in the shared overflow box: a right-edge shadow while
-                      columns remain to the right, its scrollbar on hover. */}
-                  {/* objectui#12816 — `seam="pinned"`: the shadow moves from
-                      the box's edge to the pinned Approve / Reject cells. */}
-                  <HorizontalOverflowBox seam="pinned" outerClassName="rounded-lg overflow-hidden" data-testid="approvals-inbox-table-scroller">
-                  <Table containerClassName="overflow-visible">
-                    <TableHeader>
-                      <TableRow>
-                        {tab === 'pending' && (
-                          <TableHead className="w-10">
-                            <Checkbox
-                              checked={allSelected}
-                              onCheckedChange={toggleAll}
-                              aria-label={tr('selectAll', 'Select all')}
-                              disabled={allFilteredSelectable.length === 0}
-                            />
-                          </TableHead>
-                        )}
-                        {/* Column widths rebalanced (#2762 P2): the Record is the
-                            primary content so it gets the widest share, the
-                            Request a moderate one, and Status/Submitted fixed
-                            widths so they never crowd — instead of the browser
-                            spreading five auto columns evenly and leaving 审批事项
-                            over-wide next to a cramped 状态. */}
-                        <TableHead className="w-[22%]">{tr('colRequest', 'Request')}</TableHead>
-                        {/* objectui#12816 — the Record cells are `max-w-0` (below),
-                            so this floor is the column's only minimum: enough to
-                            tell one record from the next at 1024 px, however long
-                            the titles are. */}
-                        <TableHead className="w-[30%] min-w-40">{tr('colRecord', 'Record')}</TableHead>
-                        <TableHead className="w-[16%]">{tr('colRequester', 'Requester')}</TableHead>
-                        <TableHead className="w-[110px] min-w-[96px] whitespace-nowrap">{tr('colStatus', 'Status')}</TableHead>
-                        <TableHead className="w-[132px]">{tr('colWaiting', 'Submitted')}</TableHead>
-                        <TableHead className={cn('w-20', PINNED_ACTIONS_CLASSES, 'after:bg-muted/50')} aria-label={tr('colActions', 'Actions')} />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filteredRows.map((r, i) => (
-                        <TableRow
-                          key={r.id}
-                          className={cn(
-                            'group cursor-pointer hover:bg-accent/50',
-                            focusIndex === i && 'ring-2 ring-inset ring-ring bg-accent/30',
-                          )}
-                          onClick={() => { setFocusIndex(i); openRequest(r.id); }}
-                        >
-                          {tab === 'pending' && (
-                            <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
-                              <Checkbox
-                                checked={selectedRowIds.has(r.id)}
-                                onCheckedChange={() => toggleRow(r.id)}
-                                disabled={r.status !== 'pending'}
-                                aria-label={tr('selectRow', 'Select request')}
-                              />
-                            </TableCell>
-                          )}
-                          <TableCell><RequestCell r={r} tr={tr} /></TableCell>
-                          {/* objectui#12816 — `max-w-0` takes the record title's
-                              unbreakable width out of the auto-layout table's
-                              column sizing, so a long title truncates (full text
-                              in its `title`) instead of widening the table. */}
-                          <TableCell className="max-w-0">
-                            <RecordCell
-                              r={r}
-                              // A known-dead reference needs no probe: there is
-                              // nothing to link to, and the probe is async and
-                              // fails open, so leaving it to answer would render
-                              // a live-looking link for the first paint.
-                              href={deadLabelFor(r) !== null || readability.isUnreadable(r) ? null : recordHref(r)}
-                              linkState={recordLinkState}
-                              hiddenKeys={hiddenFields.forObject(r.object_name)}
-                              deadLabel={deadLabelFor(r)}
-                              unresolvableLabel={unresolvableLabelFor(r)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {isSystemSubmitter(r) ? (
-                              // Flow-/system-initiated: name the origin instead of a
-                              // bare person icon + "—" (#2762 P1-4).
-                              <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                                <Workflow className="h-3.5 w-3.5 shrink-0" />
-                                <span className="truncate italic">{tr('flowOrigin', 'Flow-initiated')}</span>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-1.5 text-sm">
-                                <UserIcon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                <span className="truncate" title={r.submitter_id || ''}>{submitterDisplay(r)}</span>
-                                {tab !== 'submitted' && r.viewer?.is_submitter === true && (
-                                  <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
-                                )}
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell><StatusBadge status={r.status} label={statusLabel(r.status)} /></TableCell>
-                          <TableCell
-                            className={cn('text-xs whitespace-nowrap', agingClass(r, now))}
-                            title={formatDate(submittedAt(r), displayLocale)}
-                          >
-                            <Clock className="h-3 w-3 inline mr-1" />
-                            {formatRelative(submittedAt(r))}
-                            {r.status === 'pending' && (() => {
-                              const sla = slaState(r.sla_due_at, now);
-                              return sla ? (
-                                <div className={cn(
-                                  'mt-0.5 text-[10px] font-medium',
-                                  sla.overdue ? 'text-red-600 dark:text-red-400' : 'text-muted-foreground',
-                                )}>
-                                  {slaLabel(sla)}
-                                </div>
-                              ) : null;
-                            })()}
-                          </TableCell>
-                          <TableCell
-                            className={cn(
-                              'w-20',
-                              PINNED_ACTIONS_CLASSES,
-                              // The focused row's inset ring is drawn by the row,
-                              // under this opaque cell: the cell redraws the ring's
-                              // top, right and bottom edges itself.
-                              focusIndex === i
-                                ? 'after:bg-accent/30 after:opacity-100 in-[tr:hover]:after:bg-accent/50 shadow-[inset_0_2px_0_var(--color-ring),inset_-2px_0_0_var(--color-ring),inset_0_-2px_0_var(--color-ring)]'
-                                : 'after:bg-accent/50',
-                            )}
-                          >
-                            <InlineActions
-                              r={r}
-                              actionable={isActionable(r)}
-                              busy={inlineActing === r.id}
-                              needsInputs={needsDecisionInputs(r)}
-                              tr={tr}
-                              onApprove={openApprove}
-                              onReject={openReject}
-                            />
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                  </HorizontalOverflowBox>
-                </CardContent>
-              </Card>
-
-              {/* Mobile cards */}
-              <div className="md:hidden space-y-2">
-                {filteredRows.map((r) => (
-                  <Card key={r.id} className="cursor-pointer active:bg-accent/50" onClick={() => openRequest(r.id)}>
-                    <CardContent className="p-3 space-y-1.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="font-medium text-sm truncate">{processLabel(r)}</div>
-                        <StatusBadge status={r.status} label={statusLabel(r.status)} />
-                      </div>
-                      {/* objectui#7108: same tombstone as the desktop row —
-                          the mobile card renders the SAME reference for the
-                          same request, so fixing only the table would leave
-                          the bare id on every phone. */}
-                      {/* objectui#8631: and the same cause-free affordance as
-                          the desktop row. This card used to consult NO probe at
-                          all, so a phone kept the opaque id after the table had
-                          stopped showing it — the dead end moved viewport, not
-                          away. */}
-                      {(() => {
-                        const deadLabel = deadLabelFor(r);
-                        const unresolvableLabel = unresolvableLabelFor(r);
-                        return (
-                          <div className="text-sm truncate">
-                            {deadLabel !== null ? (
-                              <span className="italic text-muted-foreground">{deadLabel}</span>
-                            ) : unresolvableLabel !== null ? (
-                              <span className="italic text-muted-foreground">{unresolvableLabel}</span>
-                            ) : (
-                              r.record_title || formatIdentity(r.record_id)
-                            )}
-                            <span className="text-muted-foreground text-xs ml-1.5">{objectDisplay(r)}</span>
-                            {deadLabel !== null && r.record_title && (
-                              <span className="text-muted-foreground text-xs ml-1.5">· {r.record_title}</span>
-                            )}
-                            {(() => {
-                              // objectui#6020: this row's OWN object decides.
-                              const amount = decisionAmountEntry(r, hiddenFields.forObject(r.object_name), displayLocale);
-                              return amount ? (
-                                <span className="text-xs ml-1.5 font-medium" title={amount.label}>· {amount.display}</span>
-                              ) : null;
-                            })()}
-                          </div>
-                        );
-                      })()}
-                      <div className="flex items-center justify-between text-xs text-muted-foreground">
-                        {isSystemSubmitter(r) ? (
-                          <span className="inline-flex items-center gap-1 truncate italic">
-                            <Workflow className="h-3 w-3" />{tr('flowOrigin', 'Flow-initiated')}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 truncate">
-                            <UserIcon className="h-3 w-3" />{submitterDisplay(r)}
-                            {tab !== 'submitted' && r.viewer?.is_submitter === true && (
-                              <SelfSubmittedBadge label={tr('submittedByYou', 'You submitted this')} />
-                            )}
-                          </span>
-                        )}
-                        <span className={cn('inline-flex items-center gap-1 whitespace-nowrap', agingClass(r, now))}>
-                          <Clock className="h-3 w-3" />{formatRelative(submittedAt(r))}
-                        </span>
-                      </div>
-                      {isActionable(r) && (
-                        // #2829: outputs-declaring requests decide only via the
-                        // request page's dialog — quick buttons disable with the hint.
-                        <div
-                          className="flex gap-2 pt-1"
-                          onClick={(e) => e.stopPropagation()}
-                          title={needsDecisionInputs(r)
-                            ? tr('needsDecisionInputs', 'This approval collects decision outputs — open it to decide.')
-                            : undefined}
-                        >
-                          {/* objectstack#29070: the phone card's decision
-                              buttons take the 44 px `lg` size (they were
-                              28 px); `px-3` keeps two side by side. */}
-                          <Button size="lg" className="flex-1 px-3" disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => openApprove(r)}>
-                            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{tr('approve', 'Approve')}
-                          </Button>
-                          <Button
-                            size="lg" variant="outline" className="flex-1 px-3 border-destructive text-destructive"
-                            disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => openReject(r)}
-                          >
-                            <XCircle className="h-3.5 w-3.5 mr-1" />{tr('reject', 'Reject')}
-                          </Button>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
+              {rowFaces}
 
               {tab !== 'pending' && total != null && (
                 <div className="flex items-center justify-center gap-3 py-1">
