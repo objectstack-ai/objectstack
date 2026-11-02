@@ -51,7 +51,7 @@ import { DraftChangesPanel, computeChangeDetail } from '../DraftChangesPanel';
 const ZH_LABELS: Record<string, string> = {
   created_at: '创建时间',
   created_by: '创建人',
-  owner_id: '所有者',
+  owner_id: '负责人',
   updated_at: '更新时间',
   updated_by: '更新人',
 };
@@ -109,7 +109,7 @@ describe('computeChangeDetail — what the platform wrote is not an author row (
       { name: 'nameField', kind: 'added', scope: 'key' },
     ]);
     // A generated field keeps its label, for the row the group shows when opened.
-    expect(d.fields?.labels.get('owner_id')).toBe('所有者');
+    expect(d.fields?.labels.get('owner_id')).toBe('负责人');
   });
 
   it('CONTROL: a field shaped like an audit column without the system mark is the author’s', () => {

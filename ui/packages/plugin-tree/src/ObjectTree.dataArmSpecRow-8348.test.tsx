@@ -43,7 +43,7 @@
  *
  * ## The outcome, named — the same one `object-map` and `object-gantt` give
  *
- * A bare array under `data` draws nothing (`No records`) when the node names
+ * A bare array under `data` draws nothing (`No data`) when the node names
  * no object, and the tree queries its `objectName` instead when it does — the
  * ladder falls through to rung 2, then rung 3. In a development build
  * `SchemaRenderer` says so once, naming the key and the spelling that works;
@@ -164,7 +164,7 @@ describe('object-tree honours only the `data` arm its published row declares (ob
     renderNode({ ...BASE, id: 't2', data: AUTHORED }, ds);
 
     expect(await drawn()).toEqual([]);
-    expect(screen.getByText('No records')).toBeTruthy();
+    expect(screen.getByText('No data')).toBeTruthy();
     expect(ds.find).not.toHaveBeenCalled();
     expect(refusalWarningsFor(warn, 'object-tree')).toHaveLength(1);
   });
