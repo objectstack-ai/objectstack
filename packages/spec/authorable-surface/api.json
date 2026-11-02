@@ -1300,6 +1300,7 @@
     "api/OperatorMapping:odata",
     "api/OperatorMapping:operator",
     "api/OperatorMapping:rest",
+    "api/PackageExportBundle:packages",
     "api/PackageExportManifest:id",
     "api/PackageExportManifest:label",
     "api/PackageExportManifest:name",

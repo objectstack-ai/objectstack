@@ -311,6 +311,7 @@
     "api/OpenApiSpec",
     "api/OperatorMapping",
     "api/PackageApiErrorCode",
+    "api/PackageExportBundle",
     "api/PackageExportManifest",
     "api/PackageInstallBody",
     "api/PackageInstallManifest",
