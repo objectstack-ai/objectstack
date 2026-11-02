@@ -579,7 +579,7 @@
       "title": "Every demonstrable flow node type authors in the designer, executes in a run, and surfaces its step in run logs",
       "since": "v15",
       "status": "active",
-      "revision": 12,
+      "revision": 13,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -622,7 +622,7 @@
       ],
       "steps": [
         "boot the showcase on its own port and DB (dogfood §0); sign in as the dev admin",
-        "GET /api/v1/automation/actions (the designer palette feed) and record the descriptor list; open the Studio flow-designer palette on a WRITABLE scope and screenshot it — the stock showcase package is read-only, so its canvas offers no Add node: clone a flow first (POST /api/v1/automation/NAME/clone with both `name` and `label` in the body — a missing label is refused, field label required — or Setup › Packaged Automation, as QA run #24545 did) and open the clone under Studio's ~org scope",
+        "GET /api/v1/automation/actions (the designer palette feed) and record the descriptor list; open the Studio flow-designer palette on a WRITABLE package and screenshot it — the stock showcase package is read-only, so its canvas offers no Add node: make a copy into its writable customization pair first, from Studio (/_console/studio/com.example.showcase/automations, open a flow, ⋯ → New similar, a new machine name and label) or over the API (POST /api/v1/automation/NAME/clone with both `name` and `label` and no `package` — a missing label is refused, field label required). The copy lands in com.example.showcase.custom switched off (ADR-0146 D4) and opens there; it is also listed on the base's rail marked 'In com.example.showcase.custom'. Delete it at teardown",
         "record_change chain: POST a showcase_task WITH `assignee` set to a real user's email, under a project that has an `owner` (the project lookup is required), with status 'in_review' — task_status_flow allows done only from in_review and does not check a create — then PATCH status→done — fires showcase_task_completed (script+save_notice+notify; the PATCH answer carries its `notice`), showcase_fan_out_notify (parallel+http), showcase_resilient_sync (try_catch), showcase_task_done_notify_owner (subflow); the create also fires showcase_task_follow_up (wait) and showcase_declarative_connector_ping / showcase_mcp_connector_echo (connector_action). ⚠ The notify steps address the task's assignee and its project's owner: a task created without an assignee, or under a project without an owner, makes them fail LOUDLY for want of a recipient — a correct refusal, not a notify FAIL (QA run #23166)",
         "on-demand chain: POST /api/v1/automation/<name>/trigger for showcase_batch_reminders {params:{tasks:[…]}} (loop), showcase_inquiry_purge (get_record+decision+delete_record — seed at least one closed showcase_inquiry first), showcase_release_signoff {params:{items:[…]}} (map — its itemObject is showcase_task, so each item is record-shaped, {id, title})",
         "browser chain: run the Tasks row action showcase_bulk_reassign → showcase_reassign_wizard (screen + update_record)",
@@ -752,7 +752,13 @@
           "ref": "#25807"
         },
         { "revision": 11, "date": "2026-10-31", "change": "fixtures.requires[0] names the second assignment carrier and steps[5] the seeded approval run. Fixture findings of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): assignment is also exercised by showcase_one_task_signoff, and the boot already leaves a paused showcase_expense_signoff run, while PATCHing an already-submitted report starts nothing. Re-read at base 488b3ed0: examples/app-showcase/src/automation/flows/index.ts (showcase_one_task_signoff mark_ok / mark_no; showcase_expense_signoff's record-after-update start condition), examples/app-showcase/src/security/seed-approval-demo.ts (launches showcase_expense_signoff on EXP-2001). No clause changed", "ref": "#27441" },
-        { "revision": 12, "date": "2026-11-01", "change": "variants gain save_notice, the FlowNodeAction member #28251 added: a record-triggered flow tells the person who made the write what the save set in motion, and the create/update answer carries it as `notice`. The showcase demonstrates it on showcase_task_completed (node tell_saver, between summarize and notify), so fixtures.requires[0] and steps[2] name it; acceptance[0] counts 20 of 22 offered variants and acceptance[1] 21 step-logging variants; enumSource.expect is 21", "ref": "#28251" }
+        { "revision": 12, "date": "2026-11-01", "change": "variants gain save_notice, the FlowNodeAction member #28251 added: a record-triggered flow tells the person who made the write what the save set in motion, and the create/update answer carries it as `notice`. The showcase demonstrates it on showcase_task_completed (node tell_saver, between summarize and notify), so fixtures.requires[0] and steps[2] name it; acceptance[0] counts 20 of 22 offered variants and acceptance[1] 21 step-logging variants; enumSource.expect is 21", "ref": "#28251" },
+        {
+          "revision": 13,
+          "date": "2026-11-02",
+          "change": "steps[1] re-pointed to the Studio door (ADR-0146 D4/D11): the copy that gives the palette a writable canvas is made with Studio's New similar (or the clone door with no `package`) and lands in com.example.showcase.custom, not under Studio's ~org scope, which no longer receives a package-less clone (#28149), and Setup › Packaged Automation, the old route to it, is retired (#28785). Read at base dfbe34d887 (FlowItemMoreMenu.tsx New similar; domains/automation.ts resolveCloneTarget), with QA run #29002's measurement of where a copy lands (card note 6570476620). No clause changed",
+          "ref": "#28579"
+        }
       ],
       "enumSource": {
         "file": "packages/spec/src/automation/flow.zod.ts",
