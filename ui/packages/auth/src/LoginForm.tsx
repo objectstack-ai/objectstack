@@ -313,9 +313,10 @@ export function LoginForm({
   const passwordFormCollapsed = ssoEnforced || passwordSignInOff;
   const passwordFormVisible = !passwordFormCollapsed || showPasswordFallback;
   // The break-glass link reveals the password form, so it is offered only
-  // while that form holds a door the server accepts: email+password itself, the
-  // SSO button (routes the entered email), or phone+password sign-in.
-  const breakGlassOffered = !passwordSignInOff || ssoEnabled || phonePasswordEnabled;
+  // while that form holds a password door the server accepts: email+password
+  // itself, or phone+password sign-in. The SSO button needs no link: the
+  // SSO-only view draws it on first paint (`ssoEmailFormVisible` below).
+  const breakGlassOffered = !passwordSignInOff || phonePasswordEnabled;
   // Nothing the server advertises lets anyone in: say so, instead of SSO copy
   // with no SSO affordance and a password link the server refuses.
   const noSignInMethod =

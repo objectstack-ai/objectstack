@@ -145,7 +145,7 @@ describe('LoginForm — doors the server does advertise stay usable', () => {
     expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
   });
 
-  it('with password off and SSO advertised, says SSO and reaches the SSO button through the link', async () => {
+  it('with password off and SSO advertised, says SSO and offers the SSO button with no refused password link', async () => {
     renderLogin({
       socialProviders: [],
       emailPassword: { enabled: false },
@@ -155,8 +155,11 @@ describe('LoginForm — doors the server does advertise stay usable', () => {
 
     expect(screen.getByText(SSO_ONLY_COPY)).toBeTruthy();
     expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
-    fireEvent.click(screen.getByRole('button', BREAK_GLASS));
-    expect(await screen.findByRole('button', SSO_BUTTON)).toBeTruthy();
+    // The SSO way in is on the first paint since #29274, so the link no longer
+    // has a door to reach here: the password form it opens is one the server
+    // refuses.
+    expect(screen.getByRole('button', SSO_BUTTON)).toBeTruthy();
+    expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
   });
 
   it('with password off and phone sign-in on, is not the no-method state', async () => {

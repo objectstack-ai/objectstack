@@ -17,8 +17,9 @@
  *
  * The same holds when the password door is shut (`emailPassword.enabled:
  * false`) and the server advertises SSO without enforcing it: that collapses
- * the same form, and the break-glass link there opens a password door the
- * server refuses.
+ * the same form. There the break-glass link is no longer offered: the
+ * password form it would open is one the server refuses, unless phone+password
+ * sign-in is on.
  *
  * The controls: federated providers only, a server whose password form is
  * shown, and the no-method state keep their views.
@@ -137,6 +138,20 @@ describe('LoginForm — password door shut with SSO advertised: the first paint 
     expect(screen.getByRole('button', SSO_BUTTON)).toBeTruthy();
     expect(screen.queryByLabelText('Password')).toBeNull();
     expect(screen.queryByTestId('login-no-sign-in-method')).toBeNull();
+    // The password form the link would open is one the server refuses.
+    expect(screen.queryByRole('button', BREAK_GLASS)).toBeNull();
+  });
+
+  it('keeps the link when phone+password is a door the server still accepts', async () => {
+    renderLogin({
+      socialProviders: [],
+      emailPassword: { enabled: false },
+      features: { sso: true, ssoEnforced: false, phoneNumber: true },
+    });
+    await configResolved();
+
+    expect(screen.getByRole('button', SSO_BUTTON)).toBeTruthy();
+    expect(screen.getByRole('button', BREAK_GLASS)).toBeTruthy();
   });
 });
 
