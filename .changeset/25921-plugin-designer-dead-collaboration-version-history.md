@@ -4,7 +4,7 @@
 
 refactor(plugin-designer)!: retire `useConfirmDialog` and `VersionHistory` from the entry, and delete the designers' dead collaboration code
 
-Clause-②: yes
+Clause-②: no (narrowing)
 Metadata-protocol: none
 
 <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-designer#useConfirmDialog, @object-ui/plugin-designer#VersionHistory) the retired operands are a React hook and a React component in a published ui package's entry that nothing in the workspace or in hotcrm imported; no packages/spec schema, registered node type, ADR-0087 conversion surface or stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite -->
