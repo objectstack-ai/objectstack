@@ -1,0 +1,38 @@
+{
+  "number": 28799,
+  "kind": "issue",
+  "title": "analytics: two timeDimensions entries over one column at different granularities collapse to the last granularity on the live faces, and the preview's answer is unmeasured",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T20:22:08Z",
+  "updated_at": "2026-11-01T23:56:51Z",
+  "closed_at": "2026-11-01T23:55:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28799",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nBlocked-by: PR #28794\n\nFiling gate: ① an observation in the `CONTRACT_REVIEW_TIER` review `6563360371` on PR #28794 (#28765). It was read in the tree and has not been measured. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: the query is `timeDimensions: [{ dimension: OBJECT.closed_at, granularity: month }, { dimension: OBJECT.closed_at, granularity: year }]`, the same spelling twice. Read in the tree, the live faces key granularity by dimension (`granByDim`). The second entry overwrites the first, so the query is served as one year bucket and the month request is dropped silently. How the draft preview answers the same pair has not been measured.\n\n## Wanted\n\n1. Measure all three faces on real SQLite.\n2. If the live faces drop an entry silently, they answer loudly instead. That means either refusing the pair as one column asked twice (the #28765 line) or serving both buckets under distinct keys. Read the published `analytics.zod` precedence (\"one granularity per dimension\") to pick which, and make all three faces agree.\n\n## Dedupe\n\nRead open issues for `granByDim`, `two granularities` and `timeDimensions same column`: none besides #28765 and #28744. **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`).\n\nLinks back: #28765, PR #28794, #28744\n"
+}

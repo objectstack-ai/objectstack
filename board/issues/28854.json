@@ -1,0 +1,35 @@
+{
+  "number": 28854,
+  "kind": "pull_request",
+  "title": "fix(mcp): update_record and delete_record answer a write that landed under a failing roll-up with their own success",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T01:15:35Z",
+  "updated_at": "2026-11-02T01:48:44Z",
+  "closed_at": "2026-11-02T01:48:42Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T01:48:42Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28854",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\n<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1X8dNy8r76WjFsVdvaSJbXXR)_\n\nFixes #28844\n\nClause-②: no\nMetadata-protocol: none\nSkills-docs: none — no file under `skills/**` teaches what an MCP write tool answers when a parent roll-up cannot be recomputed after the write.\n\n## 维护者速读\n\n- 问题：子记录的更新或删除已经生效、只是父记录汇总重算失败（`ERR_SUMMARY_RECOMPUTE`）时，MCP 的 `update_record` / `delete_record` 仍返回错误结果，agent 会以为写入失败而重做一次。#28843 只修了 `create_record`。\n- 现在：两个工具在两种 bridge 上都返回各自已有的成功结果（更新 `{ object, id, record }`，删除 `{ object, id, success: true }`），复用 #28781 的载体和那条 stale-summary 日志；没有新错误码、字段或形状。\n- 写入前的拒绝（校验、权限、找不到、暴露设置）完全照旧；只改 `packages/mcp`，未改 `packages/spec/**`。\n- `run_action` 未改：动作的结果不是这次写入的答案，载体里也没有它，需要另行裁定（见 Acceptance notes）。\n\n## What changes\n\n`packages/mcp` only, through #28781's carrier in `@objectstack/types` (`earnedAnswerOf` / `staleSummaryAnswerLines` / `staleSummaryRefusalOrThrow` / `withEarnedAnswer`).\n\n- **Tools read the answer** (`mcp-http-tools.ts`): `create_record`'s #28843 reading moves into one local helper, `landedWriteResultOrError(err, objectName)`, and `update_record` and `delete_record` call it from their catches. It answers the attached answer as a normal `textResult` and logs the stale column at `error` (`[MCP]` prefix, once per field per process); any other throw renders through `errorResultWithCode` as before. The carrier is read by `code` inline in `@objectstack/types`; no new constant.\n- **Runtime bridge**: no change needed. `update` / `remove` reach the protocol's `updateData` / `deleteData` through `callData`, and those attach the answer since #28781.\n- **stdio bridge** (`stdio-data-bridge.ts`): `update` and `remove` wrap `engine.update` / `engine.delete` the way `create` wraps `engine.insert` (#28843). `staleSummaryRefusalOrThrow` rethrows every other error unchanged; on the stale refusal the bridge builds the same answer it returns on success and throws `withEarnedAnswer(stale, answer)`, so a caller that does not read the carrier still gets the refusal.\n\n## Tests\n\n`packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts` (5, over the HTTP `/mcp` transport via `MCPServerRuntime.handleHttpRequest`). The engine is a double over a row map whose `update` / `delete` apply the write, then throw the refusal as objectql's `SummaryRecomputeError` does; it routes through the engine-dispatch asserts (`check:engine-double-contract` ledger updated).\n\n- `update_record`, stdio bridge: `{ object, id, record }` with the patched row, update applied once.\n- `delete_record`, stdio bridge: `{ object, id, success: true }`, row gone, delete applied once.\n- Both tools, runtime-bridge shape: relays the answer the protocol attached.\n- Pre-write guard: an engine refusal before the write (`VALIDATION_FAILED`) is still `isError` with its code, nothing written.\n- One `error` log line naming `\"qsf_parent.probe_sf\"`.\n\nRed on `origin/main` `b95a856e3` (test file only): 4 red, the pre-write guard green. Green on the head.\n\nAblations, each landed on disk then restored:\n\n| ablation | red |\n|---|---|\n| `update_record` catch back to `errorResultWithCode` | 2 (stdio update, runtime-bridge) |\n| `delete_record` catch back to `errorResultWithCode` | 2 (stdio delete, runtime-bridge) |\n| stdio `update` throws the bare refusal | 1 (stdio update) |\n| stdio `remove` throws the bare refusal | 1 (stdio delete) |\n| stdio `update` answers success for every engine throw | 1 (pre-write guard) |\n\n`@objectstack/mcp` suite: 52 files, 640/640.\n\n## Acceptance notes\n\n- **No result shape change.** Each tool answers the result it already publishes for the same write when every roll-up recomputes; no published type changed.\n- **`run_action` is not included.** Its answer is the action's own result (`invokeBusinessAction` in `packages/runtime`), not the write's data answer the carrier holds, and the REST action door does not read the carrier either. Same symptom, different reading; it needs its own ruling and a runtime-side change.\n- No `packages/spec/**` edit; `check:error-code-provenance` exit 0.\n\n## Verification\n\nGates: `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` derived 67 commands on the diff; all 67 exit 0, and `--ran` reconciles 67 derived, 67 run, 0 NOT-MEASURED. `check:engine-double-contract` first read exit 1 on the new double (unrecorded in the pinned ledger), fixed by `--write` and committing `scripts/engine-double-contract.pinned.json`. `pnpm --filter @objectstack/spec check:error-code-provenance`: exit 0. `pnpm --filter @objectstack/mcp typecheck` (includes `check:test-typecheck`): exit 0. Scoped eslint over the three changed `.ts` files: exit 0. After the final merge of `main` (`a3143182`, nothing under `packages/mcp` or `packages/types`): `check:engine-double-contract` and `check:error-code-provenance` exit 0, the new file, `create_record`'s #28843 file and the stdio bridge suites green (9 files, 153 tests).\n\nNo live probe: the stdio bridge runs the engine directly and the runtime bridge's producer half (`updateData` / `deleteData`) is #28781's, pinned on a real store by its REST suite; this change is the tools' read and the stdio carrier, both pinned above. Full dogfood not owed (no `!`, no narrowing arm).\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5kV6ptpTnU6Hjb2mE4)_\n\n"
+}

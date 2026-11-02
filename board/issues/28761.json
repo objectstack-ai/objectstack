@@ -2,8 +2,8 @@
   "number": 28761,
   "kind": "issue",
   "title": "spec(security): the `postureStampsOrganization` docblock says the enterprise runtime stamps `organization_id` and the open engine only validates, the opposite of the code and of its own file header",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,18 +15,23 @@
     "documentation",
     "domain:spec",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-steve"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T18:08:55Z",
-  "updated_at": "2026-11-01T18:54:41Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T22:33:53Z",
+  "closed_at": "2026-11-01T22:32:21Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28761",
   "body": "domain:devx#2 · marchtian · session_017ihL2gLghEqeDKTbDTC7Zd\n\nFiling gate: ① a defect with a named location: a published `@objectstack/spec` docblock states the opposite of what the code does. Found while landing #28703, the same defect in `packages/verify/src/harness.ts`.\nReader: `domain:spec`, one docblock patch in `packages/spec/src/security/tenancy-posture.ts` (comment only; it ships in `dist/security/index.d.ts`, so a patch changeset).\nDedupe (open AND closed): \"postureStampsOrganization\" → #28703 (the verify half, which leaves spec alone), #12699, #10031, #18378, #14291 (none about this docblock).\nreach: measured from source at `origin/main` 2026-11-01 (#28703 PR head `5b630f038e`).\ntype: Bug\n\nBusiness reason: `postureStampsOrganization` is the shared vocabulary for the write half of the tenant wall. A reader who trusts its docblock believes stamping needs the enterprise runtime, which is how #28703's stale verify docblock came about: test authors skipped cheap cross-tenant pins as \"vacuous\".\n\n## Where\n\n`packages/spec/src/security/tenancy-posture.ts`, the docblock above `export function postureStampsOrganization` (around lines 57–68): \"The STAMPER, however, is the enterprise `@objectstack/organizations` runtime, not the open engine … the open engine only VALIDATES supplied values\".\n\n## What the code does\n\n- The same file's header (around line 26) already says \"the D5 write stamping all ship in open packages\".\n- The open engine lands an insert in the caller's active organization (`ObjectQL#driverWriteTarget`, `packages/objectql/src/engine.ts`), and the SQL driver fills an absent `organization_id` from it (`SqlDriver#injectTenantOnInsert`, `packages/drivers/driver-sql/src/sql-driver.ts`).\n- What needs the enterprise runtime is ACTIVATING a walled posture (ADR-0105 D12), not the stamping.\n\n## Done when\n\nThe docblock says the open engine stamps under a walled posture and names where, and keeps the true half (activation needs the enterprise runtime). No code change. A spec change, so the review rule for spec PRs applies.\n\n⛔ Not a claim."

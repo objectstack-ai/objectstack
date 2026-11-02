@@ -1,0 +1,35 @@
+{
+  "number": 28801,
+  "kind": "pull_request",
+  "title": "fix(metadata-protocol): the sealed-overlay boot report no longer counts a served .custom override (#28771)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T20:41:13Z",
+  "updated_at": "2026-11-01T21:25:51Z",
+  "closed_at": "2026-11-01T21:25:49Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T21:25:49Z",
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28801",
+  "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFixes #28771\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：启动时的 `[metadata_sealed_overlay_unserved]` 告警不再把基础包在 `BASE.custom` 里声明的覆盖算作「没有读取会返回它」的行，也就不再让运维删掉这份正在生效的定制。真正没被返回的行照旧上报，附带补救办法。\n- **为什么改**：#28412 之后，这份覆盖会被返回，流程还会被挂载，但启动告警仍然把它算进去，并建议「删除存储行」。照做会让租户悄悄回到基础流程。\n- **风险与回滚**：低。只改一条启动日志里统计哪些行；判定用唯一的 `isServedOverrideRowOf`，看存储的 `package_id` 列，不看正文 `_packageId`。加载、返回、挂载都不变。回滚即还原本 PR。\n- **先看**：`packages/metadata-protocol/src/protocol.ts` 的 `loadMetaFromDb`，即 `sealedOverlays.push` 前多出的一个条件。\n- **两分钟验证**：`pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.reads-environment-only.test.ts`，预期 27/27 通过。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n`loadMetaFromDb` collects the rows it hands to `reportSealedOverlayRows`, the census behind `[metadata_sealed_overlay_unserved]`. It now skips a row that the one served-override predicate admits: `isServedOverrideRowOf(record, packagedArtifactOwner(type, name))`, judged on the row's own `package_id` column, never on a body's `_packageId`. Since #28412 the shipping package's declared `BASE.custom` override is served, and for a flow it is armed, so the line's \"No read serves them … delete the stored row\" was a destructive remedy aimed at a working row.\n\nOnly the census changes. The `object` skip just below it, the hydration and what is served or armed are all untouched. Every row no rule serves is still reported with both remedies, and the count goes down by exactly the served rows.\n\n⛔ No `packages/spec/**`, no new export, no new error code and no new gate. **Clause-② measured: no.** It is a boot log line only: no served value, no export and no accept-set change. **Metadata-protocol: none.**\n\n## Tests\n\n<details><summary>New cases, red first on main, ablation</summary>\n\nThere are 7 new cases in `metadata-protocol` `protocol.reads-environment-only.test.ts`, section 3 (the boot report). They use the file's environment-kernel harness and `loadMetaFromDb`, with a packaged flow artifact:\n- a boot holding only the declared override prints no sealed-overlay line;\n- the override plus a legacy package-less row reports the legacy row alone (\"1 active environment sys_metadata row(s)\", `flow×1 (managed_flow)`, both remedies);\n- controls, each still reported: the legacy row alone; the pair's undeclared row; a dependent package's declaration; a package-less row whose body stamps the pair and declares the override (binding, not stamp).\n\nRed first: `protocol.ts` was restored to main `d9c4cdc4` (the suite imports the source, so there is no dist step). Result: `Tests 2 failed | 25 passed (27)`:\n- `× a boot holding only the declared override prints no sealed-overlay line`, because it printed \"flow×1 (managed_flow) … delete the stored row\";\n- `× … reports the legacy row alone`, because it counted \"2 … flow×2 (managed_flow, managed_flow)\".\n\nRestore: `git checkout HEAD --`, blob equal to HEAD, `git diff HEAD` empty, porcelain empty.\n\nAblation: `ablation-replace.mjs` made the exclusion always false (anchor `&& !isServedOverrideRowOf(`, 1 marker on disk). Result: the same two cases red, `Tests 2 failed | 25 passed (27)`. Restore: `ok restored: blob == HEAD … git diff HEAD is empty`, marker count 0, porcelain empty.\n</details>\n\n<details><summary>Full suites, typecheck, lint, gates</summary>\n\nAll on head `c3a0c542`:\n\n- `metadata-protocol` full suite, under the verify lock: `Test Files 295 passed | 4 skipped (299)`, `Tests 22065 passed | 26 skipped (22091)`.\n- `service-automation` full suite, under the verify lock: `Test Files 254 passed (254)`, `Tests 3269 passed (3269)`.\n- `tsc --noEmit -p packages/metadata-protocol`: exit 0. `eslint --no-inline-config packages/metadata-protocol`: exit 0.\n- Derived gate list (`dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`, 61 families): each was run with its exit code captured before any pipe, and all exited 0. `--ran`: `61 derived, 61 run, 0 NOT-MEASURED, 0 UNRUN`. `check-nul-bytes`: exit 0.\n- Dogfood battery: not owed (no `!` in the title, and no `(narrowing)` arm).\n</details>\n\n## Acceptance notes\n\n- The served-override predicate is asked with the loader's set's owner (`packagedArtifactOwner`), the same owner the reads use. A row that overlays sealed content of a name no package ships never enters this census at all.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5oTRCUNQ4EA3YV84sZ\n"
+}

@@ -1,0 +1,36 @@
+{
+  "number": 28833,
+  "kind": "issue",
+  "title": "ui/metadata-admin: the condition row builder offers `user.role` (the legacy scalar) and `user.isAdmin` (absent from the expression bag) as subjects, so an author builds an admin gate that never opens",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T23:07:08Z",
+  "updated_at": "2026-11-02T01:07:35Z",
+  "closed_at": "2026-11-02T01:05:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28833",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① class (c) out-of-scope finding of the #28812 dev (os-dev-report 6565212761, `out_of_scope_findings`), carried to its own card by this seat. Filed by `domain:server` seat 5. Graded by this seat: p3 (an authoring-UI offer, no stored data moves), under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: any admin building a visibility or condition row in the metadata-admin inspectors who picks `user.role` or `user.isAdmin` from the subject dropdown.\nReader who acts: the lane that owns `ui/packages/app-shell` (`domain:ui`).\n\n## What the code does (read on `origin/main`)\n\n`ui/packages/app-shell/src/views/metadata-admin/inspectors/ConditionBuilder.tsx`, `CONTEXT_SUBJECTS` (~line 224): `record.id`, `user.id`, `user.email`, `user.role`, `user.isAdmin`. The docblock above it says this list is the row builder's ONLY subject control.\n- `user.role` is better-auth's legacy `sys_user.role` scalar: ObjectStack never writes it, and with the admin plugin on it reads `user` for a platform admin too (#28105, ruling D1).\n- `user.isAdmin` is, per the #28812 dev, absent from the expression bag `ExpressionProvider` builds, so a row on it never matches.\n- The documented platform-admin signal is `isPlatformAdmin` (PR #28832 fixed four teachings of `user.role === 'admin'`).\n\n## Wanted\n\n- The subject list offers the signals the bag actually carries: replace `user.isAdmin` with the real platform-admin key (measure its exact spelling in the bag), and drop or relabel `user.role` so it does not read as the platform role. Keep `conditionScope.ts`'s raw-editor suggestions consistent with the builder.\n- Measure first whether any stored condition in `examples/**` or the platform apps already uses `user.isAdmin` or `user.role`; list them.\n- A test pins the subject list against the bag's keys, so the two cannot drift again.\n\nDedupe: searched `ConditionBuilder user.isAdmin`; none. **New.**\n\nLinks back: #28812, PR #28832, #28105."
+}

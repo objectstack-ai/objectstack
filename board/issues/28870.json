@@ -1,0 +1,32 @@
+{
+  "number": 28870,
+  "kind": "issue",
+  "title": "examples/app-crm: metadata hygiene on the accepted preview surface — zh-CN translations, pluralLabels without 「列表」, declared highlightFields, contact nameField full_name, assigned_to as a user lookup, seed and dashboard copy",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:06:36Z",
+  "updated_at": "2026-11-02T02:18:01Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28870",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat, part of epic #26676. The seat walked the console on `main` `c064d3a246`, with `examples/app-crm` as the backend, at 1440 / 1100 / 375 px, light and dark. An independent review pass then checked each finding against the code. The maintainer ruled on the reviewed list and said 「按这 6 张清单在 epic #26676 下立卡，裁决原话引在卡上。」 and 「还有刚才立的卡可以交给ui车道处理吗？」 (2026-11-02). So this card goes to the `domain:ui` lane queue. Priority and `area:*` are left to triage. Code readings below are on `main` `3b920f6dd0`.\n\n## Ruling\n\nThe maintainer, on the contact title showing only \"Ada\": 「联系人标题只显示 “Ada”，不处理，这种就是元数据的bug」 (2026-11-02). The platform stays as it is, with no lint and no inference. The fix is the app's metadata.\n\n## Why this app\n\n`examples/app-crm` is the accepted preview surface under #26676 ruling B. Every acceptance screenshot of the record page is taken on it, so its metadata errors show up as platform defects in reviews.\n\n## Items (each read on `main`)\n\n1. **Contact title.** `src/objects/contact.object.ts` declares no `nameField`. Its `full_name` formula has no `returnType`, so `isTitleEligible` (`packages/spec/src/data/display-name.ts`, around line 125) rejects it, and the derived title falls back to `first_name`. The title, lookups and pickers then show \"Ada\". Fix: declare `nameField: 'full_name'` and give the formula `returnType: 'text'`.\n2. **pluralLabels end in 「列表」.** In `src/translations/crm.translation.ts` (lines 104, 115, 126, 157, 186): 客户列表, 联系人列表, 商机列表, 线索列表, 活动列表. These become tab and panel names such as 「商机列表 4」. Use the plain noun: 客户, 联系人, 商机, 线索, 活动.\n3. **English under zh-CN.**\n   - Navigation: Leads, Accounts, Contacts, Opportunities, Activities.\n   - Fields: `crm_opportunity` expected_revenue, days_to_close, line_total and account; the lead list's Account and Assigned To.\n   - Option values: stage options such as Prospecting, Qualification and Closed Won.\n   - Dashboard titles and descriptions.\n\n   Fill the zh-CN bundle so the zh preview has no English business text.\n4. **Declared highlightFields.** #28868 removes the derived strip. Declare a strip on account, contact, opportunity, lead and activity so the preview keeps one.\n5. **Lead \"Assigned To\" shows raw emails.** `src/objects/lead.object.ts:76` declares `assigned_to: Field.text`, and the seed fills it with email addresses. Make it a lookup to the user object and seed user references.\n6. **Seed ownership.** `src/data/index.ts:109`: the activity \"Discovery Call — Bletchley Systems\" is linked to Acme Corp / Ada. Link it to a Bletchley record, or rename it to match Acme.\n7. **Dashboard copy.** `src/dashboards/pipeline.dashboard.ts:129` reads \"Pie/donut/funnel ignore `compareTo`.\", and the trend chart's description mentions compareTo. These are developer notes on a user-facing face. Rewrite them in business words, and translate them.\n\n## Not in scope\n\n- No platform change, lint or gate, per the ruling.\n- The platform's own label and i18n issues are filed separately.\n\n## Acceptance\n\n- The zh-CN preview of app-crm shows no English business text in navigation, list columns, record fields, options or dashboards.\n- The tab names have no 「列表」.\n- The contact title is the full name.\n- The lead list shows user names under Assigned To.\n- `pnpm --filter @objectstack/example-crm` build and tests pass.\n- Screenshots of the account page, the contact page and the lead list are linked from the PR.\n"
+}

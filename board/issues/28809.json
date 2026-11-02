@@ -1,0 +1,35 @@
+{
+  "number": 28809,
+  "kind": "issue",
+  "title": "objectql/cloud-connection: an option patch on an owner field that an extension takes over through `fields` applies in the registry fold but is refused at the install door and by `os validate`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:data",
+    "domain:server",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T21:12:33Z",
+  "updated_at": "2026-11-02T01:07:35Z",
+  "closed_at": "2026-11-02T01:05:58Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28809",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① should-fix S2(b) of the PR #28791 contract review (comment 6563266243), the #28733 dev's own flag (PR body, Acceptance notes), carried to its own card by this seat. Filed by `domain:server` seat 5. Graded by this seat: p3 (needs an extension that redeclares an owner field through `fields`; not measured in any shipped package), under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: a package whose `objectExtensions[]` both redeclares an owner field through `fields` (with its own `options`) and patches an option of that field through `fieldPatches`.\nReader who acts: `domain:server` (`packages/objectql/src/registry.ts`, `packages/cloud-connection/src/marketplace-install-local-plugin.ts`, `packages/cli/src/utils/field-patch-targets.ts`).\n\n## What the code does (read, not measured)\n\nAfter PR #28791, the three readers of `fieldPatches` agree on WHICH fields may be patched (the owner's own). They still disagree on that field's OPTIONS when an extension takes an owner field over through `fields`:\n- the registry fold judges an option patch against the owner-named field **as merged so far** (`ownFieldsTarget(merged, ownFields)`), so the extension's redeclared options count and the patch applies;\n- the install door and `os validate` read the **owner's own declaration**, so the same option patch is refused there.\n\n## Wanted\n\nOne answer at all three readers. Either the fold judges options against the owner's declared options (pre-merge), or the doors judge against the merged field; the route is the dispatching seat's. Measure first whether any shipped package or example has an extension redeclaring an owner field through `fields`.\n\nDedupe: searched `fieldPatches options`. Related, not the same: #28655 item A (domain:spec, open) refuses a field named in both `fields` and `fieldPatches` of the SAME extension at the schema; once it lands, the same-extension case here is refused at authoring, and what remains is one extension redeclaring the owner field and ANOTHER patching its options (measure which order the fold sees). #28803 is the documented example's option name. **New** for the cross-extension case.\n\nLinks back: #28655, #28733, PR #28791 (review 6563266243), #28565."
+}

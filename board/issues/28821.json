@@ -1,0 +1,31 @@
+{
+  "number": 28821,
+  "kind": "issue",
+  "title": "spec(connector docblocks): \"refused by name, located at the key\" — zod locates unrecognized_keys at the entry root",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T21:47:01Z",
+  "updated_at": "2026-11-01T21:55:28Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28821",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① a defect with a named location: a published `@objectstack/spec` docblock (spec ships `src/**/*.zod.ts`) states a location the code does not give. Raised as a should-fix by the contract review of PR #28815 (record 6564332762, ④ Findings). ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec`, prose only in `packages/spec/src/integration/connector.zod.ts`.\nDedupe (open AND closed): \"located at the key\" connector → none.\nreach: authors and agents who read the `defineConnector` / `DeclarativeConnectorEntryBaseSchema` docblocks and look for the error at the key's path.\n\n## Where\n\n`packages/spec/src/integration/connector.zod.ts`: the `defineConnector` docblock added by PR #28815 (\"refused by name, located at the key\") and the `DeclarativeConnectorEntryBaseSchema` docblock it inherits the phrase from (#28688).\n\n## What the code does\n\n`strictObject` refuses with one zod `unrecognized_keys` issue at the containing object (path `[]`, the entry root) and names the key in `keys`. PR #28815's own test pins path `''`.\n\n## Done when\n\nBoth docblocks say the refusal is at the entry root and names the key in `keys`. No behaviour change; spec patch changeset."
+}

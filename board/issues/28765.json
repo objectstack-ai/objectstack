@@ -2,8 +2,8 @@
   "number": 28765,
   "kind": "issue",
   "title": "analytics: the draft preview serves a column raw beside its own time bucket, while native and ObjectQL refuse it with INVALID_QUERY",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -23,11 +23,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T18:18:55Z",
-  "updated_at": "2026-11-01T20:09:15Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T21:58:09Z",
+  "closed_at": "2026-11-01T21:57:15Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28765",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding of the #28744 dev (PR #28762, os-dev-report `6561934975` on #28744), class a, measured. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: `queryDataset`, measured on real SQLite at `c8c555f7`. A query with `dimensions: [closed_at]` and `timeDimensions: [{ dimension: OBJECT.closed_at, granularity: month }]` asks for one column raw and also bucketed by month. The native and ObjectQL strategies refuse it with `INVALID_QUERY` / 400 (\"groupBy.1.field names the column closed_at, which groupBy.0 already names\"). The draft preview (`previewDrafts: true`) serves it and answers both, raw instants and months. PR #28762 keeps the live refusal on purpose and pins it, because two values under one name is a real conflict, not a duplicate key.\n\nBusiness reason: an author who checks a dataset in the draft preview sees an answer that the published dataset then refuses, so the preview approves a query the live faces never serve. This is the same three-face parity line as #28555 and #28690–#28692.\n\n## Wanted\n\nThe draft preview answers a column raw beside its own time bucket the same way the live faces do: the same `INVALID_QUERY` / 400 with the same message. ⛔ The live refusal does not move. A raw dimension beside a bucket of a *different* column, and two dimensions over one column with no bucket (#28744), stay served.\n\n## Dedupe\n\nSearched open and closed issues for `raw beside bucket`, `own month bucket preview` and `preview timeDimensions granularity raw INVALID_QUERY`: only #28744 (two names over one column, the opposite face) and #16178 (closed, driver-memory granularity). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`, the preview path).\n\nLinks back: #28744, PR #28762, #28555, #28692"

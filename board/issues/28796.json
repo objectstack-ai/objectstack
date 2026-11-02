@@ -2,8 +2,8 @@
   "number": 28796,
   "kind": "issue",
   "title": "packages: customizations `contributions` follow-ups from #28722 — one stamp predicate for both kinds, and the schema docblock's over-claim about the pair's flows",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -17,15 +17,21 @@
     "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-project-manager"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T20:12:20Z",
-  "updated_at": "2026-11-01T20:15:47Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T21:51:26Z",
+  "closed_at": "2026-11-01T21:50:32Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28796",
   "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① the non-blocking should-fixes of the `CONTRACT_REVIEW_TIER` review `6561256710` on PR #28749, merged as `8196881e`, Part of #28722. The review was re-confirmed twice: `6562066799` and `6562785424`. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\n## Wanted\n\n1. **One stamp predicate.** In `packages/runtime/src/domains/packages.ts`, `readBaseContributions` decides \"which package contributed this\" with `isCodeArtifactBody` on its flow branch but with a different reading on its field branch. Use the one predicate on both kinds, so a field and a flow carrying the same stamp are attributed alike. The two predicates diverge on no input in the tree today, so pin the shared reading with a test.\n2. **Docblock wording.** The `contributions` docblock in `packages/spec/src/api/package-lifecycle.zod.ts` says the pair's items are \"(listed above)\" and never counted as contributions. That is too broad for the pair's flows. Say exactly what the answer lists and where.\n\n⛔ No change to who is listed or to the answer's shape.\n\n## Dedupe\n\nRead the open titles for `contributions`, `readBaseContributions` and `customizations answer`: only #28722 (open for its Wanted 3, waiting on #27928). **New.**\n\nReader who acts: `domain:server` (`packages/runtime` packages domain, `packages/spec` docblock).\n\nLinks back: #28722, PR #28749"

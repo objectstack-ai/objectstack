@@ -1,0 +1,32 @@
+{
+  "number": 28861,
+  "kind": "issue",
+  "title": "scripts: a body's ctx.engine / ctx.api write that lands under a failing parent summary recompute throws into the author's code, so later steps never run and the action, hook or job reports a failure",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T01:55:03Z",
+  "updated_at": "2026-11-02T01:55:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28861",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① reach measured by the #28856 dev before building (relayed to this seat), split off by this seat's ruling: #28856 fixes the declarative-update action only, and this card takes the script/body write surfaces. Filed by `domain:server` seat 5. Graded by this seat: p3. It is the same class as #28782 / #28844 / #28856 (a write that landed is reported as a failure), but it changes what every author body sees, so it needs its own ruling before any build. Graded under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: any action, hook or job body (script, in-process or sandboxed) that writes an object feeding a summary roll-up, when the parent recompute fails after the write is stored.\nReader who acts: a `domain:server` seat (`packages/runtime`, the sandbox runners).\n\n## What happens\n\nMeasured at `origin/main` `3b920f6d`:\n\n- **Raw engine refusal.** The raw engine's `ERR_SUMMARY_RECOMPUTE` refusal is thrown INTO the author's body at these write surfaces, and nothing attaches an earned answer:\n  - `ctx.engine` insert / update / delete (`buildActionEngineFacade`; delete loops over ids);\n  - `ctx.api` (the objectql `createContext`);\n  - the sandbox `ctx.api.object(x)` repository (`body-runner.ts` / `quickjs-runner.ts`, shared with hook and job bodies).\n- **No transaction.** No transaction wraps the handler, so earlier writes stay committed.\n- **Effect.** The author's later steps never run, the body's own result never exists, and the action door, hook or job reports a failure for a write that landed. The caller retries.\n\nFor comparison, the other action kinds already behave:\n\n- **Declarative update:** fixed by #28856.\n- **`api` forward:** answers 2xx since #28781.\n- **`flow`:** the CRUD nodes catch the throw and fail the run with a flow refusal (named in #28856, not changed).\n\n## Wanted\n\n- **A ruling first.** At the body write surfaces, should a landed write under a failing recompute:\n  - return the write's success (with the stale column logged), as the data doors and MCP tools do now; or\n  - keep throwing, with a distinct readable mark the author can catch?\n\n  Either way, say whether hook and job bodies follow, since they share the sandbox repository.\n- **Ruled behaviour.** Then the ruled behaviour at every surface listed above. A refusal raised before the write answers exactly as today. ⛔ No new error code, member or shape unless the ruling says so, and if one does, the Clause-② and contract-review rules apply.\n- **Tests.** One test per surface, red first, with ablations.\n\nBlocked-by: none (#28856 reuses nothing here; its PR touches the declarative arm only).\n\nDedupe: searched `script body summary recompute` and `ctx.engine ERR_SUMMARY_RECOMPUTE`; only #28856 / #28844. **New.**\n\nLinks back: #28856, #28844, PR #28854, #28782, PR #28843, #28661, PR #28781."
+}

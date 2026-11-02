@@ -1,0 +1,34 @@
+{
+  "number": 28840,
+  "kind": "issue",
+  "title": "automation: a save_notice after a subflow or map whose child suspends passes publish and strands every decision of the parent run",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T23:29:53Z",
+  "updated_at": "2026-11-02T02:12:49Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28840",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nBlocked-by: PR #28838\n\nFiling gate: ① should-fix of the `CONTRACT_REVIEW_TIER` review `6565504502` on PR #28838 (#28806). Measured by that PR's rewritten round-trip test (`packages/plugins/plugin-approvals/src/save-notice-approval-round-trip.integration.test.ts`). Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: after PR #28838, the placement door refuses a `save_notice` reachable from an `approval`, `wait` or `screen` node in the same graph. It cannot see a suspension inside a child flow. `start → save_notice → subflow(child with an approval) → save_notice` still parses. At run time:\n- the parent suspends at the `subflow` node;\n- the decision resumes the child, and `bubbleToParent` resumes the parent from the store;\n- the parent's second `save_notice` refuses by name;\n- the parent lands on the stranded exit, and `decide` answers 200 with `resumed: true` and `resumeFailure: RESUME_FAILED`.\n\nSo every decision strands the parent run. A `map` whose item flow suspends has the same shape. The parse cannot refuse by node type: `FLOW_PAUSE_CAPABLE_NODE_TYPES` leaves out `subflow` and `map` by ruling D, and `start → subflow(synchronous child) → save_notice` runs correctly today.\n\n## Wanted\n\nThe author learns before the first decision that a `save_notice` reachable after a `subflow` or `map` whose child can suspend never answers a write.\n\nDirection: refuse it where the child flow is in hand. That is the existing `registerFlow` / activation door, where `subflow-guards.ts` already resolves `subflowTargets`. Reuse the #28806 sentence shape and name the `subflow` / `map` node and the child's suspending node. ⛔ No new gate: extend that door, or state why it cannot carry this. ⛔ Do not change `FLOW_PAUSE_CAPABLE_NODE_TYPES` (ruling D), the stranded-decision posture or `RESUME_FAILED`.\n\nThis narrows activation: a flow set that registers today is refused. So it is `Clause-②: no (narrowing)`, with a `CONTRACT_REVIEW_TIER` review owed. The dev measures shipped flows (showcase, dogfood, hotcrm) for the shape. None is expected.\n\n## Dedupe\n\nRead open issues for `save_notice subflow`, `subflow approval strand` and `resumeFailure`: #28806 (the same-graph half, PR #28838) and #28788 (HotCRM places `save_notice` before its approval). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-automation` registration guards, or `packages/lint` only if no registration door sees the child).\n\nLinks back: #28806, PR #28838, #28786, #28251"
+}

@@ -14,17 +14,20 @@
     "area:access",
     "bug",
     "domain:ui",
+    "pm:dispatched",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "zhuangjianguo"
+  ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T12:22:56Z",
-  "updated_at": "2026-11-01T12:58:37Z",
+  "updated_at": "2026-11-02T02:06:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28664",
   "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiled by the PM seat for the W3-RT runner `session_017xRBcRX4wwwVw5bEckffdp`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\nQA-source: #28656 · studio-authoring.expression-editors · observed beside the clauses\n\n## What happens\n\nIn Studio's Access pillar, on a permission set's Row-level security tab (`/_console/studio/PKG/access?surface=permission:SET` → `[data-testid=perm-tab-rls]`), a policy whose operation is `select` still offers the CHECK (WRITE FILTER) box.\n\n1. Typing `record.status == 'open'` into CHECK on a `select` policy: the field reads **\"Valid CEL\"**, and the autosave `PUT /api/v1/meta/permission/SET?mode=draft&package=PKG&surface=studio` → **422 INVALID_METADATA** at `rowLevelSecurity.0.check`.\n2. The page banner reads only \"permission/SET failed spec validation: 1 issue — rowLevelSecurity.0.check [custom]\". The server's own explanation in `issues[].message` (\"`check` is never evaluated on a `select` policy … Remove `check`…\") is not shown, and the field keeps reading \"Valid CEL\".\n3. Emptying USING behaves the same: 422 at `rowLevelSecurity.0`, banner shows only the path code, and the field shows no inline finding.\n\nThe server side is right: #19965 (closed) made the schema refuse a `check` on `select`/`delete`. The gap is the editor. It lints CHECK regardless of operation, and the save-error banner renders the summary instead of the issue messages.\n\n**Expected:** CHECK is hidden or disabled (or flagged inline as an error) on a `select` policy, and a refused save shows the server's `issues[].message` text.\n\nMeasured at framework `6e11a929` (main, 2026-11-01), with the Console built in-repo, on a stock showcase boot with a scratch package installed at runtime. Minor.\n\n## Reproduction\n\n1. As admin, install a scratch package (`POST /api/v1/packages`) with an object and a permission set carrying one RLS policy `{name, object, operation: \"select\", using: \"record.status == 'open'\"}`, and publish.\n2. Open `/_console/studio/PKG/access?surface=permission:SET`, click the Row-level security tab, and type `record.status == 'open'` in the CHECK box.\n3. Observe \"Valid CEL\" in the field, a 422 on the autosave PUT, and the path-only banner.\n\n## Mechanism (suspected)\n\n`ui/packages/app-shell/src/views/metadata-admin/PermissionAdvancedFacets.tsx` renders `CelPredicateField` for CHECK whatever the policy's operation is. The Studio autosave error surface prints the refusal's summary line rather than its `issues[].message`."

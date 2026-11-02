@@ -1,0 +1,38 @@
+{
+  "number": 28798,
+  "kind": "issue",
+  "title": "analytics: the duplicate-column refusal tells a dataset author to \"give one of the group entries its own alias\", which a dataset selection cannot do",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T20:21:31Z",
+  "updated_at": "2026-11-02T01:28:15Z",
+  "closed_at": "2026-11-02T01:27:20Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28798",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nBlocked-by: PR #28794\n\nFiling gate: ① should-fix 2 of the `CONTRACT_REVIEW_TIER` review `6563360371` on PR #28794 (#28765), read in the tree, not measured live. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: a dataset query that names one column twice in its groups is refused with `INVALID_QUERY` / 400 by the objectql engine's duplicate-column door. Examples are a column raw beside its own bucket, or two buckets of one column. Native declines granularity selections to the ObjectQL strategy, so both live faces reach that door. After PR #28794 the draft preview copies the same message. The message's remedy reads \"Give one of the group entries its own 'alias'\". A dataset selection (`dimensions` / `timeDimensions`) has no alias, so the author cannot make that repair on any face.\n\n## Wanted\n\nWhen the refusal reaches a dataset caller, its prescription names a repair the author can make. For example: drop the raw dimension, or ask for one granularity of the column. Keep the same `code` and `status`. Keep the engine's alias prescription for a direct objectql caller who can alias. Update the preview copy (PR #28794's `preview-group-column-door.ts`) and its parity pin in the same change.\n\n## Dedupe\n\nRead open issues for `own alias`, `duplicate groupBy` and `INVALID_QUERY group`: only #28765 (the preview parity this rides on). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`, with `packages/objectql` only if the prescription must move at the door).\n\nLinks back: #28765, PR #28794, #28744\n"
+}

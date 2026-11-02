@@ -1,0 +1,35 @@
+{
+  "number": 28805,
+  "kind": "pull_request",
+  "title": "fix: save_notice follow-ups: name the array triggerType, pin the persisted approval round trip, classify the node in flow lint",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T20:53:00Z",
+  "updated_at": "2026-11-01T21:37:54Z",
+  "closed_at": "2026-11-01T21:37:53Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T21:37:52Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28805",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5omF1nCbQTGgW1nbRA\n\nFixes #28786\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 这是 #28251（`save_notice`）合并后审查 6562490492 提出的三条 should-fix，只补措辞、测试和 lint 分类，契约、放置判定和线上的 `notice` 都没变。\n- 数组形式的 `triggerType`（比如 `['record-after-create', 'record-after-update']`）仍然被拒，但拒绝文案现在会照原样引出这个数组，说明这种写法不支持、永远不会绑定，并让作者只写一个触发类型（`'record-after-write'` 同时覆盖新建和更新）。\n- 新增一个集成测试，走真实的 `sys_automation_run` 持久化往返：审批之前的 `save_notice` 让新建应答带回了提示；审批决定后从存储恢复的分支上，第二个 `save_notice` 按名字被拒。实测行为与推断一致，没有发现缺陷。\n- lint 的两张节点表都加入了 `save_notice`：写在它上面的 `condition` 会提示无效，放在没有 `try_catch` 的循环体里会提示可能失败。\n- 没有需要你拍板的事项。\n\n## What changes\n\n**Spec: the array trigger form is named (`save-notice-placement.ts`).** A `save_notice` node in a flow whose start writes `triggerType` as an array was refused with \"This flow's start has no record trigger\", which misnames the shape. The verdict is unchanged, and the refusal now says what the author wrote:\n\n> This flow's start writes `triggerType` as an array (`['record-after-create', 'record-after-update']`). That form is not supported and never binds, so no write waits on the run and the notice would reach nobody. Give the start node ONE trigger type: `'record-after-write'` fires on both a create and an update.\n\nA string trigger and a missing trigger keep their existing sentence.\n\n**Coverage: the persisted approval round trip** (`plugin-approvals/src/save-notice-approval-round-trip.integration.test.ts`). It uses a real kernel: `ObjectQLPlugin` over `SqlDriver` (better-sqlite3), `AutomationServicePlugin` with its default durable store (`ObjectStoreSuspendedRunStore` over `sys_automation_run`), and `RecordChangeTriggerPlugin`. The real `ApprovalService` runs behind the real approval node. The flow is `record-after-create` → `save_notice` → `approval` → (approve) `save_notice` → end. The test reads:\n- The create's own `onNotice` heard \"Sent Acme to your manager for approval\".\n- The run is persisted as a `paused` row at the approval node. Its `context_json` holds no `saveNotice.set`: JSON drops the function.\n- The approve decision resumes the run from the store (the store is the resume authority, #13617). The resumed `save_notice` is refused by name: `save_notice 'tell_after': this run holds no record write to answer`. The run's history row is `failed` with that error, and the listener heard nothing more.\n- Because the resumed leg failed, `decide` answers the approvals' existing stranded-decision failure (#4420). That failure names the refusal and carries `strandedDecisionDetails` `{ finalized: true, decision: 'approve', runId }`. This is existing behaviour, read here, not a new refusal.\n\n**Lint: `save_notice` in the node-type lists** (`lint-flow-patterns.ts`), classified by reading its executor, as the lists' headers ask:\n- `INERT_CONDITION_NODE_TYPES`: the executor parses `message` only and never reads `condition`.\n- `FALLIBLE_NODE_TYPES`: it returns `success: false` on data alone. That happens when the run holds no write (a resumed leg, a subflow or map child), when the channel is already closed, or when every hole of the message rendered empty (`save-notice-node.ts:67, :94, :104`).\n\n## Why\n\nThese are the three should-fixes of review 6562490492 on #28753.\n\n## Verification\n\n- **Red first.**\n  - Item 1's sentence pin (`spec/src/automation/save-notice-node.test.ts`) was 1 failed of 18 before the fix and 18/18 after.\n  - Item 3's two lint readings (`lint/src/lint-flow-patterns.test.ts`: inert `condition` on a `save_notice`, and `save_notice` in the fallible-builtin list) were 2 failed before and 245/245 after.\n- **Ablation of the coverage pin (item 2).** I replaced the executor's no-channel `refuseNode(...)` with `return { success: true }`. The round-trip test went red: `decide` no longer threw, so \"expected 'undefined' to contain 'save_notice 'tell_after': this run …'\". I restored it and checked it was byte-identical by blob (`ea8be53d`), and the test was green again. The test resolves `@objectstack/service-automation` through its built `dist/`, so I ablated the built file the test runs.\n- **Gates.** `dispatch-gates.mjs --commands` derived 84; `--ran` reconciles 84 run, 0 NOT-MEASURED, 0 UNRUN. Five gates first exited 3 (prerequisite not met): four spec gates read a spec `dist` older than a later test edit, and `check:dual-build-cjs-loads` needs every package's `dist`. I rebuilt them and reran all five: exit 0.\n- **Suites.** Full `vitest run` of `@objectstack/spec`, `@objectstack/lint` and `@objectstack/plugin-approvals`: exit 0 each.\n- `eslint --no-inline-config` over `packages/spec`, `packages/lint` and `packages/plugins/plugin-approvals` exits 0.\n\n## Acceptance notes\n\n- With a `save_notice` placed after an approval in a record-triggered flow, the parse still accepts the flow, because it cannot see where a run suspends. The approver's decision is recorded, and the resumed run fails at the node. The decision answers the stranded-decision failure, which names the node. This PR pins that reading and does not change it.\n- No `ui/**` and no hotcrm changes.\n\n## Human Minimum\n\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic.\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes.\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: no generated artifact moves (the change is refusal text only).\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5omF1nCbQTGgW1nbRA)_\n"
+}

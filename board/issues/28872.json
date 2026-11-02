@@ -1,0 +1,30 @@
+{
+  "number": 28872,
+  "kind": "issue",
+  "title": "Console: when the organization has no default currency, the workspace prompt that asks for the timezone also offers a currency — today amounts silently show as bare numbers",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:07:36Z",
+  "updated_at": "2026-11-02T02:09:26Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28872",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat, part of epic #26676. The seat walked the console on `main` `c064d3a246`, with `examples/app-crm` as the backend, at 1440 / 1100 / 375 px, light and dark. An independent review pass then checked each finding against the code. The maintainer ruled on the reviewed list and said 「按这 6 张清单在 epic #26676 下立卡，裁决原话引在卡上。」 and 「还有刚才立的卡可以交给ui车道处理吗？」 (2026-11-02). So this card goes to the `domain:ui` lane queue. Priority and `area:*` are left to triage. Code readings below are on `main` `3b920f6dd0`.\n\n## Ruling\n\nThe maintainer, on amounts without a currency symbol: 「B9：金额不带货币符号：组织创建时，能根据区域识别出默认的货币吗？如果必要的话，设置页可以有一个向导。」 (2026-11-02).\n\n## The first half is already done\n\nYes, it is already derived. #25495 (ruling 乙, 2026-10-23) and #25651 give a new organization the currency of its creator's region. The code is `packages/plugins/plugin-auth/src/organization-default-currency.ts`, and the mapping is a checked-in CLDR table. The language it maps from depends on how the organization is created:\n\n| How the organization is created | The language it maps from |\n|---|---|\n| Created in the console | The creator's stored `sys_user.locale`, else the request's `Accept-Language` |\n| The single posture's Default Organization | The first owner's stored language or `Accept-Language` |\n| `--seed-admin` dev seed | The host's `LC_ALL` / `LC_MONETARY` / `LANG` |\n| Nothing derivable | Nothing is written. Code-less amounts then show as plain numbers, by design: no guessed symbol |\n\nThe value is written to Setup → Localization → Default currency, where an admin sees and changes it. The seat's bare-number screenshots came from a preview backend started with an empty `LANG`, so the seat's environment is the cause, not this code.\n\n## The gap this card closes\n\nAn organization still ends up with no currency when nothing was derivable. Two cases:\n\n- a language tag with no country region, such as `es-419`;\n- a self-hosted container started with no `LANG`.\n\nThen every `dynamic` amount shows as a bare number, and nobody is told. The renderer is right not to guess (`ui/packages/fields/src/index.tsx`, around line 844). The problem is that the missing setting is silent.\n\n## Target: the wizard the maintainer allowed for\n\nThe console already asks an admin once about a still-default workspace timezone. That prompt is `ui/apps/console/src/pages/settings/WorkspaceTimezonePrompt.tsx` with `workspaceTimezonePromptLogic.ts` (objectui#11758, ruling objectui#11693 B2).\n\n1. The prompt also covers the currency.\n   - Condition: `localization.currency` resolves from the default, with no value on any rung.\n   - Copy, in the sense of: 本组织尚未设置默认货币，金额暂不显示币种 — offering the currency of the admin's browser region, for example 人民币（CNY）.\n   - Confirm writes through the Settings page's own write path. Decline writes nothing. It is asked once per admin per workspace, under the prompt's existing record.\n2. When both the timezone and the currency are unset, it is one prompt, not two dialogs.\n3. No new settings key, no server-side \"dismissed\" flag (the prompt's existing ruling), and no gate.\n\n### Premise to verify first\n\nThe console can map the browser's region to a currency without a second hand-written table. `Intl` has no region → currency lookup, and the CLDR table lives in plugin-auth today.\n\n- The expected route: the table moves to a shared package (`@objectstack/spec`), and plugin-auth and the console both read it.\n- If that is not possible, stop and report a fork. Do not copy the table into the console.\n\n## Acceptance\n\n- A workspace whose `localization.currency` is unset: the admin is asked once and offered the browser region's currency. Confirm sets it, and amounts then show the symbol. Decline leaves it unset, and the admin is not asked again.\n- A workspace with a currency: no prompt.\n- A non-admin: no prompt.\n- The existing timezone prompt tests pass, and new tests pin the currency arm and the combined case.\n"
+}

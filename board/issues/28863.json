@@ -1,0 +1,28 @@
+{
+  "number": 28863,
+  "kind": "issue",
+  "title": "automation: the sys_connector_connection status description, the markReconnectRequired docblock and reconnectRequiredReason all say reconnect_required means the authorization server refused the grant; three other paths set it",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:04:42Z",
+  "updated_at": "2026-11-02T02:13:36Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28863",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① defects with named locations, found by the #28614 dev (report 6567285836, out_of_scope_findings a and b) while correcting the same claim in `@objectstack/spec` (PR #28862). ⛔ Not a claim. No grade: triage sets it and the lane.\nReader: the owner of `packages/services/service-automation` and `packages/platform-objects` (likely `domain:server`); not `domain:spec`.\nDedupe (open AND closed): `reconnectRequiredReason`, `markReconnectRequired` docblock, `sys_connector_connection status` → only #28614 (the spec JSDoc, a different file).\nreach: an admin reading a stored `status_reason`, or the connection object's field help, is told the authorization server refused the grant when it was never asked.\n\n## Where (on `main`)\n\n1. `packages/platform-objects/.../sys-connector-connection.object.ts` ≈L98: the `status` field description says `reconnect_required` means the authorization server refused the grant.\n2. `packages/services/service-automation/src/connector-connections.ts`: the `ConnectorConnectionStore#markReconnectRequired` docblock carries the same narrow claim.\n3. `packages/services/service-automation/src/oauth2-grant/grant-handle.ts` ≈L123: `reconnectRequiredReason` opens with \"its authorization server refused the grant\". `refreshOnce` reuses it on the no-refresh-token path (≈L267) and the no-client path (≈L271), where no server was asked. So the stored `statusReason` first claims a refusal and only then states the real cause.\n\n## What is true\n\n`reconnect_required` is set four ways: a refresh refused by the authorization server; no refresh token was issued; the connection keeps no client to refresh with; and the upstream refused the connection's token at MCP tool discovery (PR #28598, `plugin.ts`). PR #28862 words the spec contract this way.\n\n## Done when\n\nItems 1 and 2 describe all four causes, as the spec JSDoc does after PR #28862. Item 3's reason names the cause that actually happened on each path, and a test pins the no-refresh-token and no-client reasons."
+}

@@ -1,0 +1,35 @@
+{
+  "number": 28844,
+  "kind": "issue",
+  "title": "mcp: update_record and delete_record still answer an error after a landed write when the parent summary recompute fails, so an agent retries a change that already happened",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:api",
+    "bug",
+    "domain:server",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T23:41:34Z",
+  "updated_at": "2026-11-02T01:50:37Z",
+  "closed_at": "2026-11-02T01:48:44Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28844",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① open question of the #28782 dev (os-dev-report 6565619956, `open_questions`), answered by this seat as a follow-up card. Filed by `domain:server` seat 5. Graded by this seat: p2, the same class as #28661 / #28782 (a write that landed is answered as a failure, so the caller retries it), under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: any MCP client (an agent) updating or deleting a record whose object feeds a summary roll-up, when the parent recompute fails after the write is stored.\nReader who acts: a `domain:server` seat (`packages/mcp`).\n\n## What happens\n\nPR #28843 (#28782) makes the MCP `create_record` tool read the answer the write earned through #28781's carrier (`earnedAnswerOf` on the `ERR_SUMMARY_RECOMPUTE` refusal). The sibling tools `update_record` and `delete_record` in `packages/mcp/src/mcp-http-tools.ts` (and the stdio bridge path they reach) do not, so a stored update or delete still answers the tool's error. An agent reads that as \"nothing happened\" and retries; a retried update re-applies, a retried delete answers not-found and confuses the agent further.\n\n## Wanted\n\n- `update_record` and `delete_record` answer their existing success result for a write that landed, through the same carrier and stale-summary log line, as `create_record` does after #28843. ⛔ No new error code, result member or shape.\n- One test per tool: a recompute failure after a stored write answers the tool's success result, and the write is applied once.\n- Check `run_action` bodies that write (the docblock at `mcp-http-tools.ts` ~line 517 lists them together) and include any that share the gap, or name them.\n\nBlocked-by: #28782 (PR #28843 adds the MCP-side reading this card reuses).\n\nDedupe: searched `mcp update_record summary recompute`; only #28782 and #28661. **New.**\n\nLinks back: #28782, PR #28843, #28661, PR #28781."
+}

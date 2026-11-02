@@ -1,0 +1,30 @@
+{
+  "number": 28864,
+  "kind": "issue",
+  "title": "spec: an `oauth2` `authorization_code` instance takes its OAuth client from the installer (a per-connection client record), not a packaged `clientId` — ADR-0143 D2.1 amendment (#28702 B)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:spec",
+    "enhancement",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:04:59Z",
+  "updated_at": "2026-11-02T02:04:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28864",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nFiling gate: ④ execution of a maintainer ruling, slice 1 of 3 (the spec slice; it goes first). Ruling-ref: 6566728470 (#28702, letter B, maintainer 「同意」 2026-11-02T01:12Z). Child of #27293 (E4). Handed to the spec lane per the maintainer's 「按你的方案交给车道」 (2026-11-01). ⛔ Not a claim.\n\nRuling-ref: 6566728470\n\n## What the ruling binds\n\nAn open-edition OAuth connector app ships no ObjectStack-owned `clientId` or secret. The administrator of each deployment registers their own integration key with the vendor, against that deployment's callback (`OS_BASE_URL` / `OS_AUTH_URL` + `/api/v1/automation/connectors/oauth/callback`), and enters it on the connection. Shape: a per-connection client record on the `authorization_code` instance, the shape ADR-0143 D2.1 already keeps for MCP dynamic registration (`registered_client`, `packages/services/service-automation/src/sys-connector-connection.object.ts:87`). It is a widening: `Clause-②: yes`, `Metadata-protocol: added`.\n\n## Work (this slice)\n\n- `packages/spec/src/shared/connector-auth.zod.ts` (the `authorization_code` variant, ~`:319-345` at `origin/main` `67103cc1`). Today `clientId` is a packaged literal (`:301-303`). Add the declared way for the instance to say its client comes from the installer, and how a packaged `clientId` relates to it: refused, or kept for private apps. That choice is this slice's to make and must say why. Keep the definition free of secrets.\n- `docs/adr/0143-outbound-connector-auth-is-open-tier.md` § D2: amend D2.1 to say what the variant carries and where an installer-supplied client lives. This is Tier H and needs a `GOVERNED_APPROVERS` approval.\n- Generated surfaces and any ledger rows the spec gates require. The review runs at `CONTRACT_REVIEW_TIER`.\n- Confidence gap carried from the ruling: DocuSign's per-account production API host comes from vendor docs and was not measured. Say how a host is discovered, or name production as a follow-up.\n\n## Reader\n\nThe spec lane takes it from `pm:queue`. The server slice and the ui slice are `Blocked-by:` this card. DocuSign (#28277) waits on all three.\n\n## Dedupe\n\nThe 500 most recent issues and PRs (read 2026-11-02T02:03Z), titles grepped for `client ?id|oauth client|installer-supplied|integration key`: 1 hit, #28702 (the decision itself). Control `oauth`: 9 hits."
+}

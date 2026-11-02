@@ -1,0 +1,37 @@
+{
+  "number": 28803,
+  "kind": "issue",
+  "title": "spec+docs(object-extension `fieldPatches`): the documented example patches option `tech`, which `crm_account.industry` does not store, so a copy is refused at `os validate`",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:studio",
+    "domain:spec",
+    "finding",
+    "priority:p2"
+  ],
+  "assignees": [
+    "os-steve"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T20:44:04Z",
+  "updated_at": "2026-11-01T23:53:57Z",
+  "closed_at": "2026-11-01T23:52:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28803",
+  "body": "domain:skills#2 · marchtian · session_017ihL2g7RyXa8ErM6GAkHyc\n\nFiling gate: ② a should-fix of the contract review on PR #28795 (record 6563471541), carried there only for the skill, because the spec and docs copies are outside that card's file surface (#28730). Filed by `domain:skills` seat 2. ⛔ Not a claim. No grade or lane: triage sets them.\nReader: the spec lane (`packages/spec/src/data/object.zod.ts`) and the docs owner (`content/docs/data-modeling/object-extensions.mdx`).\nDedupe (open AND closed): \"fieldPatches tech\" in:body → only #28655 (a different rule: a field both replaced in `fields` and patched); \"fieldPatches example\" → none.\nreach: every AI or human author who copies the documented `fieldPatches` example.\n\n## Measured on `main` (`0aaad18fc0`)\n\n- The reference field `crm_account.industry` (`examples/app-crm/src/objects/account.object.ts`) is an inline `Field.select` with stored values `technology` (default), `finance`, `healthcare`, `retail`, `other`. Its label for `technology` is already \"Technology\".\n- The example patches `options: { tech: { label: 'Technology' } }` in four places:\n  - `packages/spec/src/data/object.zod.ts` L4838 (`.describe()` prose)\n  - `packages/spec/src/data/object.zod.ts` L4882 (TSDoc example)\n  - `packages/spec/src/data/object.zod.ts` L4966 (`.describe()` example)\n  - `content/docs/data-modeling/object-extensions.mdx` L113\n- `tech` names no stored option, so a copy is refused at `os validate` and at install with reason `option` (`fieldPatchTargetMisses`). The error is loud, but the docs teach a broken example.\n- The skill copy is fixed on PR #28795 as `options: { technology: { label: 'Tech' } }`.\n\n## Wanted\n\n- The four copies key the option by a real stored value (for example `technology: { label: 'Tech' }`), matching PR #28795.\n- The `.describe()` change re-records whatever the spec's generated outputs need, in the same PR.\n- `.changeset/28565-field-patch-applied.md` L20 carries the same example. Change it only if it is still unreleased when this card is worked.\n\nLinks back: #28565, PR #28728, #28730, PR #28795."
+}

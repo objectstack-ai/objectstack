@@ -1,0 +1,32 @@
+{
+  "number": 28826,
+  "kind": "issue",
+  "title": "spec(security): `tenancy-posture.ts` still calls the Apache-2.0 `@objectstack/organizations` runtime \"enterprise\" (file header + `postureStampsOrganization` docblock)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:access",
+    "documentation",
+    "domain:spec",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T22:03:59Z",
+  "updated_at": "2026-11-01T22:55:56Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28826",
+  "body": "domain:spec#1 · os-steve · session_01ADHkmPi25XXKx92Xmg4viS\n\nFiling gate: ① a defect with a named location: a published `@objectstack/spec` docblock labels open code \"enterprise\". Raised as a non-blocking flag by the contract review of PR #28823 (record 6564510713, ③ Boundary flags: \"Worth a follow-up card that re-words the header and the docblock together\"). ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:spec`, prose only in `packages/spec/src/security/tenancy-posture.ts`.\nDedupe (open AND closed): #16718 and #17379 (closed) swept the \"enterprise / closed-source\" spellings of `@objectstack/organizations` after ADR-0132; this file's header and docblock were not reached. #28761 (PR #28823) fixed only the stamper claim and kept the adjective on purpose.\nreach: authors and agents who read the posture docblocks and conclude that stamping or the posture runtime is closed code.\n\n## Where\n\n`packages/spec/src/security/tenancy-posture.ts` on `main`: the file header (\"requires the enterprise `@objectstack/organizations` runtime\"), the `postureStampsOrganization` docblock as rewritten by PR #28823 (\"The enterprise `@objectstack/organizations` runtime fills an absent value too\"), and the other \"enterprise\" mentions in the file (`grep -n enterprise`), each to be read for whether it means the package or the commercial entitlement.\n\n## What is true\n\nSince ADR-0132 D1, `@objectstack/organizations` ships from this repo as `packages/plugins/organizations` (Apache-2.0). The commercial repo keeps a private package of the same name that subclasses it and adds the licence gate (ADR-0132 D2, D3). What stays true: the runtime must be present to activate a walled posture (ADR-0093 D5, `organizationWallActive`), and the entitlement is commercial (ADR-0132 D2).\n\n## Done when\n\nThe header and the docblocks name the package without the \"enterprise\" adjective, and say \"commercial entitlement\" where they mean the licence. No behaviour change; spec patch changeset."
+}

@@ -14,19 +14,19 @@
     "area:identity",
     "domain:server",
     "enhancement",
-    "pm:blocked",
+    "needs-user-decision",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T20:02:31Z",
-  "updated_at": "2026-11-01T20:02:31Z",
+  "updated_at": "2026-11-02T01:16:59Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 6,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28793",
-  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① the follow-up card the director's ruling on #28105 binds (comment 6557746678, letter D1, maintainer 「同意」 on 2026-11-01 at 12:10Z): \"a follow-up card is filed at p3\". Filed by `domain:server` seat 5, the seat executing #28105. Graded p3 by the ruling.\n\nReach: every Setup admin scanning the Users list for who is a platform admin, the need #27863 stated.\nReader who acts: `domain:server` (`packages/platform-objects` for the list view; `packages/core` owns the predicate).\n\n## What is true today (read on `origin/main` `d9c4cdc4e`)\n\n- Platform-admin standing is decided by `hasPlatformAdminStanding` (`packages/core/src/security/resolve-authz-context.ts:2145`): a verified email in `OS_PLATFORM_OWNER_EMAIL`, or, under the `single` tenancy posture, an unscoped `admin_full_access` assignment in `sys_user_permission_set`.\n- `sys_user.role` is better-auth's own legacy column and does not say this. Under #28105 D1 it leaves the `all_users` list and the record highlights.\n\n## Wanted\n\n- The Users list gains a column (or an equivalent served mark) derived from real platform-admin standing, read through the same predicate, never a second copy of the rule.\n- ⛔ Nothing is written into `sys_user.role`: the #9652 veto (comment 5334874978) stands, and D1 rejected S1 (projecting standing into the scalar).\n- Measure first how a derived, non-stored column is served on a platform list view today (a formula field, a served-beside key, or a computed read) and pick the existing mechanism; say which in the PR.\n\nBlocked-by: #28105 (it removes the `role` column this card's column replaces).\n\nDedupe: searched `platform admin column users list`; only #28105 and #27855. **New.**\n\nLinks back: #28105 (ruling 6557746678), #27863, PR #28065."
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nRuled: 6566734829 · letter C · 2026-11-02T01:16Z\nRuling-ref: 6566734829\n\nFiling gate: ① the follow-up card the director's ruling on #28105 binds (comment 6557746678, letter D1, maintainer 「同意」 on 2026-11-01 at 12:10Z): \"a follow-up card is filed at p3\". Filed by `domain:server` seat 5, the seat executing #28105. Graded p3 by the ruling.\n\nReach: every Setup admin scanning the Users list for who is a platform admin, the need #27863 stated.\nReader who acts: `domain:server` (`packages/platform-objects` for the list view; `packages/core` owns the predicate).\n\n## What is true today (read on `origin/main` `d9c4cdc4e`)\n\n- Platform-admin standing is decided by `hasPlatformAdminStanding` (`packages/core/src/security/resolve-authz-context.ts:2145`): a verified email in `OS_PLATFORM_OWNER_EMAIL`, or, under the `single` tenancy posture, an unscoped `admin_full_access` assignment in `sys_user_permission_set`.\n- `sys_user.role` is better-auth's own legacy column and does not say this. Under #28105 D1 it leaves the `all_users` list and the record highlights.\n\n## Wanted\n\n- The Users list gains a column (or an equivalent served mark) derived from real platform-admin standing, read through the same predicate, never a second copy of the rule.\n- ⛔ Nothing is written into `sys_user.role`: the #9652 veto (comment 5334874978) stands, and D1 rejected S1 (projecting standing into the scalar).\n- Measure first how a derived, non-stored column is served on a platform list view today (a formula field, a served-beside key, or a computed read) and pick the existing mechanism; say which in the PR.\n\nBlocked-by: #28105 (it removes the `role` column this card's column replaces).\n\nDedupe: searched `platform admin column users list`; only #28105 and #27855. **New.**\n\nLinks back: #28105 (ruling 6557746678), #27863, PR #28065.\n"
 }

@@ -1,0 +1,35 @@
+{
+  "number": 28807,
+  "kind": "pull_request",
+  "title": "fix(runtime): the customizations read attributes a contributed field and flow by one stamp rule",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T21:06:52Z",
+  "updated_at": "2026-11-01T21:50:33Z",
+  "closed_at": "2026-11-01T21:50:30Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T21:50:30Z",
+  "comments": 3,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28807",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-project-manager\"} -->\n_Requested by **Leehom** · [project thread](https://claude.ai/code/project/chan_01TenzsRopZj4jMbvjX8uz1X?thread=cmsg_01TenzsRopZj4jMbvjX8uz1XQB8PvuLXjvzVKRUBkB8969)_\n\nFixes #28796\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- **改了什么**：上一版「定制读取」里的 `contributions`（别的包贡献的字段和流程）对字段和流程用了两套判断来认定「这是哪个包的」。现在两者共用一个判断：必须是代码包的标记，不是 `sys_metadata` 占位，也不是本环境自己写的内容，并且不是基础包或它的 `.custom` 配对包。spec 里这段说明也改准了：配对包的东西分别在 `overrides` 和 `extensions` 里，不在 `contributions` 里。\n- **为什么改**：这是上一版 PR #28749 评审提出的两条非阻塞修正。两套判断今天对所有真实输入给出的结果一样，但以后容易走偏。\n- **风险与回滚**：对现有安装的应答没有任何变化：列出谁不变，应答形状也不变。回滚 = revert 本 PR。\n- **先看**：① `packages/runtime/src/domains/packages.ts` 的 `codePackageOf`（两种类型共用的判断）；② `packages/runtime/src/domains/packages-customizations.test.ts` 新增的「两种类型同一读法」测试；③ `packages/spec/src/api/package-lifecycle.zod.ts` 的说明文字。\n- **两分钟验证**：`pnpm --filter @objectstack/runtime exec vitest run src/domains/packages-customizations.test.ts`，预期 18 个测试全绿。\n- **需要你做的**：无，席位落地。\n\n## What changes\n\n- **One stamp predicate** — `packages/runtime/src/domains/packages.ts#readBaseContributions`: both branches now attribute through `codePackageOf(packageId, body)`, which returns the package only when it is neither the base nor its pair and `isCodeArtifactBody` accepts the stamp (not the `sys_metadata` sentinel, not a tenant-authored `_provenance: 'org'` body). Only where the stamp is read differs: the field branch passes the `extend` contributor's `packageId` and its `definition`; the flow branch passes the flow's own `_packageId` and the flow.\n- **Which reading, and why.** The flow branch's `isCodeArtifactBody` reading is taken for both, as the order expects:\n  - Measured: the only `'extend'` registration is `ObjectQL.registerApp` (`packages/objectql/src/engine.ts`, objectExtensions loop), which registers under the manifest's package id. So every field contributor in the tree is a code package's, and the shared predicate lists exactly what the field branch listed before.\n  - The field branch's bare id check cannot be used for flows: a flow carries its package only as a body stamp, which a tenant-authored overlay or the `sys_metadata` sentinel can also wear.\n- **Docblock** — `packages/spec/src/api/package-lifecycle.zod.ts`, the TSDoc above `GetPackageCustomizationsResponseSchema`: it names the two kinds that are listed. It drops the \"(listed above)\" claim and says where the pair's items are instead: an overriding pair item, a flow included, is in `overrides`; its extension members are in `extensions`; and any other pair flow is in no list of the answer. No `.describe()` text changed, and `check:generated` reports all 14 artifacts up to date.\n- `.changeset/28796-contributions-one-stamp.md`: `patch` on `@objectstack/runtime` and `@objectstack/spec` (the TSDoc ships in the spec's `.d.ts`).\n\n## Tests\n\n| Test | Head | Base / ablation |\n|---|---|---|\n| `packages/runtime/src/domains/packages-customizations.test.ts` (18) | 18/18 | `packages.ts` at base `8196881e`: 1 red, the new divergence pin |\n| ablation: field branch back to its own id-only reading | | 1 red (the divergence pin) |\n| ablation: flow branch to an id-only reading | | 2 red (the divergence pin and the environment-flow test) |\n\nThe new test registers, on the base's object, one field extension and one flow per stamp: a code package's (listed), the `sys_metadata` sentinel (not listed), and a tenant-authored body wearing a real package id (not listed). It asserts that the stamps whose field is listed are exactly the stamps whose flow is listed, and then the exact answer. It reds whenever the two branches read a stamp differently. Each ablation ran through `scripts/ablation-replace.mjs`, and each restore was proven: blob equal to HEAD and `git diff HEAD` empty.\n\n| Suite | Result |\n|---|---|\n| `pnpm --filter @objectstack/runtime test` | 508 files, 8229 passed, 19 skipped, exit 0 |\n| `pnpm --filter @objectstack/runtime typecheck`, `pnpm --filter @objectstack/spec typecheck` | exit 0 |\n| `pnpm build` (whole repo) | exit 0 |\n\n## Acceptance notes\n\n- Nothing in an installed composition is attributed differently: the base leg reds only on the new test's hand-built sentinel and tenant stamps.\n- No `ui/**` change, and no change to who is listed or to the answer's shape.\n\n## Verification\n\nAll readings at head `6eeaf6a5`.\n\n<details><summary>Derived gates: 81 derived, 81 run, 0 NOT-MEASURED, 0 UNRUN</summary>\n\n- `node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` on the real diff gave 81 commands; re-derived after the loop, the list is identical.\n- A whole-repo `pnpm build` (exit 0) ran first, so the dist-reading families measured.\n- Every one of the 81 ran with exit 0 on the first pass.\n- `--ran` verdict: \"81 derived famil(ies) accounted for — 81 run, 0 NOT-MEASURED\", exit 0.\n- `pnpm --filter @objectstack/spec check:generated --fix`: all 14 artifacts up to date, nothing regenerated.\n- eslint `--no-inline-config` over the changed `packages/` TS files: exit 0.\n\n</details>\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01FEkQ5ogKLgaK3fAZF4kmeF)_\n"
+}

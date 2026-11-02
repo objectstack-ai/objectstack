@@ -1,0 +1,30 @@
+{
+  "number": 28869,
+  "kind": "issue",
+  "title": "console: the connector connection form asks the administrator for the OAuth client (client id + secret) when the instance takes an installer-supplied client (#28702 B, ui slice)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:06:23Z",
+  "updated_at": "2026-11-02T02:06:23Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28869",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nBlocked-by: #28866\n\nFiling gate: ④ execution of a maintainer ruling, slice 3 of 3 (ui). Ruling-ref: 6566728470 (#28702, letter B). Child of #27293 (E4). Handed to the ui lane per 「按你的方案交给车道」. ⛔ Not a claim.\n\nRuling-ref: 6566728470\n\n## Work (this slice, after the server slice #28866 lands)\n\n- The Connector connections page (`ConnectorConnectionsPage.tsx`, `connectorConnections.ts`, landed by #26702 in `da46b2af`). For an instance that takes an installer-supplied client, the Connect step asks for the client id and the secret before it opens the vendor's consent page. It shows the exact redirect URI this deployment registers with the vendor, the value the server derives, and offers a copy button. The secret field is write-only. Reconnect keeps the stored client unless the administrator replaces it.\n- i18n for the four shipped locales, as that commit did.\n- Tests: the form appears only for such an instance; the redirect URI shown is the server's; the secret is never echoed back.\n\n## Reader\n\nThe ui lane takes it from `pm:queue` once #28866 closes. DocuSign (#28277) waits on this card."
+}

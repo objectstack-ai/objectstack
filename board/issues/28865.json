@@ -1,0 +1,32 @@
+{
+  "number": 28865,
+  "kind": "issue",
+  "title": "Record page enlarged related tab: on desktop, draw the child object's list face (object-grid) as the phone face already does — today a generic data-table with taller rows, plain-text names and the count twice",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:05:36Z",
+  "updated_at": "2026-11-02T02:18:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28865",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat, part of epic #26676. The seat walked the console on `main` `c064d3a246`, with `examples/app-crm` as the backend, at 1440 / 1100 / 375 px, light and dark. An independent review pass then checked each finding against the code. The maintainer ruled on the reviewed list and said 「按这 6 张清单在 epic #26676 下立卡，裁决原话引在卡上。」 and 「还有刚才立的卡可以交给ui车道处理吗？」 (2026-11-02). So this card goes to the `domain:ui` lane queue. Priority and `area:*` are left to triage. Code readings below are on `main` `3b920f6dd0`.\n\n## Observed\n\nAccount Acme Corp → the 商机 tab, enlarged at 1440 px:\n\n- Rows are about 65 px tall. The opportunity list page draws 41 px rows.\n- The name column is plain text, so it does not open the record.\n- The count shows twice: the chip 「全部 4」 and the line 「4 条」.\n- The 操作 header sits over a column with no visible buttons, the same as on the list page (#28871).\n\n## Reading\n\n- `ui/packages/plugin-detail/src/RelatedList.tsx`, `viewSchema` (around lines 2736–2790):\n  - On the phone, the enlarged face already returns `type: 'object-grid'` over the rows the list read (#28484).\n  - On desktop it falls through to the generic `type: 'data-table'`.\n- So the enlarged tab is a different table from the child object's list page. Row height, the name link, row actions and the count all differ from that list page.\n\n## Governing text\n\n#27524 item 9: below the tab row, \"the full-width table (all columns, paging, sort, inline edit where the FK allows — **the child object's list face**)\".\n\n## Target\n\n1. The desktop enlarged face renders `object-grid` over the rows this list already reads, the same branch the phone takes. Specifically:\n   - the name opens the record;\n   - row actions come from the grid;\n   - row height and density are the list page's;\n   - one count is shown.\n2. This related list's own state is kept: its paging and sort (windowed per objectui#3106), the filter chips (`enlargedChipsOf`), and the ＋ new action.\n3. Compact panels in the right column are unchanged.\n\n### Premise to verify first\n\n`object-grid` with a value provider can carry this list's windowed paging and sort, with the list as the source of truth.\n\n- If it cannot, stop and report a fork.\n- Do not add a third table renderer, and do not keep `data-table` on desktop \"for now\".\n\n## Acceptance\n\n- At 1440 px, the enlarged tab's row height equals the child list page's.\n- The name is a link to the record.\n- The count shows once.\n- Paging, sort and the filter chips behave as today.\n- The tests pin the desktop branch to `object-grid`.\n- Screenshots of the account → opportunities tab, before and after, are linked from the PR.\n"
+}

@@ -1,0 +1,35 @@
+{
+  "number": 28812,
+  "kind": "issue",
+  "title": "ui/app-shell: the evaluateVisibility docblock teaches `${user.role === 'admin'}`, a gate that is always false for a platform admin (the documented gate is isPlatformAdmin)",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "domain:ui",
+    "finding",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T21:24:11Z",
+  "updated_at": "2026-11-01T23:39:00Z",
+  "closed_at": "2026-11-01T23:37:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28812",
+  "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① the finding the director's ruling on #28105 (comment 6557746678, letter D1) carries \"for the ui seat\", filed by `domain:server` seat 5 while executing #28105 (PR #28810). Graded by this seat: p3 (a docblock example, no runtime behaviour), under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: any author or agent who copies the example from the `evaluateVisibility` docblock into a `visible` predicate to gate on platform-admin standing.\nReader who acts: the lane that owns `ui/packages/app-shell` (`domain:ui`).\n\n## What the code says (read on `origin/main` `c9a9981da`)\n\n`ui/packages/app-shell/src/providers/ExpressionProvider.tsx:550`, in the `evaluateVisibility` docblock: `- template expression: \"${user.role === 'admin'}\"`.\n\n`user.role` is better-auth's legacy `sys_user.role` scalar. ObjectStack never writes it, and with the admin plugin on it reads `user` for every user, a platform admin included (#28105, ruling D1). So the example teaches a gate that never opens for the people it means. The documented gate is `isPlatformAdmin`.\n\n## Wanted\n\n- Replace the example with one that gates on a real signal (`isPlatformAdmin`, or a CEL envelope over `current_user.positions` as the docblock's own later paragraph shows), keeping the \"template expression\" shape it illustrates if that shape is still supported.\n- Grep `ui/**` and `content/docs/**` for other `user.role === 'admin'` teachings and fix them in the same change; list what you find.\n\nDedupe: searched `ExpressionProvider user.role`; only #28105. **New.**\n\nLinks back: #28105 (ruling 6557746678), PR #28810."
+}

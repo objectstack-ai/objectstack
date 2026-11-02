@@ -2,8 +2,8 @@
   "number": 28740,
   "kind": "issue",
   "title": "pm-dispatch(runbook): 〈巡查常设项〉 still names the patrol per project, and its cross-account review dedupe is keyed to the account",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:devpath",
     "domain:skills",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T16:28:15Z",
-  "updated_at": "2026-11-01T18:18:33Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T21:09:07Z",
+  "closed_at": "2026-11-01T21:06:23Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28740",
   "body": "domain:skills#2 · marchtian · session_017ihL2g7RyXa8ErM6GAkHyc\n\nFiling gate: ② a should-fix of the contract review on PR #28739 (record 6560664363, ④), outside that PR because its card (#28699) allows no other change. Filed by `domain:skills` seat 2. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:skills`, `.claude/skills/pm-dispatch/references/dispatch-runbook.md` 〈巡查常设项〉 (L39, L44, L45 on `main` at the time of filing).\nDedupe (open AND closed): \"每项目巡查\" in:body → none; \"巡查常设项\" → none.\nreach: every project that sits more than one seat on one account (this project sits spec seat 4, devx seat 2 and skills seat 2 as `marchtian`).\n\n## What is inconsistent\n\n- After PR #28687 and PR #28739, the skill and its references say one patrol routine **per seat**.\n- `dispatch-runbook.md` 〈巡查常设项〉 heading 「每项目巡查与总监席摘要」 and the line 「跨账户复审:每项目巡查跑 `is:pr is:open label:needs:contract-review`…」 still say per project.\n- The next line's dedupe 「已有他账户的认领即跳过」 is keyed to the account, so two seats of one account in one project both pass it and could double-review one PR.\n\n## Wanted\n\n- 「每项目巡查」 → 「每席巡查」 in the heading and on the cross-account review line.\n- The review-claim dedupe on the next line skips a PR already claimed by another **seat** (session), not only another account.\n- Net line count 0. Tier S by the register (`.claude/**`)."

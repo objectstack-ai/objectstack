@@ -1,0 +1,35 @@
+{
+  "number": 28827,
+  "kind": "pull_request",
+  "title": "docs(spec): key the fieldPatches example option by a value crm_account.industry stores",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T22:08:16Z",
+  "updated_at": "2026-11-01T23:52:29Z",
+  "closed_at": "2026-11-01T23:52:27Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T23:52:27Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28827",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi9Woe1WqkwqEbbQEviGw1m5U)_\nFixes #28803\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么:`fieldPatches` 文档示例里的选项键从 `tech` 改成 `crm_account.industry` 真实存储的值 `technology`(`technology: { label: 'Tech' }`),覆盖 spec 描述、TSDoc、选项列表拒收文案、对象扩展指南和两份未发布的 changeset。\n- 为什么改:原示例照抄会在 `os validate` 和安装时被拒(该字段没有 `tech` 这个选项),文档在教一个坏例子;技能包那份已在 #28795 修好,这里补齐其余几份。\n- 风险与回滚:纯文案,schema 接受/拒收的结果不变;回滚即 revert 本 PR。\n- 先看:`packages/spec/src/data/object.zod.ts`(三处示例文字)、`content/docs/data-modeling/object-extensions.mdx`、`content/docs/references/data/object.mdx`(重新生成的参考页)。\n- 两分钟验证:`git grep -n \"tech: {\" -- packages/spec/src content/docs skills .changeset ':!*.test.ts'`,预期没有任何输出。\n- 需要你做的:无,席位落地。\n\n## What changes\n\n- `packages/spec/src/data/object.zod.ts`: the `fieldPatches` `.describe()` example, the `ObjectExtensionSchema` TSDoc example, and the refusal text for an option list under `options` now read `options: { technology: { label: 'Tech' } }`. `crm_account.industry` (`examples/app-crm/src/objects/account.object.ts`) stores `technology`, `finance`, `healthcare`, `retail`, `other`; `tech` is none of them, so a copy was refused with reason `option`.\n- `content/docs/data-modeling/object-extensions.mdx`: the guide's example, same re-key.\n- `content/docs/references/data/object.mdx`: re-recorded by `check:generated --fix` (only `check:docs` was stale).\n- `.changeset/28565-field-patch-applied.md` and `.changeset/28560-field-patch-slot.md`: both still unreleased (present in `.changeset/` on `main` at 1617b7fb, no Version Packages release has consumed them), so their copies of the example are re-keyed too. The 28560 copy is a fifth copy the card did not list.\n- `.changeset/28803-field-patches-example.md`: spec patch.\n\nNo forced test edits. Test fixtures that patch `tech` (`field-customization.test.ts`, `field-patches-derived.test.ts`, and the cli / metadata-core / objectql / cloud-connection field-patch tests) build their own objects and do not pin the documented example text, so they stay as they are.\n\n## Tests\n\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2 src/data` and `pnpm --filter @objectstack/spec typecheck`: Test Files 154 passed (154), Tests 4756 passed, 1 todo; VERDICT command-exit 0.\n- `pnpm --filter @objectstack/spec build && check:generated`: 1 of 14 stale (`check:docs`), fixed with `--fix`, then all up to date.\n\n## Acceptance notes\n\n- Prose only; no consumer package test is owed (no accept/reject result changes).\n- **Pending release notes corrected, so `Check Changeset` stays red by design.** This PR edits two changesets it did not add, both still pending (no Version Packages release has consumed them): `.changeset/28565-field-patch-applied.md` (named by the card, its example line) and `.changeset/28560-field-patch-slot.md` (a fifth copy of the same example, not named by the card). In each, only the option key and label inside the code example change, from `tech: { label: 'Technology' }` to `technology: { label: 'Tech' }`; no sentence about behaviour changes. This is the DELIBERATE CORRECTION class `check-empty-changeset.mjs` names: the gate stays red, `skip-changeset` is not applied, and the correction needs a written confirmation on this PR. Restoring either file from the base would republish an example that `os validate` refuses.\n- Merged `origin/main` at 663b7c08ee with `scripts/pm/os-regen-merge.sh` (#28791 had edited `object.zod.ts` and `object-extensions.mdx`); no conflict, and `check:generated` reports all 14 artifacts up to date on the merged head.\n\n## Verification\n\nAll readings on head `0c29908fd8` (the merge of main).\n\n<details><summary>spec tests and typecheck</summary>\n\n`bash scripts/pm/os-verify-lock.sh -c 'pnpm --filter @objectstack/spec test && pnpm --filter @objectstack/spec typecheck'`: Test Files 788 passed (788), Tests 23268 passed, 1 todo; `VERDICT command-exit 0`.\n\n</details>\n\n<details><summary>generated artifacts</summary>\n\nBefore the merge: `check:generated` found 1 of 14 stale (`check:docs`, `content/docs/references/data/object.mdx`), fixed with `--fix`. After the merge: `pnpm --filter @objectstack/spec build && pnpm --filter @objectstack/spec check:generated`: all 14 generated artifacts up to date; `VERDICT command-exit 0`.\n\n</details>\n\n<details><summary>derived gate list</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack` listed 97 commands; each ran on this head with its exit code recorded. 96 exit 0. `node scripts/check-empty-changeset.mjs --base origin/main` exits 1 on the two pending changesets above, as designed. Reconciliation: `97 derived, 97 run, 0 NOT-MEASURED, 0 UNRUN` (a derived zero, every line carries an exit code). Seven gates first exited 3 (prerequisites: unbuilt packages, shallow clone); after a full `turbo run build` and `git fetch --unshallow` all seven exit 0. Local-only: `check-dev-prereqs` exit 0, `check:skill-frame-freshness` exit 0.\n\n</details>\n\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmQfYHca8dfoXTJfeKp)_\n"
+}

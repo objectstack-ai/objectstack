@@ -1,0 +1,32 @@
+{
+  "number": 28852,
+  "kind": "issue",
+  "title": "analytics: the draft preview serves a time bucket over a text column as one null bucket, where the live faces refuse INVALID_FIELD",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:reports",
+    "domain:server",
+    "finding",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T00:49:59Z",
+  "updated_at": "2026-11-02T01:28:48Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28852",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nBlocked-by: PR #28851\n\nFiling gate: ① out-of-scope finding of the #28798 dev (PR #28851, os-dev-report `6566411471`). The dev observed it while measuring the precedence question. The seat has not re-measured it. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: a dataset selection with a `timeDimensions` entry that asks a granularity of a member over a text column (for example `zone` by month, where `zone` reads the text column `region`) gets two different answers:\n- The live faces refuse it. The engine's temporal-bucket door (`packages/objectql/src/aggregate-query-shape-door.ts`) answers `INVALID_FIELD` / 400 at `groupBy.N.dateGranularity`.\n- The draft preview (`previewDrafts: true`) serves it as one `null` bucket.\n\nSo an author sees a chart in the draft that the published dataset refuses. This is the same family as #28765 and #28555: a preview gate the live faces have and the preview lacks.\n\n## Wanted\n\n1. Measure the three faces on real SQLite, for text, select, number and boolean columns.\n2. If the preview serves where live refuses, the preview refuses the same way, field for field, with the same code, status, `path` and message. Do it in the existing preview gate list in `analytics-service.ts`. Reuse the engine's field-type reading or an existing service-analytics reading of it rather than a third copy. ⛔ No new gate on the live faces.\n\nThis narrows the preview: a selection the preview serves today is refused. So it is `Clause-②: no (narrowing)`, with a `CONTRACT_REVIEW_TIER` review owed.\n\n## Dedupe\n\nRead open issues for `preview text column bucket`, `preview dateGranularity text` and `preview null bucket`: only #28798 (PR #28851, same files). **New.**\n\nReader who acts: `domain:server` (`packages/services/service-analytics`).\n\nLinks back: #28798, PR #28851, #28765, #28555"
+}

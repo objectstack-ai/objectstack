@@ -1,0 +1,38 @@
+{
+  "number": 28806,
+  "kind": "issue",
+  "title": "automation: a save_notice placed after an approval, wait or screen node passes publish and then strands every decision with RESUME_FAILED",
+  "state": "closed",
+  "state_reason": "completed",
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "finding",
+    "pm:dispatched",
+    "priority:p3"
+  ],
+  "assignees": [
+    "os-project-manager"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T21:00:11Z",
+  "updated_at": "2026-11-02T00:05:48Z",
+  "closed_at": "2026-11-02T00:04:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": null,
+  "comments": 5,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28806",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nBlocked-by: PR #28805\n\nFiling gate: ① out-of-scope finding of the #28786 dev (PR #28805, os-dev-report `6563740409`), escalated by the `CONTRACT_REVIEW_TIER` review `6563799258`. Measured by PR #28805's persisted round-trip test. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: a record-triggered flow can place `save_notice` downstream of a suspending node (`approval`, `wait`, `screen`). It passes the `FlowSchema` parse, because the placement door (`packages/spec/src/automation/save-notice-placement.ts`) checks only the start trigger. At run time the leg after the suspension has no write to answer, so the node refuses by name, as #28251 intends. For an approval, though, the decision is finalised first. The resume then fails, and `decide` throws the 500-class `RESUME_FAILED` (`stranded-decision.ts`). So every decision on such a flow strands. An AI writing \"notify after approval\" with `save_notice` produces exactly this graph.\n\n## Wanted\n\nThe author learns at publish time, not at the first approval decision, that a `save_notice` reachable only after a suspending node can never answer a write.\n\nDirection: extend the existing placement door, which is already the one refusal for `save_notice` misplacement, rather than add a new gate. It would refuse a `save_notice` that every path from the start reaches only through a suspending node, with a prescription that names the node. The refusal is `INVALID_METADATA` 422 at `nodes.<i>.type`, like the trigger case.\n\n⛔ Do not change the stranded-decision posture or `RESUME_FAILED`.\n\nThis narrows publish: a graph that parses today is refused. So the order declares `Clause-②: no (narrowing)` and a `CONTRACT_REVIEW_TIER` review is owed. The dev measures whether any shipped flow (hotcrm, showcase) has this shape. None is expected, since `save_notice` landed at `a00f3359`.\n\n## Dedupe\n\nRead open issues for `save_notice` approval, `RESUME_FAILED` and `stranded decision`: #28786 (merging the round-trip pin) and #28788 (HotCRM places `save_notice` *before* its approval). **New.**\n\nReader who acts: `domain:server` (`packages/spec` automation placement, with `packages/lint` only if a graph walk already lives there).\n\nLinks back: #28251, #28786, PR #28805, PR #28753\n"
+}

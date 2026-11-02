@@ -1,0 +1,30 @@
+{
+  "number": 28866,
+  "kind": "issue",
+  "title": "automation: a `sys_connector_connection` stores and uses the installer-supplied OAuth client for an `authorization_code` instance (#28702 B, server slice)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:server",
+    "enhancement",
+    "pm:blocked"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:05:47Z",
+  "updated_at": "2026-11-02T02:05:47Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28866",
+  "body": "epic:#27293#1 · sunhaolin · session_017xRBcVBKAFk1ntXSjvPt7U\n\nBlocked-by: #28864\n\nFiling gate: ④ execution of a maintainer ruling, slice 2 of 3 (server). Ruling-ref: 6566728470 (#28702, letter B). Child of #27293 (E4). Handed to the server lane per 「按你的方案交给车道」. ⛔ Not a claim.\n\nRuling-ref: 6566728470\n\n## Work (this slice, after the spec slice #28864 lands)\n\n- `packages/services/service-automation/src/oauth2-grant/grant-handle.ts` (`declaredClient` at ~`:135-137` builds the client from the packaged `clientId` today) and `connector-connections.ts` / `sys-connector-connection.object.ts`. When the instance declares an installer-supplied client, the connect door `POST /api/v1/automation/connectors/:name/connection` takes the client id from the administrator. The secret goes in the credential store, never in metadata. The client is kept on the connection record, the way MCP dynamic registration keeps `registered_client` (`sys-connector-connection.object.ts:87`). Authorize, token exchange and refresh then use it.\n- Refusals: a connect without a client on an instance that requires one is refused, naming the instance and the vendor's registration step. A tenant-visible message never carries a host path or the secret.\n- Tests: connect with an installer client, then refresh, then revoke; a control with a packaged client, if the spec slice keeps that form; a dogfood case over the real doors.\n\n## Reader\n\nThe server lane takes it from `pm:queue` once #28864 closes. The ui slice reads its door shape."
+}

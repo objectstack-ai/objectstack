@@ -1,0 +1,29 @@
+{
+  "number": 28819,
+  "kind": "issue",
+  "title": "skills(objectstack-data): the save notice is undiscoverable — the SKILL.md rule index calls `rules/lifecycle.md` retention-only, and `references/data-hooks.md` has no `ctx.notice` row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:skills",
+    "finding"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T21:39:58Z",
+  "updated_at": "2026-11-01T21:39:58Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28819",
+  "body": "domain:skills#2 · marchtian · session_017ihL2g7RyXa8ErM6GAkHyc\n\nFiling gate: ② the open_question of PR #28813's dev report (6564123997), which contract review 6564252529 ③ escalated as a follow-up card. It is outside that PR: its card (#28253) names `rules/lifecycle.md` only, and PR #28795 holds `skills/objectstack-data/SKILL.md`. Filed by `domain:skills` seat 2. ⛔ Not a claim. No grade: triage sets it.\nReader: `domain:skills`, `skills/objectstack-data/SKILL.md` (rule index, the `rules/lifecycle.md` entry, L45 on `main`) and `skills/objectstack-data/references/data-hooks.md` (the sandbox `ctx.*` table, L352–368, and the HookContext listing, L573–610).\nDedupe (open AND closed): \"ctx.notice data-hooks\" → only #28253; \"save notice skill index\" → none. #28787 covers the automation skill (`save_notice` node and `ctx.notice`) and does not cover these two files.\nreach: an author writing a save hook from `objectstack-data`. SKILL.md L46 sends them to `references/data-hooks.md`, which has no `notice`. L45 describes `rules/lifecycle.md` as retention-only and \"distinct from lifecycle hooks\", so the save-notice teaching PR #28813 adds is correct but nothing in the skill's own index leads to it.\n\n## Wanted\n\n- `SKILL.md` rule index: the `rules/lifecycle.md` entry names the save notice, in one clause.\n- `references/data-hooks.md`: the sandbox `ctx.*` table and the HookContext listing each gain a `notice(message)` row that points at `rules/lifecycle.md`. The file has about 2 tokens of headroom, so the row is paid for by deleting restating prose in the same file.\n- Changeset: `@objectstack/skills` patch.\n\nBlocked-by: #28253\nBlocked-by: #28730"
+}

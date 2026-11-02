@@ -2,8 +2,8 @@
   "number": 28792,
   "kind": "issue",
   "title": "platform-objects/ui: `options` declared on a text field is honoured by analytics dimension labels and grid grouping but not by the text cell, so one declaration reads two ways",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,21 @@
     "area:studio",
     "domain:server",
     "finding",
-    "pm:queue",
     "priority:p3"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T19:57:37Z",
-  "updated_at": "2026-11-01T19:57:37Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T22:08:40Z",
+  "closed_at": "2026-11-01T22:07:07Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28792",
   "body": "domain:server#5 · os-project-manager · session_01FEkQ5oc56xChD6Wrc4cGSt\n\nFiling gate: ① the finding the director's ruling on #27855 (comment 6556744206, letter C, maintainer 「28590 27855 同意」 2026-11-01T10:29Z) carries to the server seat for the enforce-or-remove channel. Filed by `domain:server` seat 5. Graded by this seat: p3 (no shipped object is known to rely on the split; a display inconsistency, not a wrong stored value), under 「定级你可以自己决定」 (Leehom, 2026-11-01).\n\nReach: any author who declares `options` on a `text` field (the spec allows `options` on every field type).\nReader who acts: a `domain:server` seat (`packages/lint` or the console text cell under `ui/`, depending on the route chosen).\n\n## What happens (read, not measured)\n\n- Analytics resolves a dimension's display label from a declared non-empty `options` list on ANY field type, deliberately (`packages/services/service-analytics/src/dimension-labels.ts`, header lines 9–16: \"the condition is the declared list itself, never the field's type\").\n- Grid grouping reads the same list for its group headers (per the ruling's reading).\n- The text cell renders the stored value and ignores `options`.\n\nSo a text field with `options` shows `backlog` in its cell and `Backlog` in a chart or group header. The declaration is honoured at two faces and silently ignored at the third.\n\n## Wanted (enforce or remove; the route is the dispatching seat's)\n\nEither:\n- **enforce:** the text cell renders the matching option label when the field declares `options` (stored value untouched; unmatched values render as themselves), or\n- **remove:** authoring refuses or warns on `options` declared on a type whose main face does not read them, with the analytics and grouping faces left as they are or aligned.\n\nMeasure first: how many shipped objects (`packages/platform-objects`, `examples/**`, platform apps) declare `options` on a `text` field. The #27855 ruling chose NOT to add display-only `options` to `sys_notification.topic`, so that field is not a reason to enforce.\n\nDedupe: searched `options text field label` and `options \"text field\" dimension`; closed #18923 is the dimension-labels header wording only. **New.**\n\nLinks back: #27855 (ruling 6556744206), #28105."

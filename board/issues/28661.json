@@ -2,8 +2,8 @@
   "number": 28661,
   "kind": "issue",
   "title": "objectql: a published roll-up summary that sums a text field makes every create, update and delete of its child answer 500, though each write lands — the authoring door does not check the summed field's type",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,20 +14,21 @@
     "area:data",
     "bug",
     "domain:server",
-    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [
-    "os-project-manager"
-  ],
+  "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T12:21:55Z",
-  "updated_at": "2026-11-01T19:50:10Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T21:04:51Z",
+  "closed_at": "2026-11-01T21:03:29Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28661",
   "body": "domain:devx#1 · sunhaolin · session_017xRBcVy4VXmkQjn2MGeaWk\n\nFiled by the PM seat for the W3-RT runner `session_017xRBcRX4wwwVw5bEckffdp`, whose own write was refused by its session permissions (RUNNER rule 2: staged text, posted verbatim through the same door).\n\nQA-source: #28656 · studio-authoring.summary-field-authoring · observed beside the clauses\n\n## What happens\n\nThe object-authoring door accepts a `summary` field whose `summaryOperations` is `{function: \"sum\", field: TEXT_FIELD}`. It saves 200, the draft reads `_diagnostics {\"valid\":true}`, and publish-drafts answers `published`. From then on, every write to the child object answers **500 `INTERNAL_ERROR`**: POST, PATCH and DELETE alike. Yet each write has persisted, and the valid sibling roll-ups on the same parent recompute.\n\nClients see a failure for a write that succeeded. A retried create therefore makes a duplicate.\n\n**Expected:** the save door, or at least publish, refuses a `sum` or `avg` whose `field` is not numeric. The Studio picker already offers only numeric fields since #27461; the server door and package source are not covered. Failing that, a recompute failure on one summary should not turn a successful triggering write into an unhandled 500.\n\nSame door, lower severity: a summary naming a child object that does not exist (`qsf_nope`) also publishes with `valid:true` and reads null.\n\nMeasured at framework `6e11a929` (main, 2026-11-01), on a stock showcase boot with a scratch package installed at runtime.\n\n## Reproduction\n\n1. As admin, install a scratch package (`POST /api/v1/packages`, namespace `qsf`). Author `qsf_parent` (`name`) and `qsf_child` (`controlled_by_parent`, with fields `name` text, `memo` text, `amount` number, and `parent` master_detail `required: true`). Add a valid summary `child_sum = sum(amount)` on the parent, publish, and create a parent P and a few children.\n2. `PUT /api/v1/meta/object/qsf_parent?mode=draft&package=PKG` with the existing body plus `fields.probe_sf = {\"type\":\"summary\",\"label\":\"Probe\",\"summaryOperations\":{\"object\":\"qsf_child\",\"function\":\"sum\",\"field\":\"memo\"}}` → 200, `_diagnostics {\"valid\":true}`.\n3. `POST /api/v1/packages/PKG/publish-drafts` → `published`.\n4. Each of these → **500** `{\"code\":\"INTERNAL_ERROR\"}`:\n   - `PATCH /api/v1/data/qsf_child/ID {\"amount\":35}`\n   - `POST /api/v1/data/qsf_child {\"name\":\"x\",\"amount\":60,\"parent\":\"P\"}`\n   - `DELETE /api/v1/data/qsf_child/ID`\n5. Re-read after each: the child shows `amount: 35`; the parent's `child_count` goes 4 → 5 → 4 and `child_sum` recomputes 235 → 295 → 255; `probe_sf` stays null.\n\n## Mechanism\n\n- The authoring rule checks only that `field` is present for `sum`: \"`summaryOperations.function: 'sum'` needs `summaryOperations.field`\". It does not check the field's type against the function.\n- At recompute the engine refuses. The server log shows `WARN Roll-up summary recompute failed … aggregations[0].field sums 'memo', a declared text field, which the engine does not sum`.\n- The resulting `SummaryRecomputeError` (`ERR_SUMMARY_RECOMPUTE`, whose message says \"the triggering records WERE written\") reaches the REST layer unhandled: `[REST] Unhandled error: SummaryRecomputeError`.\n- Related, but a different cause: #7719 (recompute under the caller's context, closed). Not a reopen of #27461, which fixed the Studio picker only."

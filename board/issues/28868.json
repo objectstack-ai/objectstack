@@ -1,0 +1,32 @@
+{
+  "number": 28868,
+  "kind": "issue",
+  "title": "Default record page: no derived highlight strip (declared highlightFields only); the stage field leaves the body when the path draws it; the owner appears once, under one word",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:dispatched"
+  ],
+  "assignees": [
+    "zhuangjianguo"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:06:07Z",
+  "updated_at": "2026-11-02T02:18:04Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28868",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat, part of epic #26676. The seat walked the console on `main` `c064d3a246`, with `examples/app-crm` as the backend, at 1440 / 1100 / 375 px, light and dark. An independent review pass then checked each finding against the code. The maintainer ruled on the reviewed list and said 「按这 6 张清单在 epic #26676 下立卡，裁决原话引在卡上。」 and 「还有刚才立的卡可以交给ui车道处理吗？」 (2026-11-02). So this card goes to the `domain:ui` lane queue. Priority and `area:*` are left to triage. Code readings below are on `main` `3b920f6dd0`.\n\n## Ruling\n\nThe maintainer, on how to tighten the derived strip: 「A1「派生条带」该怎么收紧：没声明就不挑」 (2026-11-02). The seat offered two routes:\n\n- (a) an object that declares no `highlightFields` gets no strip;\n- (b) keep deriving, but never empty the body and never take the owner.\n\nThe maintainer chose (a).\n\n## Observed\n\n1. **Empty overview.** Account Acme Corp has four business fields: industry, annual revenue, website and owner. All four are put into the strip and hidden from the body. The left column then holds only the meta line 「创建于 … · 负责人 · id」.\n2. **Stage twice.** On an opportunity, the stage is drawn by the path bar and again as the body field 阶段. Since #28061 the path itself changes the stage.\n3. **Owner twice, under two words.** On contact Ada, the strip says 「所有者」 and the meta line says 「负责人」. Every derived page shows the owner in both places.\n\n## Reading\n\n- `deriveHighlightFields` (`ui/packages/plugin-detail/src/synth/buildDefaultPageSchema.ts:495`):\n  - It picks up to six fields from a preferred list whose first entries are `owner` / `owner_id` (line 537).\n  - The default page uses it when `highlightFields` is undeclared (line 703), and passes the same list to the body as `hideFields`.\n- It has two more readers, which carry the same strip:\n  - the phone record header, `ui/packages/app-shell/src/views/recordPhoneHeader.ts:69`;\n  - the record hover card's key fields, `ui/packages/app-shell/src/views/record-preview/RecordPreviewCard.tsx:172`.\n- Stage: the path's `statusField` is not in the body's `hideFields`.\n- Owner:\n  - the meta line is `RecordMetaFooter.tsx:290`, `t('detail.owner')`, which is 「负责人」 in `ui/packages/i18n/src/locales/zh.ts:1297`;\n  - the platform label of the system field `owner_id` is 「所有者」 in `packages/spec/src/system/i18n-resolver.ts:3998`.\n\n## Governing text\n\n#27524 item 12: \"Highlights are the object's declared `highlightFields` minus the name field (the title), max 6 … nothing invents one.\" Derivation goes beyond that item, so this card brings the code back to it.\n\n## Target\n\n1. **No derived strip.** An object with no declared `highlightFields` has no strip, so every field stays in the body. This applies to all three readers:\n   - the default page;\n   - the phone header;\n   - the hover card.\n\n   `deriveHighlightFields`'s preferred-name guessing is deleted, not kept behind a flag. A declared strip is unchanged: the declared list minus the name field, max 6.\n2. **Stage once.** When the page draws `record:path`, its `statusField` joins the body's `hideFields`.\n3. **Owner once.** When the strip carries the owner field, the meta line leaves the owner out. Otherwise the meta line keeps it.\n4. **One word for the owner,** used by both the ui key `detail.owner` and the spec system label of `owner_id`, across the ten packs.\n   - The seat recommends 「负责人」 in zh: the person who follows the record up.\n   - The word is not ruled by the maintainer. The claiming seat states its choice in the PR.\n5. No new metadata key and no new gate.\n\nConsequence: `examples/app-crm` declares no `highlightFields`, so its pages lose the strip. #28870 (app-crm hygiene, filed in the same batch) declares them. HotCRM declares them already.\n\n## Acceptance\n\n- An object without `highlightFields` shows no strip on the page, in the phone header or in the hover card, and the body shows every field.\n- An object with `highlightFields` shows exactly the declared list minus the name field.\n- An opportunity with a path has no 阶段 field in the body.\n- The owner appears once on the page, under one word in zh and en.\n- The tests pin each of the four rules.\n"
+}

@@ -1,0 +1,32 @@
+{
+  "number": 28846,
+  "kind": "issue",
+  "title": "automation: subflow guards read top-level nodes only, so a subflow or map inside a region body escapes every subflow guard",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:automation",
+    "domain:server",
+    "finding",
+    "pm:blocked",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T00:14:28Z",
+  "updated_at": "2026-11-02T00:15:20Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28846",
+  "body": "domain:server#3 · os-project-manager · session_01FEkQ5kE5BrPUPNMMyv6oCH\n\nFiling gate: ① out-of-scope finding of the #28840 dev (os-dev-report `6565979681`). Read in the tree by the seat: `subflowTargets` in `packages/services/service-automation/src/subflow-guards.ts` (lines 59–69 on `origin/main`) loops over `flow.nodes` only. Not measured on the wire. Filed by `domain:server` seat 3. ⛔ Not a claim.\n\nReach: every subflow guard reads a flow's child targets through `subflowTargets`:\n- the disabled-subflow arming gate (`declineOntoDisabledSubflows`, re-judged by `rejudgeSubflowCallers`);\n- `packagedSubflowCallers` and `refuseUnderReachingCallers`;\n- `ledgerDisabledChainReaches`;\n- after #28840, the suspending-child reason.\n\nIt walks the top-level `nodes` only. A `subflow` or `map` node inside a region body (`loop`, `parallel` branch, `try_catch` slot) is never listed. A flow can therefore call a disabled or under-reaching child from inside a region and arm anyway. The guards' verdicts depend on where the author places the node, not on what the flow calls.\n\n## Wanted\n\n1. Measure first: a caller whose `subflow` sits in a `loop` body, aimed at a disabled packaged child. Does it arm today, and does a top-level twin decline?\n2. If the region case escapes, `subflowTargets` lists targets at every region depth, reusing the existing region walk (`collectFlowGraphs` in `packages/spec/src/automation/control-flow.zod.ts`) rather than a new walker. Every guard then sees the same set.\n3. ⛔ No new gate: the guards exist, and this fixes what they read.\n\nThis narrows arming: a flow that arms today may decline. So it is `Clause-②: no (narrowing)`, with a `CONTRACT_REVIEW_TIER` review owed. The dev measures shipped flows (showcase, dogfood, hotcrm) for a region-nested `subflow` / `map`.\n\n## Dedupe\n\nRead open issues for `subflowTargets`, `subflow region` and `subflow nested region guard`: only #28840, which consumes `subflowTargets` and is in flight. **New.**\n\nReader who acts: `domain:server` (`packages/services/service-automation`).\n\nLinks back: #28840, #28806, PR #28838"
+}

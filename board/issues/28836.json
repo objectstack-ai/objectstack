@@ -1,0 +1,35 @@
+{
+  "number": 28836,
+  "kind": "pull_request",
+  "title": "fix(objectql)!: the registry fold judges an option patch against the options the owner declares, as the install door and os validate do (#28809)",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T23:11:25Z",
+  "updated_at": "2026-11-02T01:05:58Z",
+  "closed_at": "2026-11-02T01:05:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-02T01:05:56Z",
+  "comments": 6,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28836",
+  "body": "domain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\ndomain:server#1 · os-project-manager · session_01R1q2xdtYgU6FKrZ7LgjPCC\n\nFixes #28809\n\nClause-②: yes (narrowing)\nMetadata-protocol: narrowed\nSkills-docs: none — `skills/**` never names `fieldPatches` (git grep: 0); the rule is taught in `content/docs/data-modeling/object-extensions.mdx`, updated here\n\n## 维护者速读\n\n- **改了什么**：注册表合并判断 `fieldPatches` 的选项补丁时，改为对照对象所有者自己声明的选项，和安装口、`os validate` 用同一个判定、同一份目标。别的扩展（或本扩展）通过 `fields` 重新声明所有者字段时新增的选项，补丁不再生效，日志记一次。\n- **为什么改**：#28791 之后，三处对哪些字段可补丁已一致，但选项仍不一致：合并按已合并的字段判断，安装口和 `os validate` 拒绝。\n- **风险与回滚**：仓库内声明 `fieldPatches` 的包和示例为 0。补丁指向所有者已声明的选项时行为不变。回滚即还原本 PR。\n- **先看**：`packages/objectql/src/registry.ts` 的 `foldExtendersOntoDefinition`（判定移到合并前）、`ownFieldsTarget`、`admittedFieldPatches`。\n- **两分钟验证**：`pnpm --filter @objectstack/objectql exec vitest run src/registry-extension-field-patches.test.ts`，预期 16/16。\n- **需要你做的**：无，席位安排契约复核后落地。\n\n## What changes\n\n- **The fold judges first, against the owner.** Per extension, before the merge, the fold asks `fieldPatchTargetMisses` of `ownFieldsTarget(owner, ownFields, carried)`: the owner's own fields, each as the OWNER declares it. That is the target the install door (`getObjectOwner(name).definition`) and `os validate` read. The merge gets only the admitted patches (`admittedFieldPatches` drops a missed field's patch, or a missed option's entry), and `reportFieldPatchMisses` names exactly the misses. One judge, one verdict, applied and reported from the same answer.\n- **Which fields may be patched is unchanged.** `carried` keeps #28791's rule: an own field the fold carries in record spelling, or one this body redeclares. The array-spelled pin stays green, and `applyFieldPatches` keeps its `ownFields` guard.\n- **No door moves.** No change to `cloud-connection` or `cli` source, no `packages/spec/**`, no new gate, error code or export. `metadata-core` changes one docblock sentence (no code).\n- **Docs.** One bullet in `object-extensions.mdx`: options are the owner's too, plus the residual case.\n\n**Residual (ruling 4), pinned as measured (head `301b4e3d`).** An earlier layer (an extension's `fields` redeclaration, or a tenant overlay base) leaves out an option the owner declares, and a later patch names it. All three readers admit it; `applyFieldPatches` finds no such option, so nothing of it applies. The fold then asks the same judge of the merged fields, which only names, so the patch is named once, as on main. No new rule.\n\n**Clause-② measured: yes (narrowing).** On main the fold applied a patch of an option the owner does not declare whenever it was already on the merged field: one a redeclaring extension folded first adds (served `Banking`), or one a tenant overlay base adds (served `Bulk`). Now neither applies, and each is named once; both doors already refused it.\n\n## Tests\n\n**Round 2 (head `301b4e3d`, contract review should-fixes S1/S2).** 17 tests in the file (6 new). Red on main `663b7c08`: 3 failed | 14 passed (17): the two redeclare cases and the tenant overlay case (wholesale served Bulk). Second-pass ablation (`reportFieldPatchMisses` gets misses only): 2 failed | 15 passed (both residual cases); restore ok, blob == HEAD. Two-minute check: expect 17/17. objectql typecheck in full exit 0 (ledger unchanged 39/233/64); eslint exit 0; objectql full suite 520 files, 9996 tests passed.\n\n<details><summary>Red first, ablation, agreement</summary>\n\n`registry-extension-field-patches.test.ts`, 5 new cases:\n- another extension adds `finance` by redeclaring `industry` (priority 100), and a patcher (200) patches it;\n- the same extension redeclares and patches;\n- control: patcher folded first;\n- control: owner options `tech` and `retail` still apply onto the redeclared field;\n- the residual.\n\nEach asks the door's judge with `getObjectOwner` beside the fold.\n\nRed first: `registry.ts` restored to main `663b7c08` gave `Tests 3 failed | 13 passed (16)`. Both redeclare cases served `Banking`, and the residual named one line. Restore: `git checkout HEAD`, porcelain empty.\n\nAblation (`ablation-replace.mjs`): the judge's target set back to the merged field, which gave the same 3 red. Restore: `ok restored: blob == HEAD`, `git diff HEAD` empty, marker count 0.\n\nAgreement cases (green on main by construction, since the doors already read the owner):\n- install-local 2e refuses `finance` with 422 beside an installed takeover;\n- `findFieldPatchTargetRefusals` refuses it in both the same and another extension.\n</details>\n\n<details><summary>Suites, typecheck, lint, gates, dogfood</summary>\n\nHead `23083aa1`, after a whole-repo `pnpm build` (exit 0), each under the verify lock:\n- objectql: 520 files, 9995 tests;\n- metadata-core: 22 files, 885 tests;\n- cloud-connection: 67 files, 813 tests;\n- cli unit: 368 files, 5195 tests.\n\nAll passed. `tsc --noEmit` exits 0 on all four, and `eslint --no-inline-config` exits 0 on the 5 touched files.\n\nGates: `dispatch-gates.mjs --commands` derived 95; all 95 ran, every exit 0. `--ran`: 95 derived, 95 run, 0 NOT-MEASURED.\n\nDogfood battery (narrowing arm): `pnpm --filter @objectstack/dogfood test`, VERDICT command-exit 0. Test Files 380 passed, 3 skipped; Tests 3114 passed, 28 skipped.\n</details>\n\n## Acceptance notes\n\n- `origin/main` has moved 10 commits since the gates; `git merge-tree` against it is clean. Seat 1's PR #28811 has not landed; whichever lands second merges main once.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_01FEkQ5oTRCUNQ4EA3YV84sZ\n\n"
+}

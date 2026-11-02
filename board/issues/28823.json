@@ -1,0 +1,34 @@
+{
+  "number": 28823,
+  "kind": "pull_request",
+  "title": "docs(spec): postureStampsOrganization docblock names the open stampers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-01T21:49:07Z",
+  "updated_at": "2026-11-01T22:32:21Z",
+  "closed_at": "2026-11-01T22:32:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-01T22:32:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/28823",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-steve\"} -->\n_Requested by **Steve** · [project thread](https://claude.ai/code/project/chan_01FdL1XeUyvVNxLreh3F4Qi9?thread=cmsg_01FdL1XeUyvVNxLreh3F4Qi95tVgzfxNpUQDVe92GxUNjY)_\n\nFixes #28761\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 改了什么：只改 `packages/spec/src/security/tenancy-posture.ts` 中 `postureStampsOrganization` 上方的注释，外加一条 `@objectstack/spec` patch changeset；不改任何代码。\n- 为什么改：旧注释说\"打 organization_id 的是企业版 organizations 运行时，不是开源引擎\"，与代码相反：开源引擎在写入时把记录落到当前组织，SQL 驱动补上缺省的 organization_id。保留真实的一半：启用多组织姿态仍需企业版运行时。\n- 风险与回滚：零运行时风险（仅注释，随 `dist` 的 `.d.ts` 发布）；回滚即 revert 本 PR。\n- 先看：`packages/spec/src/security/tenancy-posture.ts` 的 `postureStampsOrganization` 文档块。\n- 两分钟验证：`git diff origin/main...HEAD -- packages/spec/src/security/tenancy-posture.ts`，预期只见注释行变动、无一行代码变化。\n- 需要你做的：无，席位落地。\n\n## What changes\n\nComments only, plus a `patch` changeset for `@objectstack/spec` (the JSDoc ships in the built declaration chunk, so the published bytes change).\n\nThe `postureStampsOrganization` docblock said \"The STAMPER, however, is the enterprise `@objectstack/organizations` runtime, not the open engine … the open engine only VALIDATES supplied values\". It now says:\n\n- **The stamping is open code** (ADR-0105 D5). The engine lands an insert in the caller's active organization in every posture (`ObjectQL#driverWriteTarget`, body in `packages/objectql/src/engine-driver-options.ts`), and the SQL driver fills an absent `organization_id` from it (`SqlDriver#injectTenantOnInsert`, `packages/drivers/driver-sql/src/sql-driver.ts`).\n- **An explicit value is never overwritten.** Where `@objectstack/plugin-security` installs the wall on the write, it holds that value to the Layer 0 verdict (the `wallJudgesOrganization` seam documented in `packages/objectql/src/engine.ts`).\n- **The enterprise runtime fills an absent value too**, in its write middleware (the `callerKeySets` docblock in `packages/objectql/src/engine.ts` names it), but it is not the only stamper.\n- **Kept, the true half:** activating a walled posture needs that runtime (ADR-0105 D12). The wording follows #28703's merged verify docblock (#28760).\n\n## Tests\n\nNo behaviour changes, so no test was added or changed.\n\n<details><summary>Local runs at head 021a3cf905</summary>\n\n- `pnpm --filter @objectstack/spec build` (under `os-verify-lock`): `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec check:generated`: `VERDICT command-exit 0`, \"All 14 generated artifacts are up to date\".\n- `pnpm --filter @objectstack/spec typecheck`: `VERDICT command-exit 0`.\n- `pnpm --filter @objectstack/spec exec vitest run --maxWorkers=2`: `Test Files 875 passed (875)`, `Tests 24715 passed | 1 todo (24716)`, `VERDICT command-exit 0`.\n- Published-surface check after the build: the new docblock (with \"but it is not the only stamper\") is in `packages/spec/dist/queue.zod-IH5GXQGp.d.ts` / `.d.mts`, directly above `declare function postureStampsOrganization`; \"not the open engine\" has 0 matches in `dist/security/index.d.ts`. `files` includes `dist`.\n\n</details>\n\n## Acceptance notes\n\n- **Where the JSDoc ships.** The card and triage said `dist/security/index.d.ts`. After the build the declaration lives in a shared chunk (`dist/queue.zod-IH5GXQGp.d.ts`) that the security entry re-exports. It still ships, so the changeset level (`patch`) holds.\n- **No consumers.** `postureStampsOrganization` has no caller in this repo (grep at 1617b7fb); only `api-surface/security.json` and `export-origins/security.json` name it, and those record names only, so they did not move.\n\n## Verification\n\n<details><summary>Derived gate families (dispatch-gates --commands, head 021a3cf905)</summary>\n\n- 73 derived families. 72 exited 0 (three after clearing their prerequisites: `--unshallow` for `check-plugin-teardown-shape --self-test`, an objectql + lint closure build for `check:lean-entry-closure` and `check:doc-formula-expressions`).\n- 1 is NOT MEASURED: `pnpm check:dual-build-cjs-loads` exited 3 (`PREREQUISITE NOT MET`, needs a full `pnpm build`). CI runs it.\n- `node scripts/pm/dispatch-gates.mjs --repo objectstack-ai/objectstack --ran FILE`: \"73 derived famil(ies) accounted for — 72 run, 1 NOT-MEASURED (1 DERIVED from a recorded exit 3)\", exit 0.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ADHkmPJS1YYanT5AinLa5h)_\n"
+}

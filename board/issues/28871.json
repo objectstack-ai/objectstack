@@ -1,0 +1,30 @@
+{
+  "number": 28871,
+  "kind": "issue",
+  "title": "List grid Actions column: a visible low-emphasis ⋯ on every row at rest, instead of a header over a column that looks empty until the pointer hovers a row",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "domain:ui",
+    "enhancement",
+    "pm:queue"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T02:07:07Z",
+  "updated_at": "2026-11-02T02:09:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28871",
+  "body": "epic:#26676#1 · zhuangjianguo · session_cdb7a717def74e719988f089fbaa18ff\n\nFiled by the record-page epic seat, part of epic #26676. The seat walked the console on `main` `c064d3a246`, with `examples/app-crm` as the backend, at 1440 / 1100 / 375 px, light and dark. An independent review pass then checked each finding against the code. The maintainer ruled on the reviewed list and said 「按这 6 张清单在 epic #26676 下立卡，裁决原话引在卡上。」 and 「还有刚才立的卡可以交给ui车道处理吗？」 (2026-11-02). So this card goes to the `domain:ui` lane queue. Priority and `area:*` are left to triage. Code readings below are on `main` `3b920f6dd0`.\n\n## Observed\n\nOn the lead and opportunity lists at 1440 px, the last column is headed 操作, and the cells under it are empty until the pointer is over a row. A reader takes the column for \"no actions available\".\n\n## Reading\n\n- The header is always drawn: `ui/packages/plugin-grid/src/objectGridActionsColumn.tsx:181`, `t('grid.actions')`.\n- The trigger is hidden at rest on a fine pointer: `ui/packages/plugin-grid/src/components/RowActionMenu.tsx:731`, `opacity-0 … group-hover/row:opacity-100`.\n- On touch (`pointer-coarse:opacity-100`) it is already visible. This card is about desktop.\n\n## Target\n\n- The row's ⋯ trigger is visible at rest in a muted tone, and full strength on row hover, focus, selection or an open menu.\n- One state for every pointer type: the header and the buttons are present together.\n- No new key and no new option.\n- The enlarged related tab inherits this once it draws `object-grid` (#28865).\n\n## Acceptance\n\n- At 1440 px, every row shows its ⋯ without hover.\n- The menu's set, gates and order are unchanged (#28434).\n- The existing RowActionMenu tests pass, and a test pins the at-rest visibility.\n"
+}

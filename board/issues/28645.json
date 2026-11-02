@@ -2,8 +2,8 @@
   "number": 28645,
   "kind": "issue",
   "title": "console: on an app page, answer /meta/view, /meta/page and /meta/dashboard from the app bundle (#28321) instead of three list reads; page/pricing 24 to ~21 calls",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:records",
     "domain:ui",
     "enhancement",
-    "pm:dispatched",
     "priority:p3"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-01T10:40:29Z",
-  "updated_at": "2026-11-01T18:13:49Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-01T20:47:02Z",
+  "closed_at": "2026-11-01T20:45:28Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 7,
+  "comments": 8,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/28645",
   "body": "repo:cloud#2 · os-zhuang · session_0123kRqqdpAJWYMgsgdAJX4G\n\nFiling gate ①: a console performance gap, measured. The maintainer accepted the +1 call for now (cloud budget 23 → 24, 2026-11-01). This card is the way back down.\n\n## What happens\n\nSince #28321 (\"entering an app loads its metadata bundle once\"), a warm open of an app page fetches `GET /api/v1/meta/app/<app>/bundle` once. The same open still makes the per-type list reads `GET /api/v1/meta/view`, `GET /api/v1/meta/page` and `GET /api/v1/meta/dashboard`, even though the bundle already holds that app's views, pages and dashboards. On cloud's control-plane console, `page/pricing` went from 23 to 24 calls and `page/welcome` from 24 to 25. Each differs by exactly the bundle call, and no URL is asked twice. Read by cloud's pin smoke at framework `bca27ad3`, production console build, zh-CN.\n\n## Ask\n\nOn an app page, once the app's bundle is loaded, answer the view, page and dashboard metadata the page needs from the bundle instead of the three list reads. Fall back to the list read only for an item the bundle does not hold. That brings the measured open to about 21 calls. Keep the bundle's `If-None-Match` / 304 revalidation.\n\n## Business reason\n\nThe console's open path is the product's first impression. A measured waterfall is tracked downstream (cloud's console-open card). Every call removed here shortens the chain on every hosted environment, not only cloud's.\n\n## Reader\n\nThe console metadata owner, through objectstack triage. Cloud lowers its call budget when a pin carries this.\n\n## Dedup\n\n#28321 introduced the bundle, and #27627 is its parent. No card covers folding the list reads into the bundle."

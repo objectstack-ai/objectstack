@@ -1,0 +1,33 @@
+{
+  "number": 28849,
+  "kind": "issue",
+  "title": "4-hourly full run: red on main (CI)",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "github-actions[bot]",
+    "id": 41898282,
+    "type": "Bot"
+  },
+  "labels": [
+    "bug",
+    "domain:devx",
+    "pm:dispatched",
+    "priority:p0"
+  ],
+  "assignees": [
+    "marchtian"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-02T00:32:09Z",
+  "updated_at": "2026-11-02T02:06:51Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/28849",
+  "body": "os-4-hourly-full-run-ci — machine-findable marker for this generated card. ⛔ Do not delete this line: it is how the 4-hourly full run finds this card instead of filing a new one every 4 hours.\n# 4-hourly full run: red on main (CI)\n_Swept 2026-11-02T00:32:07.615Z · [run log](https://github.com/objectstack-ai/objectstack/actions/runs/41365575482) · commit `2cba2eb3f1f50ff1678dfa7b2925e37965b6f9c5` · conclusion `failure`._\n`CI` runs the FULL battery on `main` every 4 hours (#16467, #25771). A `push` run on\n`main` tests only the packages the merge touched, and a merge-queue build tests only what the group\ncontained — so this scheduled run is the only thing that says whether the WHOLE tree is green, and\nthis card is the only channel that reports it. Nothing is blocked by it.\n⛔ The remedy is never to narrow, skip or delete the failing check to make the 4-hourly run green.\nFix what it names and let the next 4-hourly run refresh this card; a card nobody reopens is closed by\nthe next green run being uneventful, not by editing this one.\n## What landed since the last green 4-hourly run\nRange: `d9c4cdc4e5` (run 41344864428, the last green `CI` schedule run) .. `2cba2eb3f1` — [compare](https://github.com/objectstack-ai/objectstack/compare/d9c4cdc4e544f8922952f34878821d4d008547f2...2cba2eb3f1f50ff1678dfa7b2925e37965b6f9c5)\n- `8196881e70` feat(runtime): the per-base customizations read names the package behind each field and flow another package contributes (#28749)\n- `0aaad18fc0` feat(setup): retire Packaged automation's flows half; Packaged actions is its own Setup entry (#28785)\n- `899782b58b` fix(objectql): a package refused while it registers leaves nothing of itself registered (#28790)\n- `c064d3a246` perf(console): write app navigation at page and dashboard create and delete sites (#28783)\n- `1617b7fb91` fix(lint,metadata-protocol,rest,runtime): refuse a sum/avg roll-up the engine cannot recompute, and answer a landed child write's success (#28781)\n- `b9b877ccb0` feat(pm): epic seats open a mailbox and show on the fleet roster (#28751)\n- `516119db19` docs(pm-dispatch): runbook patrol names the per-seat patrol and dedupes review claims by seat (#28759)\n- `c9a9981dae` test(dogfood): pin what the reads serve for a dependent's email template locale the base does not ship (#28779) (#28800)\n- `70bf434385` fix(metadata-protocol): the sealed-overlay boot report no longer counts a served .custom override (#28771) (#28801)\n- `70943dd677` fix: save_notice follow-ups: name the array triggerType, pin the persisted approval round trip, classify the node in flow lint (#28805)\n- `663b7c08ee` fix(objectql,cloud-connection)!: a field patch reaches the owner's own fields only, at the fold and the install door; the install door refuses it with 422 (#28733) (#28791)\n- `2081a5e58e` fix(runtime): the customizations read attributes a contributed field and flow by one stamp rule (#28807)\n- `c5ac1b61e0` fix(service-analytics)!: the draft preview refuses one column asked raw beside its own time bucket, as the live faces do (#28794)\n- `1e019240f9` fix(platform-objects): the Setup Users list and the user record highlights stop showing the legacy role scalar (#28810)\n- `3e05ed1ec2` fix(fields): a text field that declares options reads the option label in its record cell (#28817)\n- `50df124c1a` fix(spec)!: defineConnector() refuses a top-level key the connector does not declare (#28815)\n- `2587485175` fix(objectql): a refused upgrade leaves the installed version serving (#28822)\n- `693e1003c9` feat(studio): customize a read-only base's flow into its pair, with one ledger switch and Restore package original (#28824)\n- `3cb8553c94` docs(spec): postureStampsOrganization docblock names the open stampers (#28823)\n- `1caf67220f` fix(app-shell): Studio and Setup read an item's layered view at the package that owns it (#28825)\n- `2a4c0034ed` fix(metadata-protocol)!: the adopt-orphans door asks the save door's owner judges (another package owns the object; a permission set naming another owner) before the `__c` judge (#28808)\n- `1920e4801a` fix(metadata-protocol)!: an email template locale added in a `.custom` pair is listed and sent on the base's address; a dependent's added locale stays under its own package (#28802) (#28828)\n- `0c1829a28a` feat(metadata-protocol,objectql): an object extension is an authorable item of a writable package, saved, published and exported through the existing doors (#28574) (#28811)\n- `839aae58c2` docs(ui): platform-admin gate examples read isPlatformAdmin, not the legacy user.role scalar (#28832)\n- `892eb668f6` docs(spec): key the fieldPatches example option by a value crm_account.industry stores (#28827)\n- `fa59f78779` fix(service-analytics)!: two granularities of one time dimension are refused on every face, not collapsed to the last one (#28837)\n- `a96bf3ce4b` fix(objectql): a refused first install leaves nothing of itself, even over a tenant's object (#28839)\n- `2cba2eb3f1` feat(spec)!: refuse at publish a save_notice that a suspending node reaches (#28838)\n_Filed by `.github/workflows/scheduled-full-run-card.yml`. Generated by [Claude Code](https://claude.ai/code)_"
+}
