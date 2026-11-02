@@ -4307,6 +4307,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/share-link-redact-fields.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/share-link-redact-fields.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/sharing-rule-provenance.test.ts",
       "verb": "delete",
       "pinned": 1
