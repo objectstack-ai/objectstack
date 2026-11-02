@@ -54,10 +54,36 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
  * the class's static block.
  */
 export interface ProtocolHost {
+    readonly artifactLockLayerAt: ObjectStackProtocolImplementation['artifactLockLayerAt'];
+    readonly baseServesBundleMember: ObjectStackProtocolImplementation['baseServesBundleMember'];
+    readonly convertStoredItem: ObjectStackProtocolImplementation['convertStoredItem'];
+    readonly declinesStoredRow: ObjectStackProtocolImplementation['declinesStoredRow'];
+    readonly disabledActionsOf: ObjectStackProtocolImplementation['disabledActionsOf'];
+    readonly engine: ObjectStackProtocolImplementation['engine'];
+    readonly environmentId: ObjectStackProtocolImplementation['environmentId'];
+    readonly expandStoredViewContainers: ObjectStackProtocolImplementation['expandStoredViewContainers'];
+    readonly findEnvironmentRows: ObjectStackProtocolImplementation['findEnvironmentRows'];
+    readonly flowRegistrationsOf: ObjectStackProtocolImplementation['flowRegistrationsOf'];
+    readonly foldObjectExtendersFromRegistry: ObjectStackProtocolImplementation['foldObjectExtendersFromRegistry'];
+    readonly getServicesRegistry: ObjectStackProtocolImplementation['getServicesRegistry'];
+    readonly governServedObject: ObjectStackProtocolImplementation['governServedObject'];
+    readonly hydrateOverlayIntoRegistry: ObjectStackProtocolImplementation['hydrateOverlayIntoRegistry'];
+    readonly isStoredEntryOfDeclinedName: ObjectStackProtocolImplementation['isStoredEntryOfDeclinedName'];
+    readonly isUnservedSealedOverlay: ObjectStackProtocolImplementation['isUnservedSealedOverlay'];
+    readonly isWritablePackage: ObjectStackProtocolImplementation['isWritablePackage'];
+    readonly lookupArtifactItem: ObjectStackProtocolImplementation['lookupArtifactItem'];
+    readonly namesWithOwnStoredRow: ObjectStackProtocolImplementation['namesWithOwnStoredRow'];
     readonly overrideWriteVerdict: ObjectStackProtocolImplementation['overrideWriteVerdict'];
     readonly packagedArtifactOwner: ObjectStackProtocolImplementation['packagedArtifactOwner'];
     readonly packagedBaseRefusal: ObjectStackProtocolImplementation['packagedBaseRefusal'];
+    readonly readActiveOverlayRows: ObjectStackProtocolImplementation['readActiveOverlayRows'];
+    readonly readFlattenedMetaItems: ObjectStackProtocolImplementation['readFlattenedMetaItems'];
+    readonly rethrowUnlessMetadataStoreUnprovisioned: ObjectStackProtocolImplementation['rethrowUnlessMetadataStoreUnprovisioned'];
+    readonly shippedArtifactsOf: ObjectStackProtocolImplementation['shippedArtifactsOf'];
+    readonly shippingPackagesOf: ObjectStackProtocolImplementation['shippingPackagesOf'];
+    readonly shipsBundleName: ObjectStackProtocolImplementation['shipsBundleName'];
     readonly storedFlowBindingAgrees: ObjectStackProtocolImplementation['storedFlowBindingAgrees'];
+    readonly storedOverlayEntries: ObjectStackProtocolImplementation['storedOverlayEntries'];
     readonly uninstalledNamedBaseRefusal: ObjectStackProtocolImplementation['uninstalledNamedBaseRefusal'];
 }
 
