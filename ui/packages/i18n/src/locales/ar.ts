@@ -7,6 +7,7 @@ const ar = {
     banner: {
       message: 'أنت تنتحل هوية {{user}} — يُسجَّل كل إجراء باسمه.',
       startedBy: 'بدأها المسؤول {{admin}}.',
+      startedByUnnamed: 'بدأها أحد المسؤولين.',
       stop: 'إنهاء انتحال الهوية',
       stopping: 'جارٍ الإنهاء…',
       stopFailed: 'تعذّر إنهاء انتحال الهوية: {{reason}}',

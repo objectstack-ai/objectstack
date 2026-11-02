@@ -7,6 +7,7 @@ const ja = {
     banner: {
       message: '{{user}} になりすまして操作しています。すべての操作はこのユーザーとして記録されます。',
       startedBy: '管理者 {{admin}} が開始しました。',
+      startedByUnnamed: '管理者が開始しました。',
       stop: 'なりすましを終了',
       stopping: '終了しています…',
       stopFailed: 'なりすましを終了できませんでした: {{reason}}',
