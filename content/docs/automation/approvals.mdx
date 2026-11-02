@@ -327,8 +327,10 @@ run is never killed — and the log says both that the fallback fired and that i
 found nobody.
 
 The "previous approver picks the next step's approvers" loop needs no record
-field at all: declare `decisionOutputs: ['next_reviewers']` on node A, have the
-approver decide with `{ outputs: { next_reviewers: ['u2', 'u3'] } }`, and let
+field at all: declare `decisionOutputs: [{ key: 'next_reviewers', multiple: true }]`
+on node A (`multiple: true` because the answer is a list; a bare
+`'next_reviewers'` takes one value), have the approver decide with
+`{ outputs: { next_reviewers: ['u2', 'u3'] } }`, and let
 node B's approver be
 `{ type: 'expression', value: 'vars.<nodeA-id>.next_reviewers' }`. The author
 declares output keys, approvers only fill values; undeclared keys reject the
@@ -339,12 +341,31 @@ multiple: true }` — which renders a multi-select user picker in the decision
 dialog instead of free text (`department` / `team` render the matching
 system-object picker and commit record ids; `position` renders a picker over
 the position registry and commits position machine names; `multiple` collects
-an array of them). The type shapes only the input widget; the whitelist
-still works by `key`, so bare strings and typed declarations mix freely.
+an array of them). The whitelist still works by `key`, so bare strings and
+typed declarations mix freely.
+
+The runtime enforces every declaration at the decision, on an approve and a
+reject alike, before anything is written:
+
+- `multiple: true` takes a list, and only a list, with no entry twice. An
+  absent or `false` `multiple` takes one value. This holds for every entry,
+  `text` and bare strings included.
+- A picker output's values are also resolved, the way the matching
+  `expression` approver's `resolveAs` expands them, in the request's
+  organization: `user`, `department` and `team` by record id, `position` by
+  the machine name of a position someone holds. A position name nobody holds is
+  refused, and so is a `sys_position` record id: either would route to nobody.
+- A mismatch is refused with `400 VALIDATION_FAILED` naming every
+  `outputs.<key>` that does not match. No decision is recorded and the request
+  stays pending, so the approver can decide again.
+
+A `text` output (the default, and every bare-string entry) is judged by shape
+only: its value is free text. A blank value is left to `required`, below.
 
 Add **`required: true`** when the next step cannot run without it — the very
 case above, where node B has nobody to route to if the lead skipped the field.
-Unlike `type` / `multiple`, this one is enforced by the runtime: an **approve**
+Where `type` / `multiple` judge the shape of a value the approver supplies,
+`required` judges whether one is there: an **approve**
 carrying no value (or a blank one — `''`, `[]`) for a required key is rejected
 before any write, so the run can never resume past the node with the key
 missing. A **reject** never requires it: the run leaves down the `reject` edge,
