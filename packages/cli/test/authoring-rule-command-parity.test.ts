@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: three spawns of the source CLI (os lint, os validate, os build) over one planted-defect stack, every one a distinct triple whose exit code is the contract; the nine rule cases run in process; slowest CI reading 12.5 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
+// test-budget: 20 — spawns the real producer once per single-cause fixture: three spawns of the source CLI (os lint, os validate, os build) over one planted-defect stack, every one a distinct triple whose exit code is the contract; the ten rule cases run in process; slowest CI reading 12.5 s (run 41271604267) of the five scheduled CI runs 41199450735, 41217827347, 41237094739, 41255489006, 41271604267, x 1.25, rounded up
 
 /**
  * The BEHAVIOURAL half of #4409, next to the structural ratchet in
@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { AUTHORING_COMMANDS, runAuthoringRules, type AuthoringCommand } from '@objectstack/lint';
 import { childEnv } from './helpers/serve-process.js';
 import { defineStackSource, linkSpec } from './helpers/define-stack-fixture.js';
+import { findFlowRegionRefusals } from '../src/utils/flow-region-shape.js';
 
 const cliBin = join(fileURLToPath(new URL('.', import.meta.url)), '..', 'bin', 'run-dev.js');
 
@@ -145,20 +146,34 @@ const CASES: ReadonlyArray<{ rule: string; blindTo: readonly AuthoringCommand[];
 /**
  * Checks `os validate` and `os build` gate on OUTSIDE the rule table, so
  * `os lint`, which runs only the table, is blind to them. `blindTo` is the same
- * documentation as above; the pin below asserts the blindness, so closing it
- * (registering the check as an authoring rule) reds here and the case moves
- * into `CASES`.
+ * documentation as above; `gate` is the check the two doors call.
+ *
+ * The pin below measures two things on the SAME stack, in process: `gate`
+ * refuses it with a row carrying `marker` (so the fixture really plants the
+ * defect), and the rule registry, run as each `blindTo` command runs it,
+ * reports no finding carrying `marker`. It measures the registry, not the
+ * `os lint` command. Closing the gap (registering the check as an authoring
+ * rule) reds the second half here and the case moves into `CASES`; a fixture
+ * that stops planting the defect reds the first half (#29059) instead of
+ * leaving the blindness assertion vacuously green.
  *
  * - flow region shape (#28893): a `try_catch` region that is not single-exit.
  *   validate and build refuse it with the automation engine's own registration
- *   verdict (`utils/flow-region-shape.ts`, pinned by
- *   `validate-flow-region-shape.test.ts`); `os lint` passes it.
+ *   verdict (`findFlowRegionRefusals`, `utils/flow-region-shape.ts`, pinned
+ *   end to end by `validate-flow-region-shape.test.ts`).
  */
-const OUTSIDE_THE_TABLE: ReadonlyArray<{ check: string; marker: string; blindTo: readonly AuthoringCommand[]; stack: Record<string, unknown> }> = [
+const OUTSIDE_THE_TABLE: ReadonlyArray<{
+  check: string;
+  marker: string;
+  blindTo: readonly AuthoringCommand[];
+  gate: (stack: Record<string, unknown>) => ReadonlyArray<{ message: string }>;
+  stack: Record<string, unknown>;
+}> = [
   {
     check: 'flow region shape (#28893)',
     marker: 'single-exit',
     blindTo: ['lint'],
+    gate: findFlowRegionRefusals,
     stack: withBaseline({
       objects: [{ name: 'parity_task', label: 'Task', sharingModel: 'private', fields: { name: { type: 'text', label: 'Name' } } }],
       flows: [{
@@ -208,6 +223,10 @@ describe('every authoring command reaches the same verdict (#4409)', () => {
   });
 
   it.each(OUTSIDE_THE_TABLE.map((c) => [c.check, c] as const))('%s: a known gap, os lint is still blind to it', (_check, testCase) => {
+    // The fixture plants the defect: the doors' own gate refuses it with the
+    // marker, or the blindness below would hold of a stack nothing refuses.
+    const refused = testCase.gate(testCase.stack).filter((r) => r.message.includes(testCase.marker));
+    expect(refused, JSON.stringify(testCase.gate(testCase.stack), null, 2)).not.toEqual([]);
     for (const command of testCase.blindTo) {
       const findings = runAuthoringRules(command, {
         normalized: testCase.stack,

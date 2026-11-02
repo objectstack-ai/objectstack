@@ -139,8 +139,10 @@ describe('every slot reader takes the caller\'s acting addresses (#21379)', () =
         expect(await detail(bystanderToken, tableRequest)).toBe(404);
 
         // ⭐ …is the default actor's decision answer, row for row.
+        // The bystander does not read the request (404 above), so the door
+        // answers them as it answers an id that names no request.
         const bystanderTry = await approve(bystanderToken, tableRequest);
-        expect([bystanderTry.status, bystanderTry.code]).toEqual([403, 'FORBIDDEN']);
+        expect([bystanderTry.status, bystanderTry.code]).toEqual([404, 'REQUEST_NOT_FOUND']);
         const submitterTry = await approve(submitterToken, tableRequest);
         expect([submitterTry.status, submitterTry.code]).toEqual([403, 'FORBIDDEN']);
         const holderDecision = await approve(holderToken, tableRequest);

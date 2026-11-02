@@ -192,11 +192,14 @@ describe('REST /actions — flow dispatch (#3915)', () => {
 
     it('lets an explicit param win over every seeded key', async () => {
         const execute = vi.fn(async () => ({ success: true }));
-        const { dispatcher } = makeDispatcher({
+        const { dispatcher, ql } = makeDispatcher({
             objectDef: { name: 'crm_lead', actions: [flowAction] },
             automation: { execute },
             record: { id: 'lead_1' },
         });
+        // The caller reads both rows: a record key the caller's own params hand
+        // the run is loaded in the caller's scope too, as the routed row is.
+        ql.find.mockImplementation(async (_object: string, opts: any) => [{ id: opts?.where?.id }]);
 
         await dispatcher.handleActions(
             '/crm_lead/convert_lead/lead_1',
