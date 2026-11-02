@@ -447,7 +447,7 @@ const FAMILIES: Record<string, Record<string, Sources>> = {
     compactToolbar: { named: true, host: false, node: true },
     allowPrinting: { named: true, host: false, node: true },
     showRecordCount: { named: false, host: true, node: false },
-    sharing: { named: { type: 'collaborative' }, host: { type: 'personal' }, node: { type: 'personal', lockedBy: 'node' } },
+    sharing: { named: { lockedBy: 'named' }, host: { lockedBy: 'host' }, node: { lockedBy: 'node' } },
     aria: { named: { ariaLabel: 'Named tasks' }, host: { ariaLabel: 'Host tasks' }, node: { ariaLabel: 'Node tasks' } },
     emptyState: { named: { title: 'Named empty' }, host: { title: 'Host empty' }, node: { title: 'Node empty' } },
   },

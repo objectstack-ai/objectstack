@@ -1028,6 +1028,32 @@ describe('[#28904] the ceremony moves a row of a member the package does not shi
         expect(rowsOf(stores, DIGEST).map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
     });
 
+    it('[#29392] an unshipped locale in a row bound to the package itself (a save naming it, before that write was closed): listed bound, and moved into the pair as its own member', async () => {
+        const stores = new Map<string, Map<string, Record<string, unknown>>>();
+        const first = await boot(stores);
+        await (first.raw as any).getOverlayRepo().put(
+            { type: T, name: DIGEST, org: 'env' },
+            { ...template('zh-CN', `ADMIN ${DIGEST} zh-CN`), name: DIGEST, ...ENVELOPE },
+            { parentVersion: null, actor: null, source: 'older-release', intent: 'override-artifact', packageId: PKG },
+        );
+        const { raw } = await boot(stores);
+        expect(rowsOf(stores, DIGEST).map((r) => [r.packageId, r.member])).toEqual([[PKG, 'zh-CN']]);
+
+        const listed = await census(raw);
+        expect(listed.rows.map((r: any) => [r.name, r.member, r.disposition, r.addedMember, r.base, r.boundToBase]))
+            .toEqual([[DIGEST, 'zh-CN', 'movable', 'zh-CN', PKG, true]]);
+        const result = await migrate(raw);
+        expect(result.outcomes).toEqual([{ id: listed.rows[0].id, outcome: 'moved', packageId: PAIR, addedMember: 'zh-CN' }]);
+        const stored = rowsOf(stores, DIGEST);
+        expect(stored.map((r) => [r.packageId, r.member, r.state])).toEqual([[PAIR, 'zh-CN', 'active']]);
+        expect(stored[0]!.body).not.toHaveProperty('overrides');
+        for (const served of [raw, (await boot(stores)).raw]) {
+            expect(await sentMember(served, DIGEST, 'zh-CN')).toMatchObject({ subject: `ADMIN ${DIGEST} zh-CN`, ...ENVELOPE });
+            expect((await sentMember(served, DIGEST, 'en-US'))?.subject).toBe('PKG digest en');
+        }
+        expect((await migrate(raw)).rows).toEqual([]);
+    });
+
     it('an unshipped locale whose stored body declares the base: the declaration is dropped, as the pair\'s own member carries none', async () => {
         const { stores, raw } = await withUnboundZh(DIGEST, { overrides: { package: PKG, basedOn: '0.9.0' } });
         const result = await migrate(raw);

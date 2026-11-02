@@ -267,14 +267,16 @@
  *     was judged inside the run (the executor fails the action when the
  *     answer lists fewer than sent), so a login sent and absent here is
  *     another actor's later write, said on the row's line;
- *   - the three advisory rows are NOT read back here, by construction, and
- *     that is no missed case. `advisory_report` carries prose (`summary`,
- *     `description`, so it is content-creating for rule ⑤) but no `body`, and
- *     the relay's byte-for-byte read-back cannot apply to it: the seat cannot
- *     read a private report until it is the advisory's collaborator, and the
+ *   - the four advisory rows are NOT read back here, by construction, and
+ *     that is no missed case. `advisory_report` and `advisory_create` carry
+ *     prose (`summary`, `description`, so each is content-creating for rule
+ *     ⑤) but no `body`, and the relay's byte-for-byte read-back cannot apply
+ *     to them: the seat cannot read an unpublished advisory, a report or a
+ *     draft, until it is the advisory's collaborator, and the
  *     executor must not print the answer's text, which is the only other place
  *     the stored bytes could come back from (`ops.mjs`, the advisory rows). It
- *     is confirmed INSIDE the run — a 2xx carrying a `ghsa_id` — and the run
+ *     is confirmed INSIDE the run — a 2xx carrying a `ghsa_id`, a draft's
+ *     reading state `draft` — and the run
  *     names that id in an annotation this file reads and hands on as
  *     `result.annotations.advisories` (`--json`: `advisories`), so the seat
  *     follows with `advisory_collaborators_add` and then reads the report under
@@ -350,8 +352,8 @@
  *
  * ## The run's annotations — the numbers a seat CAN read
  *
- * (An `advisory_report` that landed is annotated too, with its own message —
- * `fleet-write action=<i> op=advisory_report ghsa_id=<id>`, spelled by
+ * (An `advisory_report` or `advisory_create` that landed is annotated too, with its own message —
+ * `fleet-write action=<i> op=<op> ghsa_id=<id>`, spelled by
  * `relayAdvisoryAnnotationMessage` and read by `parseRelayAdvisoryAnnotation`,
  * the id and nothing else — and `readRunAnnotations` hands those rows on as
  * `advisories`. Everything below is the card ops' half.)
@@ -912,8 +914,8 @@ export const RUN_READ_BACK_WINDOW_MS = 60_000;
  * nothing is `unverified` — an object that was not found was not measured.
  * The self-test pins that this table names exactly `BODY_OPS`.
  */
-// ⛔ No locator for `advisory_report`, on purpose: its prose rides `summary` and `description`, never `body`, so it is
-// not in `BODY_OPS`, and a byte-for-byte read-back cannot apply to it — the seat cannot read a private report before it
+// ⛔ No locator for `advisory_report`, on purpose — nor for `advisory_create`, the same shape: its prose rides `summary`
+// and `description`, never `body`, so it is not in `BODY_OPS`, and a byte-for-byte read-back cannot apply to it — the seat cannot read a private report before it
 // is a collaborator, and the executor must not print the answer that holds the stored bytes. Its confirmation is the
 // executor's (a 2xx carrying an id) and its id reaches the seat as an advisory annotation (header, "How the callers").
 export const READ_BACK_LOCATORS = Object.freeze({
@@ -1090,17 +1092,17 @@ export function parseRelayAnnotation(message) {
 
 /**
  * The ops whose landing the executor reports as an ADVISORY annotation — the
- * one that files a report, whose id the seat needs for its next stroke
- * (`advisory_collaborators_add`): the App files it, so the finding seat is no
- * collaborator until that stroke lands. The message is
+ * two that file a finding, a private report or a draft advisory, whose id the
+ * seat needs for its next stroke (`advisory_collaborators_add`): the App files
+ * either, so the finding seat is no collaborator until that stroke lands. The message is
  * `fleet-write action=<i> op=<op> ghsa_id=<id>` and names nothing else — an id
  * exposes no content, and the run log is public (`ops.mjs`, the advisory rows).
  */
-export const ADVISORY_ANNOTATED_OPS = Object.freeze(['advisory_report']);
+export const ADVISORY_ANNOTATED_OPS = Object.freeze(['advisory_report', 'advisory_create']);
 
 const RELAY_ADVISORY_ANNOTATION_SHAPE = new RegExp(`^${RELAY_ANNOTATION_PREFIX} action=([1-9][0-9]*) op=([a-z_]+) ghsa_id=(GHSA(?:-[0-9a-z]{4}){3})$`);
 
-/** The message of the one annotation the executor emits for a landed advisory report. Pure. */
+/** The message of the one annotation the executor emits for a landed advisory report or draft. Pure. */
 export function relayAdvisoryAnnotationMessage({ action, op, ghsaId }) {
   return `${RELAY_ANNOTATION_PREFIX} action=${action} op=${op} ghsa_id=${ghsaId}`;
 }
@@ -1389,7 +1391,7 @@ async function runAnnotationsFor(payload, run, deps) {
   }
   // A report has no fallback a seat can read: until it is a collaborator, the advisory is invisible to it.
   for (const a of filing) {
-    if (!filed.rows.some((r) => r.action === a.action)) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s advisory id — the run's summary row holds it, which a seat container cannot read, and the seat cannot list the repository's reports: ask the maintainer for the id; ⛔ do not re-send the report.`);
+    if (!filed.rows.some((r) => r.action === a.action)) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s advisory id — the run's summary row holds it, which a seat container cannot read, and the seat cannot list the repository's advisories: ask the maintainer for the id; ⛔ do not re-send the ${a.op === 'advisory_create' ? 'draft' : 'report'}.`);
   }
   return { state: read.state, rows, ignored, advisories: filed.rows, why: read.why };
 }
@@ -1743,7 +1745,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   "the pull request body at the seat's door: an issue_patch body signed only by its LAST-line trailer passes when the platform answers its target is a pull request, before the dry-run exit; an issue, an unread target and a trailer-less body are refused; comment_edit takes no trailer": 19,
   "the run_rerun_failed stroke at the seat: it packs as ONE action carrying run_id alone and travels in ONE dispatch; beside any other action, or with a key that widens it, it is refused before anything is sent; it creates no content, carries no body and names no workflow, so nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 6,
   "the hierarchy link at the seat: an epic's children pack as sub_issue_add actions carrying the parent and the child by number alone, beside other issue ops in ONE dispatch; a self-link, an id or a replace_parent is refused before anything is sent; neither row creates content, carries a body or names a workflow, so the stroke is paced at rule ①'s gap and nothing is read back here — a success run is the executor's confirmation; a run that failed at the relay's fence is exit 5 after ONE dispatch, never re-sent": 5,
-  "the advisory rows at the seat: a report, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, published or a key that carries content, refused before anything is sent and never echoing a value; the report creates content but carries no body, so nothing is read back — by construction, said where the read-back is decided — and its id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 12,
+  "the advisory rows at the seat: a report, a draft, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id or package, published or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent": 14,
 });
 // Raised 21 → 22 with the run_rerun_failed seat battery, 22 → 23 with the signature battery, 23 → 24 with the
 // hierarchy link seat battery, 24 → 25 with the pull request body battery, 25 → 26 with the advisory rows' seat
@@ -2133,9 +2135,9 @@ export async function selfTest() {
       // The board after a batched stroke of comments: each one stored as sent, the batch gap apart — so it reads back clean.
       const board = (n) => ({ [`GET /repos/objectstack-ai/objectstack/issues/${ACTIONS[0].issue}/comments`]: { status: 200, json: comments(n).map((c, i) => ({ id: 501 + i, created_at: at(8_000 + i * GAP), body: c.body })) } });
       t(
-        'the content-creating ops, derived from the table: the creates of a comment, an issue, a pull and a private advisory report, and the transfer that creates the card on its target — no edit, label, assignee, reviewer, flag, base sync, workflow dispatch, collaborator or state change',
+        'the content-creating ops, derived from the table: the creates of a comment, an issue, a pull, a private advisory report and a draft advisory, and the transfer that creates the card on its target — no edit, label, assignee, reviewer, flag, base sync, workflow dispatch, collaborator or state change',
         [[...CONTENT_CREATING_OPS].sort(), OP_NAMES.filter((op) => !CONTENT_CREATING_OPS.includes(op)).sort()],
-        [['advisory_report', 'comment', 'issue_create', 'pr_create', 'transfer'], OP_NAMES.filter((op) => !['advisory_report', 'comment', 'issue_create', 'pr_create', 'transfer'].includes(op)).sort()],
+        [['advisory_create', 'advisory_report', 'comment', 'issue_create', 'pr_create', 'transfer'], OP_NAMES.filter((op) => !['advisory_create', 'advisory_report', 'comment', 'issue_create', 'pr_create', 'transfer'].includes(op)).sort()],
       );
       t('…every op that creates or moves a card (ANNOTATED_OPS) is among them', Object.keys(ANNOTATED_OPS).every((op) => CONTENT_CREATING_OPS.includes(op)));
       const row = (first) => ({ required: ['title'], optional: [], requests: () => [first] });
@@ -2536,18 +2538,19 @@ export async function selfTest() {
     }
 
     // ── the advisory rows at the seat ───────────────────────────────────────
-    battery("the advisory rows at the seat: a report, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id, published or a key that carries content, refused before anything is sent and never echoing a value; the report creates content but carries no body, so nothing is read back — by construction, said where the read-back is decided — and its id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent");
+    battery("the advisory rows at the seat: a report, a draft, an advisory's collaborators and its state each pack as ONE action in a stroke of its own and travel in ONE dispatch; beside another action, with a malformed id or package, published or a key that carries content, refused before anything is sent and never echoing a value; the report and the draft create content but carry no body, so nothing is read back — by construction, said where the read-back is decided — and each one's id comes back as an advisory annotation the seat reads and hands on; the two id rows read nothing back; a run that failed is exit 5 after ONE dispatch, never re-sent");
     {
       const REPO = 'objectstack-ai/objectstack';
       // A made-up id: the fixture names no real advisory.
       const GHSA = 'GHSA-abcd-2345-wxyz';
       const MARKER = 'ADVISORY MARKER: never in a seat line';
       const REPORT = { op: 'advisory_report', summary: `${MARKER} — summary`, description: `${MARKER} — description`, severity: 'low', cwe_ids: ['CWE-79'] };
+      const DRAFT = { op: 'advisory_create', summary: `${MARKER} — summary`, description: `${MARKER} — description`, packages: ['@objectstack/rest'], severity: 'low', cwe_ids: ['CWE-863'] };
       const ADD = { op: 'advisory_collaborators_add', ghsa_id: GHSA, collaborators: ['os-dev-a'] };
       const MOVE = { op: 'advisory_state', ghsa_id: GHSA, advisory_state: 'draft' };
       const pack = (actions) => packRequest({ repo: REPO, session: SESSION, actions, requestId: 'fw-test-1' });
-      const packed = [REPORT, ADD, MOVE].map((a) => pack([a]));
-      t('each row packs as ONE action carrying exactly its keys, in a stroke of its own', packed.map((p) => [p.ok, p.payload?.actions]), [REPORT, ADD, MOVE].map((a) => [true, [a]]), packed.flatMap((p) => p.errors).join(' | '));
+      const packed = [REPORT, ADD, MOVE, DRAFT].map((a) => pack([a]));
+      t('each row packs as ONE action carrying exactly its keys, in a stroke of its own', packed.map((p) => [p.ok, p.payload?.actions]), [REPORT, ADD, MOVE, DRAFT].map((a) => [true, [a]]), packed.flatMap((p) => p.errors).join(' | '));
       const refused = (actions) => {
         const p = pack(actions);
         return { ok: p.ok, payload: p.payload, errors: p.errors };
@@ -2559,18 +2562,22 @@ export async function selfTest() {
         [[{ ...MOVE, advisory_state: 'published' }], 'actions[0].advisory_state is "published", refused by name'],
         [[{ ...REPORT, vulnerabilities: [{ package: MARKER }] }], 'actions[0].vulnerabilities is not a key `advisory_report` takes'],
         [[{ ...REPORT, severity: MARKER }], 'actions[0].severity must be one of'],
+        [[DRAFT, REPORT], 'actions[1] is `advisory_report` in a stroke that carries a `advisory_create`'],
+        [[{ ...DRAFT, packages: [MARKER] }], 'actions[0].packages[0] must be an npm package name'],
+        [[{ ...DRAFT, vulnerabilities: [{ package: { ecosystem: 'npm', name: MARKER } }] }], 'actions[0].vulnerabilities is not a key `advisory_create` takes'],
       ];
       const judged = cases.map(([actions, needle]) => {
         const p = refused(actions);
         return [!p.ok && p.payload === null, p.errors.some((e) => e.includes(needle)), p.errors.some((e) => e.includes('ADVISORY MARKER'))];
       });
-      t('⛔ refused at the packer, before anything is sent: a report beside a comment, two advisory rows together, a malformed id, published, a vulnerabilities key and a severity carrying prose — each named, and ⛔ no refusal echoes the marker', judged, cases.map(() => [true, true, false]));
+      t('⛔ refused at the packer, before anything is sent: a report beside a comment, two advisory rows together, a malformed id, published, a vulnerabilities key and a severity carrying prose, a draft beside a report, a package that is prose and a draft carrying its own vulnerabilities — each named, and ⛔ no refusal echoes the marker', judged, cases.map(() => [true, true, false]));
       const reportStroke = packed[0].payload;
       const pacing = strokePacing(reportStroke);
-      t('derived from the table: the report creates content but is no body op, no run op and no card annotation — an advisory annotation instead — with no read-back locator and no read-back target; the two id rows are none of these; each stroke is ONE write, never batched', [['advisory_report', 'advisory_collaborators_add', 'advisory_state'].map((op) => [CONTENT_CREATING_OPS.includes(op), BODY_OPS.includes(op), RUN_OPS.includes(op), Object.hasOwn(ANNOTATED_OPS, op), ADVISORY_ANNOTATED_OPS.includes(op), op in READ_BACK_LOCATORS]), readBackTargets(reportStroke), pacing.writes, pacing.batched], [[[true, false, false, false, true, false], [false, false, false, false, false, false], [false, false, false, false, false, false]], [], 1, false]);
+      const draftStroke = packed[3].payload;
+      t('derived from the table: the report and the draft create content but are no body op, no run op and no card annotation — an advisory annotation instead — with no read-back locator and no read-back target; the two id rows are none of these; each stroke is ONE write, never batched', [['advisory_report', 'advisory_create', 'advisory_collaborators_add', 'advisory_state'].map((op) => [CONTENT_CREATING_OPS.includes(op), BODY_OPS.includes(op), RUN_OPS.includes(op), Object.hasOwn(ANNOTATED_OPS, op), ADVISORY_ANNOTATED_OPS.includes(op), op in READ_BACK_LOCATORS]), readBackTargets(reportStroke), readBackTargets(draftStroke), pacing.writes, pacing.batched, strokePacing(draftStroke).writes, strokePacing(draftStroke).batched], [[[true, false, false, false, true, false], [true, false, false, false, true, false], [false, false, false, false, false, false], [false, false, false, false, false, false]], [], [], 1, false, 1, false]);
       const own = readReal(SELF_PATH, 'utf8');
       const at = own.indexOf('export const READ_BACK_LOCATORS');
-      t('⛔ the read-back that cannot apply is said WHERE the read-back is decided: the lines above READ_BACK_LOCATORS name advisory_report and why', [at > 0, own.slice(Math.max(0, at - 600), at).includes('No locator for `advisory_report`, on purpose')], [true, true]);
+      t('⛔ the read-back that cannot apply is said WHERE the read-back is decided: the lines above READ_BACK_LOCATORS name advisory_report and advisory_create and why', [at > 0, own.slice(Math.max(0, at - 700), at).includes('No locator for `advisory_report`, on purpose'), own.slice(Math.max(0, at - 700), at).includes('nor for `advisory_create`')], [true, true, true]);
       // The advisory annotation: one spelling, read back exactly.
       const NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: GHSA });
       t('the advisory annotation is one spelling the reader reads back exactly — and nothing else: a card op\'s message, an id row, a malformed id, trailing text or null', [NOTE, parseRelayAdvisoryAnnotation(NOTE), [relayAnnotationMessage({ action: 1, op: 'issue_create', number: 9, url: `https://github.test/${REPO}/issues/9` }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_state', ghsaId: GHSA }), relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_report', ghsaId: 'GHSA-ABCD-2345-WXYZ' }), `${NOTE} ${MARKER}`, null].map(parseRelayAdvisoryAnnotation)], [`fleet-write action=1 op=advisory_report ghsa_id=${GHSA}`, { action: 1, op: 'advisory_report', ghsaId: GHSA }, [null, null, null, null, null]]);
@@ -2582,8 +2589,13 @@ export async function selfTest() {
       t('⭐ a filed report: ONE dispatch carrying it as judged, nothing read back at the target, and the run\'s advisory annotation handed on as the id to follow with — said in one line — exit 0', [sent.length, sent[0]?.body?.client_payload?.actions, filed.state, filed.readBack?.state, atTarget.length, filed.annotations?.advisories, filed.logs.some((l) => l.includes(`advisory ${GHSA}`) && l.includes('advisory_collaborators_add')), exitForResult(filed)], [1, [REPORT], 'success', 'none', 0, [{ action: 1, op: 'advisory_report', ghsaId: GHSA }], true, EXIT_OK], filed.logs.join(' | '));
       const unnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: reportStroke });
       t('a filed report no annotation names: still exit 0 — the run confirmed it — no id handed on, and one line saying where the id is and that the report is never re-sent', [unnamed.state, unnamed.annotations?.advisories, unnamed.logs.some((l) => l.includes("action 1 advisory_report's advisory id") && l.includes('do not re-send')), exitForResult(unnamed)], ['success', [], true, EXIT_OK], unnamed.logs.join(' | '));
+      const DRAFT_NOTE = relayAdvisoryAnnotationMessage({ action: 1, op: 'advisory_create', ghsaId: GHSA });
+      const drafted = await drive({ runs: () => [RUN('completed', 'success')], notes: () => ({ status: 200, json: [RUNNER_NOTICE, { ...withNote, title: 'fleet-write advisory_create', message: DRAFT_NOTE }] }) }, { stroke: draftStroke });
+      t('⭐ a created draft: ONE dispatch carrying it as judged, nothing read back at the target, and the run\'s advisory annotation — its own spelling, read back exactly — handed on as the id to follow with; exit 0', [DRAFT_NOTE, parseRelayAdvisoryAnnotation(DRAFT_NOTE), drafted.seen.filter((s) => s.call === DISPATCH).map((s) => s.body?.client_payload?.actions), drafted.state, drafted.readBack?.state, drafted.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, drafted.annotations?.advisories, drafted.logs.some((l) => l.includes(`advisory ${GHSA}`) && l.includes('advisory_collaborators_add')), exitForResult(drafted)], [`fleet-write action=1 op=advisory_create ghsa_id=${GHSA}`, { action: 1, op: 'advisory_create', ghsaId: GHSA }, [[DRAFT]], 'success', 'none', 0, [{ action: 1, op: 'advisory_create', ghsaId: GHSA }], true, EXIT_OK], drafted.logs.join(' | '));
+      const draftUnnamed = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: draftStroke });
+      t('a created draft no annotation names: still exit 0, no id handed on, and one line saying to ask the maintainer and never to re-send the draft', [draftUnnamed.annotations?.advisories, draftUnnamed.logs.some((l) => l.includes("action 1 advisory_create's advisory id") && l.includes('do not re-send the draft')), exitForResult(draftUnnamed)], [[], true, EXIT_OK], draftUnnamed.logs.join(' | '));
       const idRows = [];
-      for (const p of packed.slice(1)) {
+      for (const p of packed.slice(1, 3)) {
         const r = await drive({ runs: () => [RUN('completed', 'success')] }, { stroke: p.payload });
         idRows.push([r.state, r.readBack?.state, r.annotations?.state, r.seen.filter((s) => s.call === DISPATCH).length, r.seen.filter((s) => !s.call.includes(`/repos/${RELAY_REPO}/`)).length, exitForResult(r)]);
       }
@@ -2593,8 +2605,8 @@ export async function selfTest() {
         const r = await drive({ runs: () => [RUN('completed', 'failure')] }, { stroke: p.payload });
         failed.push([r.state, exitForResult(r), r.seen.filter((s) => s.call === DISPATCH).length, r.seen.filter((s) => s.call !== DISPATCH && !s.call.startsWith('GET ')).length]);
       }
-      t('⛔ a run that failed — a fence refused it, or the answer did not show the result — is exit 5 after ONE dispatch for each row, never re-sent and never a direct write', failed, [0, 1, 2].map(() => ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]));
-      t('⛔ no seat line of those runs carries the report\'s text', [filed, unnamed].some((r) => r.logs.some((l) => l.includes('ADVISORY MARKER'))), false);
+      t('⛔ a run that failed — a fence refused it, or the answer did not show the result — is exit 5 after ONE dispatch for each row, never re-sent and never a direct write', failed, [0, 1, 2, 3].map(() => ['failure', EXIT_PLATFORM_REFUSAL, 1, 0]));
+      t('⛔ no seat line of those runs carries the report\'s or the draft\'s text', [filed, unnamed, drafted, draftUnnamed].some((r) => r.logs.some((l) => l.includes('ADVISORY MARKER'))), false);
       // The CLI hands the id on in --json, beside the card annotations.
       writeFileSync(join(dir, 'advisory-report.json'), JSON.stringify([REPORT]), 'utf8');
       let nowMs = T0;
@@ -3104,7 +3116,7 @@ export async function selfTest() {
       "only after a lagging issue list was re-read on its bounded schedule — unless the run's annotation named the new number, which is read at once and never listed — the create never re-sent; " +
       "a started workflow run read back from the target's run list within a bounded window, UNCONFIRMED (6) when it is not there; " +
       "a batched stroke waited for as long as the runner is told to pause, and one the relay job cannot hold refused before it leaves; " +
-      "an advisory report never read back, by construction, its id handed on from the run's advisory annotation; " +
+      "an advisory report or draft never read back, by construction, its id handed on from the run's advisory annotation; " +
       'and every relay sender, discovered from the source, answering an accepted dispatch with no run, or none completed, UNCONFIRMED (6) with ZERO direct writes, under auto as under dispatch (the no-run conformance).',
   );
   selfTestReachedVerdict = true;

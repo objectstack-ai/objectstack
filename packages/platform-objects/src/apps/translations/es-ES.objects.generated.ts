@@ -244,6 +244,17 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
           }
         }
       },
+      list_platform_admins: {
+        label: "Administradores de la plataforma",
+        resultDialog: {
+          title: "Administradores de la plataforma",
+          description: "Todas las personas que tienen ahora la condición de administrador de la plataforma: una concesión admin_full_access vigente propiedad de la Organización predeterminada, o una dirección verificada en la lista de propietarios de la implementación.",
+          acknowledge: "Cerrar",
+          fields: {
+            entries: "Administradores de la plataforma"
+          }
+        }
+      },
       update_my_profile: {
         label: "Actualizar perfil",
         successMessage: "Perfil actualizado"

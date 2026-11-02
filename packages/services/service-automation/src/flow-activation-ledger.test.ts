@@ -67,8 +67,8 @@ function packagedFlow(name: string, startConfig: Record<string, unknown> = {}, e
 
 /** [#27966] What a caller reads for a flow switched off in the activation ledger. */
 const LEDGER_SENTENCE =
-    'This flow is turned off for this deployment. An administrator can turn it on again under '
-    + 'Setup › Packaged automation, or copy it there under a new name.';
+    'This flow is turned off for this deployment. An administrator can turn it on again '
+    + "in its package's Automations in Studio, or copy it there under a new name.";
 
 /** A recording trigger, so binding state is asserted for real rather than inferred. */
 function recordingTrigger(type: string) {
@@ -241,8 +241,8 @@ describe('ADR-0126 §7.2 — a ledger-disabled flow refuses at the execute() sea
         // meanwhile: flow clone is chartered (ADR-0126 §7.2), so the copy is
         // offered, unlike the action sentence.
         expect(refused.error).toBe(
-            'This flow is turned off for this deployment. An administrator can turn it on again under '
-            + 'Setup › Packaged automation, or copy it there under a new name.',
+            'This flow is turned off for this deployment. An administrator can turn it on again '
+            + "in its package's Automations in Studio, or copy it there under a new name.",
         );
         expect(refused.error).not.toContain('sys_metadata_activation');
         expect(refused.error).not.toMatch(/ADR-\d+/);
@@ -296,8 +296,8 @@ describe('ADR-0126 §7.2 — a ledger-disabled flow refuses at the execute() sea
         expect(refused.error).toBe("Flow 'obsolete_flow' is disabled");
         // The point of the distinction: an operator reading this must not be
         // sent to the activation switch for an authoring-state problem.
-        // [#27966] The switch is now named by its Setup page, not its table.
-        expect(refused.error).not.toContain('Packaged automation');
+        // [#27966] The switch is named by where it is, not by its table.
+        expect(refused.error).not.toContain('turn it on again');
     });
 
     it('a ledger-disabled flow stays disabled across re-registration (publish / hot reload / boot pull)', async () => {

@@ -18,6 +18,10 @@
 // commit as not in the path's package, and writes nothing: the items are
 // untouched and the commit's own package keeps the history it had. An
 // unknown package id answers the sibling doors' `404 Package 'ID' not found`.
+// A package that was installed, committed to and then uninstalled is an
+// unknown id too: its commits stay in the trail (`GET /:id/commits` still
+// lists them), and its own revert and rollback paths answer that same 404
+// and write nothing.
 // Controls: the same revert and rollback through the commit's own package
 // still answer 200 and record their commits; a member without
 // `manage_metadata` is still refused 403 first.
@@ -49,6 +53,7 @@ const SHOWCASE = 'com.example.showcase';
 const OVERLAY = 'showcase_task.default';
 const A = 'app.cmtprobe-a';
 const B = 'app.cmtprobe-b';
+const GONE = 'app.cmtprobe-gone';
 
 const object = (name: string, label: string) => ({
   name,
@@ -131,6 +136,35 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
     const rollback = await call('POST', '/packages/app.cmtprobe-nosuch/rollback', { commitId: target.id });
     expect(rollback.status, JSON.stringify(rollback.json)).toBe(404);
     expect(JSON.stringify(rollback.json)).toContain("Package 'app.cmtprobe-nosuch' not found");
+  });
+
+  it('an uninstalled package\'s commit is refused 404 through its own revert and rollback path, and writes nothing', async () => {
+    const created = await call('POST', '/packages', {
+      manifest: { id: GONE, name: 'Commit probe gone', version: '0.1.0', type: 'app', namespace: 'cmtpg' },
+    });
+    expect(created.status, JSON.stringify(created.json)).toBe(201);
+    await publishObject(GONE, 'cmtpg_first', 'Gone first');
+    const before = await commitsOf(GONE);
+    const target = before.find((c) => c.operation === 'apply')!;
+    expect(target).toBeDefined();
+
+    const uninstalled = await call('DELETE', `/packages/${GONE}`);
+    expect(uninstalled.status, JSON.stringify(uninstalled.json)).toBe(200);
+    expect(await isServed('cmtpg_first')).toBe(false);
+    // The trail outlives the package's registry entry.
+    expect(await commitsOf(GONE)).toEqual(before);
+
+    const revert = await call('POST', `/packages/${GONE}/commits/${target.id}/revert`, {});
+    expect(revert.status, JSON.stringify(revert.json)).toBe(404);
+    expect(revert.json?.error?.code, JSON.stringify(revert.json)).toBe('RESOURCE_NOT_FOUND');
+    expect(revert.json?.error?.message).toBe(`Package '${GONE}' not found`);
+    const rollback = await call('POST', `/packages/${GONE}/rollback`, { commitId: target.id });
+    expect(rollback.status, JSON.stringify(rollback.json)).toBe(404);
+    expect(rollback.json?.error?.code, JSON.stringify(rollback.json)).toBe('RESOURCE_NOT_FOUND');
+    expect(rollback.json?.error?.message).toBe(`Package '${GONE}' not found`);
+
+    expect(await commitsOf(GONE)).toEqual(before);
+    expect(await isServed('cmtpg_first')).toBe(false);
   });
 
   it('control: a member without manage_metadata is refused 403 first', async () => {
