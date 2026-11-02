@@ -97,6 +97,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
       crm_opportunity_line_item: {
         label: '产品明细',
         pluralLabel: '产品明细',
+        description: '商机报价中的一行产品。',
         fields: {
           opportunity: { label: '商机', inlineTitle: '产品明细' },
           product: { label: '产品' },
@@ -110,6 +111,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
       crm_account: {
         label: '客户',
         pluralLabel: '客户',
+        description: '向其销售产品或提供服务的企业。',
         fields: {
           name: { label: '客户名称' },
           industry: {
@@ -130,6 +132,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
       crm_contact: {
         label: '联系人',
         pluralLabel: '联系人',
+        description: '与客户相关的联系人。',
         fields: {
           first_name: { label: '名' },
           last_name: { label: '姓' },
@@ -141,6 +144,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
       crm_opportunity: {
         label: '商机',
         pluralLabel: '商机',
+        description: '与客户关联的潜在销售机会。',
         fields: {
           name: { label: '商机名称' },
           account: { label: '客户' },
@@ -191,10 +195,17 @@ export const CrmTranslationBundle = defineTranslationBundle({
         _sections: {
           opportunity: { label: '商机' },
         },
+        // The words a rejected save shows.
+        _validations: {
+          discount_cap: { message: '未经特批，折扣不能超过 40%。' },
+          opp_close_date_not_past: { message: '预计成交日期不能早于今天。' },
+          opp_stage_transitions: { message: '商机不能变更到这个阶段。' },
+        },
       },
       crm_lead: {
         label: '线索',
         pluralLabel: '线索',
+        description: '尚未确认为商机的潜在客户。',
         fields: {
           name: { label: '线索名称' },
           email: { label: '邮箱' },
@@ -250,10 +261,16 @@ export const CrmTranslationBundle = defineTranslationBundle({
           conversion: { label: '转化' },
           notes: { label: '备注' },
         },
+        // The words a rejected save shows.
+        _validations: {
+          lead_status_transitions: { message: '线索不能变更到这个状态。' },
+          lead_score_range: { message: '线索评分必须在 0 到 100 之间。' },
+        },
       },
       crm_activity: {
         label: '活动',
         pluralLabel: '活动',
+        description: '与客户关系记录相关的一次互动（电话、邮件、会议或任务）。',
         fields: {
           subject: { label: '主题' },
           type: {
@@ -362,6 +379,13 @@ export const CrmTranslationBundle = defineTranslationBundle({
           total_amount: { label: '总金额' },
           avg_amount: { label: '平均成交额' },
         },
+      },
+    },
+    pages: {
+      crm_welcome: {
+        label: '欢迎页',
+        title: '欢迎使用客户管理',
+        subtitle: '管理客户、联系人和商机。',
       },
     },
     // The lead-conversion wizard: the flow's name in the runner header and
