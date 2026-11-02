@@ -58,8 +58,11 @@
  *
  * An app item without a package id (an app created in the console) has no
  * package to scope by: an object's route reads the same names by name through
- * the names-only scope (objectstack#29416), and its root keeps the whole
- * registry.
+ * the names-only scope (objectstack#29416), and so does its root
+ * (objectstack#29552): the objects the app's entries require, and the
+ * navigation's while the command palette is open, never the whole registry.
+ * The root lands on its first entry, which reads its own names; a root with
+ * no name to ask reads nothing.
  *
  * Two readers ask the same question with the same answer: `AppContent`, which
  * renders the route, and the console root (`ConsoleShell`), which asks it as
@@ -518,9 +521,12 @@ export function readAppObjectScope(
     // objectstack#29416 — an app with no package: an object's route reads its
     // names by name through the names-only scope (the route's object, its
     // lookup targets and the app's `requiresObject` entries), as an app whose
-    // package holds no objects does below. The app's root keeps the whole
-    // registry, as there. Until the app list names the app, nothing is read.
-    if (!app || !route.objectName) return { candidate, scope: null, ready: false, ...NOT_READ };
+    // package holds no objects does below. objectstack#29552 — so does the
+    // app's root, with no route object: measured on a production Console, a
+    // console-created app's root read the whole object registry (553 KB on
+    // app-crm) before it landed on its first entry. Until the app list names
+    // the app, nothing is read.
+    if (!app) return { candidate, scope: null, ready: false, ...NOT_READ };
     return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, undefined) };
   }
   // The package list first: no name is asked until it has answered.
@@ -551,8 +557,10 @@ function readObjectRouteNames(
   search: string,
   packageId: string | undefined,
 ): Omit<AppObjectScopeRead, 'candidate'> {
+  // With no package and no name, nothing: the provider reads an empty
+  // names-only ask as the whole registry (objectstack#29552, an app's root).
   const read = (names: readonly string[]): AppObjectScope =>
-    packageId ? readObjectScope({ packageId, names }) : readObjectScope({ names });
+    packageId ? readObjectScope({ packageId, names }) : names.length > 0 ? readObjectScope({ names }) : NO_OBJECT_SCOPE;
   const routeRead = read(objectName ? [objectName] : []);
   const ready = routeReadDone(routeRead);
   const routeOutcome = { failedNames: failedNamesOf(routeRead), routeObjectRefusal: refusalOf(routeRead, objectName) };
