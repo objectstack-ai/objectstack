@@ -1443,10 +1443,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       config: {
         label: "View Configuration",
         help: "The list configuration, in spec's ListView shape. Validated on every save."
-      },
-      is_default: {
-        label: "My Default",
-        help: "The owner's default view for this object. At most one per owner and object."
       }
     }
   },

@@ -10,7 +10,7 @@
  * authorization resolver and the real error mapping:
  *
  *  - `[owner]` a plain member saves, lists, reads and renames their own view
- *    through `/data/sys_personal_view`, and a second default clears the first;
+ *    through `/data/sys_personal_view`;
  *  - `[member]` another member reads none of them by id (404), lists none and
  *    updates none (404), and cannot delete one (403, no grant reaches it);
  *  - `[org-admin]` an organization administrator gets no back door: the same
@@ -32,8 +32,10 @@
  *    still 403, because the door grants nothing (`member_default` is bound to
  *    the `everyone` anchor and carries no delete bit, ADR-0090 D5).
  *
- * A platform administrator's wildcard keeps reading every row, as it does on
- * `sys_user_preference` (the recorded admin rescue path).
+ *  - `[platform-admin]` the recorded boundary: `admin_full_access`'s bare
+ *    wildcard reads, edits and deletes a member's view through the generic
+ *    data door, as it does on `sys_user_preference` (the admin rescue path);
+ *    only the own-row door refuses its delete.
  *
  * Refusals assert `code` AND `status` (ADR-0112).
  */
@@ -137,14 +139,6 @@ describe('sys_personal_view over REST: a reader\'s own named list views (ruling 
     expect(recordOf(await read.json()).label).toBe('Alice: this week, hot');
   });
 
-  it('[owner] a second default clears the first in the same write', async () => {
-    const first = await save(aliceTok, aliceId, 'Alice: default one', { is_default: true });
-    const second = await save(aliceTok, aliceId, 'Alice: default two', { is_default: true });
-    const rows = await ql.find(OBJ, { where: { id: { $in: [first.id, second.id] } }, context: SYS });
-    const on = Object.fromEntries(rows.map((r: any) => [r.label, r.is_default === true || r.is_default === 1]));
-    expect(on).toEqual({ 'Alice: default one': false, 'Alice: default two': true });
-  });
-
   it('[member] another member reads none by id, lists none, updates none and deletes none', async () => {
     const row = await save(aliceTok, aliceId, 'Alice: private');
 
@@ -203,6 +197,25 @@ describe('sys_personal_view over REST: a reader\'s own named list views (ruling 
     expect(fields.length).toBeGreaterThan(0);
     for (const f of fields) expect(f.field.startsWith('config')).toBe(true);
     expect(await ql.findOne(OBJ, { where: { label: 'Broken' }, context: SYS })).toBeFalsy();
+  });
+
+  it('[body] a body listing another object answers 400 VALIDATION_FAILED on config.data.object', async () => {
+    const r = await stack.apiAs(aliceTok, 'POST', `/data/${OBJ}`, {
+      user_id: aliceId, object_name: TARGET, label: 'Wrong object',
+      config: { ...listView(), data: { provider: 'object', object: 'showcase_task' } },
+    });
+    expect(r.status, await r.clone().text()).toBe(400);
+    const body: any = await r.json();
+    expect(errorCodeOf(body)).toBe('VALIDATION_FAILED');
+    const fields: Array<{ field: string }> = body?.error?.details?.fields ?? body?.error?.fields ?? body?.fields ?? [];
+    expect(fields.map((f) => f.field)).toEqual(['config.data.object']);
+  });
+
+  it('[owner] cannot hand their view to another member (user_id re-parent refused)', async () => {
+    const row = await save(aliceTok, aliceId, 'Alice: keep mine');
+    const r = await stack.apiAs(aliceTok, 'PATCH', `/data/${OBJ}/${row.id}`, { user_id: await userIdOf(BOB) });
+    expect(r.status, await r.clone().text()).toBe(403);
+    expect((await ql.findOne(OBJ, { where: { id: row.id }, context: SYS }))?.user_id).toBe(aliceId);
   });
 
   it('[predicate] a view filtering on an unreadable field is saved, and its list query is refused by the predicate guard', async () => {
@@ -276,6 +289,18 @@ describe('sys_personal_view over REST: a reader\'s own named list views (ruling 
       expect(r.status, await r.clone().text()).toBe(403);
       expect(errorCodeOf(await r.json())).toBe('PERMISSION_DENIED');
       expect((await stillThere(row.id))?.label).toBe('Alice: not the platform admin\'s to remove');
+    });
+
+    it('[platform-admin] RECORDED BOUNDARY: the generic data door reads, edits and deletes a member\'s view', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: within the platform admin\'s reach');
+      const read = await stack.apiAs(adminTok, 'GET', `/data/${OBJ}/${row.id}`);
+      expect(read.status, await read.clone().text()).toBe(200);
+      const patch = await stack.apiAs(adminTok, 'PATCH', `/data/${OBJ}/${row.id}`, { label: 'edited by the platform admin' });
+      expect(patch.status, await patch.clone().text()).toBe(200);
+      expect((await stillThere(row.id))?.label).toBe('edited by the platform admin');
+      const del = await stack.apiAs(adminTok, 'DELETE', `/data/${OBJ}/${row.id}`);
+      expect(del.status, await del.clone().text()).toBeLessThan(300);
+      expect(await stillThere(row.id)).toBeFalsy();
     });
 
     it('[door] anonymous: 401 UNAUTHENTICATED, and the row stays', async () => {

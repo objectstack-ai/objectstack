@@ -1443,10 +1443,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       config: {
         label: "ビュー設定",
         help: "spec の ListView 形式のリスト設定。保存のたびに検証されます。"
-      },
-      is_default: {
-        label: "マイデフォルト",
-        help: "このオブジェクトでの所有者のデフォルトビュー。所有者とオブジェクトごとに最大 1 つ。"
       }
     }
   },

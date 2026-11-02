@@ -8,8 +8,11 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * A named personal view is a row of USER DATA, not view metadata (ruling
  * 6570568131 on #28971, letter C; ADR-0131 D13: "if pulled, it returns as a user-owned D3 object").
  * One row is one saved list: its owner, the object it lists, the name the owner
- * gave it, the list configuration in spec's `ListView` shape, and whether it is
- * the owner's default for that object.
+ * gave it, and the list configuration in spec's `ListView` shape. Which view
+ * opens by default is NOT stored here: the reader's existing per-object pin
+ * (the Console's `list.view.pinned` workspace preference, #27594) holds a view
+ * id, and a personal view's id is one more value it can hold (seat ruling
+ * 6587007982 on #29443: one "my default" store, not two).
  *
  * What it is NOT, each on purpose:
  *  - not a view item: `/meta` never serves it and the metadata write door
@@ -29,11 +32,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * Layer 0 wall bounds it and the row scope applies inside that wall), and the
  * same registrar (`plugin-auth`'s identity manifest).
  *
- * Two behaviours live in the registrar's hooks, not here
+ * One behaviour lives in the registrar's hooks, not here
  * (`plugin-auth/src/personal-view-hooks.ts`): a save whose `config` is not a
- * valid `ListView` is refused with `400 VALIDATION_FAILED`, and a write that
- * makes a row the owner's default clears the default flag on the owner's other
- * rows for the same object in the same write. The owner removes a view through
+ * valid `ListView` for the row's own object is refused with
+ * `400 VALIDATION_FAILED`. The owner removes a view through
  * the registrar's own-row door, `DELETE /api/v1/personal-views/:id`
  * (`plugin-auth/src/personal-view-routes.ts`): no shipped set grants delete on
  * this object, and the door's authorization is structural (owner == caller).
@@ -47,7 +49,7 @@ export const SysPersonalView = ObjectSchema.create({
   icon: 'list',
   isSystem: true,
   // [ADR-0103] User-writable DATA on a platform-defined schema, like
-  // `sys_user_preference`: a reader saves, renames and re-defaults their own
+  // `sys_user_preference`: a reader saves and renames their own
   // views from the list page; no admin authors them. The bucket default is
   // full CRUD, so no `userActions` block is needed; the row scope below is the
   // authz.
@@ -55,12 +57,16 @@ export const SysPersonalView = ObjectSchema.create({
   description: "A reader's own named list views (My Views). Visible only to the owner.",
   nameField: 'label', // [ADR-0079] canonical primary-title pointer
   titleFormat: '{label}',
-  highlightFields: ['object_name', 'is_default'],
+  highlightFields: ['object_name'],
 
-  // [ADR-0066 D2] `private`: a plain `'*'` wildcard grant does not cover this
-  // object, so a reader reaches it only through the explicit grant the
-  // platform baseline (`member_default`) names. An application's wildcard set
-  // never widens who reads another reader's views.
+  // [ADR-0066 D2] `private`: a plain (non-superuser) `'*'` wildcard grant
+  // does not cover this object, so a member reaches it only through the
+  // explicit grant the platform baseline (`member_default`) names. A wildcard
+  // that carries `viewAllRecords` / `modifyAllRecords` still reaches a
+  // `private` object (ADR-0066 D2): `organization_admin`'s is closed for this
+  // object by an explicit entry in that set, and `admin_full_access`'s is not
+  // (the platform administrator reads, edits and deletes through the data
+  // door, as on `sys_user_preference`; an open question on #29443).
   access: { default: 'private' },
 
   // [ADR-0095 D1] Owner-only, for every operation: the same literal
@@ -117,12 +123,6 @@ export const SysPersonalView = ObjectSchema.create({
       label: 'View Configuration',
       required: true,
       description: "The list configuration, in spec's ListView shape. Validated on every save.",
-    }),
-
-    is_default: Field.boolean({
-      label: 'My Default',
-      defaultValue: false,
-      description: "The owner's default view for this object. At most one per owner and object.",
     }),
   },
 

@@ -773,7 +773,7 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // effective access for a member is byte-identical.
       sys_user_preference: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
       // A reader's own named list views (ruling 6570568131 on #28971, letter
-      // C): save, rename and set as my default, on the preference template.
+      // C): save and rename their own views, on the preference template.
       // The object's own owner-only default row scope (`sys_personal_view_self`,
       // declared on the object, `operation: 'all'`) decides WHICH rows, so the
       // grant reaches the holder's own views only. The object is `private`

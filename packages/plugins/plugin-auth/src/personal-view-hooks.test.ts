@@ -5,20 +5,23 @@
  * #28971, letter C) — driven through the real write path: a real `ObjectQL`
  * engine over SQLite, the real `SecurityPlugin` with the shipped permission
  * sets (a member resolves `member_default`, which names the object; the object
- * declares its owner-only default row scope), and the two hooks `AuthPlugin`
+ * declares its owner-only default row scope), and the hooks `AuthPlugin`
  * registers for it (`personal-view-hooks.ts`).
  *
  * What each block pins:
- *  - the owner saves, reads, renames and re-defaults their own views;
+ *  - the owner saves, reads and renames their own views;
  *  - another member reads, lists and updates none of them;
  *  - an organization administrator, under either shipped variant, reads,
  *    lists and updates none of them either (the wildcard's super-user bits
  *    are closed for this object);
  *  - a body that is not spec's `ListView` is refused `400 VALIDATION_FAILED`
  *    with its paths under `config`, and nothing is stored;
- *  - at most one default per owner and object: a new default clears the
- *    previous one in the same write, and touches no other object or owner;
- *  - the id is the engine's record id, never the `object.key` view syntax.
+ *  - a view lists the object it is saved for: `config.data.object` and
+ *    `object_name` must agree, on create and on update;
+ *  - the id is the engine's record id, never the `object.key` view syntax;
+ *  - the owner cannot re-parent a view (`user_id`) to someone else;
+ *  - the recorded platform-administrator boundary: `admin_full_access`'s bare
+ *    wildcard reads, edits and deletes a member's view through the data door;
  *  - the owner's delete door (`removeOwnPersonalView`, the core of
  *    `DELETE /api/v1/personal-views/:id`): the owner's own row is removed;
  *    another member's and an organization administrator's attempt reads
@@ -128,8 +131,6 @@ const refusalOf = async (write: Promise<unknown>): Promise<any> => write.then(()
 const stored = async (engine: ObjectQL): Promise<any[]> =>
   (await engine.find(OBJ, { ...SYS, orderBy: [{ field: 'label', order: 'asc' }] })) as any[];
 
-const isOn = (v: unknown) => v === true || v === 1;
-
 async function save(engine: ObjectQL, owner: string, label: string, extra: Record<string, unknown> = {}): Promise<any> {
   return engine.insert(
     OBJ,
@@ -204,6 +205,22 @@ describe('an organization administrator gets no back door (no admin management i
     },
   );
 
+  it('RECORDED BOUNDARY: through the data door the platform administrator also edits and deletes a member\'s view', async () => {
+    // `admin_full_access` spreads spec's ADMIN_FULL_ACCESS_CAPABILITIES:
+    // `'*'` with allowEdit, allowDelete and modifyAllRecords, and the owner
+    // floors bind members only. So the boundary today is read, edit AND delete
+    // through the generic data door (exactly as on `sys_user_preference`);
+    // only the own-row door refuses its delete. Pinned so the boundary the
+    // card's open question asks about is stated by a test, not by prose.
+    const engine = await rig();
+    const alices = await save(engine, ALICE, 'Alice only');
+    const platformAdmin = as(CAROL, ['admin_full_access']);
+    await engine.update(OBJ, { id: alices.id, label: 'edited by the platform admin' }, platformAdmin);
+    expect((await stored(engine)).map((r) => r.label)).toEqual(['edited by the platform admin']);
+    await engine.delete(OBJ, { where: { id: alices.id }, ...platformAdmin } as any);
+    expect(await stored(engine)).toEqual([]);
+  });
+
   it('RECORDED BOUNDARY: the platform administrator\'s bare wildcard still reads a member\'s view', async () => {
     // `admin_full_access` keeps its bare `'*'` super-user wildcard by design
     // (the admin rescue path; its objects are spec's
@@ -221,6 +238,17 @@ describe('an organization administrator gets no back door (no admin management i
     await save(engine, CAROL, 'Carol own');
     const own = (await engine.find(OBJ, as(CAROL, ['organization_admin']))) as any[];
     expect(own.map((r) => r.label)).toEqual(['Carol own']);
+  });
+});
+
+describe('the owner cannot hand a view to someone else', () => {
+  it('an update re-parenting user_id to another user is refused, and the row keeps its owner', async () => {
+    const engine = await rig();
+    const own = await save(engine, ALICE, 'Alice only');
+    const err = await refusalOf(engine.update(OBJ, { id: own.id, user_id: BOB }, as(ALICE)));
+    expect(err?.status).toBe(403);
+    const [row] = await stored(engine);
+    expect(row.user_id).toBe(ALICE);
   });
 });
 
@@ -260,40 +288,40 @@ describe('the body is spec\'s ListView, judged on every save', () => {
   });
 });
 
-describe('at most one default per owner and object', () => {
-  it('a new default clears the previous one in the same write', async () => {
+describe('a view lists the object it is saved for', () => {
+  it('a create whose config.data.object is another object is refused on config.data.object, nothing stored', async () => {
     const engine = await rig();
-    const first = await save(engine, ALICE, 'A first', { is_default: true });
-    const second = await save(engine, ALICE, 'B second', { is_default: true });
-
-    const byLabel = Object.fromEntries((await stored(engine)).map((r) => [r.label, isOn(r.is_default)]));
-    expect(byLabel).toEqual({ 'A first': false, 'B second': true });
-
-    // Moving the default back by update clears the other the same way.
-    await engine.update(OBJ, { id: first.id, is_default: true }, as(ALICE));
-    const after = Object.fromEntries((await stored(engine)).map((r) => [r.label, isOn(r.is_default)]));
-    expect(after).toEqual({ 'A first': true, 'B second': false });
-    expect(second.id).not.toBe(first.id);
+    const err = await refusalOf(save(engine, ALICE, 'Wrong object', { config: listView('crm_account') }));
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect((err.fields as Array<{ field: string; code?: string }>).map((f) => [f.field, f.code])).toEqual([
+      ['config.data.object', 'object_mismatch'],
+    ]);
+    expect(await stored(engine)).toEqual([]);
   });
 
-  it('touches no other object and no other owner', async () => {
+  it('an update that moves only object_name away from the stored body is refused, and the row is kept', async () => {
     const engine = await rig();
-    await save(engine, ALICE, 'A lead default', { is_default: true });
-    await engine.insert(
-      OBJ,
-      { user_id: ALICE, object_name: 'crm_account', label: 'A account default', config: listView('crm_account'), is_default: true },
-      as(ALICE),
-    );
-    await save(engine, BOB, 'B lead default', { is_default: true });
-    await save(engine, ALICE, 'A lead new default', { is_default: true });
+    const created = await save(engine, ALICE, 'Leads');
+    const err = await refusalOf(engine.update(OBJ, { id: created.id, object_name: 'crm_account' }, as(ALICE)));
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    expect((await stored(engine))[0].object_name).toBe('crm_lead');
+  });
 
-    const byLabel = Object.fromEntries((await stored(engine)).map((r) => [r.label, isOn(r.is_default)]));
-    expect(byLabel).toEqual({
-      'A account default': true,
-      'A lead default': false,
-      'A lead new default': true,
-      'B lead default': true,
-    });
+  it('an update that sends only a body for another object is refused, and the stored body is kept', async () => {
+    const engine = await rig();
+    const created = await save(engine, ALICE, 'Leads');
+    const err = await refusalOf(engine.update(OBJ, { id: created.id, config: listView('crm_account') }, as(ALICE)));
+    expect(err?.code).toBe('VALIDATION_FAILED');
+    const [row] = await stored(engine);
+    const config = typeof row.config === 'string' ? JSON.parse(row.config) : row.config;
+    expect(config.data.object).toBe('crm_lead');
+  });
+
+  it('CONTROL: moving both object_name and the body together is accepted', async () => {
+    const engine = await rig();
+    const created = await save(engine, ALICE, 'Moving');
+    await engine.update(OBJ, { id: created.id, object_name: 'crm_account', config: listView('crm_account') }, as(ALICE));
+    expect((await stored(engine))[0].object_name).toBe('crm_account');
   });
 });
 

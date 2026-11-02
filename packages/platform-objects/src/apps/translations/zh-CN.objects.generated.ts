@@ -1443,10 +1443,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       config: {
         label: "视图配置",
         help: "列表配置，采用 spec 的 ListView 结构。每次保存都会校验。"
-      },
-      is_default: {
-        label: "我的默认",
-        help: "所有者在此对象上的默认视图。每个所有者每个对象最多一个。"
       }
     }
   },

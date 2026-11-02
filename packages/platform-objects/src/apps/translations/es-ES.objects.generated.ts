@@ -1443,10 +1443,6 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       config: {
         label: "Configuración de la vista",
         help: "La configuración de la lista, en la forma ListView de spec. Se valida en cada guardado."
-      },
-      is_default: {
-        label: "Mi predeterminada",
-        help: "La vista predeterminada del propietario para este objeto. Como máximo una por propietario y objeto."
       }
     }
   },
