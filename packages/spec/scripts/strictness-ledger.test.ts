@@ -130,9 +130,10 @@ describe('site counting reads the AST, not the source text', () => {
     // from `field.zod.ts`. As with the chart count above, the number is
     // incidental — the assertion that carries the meaning is the idiom read.
     // 3 → 4 at #22593, which ADDED `FileRefusedValueSchema` (a strictObject
-    // site) — the count is still incidental.
+    // site) — the count is still incidental. 4 → 5 at #29579, which ADDED
+    // `ReferenceNameOnlyValueSchema` (a strictObject site).
     const fv = analyzeSites(at('data/field-value.zod.ts'));
-    expect(fv).toHaveLength(4);
+    expect(fv).toHaveLength(5);
     expect(fv.find((s) => s.name === 'FileValueSchema')?.idiom).toBe('z.looseObject');
   });
 });

@@ -65,22 +65,14 @@
  */
 
 import { isTitleEligible, resolveDisplayField, resolveRecordDisplayName } from '@objectstack/spec/data';
+// The value a `referenceNameVisible` reference is served as when the reader
+// was refused its target. Derived from the spec's `ReferenceNameOnlyValueSchema`,
+// which owns the shape; the engine never declares its own copy.
+import type { ReferenceNameOnlyValue } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { withoutOperationPrivateKeys } from '@objectstack/core';
 import type { ObjectQL } from './engine.js';
 import { isReadRefusal } from './engine-file-reference-hydration.js';
-
-/**
- * The value a `referenceNameVisible` reference is served as when the reader
- * was refused its target: the id the referencing row holds, the target's
- * resolved display name, and the refusal said in-band. Read-only by
- * construction: the stored form of a reference is the bare id alone.
- */
-export interface ReferenceNameOnlyValue {
-  id: string;
-  name: string;
-  readRefused: true;
-}
 
 /**
  * The `ObjectQL` members {@link serveReferenceNames} reads, every one of them

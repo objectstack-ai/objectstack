@@ -685,6 +685,51 @@ export const ReferenceIdValueSchema = lazySchema(() =>
 );
 export type ReferenceIdValue = z.input<typeof ReferenceIdValueSchema>;
 
+/**
+ * Reference value served to a reader REFUSED the record it points at, on a
+ * `lookup` or `user` field that declares `referenceNameVisible` — an
+ * `expanded` read form, beside the still-bare id and the expanded record.
+ *
+ * `$expand` on such a field answers a target the reader may not read (the
+ * object's read gate or its row scope refuses it) with the id the referencing
+ * record holds, the target's ADR-0079 display name, and `readRefused: true`,
+ * per element on a `multiple: true` field. `name` is what
+ * `resolveRecordDisplayName` answers for the target (its `nameField`, else its
+ * `displayNameField`, else the derived title field), or the `Record #` floor
+ * with the id where a field-level rule on that field holds — the field's own
+ * `referenceNameVisible` description lists those cases. The marker is the
+ * refusal said in-band, the `metadataRefused` precedent of
+ * {@link FileRefusedValueSchema}: a renderer tells this value from a target
+ * the reader expanded with a narrow projection, shows the name as text and
+ * links nothing.
+ *
+ * Read-only by construction: the STORED form is {@link ReferenceIdValueSchema}
+ * alone, so this object is never a value a record write accepts. Closed, so
+ * nothing else of the target can ride on it. The expanded union keeps its open
+ * record member, so naming this shape accepts nothing that was refused before.
+ */
+export const ReferenceNameOnlyValueSchema = lazySchema(() => strictObject(
+  {
+    surface: 'this name-only reference value',
+    // Customer-facing text: no issue ids (the anchors are in the JSDoc above).
+    history: 'A name-only reference value is served by the platform and never written: it carries the '
+      + 'id the record holds, the referenced record\'s display name and the refusal marker, nothing else.',
+  },
+  {
+    id: ReferenceIdValueSchema.describe('The id of the referenced record, as the referencing record holds it'),
+    name: z.string().min(1).describe(
+      'The referenced record\'s display name (its object\'s `nameField`, else `displayNameField`, else the '
+      + 'derived title field), or the `Record #` floor with the id where a field-level rule on that field holds',
+    ),
+    readRefused: z.literal(true).describe(
+      'The reader was refused the referenced record (the object\'s read gate or its row scope): only its '
+      + 'id and display name are served, and the name links nothing. Distinct from an expanded record and '
+      + 'from a bare id.',
+    ),
+  },
+));
+export type ReferenceNameOnlyValue = z.input<typeof ReferenceNameOnlyValueSchema>;
+
 function optionCodes(def: ValueShapeFieldDef): string[] {
   if (!Array.isArray(def.options)) return [];
   return def.options.map((o) => (typeof o === 'object' && o !== null ? String(o.value) : String(o)));
@@ -722,8 +767,11 @@ export function valueSchemaFor(def: ValueShapeFieldDef, form: ValueForm = 'store
       // Expanded form: `$expand` replaces the id in place with the related
       // record object (objectql engine `expandRelatedRecords`). The record's
       // own shape is that object's contract, not this field's — hence open.
+      // A reader refused the target on a `referenceNameVisible` field is
+      // served the named name-only value instead; the open member already
+      // accepted it, so naming it changes no verdict.
       return form === 'expanded'
-        ? z.union([ReferenceIdValueSchema, z.record(z.string(), z.unknown())])
+        ? z.union([ReferenceIdValueSchema, ReferenceNameOnlyValueSchema, z.record(z.string(), z.unknown())])
         : ReferenceIdValueSchema;
     }
     if (FILE_REFERENCE_TYPES.has(t)) {
