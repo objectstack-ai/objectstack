@@ -29,11 +29,16 @@
  * gate exists to close. The row says the flow could not be judged, with the
  * schema's issues, and the door refuses on it like any other row.
  *
- * Not judged here: a cycle in the flow's TOP-LEVEL graph. The engine refuses it
- * with `detectCycles`, which lives in `@objectstack/service-automation` and is
- * not exported; region bodies ARE cycle-checked, by `validateControlFlow`.
+ * [#29051] Also judged: a cycle in the flow's TOP-LEVEL graph that no
+ * `type: 'back'` edge declares (ADR-0044). The engine asks
+ * `findUndeclaredFlowCycle` (`@objectstack/metadata-core`) at registration,
+ * BEFORE `validateControlFlow`, and so does this walk: the same judge, the same
+ * order, the engine's sentence. The runtime authoring gate asks it too, so a
+ * flow refused here is one the publish doors refuse. Region bodies are
+ * cycle-checked by `validateControlFlow`, not by this call.
  */
 
+import { findUndeclaredFlowCycle } from '@objectstack/metadata-core';
 import { FlowSchema, validateControlFlow } from '@objectstack/spec/automation';
 
 import { artifactPackages } from './artifact-packages.js';
@@ -53,7 +58,11 @@ export interface FlowRegionRefusalRow {
   message: string;
 }
 
-/** Every flow of the parsed stack the engine would refuse to register for its region shape. */
+/**
+ * Every flow of the parsed stack the engine would refuse to register for an
+ * undeclared top-level cycle or for its region shape — one row per flow, the
+ * engine's first refusal.
+ */
 export function findFlowRegionRefusals(parsed: Record<string, unknown>): FlowRegionRefusalRow[] {
   const entries = artifactPackages(parsed);
   const subjects = entries.length > 0
@@ -78,16 +87,22 @@ export function findFlowRegionRefusals(parsed: Record<string, unknown>): FlowReg
         });
         return;
       }
+      const name = result.data.name;
+      const refuse = (reason: string) => rows.push({
+        path: `${at}flows[${i}]`,
+        code: 'VALIDATION_ERROR',
+        flow: name,
+        message: `Flow '${name}' would be refused at registration: ${reason}`,
+      });
+      const cycle = findUndeclaredFlowCycle(result.data);
+      if (cycle) {
+        refuse(cycle.message);
+        return;
+      }
       try {
         validateControlFlow(result.data);
       } catch (err) {
-        const name = result.data.name;
-        rows.push({
-          path: `${at}flows[${i}]`,
-          code: 'VALIDATION_ERROR',
-          flow: name,
-          message: `Flow '${name}' would be refused at registration: ${err instanceof Error ? err.message : String(err)}`,
-        });
+        refuse(err instanceof Error ? err.message : String(err));
       }
     });
   }

@@ -846,7 +846,9 @@ export default class Compile extends Command {
       //     `validateControlFlow`). Before this the build emitted a flow the
       //     engine then refused at boot, logging a warning and running without
       //     it; now the door that ships refuses it and writes no artifact. Same
-      //     two faces as the gates above.
+      //     two faces as the gates above. [#29051] The same walk first asks
+      //     the engine's top-level cycle judge (ADR-0044,
+      //     `findUndeclaredFlowCycle`), in the engine's order.
       const regionRefusals = findFlowRegionRefusals(result.data as Record<string, unknown>);
       if (regionRefusals.length > 0) {
         if (flags.json) {
@@ -855,10 +857,10 @@ export default class Compile extends Command {
         }
         const n = regionRefusals.length;
         console.log('');
-        printError(`The automation engine would refuse to register ${n} flow${n > 1 ? 's' : ''} for a malformed region (ADR-0031)`);
+        printError(`The automation engine would refuse to register ${n} flow${n > 1 ? 's' : ''} for an undeclared cycle (ADR-0044) or a malformed region (ADR-0031)`);
         printBulletList(
           regionRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
-          { noun: 'flow region refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+          { noun: 'flow registration refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
         );
         this.exit(1);
       }
