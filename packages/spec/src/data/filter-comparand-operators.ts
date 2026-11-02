@@ -21,14 +21,18 @@
  * set to the schema's other half: every declared operator whose enforced slot
  * refuses an array.
  *
- * ## Why it is NOT in the `data` barrel
+ * ## What the `data` barrel publishes from here: one predicate
  *
- * Nothing here is a contract a consumer calls; the faces are, and they are
- * already published (`normalizeFilterComparandTypes`,
- * `assertListComparandShapes`). Exporting the split would widen
- * `@objectstack/spec/data` for no reader, so this file stays out of
- * `./index.ts`, as `./filter-comparand-refusal-text.ts` does. It imports
- * nothing, so no face can reach a cycle through it.
+ * The faces are the contract most consumers call, and they are published on
+ * their own (`normalizeFilterComparandTypes`, `assertListComparandShapes`).
+ * A consumer that judges a comparand by its operator without running a face
+ * (a flow's record nodes take an evaluated list only at a list operator's
+ * comparand) reads {@link isListComparandOperator}, so it holds no copy of
+ * the split to drift. The barrel names that predicate alone: the two sets
+ * stay module-private, because a published `ReadonlySet` is still a live
+ * `Set` at run time, and a caller that cast and mutated it would change what
+ * every face here judges. This file imports nothing, so no face can reach a
+ * cycle through it.
  */
 
 /** The operators whose declared comparand is ONE literal. */
@@ -43,3 +47,11 @@ export const SCALAR_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
 export const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set([
   '$in', '$nin', '$between',
 ]);
+
+/**
+ * Whether `op` (a `$`-spelled field operator) declares a LIST comparand
+ * (`$in`, `$nin`, `$between`); `false` for every other spelling.
+ */
+export function isListComparandOperator(op: string): boolean {
+  return LIST_COMPARAND_OPERATORS.has(op);
+}

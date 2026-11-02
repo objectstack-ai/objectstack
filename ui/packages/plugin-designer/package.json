@@ -3,7 +3,7 @@
   "version": "18.2.0",
   "type": "module",
   "license": "MIT",
-  "description": "Visual designer plugin for ObjectUI with page, data model, process, and report designers plus collaborative editing.",
+  "description": "Visual designer plugin for ObjectUI with page, data model, process, and report designers.",
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",

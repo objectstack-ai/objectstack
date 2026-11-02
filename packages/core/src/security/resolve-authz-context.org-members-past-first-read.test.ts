@@ -35,7 +35,10 @@ const PAGE_ROWS = 10000;
 
 interface Read { object: string; where: Record<string, unknown>; limit?: number; orderBy?: unknown }
 
-function makeQl(tables: Record<string, any[]>, opts: { ignoreCursor?: boolean; failAfter?: number } = {}) {
+function makeQl(
+  tables: Record<string, any[]>,
+  opts: { ignoreCursor?: boolean; failAfter?: number; staleForOrderedReads?: ReadonlySet<string> } = {},
+) {
   const reads: Read[] = [];
   const holds = (row: any, where: Record<string, unknown>) =>
     Object.entries(where).every(([k, v]) => {
@@ -53,8 +56,11 @@ function makeQl(tables: Record<string, any[]>, opts: { ignoreCursor?: boolean; f
       if (opts.failAfter !== undefined && object === 'sys_member' && reads.filter((r) => r.object === 'sys_member').length > opts.failAfter) {
         throw new Error('connection reset');
       }
-      let rows = (tables[object] ?? []).filter((r) => holds(r, q?.where ?? {}));
       const order = Array.isArray(q?.orderBy) ? q.orderBy[0] : undefined;
+      // An ordered read (the completion's) answering from an older snapshot: the
+      // members named here had not joined yet as far as it can see.
+      const stale = order && object === 'sys_member' ? opts.staleForOrderedReads : undefined;
+      let rows = (tables[object] ?? []).filter((r) => holds(r, q?.where ?? {}) && !stale?.has(r.user_id));
       if (order) {
         rows = [...rows].sort((a, b) => (a[order.field] < b[order.field] ? -1 : a[order.field] > b[order.field] ? 1 : 0));
         if (order.order === 'desc') rows.reverse();
@@ -161,6 +167,23 @@ describe('[#29281] org_user_ids holds the whole active organization', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain(`${FIRST_READ_BOUND + 5}`);
     expect(lines[0]).toContain('org_user_ids');
+  });
+
+  it('a completion that sees fewer members than the first read still yields every member the first read returned', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const tables = tablesOf(FIRST_READ_BOUND + 5);
+    // Five members the unordered first read returns (it answers in insertion
+    // order) that the completion's older snapshot does not hold.
+    const unseen = new Set(['u000001', 'u000002', 'u000003', 'u000004', 'u000005']);
+    const ql = makeQl(tables, { staleForOrderedReads: unseen });
+    const grants = await resolveUserAuthzGrants(ql, ME, { tenantId: ORG });
+
+    // The completion did run, and did come back short of them.
+    expect(orgReads(ql.reads)).toHaveLength(2);
+    for (const u of unseen) expect(grants.org_user_ids).toContain(u);
+    expect([...grants.org_user_ids].sort()).toEqual(membersOf(tables));
+    expect(grants.org_user_ids).not.toContain('u_elsewhere_1');
+    expect(grants.org_user_ids).not.toContain('u_elsewhere_2');
   });
 
   it('a page that fails to read fails the resolution loudly — never a shorter list', async () => {

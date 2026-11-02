@@ -30,7 +30,6 @@ import { useMultiSelect } from './hooks/useMultiSelect';
 import { useClipboard } from './hooks/useClipboard';
 import { ConfirmDialog } from './components/ConfirmDialog';
 import { PropertyEditor, type PropertyField } from './components/PropertyEditor';
-import { useCollaboration } from './CollaborationProvider';
 
 function cn(...inputs: (string | undefined | false)[]) {
   return twMerge(clsx(inputs));
@@ -67,7 +66,6 @@ const LABELS = {
     `Are you sure you want to delete ${count} element${count > 1 ? 's' : ''}?`,
   collapsePanel: 'Collapse panel',
   expandPanel: 'Expand panel',
-  collaborationConnected: 'Connected',
   sectionHeader: 'Report Header',
   sectionPageHeader: 'Page Header',
   sectionGroupHeader: 'Group Header',
@@ -244,17 +242,6 @@ export function ReportDesigner({
   // -- Confirm dialog -------------------------------------------------------
   const confirmDialog = useConfirmDialog();
 
-  // -- Collaboration (optional) ---------------------------------------------
-  const collaboration = useCollaboration();
-
-  const broadcastOp = useCallback(
-    (op: { type: 'insert' | 'update' | 'delete' | 'move'; elementId: string; data: Record<string, unknown> }) => {
-      if (!collaboration) return;
-      collaboration.sendOperation({ ...op, userId: collaboration.currentUserId ?? '' });
-    },
-    [collaboration],
-  );
-
   // -- Collapsible property panel -------------------------------------------
   const [propertyPanelOpen, setPropertyPanelOpen] = useState(true);
 
@@ -314,9 +301,8 @@ export function ReportDesigner({
       );
       pushSections(updated);
       multiSelect.selectOne(newElement.id);
-      broadcastOp({ type: 'insert', elementId: newElement.id, data: { element: newElement } });
     },
-    [sections, margins.left, readOnly, pushSections, multiSelect, broadcastOp],
+    [sections, margins.left, readOnly, pushSections, multiSelect],
   );
 
   // -- Delete single element (no confirm) -----------------------------------
@@ -329,9 +315,8 @@ export function ReportDesigner({
       }));
       pushSections(updated);
       if (multiSelect.isSelected(elementId)) multiSelect.clearSelection();
-      broadcastOp({ type: 'delete', elementId, data: {} });
     },
-    [sections, readOnly, pushSections, multiSelect, broadcastOp],
+    [sections, readOnly, pushSections, multiSelect],
   );
 
   // -- Delete selected with confirmation ------------------------------------
@@ -349,10 +334,7 @@ export function ReportDesigner({
     }));
     pushSections(updated);
     multiSelect.clearSelection();
-    ids.forEach((id) => {
-      broadcastOp({ type: 'delete', elementId: id, data: {} });
-    });
-  }, [readOnly, multiSelect, confirmDialog, sections, pushSections, broadcastOp]);
+  }, [readOnly, multiSelect, confirmDialog, sections, pushSections]);
 
   // -- Update element property ----------------------------------------------
   const handleUpdateProperty = useCallback(
@@ -378,9 +360,8 @@ export function ReportDesigner({
         }),
       }));
       pushSections(updated);
-      broadcastOp({ type: 'update', elementId: selectedId, data: { [name]: value } });
     },
-    [readOnly, selectedId, sections, pushSections, broadcastOp],
+    [readOnly, selectedId, sections, pushSections],
   );
 
   // -- Copy / Paste ---------------------------------------------------------
@@ -412,10 +393,7 @@ export function ReportDesigner({
     );
     pushSections(updated);
     multiSelect.selectMany(pasted.map((p) => p.id));
-    pasted.forEach((p) => {
-      broadcastOp({ type: 'insert', elementId: p.id, data: { element: p } });
-    });
-  }, [readOnly, clipboard, sections, pushSections, multiSelect, broadcastOp]);
+  }, [readOnly, clipboard, sections, pushSections, multiSelect]);
 
   // -- Drag-and-drop handlers -----------------------------------------------
   const handleDragStart = useCallback(
@@ -490,10 +468,9 @@ export function ReportDesigner({
           pushSections(updated);
         }
       }
-      broadcastOp({ type: 'move', elementId: drag.id, data: {} });
       dragRef.current = null;
     },
-    [readOnly, sections, pushSections, broadcastOp],
+    [readOnly, sections, pushSections],
   );
 
   // -- Property fields for PropertyEditor -----------------------------------
@@ -660,15 +637,6 @@ export function ReportDesigner({
             )}
 
             <div className="flex-1" />
-
-            {/* Collaboration indicator */}
-            {collaboration?.isConnected && (
-              <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-                {LABELS.collaborationConnected}
-                {collaboration.users.length > 1 && ` (${collaboration.users.length})`}
-              </span>
-            )}
 
             <span className="text-xs text-muted-foreground">
               {pageSize} {orientation}

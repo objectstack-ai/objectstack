@@ -41,13 +41,11 @@ export type { BrandingEditorProps } from './BrandingEditor';
 export type { ObjectManagerProps } from './ObjectManager';
 export type { FieldDesignerProps } from './FieldDesigner';
 
-// Shared hooks. The clipboard, multi-select and pan/zoom hooks, the
-// `PropertyEditor` panel and the collaboration provider with its status
-// indicator are the designers' internals: nothing outside this package read
-// them, so they stay module-local.
+// Shared hooks. The clipboard, multi-select, pan/zoom and confirm-dialog hooks
+// and the `PropertyEditor` panel are the designers' internals: nothing outside
+// this package read them, so they stay module-local.
 export { useUndoRedo } from './hooks/useUndoRedo';
 export { useDesignerHistory } from './hooks/useDesignerHistory';
-export { useConfirmDialog } from './hooks/useConfirmDialog';
 // The provider-less fallback table, exported so objectui#4401's mirror gate can
 // compare it against the `en` pack from a package that depends on both.
 export { DESIGNER_DEFAULT_TRANSLATIONS } from './hooks/useDesignerTranslation';
@@ -55,7 +53,6 @@ export { DESIGNER_DEFAULT_TRANSLATIONS } from './hooks/useDesignerTranslation';
 // Shared components
 export { ConfirmDialog } from './components/ConfirmDialog';
 export { Minimap } from './components/Minimap';
-export { VersionHistory } from './components/VersionHistory';
 
 // Route-ready app authoring pages — host apps mount these at their
 // preferred routes. Each page expects an active app/adapter context from
