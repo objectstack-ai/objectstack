@@ -134,6 +134,12 @@ reason.
   sit in the owner's stored declaration, so the install door admits a patch of one and
   every read applies it, while `os validate`, which reads the declaration you wrote,
   refuses it.
+- **Patch it or take it over, not both.** An extension that names one field in both
+  `fields` and `fieldPatches` is refused when it parses: `fields` takes the owner's field
+  over whole, so the patch would land on your own replacement and the owner's field would
+  reach neither. Keep the patch to change only its display, or keep the `fields` entry
+  and set the text there. An option is addressed by its stored `value`, so a key no value
+  can be (`Tech Sector`, a label) is refused too.
 - **Conflicts resolve like `label`.** Two extensions patching the same key: the higher
   `priority` wins. A tenant who has edited that text keeps their own, [below](#extensions-and-tenant-customization).
 - **A patch must name something real.** A field the target does not declare, or an option
