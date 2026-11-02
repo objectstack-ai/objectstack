@@ -32,7 +32,8 @@ export const entry: SemanticMigration = {
     + '"This dashboard declares the global filter X twice in globalFilters: globalFilters[i] and '
     + 'globalFilters[j]", and saves. After renaming, check that every widget `filterBindings` key names the '
     + 'filter it meant, and that `os validate` reports no `dashboard-filter-binding-unknown` finding. A '
-    + 'stored `sys_metadata` dashboard that still repeats a key is refused on its next save; nothing '
+    + 'stored `sys_metadata` dashboard that still repeats a key still loads, with `_diagnostics` reading '
+    + '`valid: false` and carrying this refusal, and its next save (draft or publish) is refused; nothing '
     + 'rewrites it. Measured before the change: no authored dashboard in this repository\'s examples, '
     + 'platform objects, docs or skills repeats a filter key.',
 };
