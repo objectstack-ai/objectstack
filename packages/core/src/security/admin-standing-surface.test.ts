@@ -42,7 +42,12 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { ADMIN_STANDING_SURFACE, adminStandingTables } from './admin-standing-surface.js';
+import {
+  ADMIN_STANDING_NON_TABLE_INPUTS,
+  ADMIN_STANDING_PLATFORM_ENUMERATION,
+  ADMIN_STANDING_SURFACE,
+  adminStandingTables,
+} from './admin-standing-surface.js';
 import { resetPlatformAdminEmailMemo } from './platform-admin.js';
 import { resolveAuthzContext } from './resolve-authz-context.js';
 import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
@@ -450,6 +455,37 @@ describe('[#8734] ADMIN_STANDING_SURFACE is what resolveAuthzContext actually re
       } else {
         expect(entry.columns, `${table} reads only and must not declare columns`).toBeUndefined();
       }
+    }
+  });
+});
+
+describe('[ADR-0095 D3] ADMIN_STANDING_PLATFORM_ENUMERATION classifies every standing input', () => {
+  const { candidateSources, notCandidates } = ADMIN_STANDING_PLATFORM_ENUMERATION;
+
+  it('classifies exactly the deriving tables and the non-table inputs — a new one must be classified', () => {
+    // A resolver that starts reading a new input is red in the observation
+    // suite above until the input is declared; once declared it is red HERE
+    // until it is classified, and a candidate is red in plugin-auth's roster
+    // pin until the enumerator reads it.
+    const declared = sorted([...adminStandingTables(), ...ADMIN_STANDING_NON_TABLE_INPUTS.map((i) => i.name)]);
+    const classified = sorted([...Object.keys(candidateSources), ...Object.keys(notCandidates)]);
+    expect(classified).toEqual(declared);
+  });
+
+  it('classifies each input once', () => {
+    const both = Object.keys(candidateSources).filter((name) => name in notCandidates);
+    expect(both).toEqual([]);
+  });
+
+  it('names exactly the two sources the resolver confers platform standing from', () => {
+    // Positive control: both anchors the observation variants reach (the grant
+    // and the config list) are candidates, so an emptied list cannot pass.
+    expect(sorted(Object.keys(candidateSources))).toEqual(['OS_PLATFORM_OWNER_EMAIL', 'sys_user_permission_set']);
+  });
+
+  it('every classification carries a reason', () => {
+    for (const [name, reason] of [...Object.entries(candidateSources), ...Object.entries(notCandidates)]) {
+      expect(reason.length, `${name} needs a reason`).toBeGreaterThan(30);
     }
   });
 });
