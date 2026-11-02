@@ -721,6 +721,10 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Referencia",
         helpText: "Nombre del objeto referenciado"
       },
+      referenceNameVisible: {
+        label: "Mostrar nombre si no es legible",
+        helpText: "Permite que quien lee este registro vea el nombre del registro referenciado, como texto sin enlace, aunque no pueda abrir ese registro. No se muestra nada más de él, y una regla de nivel de campo sobre el nombre sigue aplicándose (el nombre se muestra entonces como Record # y el id). Sin definir: esa referencia se muestra como «Registro restringido»."
+      },
       deleteBehavior: {
         label: "Comportamiento al eliminar",
         helpText: "Qué ocurre cuando se elimina el registro referenciado"
