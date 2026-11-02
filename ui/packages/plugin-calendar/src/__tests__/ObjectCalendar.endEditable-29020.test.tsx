@@ -22,6 +22,10 @@
  * would write is where the record already has it: a write of unchanged values
  * still moves `updated_at` and runs every after-update trigger and flow. A
  * press and release on a week-view event, without moving it, is such a drop.
+ *
+ * The week-view cases with no end field declare `allDayField`: without it a
+ * record with no end is all-day and is drawn in the all-day lane, which has
+ * no handles and no pointer drag.
  */
 
 import React from 'react';
@@ -51,8 +55,16 @@ const OBJECT_SCHEMA = {
     end_date: { type: 'date' },
     starts_at: { type: 'datetime' },
     ends_at: { type: 'datetime' },
+    all_day: { type: 'boolean' },
   },
 };
+
+/**
+ * A record with no end is drawn in the all-day lane, which carries no handle,
+ * unless the view declares `allDayField`: then a record flagged not all-day is
+ * drawn timed, an hour long, with both resize handles before this change.
+ */
+const TIMED_NO_END = { startDateField: 'starts_at', allDayField: 'all_day' };
 
 afterEach(() => {
   cleanup();
@@ -202,7 +214,7 @@ describe('ObjectCalendar month view: the resize-end handle follows endDateField 
 
 describe('ObjectCalendar week view: the bottom resize handle follows endDateField (objectstack#29020)', () => {
   it('a view with no end field draws the top handle and no bottom handle', async () => {
-    mount({ startDateField: 'starts_at' }, { starts_at: '2026-01-12T09:00:00.000Z' }, 'week');
+    mount(TIMED_NO_END, { starts_at: '2026-01-12T09:00:00.000Z', all_day: false }, 'week');
     const piece = await screen.findByTitle(TITLE);
     expect(within(piece).queryByLabelText(GRID_HANDLE.top)).not.toBeNull();
     expect(within(piece).queryByLabelText(GRID_HANDLE.bottom)).toBeNull();
@@ -222,7 +234,7 @@ describe('ObjectCalendar week view: the bottom resize handle follows endDateFiel
 
 describe('ObjectCalendar writes nothing for a drop that changes no date (objectstack#29020)', () => {
   it('a press and release on a week-view event with no end field writes nothing', async () => {
-    const ds = mount({ startDateField: 'starts_at' }, { starts_at: '2026-01-12T09:00:00.000Z' }, 'week');
+    const ds = mount(TIMED_NO_END, { starts_at: '2026-01-12T09:00:00.000Z', all_day: false }, 'week');
     await screen.findByTitle(TITLE);
     pressAndRelease('January 12, 2026', '09:00');
     // Flush the handler's microtasks before reading the absence.
@@ -243,7 +255,7 @@ describe('ObjectCalendar writes nothing for a drop that changes no date (objects
   });
 
   it('control: a week-view event moved two hours writes its new start', async () => {
-    const ds = mount({ startDateField: 'starts_at' }, { starts_at: '2026-01-12T09:00:00.000Z' }, 'week');
+    const ds = mount(TIMED_NO_END, { starts_at: '2026-01-12T09:00:00.000Z', all_day: false }, 'week');
     await screen.findByTitle(TITLE);
     layOutColumns();
     const column = columnFor('January 12, 2026');
