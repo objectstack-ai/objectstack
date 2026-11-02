@@ -1969,10 +1969,10 @@ function assertBooleanNullFlags(node: unknown, path = 'where'): void {
  * generic list {@link fieldLeaves} gives it.
  */
 function retiredFilterOperatorError(op: string, field: string, siblings: readonly string[]): Error | null {
-  const guidance = Object.hasOwn(RETIRED_FILTER_OPERATORS, op) ? RETIRED_FILTER_OPERATORS[op] : undefined;
+  const guidance = RETIRED_FILTER_OPERATORS[op];
   if (!guidance) return null;
   const replacement = guidance.to ? ` Write "${guidance.to}" instead.` : '';
-  const alsoRetired = siblings.filter((key) => key !== op && Object.hasOwn(RETIRED_FILTER_OPERATORS, key));
+  const alsoRetired = siblings.filter((key) => key !== op && RETIRED_FILTER_OPERATORS[key]);
   const also = alsoRetired.length
     ? ` The same field constraint also carries the retired ` +
       `${alsoRetired.map((key) => `"${key}"`).join(', ')} — one "${guidance.to}" replaces the whole ` +
@@ -2004,9 +2004,11 @@ function retiredFilterOperatorError(op: string, field: string, siblings: readonl
  * no retired operator name (`isFilterAST` refuses one before lowering).
  */
 function assertNoRetiredOperators(node: unknown, path = 'where'): void {
-  forEachWhereFieldEntry(node, path, (key, spec, at) => {
+  forEachWhereFieldEntry(node, path, (key, spec) => {
     if (!isFilterObject(spec)) return;
-    const ops = Object.keys(spec);
+    // Only `$`-keys reach the table: none of them is an `Object.prototype`
+    // member, so the plain lookup the data door's builders use is exact here.
+    const ops = Object.keys(spec).filter((k) => k.startsWith('$'));
     for (const op of ops) {
       const refusal = retiredFilterOperatorError(op, key, ops);
       if (refusal) throw refusal;
