@@ -66,6 +66,7 @@ export {
 export {
   NATIVE_HOST_GLOBAL,
   NATIVE_NAVIGATE_EVENT,
+  NATIVE_CONNECTION_REMOVED_EVENT,
   getNativeHost,
   isInAppRoute,
   nativeGetPushToken,
@@ -73,14 +74,19 @@ export {
   nativeOpenExternal,
   nativeNavigate,
   nativeResetServer,
+  nativeScan,
+  nativeShowConnectionSwitcher,
+  nativeHostCan,
   postNativeReady,
   postNativeRouteChanged,
   type ObjectStackNative,
   type NativeCallResult,
+  type NativeConnectionRemovedEvent,
   type NativeHapticKind,
   type NativeHostMethod,
   type NativePushToken,
   type NativeSafeArea,
+  type NativeScanOptions,
 } from './nativeHost.js';
 
 // Re-export types for convenience

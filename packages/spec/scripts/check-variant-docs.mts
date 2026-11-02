@@ -25,6 +25,15 @@
 // — and from there to the doc. An unknown key (new union) and an orphaned key (deleted or
 // renamed union) both fail: no new undeclared surface, no stale claims.
 //
+// AN ARM'S VARIANTS ARE EVERY VALUE ITS DISCRIMINATOR MATCHES — a literal arm
+// (`kind: z.literal('nav')`) contributes its one value, an enum arm
+// (`kind: z.enum(['field', 'flow'])`) contributes every member. zod 4 keeps a literal's
+// values in the def's `values` and an enum's members in its `entries`; reading only the
+// first left an enum arm out of the key altogether, so a member added to or dropped from
+// that enum never moved the key and the gate never sent anyone back to the doc. The
+// reading lives in `armVariants()`, exported with `unionKey()` so the fixture test pins
+// both arm shapes without running the sweep.
+//
 // WHAT "MENTIONED" MEANS — and what this gate does NOT prove. A variant counts as
 // documented if the bound doc contains any of three forms:
 //
@@ -54,12 +63,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import url from 'node:url';
 
-// Safe to set here despite ESM hoisting: the only static imports above are node
-// built-ins, and every schema module is pulled in via dynamic `await import()`
-// below — i.e. after this line runs. Keeps the script correct when invoked
-// directly (`tsx scripts/check-variant-docs.mts`), not just via the pnpm script.
-process.env.OS_EAGER_SCHEMAS ??= '1';
-
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const SPEC = path.resolve(HERE, '..');
 const REPO = path.resolve(SPEC, '../..');
@@ -73,6 +76,40 @@ type Entry = {
 };
 
 const defOf = (s: any) => s?._zod?.def ?? s?._def;
+
+/**
+ * The discriminator values one arm matches, read off the arm's discriminator field.
+ * A literal carries them in `values` (zod 3: one `value`); an enum carries its members
+ * in `entries`, and zod's own parse set for it is `_zod.values`, which drops a numeric
+ * TypeScript enum's reverse-mapping keys — so that set is read first.
+ */
+export function armVariants(field: any): string[] {
+  const dd = defOf(field);
+  if (!dd) return [];
+  if (dd.entries && typeof dd.entries === 'object') {
+    const parsed = field?._zod?.values;
+    return [...(parsed instanceof Set ? parsed : Object.values(dd.entries))].map(String);
+  }
+  const vals = dd.values ?? (dd.value !== undefined ? [dd.value] : []);
+  return [...vals].map(String);
+}
+
+/**
+ * A discriminated union's ledger key and the variants it was built from, or null when the
+ * schema is not a discriminated union or none of its arms yields a value.
+ */
+export function unionKey(s: any): { disc: string; variants: string[]; key: string } | null {
+  const d = defOf(s);
+  if (!d || d.type !== 'union' || !d.discriminator) return null;
+  const variants: string[] = [];
+  for (const o of d.options ?? []) {
+    const od = defOf(o);
+    const shape = typeof od?.shape === 'function' ? od.shape() : od?.shape;
+    variants.push(...armVariants(shape?.[d.discriminator]));
+  }
+  if (!variants.length) return null;
+  return { disc: d.discriminator, variants, key: `${d.discriminator}:${[...variants].sort().join('|')}` };
+}
 
 function zodFiles(dir: string, acc: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -92,20 +129,8 @@ function walk(s: any, p: string, depth: number): void {
   const d = defOf(s);
   if (!d) return;
 
-  if (d.type === 'union' && d.discriminator) {
-    const variants: string[] = [];
-    for (const o of d.options ?? []) {
-      const od = defOf(o);
-      const shape = typeof od?.shape === 'function' ? od.shape() : od?.shape;
-      const dd = defOf(shape?.[d.discriminator]);
-      const vals = dd?.values ?? (dd?.value !== undefined ? [dd.value] : []);
-      for (const v of vals) variants.push(String(v));
-    }
-    if (variants.length) {
-      const key = `${d.discriminator}:${[...variants].sort().join('|')}`;
-      if (!found.has(key)) found.set(key, { disc: d.discriminator, variants, path: p });
-    }
-  }
+  const u = unionKey(s);
+  if (u && !found.has(u.key)) found.set(u.key, { disc: u.disc, variants: u.variants, path: p });
 
   // Structural recursion. Wrapped in try/catch because a lazy getter can reference a
   // module that is still initialising mid-import; an unresolvable branch must not abort
@@ -126,99 +151,111 @@ function walk(s: any, p: string, depth: number): void {
   } catch { /* unresolvable branch — reached via another path if it matters */ }
 }
 
-const files = zodFiles(SRC).sort();
-for (const f of files) {
-  let mod: Record<string, unknown>;
-  try { mod = await import(url.pathToFileURL(f).href); } catch { continue; }
-  const rel = path.relative(SRC, f).replace(/\.zod\.ts$/, '');
-  for (const [name, val] of Object.entries(mod)) {
-    if (val && typeof val === 'object' && defOf(val)) walk(val, `${rel}#${name}`, 0);
+async function main(): Promise<void> {
+  // Set before the first dynamic `import()` below, so every schema module loads eagerly.
+  // It lives inside `main()` so that the fixture test, which imports this module for
+  // `unionKey()`, neither sweeps `src/` nor leaves the variable set in its worker.
+  process.env.OS_EAGER_SCHEMAS ??= '1';
+
+  const files = zodFiles(SRC).sort();
+  for (const f of files) {
+    let mod: Record<string, unknown>;
+    try { mod = await import(url.pathToFileURL(f).href); } catch { continue; }
+    const rel = path.relative(SRC, f).replace(/\.zod\.ts$/, '');
+    for (const [name, val] of Object.entries(mod)) {
+      if (val && typeof val === 'object' && defOf(val)) walk(val, `${rel}#${name}`, 0);
+    }
   }
-}
 
-if (LIST) {
-  const rows = [...found.entries()].sort((a, b) => a[1].path.localeCompare(b[1].path));
-  console.log(`${rows.length} discriminated union(s):\n`);
-  for (const [key, v] of rows) console.log(`${v.path}\n    key: ${key}\n    ${v.variants.join(', ')}\n`);
-  process.exit(0);
-}
+  if (LIST) {
+    const rows = [...found.entries()].sort((a, b) => a[1].path.localeCompare(b[1].path));
+    console.log(`${rows.length} discriminated union(s):\n`);
+    for (const [key, v] of rows) console.log(`${v.path}\n    key: ${key}\n    ${v.variants.join(', ')}\n`);
+    process.exit(0);
+  }
 
-const ledger: { entries: Entry[] } = JSON.parse(fs.readFileSync(LEDGER, 'utf-8'));
-const byKey = new Map(ledger.entries.map((e) => [e.key, e]));
-const errors: string[] = [];
+  const ledger: { entries: Entry[] } = JSON.parse(fs.readFileSync(LEDGER, 'utf-8'));
+  const byKey = new Map(ledger.entries.map((e) => [e.key, e]));
+  const errors: string[] = [];
 
-// Duplicate keys in the ledger would let one entry silently shadow another.
-const dupes = ledger.entries.map((e) => e.key).filter((k, i, a) => a.indexOf(k) !== i);
-for (const k of new Set(dupes)) errors.push(`duplicate ledger key: ${k}`);
+  // Duplicate keys in the ledger would let one entry silently shadow another.
+  const dupes = ledger.entries.map((e) => e.key).filter((k, i, a) => a.indexOf(k) !== i);
+  for (const k of new Set(dupes)) errors.push(`duplicate ledger key: ${k}`);
 
-// Ratchet A — every discovered union must be declared.
-for (const [key, v] of found) {
-  if (byKey.has(key)) continue;
-  errors.push(
-    `undeclared discriminated union at ${v.path}\n` +
-    `    key: ${key}\n` +
-    `    variants (${v.variants.length}): ${v.variants.join(', ')}\n` +
-    `    → add it to packages/spec/variant-docs.json: bind \`docs\` (and make sure each variant\n` +
-    `      is mentioned there), or declare \`exempt\` with a reason.`,
+  // Ratchet A — every discovered union must be declared.
+  for (const [key, v] of found) {
+    if (byKey.has(key)) continue;
+    errors.push(
+      `undeclared discriminated union at ${v.path}\n` +
+      `    key: ${key}\n` +
+      `    variants (${v.variants.length}): ${v.variants.join(', ')}\n` +
+      `    → add it to packages/spec/variant-docs.json: bind \`docs\` (and make sure each variant\n` +
+      `      is mentioned there), or declare \`exempt\` with a reason.`,
+    );
+  }
+
+  // Ratchet B — every ledger entry must still correspond to a real union. A changed
+  // variant set surfaces here as an orphan plus an undeclared entry above.
+  for (const e of ledger.entries) {
+    if (!found.has(e.key)) {
+      errors.push(
+        `orphaned ledger entry "${e.label}"\n` +
+        `    key: ${e.key}\n` +
+        `    → no union with this discriminator/variant set exists any more. If variants changed,\n` +
+        `      update the key AND re-check the bound doc; if the union is gone, delete the entry.`,
+      );
+    }
+  }
+
+  // Coverage — every variant of a governed union must be mentioned in a bound doc.
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let governed = 0, exempt = 0;
+  for (const e of ledger.entries) {
+    const u = found.get(e.key);
+    if (!u) continue;
+    if (e.exempt) { exempt++; continue; }
+    if (!e.docs?.length) {
+      errors.push(`ledger entry "${e.label}" declares neither \`docs\` nor \`exempt\`.`);
+      continue;
+    }
+    governed++;
+
+    const missingDocs = e.docs.filter((d) => !fs.existsSync(path.join(REPO, d)));
+    if (missingDocs.length) {
+      errors.push(`ledger entry "${e.label}" binds doc(s) that do not exist: ${missingDocs.join(', ')}`);
+      continue;
+    }
+    const blob = e.docs.map((d) => fs.readFileSync(path.join(REPO, d), 'utf-8')).join('\n');
+    const undocumented = u.variants.filter((v) => {
+      const anchored = new RegExp(`${esc(u.disc)}\\s*:\\s*['"\`]${esc(v)}['"\`]`);
+      const token = new RegExp('`' + esc(v) + '`');
+      // YAML mapping line: unquoted scalar, so it must be anchored to the whole
+      // line (trailing `# comment` allowed) to stay as tight as the quoted form.
+      const yaml = new RegExp(`^\\s*${esc(u.disc)}\\s*:\\s*${esc(v)}\\s*(#.*)?$`, 'm');
+      return !anchored.test(blob) && !token.test(blob) && !yaml.test(blob);
+    });
+    if (undocumented.length) {
+      errors.push(
+        `"${e.label}" — ${undocumented.length} variant(s) the schema declares but the doc never mentions:\n` +
+        `    ${undocumented.join(', ')}\n` +
+        `    doc(s): ${e.docs.join(', ')}\n` +
+        `    → document them, or if they are genuinely not author-facing, re-classify the entry.`,
+      );
+    }
+  }
+
+  if (errors.length) {
+    console.error(`\n✗ variant/doc gate: ${errors.length} problem(s)\n`);
+    for (const e of errors) console.error(`  ${e}\n`);
+    process.exit(1);
+  }
+  console.log(
+    `✓ variant/doc gate: ${found.size} discriminated union(s) — ` +
+    `${governed} governed (every variant mentioned in a bound doc), ${exempt} exempt.`,
   );
 }
 
-// Ratchet B — every ledger entry must still correspond to a real union. A changed
-// variant set surfaces here as an orphan plus an undeclared entry above.
-for (const e of ledger.entries) {
-  if (!found.has(e.key)) {
-    errors.push(
-      `orphaned ledger entry "${e.label}"\n` +
-      `    key: ${e.key}\n` +
-      `    → no union with this discriminator/variant set exists any more. If variants changed,\n` +
-      `      update the key AND re-check the bound doc; if the union is gone, delete the entry.`,
-    );
-  }
-}
-
-// Coverage — every variant of a governed union must be mentioned in a bound doc.
-const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-let governed = 0, exempt = 0;
-for (const e of ledger.entries) {
-  const u = found.get(e.key);
-  if (!u) continue;
-  if (e.exempt) { exempt++; continue; }
-  if (!e.docs?.length) {
-    errors.push(`ledger entry "${e.label}" declares neither \`docs\` nor \`exempt\`.`);
-    continue;
-  }
-  governed++;
-
-  const missingDocs = e.docs.filter((d) => !fs.existsSync(path.join(REPO, d)));
-  if (missingDocs.length) {
-    errors.push(`ledger entry "${e.label}" binds doc(s) that do not exist: ${missingDocs.join(', ')}`);
-    continue;
-  }
-  const blob = e.docs.map((d) => fs.readFileSync(path.join(REPO, d), 'utf-8')).join('\n');
-  const undocumented = u.variants.filter((v) => {
-    const anchored = new RegExp(`${esc(u.disc)}\\s*:\\s*['"\`]${esc(v)}['"\`]`);
-    const token = new RegExp('`' + esc(v) + '`');
-    // YAML mapping line: unquoted scalar, so it must be anchored to the whole
-    // line (trailing `# comment` allowed) to stay as tight as the quoted form.
-    const yaml = new RegExp(`^\\s*${esc(u.disc)}\\s*:\\s*${esc(v)}\\s*(#.*)?$`, 'm');
-    return !anchored.test(blob) && !token.test(blob) && !yaml.test(blob);
-  });
-  if (undocumented.length) {
-    errors.push(
-      `"${e.label}" — ${undocumented.length} variant(s) the schema declares but the doc never mentions:\n` +
-      `    ${undocumented.join(', ')}\n` +
-      `    doc(s): ${e.docs.join(', ')}\n` +
-      `    → document them, or if they are genuinely not author-facing, re-classify the entry.`,
-    );
-  }
-}
-
-if (errors.length) {
-  console.error(`\n✗ variant/doc gate: ${errors.length} problem(s)\n`);
-  for (const e of errors) console.error(`  ${e}\n`);
-  process.exit(1);
-}
-console.log(
-  `✓ variant/doc gate: ${found.size} discriminated union(s) — ` +
-  `${governed} governed (every variant mentioned in a bound doc), ${exempt} exempt.`,
-);
+// Run the sweep only when invoked as a script (`tsx scripts/check-variant-docs.mts`, or the
+// pnpm script); an import — the fixture test — gets the exports and nothing else.
+const invokedDirectly = process.argv[1] !== undefined && url.fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);
+if (invokedDirectly) await main();

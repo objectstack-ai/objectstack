@@ -146,8 +146,10 @@ describe('a blank seed reference is no reference, on a REAL SqlDriver', () => {
     expect(byName('loan-real').book).toBe(dune.id);
     // The card: the row lands and the blank field is empty — by the engine's
     // blank rule, not by a shape the loader picked: the value is left as
-    // written, and what the insert door stores for a blank string-stored
-    // lookup is the door's own (it does not null one).
+    // written, and what the insert door stores for a blank lookup is the
+    // door's own (an optional lookup's `''` is stored as `null` since #29277;
+    // whitespace as written). A replay compares the seed's `''` in that
+    // stored form, so it is no change.
     expect(isMissing(byName('loan-empty').book)).toBe(true);
     expect(isMissing(byName('loan-whitespace').book)).toBe(true);
     // A blank element is dropped like a null hole; the others resolve, in order.

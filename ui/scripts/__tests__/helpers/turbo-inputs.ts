@@ -21,7 +21,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { uiRoot } from '../../ui-root.mjs';
-import { uiScopedTurboConfig, workspaceGlobs } from '../../workspace-root.mjs';
+import {
+  narrowTurboConfig,
+  turboConfigPath,
+  uiScopedTurboConfig,
+  workspaceGlobs,
+} from '../../workspace-root.mjs';
 
 /** Repo root: the objectui tree, standalone or as the monorepo's `ui/`. */
 export const repoRoot = uiRoot();
@@ -129,9 +134,107 @@ export function taskInputs(task: string, turbo: TurboTasks = liveTurboConfig()):
  * `$TURBO_ROOT$` exists at all.
  */
 export function rootAnchoredInputs(task: string, turbo: TurboTasks = liveTurboConfig()): string[] {
-  return taskInputs(task, turbo)
+  return anchoredOnly(taskInputs(task, turbo));
+}
+
+function anchoredOnly(inputs: readonly string[]): string[] {
+  return inputs
     .filter((entry) => entry.startsWith('$TURBO_ROOT$/'))
     .map((entry) => entry.slice('$TURBO_ROOT$/'.length));
+}
+
+// ── A package's own turbo.json (objectstack#29361) ───────────────────────────
+//
+// The root config is not the whole answer for a package that carries its own
+// `turbo.json` (a turbo Package Configuration, `extends: ["//"]`). For each
+// task it declares, turbo resolves that package's `inputs` like this:
+//
+//   - no `inputs` key on the package's task: the root task's list, unchanged;
+//   - an `inputs` list holding `$TURBO_EXTENDS$`: the root task's list plus the
+//     package's other entries;
+//   - an `inputs` list WITHOUT it: the package's entries REPLACE the root's,
+//     `$TURBO_DEFAULT$` included.
+//
+// Measured with turbo 2.11.10 on `@object-ui/console#build` (`--dry=json`):
+// 457 hashed files with `["$TURBO_EXTENDS$", <one $TURBO_ROOT$ file>]`, the
+// same 457 with the marker written last instead of first, and 3 with the
+// marker dropped. A guard that read only the root list would wave a replacing
+// list through and would red an extending one, so the guards read the list
+// turbo resolves for the package they judge.
+
+/** Turbo's marker: "the root task's list, plus these". */
+export const TURBO_EXTENDS = '$TURBO_EXTENDS$';
+
+/**
+ * A package's own `turbo.json`, narrowed to this tree like the root's
+ * (`$TURBO_ROOT$/ui/x` read as `$TURBO_ROOT$/x`), or `null` when it has none.
+ */
+export function packageTurboConfig(pkgDir: string): TurboTasks | null {
+  const file = path.join(pkgDir, 'turbo.json');
+  if (!fs.existsSync(file)) return null;
+  const config = JSON.parse(fs.readFileSync(file, 'utf8')) as TurboTasks;
+  const prefix = path.relative(path.dirname(turboConfigPath(repoRoot)), repoRoot);
+  return narrowTurboConfig(config, prefix ? `${prefix.split(path.sep).join('/')}/` : '');
+}
+
+/**
+ * The `inputs` turbo hashes ONE package's task from: the root task's list,
+ * resolved through the package's own `turbo.json` as described above.
+ *
+ * A root `<package>#<task>` override for the package throws: turbo has a
+ * resolution rule for it too, and this reader does not implement it. Reading
+ * the generic task instead would judge the package against a list turbo does
+ * not hash, so teach this function first.
+ */
+export function packageTaskInputs(
+  task: string,
+  pkgDir: string,
+  turbo: TurboTasks = liveTurboConfig(),
+  own: TurboTasks | null = packageTurboConfig(pkgDir),
+): string[] {
+  const manifest = path.join(pkgDir, 'package.json');
+  const name = fs.existsSync(manifest)
+    ? (JSON.parse(fs.readFileSync(manifest, 'utf8')) as { name?: string }).name
+    : undefined;
+  if (name && turbo.tasks?.[`${name}#${task}`]) {
+    throw new Error(
+      `turbo.json declares \`${name}#${task}\`, and packageTaskInputs() does not resolve a root ` +
+        `<package>#<task> override. Teach it turbo's rule for that shape rather than reading the ` +
+        `generic \`${task}\` task in its place.`,
+    );
+  }
+  const declared = own?.tasks?.[task]?.inputs;
+  if (declared === undefined) return taskInputs(task, turbo);
+  if (declared.includes(TURBO_EXTENDS)) {
+    return [...taskInputs(task, turbo), ...declared.filter((entry) => entry !== TURBO_EXTENDS)];
+  }
+  if (declared.length === 0) {
+    throw new Error(`${rel(path.join(pkgDir, 'turbo.json'))} \`${task}\` declares an empty \`inputs\` list`);
+  }
+  return declared;
+}
+
+/** `packageTaskInputs`, `$TURBO_ROOT$`-anchored entries only, as repo-relative globs. */
+export function packageRootAnchoredInputs(
+  task: string,
+  pkgDir: string,
+  turbo: TurboTasks = liveTurboConfig(),
+  own: TurboTasks | null = packageTurboConfig(pkgDir),
+): string[] {
+  return anchoredOnly(packageTaskInputs(task, pkgDir, turbo, own));
+}
+
+/**
+ * The `$TURBO_ROOT$` entries a package's OWN `turbo.json` writes for a task,
+ * as repo-relative globs: the population the phantom-input and earned-input
+ * assertions hold to that package's program, beside the root task's list.
+ */
+export function packageOwnRootAnchoredInputs(
+  task: string,
+  pkgDir: string,
+  own: TurboTasks | null = packageTurboConfig(pkgDir),
+): string[] {
+  return anchoredOnly(own?.tasks?.[task]?.inputs ?? []);
 }
 
 /**

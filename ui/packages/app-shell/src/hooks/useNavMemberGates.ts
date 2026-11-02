@@ -376,9 +376,15 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
   // package leg asks without views too: inside an app the bundle answers them
   // anyway, and on Home (the palette's gates for its host app) nothing does,
   // so composing them read the whole `/meta/view` list.
+  //
+  // objectstack#29416 — inside an app with no package the union is asked
+  // without views as well: the gate reads only which objects there are, and
+  // the union names other apps' objects, which the app's bundle does not
+  // hold, so composing them read the whole `/meta/view` list on every route
+  // of such an app. The route's own objects are composed with their views by
+  // the route's reader (`AppContent`), not here.
   const metadata = useMetadata();
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
-  const inApp = typeof app?.name === 'string' && app.name !== '';
   const readObjectScope = metadata.getTypeStatus?.('object') === 'idle' ? metadata.readObjectScope : undefined;
   const unionNames = readObjectScope && !packageId ? requiredObjectUnion(metadata.apps, app) : NO_MISSING;
   const scope: { objects: readonly unknown[]; missing: readonly string[] } | null = !readObjectScope
@@ -387,9 +393,7 @@ export function useNavMemberGates(forApp?: Record<string, unknown>): NavMemberGa
       ? (readObjectScope as ReadNamesWithoutViews)({ packageId, views: false })
       : unionNames.length === 0
         ? NO_REQUIRED_OBJECTS
-        : inApp
-          ? readObjectScope({ names: unionNames })
-          : (readObjectScope as ReadNamesWithoutViews)({ names: unionNames, views: false });
+        : (readObjectScope as ReadNamesWithoutViews)({ names: unionNames, views: false });
   const metadataObjects = scope ? scope.objects : metadata.objects;
   const missingObjects = scope ? scope.missing : NO_MISSING;
   const registeredObjectNames = useMemo(

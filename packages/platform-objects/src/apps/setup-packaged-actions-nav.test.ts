@@ -23,7 +23,7 @@
 //    `sys_metadata_activation` ledger this package registers (#12419) and work
 //    on compositions with NO automation service; gating the entry on that
 //    service would hide a page that still works there.
-//  - no `requiredPermissions` — matches `nav_packages` beside it: the Setup
+//  - no `requiredPermissions` — like the rest of `group_apps`: the Setup
 //    app's own `setup.access` gates the app, and the activation WRITE doors
 //    enforce `manage_metadata` / the ADR-0126 §5 operator gate server-side.
 import { describe, it, expect } from 'vitest';
@@ -72,7 +72,7 @@ describe('the Setup Packaged Actions entry targets the console component (ADR-01
     });
   });
 
-  it('lives in group_apps beside Packages — package administration is Operate (ADR-0084)', () => {
+  it('lives in group_apps — operational package state is Operate (ADR-0084)', () => {
     expect(entry().group).toBe('group_apps');
   });
 
@@ -93,8 +93,10 @@ describe('the Setup Packaged Actions entry targets the console component (ADR-01
 describe('Setup › Packaged automation stays retired (ADR-0146 D11)', () => {
   it('no entry names the retired id or the retired `automation:packaged` ref', () => {
     const items = allItems().map(({ item }) => item);
-    // Control: the walk reads the real array.
-    expect(items.some((i) => i.id === 'nav_packages')).toBe(true);
+    // Control: the walk reads the real array. (It used to name Setup's
+    // `nav_packages`, which moved to Studio in #25098;
+    // `setup-packages-door.test.ts` pins that move.)
+    expect(items.some((i) => i.id === 'nav_packaged_actions')).toBe(true);
     expect(items.filter((i) => i.id === 'nav_packaged_automation')).toEqual([]);
     expect(items.filter((i) => i.componentRef === 'automation:packaged')).toEqual([]);
   });

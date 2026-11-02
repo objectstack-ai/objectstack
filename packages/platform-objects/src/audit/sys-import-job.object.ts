@@ -29,7 +29,6 @@ export const SysImportJob = ObjectSchema.create({
   description: 'Asynchronous bulk-import job state, progress, and history',
   displayNameField: 'object_name',
   nameField: 'object_name', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{object_name} import @ {created_at}',
   highlightFields: ['object_name', 'status', 'processed_rows', 'total_rows', 'created_at'],
 
   fields: {

@@ -132,20 +132,28 @@ describe('#5922 — what the rule deliberately leaves alone', () => {
     expect(errs[0].message).toMatch(/array/i);
   });
 
-  it('admits an UNDECLARED $-spelling — not a filter any backend executes', () => {
-    // The rule is derived from the spec's operator vocabulary, not from the
-    // `$` sigil. `{ $inn: … }` is out of scope by construction; judging every
-    // plain object on a scalar field is #5922's option A, which this is not.
-    //
-    // [#29133] Pinned on a free-form `select`, not on `text`: the text family
-    // now refuses every plain object by its own shape rule (see
-    // `record-validator.text-shape.test.ts`), which would make this pin pass
-    // for a reason other than the one it states.
-    expect(() => validateRecord(schema, { stage_free: { $inn: ['a'] } }, 'update')).not.toThrow();
+  // The rule is derived from the spec's operator vocabulary, not from the `$`
+  // sigil: `{ $inn: … }` is out of its scope by construction, and judging every
+  // plain object on a scalar field is #5922's option A, which this is not.
+  //
+  // [#29244] Restated as refusals. Every scalar-valued type now refuses a plain
+  // object by its own SHAPE rule (the text family since #29133, the
+  // single-value select since #29244), so no scalar field is left that admits
+  // one, and moving the pins to `json` would pin nothing: that column skips
+  // this rule entirely. What the pins still prove is that THIS rule did not
+  // claim the object. The shape sentence answers, never the operator sentence.
+  it('an UNDECLARED $-spelling is not named as a filter operator (the shape rule refuses it)', () => {
+    const errs = errorsOf({ stage_free: { $inn: ['a'] } });
+    expect(errs.map((e) => [e.field, e.code])).toEqual([['stage_free', 'invalid_type']]);
+    expect(errs[0].constraint).toMatchObject({ detail: 'expected one option value, received an object' });
+    expect(errs[0].message).not.toContain('filter operator');
   });
 
-  it('admits a plain non-operator object (same reason)', () => {
-    expect(() => validateRecord(schema, { stage_free: { a: 1 } }, 'update')).not.toThrow();
+  it('a plain non-operator object is not named as a filter operator (same reason)', () => {
+    const errs = errorsOf({ stage_free: { a: 1 } });
+    expect(errs.map((e) => [e.field, e.code])).toEqual([['stage_free', 'invalid_type']]);
+    expect(errs[0].constraint).toMatchObject({ detail: 'expected one option value, received an object' });
+    expect(errs[0].message).not.toContain('filter operator');
   });
 });
 
