@@ -88,12 +88,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-/** The data route's answer for the administrator's row, in its envelope. */
+/**
+ * The data route's answer for the administrator's row: the spec's
+ * `GetDataResponse` body, unwrapped, as a live server answers it.
+ */
 function adminRow(fields: Record<string, unknown>): Response {
-  return jsonResponse({
-    success: true,
-    data: { object: 'sys_user', id: 'usr_admin', record: { id: 'usr_admin', ...fields } },
-  });
+  return jsonResponse({ object: 'sys_user', id: 'usr_admin', record: { id: 'usr_admin', ...fields } });
 }
 
 /** Stub `fetch` for the stop-impersonating call and the administrator read. */
@@ -187,8 +187,11 @@ describe('ImpersonationBanner (#4467)', () => {
   });
 
   it.each([
-    ['refused (the impersonated user cannot read the row)', () => jsonResponse({ success: false, error: { code: 'PERMISSION_DENIED' } }, 403)],
-    ['missing', () => jsonResponse({ success: false, error: { code: 'NOT_FOUND' } }, 404)],
+    // What a user outside the administrator's organization gets: the row scope
+    // hides the row, and the route answers it as missing.
+    ['outside the reader\'s row scope', () => jsonResponse({ error: 'Record usr_admin not found in sys_user', code: 'RECORD_NOT_FOUND', object: 'sys_user' }, 404)],
+    ['refused', () => jsonResponse({ error: 'Permission denied', code: 'PERMISSION_DENIED' }, 403)],
+    ['answered off the GetDataResponse shape', () => jsonResponse({ success: true, data: { name: 'Dev Admin' } })],
     ['answered without a name or email', () => adminRow({})],
     ['a network failure', () => {
       throw new TypeError('Failed to fetch');

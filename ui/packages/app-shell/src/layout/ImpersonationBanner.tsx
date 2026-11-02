@@ -56,6 +56,7 @@ import { useEffect, useState } from 'react';
 import { UserCog } from 'lucide-react';
 import { Button } from '@object-ui/components';
 import { createAuthenticatedFetch } from '@object-ui/auth';
+import { GetDataResponseSchema } from '@objectstack/spec/api';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { PERSON_DISPLAY_FIELDS, rowLabel } from '../utils/approverIdentity.js';
 import { useImpersonationExit } from './useImpersonationExit.js';
@@ -88,9 +89,10 @@ function useAdministratorName(adminId: string | undefined): AdministratorName {
           { method: 'GET', headers: { Accept: 'application/json' }, credentials: 'include' },
         );
         if (res.ok) {
-          // The data route's envelope: `{ success, data: { object, id, record } }`.
-          const body = (await res.json()) as { data?: { record?: unknown } } | null;
-          name = rowLabel(body?.data?.record, PERSON_DISPLAY_FIELDS) || null;
+          // The data route answers the spec's `GetDataResponse` body; anything
+          // else names nobody.
+          const body = GetDataResponseSchema.safeParse(await res.json());
+          if (body.success) name = rowLabel(body.data.record, PERSON_DISPLAY_FIELDS) || null;
         }
       } catch {
         // A failed read names nobody; the banner says "an administrator".
