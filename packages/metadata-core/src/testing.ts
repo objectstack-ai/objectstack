@@ -11,3 +11,8 @@ export * from './contract-suite.js';
 // exit that forgets the projection fails by name. Test-only: it belongs beside
 // the contract suite, not on the runtime entry.
 export * from './object-schema-fls-contract.js';
+// [#29025] The shared corpus both faces of the flow-cycle judge are driven
+// from — the engine's registration (`@objectstack/service-automation`) and the
+// runtime authoring gate (`@objectstack/metadata-protocol`) — so the two
+// refuse exactly the same graphs. Test-only, beside the FLS case table.
+export * from './flow-cycle-corpus.js';
