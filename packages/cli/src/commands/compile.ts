@@ -83,9 +83,6 @@ import { findOverrideDeclarationRefusals } from '../utils/override-declarations.
 // `os validate` step 3a-iv runs, over the save and install doors' own judge
 // (`judgeExtensionFieldSuffix`).
 import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
-// [#28893] The ADR-0031 region-shape check — the walk `os validate` step 3a-vi
-// runs, over the automation engine's own registration verdict.
-import { findFlowRegionRefusals } from '../utils/flow-region-shape.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -840,28 +837,9 @@ export default class Compile extends Command {
         this.exit(1);
       }
 
-      // 3b-iii-ter. [#28893] Flow region shape (ADR-0031), at build time — the
-      //     SAME call `os validate` makes at its step 3a-vi: the engine's
-      //     registration verdict (`FlowSchema`, then the spec's
-      //     `validateControlFlow`). Before this the build emitted a flow the
-      //     engine then refused at boot, logging a warning and running without
-      //     it; now the door that ships refuses it and writes no artifact. Same
-      //     two faces as the gates above.
-      const regionRefusals = findFlowRegionRefusals(result.data as Record<string, unknown>);
-      if (regionRefusals.length > 0) {
-        if (flags.json) {
-          await emitJson({ success: false, errors: regionRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
-          this.exit(1);
-        }
-        const n = regionRefusals.length;
-        console.log('');
-        printError(`The automation engine would refuse to register ${n} flow${n > 1 ? 's' : ''} for a malformed region (ADR-0031)`);
-        printBulletList(
-          regionRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
-          { noun: 'flow region refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
-        );
-        this.exit(1);
-      }
+      // 3b-iii-ter. [#28893] Flow region shape (ADR-0031) is judged by the
+      //     rule table at step 3b since #29049 (`flow-region-shape-invalid`),
+      //     the same verdict `os validate` and `os lint` give.
 
       // 3b-quater. ADR-0141 D2, author side — every `manifest.dependencies`
       //     range of the packages one install act would deliver, judged by the

@@ -7,6 +7,7 @@
     "system/AddFieldOperation",
     "system/AdvancedAuthConfig",
     "system/AnalyzerConfig",
+    "system/ApnsTransportConfig",
     "system/AppCompatibilityCheck",
     "system/AppInstallRequest",
     "system/AppInstallResult",
@@ -89,6 +90,7 @@
     "system/FacetConfig",
     "system/FailoverConfig",
     "system/FailoverMode",
+    "system/FcmTransportConfig",
     "system/Feature",
     "system/FieldEncryption",
     "system/FieldTranslation",
@@ -189,6 +191,8 @@
     "system/PlatformTranslationBundle",
     "system/PlatformTranslationData",
     "system/PresignedUrlConfig",
+    "system/PushServiceConfig",
+    "system/PushVendor",
     "system/QueueConfig",
     "system/QuotaEnforcementResult",
     "system/RPO",
@@ -287,6 +291,7 @@
     "system/TranslationDiffStatus",
     "system/TranslationItem",
     "system/UserActivityStatus",
+    "system/UserDevice",
     "system/VectorClock",
     "system/WorkerStats"
   ]

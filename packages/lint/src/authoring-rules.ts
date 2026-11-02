@@ -150,6 +150,7 @@ import { validateRuleSchemaFormats } from './validate-rule-schema-formats.js';
 import { validateActionLocations } from './validate-action-locations.js';
 import { lintFlowPatterns } from './lint-flow-patterns.js';
 import { lintFlowCredentialLiterals } from './lint-flow-credential-literals.js';
+import { validateFlowRegionShape } from './validate-flow-region-shape.js';
 import { lintConnectorCredentialLiterals } from './lint-connector-credential-literals.js';
 import { lintLivenessProperties } from './lint-liveness-properties.js';
 import { lintAutonumberFormats } from './lint-autonumber-formats.js';
@@ -1965,6 +1966,27 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
         message: f.message,
         hint: f.hint,
       })),
+  },
+  // [#29049] ADR-0031 region shape: a flow whose `loop` body, `parallel`
+  // branches or `try_catch` regions are not single-entry/single-exit and
+  // acyclic at any depth, or whose `parallel` has one branch, is a flow the
+  // automation engine refuses to register, so it never runs. The verdict is
+  // the engine's own call (`FlowSchema`, then the spec's `validateControlFlow`);
+  // `os validate` and `os build` gated on it through a CLI-only walk
+  // (#28893), which left `os lint` blind. Registered here, all three commands
+  // judge it, and the CLI walk is retired.
+  {
+    name: 'validateFlowRegionShape',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-flow-region-shape.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Not yet on the runtime publish gate: whether a flow write whose region the engine refuses is refused at '
+      + 'publish is the server lane\'s open question for the metadata write path, decided there; this entry '
+      + 'brings the three authoring commands to the engine\'s registration verdict.',
+    run: (stack) => validateFlowRegionShape(stack),
   },
   // The same predicate over a declarative connector's four header/env maps
   // (`providerConfig.headers`, `defaultHeaders`, `transport.headers`,
