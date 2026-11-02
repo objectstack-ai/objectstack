@@ -95,7 +95,7 @@
           "verifiedAt": "2026-11-02",
           "evidence": "packages/spec/src/automation/flow.zod.ts#FlowVariableSchema (the superRefine that refuses `objectName` on a variable that is not an input — the one place the key is read today)",
           "authorWarn": true,
-          "authorHint": "Keep it, but nothing reads it yet: no start door loads a declared input from its object until the server half of #29425 ruling A ships, so an id the caller cannot read still starts a run.",
+          "authorHint": "Keep it, but nothing reads it yet: no start door loads a declared input from its object until the start doors ship that check, so an id the caller cannot read still starts a run.",
           "note": "PLANNED RECORD (#29442, the spec half of #29425 ruling A 6580257050): an input's declaration that its value is the id of one record of the named object. Parsed, refused on a non-input (the evidence above) and linted (`flow-input-unknown-object` in packages/lint/src/validate-flow-trigger-readiness.ts). No door reads it: the start doors' third question (packages/runtime/src/flow-start-admission.ts, `flowDeclaredRecordReads` / `refuseUnreadableFlowStartRecords` in action-execution.ts) judges only inputs the definition reads in plain sight. Carrier: the #29425 server half, Blocked-by #29442 (every start door loads a declared input in the caller's scope, 404 RECORD_NOT_FOUND / 400 VALIDATION_FAILED). Flip to `live` on the commit that cites that reader, drop `authorWarn` / `authorHint` and the describe's planned sentence in that same edit."
         }
       }
