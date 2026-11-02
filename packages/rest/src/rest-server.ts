@@ -5423,9 +5423,9 @@ export class RestServer {
          * cosmetic:
          *  1. **No single brace pair contains exactly the right set.** The
          *     later members are registered by nine calls, in three
-         *     modules, with `GET {metaPath}/object/:name/state/:field` —
-         *     deliberately NOT part of this face — registered between the last
-         *     two of them.
+         *     modules, and `GET {metaPath}/object/:name/state/:field` —
+         *     deliberately NOT part of this face — is registered after all
+         *     nine.
          *  2. **A gate that travels with its registration cannot be inherited
          *     or shed by moving a route past a brace**, which is exactly how
          *     this switch came to gate four reads and none of its own writes:
