@@ -14,6 +14,7 @@
     "ui/Action:body",
     "ui/Action:bodyExtra",
     "ui/Action:bodyShape",
+    "ui/Action:cancelText",
     "ui/Action:component",
     "ui/Action:confirmText",
     "ui/Action:description",
