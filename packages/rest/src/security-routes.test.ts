@@ -334,7 +334,7 @@ describe('[#8326] POST/GET /security/explain with recordIds (batch form)', () =>
       const { recordIds, ...objectLevel } = request;
       const decision = await single(objectLevel);
       const records: unknown[] = [];
-      for (const recordId of recordIds) records.push((await single({ ...objectLevel, recordId })).record);
+      for (const recordId of recordIds) records.push(((await single({ ...objectLevel, recordId })) as { record?: unknown }).record);
       return { ...decision, records };
     });
   }
