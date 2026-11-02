@@ -2835,8 +2835,23 @@ const en = {
       // (rename / pin / set-as-default / configure), so the copy has to cover
       // any change to a built-in view rather than name one operation.
       cannotEditMetaView: 'This view is built in and defined in code — it cannot be changed.',
-      resetView: 'Reset view',
-      resetViewTitle: 'Set this view back to its own sort, filters and column widths. Only yours change.',
+      resetView: 'Reset to view',
+      resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
+      personalized: 'Personalized',
+      personalizedHeading: 'Your list differs from this view in',
+      personalizedParts: {
+        filters: 'Filters',
+        search: 'Search',
+        sort: 'Sort',
+        grouping: 'Grouping',
+        columns: 'Column layout',
+        hiddenFields: 'Hidden fields',
+        density: 'Density',
+        layout: 'Layout',
+        rowColor: 'Row color',
+        rowNumbers: 'Row numbers',
+        inlineEdit: 'Inline editing',
+      },
       cannotDeleteMetaView: 'This view is built in and defined in code — it cannot be deleted.',
       expandToPage: 'Open as full page',
       openAsPage: 'Open as full page',
@@ -3195,6 +3210,7 @@ const en = {
       // the same with or without the pack.
       ssoButton: 'Sign in with SSO',
       ssoOnlyDescription: "Sign in with your organization's single sign-on",
+      noSignInMethodText: 'No sign-in method is available. Contact your administrator.',
       usePasswordText: 'Use a password instead',
       backToSsoText: 'Back to single sign-on',
       // objectui#12600 — the console login card's own header, the password

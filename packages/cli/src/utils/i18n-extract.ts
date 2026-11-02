@@ -1483,10 +1483,20 @@ export function collectExpectedEntries(
         // `inlineHelpText` is the key `FieldSchema` spells help text with, so it
         // is the authored default-locale text of `help` — after `help`, before
         // `description` — exactly as the authored label is for `label` (#15711).
+        //
+        // The FIRST AUTHORED link wins, not the first defined one: the console
+        // draws `inlineHelpText || description` (`fieldHelpText` in
+        // `@object-ui/fields`), so an empty `inlineHelpText` reads as absent
+        // there and the description is the line people see. A `??` chain
+        // stopped at that `''` and scaffolded no seed, leaving the drawn
+        // description out of the bundle (#29221). `asAuthoredLabel` is the one
+        // "authored" test this file uses (a non-empty string or a non-empty
+        // inline locale map); whitespace-only text stays authored, as it does
+        // for the console's `||` and the resolver's non-empty check.
         pushOptional(
           out,
           ['objects', objectName, 'fields', fieldName, 'help'],
-          field.help ?? field.inlineHelpText ?? field.description,
+          asAuthoredLabel(field.help) ?? asAuthoredLabel(field.inlineHelpText) ?? asAuthoredLabel(field.description),
           'field',
           { objectName },
         );

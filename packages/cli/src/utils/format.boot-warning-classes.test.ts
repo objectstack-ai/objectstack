@@ -238,6 +238,7 @@ const policyRefused = (names: string[], triggerType = 'schedule'): AutomationRea
 const summary = (over: Partial<AutomationReadySummary>): AutomationReadySummary => ({
   enabled: true,
   declaredFlowCount: 0,
+  refusedCount: 0,
   flowCount: 10,
   boundCount: 0,
   triggerTypes: ['schedule', 'record_change'],
