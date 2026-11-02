@@ -1130,6 +1130,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.refusal.publishWhere': 'Not published. Check {where}: Details say what to change.',
   'engine.studio.refusal.publishUnlocated': 'Not published: the server refused this draft. Details say why.',
   'engine.studio.refusal.publishPlain': 'Not published: {reason}',
+  // A leaf whose pending draft the server refused to read (403): Studio opens no buffer over it.
+  'engine.studio.refusal.draftUnreadable': 'This item has an unpublished draft you are not allowed to read, so Studio has not opened it: editing the published version here would overwrite that draft. Someone who holds the permissions the draft requires can edit or publish it. Details show what the server answered.',
   'engine.studio.publishRefused': 'Not published: {count} items need a change. Pending changes keeps each reason until it is fixed.',
   'engine.studio.publishRefusedOne': 'Not published: {count} item needs a change. Pending changes keeps the reason until it is fixed.',
   'engine.studio.publishRefusedBatch': 'Nothing went live: the package publishes as one batch, so its other drafts wait for this fix.',
