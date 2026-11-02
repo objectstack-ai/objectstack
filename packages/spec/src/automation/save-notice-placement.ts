@@ -33,10 +33,18 @@
  * graph only (a region body refuses one), so a `save_notice` inside a region
  * is judged by its top-level container.
  *
- * What the parse still cannot see is left to the run: a `subflow` or a `map`
- * pauses only when the child flow it names does (a different record), and a
- * plugin-registered pausing type is not in the list. A `save_notice` reached
- * after one of those refuses the node by name there.
+ * What the parse still cannot see is met by the engine's arming gate, before
+ * any run. A `subflow` or a `map` pauses only when the child flow it names
+ * does (a different record, not in hand here). So a `save_notice` reached
+ * after one whose child can suspend is declined by the gate (#28840): the flow
+ * registers but is not armed, and `/_status` reports it `bound: false` with
+ * `unboundCause: 'notice_after_suspending_subflow'`, naming the call node and
+ * where the child suspends. The gate asks again whenever a flow the caller
+ * reaches through its calls is registered, so the answer does not depend on
+ * load order. A call inside a region body is not that case: a region cannot
+ * carry a durable pause, so the run fails at the region's boundary before the
+ * notice. The run-time refusal by name is the residue, for a plugin-registered
+ * pausing type, which neither this list nor the gate holds.
  */
 
 import { collectFlowGraphs } from './control-flow.zod';

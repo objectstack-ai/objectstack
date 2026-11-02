@@ -1332,6 +1332,31 @@ export function foldsApiDecisionOutputs(action: any): boolean {
 }
 
 /**
+ * Which record input does this partly built forward `path` still lack, by its
+ * `{field}` tokens? `recordId` when the caller named no record, otherwise the
+ * field the record has no value for; `undefined` when every token resolved.
+ * Read after `${…}` and `{{…}}` are refused, so a brace pair left here is a
+ * `{field}` token.
+ */
+function unresolvedApiTargetRecordInput(path: string, routedRecordId: unknown): string | undefined {
+    const match = /\{([a-z_][a-z0-9_]*)\}/i.exec(path);
+    if (!match) return undefined;
+    return routedRecordId === undefined ? 'recordId' : match[1];
+}
+
+/** The refusal for a `target` record token the dispatch inputs left unresolved: nothing is forwarded. */
+function unresolvedApiTargetRecordRefusal(name: string, target: string, missing: string): ApiActionRequestRefusal {
+    return {
+        status: 400,
+        message: missing === 'recordId'
+            ? `Action '${name}' has a \`target\` ('${target}') that names its record, and no \`recordId\` was given. ` +
+                `Pass the id of the record to run it on as \`recordId\`. The request was not sent.`
+            : `Action '${name}' has a \`target\` ('${target}') that reads \`${missing}\` from its record, and this ` +
+                `record has no value for it. The request was not sent.`,
+    };
+}
+
+/**
  * Assemble the request a same-origin `type: 'api'` action makes — method,
  * path and JSON body — from its DECLARATION and the dispatch inputs, by the
  * same rules the console's api handler applies at a click
@@ -1341,6 +1366,10 @@ export function foldsApiDecisionOutputs(action: any): boolean {
  *     the caller (`ctx.recordId`, `ctx.user.id`, `ctx.org.id`; `ctx.origin` /
  *     `ctx.apiBase` are `''` on the server, as they are for a same-origin
  *     console), values percent-encoded; then `{field}` from the subject row.
+ *     A record token neither can fill — no `recordId` given (an empty one is
+ *     none), or a row with no value for the field — is REFUSED naming the
+ *     missing input, never blanked or forwarded as written: that path reaches
+ *     no route, and its 404 would say the endpoint does not exist.
  *  2. The body: the params bag, flat or under `bodyShape.wrap`; the `outputs.*`
  *     fold (#3447); `recordIdParam` seeded from the subject row's
  *     `recordIdField` (default `id`) — or REFUSED when the row cannot supply it
@@ -1373,23 +1402,37 @@ export function buildApiActionRequest(
         : undefined;
 
     // ── 1. the path ──
+    // An empty id is no id: `${ctx.recordId}` and `{id}` stay unresolved, and
+    // are refused below by name, rather than blanked into a path naming no record.
+    const routedRecordId: unknown = input.recordId || (input.record as any)?.id || undefined;
     let path = substituteApiTargetTokens(target, {
         param: input.params,
         ctx: {
             origin: '',
             apiBase: '',
-            recordId: input.recordId ?? (input.record as any)?.id,
+            recordId: routedRecordId,
             user: { id: ec.userId, email: ec.email },
             org: { id: organizationId },
         },
     });
-    if (input.record && /\{[a-z_][a-z0-9_]*\}/i.test(path)) {
-        const row = input.record;
-        path = path.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (_m, k: string) => {
-            const v = row[k];
-            return v == null ? '' : encodeURIComponent(String(v));
+    if (/\{[a-z_][a-z0-9_]*\}/i.test(path)) {
+        // Without a row only `{id}` has a source: the routed `recordId`, as
+        // for `recordIdParam` below. A field with no value is LEFT IN PLACE,
+        // never blanked: the refusal below names it, and nothing is forwarded.
+        const row: Record<string, unknown> = input.record && typeof input.record === 'object' ? input.record : {};
+        path = path.replace(/\{([a-z_][a-z0-9_]*)\}/gi, (m, k: string) => {
+            const v = row[k] ?? (k === 'id' ? routedRecordId : undefined);
+            return v == null || v === '' ? m : encodeURIComponent(String(v));
         });
     }
+    // A record token left unresolved — the caller named no record, or the
+    // record has no value for the field the path reads — is refused BEFORE the
+    // forward, naming the missing input: a forward with a hole in its path
+    // reaches no route, and its 404 would tell the caller the endpoint does
+    // not exist instead of what they did not send. `${ctx.recordId}` is read
+    // here, ahead of the browser-only refusal below, which would otherwise
+    // claim it; a `{field}` token after it, so a `{{page.x}}` keeps that one.
+    if (path.includes('${ctx.recordId}')) return unresolvedApiTargetRecordRefusal(name, target, 'recordId');
     if (/\$\{[\w.]+\}|\{\{/.test(path)) {
         return {
             status: 400,
@@ -1400,6 +1443,8 @@ export function buildApiActionRequest(
                 `exists only in the browser). Pass the value as a param, or call the target from the console.`,
         };
     }
+    const missingRecordInput = unresolvedApiTargetRecordInput(path, routedRecordId);
+    if (missingRecordInput) return unresolvedApiTargetRecordRefusal(name, target, missingRecordInput);
     if (!isSameOriginApiTarget(path)) {
         return { status: 400, message: `Action '${name}' interpolated its \`target\` to '${path}', which is not a same-origin path.` };
     }

@@ -170,7 +170,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
   // `requiredPermissions` action closed on exactly the deployments this
   // doctrine exists to protect (objectui#4656).
   const { systemPermissions } = usePermissions();
-  const { fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionResultDialog } = useObjectLabel();
+  const { fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionCancelText, actionResultDialog } = useObjectLabel();
   // Entitlement 403s render as a dialog, not a toast — its copy is localized
   // here rather than taken from the server (objectui#2458 / cloud#959).
   // `language` also resolves inline per-locale action-param labels below, and
@@ -346,6 +346,9 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // object-less action) first, then the authored `I18nLabel` collapsed to
       // the active language. Absent, the dialog keeps its default "Confirm".
       const submitText = actionSubmitText(objForI18n, action?.name, pickLocalized(action?.submitText, language) || undefined);
+      // The dismiss button's label (`cancelText`), resolved the same way.
+      // Absent, the dialog keeps its default "Cancel".
+      const cancelText = actionCancelText(objForI18n, action?.name, pickLocalized(action?.cancelText, language) || undefined);
       setParamState({
         open: true,
         params: localized,
@@ -361,6 +364,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
           ? [overrideNotice, declaredDescription].filter(Boolean).join('\n\n')
           : declaredDescription,
         submitText,
+        cancelText,
         interpolate,
         resolve,
         // The runner's `run`, so Confirm runs the action from inside the
@@ -368,7 +372,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
         run,
       });
     })(); });
-  }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, language]);
+  }, [objectName, objectDef, objects, metadata, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);
 
   const currentUser = user
     ? { id: user.id, name: user.name, avatar: user.image, isPlatformAdmin: (user as any)?.isPlatformAdmin ?? false, systemPermissions }
