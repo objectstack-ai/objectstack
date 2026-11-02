@@ -125,6 +125,15 @@ const CALLERS: Record<string, Classification> = {
       + 'narrows what is read (`true` still reads as the caller, through the engine middleware; anything else serves the '
       + "refused marker), and it serves no row of its own; the record read it hydrates was admitted by that read's door",
   },
+  // [#29460] `referenceNameVisible`'s ask, inside the `$expand` sub-read.
+  'packages/objectql/src/engine-reference-name-visible.ts': {
+    kind: 'not-a-door',
+    reason:
+      "`referenceNameVisible`'s ask (`callerRefusedIds`, #29460): it runs only from `expandRelatedRecords`, after the "
+      + "caller's own expansion of a read whose door already admitted it through the exposure decision, and only to tell "
+      + 'which of the ids that expansion left bare the caller is refused; for those it puts, in that same read\'s value, '
+      + 'the id the row already holds and the target\'s display name (or the `Record #` floor), and it serves no row of its own',
+  },
 };
 
 const SCAN_TIMEOUT_MS = 60_000;

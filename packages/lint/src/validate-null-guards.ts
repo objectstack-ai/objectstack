@@ -90,7 +90,7 @@
  * | field `requiredWhen`           | TOTAL   | same `merged` in `evaluateValidationRules` — fail-OPEN, so an unguarded predicate enforces NOTHING in silence | covered (#4811) |
  * | field `readonlyWhen`           | TOTAL   | `rule-validator.ts` `readonlyWhenBindings` materialises BOTH roots (#4953 clause 1, landed in #6454) | excluded — NOT on totality; see below |
  * | action `visible` / `disabled`  | sparse  | evaluated client-side; no materialization exists in `objectui` | excluded (decided — #4953 clause 2) |
- * | flow start / edge / `decision` condition — record-triggered flow | TOTAL | `record-change-trigger.ts` `buildContext` layers `previous` under the payload/after-row then runs BOTH `record` and `previous` through a structural-mirror `materializeDeclaredFields` (#4953 clause 1's other half, services lane); `seedRunVariables` flattens that same total record to bare names | covered (#29026), outcome `run-fails`; see below |
+ * | flow start / edge / `decision` condition — record-triggered flow | TOTAL | `record-change-trigger.ts` `buildContext` layers `previous` under the payload/after-row then runs BOTH `record` and `previous` through a structural-mirror `materializeDeclaredFields` (#4953 clause 1's other half, services lane); `seedRunVariables` flattens that same total record to bare names | covered (#29026), outcome `run-fails`; the runtime publish gate is stricter on a bare start guard; see below |
  * | the same slots, any other flow | sparse or unknown | the inbound hook hands the request body, an action an empty record carrying at most `id`, a `map` item its own keys; nothing materializes them | excluded |
  * | sharing-rule `condition`       | n/a     | compiled to a SQL filter; `NULL > x` is three-valued, never faults | excluded |
  * | field `expression` (`Field.formula`) | n/a | product judgement, not a wiring gap — see below              | excluded |
@@ -266,6 +266,21 @@
  *         before any node, whatever the entrance, so what it proves non-null
  *         is presumed at every edge and `decision` branch of the flow
  *         ({@link provenNonNullKeys}); an author does not re-guard downstream.
+ *         **The two doors disagree on a BARE start guard, and the runtime
+ *         publish gate is the stricter one.** `os validate` sees the flow's
+ *         entrances, so where the bound set is provable a bare
+ *         `budget != null` start condition proves `record.budget` (point 2)
+ *         and an edge comparing `record.budget > 200000` passes. The runtime
+ *         publish gate judges the written flow alone
+ *         (`perWriteSnapshotEntrance`): the bound set is not provable there,
+ *         no bare name is judged, the bare guard proves nothing, and the same
+ *         edge is refused. The stricter side stands: with the bound set not
+ *         provable, a bare name is not provably the field, and deriving the
+ *         presumption from it would be unsound. Nobody has measured a sound
+ *         way for that door to stand down on such a finding instead, so it
+ *         does not. Spell the start guard `record.budget != null` and
+ *         both doors accept the flow. Pinned in
+ *         `validate-expressions.flow-null-guards.test.ts`.
  *      4. **Outcome `run-fails`, not `fail-closed`.** `evaluateCondition`
  *         throws on the fault (ADR-0032 §1c) and the record-change trigger
  *         isolates the write, so the run fails and the write lands.
@@ -275,7 +290,10 @@
  *    `previous.x != null` itself faults there; the full guard is
  *    `previous != null && previous.x != null`. The gate still reports the
  *    unguarded `previous.x` (it faults on the update leg's null), and
- *    `previous != null` alone is not accepted as guarding `previous.x`.
+ *    `previous != null` alone is not accepted as guarding `previous.x`. The
+ *    message names that full guard for a `previous.` operand
+ *    ({@link PREVIOUS_GUARD_CLAUSE}), on every surface: a validation rule
+ *    and a hook condition bind `previous` to `null` on an insert too.
  *    Other declared predicate slots (a `screen` field's `visibleWhen`) are
  *    not judged: their fault does not take this outcome, and nobody has
  *    measured what it does take.
@@ -303,6 +321,18 @@ import type { CelAstNode } from '@objectstack/formula';
 export const NULL_GUARD_HINT =
   `Guard it with '!= null'` +
   ` — 'has(x)' does NOT do that: a declared field holding null is still PRESENT, so has(x) is true.`;
+
+/**
+ * The clause {@link nullGuardMessage} adds after {@link NULL_GUARD_HINT} for a
+ * `previous.<f>` operand, and only for one. An insert binds `previous` itself to
+ * `null` (`previousBinding` in the rule validator, `seedRunVariables` on a
+ * flow's create leg), so `previous.<f> != null` faults there too and the guard
+ * that holds on both legs names `previous` first. Kept out of the shared hint,
+ * which stays verbatim with the runtime's sentence.
+ */
+const PREVIOUS_GUARD_CLAUSE = (operand: string): string =>
+  ` On an insert \`previous\` is itself null, so \`${operand} != null\` alone faults there too:` +
+  ` guard it with \`previous != null && ${operand} != null\`.`;
 
 /** Ordering + arithmetic operators — the ones with no `null` overload. */
 const FAULTING_BINARY_OPS = new Set(['<', '<=', '>', '>=', '+', '-', '*', '/', '%']);
@@ -770,6 +800,7 @@ export function nullGuardMessage(
     `as nullable (no \`required: true\`, no \`defaultValue\`).${hasNote} At runtime the operand is ` +
     `null, CEL has no \`${finding.operator}\` overload for null, and the whole predicate aborts — ` +
     `${OUTCOME_CLAUSE[outcome]}. ` +
-    `The predicate compares a value that is null. ${NULL_GUARD_HINT}`
+    `The predicate compares a value that is null. ${NULL_GUARD_HINT}` +
+    (finding.operand.startsWith('previous.') ? PREVIOUS_GUARD_CLAUSE(finding.operand) : '')
   );
 }
