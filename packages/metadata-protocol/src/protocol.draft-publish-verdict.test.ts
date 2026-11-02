@@ -432,6 +432,7 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
             dimensions: [{ name: 'deal_name', field: 'name' }],
             measures: [{ name: 'deal_count', aggregate: 'count' }],
         },
+    },
     {
         // [#29025] Not one of #26707's six: a loop whose closing edge is not
         // typed `back` (the card's push → check → revise → push). It saved,
@@ -458,7 +459,6 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
                 { id: 'e5', source: 'revise', target: 'push' },
             ],
         },
-    },
     },
 ];
 
