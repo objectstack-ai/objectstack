@@ -243,6 +243,7 @@ import {
   DraftVerdictContext,
   draftEnvelopeDiagnostics,
   editedItemDiagnostics,
+  verdictEntriesStillShown,
   verdictPreviewEntries,
   type ServerDiagnostics,
 } from '../metadata-admin/draftVerdict.js';
@@ -5149,6 +5150,17 @@ export function InterfacesPillar({
     read: boolean;
   }>({ key: '', doc: null, read: false });
 
+  // objectstack#29311 — the served verdict on the open leaf as its load read
+  // it (the pending draft's `_diagnostics`, kept before `extractDraftBody`
+  // strips them, else the published layer's), and the body it judged. A form
+  // view's `form-field-unknown` warnings ride here. Stamped with its leaf, as
+  // `leafPublished` is; never part of the buffer, so no save carries it.
+  const [leafVerdict, setLeafVerdict] = React.useState<{
+    key: string;
+    diagnostics: ServerDiagnostics | undefined;
+    judged: unknown;
+  }>({ key: '', diagnostics: undefined, judged: undefined });
+
   // Load the selected surface's draft (only for editable preview types).
   React.useEffect(() => {
     if (!current || !isEditable) {
@@ -5164,6 +5176,7 @@ export function InterfacesPillar({
       setHasDraft(false);
       setIfDirty(false);
       setLeafRefusedFor(null);
+      setLeafVerdict({ key: leafKeyOf(current), diagnostics: undefined, judged: undefined });
       return;
     }
     let cancelled = false;
@@ -5227,6 +5240,16 @@ export function InterfacesPillar({
         // spread over `effective` resurrects every key the draft deleted.
         setDraft(body ?? baseline);
         setDraftFor(leafKeyOf(current));
+        // objectstack#29311 — the verdict on that body, and the body it judged.
+        setLeafVerdict({
+          key: leafKeyOf(current),
+          diagnostics: editedItemDiagnostics({
+            hasDraft: !!body,
+            draftDiagnostics: draftEnvelopeDiagnostics(draftRead.answer),
+            layered: lay,
+          }),
+          judged: body ?? baseline,
+        });
         // objectui#11773 — the next save is pinned to what the draft read served.
         recordLeafRead(current.type, current.name, readAt, draftRead.pin);
         leafReadAtRef.current = { key: leafKeyOf(current), at: readAt };
@@ -5253,6 +5276,19 @@ export function InterfacesPillar({
       if (!settled) setLoading(false);
     };
   }, [client, current, isEditable, packageId, publishNonce, leafReloadNonce, recordLeafRead, forgetLeafVersion, customizing]);
+
+  // objectstack#29311 — the open leaf's verdict as the canvas preview's
+  // `diagnostics` (a form view's preview shows its warnings at their sections).
+  // This pillar does not read the leaf again after an autosave, so an entry
+  // whose value the author has since edited is dropped rather than shown about
+  // a body no longer on screen (`verdictEntriesStillShown`).
+  const leafDiagnostics = React.useMemo(
+    () =>
+      leafVerdict.key === leafKey
+        ? verdictEntriesStillShown(leafVerdict.diagnostics, leafVerdict.judged, draft)
+        : undefined,
+    [leafVerdict, leafKey, draft],
+  );
 
   // objectui#12688 — the open dashboard as the server serves it for this
   // session's language: the `/meta` dashboard list the console's metadata
@@ -6546,6 +6582,7 @@ export function InterfacesPillar({
             // being customized into the base's pair.
             onPatch={leafReadOnly ? undefined : onPatch}
             locale={locale}
+            diagnostics={leafDiagnostics}
           />
         ) : (
           <div className="py-12 text-center text-xs text-muted-foreground">
