@@ -7,8 +7,10 @@
 // error the ADR's Acceptance asks for; every member has a CONTROL accept, so a
 // refusal that fired on everything could not pass.
 
+import fs from 'node:fs';
 import { describe, it, expect } from 'vitest';
 import { DeclarativeConnectorEntrySchema, ConnectorInstanceAuthSchema } from './connector.zod';
+import { ConnectorInstanceOAuth2AuthorizationCodeAuthSchema } from '../shared/connector-auth.zod';
 
 const entry = (auth: unknown, over: Record<string, unknown> = {}) => ({
   name: 'vendor',
@@ -212,6 +214,26 @@ describe("ADR-0143 D2.1 — an `authorization_code` client supplied by the insta
     expect(Object.keys(parsed.auth as object).sort()).toEqual(
       ['authorizationUrl', 'clientSource', 'grant', 'scopes', 'tokenUrl', 'type'],
     );
+  });
+
+  // Declared before it is served (ADR-0049): until #28866 makes the automation
+  // service read the installer's client, the key says so on the spec surface.
+  // The liveness walker does not descend into the `auth` union, so the
+  // `connector/auth` row is the only ledger coordinate over the key. #28866
+  // drops the marker and the row's sentence together, and flips this test.
+  it('is PLANNED until the automation service serves it: the describe marker, and the ledger row over the key', () => {
+    const shape = (ConnectorInstanceOAuth2AuthorizationCodeAuthSchema as unknown as {
+      shape: Record<string, { description?: string }>;
+    }).shape;
+    expect(shape.clientSource.description).toMatch(/^\[PLANNED — not enforced\] /);
+    expect(shape.clientSource.description).toContain('ADR-0143 D2.1');
+    // Customer-facing prose carries no tracker id (check:doc-authoring); the slice is named in the ledger row.
+    expect(shape.clientSource.description).not.toMatch(/#\d{3,}/);
+    const ledger = JSON.parse(fs.readFileSync(new URL('../../liveness/connector.json', import.meta.url), 'utf8'));
+    const note: string = ledger.props.auth.note;
+    expect(note).toContain('`clientSource`');
+    expect(note).toContain('`planned`');
+    expect(note).toContain('#28866');
   });
 });
 

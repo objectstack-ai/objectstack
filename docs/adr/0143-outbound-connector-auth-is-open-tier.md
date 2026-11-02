@@ -246,7 +246,10 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
 >   targets one host set, sandbox first. Discovering an API host per connection is a follow-up.
 > - **Slices.** The server slice keeps the installer's client on the connection and sends it: the connect
 >   door takes it, and the grant handle uses it in place of a declared one. The ui slice asks for it on
->   the connection form and shows the deployment's redirect URI.
+>   the connection form and shows the deployment's redirect URI. Until the server slice lands, the key is
+>   declared and not served, and its schema description says so: off `provider: 'mcp'` over http an
+>   instance that declares it is held degraded for a missing `clientId`, and on MCP over http the
+>   provider registers a client dynamically instead of taking the installer's.
 
 ### D3 — Secrets are references; tokens are runtime state in a connection record
 
@@ -258,6 +261,9 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
   client a dynamic registration created, and the grant's status, scopes and expiry. These live in a
   dedicated connection record bound to the instance (Q2), their secrets encrypted at rest through the
   `secret` channel (ADR-0100).
+  > **Amended (2026-11-02, #28864).** This list also holds a client the installing administrator supplies,
+  > kept in the same per-connection client record as a dynamically registered one. See the 2026-11-02
+  > D2.1 note under D2.
 - Access tokens are never persisted. They live in an in-process cache. This includes every
   `client_credentials` and `app-credential` token, which the configured secret re-derives at any time.
 
