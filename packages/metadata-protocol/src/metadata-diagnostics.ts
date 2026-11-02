@@ -432,6 +432,122 @@ export function withPublishVerdict(
 }
 
 // ---------------------------------------------------------------------------
+// [#29196] The lint's `form-field-unknown` on a served view's `_diagnostics`
+// ---------------------------------------------------------------------------
+//
+// A form section naming a field its object does not have is Zod-valid, so the
+// schema verdict above reads `valid: true`, and the renderer skips the field.
+// `validateFormLayout` (`@objectstack/lint`) is the rule that says so, and it
+// ran only in the CLI. The view read now runs that rule on the body it serves
+// and puts each `form-field-unknown` finding in `_diagnostics.warnings`, with
+// the rule's own message: one spelling, no second rule.
+//
+// A WARNING, never an error: the spec's `MetadataValidationResult` calls
+// warnings non-blocking, `valid` stays the schema's answer, and neither a save
+// nor a publish reads it. The entry is the spec's `{ path, message }`, the
+// shape the read's other derived warnings already take (the admin read's
+// anonymous-intake reasons, a view container's rename note).
+//
+// The field set is the one the door already resolves for the view: the
+// caller's object lookup (`registry.getObject` at the read, the served object
+// with its extensions folded on), asked for the object names the body itself
+// spells. A name it cannot resolve is left out of the universe, and the rule
+// then judges nothing for that form: no false warning.
+//
+// Loaded lazily from the package root, as `build-probes.ts` loads its lint
+// rule: the kernel boot path reaches `@objectstack/lint` only through its
+// `/runtime` entry, and a view read is where this one is first needed.
+
+/** The two names this pass reads from `@objectstack/lint`. */
+interface FormLayoutLint {
+    validateFormLayout: (stack: Record<string, unknown>) => ReadonlyArray<{ rule: string; path: string; message: string }>;
+    FORM_FIELD_UNKNOWN: string;
+}
+
+let formLayoutLint: Promise<FormLayoutLint | undefined> | undefined;
+
+function loadFormLayoutLint(): Promise<FormLayoutLint | undefined> {
+    formLayoutLint ??= import('@objectstack/lint').then(
+        (lint) => ({ validateFormLayout: lint.validateFormLayout, FORM_FIELD_UNKNOWN: lint.FORM_FIELD_UNKNOWN }),
+        () => undefined,
+    );
+    return formLayoutLint;
+}
+
+type Rec = Record<string, unknown>;
+
+function isRec(value: unknown): value is Rec {
+    return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * The record the lint's view walk reads for one served view body. A stored
+ * form `ViewItem` (`viewKind: 'form'`) keeps its form under `config`, a rung
+ * the walk does not descend (it reads `views[]` entries as authored), so it is
+ * handed over as the container shape the walk does read: the item's `config`
+ * as the default `form`, bound to the item's `object`. Every other shape (a
+ * view container, a flattened form overlay) is the walk's own input already.
+ */
+function formLayoutSubject(view: Rec): { subject: Rec; formKey: 'config' | 'form' } {
+    if (view.viewKind === 'form' && isRec(view.config)) {
+        return { subject: { name: view.name, object: view.object, form: view.config }, formKey: 'config' };
+    }
+    return { subject: view, formKey: 'form' };
+}
+
+/** Every object name the body spells (`object` / `objectName`), at any depth. */
+function spelledObjectNames(value: unknown, into: Set<string>, depth = 0): Set<string> {
+    if (depth > 16) return into;
+    if (Array.isArray(value)) {
+        for (const entry of value) spelledObjectNames(entry, into, depth + 1);
+    } else if (isRec(value)) {
+        for (const [key, inner] of Object.entries(value)) {
+            if ((key === 'object' || key === 'objectName') && typeof inner === 'string' && inner) into.add(inner);
+            else spelledObjectNames(inner, into, depth + 1);
+        }
+    }
+    return into;
+}
+
+/**
+ * Add the lint's `form-field-unknown` warnings to a served view's
+ * `_diagnostics`. Returns `served` itself when there is nothing to add.
+ *
+ * `getObject` is the door's own object lookup; an object it does not answer
+ * is not judged.
+ */
+export async function withFormLayoutWarnings<T>(
+    type: string,
+    served: T,
+    getObject: ((name: string) => unknown) | undefined,
+): Promise<T> {
+    if ((PLURAL_TO_SINGULAR[type] ?? type) !== 'view' || !isRec(served) || !getObject) return served;
+    const lint = await loadFormLayoutLint();
+    if (!lint) return served;
+    const { subject, formKey } = formLayoutSubject(served);
+    const objects: Rec[] = [];
+    for (const name of spelledObjectNames(subject, new Set())) {
+        const object = getObject(name);
+        if (isRec(object)) objects.push({ ...object, name });
+    }
+    if (objects.length === 0) return served;
+    const name = typeof served.name === 'string' ? served.name : '';
+    const warnings = lint.validateFormLayout({ objects, views: [subject] })
+        .filter((finding) => finding.rule === lint.FORM_FIELD_UNKNOWN)
+        .map((finding) => ({
+            path: itemRelativeIssuePath('view', name, finding.path).replace(/^form(?=\.|$)/, formKey),
+            message: finding.message,
+        }));
+    if (warnings.length === 0) return served;
+    const prior = served._diagnostics as MetadataDiagnostics | undefined;
+    const diagnostics: MetadataDiagnostics = {
+        ...(prior ?? { valid: true }),
+        warnings: [...(prior?.warnings ?? []), ...warnings],
+    };
+    return { ...served, _diagnostics: diagnostics } as T;
+}
+
+// ---------------------------------------------------------------------------
 // ADR-0047 — reference-integrity diagnostics for list views
 // ---------------------------------------------------------------------------
 

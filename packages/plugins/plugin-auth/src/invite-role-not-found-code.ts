@@ -66,3 +66,44 @@ export async function codeInviteRoleNotFound(ctx: any): Promise<void> {
   if (typeof message !== 'string' || !message.startsWith(VENDOR_MESSAGE_PREFIX)) return;
   throw new APIError('BAD_REQUEST', { code: ROLE_NOT_FOUND_CODE, message });
 }
+
+/** A refusal this module answers on the invite door: the ADR-0112 code and the sentence. */
+export interface InviteRoleRefusal {
+  readonly code: typeof ROLE_NOT_FOUND_CODE;
+  readonly message: string;
+}
+
+/**
+ * Does the requested role value carry a BLANK entry — the whole value empty or
+ * whitespace-only (`""`, `"  "`, `[]`), or one empty entry in a role list
+ * (`"member,"`, `["member", ""]`)?
+ *
+ * better-auth's role check splits the list and drops empty entries before it
+ * looks for unknown names, so a blank entry yields no unknown role and the
+ * vendor writes the raw value: `sys_invitation.role = ''` (or `'member,'`).
+ * Under a walled group, accepting such an invitation writes a membership with
+ * no organization role. A blank entry names no role in the ADR-0108
+ * vocabulary, so it is refused exactly like an unknown one — never defaulted
+ * to `member`, which would be a product choice and not a refusal.
+ */
+export function hasBlankInvitationRoleEntry(requestedRole: unknown): boolean {
+  const flat = Array.isArray(requestedRole) ? requestedRole.join(',') : requestedRole;
+  if (typeof flat !== 'string') return false;
+  return flat.split(',').some((entry) => entry.trim().length === 0);
+}
+
+/**
+ * The refusal for a blank invitation role, or `null` when every entry names a
+ * role. Same code and status family as the vendor's unknown-role refusal
+ * (`400 ROLE_NOT_FOUND`), with a sentence that says the role is empty. Asked
+ * in `beforeCreateInvitation`, so no invitation row is written.
+ */
+export function blankInvitationRoleRefusal(requestedRole: unknown): InviteRoleRefusal | null {
+  if (!hasBlankInvitationRoleEntry(requestedRole)) return null;
+  return {
+    code: ROLE_NOT_FOUND_CODE,
+    message:
+      `${VENDOR_MESSAGE_PREFIX}the invitation role is empty — name the organization role ` +
+      `the invitee joins with; a blank role, or an empty entry in a role list, names no role.`,
+  };
+}

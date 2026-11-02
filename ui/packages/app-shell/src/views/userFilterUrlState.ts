@@ -131,6 +131,23 @@ export function userFilterParamsKey(searchParams: URLSearchParams): string {
   return own.toString();
 }
 
+/**
+ * A copy of the given params without the `uf_` family: every piece of list
+ * state this module owns, quick filters and the tab preset included. Every
+ * other param is kept, in its order.
+ *
+ * The Console's signed-out guard composes the sign-in page's return link with
+ * it: list state belongs to the person who left, and a filter value can be
+ * sensitive, so it never rides into whoever signs in next (objectstack#29174).
+ */
+export function withoutListStateParams(searchParams: URLSearchParams): URLSearchParams {
+  const kept = new URLSearchParams();
+  searchParams.forEach((value, key) => {
+    if (!key.startsWith(PREFIX)) kept.append(key, value);
+  });
+  return kept;
+}
+
 /** One sort entry, in the spec's `ListViewSchema.sort` element shape. */
 export interface ListSortRule {
   field: string;

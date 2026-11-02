@@ -278,6 +278,9 @@ through the same datasource connection path — one failure verdict, one escape
 hatch, and a real `status` for the primary DB in **Setup → Datasources**. The
 name `default` is host-reserved: an app bundle declaring a datasource with that
 name is rejected at load.
+The name `drivers` is reserved at the datasource admin API: creating a runtime
+datasource under it is refused, because `GET /api/v1/datasources/drivers` is the
+driver catalog, so a datasource of that name could never be opened by name.
 
 <Callout type="warn">
 `OS_ALLOW_DRIVER_CONNECT_FAILURE=1` boots anyway, in an explicitly degraded

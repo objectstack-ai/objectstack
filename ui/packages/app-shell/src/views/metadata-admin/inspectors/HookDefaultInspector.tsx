@@ -58,10 +58,11 @@ import {
   flagUnknownValue,
   rosterFrom,
 } from './_shared.js';
-import { ExpressionBodySchema, HookBodyCapability, ScriptBodySchema } from '@objectstack/spec/data';
+import { ExpressionBodySchema, ScriptBodySchema } from '@objectstack/spec/data';
 import { useObjectOptions } from '../previews/useObjectOptions.js';
 import { ConditionBuilder, RECORD_CONDITION_SUBJECTS } from './ConditionBuilder.js';
 import { expressionSource, writeExpressionSource } from './expression-envelope.js';
+import { ScriptCapabilitiesField } from './ScriptCapabilitiesField.js';
 
 /* ─────────────── constants ─────────────── */
 
@@ -88,20 +89,6 @@ const QUERY_EVENTS = [
 ];
 
 const ALL_OBJECTS = '*';
-
-/** The grantable tokens, in the spec's order — the order a grant is written in. */
-const CAPABILITY_TOKENS: readonly string[] = HookBodyCapability.options;
-
-/** The `ctx` call each token unlocks, shown under its checkbox: the methods
- *  the sandbox runner gates on that token. Code, so it reads the same in every
- *  locale; a token with no entry shows none. */
-const CAPABILITY_CALLS: Partial<Record<HookBodyCapability, string>> = {
-  'api.read': 'ctx.api.object(…).find / findOne / count / aggregate',
-  'api.write': 'ctx.api.object(…).insert / update / delete / updateMany / deleteMany / upsert',
-  'api.transaction': 'ctx.api.transaction(async () => { … })',
-  'crypto.uuid': 'ctx.crypto.randomUUID()',
-  log: 'ctx.log.debug / info / warn / error',
-};
 
 /** The keys only a `js` body admits, read off the spec's two body shapes. */
 const L2_ONLY_BODY_KEYS: readonly string[] = Object.keys(ScriptBodySchema.shape).filter(
@@ -240,23 +227,6 @@ export function HookDefaultInspector({
 
   const patchBody = (p: Record<string, unknown>) => onPatch({ body: { ...body, ...p } });
 
-  // objectstack#26726 — a stored token the spec does not list (a typo, a
-  // retired `crypto.hash`) stays on screen, flagged, so it is never dropped
-  // unseen; the save's parse names it, and unticking it removes it.
-  const granted: string[] = Array.isArray(body.capabilities)
-    ? body.capabilities.filter((c): c is string => typeof c === 'string')
-    : [];
-  const capabilityOptions = [
-    ...CAPABILITY_TOKENS,
-    ...granted.filter((c) => !CAPABILITY_TOKENS.includes(c)),
-  ];
-  const toggleCapability = (cap: string, on: boolean) => {
-    const next = new Set(granted);
-    if (on) next.add(cap);
-    else next.delete(cap);
-    // Unticking the last grant writes `[]`, the spec's default.
-    patchBody({ capabilities: capabilityOptions.filter((c) => next.has(c)) });
-  };
   const setLanguage = (v: string) => {
     const next: Record<string, unknown> = { ...body, language: v };
     if (v !== 'js') for (const key of L2_ONLY_BODY_KEYS) delete next[key];
@@ -460,32 +430,17 @@ export function HookDefaultInspector({
               : tr('engine.inspector.hook.bodyHint.js')}
           </div>
         </div>
+        {/* objectstack#26726 — the grant list, shared with the action
+            inspector's script body (`ScriptCapabilitiesField`). */}
         {language === 'js' && (
-          <div className="space-y-1" data-testid="hook-body-capabilities">
-            <Label className="text-xs text-muted-foreground">{tr('engine.inspector.hook.capabilities')}</Label>
-            <div className="space-y-1 rounded-md border p-2">
-              {capabilityOptions.map((cap) => (
-                <div key={cap} className="space-y-0.5">
-                  <InspectorCheckboxField
-                    label={
-                      CAPABILITY_TOKENS.includes(cap)
-                        ? cap
-                        : flagUnknownValue(cap, tr('engine.inspector.hook.capabilityUnknown'), locale)
-                    }
-                    value={granted.includes(cap)}
-                    onCommit={(on) => toggleCapability(cap, on)}
-                    disabled={readOnly}
-                  />
-                  {CAPABILITY_CALLS[cap as HookBodyCapability] && (
-                    <div className="pl-5 font-mono text-[10px] text-muted-foreground/70">
-                      {CAPABILITY_CALLS[cap as HookBodyCapability]}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-            <div className="text-[11px] text-muted-foreground/70">{tr('engine.inspector.hook.capabilitiesHint')}</div>
-          </div>
+          <ScriptCapabilitiesField
+            value={body.capabilities}
+            onCommit={(capabilities) => patchBody({ capabilities })}
+            hintKey="engine.inspector.hook.capabilitiesHint"
+            locale={locale}
+            disabled={readOnly}
+            testId="hook-body-capabilities"
+          />
         )}
       </div>
 
