@@ -22083,6 +22083,15 @@ export class ObjectStackProtocolImplementation implements
      * performs its promise exactly, and the removal is the one action that
      * reduces the residue. The measurement and the refuse-vs-decline reasoning
      * are stated at the gate itself.
+     *
+     * [#29390, ADR-0146 D1, D11] The restore limb asks the #28905 close
+     * ({@link namedBaseOverlayWriteRefusal}) on the binding it writes, as
+     * {@link rollbackMetaItem} does: an item whose restore would land in a row
+     * bound to the read-only base itself — a commit the base recorded before
+     * the write naming it closed — goes into `failed[]` (`NOT_OVERRIDABLE`, the
+     * rollback sentence naming the base's `.custom` pair) with nothing written,
+     * and {@link rollbackToPackageCommit} reports it per item and continues.
+     * The soft-remove limb stays open: removing such a row writes nothing.
      */
     async revertCommit(request: {
         commitId: string;
@@ -22436,6 +22445,20 @@ export class ObjectStackProtocolImplementation implements
                     // the shape that ends in a `catch {}` swallowing a real outage
                     // (#4867). Per ITEM, because a batch mixes bindings.
                     const restorePackageId = await this.resolveOverlayPackageBinding(it.type, it.name, member);
+                    // [#29390, ADR-0146 D1, D11] A restore writes the row this
+                    // binding names, so a restore into a row bound to the
+                    // read-only base itself (a commit recorded before #28905
+                    // closed the write naming the base) is refused exactly as
+                    // {@link rollbackMetaItem} refuses it, on the same key and
+                    // with the same sentence ({@link namedBaseOverlayWriteRefusal}),
+                    // into `failed[]` with nothing written. The commit's other
+                    // items still revert. The soft-remove limb above stays open:
+                    // removing a row bound to the base writes nothing.
+                    const namedBase = this.namedBaseOverlayWriteRefusal(
+                        { type: PLURAL_TO_SINGULAR[it.type] ?? it.type, name: it.name, packageId: restorePackageId, ...memberOption(member) },
+                        'rollback',
+                    );
+                    if (namedBase) throw namedBase;
                     const restored = await repo.restoreVersion(ref, restoreToVersion, {
                         actor,
                         source: 'protocol.revertCommit',
