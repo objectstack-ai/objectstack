@@ -41,6 +41,7 @@ interface WizardField {
   label: string;
   type: string;
   required?: boolean;
+  defaultValue?: unknown;
   options?: Array<{ label?: string; value?: string | number } | string>;
   multiple?: boolean;
 }
@@ -71,6 +72,8 @@ function normalizeFields(schema: any): WizardField[] {
       label: (def?.label ?? def?.name ?? name) as string,
       type: (def?.type ?? 'text') as string,
       required: !!def?.required,
+      // The wizard reads only that a default is declared (the create fills it).
+      ...(def?.defaultValue != null ? { defaultValue: def.defaultValue } : {}),
       options: def?.options,
       // A field holding a list is never offered as a match key (#27567).
       ...(def?.multiple === true ? { multiple: true } : {}),
