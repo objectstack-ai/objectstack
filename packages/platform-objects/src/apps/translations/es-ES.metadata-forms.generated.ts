@@ -2253,6 +2253,9 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "variables.defaultValue": {
         label: "Valor predeterminado"
       },
+      "variables.objectName": {
+        label: "Objeto de registro"
+      },
       status: {
         label: "Estado",
         helpText: "Estado de despliegue: draft → active → obsolete"

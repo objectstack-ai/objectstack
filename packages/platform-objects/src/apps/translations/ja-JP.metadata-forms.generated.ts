@@ -2253,6 +2253,9 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "variables.defaultValue": {
         label: "既定値"
       },
+      "variables.objectName": {
+        label: "レコードオブジェクト"
+      },
       status: {
         label: "状態",
         helpText: "デプロイ状態: draft → active → obsolete"

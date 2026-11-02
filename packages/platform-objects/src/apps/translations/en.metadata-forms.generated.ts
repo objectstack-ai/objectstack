@@ -2253,6 +2253,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "variables.defaultValue": {
         label: "Default Value"
       },
+      "variables.objectName": {
+        label: "Record Object"
+      },
       status: {
         label: "Status",
         helpText: "Deployment status: draft → active → obsolete"

@@ -2253,6 +2253,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "variables.defaultValue": {
         label: "默认值"
       },
+      "variables.objectName": {
+        label: "记录对象"
+      },
       status: {
         label: "状态",
         helpText: "部署状态：draft → active → obsolete"
