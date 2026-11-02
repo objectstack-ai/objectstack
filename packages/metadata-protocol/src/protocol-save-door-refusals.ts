@@ -62,7 +62,7 @@ import {
 import { resolveItemLock, withItemLockFamily } from './item-lock.js';
 import type { ItemAddress } from './item-lock.js';
 import { itemDiscriminator } from '@objectstack/metadata-core';
-import { externalBindingDatasourceRefusal } from '@objectstack/spec/data';
+import { externalBindingDatasourceRefusal, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import { MetadataProtectionFields, validateObjectNamespacePrefix } from '@objectstack/spec/kernel';
@@ -752,4 +752,84 @@ export function objectNamespacePrefixViolation(
     name: string, packageId: string | null | undefined): string | null {
     if (typeof packageId !== 'string' || packageId === '') return null;
     return validateObjectNamespacePrefix(name, this.engine?.registry?.getPackage?.(packageId)?.manifest?.namespace);
+}
+
+/** The seed modes whose load matches incoming records to existing rows by the dataset's `externalId`. */
+const KEYED_SEED_MODES: ReadonlySet<string> = new Set(['upsert', 'update', 'ignore']);
+
+/**
+ * The body of `ObjectStackProtocolImplementation#seedExternalIdSaveRefusal`;
+ * the method's docblock there is its contract. Written here, beside the other
+ * refusals the save door and the publish promotion ask in turn, rather than
+ * moved: its reads are the engine's registered object and, on a draft save,
+ * the object drafts.
+ */
+export async function seedExternalIdSaveRefusal(
+    this: Pick<SaveDoorRefusalHost, 'engine' | 'listDrafts'>,
+    singularType: string,
+    item: unknown,
+    name: string,
+    pending?: 'drafts' | ReadonlyArray<unknown>,
+    writeFace?: MetadataWriteFace,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
+    if (singularType !== 'seed') return undefined;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
+    const seed = item as { object?: unknown; mode?: unknown; externalId?: unknown };
+    if (typeof seed.object !== 'string' || seed.object === '') return undefined;
+    const objectName = seed.object;
+    // `SeedSchema`'s defaults, as the loader applies them (`mode: 'upsert'`,
+    // `externalId: 'name'`): a body read before the parse filled them keys the
+    // same way a parsed one does.
+    const mode = typeof seed.mode === 'string' ? seed.mode : 'upsert';
+    if (!KEYED_SEED_MODES.has(mode)) return undefined;
+    const declared = seed.externalId !== undefined;
+    const externalId = declared ? seed.externalId : 'name';
+    const composite = Array.isArray(externalId);
+    const members = (composite ? externalId : [externalId]) as unknown[];
+    // The object as the publish will have it: a draft of it in the same
+    // package batch, else the engine's registered definition (its fields as
+    // the runtime serves them, extension fields and injected columns
+    // included). On a draft save, an object that is itself still a draft may
+    // gain the field before it is published, so the seed is judged at its
+    // publish instead. An object resolved by neither is not judged here:
+    // the load reports an object it cannot find.
+    const pendingObject = Array.isArray(pending)
+        ? pending.find((o) => (o as { name?: unknown } | null)?.name === objectName) as { fields?: unknown } | undefined
+        : undefined;
+    if (!pendingObject && pending === 'drafts'
+        && (await this.listDrafts({ type: 'object' })).drafts.some((d) => d.name === objectName)) {
+        return undefined;
+    }
+    const registered = (this.engine?.registry as { getObject?(name: string): unknown } | undefined)
+        ?.getObject?.(objectName) as { fields?: unknown } | undefined;
+    if (!pendingObject && !registered) return undefined;
+    const fieldNames = new Set<string>(resolveInjectedSystemColumns(pendingObject ?? registered).names);
+    for (const def of [registered, pendingObject]) {
+        const fields = def?.fields;
+        if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+            for (const key of Object.keys(fields)) fieldNames.add(key);
+        }
+    }
+    const missing = members
+        .map((member, index) => ({ member, index }))
+        .filter(({ member }) => typeof member === 'string' && !fieldNames.has(member));
+    if (missing.length === 0) return undefined;
+    const consequence = `so a load in \`${mode}\` mode could never match a row it wrote before: each publish and each `
+        + `replay would ${mode === 'update' ? 'skip every record' : 'insert every record again'}. Name a field the object `
+        + "declares, or use `mode: 'insert'` for rows with no natural key.";
+    const issues: MetadataIssueEntry[] = missing.map(({ member, index }) => ({
+        path: composite ? `externalId.${index}` : 'externalId',
+        message: (declared
+            ? `Seed '${name}' keys on externalId member '${String(member)}', which is not a field of object '${objectName}', `
+            : `Seed '${name}' declares no externalId, so it keys on the default 'name', which is not a field of object '${objectName}', `)
+            + consequence,
+        code: 'custom',
+    }));
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
+    return err;
 }

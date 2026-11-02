@@ -7,55 +7,22 @@
  */
 
 /**
- * What a list drawn beside an open record reads from the record pane around
- * it (objectstack#27545): the face it draws at its narrowed width, and which of
- * its rows is the record the pane shows.
+ * What a list under an open record reads from the record drawer around it
+ * (objectstack#27545): which of its rows is the record the drawer shows.
  *
- * Both are published by `NavigationOverlay` around the `mainContent` it is
- * handed (the list), so a list under no pane reads the defaults: the full
- * face, and no row is the open one.
+ * It is published by `NavigationOverlay` around the `mainContent` it is handed
+ * (the list), so a list under no drawer reads the default: no row is the open
+ * one. The narrowed list faces (`columns`, `cards`) a list drew beside the
+ * split pane retired with it (objectstack#28915): the list keeps its full
+ * width under the drawer.
  *
- * The open row is a store, not a context value: the pane changes record on
+ * The open row is a store, not a context value: the drawer changes record on
  * every row click and every `↑` / `↓` step, and a context value would re-render
  * the whole list each time. Each row subscribes to its own answer instead, so
  * a step re-renders the row it leaves and the row it reaches, never the list.
  */
 
 import * as React from 'react';
-
-/**
- * The face of a list a record pane has narrowed:
- *
- * - `full` — no pane beside it (closed, an overlay drawer, or maximized): the
- *   list draws as it always does;
- * - `columns` — the pane is beside it and it is at least
- *   {@link RECORD_LIST_CARD_FACE_BELOW_PX} wide: a table of its first
- *   {@link RECORD_LIST_NARROW_COLUMN_COUNT} non-avatar view columns;
- * - `cards` — narrower than that: one card row per record, its name and two
- *   chips.
- */
-export type RecordListFace = 'full' | 'columns' | 'cards';
-
-/** Below this width a list beside a record pane draws card rows. */
-export const RECORD_LIST_CARD_FACE_BELOW_PX = 440;
-
-/** How many view columns a narrowed list keeps in its `columns` face. */
-export const RECORD_LIST_NARROW_COLUMN_COUNT = 3;
-
-const RecordListFaceContext = React.createContext<RecordListFace>('full');
-
-/** Publishes the face of the list below it. */
-export const RecordListFaceProvider = RecordListFaceContext.Provider;
-
-/** The face this list draws in — `full` under no record pane. */
-export function useRecordListFace(): RecordListFace {
-  return React.useContext(RecordListFaceContext);
-}
-
-/** The face a list beside an open record pane takes at `widthPx`. */
-export function recordListFaceFor(widthPx: number): Exclude<RecordListFace, 'full'> {
-  return widthPx < RECORD_LIST_CARD_FACE_BELOW_PX ? 'cards' : 'columns';
-}
 
 interface ActiveListRecordStore {
   get(): string | null;
@@ -86,7 +53,7 @@ const ActiveListRecordContext = React.createContext<ActiveListRecordStore | null
 
 const NO_SUBSCRIPTION = () => () => {};
 
-/** A list row's record id as the pane names it: `id`, else `_id`, as text. */
+/** A list row's record id as the drawer names it: `id`, else `_id`, as text. */
 export function listRecordIdOf(row: unknown): string | null {
   const record = row as { id?: unknown; _id?: unknown } | null | undefined;
   const id = record?.id ?? record?._id;
@@ -114,7 +81,7 @@ export function ActiveListRecordProvider({
   return <ActiveListRecordContext.Provider value={store}>{children}</ActiveListRecordContext.Provider>;
 }
 
-/** Whether the row of `recordId` is the record the pane beside the list shows. */
+/** Whether the row of `recordId` is the record the drawer over the list shows. */
 export function useIsActiveListRecord(recordId: string | null): boolean {
   const store = React.useContext(ActiveListRecordContext);
   return React.useSyncExternalStore(

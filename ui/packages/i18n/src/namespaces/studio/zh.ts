@@ -996,6 +996,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.refusal.publishWhere': '未发布。请检查{where}：详情中说明了需要修改的内容。',
   'engine.studio.refusal.publishUnlocated': '未发布：服务端拒绝了此草稿。详情中说明了原因。',
   'engine.studio.refusal.publishPlain': '未发布：{reason}',
+  'engine.studio.refusal.draftUnreadable': '此项有一份您无权读取的未发布草稿，因此 Studio 没有打开它：在这里编辑已发布版本会覆盖那份草稿。持有该草稿所需权限的人可以编辑或发布它。详情中有服务器的答复。',
   'engine.studio.publishRefused': '未发布：{count} 项需要修改。「待发布的变更」会保留每项原因，直到修复为止。',
   'engine.studio.publishRefusedOne': '未发布：{count} 项需要修改。「待发布的变更」会保留原因，直到修复为止。',
   'engine.studio.publishRefusedBatch': '没有内容生效：软件包作为一个整体发布，其余草稿会等待这项修复。',
@@ -2768,6 +2769,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.studio.held.listItemNeedsInput': '「{list}」第 {n} 项的「{input}」需要填写',
   // objectstack#27785 — a report's chart held until its axes are picked.
   'engine.studio.held.reportChartNeedsInput': '报表图表的「{input}」需要填写',
+  'engine.studio.held.reportJoinedNeedsBlock': '联合报表需要在「{list}」中至少添加一个块',
   // objectstack#27895 — a list view held until a required setting of its type's own block is picked again.
   'engine.studio.held.listViewTypeNeedsInput': '视图{type}设置中的「{input}」需要填写',
   'engine.studio.held.fieldNeedsInput': '字段「{field}」的「{input}」需要填写',

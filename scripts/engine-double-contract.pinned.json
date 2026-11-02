@@ -1892,6 +1892,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.seed-external-id-refusal.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.seed-external-id-refusal.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.seed-external-id-refusal.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.select-shorthand-refusal.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -2185,6 +2200,21 @@
       "file": "packages/metadata-protocol/src/seed-loader-driver-text.test.ts",
       "verb": "update",
       "pinned": 2
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-empty-key-warn.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-empty-key-warn.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-empty-key-warn.test.ts",
+      "verb": "update",
+      "pinned": 1
     },
     {
       "file": "packages/metadata-protocol/src/seed-loader-engine-schema-fallback.test.ts",
@@ -5178,6 +5208,21 @@
     },
     {
       "file": "packages/services/service-messaging/src/system-context.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/template-declared-fallback.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/template-declared-fallback.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-messaging/src/template-declared-fallback.test.ts",
       "verb": "update",
       "pinned": 1
     },
