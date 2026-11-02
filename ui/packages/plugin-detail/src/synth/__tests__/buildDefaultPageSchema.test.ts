@@ -195,6 +195,12 @@ describe('deriveHighlightFields', () => {
   });
 });
 
+/**
+ * `leadDef` with a declared strip. The strip is the declared list only
+ * (objectstack#28868), so a case about the strip's node declares one.
+ */
+const declaredLeadDef: ObjectDefLike = { ...leadDef, highlightFields: ['email', 'phone', 'owner_id'] };
+
 describe('buildDefaultPageSchema', () => {
   it('emits a record Page with the default template + main region', () => {
     const page = buildDefaultPageSchema(leadDef);
@@ -208,7 +214,7 @@ describe('buildDefaultPageSchema', () => {
   });
 
   it('emits page:header, record:highlights, record:path, page:tabs — no discussion footer (objectstack#27055)', () => {
-    const types = buildDefaultPageSchema(leadDef).regions[0].components.map(
+    const types = buildDefaultPageSchema(declaredLeadDef).regions[0].components.map(
       (c: any) => c.type,
     );
     // The discussion is part of the timeline stream, the Timeline tab.
@@ -511,7 +517,7 @@ describe('buildDefaultPageSchema', () => {
     });
 
     it('omitted slots fall through to synth defaults', () => {
-      const page = buildDefaultPageSchema(leadDef, {
+      const page = buildDefaultPageSchema(declaredLeadDef, {
         slots: { header: { type: 'div', id: 'h' } },
       });
       // header replaced, but tabs (with the timeline stream) + highlights still default
@@ -543,7 +549,7 @@ describe('buildDefaultPageSchema', () => {
     });
 
     it('buildDefaultHighlights returns [chips, path] when status field is present', () => {
-      const nodes = buildDefaultHighlights(leadDef);
+      const nodes = buildDefaultHighlights(declaredLeadDef);
       const types = nodes.map((n) => n.type);
       expect(types).toContain('record:highlights');
       expect(types).toContain('record:path');

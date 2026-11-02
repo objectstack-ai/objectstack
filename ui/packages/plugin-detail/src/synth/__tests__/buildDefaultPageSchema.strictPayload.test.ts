@@ -138,7 +138,9 @@ describe('ADR-0089 D3a — the Studio create payload parses server-side (objectu
       ],
       approvals: { node: { currentUserId: 'u_1' } },
     };
-    const filesDef = { ...leadDef, enable: { files: true } };
+    // A declared strip, so the `record:highlights` node is among them (the
+    // strip is the declared list only, objectstack#28868).
+    const filesDef = { ...leadDef, highlightFields: ['email'], enable: { files: true } };
     // One page: the synthesizer emits no reference rail any more
     // (objectstack#27055), so every branch it has co-occurs here.
     const pages = [buildDefaultPageSchema(filesDef, common)];
