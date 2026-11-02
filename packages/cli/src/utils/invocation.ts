@@ -134,23 +134,52 @@ export function moduleEntryMisuseLines(selfPath: string, binPath: string): [stri
 }
 
 /**
+ * A stack frame inside `@oclif/core`'s parser module (`lib/parser/`), on
+ * either path separator.
+ */
+const OCLIF_PARSER_FRAME = /[\\/]@oclif[\\/]core[\\/]lib[\\/]parser[\\/]/;
+
+/**
  * Is this one of oclif's ARGUMENT errors — a failure that happened while
  * parsing the invocation, before the command ran at all?
  *
- * Structural rather than `instanceof`: `@oclif/core` does not export
- * `CLIParseError` (`lib/parser/errors.js` is not in the package's `exports`
- * map), and reaching into an unexported path to type-test would be a worse
- * coupling than reading two own properties its constructor always sets. The
- * corpus this is checked against is the REAL parser's output —
- * `invocation.test.ts` throws the errors through `Parser.parse`, the public
- * entry point, instead of hand-rolling look-alikes.
+ * Two readings, both structural, neither reading the English message:
+ *
+ *   1. `CLIParseError`'s own fields. Structural rather than `instanceof`:
+ *      `@oclif/core` does not export `CLIParseError` (`lib/parser/errors.js` is
+ *      not in the package's `exports` map), and reaching into an unexported
+ *      path to type-test would be a worse coupling than reading two own
+ *      properties its constructor always sets. This covers an unknown flag, a
+ *      refused option value, a missing required flag or arg and an unexpected
+ *      arg.
+ *   2. The THROW SITE. The parser also throws a plain `CLIError` — a flag given
+ *      without its value (`os dev -d`), a single-valued flag given twice, a
+ *      flag with an option list given bare — and passes a flag's own `parse`
+ *      failure (`Flags.integer` on `abc`) through. Those carry nothing a
+ *      runtime failure does not: a command that parsed and then called
+ *      `this.error()` throws the same class, with the same own fields and the
+ *      same `oclif.exit` of 2. What differs is where it was thrown, so the
+ *      error's own stack is read for a frame inside oclif's parser module. A
+ *      command body never runs with that module on the stack — `this.parse()`
+ *      has returned before it does.
+ *
+ * Reading (2) degrades towards silence: a stack it cannot read (a stack-trace
+ * limit of 0, a moved parser module) answers false, which is the behaviour
+ * before it existed, never a banner on a runtime failure. The moved-module
+ * case is caught by `invocation.test.ts`, which throws every case through the
+ * REAL parser's public entry point (`Parser.parse`) instead of hand-rolling
+ * look-alikes, and pins a real command's runtime `this.error()` as not
+ * claimed.
  */
 export function isInvocationError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const own = Object.prototype.hasOwnProperty;
   // Both are class fields on `CLIParseError`; `parse` alone would also match a
   // plain object that happens to carry parsed input.
-  return own.call(error, 'parse') && own.call(error, 'showHelp');
+  if (own.call(error, 'parse') && own.call(error, 'showHelp')) return true;
+  if (!(error instanceof Error)) return false;
+  const stack = error.stack;
+  return typeof stack === 'string' && OCLIF_PARSER_FRAME.test(stack);
 }
 
 /** The first line of a message, with oclif's `See more help with --help` tail dropped. */
