@@ -38,6 +38,7 @@
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { bundleMemberDiscriminator, isItemOfDisabledPackage } from './protocol.js';
+import { packageIsInstalled } from './protocol-meta-diagnostics.js';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import type { I18nLabel } from '@objectstack/spec/ui';
 
@@ -53,12 +54,13 @@ export interface DraftsHost {
     readonly engine: ObjectStackProtocolImplementation['engine'];
     ensureOverlayIndex: ObjectStackProtocolImplementation['ensureOverlayIndex'];
     getOverlayRepo: ObjectStackProtocolImplementation['getOverlayRepo'];
+    getMetaItems: ObjectStackProtocolImplementation['getMetaItems'];
     deleteMetaItem: ObjectStackProtocolImplementation['deleteMetaItem'];
 }
 
 /** The body of `ObjectStackProtocolImplementation#listDrafts`; the method's docblock there is its contract. */
 export async function listDrafts(
-    this: Pick<DraftsHost, 'engine' | 'ensureOverlayIndex' | 'getOverlayRepo'>,
+    this: Pick<DraftsHost, 'engine' | 'ensureOverlayIndex' | 'getOverlayRepo' | 'getMetaItems'>,
     request?: {
         packageId?: string;
         type?: string;
@@ -83,6 +85,31 @@ export async function listDrafts(
         ...(request?.type ? { type: PLURAL_TO_SINGULAR[request.type] ?? request.type } : {}),
         ...(request?.packageId ? { packageId: request.packageId } : {}),
     });
+    // [#29180] A package filter that names no package scoped the list to
+    // nothing, and `{ drafts: [] }` read as "nothing pending in this package":
+    // a typo answered a confident none. Refused with the diagnostics sweep's
+    // own rule ([#27514], {@link packageIsInstalled}) — a draft bound to the
+    // package is proof enough (rows of an uninstalled package are real), and
+    // only then is the installed-package listing asked; an installed package
+    // with nothing pending keeps its honest empty list, and an unreadable
+    // listing fails OPEN. A `type` filter does not decide it: the package is
+    // judged on every draft bound to it, so a known package with no draft of
+    // THAT type still answers empty.
+    if (request?.packageId && drafts.length === 0) {
+        const bound = request.type
+            ? (await repo.listDrafts({ packageId: request.packageId })).length > 0
+            : false;
+        if (!bound && !(await packageIsInstalled(this, request.packageId))) {
+            const err = new Error(
+                `'${request.packageId}' is not an installed package, and no pending draft is bound to it, so a `
+                + `draft list scoped to it would report nothing pending in a package that does not exist. `
+                + `GET /api/v1/packages lists the installed packages; omit packageId to list every package's drafts.`,
+            );
+            (err as any).code = 'INVALID_REQUEST';
+            (err as any).status = 400;
+            throw err;
+        }
+    }
     // [#23073] The declared header (`ListDraftsResponseSchema`), with the
     // row's stored member on every draft of a bundled type: absent there
     // means the canonical member, which is spelled out here.
