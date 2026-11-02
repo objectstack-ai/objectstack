@@ -2596,6 +2596,56 @@ function envelopePackageId(requestedPackageId: string | undefined, served: unkno
 }
 
 /**
+ * [#28831, #22024, ADR-0146 D8] The artifact envelope an item of the
+ * per-package layer ({@link ObjectStackProtocolImplementation.getMetaItemsPerPackage})
+ * wears: the artifact the read looked up at the item's package
+ * ({@link envelopePackageId}) when it is that package's OWN, else none.
+ *
+ * The artifact lookup falls back to the first code package that ships the
+ * name when the item's package ships none (`registry.getArtifactItem`'s
+ * any-composite tier). On the effective read that is how a package-less row
+ * standing in for a base wears the base's envelope. On the per-package layer
+ * every row is seated under its own package, so the fallback stamped a
+ * dependent package's row, or a `.custom` pair's undeclared row, under a base
+ * item's name with the BASE's `_packageId`, `_packageVersion` and
+ * `_provenance`: the export and the anonymous form doors' withdrawal layer
+ * read it as the base's.
+ *
+ * One exception keeps today's stamp: a stored row of the item's package that
+ * is the served override of the artifact's package, judged by
+ * {@link isServedOverrideRowOf} on the row's own `package_id` (never a body
+ * `_packageId`) at the item's own bundle member. It is served as its base's
+ * item, under its base's envelope.
+ *
+ * An item bound to no package (`boundPackageOf` answers `undefined`) keeps
+ * the lookup's answer, as before. ⛔ The lookup itself is not narrowed: its
+ * other callers rely on the fallback.
+ */
+function perPackageLayerEnvelope(
+    type: string,
+    item: unknown,
+    itemPackageId: string | undefined,
+    artifact: unknown,
+    rowsOfName: readonly any[],
+): unknown {
+    if (artifact === undefined || artifact === null || typeof artifact !== 'object') return artifact;
+    const own = boundPackageOf(itemPackageId);
+    if (own === undefined) return artifact;
+    const lender = (artifact as { _packageId?: unknown })._packageId;
+    if (lender === own) return artifact;
+    const member = bundleMemberOf(type, item);
+    const declared = rowsOfName.some((row) => {
+        if (row?.package_id !== own || !isServedOverrideRowOf(row, lender)) return false;
+        try {
+            return bundleMemberOf(type, storedRowDocument(row)) === member;
+        } catch {
+            return false;
+        }
+    });
+    return declared ? artifact : undefined;
+}
+
+/**
  * [#22057] The package a body is bound to, when it is bound to one: a
  * non-empty id that is not the `'sys_metadata'` sentinel a package-less row
  * carries. `undefined` for a package-less body.
@@ -10793,7 +10843,15 @@ export class ObjectStackProtocolImplementation implements
             const itemPackageId = envelopePackageId(packageId, it);
             // [#23074] …and to the item's own bundle member, whose artifact
             // alone may lend it an envelope ({@link mergeArtifactProtection}).
-            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId, bundleMemberOf(request.type, it));
+            let a = this.lookupArtifactItem(request.type, itemName, itemPackageId, bundleMemberOf(request.type, it));
+            // [#28831] …and on the per-package layer, an item bound to a
+            // package wears ITS OWN package's artifact envelope, or none
+            // ({@link perPackageLayerEnvelope}): never another package's, which
+            // the lookup falls back to when the item's package ships no
+            // artifact of the name.
+            if (layer === 'per-package') {
+                a = perPackageLayerEnvelope(request.type, it, itemPackageId, a, lockRowsByName.get(String(itemName)) ?? []);
+            }
             let itemLock: ItemLock | undefined;
             if (typeof itemName === 'string' && (it as any)?._draft !== true) {
                 const address: ItemAddress = {

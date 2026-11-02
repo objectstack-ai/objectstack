@@ -203,6 +203,7 @@ const actionTranslationSchema = (surface: string) => strictObject({
     disabledMessage: 'disabledReason', disabledTooltip: 'disabledReason',
     disabledHint: 'disabledReason', disabledText: 'disabledReason',
     submitLabel: 'submitText', confirmLabel: 'submitText',
+    cancelLabel: 'cancelText',
     parameters: 'params', args: 'params', inputs: 'params',
     result: 'resultDialog', dialog: 'resultDialog',
   },
@@ -224,6 +225,11 @@ const actionTranslationSchema = (surface: string) => strictObject({
   // label; overlaid by `translateAction` like `description`, the same
   // dialog's line under its title, for an action that declares `params`.
   submitText: z.string().optional().describe('Translated label of the submit button in the action\'s param dialog (the action must declare `params`)'),
+  // `ActionSchema.cancelText` (#28519) — the dismiss button label of the
+  // dialog the action opens, its confirm dialog or its param dialog; overlaid
+  // by `translateAction` like `submitText`, for an action that declares
+  // `confirmText` or `params`.
+  cancelText: z.string().optional().describe('Translated label of the dismiss button on the action\'s confirm or param dialog (the action must declare `confirmText` or `params`; no renderer shows it yet)'),
   // `ActionSchema.outcomeMessages` (#21095) — one translated message per
   // declared outcome, keyed by the same snake_case outcome name, so a bundle
   // key that could never match a handler's `outcome` is refused here rather
@@ -514,6 +520,7 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    *   objects.<object>._actions.<action_name>.successMessage
    *   objects.<object>._actions.<action_name>.disabledReason
    *   objects.<object>._actions.<action_name>.submitText
+   *   objects.<object>._actions.<action_name>.cancelText
    *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
    *   objects.<object>._actions.<action_name>.params.<param_name>.label
    *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -1043,6 +1050,7 @@ const appTranslationDataShape = () => ({
    *   globalActions.<action_name>.successMessage
    *   globalActions.<action_name>.disabledReason
    *   globalActions.<action_name>.submitText
+   *   globalActions.<action_name>.cancelText
    *   globalActions.<action_name>.outcomeMessages.<outcome>
    *   globalActions.<action_name>.params.<param_name>.label
    *   globalActions.<action_name>.params.<param_name>.helpText

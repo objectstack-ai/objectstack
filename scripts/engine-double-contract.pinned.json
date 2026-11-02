@@ -4552,6 +4552,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/action-declarative-update-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/action-declarative-update.test.ts",
       "verb": "update",
       "pinned": 1

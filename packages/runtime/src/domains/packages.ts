@@ -1497,7 +1497,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // never be rebuilt or published — «declared ≠ enforced» on a
             // PUBLISHED API contract, the shape Prime Directive #10 refuses
             // outright, and the failure 北极星 clause 4 names in as many words:
-            // 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+            // "what is wrong must be loudly refused with a prescription, never
+            // silently stored".
             //
             // The authorising ruling is 基本裁决原则 —「声明而未兑现是实现缺口,
             // 补实现或退役,⛔ 不在消费端收窄」— and by the mechanical boundary
@@ -1570,7 +1571,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             // `version` installed and answered `201`. That is «declared ≠
             // enforced» on a PUBLISHED API contract — the shape Prime Directive
             // #10 refuses outright — and it is the failure 北极星 clause 4 names
-            // in as many words: 「错的必须被**响亮拒绝**并给处方,**永不静默落库**」.
+            // in as many words: "what is wrong must be loudly refused with a
+            // prescription, never silently stored".
             // So the refusal is loud and carries the prescription.
             //
             // The ruling that authorises it is 基本裁决原则 —

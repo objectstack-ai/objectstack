@@ -115,6 +115,9 @@ const STUDIO_EN: Record<string, string> = {
   'perm.rls.remove': 'Remove policy',
   'perm.rls.nameNeeded': 'Give the policy a name to save it.',
   'perm.rls.nameRefused': 'Not saved. Policy name, on row {row}: {problem}',
+  'perm.rls.policyRefused': 'Not saved. Policy on row {row}: {problem}',
+  'perm.rls.checkNotApplicable': 'Does not apply to this policy\'s operation: only a write is checked.',
+  'perm.rls.clauseHeld': 'Not saved: fix the policy finding shown under USING or CHECK.',
   // CEL authoring safety for RLS predicates (objectui#2413).
   'perm.cel.valid': 'Valid CEL',
   'perm.cel.suggestions': 'Field and scope suggestions',
@@ -349,6 +352,10 @@ const STUDIO_EN: Record<string, string> = {
   'designer.field.hidden': 'Hidden',
   'designer.field.trackHistory': 'Track history',
   'designer.field.placeholder': 'Placeholder',
+  // objectstack#28575 — a read-only base's own field: only the spec's display-property whitelist is editable.
+  'designer.field.basePatchOnly': 'This field belongs to the installed package: you can change only its {properties}, saved as your customization, and everything else stays as the package defines it.',
+  'designer.field.basePatchOnly.optionLabels': 'Option labels',
+  'designer.field.basePatchOnly.separator': ', ',
   'designer.field.group': 'Group',
   'designer.field.noGroup': '— No group —',
   'designer.field.picklistValues': 'Picklist values',

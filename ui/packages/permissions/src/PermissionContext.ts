@@ -102,6 +102,19 @@ export interface PermissionContextValue {
    * answer from it (see app-shell's `useExpressionPermissions`).
    */
   effectiveObjects?: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+  /**
+   * [objectstack#28508] Whether the caller's organization has at least one
+   * ownership queue, declared or a `sys_queue` row: the server resolves it and
+   * `/auth/me/permissions` serves it as `hasAnyQueue`, handed on here verbatim.
+   * It names no queue.
+   *
+   * `undefined` means no answer: `MePermissionsProvider` before its first
+   * answer or for an anonymous session, the role-based `PermissionProvider`,
+   * or no provider at all. A consumer reads only `=== true` as "there is a
+   * queue": an unknown answer cannot show one exists (the list's "In a queue"
+   * toggle stays hidden on it, objectstack#28428).
+   */
+  hasAnyQueue?: boolean;
   /** Whether permissions are loaded */
   isLoaded: boolean;
 }

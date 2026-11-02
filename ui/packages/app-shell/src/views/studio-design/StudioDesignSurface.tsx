@@ -417,8 +417,18 @@ import {
   overrideDraftBody,
   useCustomizeDoorWalled,
   useServedOverride,
+  OBJECT_EXTENSION_TYPE,
+  baseOwnedFieldNames,
+  extensionFieldName,
+  extensionBodyForSave,
+  extensionFieldNames,
+  foldObjectExtension,
+  objectExtensionBodyOf,
+  routeFoldedFieldsEdit,
   type CustomizeBlock,
+  type ObjectExtensionBody,
   type ServedOverride,
+  BaseFieldDisplayPatchContext,
 } from './StudioCustomizeControls.js';
 import {
   DraftChangesPanel,
@@ -7086,6 +7096,26 @@ function addedFieldName(label: string, existing: string[]): string {
 }
 
 /**
+ * objectstack#28575 — {@link addedFieldName} for a customer extension field:
+ * the name the Add field popover shows, suffixed (`region__c`), or the next
+ * free `field_<N>__c`.
+ */
+function addedExtensionFieldName(label: string, existing: string[]): string {
+  const derived = extensionFieldName(toFieldNameLoose(label).replace(/_+$/, ''));
+  if (derived && !existing.includes(derived)) return derived;
+  let i = existing.length + 1;
+  let name = extensionFieldName(`field_${i}`);
+  while (existing.includes(name)) name = extensionFieldName(`field_${++i}`);
+  return name;
+}
+
+/** objectstack#28575 — an extension body's `fields` map; `{}` when it declares none. */
+function extensionFieldsOf(body: ObjectExtensionBody): Record<string, unknown> {
+  const fields = body.fields;
+  return fields && typeof fields === 'object' && !Array.isArray(fields) ? (fields as Record<string, unknown>) : {};
+}
+
+/**
  * Data pillar — the package's objects: a records grid (Airtable parity) plus
  * table-based field management. Add a field, or click a column header's edit
  * affordance, to open ObjectFieldInspector (full type list + per-type config)
@@ -7376,6 +7406,37 @@ export function DataPillar({
   const requestedSurface = useRequestedSurface();
   const appliedRequestRef = React.useRef(0);
   const [objDraft, setObjDraft] = React.useState<Record<string, unknown>>({});
+  // objectstack#28575 (ADR-0146 D10) — a base object of a read-only base takes
+  // fields as an extension in the base's pair, never in its own buffer: the
+  // pair's `object_extension` of it (`extend` = the object), filed under the
+  // object's name. The base object stays as shipped; `objDraft` holds it as
+  // served (which already folds the pair's PUBLISHED extension), and what the
+  // pillar shows is `shownDraft`, the two folded. `published` names the
+  // fields the published extension declares, so one the draft drops is gone.
+  const extendsBase = packageReadOnly && customization !== null && current !== null && !current.addedIn;
+  const [ext, setExt] = React.useState<{
+    for: string;
+    body: ObjectExtensionBody;
+    published: ReadonlySet<string>;
+  } | null>(null);
+  const [extDirty, setExtDirty] = React.useState(false);
+  const [extHasDraft, setExtHasDraft] = React.useState(false);
+  const [extReloadNonce, setExtReloadNonce] = React.useState(0);
+  const extLoadedRef = React.useRef<string | null>(null);
+  const extOpen = extendsBase && ext !== null && ext.for === current?.name ? ext : null;
+  // Adding a field asks the ensure door for the pair once per base: its
+  // answer names every write, ⛔ never a `<base>.custom` spelled here.
+  const extWalled = customization?.walled === true;
+  const extWritable = extOpen !== null && !extWalled;
+  const shownDraft = React.useMemo(
+    () => (extOpen ? foldObjectExtension(objDraft, extOpen.body, extOpen.published) : objDraft),
+    [objDraft, extOpen],
+  );
+  // The served object's own fields: the ones a base-field patch addresses.
+  const baseOwnedFields = React.useMemo(
+    () => (extOpen ? baseOwnedFieldNames(objDraft, extOpen.body, extOpen.published) : null),
+    [objDraft, extOpen],
+  );
   // ADR-0015 — an external object's table belongs to the remote database: the
   // pillar offers no Add field on it (grid "+" column, Form toolbar) and says
   // where its fields come from. Rename / retype / duplicate / remove are gated
@@ -7419,7 +7480,7 @@ export function DataPillar({
   // and the open inspector's live verdict always wins.
   const [celVerdicts, setCelVerdicts] = React.useState<Record<string, { field: string; count: number; stamp: string | null }>>({});
   const liveFieldReport = fieldSel?.kind === 'field' && blockingReport.key === fieldSelKey;
-  const openFieldStamp = fieldSel?.kind === 'field' ? fieldCelStamp(objDraft, fieldSel.id) : null;
+  const openFieldStamp = fieldSel?.kind === 'field' ? fieldCelStamp(shownDraft, fieldSel.id) : null;
   React.useEffect(() => {
     if (!liveFieldReport || fieldSel === null) return;
     const kept = { field: fieldSel.id, count: blockingReport.count, stamp: openFieldStamp };
@@ -7435,7 +7496,7 @@ export function DataPillar({
   const celFieldPrefix = `${current?.name ?? ''}:field:`;
   for (const [key, kept] of Object.entries(celVerdicts)) {
     if (!key.startsWith(celFieldPrefix) || key === fieldSelKey) continue;
-    if (kept.count > 0 && kept.stamp === fieldCelStamp(objDraft, kept.field)) {
+    if (kept.count > 0 && kept.stamp === fieldCelStamp(shownDraft, kept.field)) {
       celHeldFields.push(kept.field);
       inspectorBlocking += kept.count;
     }
@@ -7642,6 +7703,20 @@ export function DataPillar({
     recordRead: recordObjRead,
     dialog: objConflictDialog,
   } = useDraftSaveGuard(client, reloadObjDraft);
+  // objectstack#28575 — the extension buffer's own guard, pinned by its draft read at the pair.
+  const reloadExt = React.useCallback(() => setExtReloadNonce((n) => n + 1), []);
+  const {
+    save: saveExtDraft,
+    recordRead: recordExtRead,
+    dialog: extConflictDialog,
+  } = useDraftSaveGuard(client, reloadExt);
+  // The pair a READ names is the surface's (`StudioBaseCustomization.pairId`),
+  // read through this ref, so the pair a first add creates never reloads the
+  // buffer it is about to save.
+  const extReadPairRef = React.useRef<string | null>(customization?.pairId ?? null);
+  React.useLayoutEffect(() => {
+    extReadPairRef.current = customization?.pairId ?? null;
+  });
   // Left-rail search + inline "new object" creator (design §4: rail = search + New).
   const [query, setQuery] = React.useState('');
   const [creating, setCreating] = React.useState(false);
@@ -7907,13 +7982,62 @@ export function DataPillar({
     };
   }, [client, current, packageId, publishNonce, objReloadNonce, recordObjRead]);
 
+  // objectstack#28575 — the pair's extension of the open base object: its
+  // pending draft at the pair, else its published row there, else a new
+  // `{ extend }`. Loaded once per object, and again after a publish. A draft
+  // starts from the published body, so a publish never drops a field the
+  // published extension already declares.
+  React.useEffect(() => {
+    if (!extendsBase || !current) {
+      extLoadedRef.current = null;
+      return;
+    }
+    const name = current.name;
+    const loadKey = `${name}#${publishNonce}#${extReloadNonce}`;
+    if (extLoadedRef.current === loadKey) return;
+    extLoadedRef.current = loadKey;
+    let cancelled = false;
+    let settled = false;
+    setExt(null);
+    setExtDirty(false);
+    setExtHasDraft(false);
+    const pair = extReadPairRef.current;
+    (async () => {
+      try {
+        let draft: ObjectExtensionBody | null = null;
+        let published: ObjectExtensionBody | null = null;
+        if (pair) {
+          const [draftRead, publishedRow] = await Promise.all([
+            readDraftForSave<Record<string, unknown>>(client, OBJECT_EXTENSION_TYPE, name, pair),
+            client.get<Record<string, unknown>>(OBJECT_EXTENSION_TYPE, name, { packageId: pair }),
+          ]);
+          if (cancelled) return;
+          draft = objectExtensionBodyOf(extractDraftBody(draftRead.answer), name);
+          published = objectExtensionBodyOf(publishedRow, name);
+          recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, draftRead.pin);
+        }
+        setExt({ for: name, body: draft ?? published ?? { extend: name }, published: new Set(extensionFieldNames(published)) });
+        setExtHasDraft(draft !== null);
+      } catch (e) {
+        if (!cancelled) setError(plainRefusal(e));
+      } finally {
+        settled = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      // A load cancelled before it settled takes its claim back (see the object load above).
+      if (!settled) extLoadedRef.current = null;
+    };
+  }, [client, current, extendsBase, publishNonce, extReloadNonce, recordExtRead]);
+
   // The header counts the fields the canvas shows, and names the platform's
   // own columns apart: "2 fields (+8 system)".
   const fieldCount = React.useMemo(() => {
-    const all = readFields(objDraft.fields).entries.length;
-    const own = formFieldNames(objDraft.fields).length;
+    const all = readFields(shownDraft.fields).entries.length;
+    const own = formFieldNames(shownDraft.fields).length;
     return { own, system: all - own };
-  }, [objDraft]);
+  }, [shownDraft]);
   const fieldCountText =
     tFormat(fieldCount.own === 1 ? 'engine.studio.data.fieldCountOne' : 'engine.studio.data.fieldCount', locale, {
       count: fieldCount.own,
@@ -7948,9 +8072,9 @@ export function DataPillar({
    * a PRODUCER-side fix; ListView's by-identity dependency is correct for a genuine
    * column change and is left alone.
    */
-  const gridColumns = React.useMemo(
+  const gridColumnsComputed = React.useMemo(
     () =>
-      readFields(objDraft.fields)
+      readFields(shownDraft.fields)
         // objectui#11780 — a column the platform injects AND hides (`__search`,
         // `owning_business_unit_id`) is no column an author manages. Read off
         // the definition this memo already holds, so the key stays
@@ -7971,7 +8095,19 @@ export function DataPillar({
         // inspector, which is where it gets configured; it joins the grid once
         // it is published and therefore queryable.
         .filter((n) => publishedFieldNames.has(n)),
-    [objDraft.fields, publishedFieldNames],
+    [shownDraft.fields, publishedFieldNames],
+  );
+  // objectstack#28575 — with a base object's extension open, the folded object
+  // (`shownDraft`) is rebuilt on every extension edit, so a label typed into an
+  // extension field would hand the grid a fresh columns array per keystroke:
+  // then the columns are keyed on their NAMES. Otherwise the array keeps the
+  // identity semantics above, which `StudioDesignSurface.gridColumns.test.tsx`'s
+  // identity-churn liveness case pins as a must-not-change.
+  const gridColumnsExtKey = extOpen ? JSON.stringify(gridColumnsComputed) : null;
+  const gridColumns = React.useMemo(
+    () => (gridColumnsExtKey === null ? gridColumnsComputed : (JSON.parse(gridColumnsExtKey) as string[])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- with an extension open, the names alone key it
+    [gridColumnsExtKey ?? gridColumnsComputed],
   );
 
   /**
@@ -8003,15 +8139,22 @@ export function DataPillar({
    * `fields` identical, so the looser key would churn (and re-run the form's
    * field-generation effect) on every unrelated draft edit (icon, label).
    */
-  const formFields = React.useMemo(() => formFieldNames(objDraft.fields), [objDraft.fields]);
+  const formFieldsComputed = React.useMemo(() => formFieldNames(shownDraft.fields), [shownDraft.fields]);
+  // objectstack#28575 — with an extension open, keyed on the names, as `gridColumns` is.
+  const formFieldsExtKey = extOpen ? JSON.stringify(formFieldsComputed) : null;
+  const formFields = React.useMemo(
+    () => (formFieldsExtKey === null ? formFieldsComputed : (JSON.parse(formFieldsExtKey) as string[])),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- with an extension open, the names alone key it
+    [formFieldsExtKey ?? formFieldsComputed],
+  );
 
   // objectui#12515 — what the Form tab's Preview renders. The draft differs
   // from the published definition when there is no published one, a pending
   // draft, or an unsaved edit; then Preview shows the draft unless the author
   // picked Published (offered only when a published version exists).
-  const draftDiffers = !hasBaseline || hasDraft || dirty;
+  const draftDiffers = !hasBaseline || hasDraft || dirty || (extOpen !== null && (extHasDraft || extDirty));
   const previewShowsDraft = !hasBaseline || (draftDiffers && previewSource === 'draft');
-  const previewDraft = previewShowsDraft ? objDraft : null;
+  const previewDraft = previewShowsDraft ? shownDraft : null;
   const previewObjectName = current?.name ?? '';
   const previewDataSource = React.useMemo(
     () =>
@@ -8149,6 +8292,73 @@ export function DataPillar({
     snapshot: objDraft,
     save: doSave,
   });
+
+  // objectstack#28575 — the ensure door's answer for this base's extension
+  // writes: asked by the first add (no prompt), once per base, and again only
+  // after a refusal.
+  const extPairRef = React.useRef<{ base: string; asked: Promise<string> } | null>(null);
+  const extPairFor = React.useCallback((custom: StudioBaseCustomization): Promise<string> => {
+    const held = extPairRef.current;
+    if (held && held.base === custom.base) return held.asked;
+    const asked = custom.ensure();
+    extPairRef.current = { base: custom.base, asked };
+    asked.catch(() => {
+      if (extPairRef.current?.asked === asked) extPairRef.current = null;
+    });
+    return asked;
+  }, []);
+  // The extension's draft save, into the pair the door answered. A refusal
+  // (the suffix, a structural key, the ensure door's walled 403) is shown as
+  // the server sent it.
+  const doSaveExt = React.useCallback(
+    async (sent: DraftSend) => {
+      if (!extOpen || !customization) return;
+      const { for: name, body } = extOpen;
+      setSaving('draft');
+      setError(null);
+      try {
+        const pair = await extPairFor(customization);
+        const outcome = await saveExtDraft(OBJECT_EXTENSION_TYPE, name, extensionBodyForSave(body), {
+          mode: 'draft',
+          packageId: pair,
+          surface: 'studio',
+        });
+        if (outcome === 'reloaded') return;
+        setExtHasDraft(true);
+        if (sent.unmoved()) setExtDirty(false);
+        setSavedAt(new Date());
+        onDraftSaved?.({ type: OBJECT_EXTENSION_TYPE, name });
+      } catch (e) {
+        setError(plainRefusal(e));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [extOpen, customization, extPairFor, saveExtDraft, onDraftSaved],
+  );
+  const { flush: flushExtSave } = useDraftAutoSave({
+    target: `${OBJECT_EXTENSION_TYPE}:${current?.name ?? ''}`,
+    loadedFor: extOpen ? `${OBJECT_EXTENSION_TYPE}:${extOpen.for}` : '',
+    dirty: extDirty,
+    blocked: !extWritable || !!saving || saveBlocking > 0,
+    snapshot: extOpen?.body ?? null,
+    save: doSaveExt,
+  });
+  // An edit of the folded object's fields, written into the extension: an
+  // extension field whole, a base field's whitelisted change as its patch.
+  const onExtFieldsPatch = React.useCallback(
+    (patch: Record<string, unknown>) => {
+      if (!extWritable || !('fields' in patch)) return;
+      setExt((prev) => {
+        if (!prev) return prev;
+        const before = foldObjectExtension(objDraft, prev.body, prev.published).fields;
+        const baseOwned = baseOwnedFieldNames(objDraft, prev.body, prev.published);
+        return { ...prev, body: routeFoldedFieldsEdit({ before, after: patch.fields, baseOwned, ext: prev.body }) };
+      });
+      setExtDirty(true);
+    },
+    [extWritable, objDraft],
+  );
   // objectstack#27485 — an unsent edit the CEL verdict holds is named like an
   // incomplete one: the held line, the surface's Publish and the rail's
   // question all read it, so it outlives the inspector without going unseen.
@@ -8222,26 +8432,28 @@ export function DataPillar({
         setCurrent(next);
         return true;
       }
-      if (saving || (dirty && objHeld === null && flushObjSave())) {
+      // objectstack#28575 — and the base object's extension buffer the same way.
+      if (saving || (dirty && objHeld === null && flushObjSave()) || (extDirty && flushExtSave())) {
         setSwitchTo(next);
         return true;
       }
-      if (!confirmDropUnsavedWork(dirty, locale)) return false;
+      if (!confirmDropUnsavedWork(dirty || extDirty, locale)) return false;
       setSwitchTo(null);
       setCurrent(next);
       return true;
     },
-    [current, saving, dirty, objHeld, flushObjSave, locale],
+    [current, saving, dirty, extDirty, objHeld, flushObjSave, flushExtSave, locale],
   );
   React.useEffect(() => {
     if (!switchTo || saving) return;
     if (dirty && objHeld === null && flushObjSave()) return;
+    if (extDirty && flushExtSave()) return;
     setSwitchTo(null);
     // Still dirty: the save was refused (on screen) or an edit taken meanwhile
     // is held. The author stays; the next switch asks.
-    if (dirty) return;
+    if (dirty || extDirty) return;
     setCurrent(switchTo);
-  }, [switchTo, saving, dirty, objHeld, flushObjSave]);
+  }, [switchTo, saving, dirty, extDirty, objHeld, flushObjSave, flushExtSave]);
   // The live request's apply (see `requestedSurface` above). objectstack#26845
   // — another object's load replaces the buffer a held edit lives in, so it
   // goes through the rail's own switch (`openObject`): an unsent edit is sent
@@ -8277,7 +8489,26 @@ export function DataPillar({
   // the label derived none (or a taken one); otherwise it is derived here.
   const addField = React.useCallback((label: string, type: FieldTypeId, typedName?: string) => {
     // objectui#11272 — never onto another object's buffer (not offered then).
-    if (readOnly || !objLoaded || objIsExternal) return;
+    if (!objLoaded || objIsExternal) return;
+    // objectstack#28575 (ADR-0146 D10) — on a read-only base's object the
+    // field is the customer's own, `__c`, declared in the pair's extension of
+    // it; the base object's buffer is never touched. Create asks the ensure
+    // door for the pair (no prompt); the extension's autosave writes there.
+    if (extendsBase) {
+      if (!extWritable || !customization) return;
+      const existing = readFields(shownDraft.fields).entries.map((e) => e.name);
+      const asked = typedName ? extensionFieldName(typedName) : '';
+      const name = asked && !existing.includes(asked) ? asked : addedExtensionFieldName(label, existing);
+      const { def } = newField(name, type, label);
+      setExt((prev) =>
+        prev ? { ...prev, body: { ...prev.body, fields: { ...extensionFieldsOf(prev.body), [name]: def } } } : prev,
+      );
+      setExtDirty(true);
+      setFieldSel({ kind: 'field', id: name });
+      extPairFor(customization).catch((e: unknown) => setError(plainRefusal(e)));
+      return;
+    }
+    if (readOnly) return;
     const view = readFields(objDraft.fields);
     const existing = view.entries.map((e) => e.name);
     const name = typedName && !existing.includes(typedName) ? typedName : addedFieldName(label, existing);
@@ -8285,11 +8516,13 @@ export function DataPillar({
     setObjDraft((d) => ({ ...d, fields: writeFields(view) }));
     setDirty(true);
     setFieldSel({ kind: 'field', id: name });
-  }, [objDraft, readOnly, objLoaded, objIsExternal]);
-  const canAddFields = !readOnly && !objIsExternal;
+  }, [objDraft, readOnly, objLoaded, objIsExternal, extendsBase, extWritable, customization, shownDraft, extPairFor]);
+  // objectstack#28575 — a read-only base's object takes fields into its pair,
+  // unless the ensure door is walled for this caller (drawn disabled below).
+  const canAddFields = !objIsExternal && (extendsBase ? extWritable : !readOnly);
   const addFieldTakenNames = React.useMemo(
-    () => readFields(objDraft.fields).entries.map((e) => e.name),
-    [objDraft.fields],
+    () => readFields(shownDraft.fields).entries.map((e) => e.name),
+    [shownDraft.fields],
   );
 
   // objectui#12516 — the Records grid's "+" column opens the same popover. The
@@ -8346,6 +8579,13 @@ export function DataPillar({
   // Observed (objectui#11939): an object inspector registered after this pillar
   // rendered fills the field rail below without a remount.
   const inspector = useRegisteredMetadataInspector('object');
+  // objectstack#28575 — on a base object the field rail is writable (into the
+  // pair's extension) for a field, never for a group; a base field opens in
+  // the inspector's display-property mode.
+  const fieldRailReadOnly = readOnly && !(extWritable && fieldSel?.kind === 'field');
+  const selectedBaseField =
+    extWritable && fieldSel?.kind === 'field' && baseOwnedFields !== null && baseOwnedFields.has(String(fieldSel.id));
+  const addFieldWalledId = React.useId();
 
   // objectui#12725 — the field rail is up exactly when the render below draws
   // it; that is when the pillar holds the slot's properties half. A selection
@@ -8439,6 +8679,26 @@ export function DataPillar({
       </button>
     </div>
   );
+  // objectstack#28575 — on a base object the Form toolbar's Add field sits
+  // beside the Layout / Preview control: the designer, read-only on a base
+  // object, draws none, and the field goes into the pair's extension.
+  const formToolbarLeading =
+    extendsBase && canAddFields ? (
+      <div className="inline-flex items-center gap-2">
+        {formModeControl}
+        <AddFieldPopover onCreate={addField} takenNames={addFieldTakenNames} extensionField align="start">
+          <button
+            type="button"
+            data-testid="data-form-add-extension-field"
+            className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary/10 px-2.5 text-xs font-medium text-primary hover:bg-primary/15"
+          >
+            <Plus className="h-3.5 w-3.5" /> {t('engine.studio.data.addField', locale)}
+          </button>
+        </AddFieldPopover>
+      </div>
+    ) : (
+      formModeControl
+    );
 
   // The selected object's own icon (from its metadata) — prefer the loaded
   // draft body, fall back to the rail header. getIcon degrades to Database.
@@ -8508,6 +8768,7 @@ export function DataPillar({
   return (
     <div ref={pillarRef} className="flex h-full flex-col">
       {objConflictDialog}
+      {extConflictDialog}
       <div className="relative flex min-h-0 flex-1">
         {isMobile && railOpen && (
           <div
@@ -8599,7 +8860,7 @@ export function DataPillar({
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {t('engine.studio.autoSaving', locale)}
                   </span>
-                ) : savedAt && !dirty ? (
+                ) : savedAt && !dirty && !extDirty ? (
                   <span className="text-[11px] text-muted-foreground" data-testid="data-saved-at">
                     {tFormat('engine.studio.data.lastSaved', locale, {
                       time: savedAt.toLocaleTimeString(displayLocale, { hour: '2-digit', minute: '2-digit' }),
@@ -8636,6 +8897,29 @@ export function DataPillar({
                     action left to put in one. */}
                 {/* objectui#12453 — on the Form tab it carries the layout's
                     read-only sentence the Layout control no longer does. */}
+                {/* objectstack#28575 — the ensure door refuses this caller: Add
+                    field draws disabled, in the console's own sentence. */}
+                {extendsBase && extWalled && objLoaded && !objIsExternal && (viewMode === 'grid' || viewMode === 'form') && (
+                  <span
+                    tabIndex={0}
+                    title={t('engine.studio.customize.walled', locale)}
+                    aria-describedby={addFieldWalledId}
+                    data-testid="data-add-field-walled"
+                    className="inline-flex rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <button
+                      type="button"
+                      disabled
+                      aria-describedby={addFieldWalledId}
+                      className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary/10 px-2.5 text-xs font-medium text-primary disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <Plus className="h-3.5 w-3.5" /> {t('engine.studio.data.addField', locale)}
+                    </button>
+                    <span id={addFieldWalledId} className="sr-only">
+                      {t('engine.studio.customize.walled', locale)}
+                    </span>
+                  </span>
+                )}
                 {readOnly && (
                   <StudioReadOnlyLink
                     item={current}
@@ -8808,6 +9092,7 @@ export function DataPillar({
                     onCreate={addField}
                     takenNames={addFieldTakenNames}
                     returnFocusTo={() => gridAddFieldButton.current}
+                    extensionField={extendsBase}
                   >
                     <span aria-hidden="true" className="pointer-events-none absolute right-4 top-2 h-0 w-0" />
                   </AddFieldPopover>
@@ -8827,7 +9112,7 @@ export function DataPillar({
                       : {}),
                     onEditColumn: (fieldName) => {
                       // ignore non-field columns (e.g. the row-actions column)
-                      if (readFields(objDraft.fields).entries.some((e) => e.name === fieldName)) {
+                      if (readFields(shownDraft.fields).entries.some((e) => e.name === fieldName)) {
                         setFieldSel({ kind: 'field', id: fieldName });
                       }
                     },
@@ -8878,7 +9163,7 @@ export function DataPillar({
                   to trail it is each item's title. */}
               {formMode === 'layout' ? (
                 <ObjectFormDesigner
-                  draft={objDraft}
+                  draft={shownDraft}
                   objectName={current.name}
                   systemFieldNames={STUDIO_SYSTEM_FIELD_NAMES}
                   onChange={onPatch}
@@ -8888,12 +9173,12 @@ export function DataPillar({
                   onSelectGroup={(key) => setFieldSel({ kind: 'group', id: key })}
                   onAddField={canAddFields ? addField : undefined}
                   readOnly={readOnly}
-                  modeControl={formModeControl}
+                  modeControl={formToolbarLeading}
                 />
               ) : (
               <>
               <FormToolbar
-                leading={formModeControl}
+                leading={formToolbarLeading}
                 hint={
                   /* objectui#12515 — Preview renders the runtime form from the draft
                    * definition (the open object's buffer, unsaved edits included):
@@ -8973,7 +9258,7 @@ export function DataPillar({
                   onClick={(e) => {
                     const el = (e.target as HTMLElement).closest('[data-field]');
                     const name = el?.getAttribute('data-field');
-                    if (name && readFields(objDraft.fields).entries.some((f) => f.name === name)) {
+                    if (name && readFields(shownDraft.fields).entries.some((f) => f.name === name)) {
                       setFieldSel({ kind: 'field', id: name });
                     } else if (!el && inSlot) {
                       // objectui#12725 — the space between the fields is empty canvas.
@@ -9039,7 +9324,7 @@ export function DataPillar({
             // objectui#12725 — the copilot's 草稿 chip on a field it changed.
             actions={fieldAgentMark ? <DraftChip locale={locale} className="mr-1" /> : undefined}
             // objectui#12453 — a read-only package saves no draft: no footer.
-            footer={readOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
+            footer={fieldRailReadOnly ? null : t('engine.studio.inspector.draftFooter', locale)}
             bodyClassName="flex min-h-0 flex-1 flex-col"
           >
             <div ref={fieldInspectorBodyRef} className="contents">
@@ -9055,19 +9340,24 @@ export function DataPillar({
                     locale={locale}
                   />
                 ) : inspector ? (
-                  React.createElement(inspector, {
-                    type: 'object',
-                    name: current.name,
-                    draft: objDraft,
-                    selection: fieldSel,
-                    onPatch,
-                    onClearSelection: () => setFieldSel(null),
-                    onSelectionChange: setFieldSel,
-                    onBlockingIssuesChange: (count: number) =>
-                      setBlockingReport({ key: fieldSelKey, count }),
-                    readOnly,
-                    locale,
-                  })
+                  // objectstack#28575 — on a base object the inspector edits
+                  // the pair's extension: its own fields whole, a base field
+                  // within the display-property whitelist only.
+                  <BaseFieldDisplayPatchContext.Provider value={selectedBaseField}>
+                    {React.createElement(inspector, {
+                      type: 'object',
+                      name: current.name,
+                      draft: shownDraft,
+                      selection: fieldSel,
+                      onPatch: extOpen ? onExtFieldsPatch : onPatch,
+                      onClearSelection: () => setFieldSel(null),
+                      onSelectionChange: setFieldSel,
+                      onBlockingIssuesChange: (count: number) =>
+                        setBlockingReport({ key: fieldSelKey, count }),
+                      readOnly: fieldRailReadOnly,
+                      locale,
+                    })}
+                  </BaseFieldDisplayPatchContext.Provider>
                 ) : (
                   /* No field inspector registered. ⛔ Not "loading…": the read
                    * is observed (objectui#11939), so a late registration does
@@ -9087,7 +9377,7 @@ export function DataPillar({
                 ) : (
                   fieldRailContent
                 );
-                if (!readOnly) return <div className="min-h-0 flex-1 overflow-auto p-3">{railContent}</div>;
+                if (!fieldRailReadOnly) return <div className="min-h-0 flex-1 overflow-auto p-3">{railContent}</div>;
                 // objectui#12303 — on a read-only package every input and the
                 // Remove button in this rail are disabled for one reason, the
                 // package's. It rides the record page's Archive pattern

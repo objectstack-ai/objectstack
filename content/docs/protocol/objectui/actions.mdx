@@ -231,6 +231,7 @@ interface Action {
   body?: HookBody;              // Inline logic for type: 'script'
   params?: ActionParam[];       // Inputs collected before execution
   submitText?: I18nLabel;       // The param dialog's submit button verb (default "Confirm")
+  cancelText?: I18nLabel;       // The confirm or param dialog's dismiss button label (default "Cancel")
   method?: 'POST' | 'PATCH' | 'PUT' | 'DELETE'; // for type: 'api'
 
   // UX
@@ -538,6 +539,26 @@ params:
 - A blank string (`''` or whitespace only) is refused at parse. Omit the key to keep **Confirm**.
 - `submitLabel` and `confirmLabel` (the button's spelling on a view's `bulkActionDefs`) are refused with a rename to `submitText`.
 - The console does not draw it yet: until its param dialog reads the key, the button says **Confirm**, and `os validate` warns an author who declares it.
+
+### Naming the dismiss button: `cancelText`
+
+The dialog an action opens before it runs, its confirm dialog or its param dialog, has a dismiss button that says **Cancel**. That reads badly when the action's own verb is "Cancel …" or "Close …": a **Cancel Invitation** confirm whose two buttons read **Cancel** and **Cancel Invitation** leaves the user unable to tell which one keeps the invitation. `cancelText` names what dismissing keeps.
+
+```yaml
+name: cancel_invitation
+label: Cancel Invitation
+objectName: sys_invitation
+type: api
+target: /api/v1/auth/organization/cancel-invitation
+confirmText: Cancel this invitation? The recipient will no longer be able to accept it.
+cancelText: Keep invitation
+```
+
+- It is an `I18nLabel`: a plain string, translated at `objects.<object>._actions.<action>.cancelText` (`globalActions.<action>.cancelText` for an action with no `objectName`), or an inline locale map.
+- **Either pre-run dialog.** It labels the dismiss button of the confirm dialog a param-less action with `confirmText` opens, and of the param dialog an action with a non-empty `params` opens (beside that dialog's `submitText`). An action that declares neither opens no dialog, so `cancelText` there is refused at parse, and a translation of it under such an action is reported by `os validate` (`translation-target-unknown`).
+- A blank string (`''` or whitespace only) is refused at parse. Omit the key to keep **Cancel**.
+- `cancelLabel` (the button's spelling on the console's `form` and `alert-dialog` renderers) is refused with a rename to `cancelText`.
+- The console does not draw it yet: until its confirm and param dialogs read the key, the button says **Cancel**, and `os validate` warns an author who declares it.
 
 ## AI Tool Exposure (ADR-0011)
 

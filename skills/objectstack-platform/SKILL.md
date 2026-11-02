@@ -65,9 +65,8 @@ Undeclared keys are handled per surface, in two postures:
   been closed yet (`connectors` is one). `defineStack()` prints the warning
   before the parse, and the value does not survive it:
   `defineStack: connectors.stripe.bogusKey: 'bogusKey' is not a declared connector key, so its value is dropped at load.`
-  Treat these as errors-in-waiting — closing the remaining shapes is a
-  scheduled migration, so a key that only warns today is expected to be
-  refused later.
+  Treat these as errors-in-waiting: a key that only warns today is expected
+  to be refused later.
 
 Exact shape: `ObjectStackDefinitionSchema` in
 `node_modules/@objectstack/spec/src/stack.zod.ts`; each collection's item
@@ -83,7 +82,7 @@ schema sits in its domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
 2. **Cross-references** — views/actions/flows reference defined objects
 3. **Seed data** — dataset objects exist in the definition
 
-To disable (advanced — e.g., objects provided by another plugin):
+To disable (e.g., objects provided by another plugin):
 
 ```typescript
 export default defineStack(config, { strict: false });
@@ -130,14 +129,14 @@ to a new protocol major — never to silence a mismatch.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
 
-**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow (the rest of `OVERRIDABLE_METADATA_TYPES` wait for their doors), never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a package-unbound Setup row still wins over the base's until D11. An undeclared pair row or a dependent's row is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`; the base's is unchanged.
+**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow (the rest of `OVERRIDABLE_METADATA_TYPES` wait for their doors), never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a package-unbound Setup row still wins over the base's until D11. The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); a locale a dependent adds under the base's name is served only under its own `?package=`, never by a base-named or package-less read. An undeclared pair row or a dependent's row at a locale the base ships is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`; the base's is unchanged.
 
 ---
 
 ## The App / Platform Boundary
 
 An ObjectStack app is a **simplified implementation of business features**:
-author metadata under the platform's spec, guided by these skills, and check it
+author metadata under the platform's spec and check it
 with the `os` commands ([Verify your work](./references/operations.md#verify-your-work)). Never rebuild
 what the platform owns.
 
@@ -172,7 +171,6 @@ what the platform owns.
   `exportsOf` — the scaffolded `AGENTS.md` says how to add to them. The
   memory driver and the Hono server are NOT in the file — the CLI
   auto-registers both at boot
-- A clean slate to extend with the metadata this skill describes
 
 The five retired remote templates (`todo`, `compliance`, `content`,
 `contracts`, `procurement`) are refused by name.
@@ -183,7 +181,7 @@ The five retired remote templates (`todo`, `compliance`, `content`,
 
 ## Project Structure Conventions
 
-Every ObjectStack project follows this directory structure:
+Project layout:
 
 ```
 my-app/
@@ -242,7 +240,7 @@ Under `os dev` / `os serve` / `os start` the CLI **resolves the driver itself**
 from the database URL and registers `DriverPlugin` for you. Do **not** put a
 driver in your config's `plugins:` array: no example app does, and the
 `plugins:` key is for plugins the CLI cannot infer (connector executors, your
-own plugins). Pick a driver by setting the DB URL, not by writing code.
+own plugins).
 
 Construct `DriverPlugin` yourself only when **you** own the runtime — embedding
 via `Runtime` / `ObjectKernel`, or a test that boots a kernel directly:
@@ -261,8 +259,7 @@ Two packages exist:
 | `@objectstack/hono` | `createHonoApp({ kernel, prefix })` | You own the server: embed ObjectStack routes in your own Hono app / deploy target. |
 | `@objectstack/plugin-hono-server` | `HonoServerPlugin` | ObjectStack owns the server: a kernel plugin that hosts the Hono app and opens the listening socket (this is what `os dev` / `os serve` register). |
 
-There are **no** `@objectstack/adapter-*` packages (no adapter-express /
--fastify / -nextjs / -nuxt / -nestjs / -sveltekit). To integrate another
+There are **no** `@objectstack/adapter-*` packages. To integrate another
 framework, mount the Hono app (a web-standard `fetch` handler) or call the
 dispatcher yourself.
 

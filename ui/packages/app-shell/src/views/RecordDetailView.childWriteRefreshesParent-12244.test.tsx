@@ -279,7 +279,9 @@ describe('RecordDetailView — a child write in a related list refreshes the par
     expect(headerBefore).toBeTruthy();
 
     const row = screen.getByText('Seat licence').closest('tr')!;
-    await userEvent.click(within(row).getByRole('button', { name: 'Row actions' }));
+    // The enlarged tab draws the child object's list grid (objectstack#28865),
+    // so the row menu is the grid's.
+    await userEvent.click(within(row).getByTestId('row-action-trigger'));
     await userEvent.click(await screen.findByTestId('row-action-builtin-delete'));
     const dialog = await screen.findByRole('alertdialog');
     await userEvent.click(within(dialog).getByRole('button', { name: /delete/i }));
