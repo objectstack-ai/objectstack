@@ -67,6 +67,11 @@ import {
  * `If-Match` carries the OCC token on record PATCHes (objectui's inline edit,
  * REST `update` with `ifMatch`) — without it in the preflight allow-list every
  * cross-origin save fails in the browser with "Failed to fetch" (objectui#2572).
+ * `If-None-Match` carries the `/meta` draft save's first-write pin (`*`, the
+ * console's `DraftConflictDialog` and Studio's first-draft saves) and the
+ * validator `@objectstack/client`'s cached metadata reads send back — without
+ * it here the preflight refuses both and the browser answers a bare "Failed to
+ * fetch" before the request reaches the door (#28970).
  * `X-Share-Password` carries a share-link password to the public
  * `/share-links/:token/resolve` and `/messages` routes — the preferred form,
  * since a header stays out of URLs (#21839); without it here a cross-origin
@@ -83,6 +88,7 @@ export const DEFAULT_CORS_ALLOW_HEADERS: readonly string[] = Object.freeze([
     'X-Tenant-ID',
     'X-Environment-Id',
     'If-Match',
+    'If-None-Match',
     'X-Share-Password',
     'X-Share-Password-Encoding',
 ]);
@@ -94,11 +100,15 @@ export const DEFAULT_CORS_ALLOW_HEADERS: readonly string[] = Object.freeze([
  * `set-auth-token` lets better-auth's `bearer()` plugin hand rotated session
  * tokens to cross-origin clients (see plugin-auth). `x-objectstack-dropped-fields`
  * (#3455) exposes the single-write drop warning (#3431); the body `droppedFields`
- * channel remains the primary, cross-origin-safe surface.
+ * channel remains the primary, cross-origin-safe surface. `ETag` is the version
+ * the metadata reads answer, which a cached read sends back as `If-None-Match`
+ * and a save can pin as `If-Match` — without it here cross-origin JS reads it
+ * as `null` (#28970).
  */
 export const DEFAULT_CORS_EXPOSE_HEADERS: readonly string[] = Object.freeze([
     'set-auth-token',
     'x-objectstack-dropped-fields',
+    'ETag',
 ]);
 
 /**

@@ -1,10 +1,21 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The five overlay-enabled metadata types keep their ENVIRONMENT overlay: a
- * packaged item of each can be overlaid environment-wide, the overlay is stored
- * with no organization, it is what the item's read then serves, and
- * `GET /meta/types` tells Studio the type is writable.
+ * The five overlay-enabled metadata types keep their ENVIRONMENT customization:
+ * a packaged item of each is customized environment-wide, the customization is
+ * stored with no organization, it is what the item's read then serves, and
+ * `GET /meta/types` still carries the type's flag.
+ *
+ * ## Re-judged for the migrated state (#28576, ADR-0146 D11)
+ *
+ * Since D11 closed the package-less write, the flag no longer opens a write
+ * door: a save naming no package over the packaged item is refused
+ * `403 NOT_OVERRIDABLE`, naming the base's paired `.custom` and the
+ * `os migrate packageless-overlays` ceremony, and stores nothing. The
+ * customization is the same save naming the pair (`?package=<base>.custom`),
+ * declaring the override. The flag stays the predicate the migration reads
+ * and the read of a row not migrated yet honours, so leg 2 below (a stored
+ * package-less row is served) is unchanged.
  *
  * ## Why this file exists (#22340, stage S1)
  *
@@ -21,15 +32,17 @@
  *
  * ## What is pinned, per type and on both topologies
  *
- *   1. the write — `saveMetaItem` over the packaged item is accepted, stores
- *      exactly one row, the row names no organization, and the item's read
+ *   1. the write — `saveMetaItem` naming no package over the packaged item is
+ *      refused naming the pair, and stores nothing; the same save into the
+ *      pair, declaring the override, is accepted, stores exactly one row,
+ *      bound to the pair, the row names no organization, and the item's read
  *      serves the body that was written;
  *   2. the read of a stored overlay — a stored environment-wide row is served
  *      by `getMetaItem`. The row is inserted through the engine, never a write
  *      door, so this leg asks the read alone (the engine, not the driver, so
  *      the served read's cache sees the write as it sees every production one): a row stored before a
  *      flag change keeps being served whatever the flag then says;
- *   3. the wire — `getMetaTypes` advertises the flag `true` for the type, from
+ *   3. the wire — `getMetaTypes` carries the flag `true` for the type, from
  *      the registry and not from the `OS_METADATA_WRITABLE` hatch.
  *
  * And the identity: the registry types whose flag is `true` are exactly these
@@ -85,7 +98,10 @@ import { ObjectStackProtocolImplementation, resetEnvWritableMetadataTypes } from
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject } from '@objectstack/metadata-core';
 import { ObjectQL } from './engine.js';
 
-const PKG = 'com.acme.overlay_catalog';
+const PKG = 'com.acme.overlaycatalog';
+/** The base's paired customization package (ADR-0146 D3), where its customization lives. */
+const PAIR = 'com.acme.overlaycatalog.custom';
+const PKG_VERSION = '1.0.0';
 const PACKAGED_LABEL = 'Packaged';
 const OVERLAY_LABEL = 'Environment overlay';
 
@@ -135,6 +151,8 @@ function overlayCatalogManifest(): Record<string, unknown> {
     return {
         id: PKG,
         name: 'overlay_catalog',
+        version: PKG_VERSION,
+        namespace: 'overlaycat',
         // [#24668] The object the view and the dataset bind to, shipped by the
         // package: the overlay save door refuses a list view bound to an object
         // that exists nowhere, and `probe_obj` was declared by nothing.
@@ -333,7 +351,7 @@ afterEach(() => {
     resetEnvWritableMetadataTypes();
 });
 
-describe('the five overlay-enabled types keep their environment overlay of a packaged item', () => {
+describe('the five overlay-enabled types keep their environment customization of a packaged item, in its pair (ADR-0146 D11)', () => {
     it('the registry opens an overlay on exactly these five types', () => {
         const flagged = DEFAULT_METADATA_TYPE_REGISTRY
             .filter((entry) => entry.allowEnvironmentOverlay === true)
@@ -343,19 +361,32 @@ describe('the five overlay-enabled types keep their environment overlay of a pac
     });
 
     for (const topology of TOPOLOGIES) {
-        it.each(OVERLAY_ENABLED)(`${topology}: a save over the packaged %s is accepted, stored with no organization, and served back`, async (type) => {
+        it.each(OVERLAY_ENABLED)(`${topology}: a package-less save over the packaged %s is refused naming its pair; the same save into the pair is accepted, stored with no organization, and served back`, async (type) => {
             const { engine, protocol, rowsOf } = await boot(topology);
             const { name, body } = ITEMS[type];
-            // Only an overlay if a package ships the item it lands on.
+            // Only a customization if a package ships the item it lands on.
             expect(engine.registry.getArtifactItem<any>(type, name)?._packageId).toBe(PKG);
 
-            const result: any = await protocol
+            const refused: any = await protocol
                 .saveMetaItem({ type, name, item: body(OVERLAY_LABEL) })
-                .catch((e: any) => ({ refused: { code: e?.code, status: e?.status } }));
+                .then(() => undefined, (e: any) => ({ code: e?.code, status: e?.status, message: String(e?.message ?? '') }));
+            expect(refused).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+            expect(refused.message).toContain(`'${PAIR}'`);
+            expect(refused.message).toContain('os migrate packageless-overlays');
+            expect(rowsOf(type, name)).toHaveLength(0);
+
+            await (protocol as any).ensureCustomizationPackage({ basePackageId: PKG });
+            const result: any = await protocol
+                .saveMetaItem({
+                    type, name, packageId: PAIR,
+                    item: { ...body(OVERLAY_LABEL), overrides: { package: PKG, basedOn: PKG_VERSION } },
+                })
+                .catch((e: any) => ({ refused: { code: e?.code, status: e?.status, message: e?.message } }));
 
             expect(result).toMatchObject({ success: true });
             const rows = rowsOf(type, name);
             expect(rows).toHaveLength(1);
+            expect(rows[0].package_id).toBe(PAIR);
             // NULL is how the repository writes "no organization" today; a
             // tenant-less row with no such column reads the same here.
             expect(rows[0].organization_id ?? null).toBeNull();
@@ -378,7 +409,7 @@ describe('the five overlay-enabled types keep their environment overlay of a pac
         });
     }
 
-    it.each(OVERLAY_ENABLED)('GET /meta/types advertises %s as overlay-writable, from the registry', async (type) => {
+    it.each(OVERLAY_ENABLED)('GET /meta/types carries the overlay flag on %s, from the registry (the migration\'s and the unmigrated read\'s predicate)', async (type) => {
         const { protocol } = await boot('environment-scoped');
 
         const result: any = await protocol.getMetaTypes();
