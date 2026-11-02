@@ -146,7 +146,7 @@ describe('the 动态 panel (peek) shows the same notice (objectstack#29188)', ()
   it('the Retry is disabled while the re-read is in flight over rows on screen', () => {
     const row = {
       id: 'a-1',
-      type: 'created',
+      type: 'record_create',
       actor: 'Grace',
       body: 'created the account',
       createdAt: '2026-01-02T00:00:00.000Z',
