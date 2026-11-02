@@ -211,6 +211,38 @@ describe('[#23214] /meta — the four arity doors, over the list both transports
             expect(protocol.getMetaItems.mock.calls[0][0]).toMatchObject({ packageId: 'com.acme' });
         });
     });
+
+    // A qs-style array spelling (`?package[]=`, `?package[0]=`) reached the
+    // binding under the key as sent, so it read no package and the list and
+    // the tree answered across every package. Refused at the same arity step,
+    // with `RestServer`'s code and sentence, before any read.
+    describe('a BRACKETED `package` key on the list and the book tree', () => {
+        it.each([
+            ['/meta/view', 'package[]', 'list', 'list across every package'],
+            ['/meta/view', 'package[0]', 'list', 'list across every package'],
+            ['/meta/book/handbook/tree', 'package[]', 'tree', 'read the tree across every package'],
+            ['/meta/book/handbook/tree', 'package[0]', 'tree', 'read the tree across every package'],
+        ])('GET %s?%s=… is refused before any read', async (path, key, served, unscoped) => {
+            const { dispatcher, protocol } = boot();
+            const answer = await get(dispatcher, path, { [key]: 'com.acme' });
+            expect(answer.status, JSON.stringify(answer)).toBe(400);
+            expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+            expect(answer.body?.error?.message).toBe(
+                `Query parameter '${key}' names no package; the 'package' filter takes exactly one package id, `
+                + `spelled ?package=ID. The ${served} was not served: a bracketed 'package' key is not a filter. `
+                + `Name one package, or leave the parameter out to ${unscoped}.`,
+            );
+            expect(protocol.getMetaItems).not.toHaveBeenCalled();
+        });
+
+        it('a bracketed view `object` key is refused by the list chain, never every view', async () => {
+            const { dispatcher } = boot();
+            const answer = await get(dispatcher, '/meta/view', { 'object[]': 'task' });
+            expect(answer.status, JSON.stringify(answer)).toBe(400);
+            expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+            expect(answer.body?.error?.message).toMatch(/^Query parameter 'object\[\]' names no object/);
+        });
+    });
 });
 
 describe('[#23214] GET /ui/view/:object — `?type=` is one view type, read only when the path names none', () => {

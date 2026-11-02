@@ -10,6 +10,7 @@ import React, { useEffect, useState } from 'react';
 import { useAuth } from './useAuth.js';
 import { SocialSignInButtons } from './SocialSignInButtons.js';
 import { looksLikePhoneIdentifier, normalizePhoneIdentifier } from './phone-identifier.js';
+import { TwoFactorChallengeForm } from './TwoFactorChallengeForm.js';
 import type { AuthLinkComponentProps } from './types.js';
 import {
   AUTH_FIELD_LABEL_CLASS,
@@ -40,8 +41,9 @@ export interface LoginFormLabels {
   /**
    * Divider label between the social provider buttons and the email/password
    * form (defaults to "or continue with email"). Rendered only when the server
-   * reports at least one social provider, and only while that form is shown:
-   * under SSO-only mode it appears once "Use a password instead" reveals it.
+   * reports at least one social provider, and only while an email field is
+   * shown: under SSO-only mode, the SSO email field (when the server also
+   * advertises SSO) or the form "Use a password instead" reveals.
    */
   orText?: string;
   /**
@@ -88,6 +90,26 @@ export interface LoginFormLabels {
   showPasswordText?: string;
   /** Accessible name of the password field's reveal toggle while the password is shown (defaults to "Hide password"). */
   hidePasswordText?: string;
+  /** objectstack#29105 — Title of the two-factor step (defaults to "Two-factor authentication"). */
+  twoFactorTitle?: string;
+  /** objectstack#29105 — What the two-factor step asks for, authenticator mode. */
+  twoFactorDescription?: string;
+  /** objectstack#29105 — What the two-factor step asks for, backup-code mode. */
+  twoFactorBackupDescription?: string;
+  /** objectstack#29105 — Label of the authenticator code field (defaults to "Authentication code"). */
+  twoFactorCodeLabel?: string;
+  /** objectstack#29105 — Label of the backup code field (defaults to "Backup code"). */
+  twoFactorBackupCodeLabel?: string;
+  /** objectstack#29105 — The two-factor step's submit button (defaults to "Verify"). */
+  twoFactorVerifyButton?: string;
+  /** objectstack#29105 — The submit button while the code is checked (defaults to "Verifying…"). */
+  twoFactorVerifyingButton?: string;
+  /** objectstack#29105 — Link that switches the step to a backup code. */
+  twoFactorUseBackupCodeText?: string;
+  /** objectstack#29105 — Link that switches the step back to the authenticator code. */
+  twoFactorUseAuthenticatorText?: string;
+  /** objectstack#29105 — Link that abandons the two-factor step for the password step. */
+  twoFactorBackText?: string;
 }
 
 export interface LoginFormProps {
@@ -219,7 +241,15 @@ export function LoginForm({
   labels = {},
   errorMessages,
 }: LoginFormProps) {
-  const { signIn, isLoading, getAuthConfig, sendPhoneOtp, signInWithPhoneOtp, signInWithPhonePassword } = useAuth();
+  const {
+    signIn,
+    isLoading,
+    getAuthConfig,
+    sendPhoneOtp,
+    signInWithPhoneOtp,
+    signInWithPhonePassword,
+    twoFactorChallenge,
+  } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   // The password field's reveal toggle. Local and ephemeral on purpose: a
@@ -312,9 +342,10 @@ export function LoginForm({
   const passwordFormCollapsed = ssoEnforced || passwordSignInOff;
   const passwordFormVisible = !passwordFormCollapsed || showPasswordFallback;
   // The break-glass link reveals the password form, so it is offered only
-  // while that form holds a door the server accepts: email+password itself, the
-  // SSO button (routes the entered email), or phone+password sign-in.
-  const breakGlassOffered = !passwordSignInOff || ssoEnabled || phonePasswordEnabled;
+  // while that form holds a password door the server accepts: email+password
+  // itself, or phone+password sign-in. The SSO button needs no link: the
+  // SSO-only view draws it on first paint (`ssoEmailFormVisible` below).
+  const breakGlassOffered = !passwordSignInOff || phonePasswordEnabled;
   // Nothing the server advertises lets anyone in: say so, instead of SSO copy
   // with no SSO affordance and a password link the server refuses.
   const noSignInMethod =
@@ -349,6 +380,16 @@ export function LoginForm({
     usePasswordSignInText: labels.usePasswordSignInText ?? 'Sign in with password instead',
     showPasswordText: labels.showPasswordText ?? 'Show password',
     hidePasswordText: labels.hidePasswordText ?? 'Hide password',
+    twoFactorTitle: labels.twoFactorTitle ?? 'Two-factor authentication',
+    twoFactorDescription: labels.twoFactorDescription ?? 'Enter the 6-digit code from your authenticator app.',
+    twoFactorBackupDescription: labels.twoFactorBackupDescription ?? 'Enter one of the backup codes you saved when you set up two-factor authentication.',
+    twoFactorCodeLabel: labels.twoFactorCodeLabel ?? 'Authentication code',
+    twoFactorBackupCodeLabel: labels.twoFactorBackupCodeLabel ?? 'Backup code',
+    twoFactorVerifyButton: labels.twoFactorVerifyButton ?? 'Verify',
+    twoFactorVerifyingButton: labels.twoFactorVerifyingButton ?? 'Verifying…',
+    twoFactorUseBackupCodeText: labels.twoFactorUseBackupCodeText ?? 'Use a backup code instead',
+    twoFactorUseAuthenticatorText: labels.twoFactorUseAuthenticatorText ?? 'Use your authenticator app instead',
+    twoFactorBackText: labels.twoFactorBackText ?? 'Back to sign in',
   };
 
   // Tick the resend cooldown down once per second while it's armed.
@@ -374,7 +415,16 @@ export function LoginForm({
         // code) or the phoneNumber lookup fails.
         await signInWithPhonePassword(normalizePhoneIdentifier(identifier) ?? identifier, password);
       } else {
-        await signIn(identifier, password);
+        const { twoFactorRequired } = await signIn(identifier, password);
+        if (twoFactorRequired) {
+          // Password accepted; the account has two-factor sign-in on. The
+          // provider now holds the challenge and this form draws the code
+          // step (objectstack#29105). Nothing is signed in yet, so the host
+          // hears `onSuccess` only once the code is verified.
+          setPassword('');
+          setPasswordVisible(false);
+          return;
+        }
       }
       onSuccess?.();
     } catch (err) {
@@ -458,6 +508,40 @@ export function LoginForm({
   // its own enforcement declaration, or the SSO button. Never while the
   // server answers `features.sso: false` with no enforcement.
   const ssoOnlyCopy = ssoOnlyView && !noSignInMethod && (ssoEnforced || ssoEnabled);
+  // When the password form is collapsed (declared enforcement, or the password
+  // door shut) and the server advertises SSO, the SSO button IS the way in, so
+  // the SSO-only view draws it on first paint with the email field it routes,
+  // and no password field. It used to live only inside the password form,
+  // reachable solely through the break-glass link.
+  const ssoEmailFormVisible = ssoOnlyView && ssoEnabled;
+
+  // objectstack#29105 — a password sign-in waiting for its second factor,
+  // whoever started it (this form, or another `signIn` caller on the page).
+  if (twoFactorChallenge) {
+    return (
+      <TwoFactorChallengeForm
+        challenge={twoFactorChallenge}
+        hideHeader={hideHeader}
+        hideIcon={hideIcon}
+        errorMessages={errorMessages}
+        onSuccess={onSuccess}
+        onError={onError}
+        onChallengeEnded={setError}
+        strings={{
+          title: l.twoFactorTitle,
+          description: l.twoFactorDescription,
+          backupDescription: l.twoFactorBackupDescription,
+          codeLabel: l.twoFactorCodeLabel,
+          backupCodeLabel: l.twoFactorBackupCodeLabel,
+          verifyButton: l.twoFactorVerifyButton,
+          verifyingButton: l.twoFactorVerifyingButton,
+          useBackupCodeText: l.twoFactorUseBackupCodeText,
+          useAuthenticatorText: l.twoFactorUseAuthenticatorText,
+          backText: l.twoFactorBackText,
+        }}
+      />
+    );
+  }
 
   return (
     // `sm:max-w-[400px]`, not a fixed `sm:w-[400px]`: identical wherever the
@@ -517,7 +601,7 @@ export function LoginForm({
         <SocialSignInButtons
           mode="sign-in"
           dividerText={labels.orText}
-          hideDivider={!passwordFormVisible}
+          hideDivider={!passwordFormVisible && !ssoEmailFormVisible}
           buttonText={labels.socialButton}
           onProvidersResolved={(hasProviders) => setHasSocialProviders(hasProviders)}
         />
@@ -718,6 +802,43 @@ export function LoginForm({
              link to the password form for the env owner / local admin. */
           <div className="space-y-4">
             {error && <AuthErrorBanner message={error} />}
+            {ssoEmailFormVisible && (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  void handleSso();
+                }}
+                className="space-y-4"
+                data-testid="login-sso-email-form"
+              >
+                <div className="space-y-2">
+                  <label htmlFor="login-sso-email" className={AUTH_FIELD_LABEL_CLASS}>
+                    {l.emailLabel}
+                  </label>
+                  <input
+                    id="login-sso-email"
+                    type="email"
+                    inputMode="email"
+                    placeholder={l.emailPlaceholder}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="username"
+                    disabled={ssoSubmitting}
+                    className={AUTH_INPUT_CLASS}
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={ssoSubmitting}
+                  aria-busy={ssoSubmitting}
+                  className={AUTH_PRIMARY_BUTTON_CLASS}
+                >
+                  {ssoSubmitting && <AuthSpinner />}
+                  {l.ssoButton}
+                </button>
+              </form>
+            )}
             {breakGlassOffered && (
               <button
                 type="button"

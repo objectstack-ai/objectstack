@@ -459,13 +459,6 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     kind: 'omit',
     type: 'view',
     path: ROOT_PATH,
-    key: 'drawerWidth',
-    why: '`[DEPRECATED → size buckets]` pixel drawer width, deliberately not offered to new authors: a pixel width cannot be chosen without knowing the client viewport, so the renderer derives it from the size bucket',
-  },
-  {
-    kind: 'omit',
-    type: 'view',
-    path: ROOT_PATH,
     key: 'groups',
     why: '`[LEGACY ALIAS → sections]` accepted for back-compat and folded onto `sections` at parse (`sections` wins when both are present), deliberately not offered to new authors',
   },

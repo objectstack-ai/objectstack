@@ -21,6 +21,13 @@
 //     caller. The refusal now cancels the child run, and any run that child is
 //     parked on, through the engine's own `cancelRun`.
 //
+// [#29166] The chain that cancel walks is read through the DEGRADING loader
+// (`loadSuspendedRun`), so a store it cannot read hands back an empty chain.
+// Measured before that card: zero `cancelRun` calls, a `warn` from the
+// degrading read, and the child left parked with nothing at `error`. An empty
+// chain now still cancels the child run once, through `cancelRun`, whose
+// strict read owns the `error` record when the store stays unreadable.
+//
 // Neither half changes the refusal itself (code, text, un-routability) or
 // `FLOW_PAUSE_CAPABLE_NODE_TYPES`.
 
@@ -28,6 +35,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { AutomationEngine } from './engine.js';
 import type { FlowTrigger, FlowTriggerBinding } from './engine.js';
 import { InMemoryFlowActivationStore } from './flow-activation-store.js';
+import { InMemorySuspendedRunStore } from './suspended-run-store.js';
+import type { SuspendedRun } from './engine.js';
 import {
     registerSubflowNode,
     registerMapNode,
@@ -281,5 +290,74 @@ describe('the region refusal cancels the child run it leaves behind (#28897)', (
         expect(result.status).toBe('paused');
         const parked = (await engine.listSuspendedRunsDurable()).map((r) => r.flowName).sort();
         expect(parked).toEqual(['deal_review', 'deal_submit']);
+    });
+});
+
+/**
+ * [#29166] A store whose `load` fails for the child flow's runs: always
+ * (`'always'`), or only the first time each run id is read (`'once'`, a store
+ * that answers again by the time the cancel reads it).
+ */
+class ChildLoadFailingStore extends InMemorySuspendedRunStore {
+    private readonly failedOnce = new Set<string>();
+    constructor(private readonly childFlow: string, private readonly mode: 'always' | 'once') {
+        super();
+    }
+    override async load(runId: string): Promise<SuspendedRun | null> {
+        const row = await super.load(runId);
+        if (row?.flowName === this.childFlow && (this.mode === 'always' || !this.failedOnce.has(runId))) {
+            this.failedOnce.add(runId);
+            throw new Error('store connection reset');
+        }
+        return row;
+    }
+}
+
+describe('the region refusal still cancels the child run when its suspension chain cannot be read (#29166)', () => {
+    function storeRig(mode: 'always' | 'once') {
+        const r = rig();
+        const store = new ChildLoadFailingStore('deal_review', mode);
+        r.engine.setSuspendedRunStore(store);
+        r.engine.registerFlow('deal_review', pausingChild('deal_review'));
+        r.engine.registerFlow('deal_submit', regionCaller('deal_submit', 'deal_review', 'loop', 'subflow', false));
+        const cancel = vi.spyOn(r.engine, 'cancelRun');
+        return { ...r, store, cancel };
+    }
+
+    it('an unreadable store: the refusal is thrown as before, the child run gets exactly one cancelRun, and the skipped cancellation is recorded at `error`', async () => {
+        const { engine, logger, store, cancel } = storeRig('always');
+
+        const result: any = await engine.execute('deal_submit', {} as any);
+        // The refusal itself is unchanged.
+        expect(result.success).toBe(false);
+        expect(String(result.error)).toContain(
+            `durable pause inside a structured region: node 'step' (sub-flow 'deal_review') suspended`,
+        );
+
+        const parked = await store.list();
+        expect(parked.map((r) => r.flowName), 'the store could not be read, so the child is still parked').toEqual(['deal_review']);
+        const childRunId = parked[0].runId;
+
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(cancel.mock.calls[0][0]).toBe(childRunId);
+        expect(String(cancel.mock.calls[0][1])).toContain('durable pause inside a structured region');
+
+        const errors = logger.error.mock.calls.map((c: unknown[]) => String(c[0]));
+        expect(
+            errors.filter((m: string) => m.includes(`cancelRun('${childRunId}') could not read the durable suspended-run store`)),
+            "cancelRun's strict read owns the error record",
+        ).toHaveLength(1);
+    });
+
+    it('a store that answers again by the cancel: the child run the empty chain hid is cancelled, not left parked', async () => {
+        const { engine, store, cancel } = storeRig('once');
+
+        const result: any = await engine.execute('deal_submit', {} as any);
+        expect(result.success).toBe(false);
+
+        expect(cancel).toHaveBeenCalledTimes(1);
+        expect(await store.list(), 'no run is left parked').toEqual([]);
+        const runs = await engine.listRuns('deal_review');
+        expect(runs.map((r: any) => r.status)).toEqual(['cancelled']);
     });
 });

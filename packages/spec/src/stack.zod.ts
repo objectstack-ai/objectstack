@@ -47,7 +47,7 @@ import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
 import { AppSchema } from './ui/app.zod';
-import { ViewSchema, isAggregatedViewContainer } from './ui/view.zod';
+import { ViewSchema, isAggregatedViewContainer, expandViewContainer } from './ui/view.zod';
 import { deriveViewContainerObject } from './ui/view-container-object';
 import { defaultRecordPageObject } from './ui/default-record-page';
 import { PageSchema } from './ui/page.zod';
@@ -299,10 +299,13 @@ function applyPermissionSetOwnerBindingGate(
  * - **no `packages[]`**: every top-level item ships from `manifest.id`, and
  *   from no package when there is no `manifest`;
  * - **`packages[]`** (ADR-0130 D4): a body's items ship from that body's own
- *   `id`. A top-level item that no body declares in the same collection under
- *   the same name is the stack's residual, registered under `manifest.id`; a
- *   top-level item a body declares is a copy of that body's item, never
- *   registered from the top level, so the top level does not judge it.
+ *   `id`. The top level is judged as the boot's residual rule reads it
+ *   (`unclaimedTopLevel`, `@objectstack/metadata`), mirrored by
+ *   {@link isResidualTopLevelItem} because this package cannot import that one:
+ *   a top-level item is the stack's residual, registered under `manifest.id`
+ *   and judged against it, only when it occupies a registry slot no body
+ *   occupies. A top-level item a body declares is a copy of that body's item,
+ *   never registered from the top level, so the top level does not judge it.
  *
  * A stack's `plugins` are runtime plugin instances (`z.unknown()`), not bodies
  * this parse can read; the registration door judges a nested plugin's items
@@ -321,14 +324,14 @@ function applyCollectionItemOwnerStampGate(
     body: Record<string, unknown>,
     owner: unknown,
     path: (string | number)[],
-    skip?: (key: string, name: string) => boolean,
+    judged?: (key: string, item: unknown) => boolean,
   ): void => {
     for (const key of OWNER_STAMP_JUDGED_COLLECTIONS) {
       const items = body[key];
       if (!Array.isArray(items)) continue;
       items.forEach((item: unknown, i: number) => {
+        if (judged && !judged(key, item)) return;
         const name = nameOf(key, item);
-        if (skip?.(key, name)) return;
         const refusal = judgeCollectionItemOwnerStamp(
           item,
           pluralToSingular(key),
@@ -344,18 +347,78 @@ function applyCollectionItemOwnerStampGate(
     judgeBody(config, config.manifest?.id, []);
     return;
   }
-  // `<collection>:<name>`: no collection key carries a `:`, so the pair is unambiguous.
-  const claimed = new Set<string>();
+  const bodies: Record<string, unknown>[] = [];
   config.packages.forEach((entry: unknown, j: number) => {
     const body = (entry as { manifest?: Record<string, unknown> } | null | undefined)?.manifest;
     if (!body || typeof body !== 'object') return;
-    for (const key of OWNER_STAMP_JUDGED_COLLECTIONS) {
-      const items = body[key];
-      if (Array.isArray(items)) for (const item of items) claimed.add(`${key}:${nameOf(key, item)}`);
-    }
+    bodies.push(body);
     judgeBody(body, body.id, ['packages', j, 'manifest']);
   });
-  judgeBody(config, config.manifest?.id, [], (key, name) => claimed.has(`${key}:${name}`));
+  judgeBody(config, config.manifest?.id, [], isResidualTopLevelItem(bodies));
+}
+
+/**
+ * The judged collections a `packages[]` stack's TOP LEVEL never files as
+ * residual items: the boot's residual rule (`unclaimedTopLevel`,
+ * `@objectstack/metadata`) walks the collections the metadata door registers
+ * as items (its `ARTIFACT_FIELD_TO_TYPE`), and these three are not among them.
+ * The boot reads them off the stack whole and judges no stamp on them: seed
+ * `data` is applied by the seed loader, `jobs` are scheduled and `datasets`
+ * consumed by `AppPlugin` straight off the bundle. A package BODY's items of
+ * these collections are still judged, at both doors.
+ *
+ * Mirrored, because `@objectstack/spec` cannot import the rule it mirrors; a
+ * `@objectstack/metadata` test holds the two equal, collection by collection.
+ */
+const TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL: ReadonlySet<string> = new Set(['data', 'datasets', 'jobs']);
+
+/**
+ * The registry slot one item occupies, the way the boot's residual rule
+ * derives it (`artifactItemSlot`, `@objectstack/metadata`): an aggregated view
+ * container is filed under the object it binds to
+ * ({@link deriveViewContainerObject}), however that binding is spelled; any
+ * other item under its `name`, a `views` entry without one falling back to the
+ * same derivation. `undefined`: no slot, so no door registers the item.
+ */
+function residualSlotOf(key: string, item: unknown): string | undefined {
+  if (key === 'views' && isAggregatedViewContainer(item)) return deriveViewContainerObject(item) || undefined;
+  const name = (item as { name?: unknown } | null | undefined)?.name;
+  if (name) return String(name);
+  return key === 'views' ? deriveViewContainerObject(item) || undefined : undefined;
+}
+
+/**
+ * Whether a top-level item of a `packages[]` stack is its RESIDUAL: the
+ * mirror of `unclaimedTopLevel`'s judgement (`@objectstack/metadata`). True
+ * when the item's collection is one the rule walks
+ * ({@link TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL}), the item occupies a slot
+ * ({@link residualSlotOf}), and no body occupies that slot in the same
+ * collection: a body's container claims its object's slot and the slot of
+ * every view it expands into ({@link expandViewContainer}), any other body
+ * item its name's.
+ */
+function isResidualTopLevelItem(bodies: readonly Record<string, unknown>[]): (key: string, item: unknown) => boolean {
+  // `<collection>:<slot>`: no collection key carries a `:`, so the pair is unambiguous.
+  const claimed = new Set<string>();
+  for (const body of bodies) {
+    for (const key of OWNER_STAMP_JUDGED_COLLECTIONS) {
+      const items = body[key];
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        const slot = residualSlotOf(key, item);
+        if (slot === undefined) continue;
+        claimed.add(`${key}:${slot}`);
+        if (key === 'views' && isAggregatedViewContainer(item)) {
+          for (const view of expandViewContainer(slot, item)) claimed.add(`views:${view.name}`);
+        }
+      }
+    }
+  }
+  return (key, item) => {
+    if (TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL.has(key)) return false;
+    const slot = residualSlotOf(key, item);
+    return slot !== undefined && !claimed.has(`${key}:${slot}`);
+  };
 }
 
 /** One `objectExtensions` entry as the registry registers it, with where it sits in the stack. */

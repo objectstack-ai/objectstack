@@ -181,6 +181,9 @@ const zh = {
     noPermissionToEdit: '您没有编辑{{object}}的权限，字段均为只读。',
     noPermissionToEditRecord: '您没有编辑此记录的权限，字段均为只读。',
     submitFailed: '保存失败，请重试。',
+    noPermissionToOpenRecord: '您没有权限查看这条记录。',
+    recordNotFoundOrHidden: '这条记录不存在，或者您没有权限查看它。',
+    openRecordFailed: '无法打开这条记录，请重试。',
     uploadInFlight: '请等待上传完成后再保存。',
     clearedOnHide: '已清空不再适用于当前取值的字段：{{fields}}',
     visibleWhenFaulted: '无法提交：{{fields}} 的 visibleWhen 规则无法求值。需先修正该规则，才能提交此表单。',
@@ -1432,6 +1435,9 @@ const zh = {
     noActivity: '暂无活动记录',
     activityAccessDenied: '您没有查看此记录活动的权限。',
     commentsAccessDenied: '您没有查看此记录评论的权限。',
+    activityLoadFailed: '无法加载此记录的活动。',
+    commentsLoadFailed: '无法加载此记录的评论。',
+    retryLoadFeed: '重试',
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
     // `detail.*` pack did not already name, and the `formatFieldChange`
     // sentences, which are assembled in code and so need interpolation holes.
@@ -2741,6 +2747,11 @@ const zh = {
         invalidCredentials: '邮箱或密码错误，请重试。',
         emailNotVerified: '请先验证您的邮箱后再登录。',
         oauthCallbackFailed: '单点登录未能完成——登录链接已过期或已被使用，请重新发起登录。',
+        twoFactorInvalidCode: '验证码无效，请检查身份验证器应用后重试。',
+        twoFactorInvalidBackupCode: '该备用码无效或已被使用。',
+        twoFactorTooManyAttempts: '错误次数过多，请重新使用密码登录。',
+        twoFactorExpired: '本次登录已过期，请重新使用密码登录。',
+        twoFactorLocked: '失败次数过多，您的账户已被暂时锁定，请稍后再试。',
       },
       // objectui#3546 slice three — phone/OTP sign-in. `{seconds}` is LoginForm's own
       // literal `.replace()` hole, not i18next interpolation: keep the single braces.
@@ -2761,6 +2772,16 @@ const zh = {
       noSignInMethodText: '当前没有可用的登录方式，请联系管理员。',
       usePasswordText: '改用密码登录',
       backToSsoText: '返回单点登录',
+      twoFactorTitle: '双重验证',
+      twoFactorDescription: '请输入身份验证器应用中的 6 位验证码。',
+      twoFactorBackupDescription: '请输入您设置双重验证时保存的任意一个备用码。',
+      twoFactorCodeLabel: '验证码',
+      twoFactorBackupCodeLabel: '备用码',
+      twoFactorVerifyButton: '验证',
+      twoFactorVerifyingButton: '正在验证…',
+      twoFactorUseBackupCodeText: '改用备用码',
+      twoFactorUseAuthenticatorText: '改用身份验证器应用',
+      twoFactorBackText: '返回登录',
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: '欢迎回来',
@@ -3229,8 +3250,6 @@ const zh = {
     browseMarketplace: '浏览应用市场',
     quickActions: {
       title: '快捷操作',
-      manageObjects: '管理对象',
-      manageObjectsDesc: '配置数据模型',
       systemSettings: '系统设置',
       systemSettingsDesc: '配置您的系统',
     },
@@ -3273,7 +3292,6 @@ const zh = {
       systemSettings: '系统设置',
       applications: '应用',
       appMarketplace: '应用市场',
-      objectManager: '对象管理器',
       users: '用户',
       organizations: '组织',
       roles: '角色',
@@ -4808,44 +4826,19 @@ const zh = {
       bulkOperationFailed: '批量操作失败：{{reason}}',
     },
   },
-  // objectui#6301 — 设置 › 打包自动化(ADR-0126 §7.4)。术语沿用本包既有译法:
-  // `common.package` = 软件包,`flowRunner.completed` = 流程,`common.duplicate`
-  // 一族的“复制”在这里写作“克隆”,因为服务端的 clone 是另起机器名的同级流程,
-  // 不是一次副本粘贴。⛔ 本组不含任何血缘/漂移措辞(§9)。
+  // objectui#6301 — 设置 › 打包动作(ADR-0126 §7.4)。术语沿用本包既有译法:
+  // `common.package` = 软件包。页面的流程一半(列表与克隆对话框)已移入 Studio
+  // 的自动化区(ADR-0146 D11),其键随之离开各语言包。⛔ 本组不含任何血缘/漂移
+  // 措辞(§9)。
   packagedAutomation: {
-    title: '打包自动化',
-    subtitle: '由已安装软件包提供的流程与动作。可在本部署中关闭其中之一,流程还可以新名称克隆后再自定义。编辑在 Studio 中进行。',
     refresh: '刷新',
-    flowsHeading: '打包流程',
     actionsHeading: '打包动作',
-    colFlow: '流程',
     colActivation: '启用状态',
-    colActions: '操作',
-    toggleLabel: '{{label}} 的启用状态',
     on: '已启用',
     off: '已关闭',
-    notRunning: '未在此运行',
-    notRunningDeploymentPolicy: '已启用，但此部署不运行计划任务',
-    clone: '克隆',
-    cloneTitle: '克隆打包流程',
-    cloneBody: '副本会带上完整定义,并需要新的机器名和标签。请在 Studio 中编辑副本。',
-    cloneName: '新机器名',
-    cloneLabel: '新标签',
-    cloneCopyLabel: '{{label}}（副本）',
     cancel: '取消',
-    cloneConfirm: '创建克隆',
-    cloneCreated: '已创建流程「{{name}}」。',
-    cloneSwitchSourceOff: '停用「{{label}}」',
-    cloneSourceOff: '打包流程「{{label}}」已停用。',
-    cloneOpen: '在 Studio 中打开副本',
-    emptyTitle: '没有打包流程',
-    emptyBody: '本部署中没有任何已安装软件包提供自动化流程。你自己编写的流程在 Studio 中。',
-    loadFailed: '无法加载打包自动化。',
     toggleFailedHttp: '无法更改启用状态(HTTP {{status}})。',
     toggleFailed: '无法更改启用状态。',
-    cloneFailedHttp: '无法克隆此流程(HTTP {{status}})。',
-    cloneFailed: '无法克隆此流程。',
-    reasonDetails: '详情',
     actionsSubtitle: '由已安装软件包提供的动作。在本部署中关闭后,它在所有提供它的位置都不再运行。你仍然可以在 Studio 中另行编写自己的动作。',
     colAction: '动作',
     colObject: '对象',
