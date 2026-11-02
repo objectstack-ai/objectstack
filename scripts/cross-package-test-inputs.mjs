@@ -1199,6 +1199,10 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/client/src/**',
       'packages/mcp/src/**',
       'packages/plugins/plugin-hono-server/src/**',
+      // test/upgrade-harness-fixture-as-of.test.ts IMPORTS sys_activity's
+      // declaration from source and runs the real rotation with its policy over
+      // the upgrade fixtures. Per-file, matching what the import names.
+      'packages/plugins/plugin-audit/src/objects/sys-activity.object.ts',
       'packages/rest/src/**',
       'packages/runtime/src/**',
       'packages/services/service-print/src/**',

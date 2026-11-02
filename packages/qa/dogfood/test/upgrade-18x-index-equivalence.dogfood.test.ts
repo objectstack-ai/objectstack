@@ -22,17 +22,19 @@
 // there every 18.0 index survives the ceremony; a SQLite store an earlier 18.x
 // ceremony certified holds them too. The second block models that store by
 // restoring the 13 indexes exactly as 18.0 wrote them.
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { VerifyStack } from '@objectstack/verify';
 import { ceremoniedFixture } from './upgrade-harness/ceremony.js';
+import { readFixtureAsOf } from './upgrade-harness/fixture-as-of.js';
 import { bootFixture } from './upgrade-harness/populate-fixture.js';
 import { relaxTenantColumns } from './pre-18-tenant-column.testkit.js';
 
-const fixtureSql = readFileSync(new URL('./upgrade-harness/fixture-18.0/database.sql', import.meta.url), 'utf8');
+// Its rotation shards re-dated to the day before this run (`fixture-as-of.ts`).
+const { sql: fixtureSql } = readFixtureAsOf(new URL('./upgrade-harness/fixture-18.0/', import.meta.url));
 
 /**
  * The organization uniques a `kernel:ready` migration in `metadata-protocol`

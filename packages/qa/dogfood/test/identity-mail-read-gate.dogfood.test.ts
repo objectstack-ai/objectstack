@@ -51,16 +51,19 @@
 // ⛔ No body, link or token value appears in a test title, an assertion
 // message or a log line: every probe compares a value read as the system
 // against a response by inclusion, and reports a boolean.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { VerifyStack } from '@objectstack/verify';
 import { ceremoniedFixture } from './upgrade-harness/ceremony.js';
+import { readFixtureAsOf } from './upgrade-harness/fixture-as-of.js';
 import { FIXTURE_PEOPLE, bootFixture } from './upgrade-harness/populate-fixture.js';
 
 const FIXTURE = new URL('./upgrade-harness/fixture-18.0/', import.meta.url);
-const fixtureSql = readFileSync(new URL('database.sql', FIXTURE), 'utf8');
+// Its rotation shards re-dated to the day before this run (`fixture-as-of.ts`):
+// a boot drops a shard older than the retention window, its mirror rows with it.
+const { sql: fixtureSql } = readFixtureAsOf(FIXTURE);
 
 const SYS = { context: { isSystem: true } } as const;
 const BODY_FIELDS = ['body_text', 'body_html'] as const;
