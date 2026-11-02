@@ -1163,7 +1163,6 @@ const pt = {
     undo: "Desfazer",
     redo: "Refazer",
     canvasMinimap: "Minimapa da tela",
-    versionHistory: "Histórico de versões",
   },
   detail: {
     editInlineHint: "Clique duas vezes para editar",
