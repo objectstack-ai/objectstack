@@ -3043,6 +3043,15 @@ export class AuthPlugin implements Plugin {
    * is still seen.
    */
   private mountPersonalViewDoor(httpServer: IHttpServer, ctx: PluginContext): void {
+    // A server that serves the raw-app auth routes but registers no DELETE
+    // verb (a partial embedding) mounts nothing here, and says so by name.
+    if (typeof (httpServer as Partial<IHttpServer>).delete !== 'function') {
+      ctx.logger.warn(
+        `The HTTP server registers no DELETE routes, so the personal view delete door (DELETE ${PERSONAL_VIEW_REMOVE_ROUTE}) `
+          + 'is not mounted, and a member cannot remove their own personal view.',
+      );
+      return;
+    }
     registerPersonalViewRoutes(httpServer, {
       getEngine: () => this.authManager?.getDataEngine() as unknown as PersonalViewEngine | undefined,
       resolveCaller: personalViewCallerResolver({
