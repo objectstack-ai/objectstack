@@ -22,7 +22,8 @@
  * - Opening the drawer pushes the entry; nothing is pushed when the current
  *   entry already carries the flag.
  * - Arriving on an entry without the flag while the drawer is open closes the
- *   drawer (Back, or a navigation from inside the drawer).
+ *   drawer (Back, or a navigation from inside the drawer), and so does any
+ *   history move off the flagged entry, even one the router never commits.
  * - Every other close (Escape, an outside tap, the trigger, the edge swipe's
  *   counterpart) pops the entry, so Back never stops on a no-op.
  * - A link chosen inside the drawer replaces the flagged entry, so Back from
@@ -130,11 +131,21 @@ export function usePhoneNavDrawerHistory(): void {
     }
   }, [isMobile, openMobile, navigate]);
 
-  // A link chosen inside the open drawer replaces the flagged entry. A capture
-  // listener on the document runs before the router's own click handler, and
-  // `Link` skips its navigation for a click whose default is prevented.
+  // While the drawer is open on its flagged entry: any history move leaves
+  // that entry, and a link chosen inside the drawer replaces it.
   useEffect(() => {
     if (!isMobile || !openMobile) return;
+    // `BrowserRouter` commits the push and a Back pressed before the push
+    // committed as one transition, so the router reports no location change
+    // at all; the document's own popstate still says the entry was left.
+    const onPopState = () => {
+      if (!entryFlagged.current) return;
+      entryFlagged.current = false;
+      setOpenMobile(false);
+    };
+    // A capture listener on the document runs before the router's own click
+    // handler, and `Link` skips its navigation for a click whose default is
+    // prevented.
     const onClick = (event: MouseEvent) => {
       if (!entryFlagged.current || event.defaultPrevented || !isPlainClick(event)) return;
       const target = event.target instanceof Element ? event.target : null;
@@ -157,7 +168,11 @@ export function usePhoneNavDrawerHistory(): void {
       }
       navigate({ pathname, search: url.search, hash: url.hash }, { replace: true });
     };
+    window.addEventListener('popstate', onPopState);
     document.addEventListener('click', onClick, true);
-    return () => document.removeEventListener('click', onClick, true);
-  }, [isMobile, openMobile, basename, navigate]);
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      document.removeEventListener('click', onClick, true);
+    };
+  }, [isMobile, openMobile, basename, navigate, setOpenMobile]);
 }
