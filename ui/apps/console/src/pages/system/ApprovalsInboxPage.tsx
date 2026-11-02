@@ -29,11 +29,12 @@
  * an input is focused.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ConsolePageHeader } from '@object-ui/app-shell';
 import {
   Button,
+  buttonVariants,
   Badge,
   Card,
   CardContent,
@@ -71,6 +72,7 @@ import {
   SelectTrigger,
   SelectValue,
   cn,
+  useIsMobile,
   HorizontalOverflowBox,
   PINNED_RIGHT_SEAM_SHADOW_CLASSES,
 } from '@object-ui/components';
@@ -445,6 +447,113 @@ function RejectCommentField({ id, label, value, onChange }: {
       <label htmlFor={id} className="text-sm font-medium">{label}</label>
       <Textarea id={id} rows={3} value={value} onChange={(e) => onChange(e.target.value)} />
     </div>
+  );
+}
+
+/** How the page opens the shared inline confirmations for one row. */
+interface InlineDecisionDialogsHandle {
+  openApprove: (r: ApprovalRequestRow) => void;
+  openReject: (r: ApprovalRequestRow) => void;
+}
+
+/**
+ * The shared inline approve / reject confirmations (#2762 P0-2) — opened from
+ * a row's quick buttons, a phone card, or the a / r keys — and the state they
+ * hold: which row, and the Reject reason.
+ *
+ * objectstack#29070: that state lives HERE, not on the page. On the page,
+ * opening a confirmation or typing one character of the reason re-rendered the
+ * whole inbox — both faces of every row — so on a phone at 4× CPU with 200
+ * pending requests a tap on Approve took about a second to show the dialog and
+ * each keystroke of the reason blocked for about 400 ms. Here only these two
+ * dialogs re-render. The page learns the decision through `onApprove` /
+ * `onReject` once it is confirmed.
+ *
+ * On a phone (`useIsMobile`) the footer buttons take the `lg` size, 44 px.
+ */
+function InlineDecisionDialogs({ ref, tr, isMobile, onApprove, onReject }: {
+  ref: React.Ref<InlineDecisionDialogsHandle>;
+  tr: Translate;
+  isMobile: boolean;
+  onApprove: (r: ApprovalRequestRow) => void;
+  onReject: (r: ApprovalRequestRow, comment: string) => void;
+}) {
+  const [approveTarget, setApproveTarget] = useState<ApprovalRequestRow | null>(null);
+  const [rejectTarget, setRejectTarget] = useState<ApprovalRequestRow | null>(null);
+  // The optional reason a Reject confirmation collects, sent as the reject
+  // call's `comment` (the approvals door records it on the timeline). Each
+  // dialog starts empty: closing one clears what it held.
+  const [rejectComment, setRejectComment] = useState('');
+  useImperativeHandle(ref, () => ({ openApprove: setApproveTarget, openReject: setRejectTarget }), []);
+  // The size alone (`variant: null`): each button keeps its own variant.
+  const footerButton = isMobile ? buttonVariants({ variant: null, size: 'lg' }) : undefined;
+  const titleOf = (r: ApprovalRequestRow | null) => (r ? (r.record_title || formatIdentity(r.record_id)) : '');
+
+  return (
+    <>
+      <AlertDialog open={!!approveTarget} onOpenChange={(open) => !open && setApproveTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {tr('approveOneTitle', 'Approve "{{title}}"?', { title: titleOf(approveTarget) })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {tr('approveOneBody', 'This approves the request with your identity. To add a comment or attachment, open the request instead.')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className={footerButton}>{tr('cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              className={footerButton}
+              onClick={() => {
+                const r = approveTarget;
+                setApproveTarget(null);
+                if (r) onApprove(r);
+              }}
+            >
+              {tr('approve', 'Approve')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!rejectTarget}
+        onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectComment(''); } }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {tr('rejectOneTitle', 'Reject "{{title}}"?', { title: titleOf(rejectTarget) })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {tr('rejectOneBody', 'This rejects the request and notifies the submitter.')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <RejectCommentField
+            id="approvals-reject-comment"
+            label={tr('comment', 'Comment (optional)')}
+            value={rejectComment}
+            onChange={setRejectComment}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel className={footerButton}>{tr('cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const r = rejectTarget;
+                const comment = rejectComment;
+                setRejectTarget(null);
+                setRejectComment('');
+                if (r) onReject(r, comment);
+              }}
+              className={cn(footerButton, 'bg-destructive text-destructive-foreground hover:bg-destructive/90')}
+            >
+              {tr('reject', 'Reject')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -878,17 +987,22 @@ function ApprovalsQueue() {
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [bulkRunning, setBulkRunning] = useState(false);
 
-  // Inline decision confirmation targets (row-level quick action / mobile
-  // card / keyboard). BOTH decisions confirm before executing (#2762 P0-2):
-  // the right-edge icons are small, easy to misclick, and a decision is
-  // irreversible — one stray click must never finalize a request.
-  const [approveTarget, setApproveTarget] = useState<ApprovalRequestRow | null>(null);
-  const [rejectTarget, setRejectTarget] = useState<ApprovalRequestRow | null>(null);
+  // Inline decision confirmations (row-level quick action / mobile card /
+  // keyboard). BOTH decisions confirm before executing (#2762 P0-2): the
+  // right-edge icons are small, easy to misclick, and a decision is
+  // irreversible — one stray click must never finalize a request. Which row a
+  // confirmation is for, and the Reject reason, live in `InlineDecisionDialogs`
+  // (objectstack#29070), so opening one does not re-render the list.
+  const decisionDialogs = useRef<InlineDecisionDialogsHandle>(null);
+  const openApprove = useCallback((r: ApprovalRequestRow) => decisionDialogs.current?.openApprove(r), []);
+  const openReject = useCallback((r: ApprovalRequestRow) => decisionDialogs.current?.openReject(r), []);
   const [inlineActing, setInlineActing] = useState<string | null>(null);
-  // The optional reason a Reject confirmation collects, sent as the reject
-  // call's `comment` (the approvals door records it on the timeline). Each
-  // dialog starts empty: closing one clears what it held.
-  const [rejectComment, setRejectComment] = useState('');
+  // Phone sizing (objectstack#29070): below 768 px the inbox's own controls
+  // take the 44 px touch height — Button's `lg` size, and `h-11` on the
+  // controls that have no size prop.
+  const isMobile = useIsMobile();
+  const controlHeight = isMobile ? 'h-11' : 'h-8';
+  const tabTouch = cn(isMobile && 'min-h-11 min-w-11');
   const [bulkRejectComment, setBulkRejectComment] = useState('');
 
   // Keyboard row focus
@@ -1179,13 +1293,10 @@ function ApprovalsQueue() {
   }, [actionableSelectedRows, identities, user?.id, load, refreshBadge, tr]);
 
   /** Confirmed row-level approve (from the shared dialog). */
-  const inlineApprove = useCallback(async () => {
-    const r = approveTarget;
-    if (!r) return;
+  const inlineApprove = useCallback(async (r: ApprovalRequestRow) => {
     const pending = new Set(r.pending_approvers || []);
     const actor = identities.find(i => pending.has(i)) || user?.id || '';
     setInlineActing(r.id);
-    setApproveTarget(null);
     try {
       const res = await approvalsApi.approve(r.id, { actor_id: actor });
       toast.success(res.finalized
@@ -1198,18 +1309,13 @@ function ApprovalsQueue() {
     } finally {
       setInlineActing(null);
     }
-  }, [approveTarget, identities, user?.id, load, refreshBadge, humanizeError, tr]);
+  }, [identities, user?.id, load, refreshBadge, humanizeError, tr]);
 
   /** Confirmed row-level reject (from the shared dialog). */
-  const inlineReject = useCallback(async () => {
-    const r = rejectTarget;
-    if (!r) return;
+  const inlineReject = useCallback(async (r: ApprovalRequestRow, comment: string) => {
     const pending = new Set(r.pending_approvers || []);
     const actor = identities.find(i => pending.has(i)) || user?.id || '';
-    const comment = rejectComment;
     setInlineActing(r.id);
-    setRejectTarget(null);
-    setRejectComment('');
     try {
       await approvalsApi.reject(r.id, { actor_id: actor, ...decisionComment(comment) });
       toast.success(tr('inlineRejected', 'Rejected "{{title}}"', { title: r.record_title || formatIdentity(r.record_id) }));
@@ -1220,7 +1326,7 @@ function ApprovalsQueue() {
     } finally {
       setInlineActing(null);
     }
-  }, [rejectTarget, rejectComment, identities, user?.id, load, refreshBadge, humanizeError, tr]);
+  }, [identities, user?.id, load, refreshBadge, humanizeError, tr]);
 
   // ── Keyboard flow: j/k move · Enter open · x select · a approve · r reject ──
   const filteredRef = useRef(filteredRows);
@@ -1230,11 +1336,10 @@ function ApprovalsQueue() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (approveTarget || rejectTarget) return; // a dialog owns the keyboard
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
-      if (document.querySelector('[role="alertdialog"]')) return;
+      if (document.querySelector('[role="alertdialog"]')) return; // a dialog owns the keyboard
       const list = filteredRef.current;
       if (!list.length) return;
       const idx = focusRef.current;
@@ -1253,15 +1358,15 @@ function ApprovalsQueue() {
         toggleRow(list[idx].id);
       } else if (e.key === 'a' && idx >= 0 && list[idx] && quickDecidable(list[idx])) {
         e.preventDefault();
-        setApproveTarget(list[idx]);
+        openApprove(list[idx]);
       } else if (e.key === 'r' && idx >= 0 && list[idx] && quickDecidable(list[idx])) {
         e.preventDefault();
-        setRejectTarget(list[idx]);
+        openReject(list[idx]);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [approveTarget, rejectTarget, tab, openRequest, toggleRow, quickDecidable]);
+  }, [tab, openRequest, toggleRow, quickDecidable, openApprove, openReject]);
 
   const hasFilters = !!query || processFilter !== 'all' || objectFilter !== 'all' || statusFilter !== 'all';
 
@@ -1300,15 +1405,16 @@ function ApprovalsQueue() {
       )}
 
       <Tabs value={tab} onValueChange={onTabChange}>
-        <TabsList>
-          <TabsTrigger value="pending">
+        {/* Phone (objectstack#29070): 44 px triggers, so the list grows to hold them. */}
+        <TabsList className={cn(isMobile && 'h-auto')}>
+          <TabsTrigger value="pending" className={tabTouch}>
             {tr('tabMyPending', 'My Pending')}
             {myPendingCount > 0 && (
               <Badge variant="secondary" className="ml-2">{myPendingCount}</Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="submitted">{tr('tabSubmitted', 'Submitted by me')}</TabsTrigger>
-          <TabsTrigger value="all">{tr('tabAll', 'All')}</TabsTrigger>
+          <TabsTrigger value="submitted" className={tabTouch}>{tr('tabSubmitted', 'Submitted by me')}</TabsTrigger>
+          <TabsTrigger value="all" className={tabTouch}>{tr('tabAll', 'All')}</TabsTrigger>
         </TabsList>
 
         <TabsContent value={tab} className="mt-4 space-y-3">
@@ -1321,13 +1427,18 @@ function ApprovalsQueue() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={tr('searchPlaceholder', 'Search record, process, requester…')}
-                  className="pl-8 h-8 text-sm"
+                  // On a phone: 44 px, and Input's own 16 px text — a smaller
+                  // focused field makes iOS zoom the page (objectstack#29070).
+                  className={cn('pl-8', isMobile ? 'h-11' : 'h-8 text-sm')}
                 />
                 {query && (
                   <button
                     type="button"
                     onClick={() => setQuery('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    className={cn(
+                      'absolute top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground',
+                      isMobile ? 'right-0 inline-flex h-11 w-11 items-center justify-center' : 'right-2',
+                    )}
                     aria-label={tr('clearSearch', 'Clear search')}
                   >
                     <X className="h-3.5 w-3.5" />
@@ -1336,7 +1447,7 @@ function ApprovalsQueue() {
               </div>
               {tab !== 'pending' && (
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="h-8 w-auto min-w-[130px] text-sm">
+                  <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[130px] text-sm')}>
                     <SelectValue placeholder={tr('statusFilter', 'Status')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1351,7 +1462,7 @@ function ApprovalsQueue() {
               )}
               {processOptions.length > 1 && (
                 <Select value={processFilter} onValueChange={setProcessFilter}>
-                  <SelectTrigger className="h-8 w-auto min-w-[140px] text-sm">
+                  <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[140px] text-sm')}>
                     <SelectValue placeholder={tr('processFilter', 'Process')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1364,7 +1475,7 @@ function ApprovalsQueue() {
               )}
               {objectOptions.length > 1 && (
                 <Select value={objectFilter} onValueChange={setObjectFilter}>
-                  <SelectTrigger className="h-8 w-auto min-w-[140px] text-sm">
+                  <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[140px] text-sm')}>
                     <SelectValue placeholder={tr('objectFilter', 'Object')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -1378,7 +1489,7 @@ function ApprovalsQueue() {
               {/* Triage ordering (#2762 P1-3): newest by default, or by wait
                   time / decision amount. */}
               <Select value={sortKey} onValueChange={(v) => setSortKey(v as typeof sortKey)}>
-                <SelectTrigger className="h-8 w-auto min-w-[120px] text-sm">
+                <SelectTrigger className={cn(controlHeight, 'w-auto min-w-[120px] text-sm')}>
                   <ArrowUpDown className="h-3.5 w-3.5 mr-1 text-muted-foreground" />
                   <SelectValue placeholder={tr('sortBy', 'Sort')} />
                 </SelectTrigger>
@@ -1511,7 +1622,7 @@ function ApprovalsQueue() {
                     </Button>
                   </p>
                 ) : tab === 'pending' && (
-                  <Button variant="link" size="sm" className="mt-1" onClick={() => onTabChange('all')}>
+                  <Button variant="link" size={isMobile ? 'lg' : 'sm'} className="mt-1" onClick={() => onTabChange('all')}>
                     {tr('emptyViewAll', 'Browse all requests')}
                   </Button>
                 )}
@@ -1657,8 +1768,8 @@ function ApprovalsQueue() {
                               busy={inlineActing === r.id}
                               needsInputs={needsDecisionInputs(r)}
                               tr={tr}
-                              onApprove={setApproveTarget}
-                              onReject={setRejectTarget}
+                              onApprove={openApprove}
+                              onReject={openReject}
                             />
                           </TableCell>
                         </TableRow>
@@ -1740,12 +1851,15 @@ function ApprovalsQueue() {
                             ? tr('needsDecisionInputs', 'This approval collects decision outputs — open it to decide.')
                             : undefined}
                         >
-                          <Button size="sm" className="h-7 flex-1" disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => setApproveTarget(r)}>
+                          {/* objectstack#29070: the phone card's decision
+                              buttons take the 44 px `lg` size (they were
+                              28 px); `px-3` keeps two side by side. */}
+                          <Button size="lg" className="flex-1 px-3" disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => openApprove(r)}>
                             <CheckCircle2 className="h-3.5 w-3.5 mr-1" />{tr('approve', 'Approve')}
                           </Button>
                           <Button
-                            size="sm" variant="outline" className="h-7 flex-1 border-destructive text-destructive"
-                            disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => setRejectTarget(r)}
+                            size="lg" variant="outline" className="flex-1 px-3 border-destructive text-destructive"
+                            disabled={inlineActing === r.id || needsDecisionInputs(r)} onClick={() => openReject(r)}
                           >
                             <XCircle className="h-3.5 w-3.5 mr-1" />{tr('reject', 'Reject')}
                           </Button>
@@ -1762,7 +1876,7 @@ function ApprovalsQueue() {
                     {tr('loadedOf', 'Loaded {{loaded}} of {{total}}', { loaded: rows.length, total })}
                   </span>
                   {rows.length < total && (
-                    <Button size="sm" variant="outline" disabled={loadingMore} onClick={() => void loadMore()}>
+                    <Button size={isMobile ? 'lg' : 'sm'} variant="outline" disabled={loadingMore} onClick={() => void loadMore()}>
                       {loadingMore ? tr('loadingMore', 'Loading…') : tr('loadMore', 'Load more')}
                     </Button>
                   )}
@@ -1777,61 +1891,14 @@ function ApprovalsQueue() {
         </TabsContent>
       </Tabs>
 
-      {/* Shared inline-approve confirmation (#2762 P0-2) */}
-      <AlertDialog open={!!approveTarget} onOpenChange={(open) => !open && setApproveTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {tr('approveOneTitle', 'Approve "{{title}}"?', {
-                title: approveTarget ? (approveTarget.record_title || formatIdentity(approveTarget.record_id)) : '',
-              })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {tr('approveOneBody', 'This approves the request with your identity. To add a comment or attachment, open the request instead.')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{tr('cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void inlineApprove()}>
-              {tr('approve', 'Approve')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Shared inline-reject confirmation */}
-      <AlertDialog
-        open={!!rejectTarget}
-        onOpenChange={(open) => { if (!open) { setRejectTarget(null); setRejectComment(''); } }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {tr('rejectOneTitle', 'Reject "{{title}}"?', {
-                title: rejectTarget ? (rejectTarget.record_title || formatIdentity(rejectTarget.record_id)) : '',
-              })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {tr('rejectOneBody', 'This rejects the request and notifies the submitter.')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <RejectCommentField
-            id="approvals-reject-comment"
-            label={tr('comment', 'Comment (optional)')}
-            value={rejectComment}
-            onChange={setRejectComment}
-          />
-          <AlertDialogFooter>
-            <AlertDialogCancel>{tr('cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void inlineReject()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {tr('reject', 'Reject')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Shared inline approve / reject confirmations (#2762 P0-2) */}
+      <InlineDecisionDialogs
+        ref={decisionDialogs}
+        tr={tr}
+        isMobile={isMobile}
+        onApprove={(r) => void inlineApprove(r)}
+        onReject={(r, comment) => void inlineReject(r, comment)}
+      />
     </div>
     </div>
   );
