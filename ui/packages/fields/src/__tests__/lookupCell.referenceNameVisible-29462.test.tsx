@@ -116,6 +116,7 @@ describe('#29462 — a lookup the reader is refused, served by name', () => {
       { displayField: 'secret_code' },
     );
     expect(container.textContent).toBe('Payroll Q4');
+    expect(container.querySelector('a')).toBeNull();
   });
 
   it('multiple: true draws one text chip per element, none of them a link', async () => {
