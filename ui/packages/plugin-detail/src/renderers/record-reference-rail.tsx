@@ -703,7 +703,7 @@ export const RecordReferenceRailRenderer: React.FC<RecordReferenceRailRendererPr
                 {appName && parentId && !suppressViewAll && (
                   <Link
                     to={`/apps/${appName}/${entry.objectName}?filter%5B${entry.relationshipField}%5D=${encodeURIComponent(String(parentId))}`}
-                    className="text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+                    className="inline-flex min-h-[44px] items-center text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors sm:min-h-0"
                     title={t('detail.viewAll', { defaultValue: 'View All' })}
                   >
                     {t('detail.viewAll', { defaultValue: 'View All' })}
