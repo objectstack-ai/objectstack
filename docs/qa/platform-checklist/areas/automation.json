@@ -2121,10 +2121,10 @@
     },
     {
       "id": "automation.packaged-flow-clone-contract",
-      "title": "POST /automation/:name/clone: whole-definition copy mutating exactly name/label/status, protection envelope dropped, no ancestry, draft-but-armed (double-fire notice verbatim), 409/404/400 refusal arms — and the honest clause: the clone must survive a restart and reach Studio",
+      "title": "POST /automation/:name/clone (Studio's New similar): whole-definition copy mutating exactly name/label/status, written switched off (status obsolete) into a package — the base's .custom pair when `package` is omitted —, protection envelope dropped, no ancestry, notice verbatim, 400/404/409/422 refusal arms — and the honest clause: the copy survives a restart and reaches Studio",
       "since": "v17",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2134,19 +2134,21 @@
         "app": "showcase",
         "requires": [
           "a FILE-backed database (the restart clause is unreachable without one — same discipline as automation.durable-suspend-restart)",
-          "showcase_urgent_task_alert (packaged record_change flow — the double-fire specimen: its trigger is an urgent showcase_task create, cheap to fire twice) and showcase_task_done_notify_owner (packaged flow carrying a subflow node → showcase_notify_owner — the references-not-re-pointed specimen)"
+          "showcase_urgent_task_alert (packaged record_change flow — the no-double-fire specimen: its trigger is an urgent showcase_task create, cheap to fire) and showcase_task_done_notify_owner (packaged flow carrying a subflow node → showcase_notify_owner — the references-not-re-pointed specimen)",
+          "the read-only base com.example.showcase and its pair com.example.showcase.custom: with `package` omitted the door ensures the pair (ADR-0146 D3) and lands the copy there (resolveCloneTarget, domains/automation.ts)",
+          "for acceptance[7]'s outside-closure arm, a writable package whose manifest declares no dependency on com.example.showcase (e.g. a scratch package made from the Studio landing); delete it at teardown"
         ]
       },
       "steps": [
         "boot the showcase on its own port against its own file DB (dogfood §0, OS_PORT exported); sign in as the dev admin",
-        "refusal arms first (no state left behind): POST /api/v1/automation/showcase_urgent_task_alert/clone with {} · with {\"name\":\"x\"} (label missing) · with {\"label\":\"x\"} (name missing) · with {\"name\":\"\",\"label\":\"Empty\"} (empty name, code invalid_type) · with {\"name\":\"showcase_urgent_task_alert\",\"label\":\"Same\"} (same-name) · with {\"name\":\"Bad-Name!\",\"label\":\"Illegal\"} (violates ^[a-z_][a-z0-9_]*$) · and POST /api/v1/automation/does_not_exist/clone {\"name\":\"qa_x\",\"label\":\"X\"} (unknown source) — record every status + code + message",
-        "the copy: POST /api/v1/automation/showcase_urgent_task_alert/clone {\"name\":\"qa_urgent_alert_clone\",\"label\":\"QA urgent alert clone\"} — record the FULL response body (flow + notice)",
+        "refusal arms first (no state left behind): POST /api/v1/automation/showcase_urgent_task_alert/clone with {} · with {\"name\":\"x\"} (label missing) · with {\"label\":\"x\"} (name missing) · with {\"name\":\"\",\"label\":\"Empty\"} (empty name, code invalid_type) · with {\"name\":\"showcase_urgent_task_alert\",\"label\":\"Same\"} (same-name) · with {\"name\":\"Bad-Name!\",\"label\":\"Illegal\"} (violates ^[a-z_][a-z0-9_]*$) · and POST /api/v1/automation/does_not_exist/clone {\"name\":\"qa_x\",\"label\":\"X\"} (unknown source) — record every status + code + message. Then the `package` arms, each on POST /api/v1/automation/showcase_urgent_task_alert/clone {\"name\":\"qa_x\",\"label\":\"X\",\"package\":…}: \"package\": \"\" (blank) · \"package\": \"qa_no_such_pkg\" (not installed) · \"package\": \"com.example.showcase\" (read-only) · \"package\": the scratch package with no dependency on the base (outside the closure); after each, confirm GET /api/v1/automation/qa_x answers 404",
+        "the copy: POST /api/v1/automation/showcase_urgent_task_alert/clone {\"name\":\"qa_urgent_alert_clone\",\"label\":\"QA urgent alert clone\"} (no `package`) — record the FULL response body (flow + packageId + notice)",
         "read both definitions back (GET /api/v1/automation/qa_urgent_alert_clone and …/showcase_urgent_task_alert) and diff them key by key",
-        "double-fire: POST /api/v1/data/showcase_task with priority='urgent'; GET both flows' runs lists",
+        "no double-fire: POST /api/v1/data/showcase_task with priority='urgent' (with its required project), three times; GET both flows' runs lists",
         "references: POST /api/v1/automation/showcase_task_done_notify_owner/clone {\"name\":\"qa_task_done_clone\",\"label\":\"QA task-done clone\"}; read the clone's subflow node config",
-        "ordinariness: PUT /api/v1/automation/qa_urgent_alert_clone with the clone's own definition (label tweaked) — it is a tenant flow, the edit lands",
-        "restart probe: stop the server; cold-boot over the SAME database file; GET /api/v1/automation/qa_urgent_alert_clone and GET /api/v1/meta/flow (does any package/tenant metadata hold the clone?); then, in the browser as the admin (this leg needs a served console: on a tree built with `pnpm build` alone /_console/ answers 503 until `pnpm console:build` has run), open /_console/studio/~org/automations (the 'Organization flows' scope) and confirm the clone is listed on the Automations rail and opens in the designer; create one more urgent task (with its required project) and confirm the clone's runs list grows on the new process",
-        "teardown: DELETE /api/v1/automation/qa_urgent_alert_clone and …/qa_task_done_clone (or discard the run's own DB)"
+        "ordinariness: PUT /api/v1/automation/qa_urgent_alert_clone with the clone's own definition (label tweaked) — it is the pair's own flow, the edit lands",
+        "restart probe: stop the server; cold-boot over the SAME database file; GET /api/v1/automation/qa_urgent_alert_clone and GET /api/v1/meta/flow (which package holds the copy?); create one more urgent task and read both runs lists; then, in the browser as the admin (this leg needs a served console: on a tree built with `pnpm build` alone /_console/ answers 503 until `pnpm console:build` has run), open /_console/studio/com.example.showcase/automations and confirm the copy is listed on the rail marked 'In com.example.showcase.custom' and opens in the designer; open /_console/studio/~org/automations and record what it lists",
+        "teardown: DELETE /api/v1/automation/qa_urgent_alert_clone and …/qa_task_done_clone (or discard the run's own DB), and the scratch package"
       ],
       "acceptance": [
         {
@@ -2156,16 +2158,16 @@
           "evidence": "the four 400 bodies with their details arrays"
         },
         {
-          "clause": "the copy is whole-definition with exactly name/label/status mutated, the protection envelope and read decorations dropped, and NO ancestry: every other key of the clone deep-equals the source; none of the 10 FLOW_CLONE_DROPPED_KEYS (_diagnostics, _draft, _lock, _lockReason, _lockSource, _provenance, _packageId, _packageVersion, _lockDocsUrl, protection) is present on the clone; no clonedFrom-shaped key exists in the response or the stored definition",
+          "clause": "the copy is whole-definition with exactly name/label/status mutated, the protection envelope and read decorations dropped, and NO ancestry: every other key of the copy deep-equals the source; none of the 10 FLOW_CLONE_DROPPED_KEYS (_diagnostics, _draft, _lock, _lockReason, _lockSource, _provenance, _packageId, _packageVersion, _lockDocsUrl, protection) is present on the copy; no clonedFrom-shaped key exists in the response or the stored definition. The response names where the copy LIVES (packageId com.example.showcase.custom when `package` was omitted), which is not ancestry",
           "oracle": "api",
-          "verify": "the step-4 diff: differences are exactly {name, label, status:'draft'} (FLOW_CLONE_MUTATED_FIELDS, flow-clone.ts) plus the ABSENCE of the dropped keys (flow-clone.ts — METADATA_READ_DECORATIONS + MetadataProtectionFields, derived, plus the package author's `protection` block, named (#23120): 2+7+1=10 at base 9a7838edf5; count them from the source at run time rather than trusting this line). A missing facet (nodes, edges, variables, runAs, retry…) is the #11703 param-list failure shape; a surviving _packageId or _lock defeats the feature (the clone would be package-owned or locked); any ancestry key violates amendment ruling 2 / §9",
-          "evidence": "the key-by-key diff + the dropped-keys absence check"
+          "verify": "the step-4 diff: differences are exactly {name, label, status:'obsolete'} (FLOW_CLONE_MUTATED_FIELDS and FLOW_CLONE_STATUS, flow-clone.ts — 'obsolete' since #28149, ADR-0146 D4) plus the ABSENCE of the dropped keys (flow-clone.ts — METADATA_READ_DECORATIONS + MetadataProtectionFields, derived, plus the package author's `protection` block, named (#23120): 2+7+1=10 at base 9a7838edf5; count them from the source at run time rather than trusting this line). The step-3 response carries data.packageId 'com.example.showcase.custom' (domains/automation.ts, the clone arm's deps.success). A missing facet (nodes, edges, variables, runAs, retry…) is the #11703 param-list failure shape; a surviving _packageId or _lock defeats the feature (the copy would claim the base's package or be locked); any ancestry key violates amendment ruling 2 / §9",
+          "evidence": "the key-by-key diff + the dropped-keys absence check + the response's packageId"
         },
         {
-          "clause": "status 'draft' is NOT an off-switch and the response says so verbatim: one urgent create fires BOTH base and clone (double-fire), and the clone response's notice equals FLOW_CLONE_NOTICE",
+          "clause": "the copy is written switched OFF and never double-runs beside its original, and the response says so verbatim: over the step-5 urgent creates the base runs each time and the copy never runs, and the response's notice equals FLOW_CLONE_NOTICE",
           "oracle": "api",
-          "verify": "step 5: one new run in EACH flow's runs list for the same create — the engine disables on status obsolete/invalid only, draft binds its trigger (flow-clone.ts). The response notice matches flow-clone.ts verbatim, including the toggle instruction — the sentence is the only thing standing between the admin and the two-flows-one-trigger surprise, so a paraphrase is a FAIL",
-          "evidence": "both runs lists bracketing the create + the notice text from the clone response"
+          "verify": "step 5: one new run per create in the base's runs list, none in the copy's — the copy carries status 'obsolete', one of the two values the engine disables a flow on (FLOW_CLONE_STATUS, flow-clone.ts; registerFlow, service-automation engine.ts). The notice matches flow-clone.ts FLOW_CLONE_NOTICE verbatim ('The copy is switched off and does not run until you switch it on, and it still uses the same subflows, actions and objects as the original.'), so a paraphrase is a FAIL. A copy run on a base trigger is the double-fire ADR-0146 D4 ruled out — FAIL. QA run #29002 measured 3 creates: the base ran each time, the copy never",
+          "evidence": "both runs lists bracketing the creates + the notice text from the clone response"
         },
         {
           "clause": "the refusal arms answer their own status+code: same/taken name → 409 RESOURCE_CONFLICT with the shadow-rationale message suggesting a free name; unknown source → 404 RESOURCE_NOT_FOUND; an illegal machine name → 400 (the definition goes through registerFlow's own validation, one policy not two)",
@@ -2180,38 +2182,45 @@
           "evidence": "the clone's subflow node config read"
         },
         {
-          "clause": "the clone is an ordinary tenant flow at the engine: PUT /api/v1/automation/qa_urgent_alert_clone lands (2xx, edit visible on re-read)",
+          "clause": "the copy is an ordinary flow of the pair at the engine: PUT /api/v1/automation/qa_urgent_alert_clone lands (2xx, edit visible on re-read)",
           "oracle": "api",
-          "verify": "step 7. ⚠️ Scope note: this proves the clone is editable, NOT that the packaged base is protected at this door — PUT /automation/:name currently performs no lock/provenance check on ANY flow (domains/automation.ts), and that door-parity question is access-security.packaged-flow-write-door-parity's expected-fail probe, not this clause",
+          "verify": "step 7. ⚠️ Scope note: this proves the copy is editable, NOT that the packaged base is protected at this door — that door-parity question is access-security.packaged-flow-write-door-parity's item, not this clause",
           "evidence": "the PUT response + the re-read"
         },
         {
-          "clause": "the honest clause — the clone OUTLIVES the process and REACHES Studio: after a cold restart over the same database file the clone still exists and dispatches, and it is listed on a Studio Automations rail (it is 'an ordinary org/install-owned flow', ADR-0126 §7.1, under the shipped 'customize in Studio' promise §1.3 — the Setup page's own copy says 'Editing happens in Studio')",
+          "clause": "the honest clause — the copy OUTLIVES the process and REACHES Studio: after a cold restart over the same database file the copy still exists in com.example.showcase.custom, still switched off (it does not run on a new urgent create), and it is listed on the base's Studio Automations rail marked 'In com.example.showcase.custom' and opens in the designer (ADR-0146 D4: 'new similar' lands in the pair; ADR-0126 §1.3's 'customize in Studio' promise)",
           "oracle": "api",
-          "verify": "step 8: GET /api/v1/automation/qa_urgent_alert_clone on the new process, and the flow present in metadata a Studio rail can list. DURABILITY holds since cb4c31d (#20907, with the clone save path #20761): the clone survives a cold restart and still dispatches. REACHABILITY holds since objectui#11553 (the vendored console at f8267df93aba carries it; #21332 closed as a duplicate on 2026-10-03): Studio's org scope, /_console/studio/~org/automations ('Organization flows'), lists package-less flows on its Automations rail, so the clone stored with package_id null (_packageId deliberately stripped, flow-clone.ts) is listed there and opens in the designer. A clone absent from that rail, or a rail that opens another flow for the clone's deep link, fails the clause. Record which half failed (durability, reachability, or both) — do NOT soften the clause to a same-process read",
-          "evidence": "the post-restart GET (present or 404) + the meta/flow listing showing where, if anywhere, the clone is held"
+          "verify": "step 8: GET /api/v1/automation/qa_urgent_alert_clone on the new process answers the copy; GET /api/v1/meta/flow shows it held by com.example.showcase.custom; the post-restart urgent create adds a run to the base only. Reachability: /_console/studio/com.example.showcase/automations lists the copy with the pair's mark (engine.studio.customize.addedIn 'In {pair}'; a read-only base's rail lists the flows its pair adds, StudioDesignSurface.tsx railPairId) and its deep link opens it. The package-less scope /_console/studio/~org/automations no longer holds the copy: QA run #29002 read 'No flows outside a package…' there, which is correct now that no clone is written without a package (ADR-0070 D5/D6). A copy absent from the base's rail, or a rail that opens another flow for the copy's deep link, fails the clause. Record which half failed (durability, reachability, or both) — do NOT soften the clause to a same-process read",
+          "evidence": "the post-restart GET (present or 404) + the meta/flow listing showing which package holds the copy + the rail screenshot"
+        },
+        {
+          "clause": "the `package` target arms answer their own status + code and write nothing: a blank `package` → 400 on the field (code invalid_type); a package not installed → 422 WRITABLE_PACKAGE_REQUIRED; a read-only package → 422 WRITABLE_PACKAGE_REQUIRED; a writable package whose closure does not hold the source's package → 409 RESOURCE_CONFLICT",
+          "oracle": "api",
+          "verify": "step 2's package arms: each message carries its bracketed reason (new_similar_target_not_installed, new_similar_target_read_only, new_similar_target_outside_closure — newSimilarTargetRefusal, domains/new-similar-target.ts) and ends 'Nothing was written.', and the follow-up GET answers 404 each time. The blank arm is the clone arm's own 400 (domains/automation.ts: 'must be a non-empty package id when sent'), never read as omitted. Pinned at the route layer by packages/runtime/src/domains/automation-flow-clone-custom-package.test.ts ('an explicit target: `package`'), a mocked-service pin that does not drive the live dispatcher",
+          "evidence": "the four refusal bodies + the four 404 re-reads"
         }
       ],
       "negative": [
-        "a clone missing any source facet the diff can name (a node, an edge, a variable, the retry block) is the #11703 enumerated-param-list regression — fail the copy clause even if the clone runs",
+        "a copy missing any source facet the diff can name (a node, an edge, a variable, the retry block) is the #11703 enumerated-param-list regression — fail the copy clause even if the copy runs",
         "a clonedFrom / ancestry field appearing ANYWHERE — response, stored definition, or a later listing — is a FAIL of amendment ruling 2: a response field is the cheapest place for lineage to reappear and a UI that reads one starts displaying what the platform ruled it does not track",
         "a same-name clone answering 2xx is the silent order-dependent shadow #11665 §2.2 measured — the worst outcome this door has, because storage legitimately holds both rows and only the engine's bare-name map breaks",
-        "an anonymous or non-manage_metadata caller reaching the clone door (anything but 401/403 PERMISSION_DENIED) is a FAIL — the door is in the #10145 authoring write set precisely because a clone REGISTERS flow metadata at environment scope"
+        "an anonymous or non-manage_metadata caller reaching the clone door (anything but 401/403 PERMISSION_DENIED) is a FAIL — the door is in the #10145 authoring write set precisely because a clone REGISTERS flow metadata at environment scope",
+        "a copy written without a package (package_id null, listed under /_console/studio/~org/automations) is the package-less clone ADR-0146 D4 retired — FAIL"
       ],
       "traps": [
         "dispatcher-vs-hono-route",
         "destructive-in-place"
       ],
       "source": [
-        "docs/adr/0126-packaged-metadata-customization-model.md §7.1 (mandatory new name, whole-definition copy, no linkage), §9 (no re-pointing, no ancestry), §1.3 (the shipped 'customize in Studio' promise the honest clause holds the clone to)",
+        "docs/adr/0126-packaged-metadata-customization-model.md §7.1 (mandatory new name, whole-definition copy, no linkage), §9 (no re-pointing, no ancestry), §1.3 (the shipped 'customize in Studio' promise the honest clause holds the copy to), as amended by docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D4 (clone kept only as 'new similar': a target package, the pair by default, the copy written inactive)",
         "packages/runtime/src/flow-clone.ts#FLOW_CLONE_STATUS (FLOW_CLONE_STATUS draft — and why it is deliberately not an off-switch), (FLOW_CLONE_MUTATED_FIELDS), (FLOW_CLONE_DROPPED_KEYS derived from spec), (FLOW_CLONE_NOTICE), (409 + name-taken message), (deep copy via structuredClone; _packageId et al. stripped)",
-        "packages/runtime/src/domains/automation.ts#clone (the clone arm: body-first validation, mandatory name+label, 404/409 probes, registerFlow-only registration, no ancestry on the response), (clone in the manage_metadata write set)",
-        "packages/runtime/src/domains/automation-flow-clone.test.ts#dispatcher (route-level pins for the validation and refusal arms — a mocked-service pin; it cannot see the live dispatcher, the double-fire, or the restart — which is exactly the remainder this item drives)",
+        "packages/runtime/src/domains/automation.ts#clone (the clone arm: body-first validation, mandatory name+label, optional `package`, 404/409 probes, registerAndSaveFlow, packageId + notice on the response, no ancestry), (clone in the manage_metadata write set) + resolveCloneTarget (the pair by default, ensured through the protocol's ensureCustomizationPackage) + packages/runtime/src/domains/new-similar-target.ts#newSimilarTargetRefusal (the 422/409 target arms)",
+        "packages/runtime/src/domains/automation-flow-clone.test.ts#dispatcher (route-level pins for the validation and refusal arms) + automation-flow-clone-custom-package.test.ts (the pair by default, switched off; the `package` arms) — mocked-service pins; they cannot see the live dispatcher, the runs, or the restart — which is exactly the remainder this item drives",
         "packages/spec/src/automation/flow.zod.ts (machine-name regex)",
-        "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx + studioScope.ts (the org scope ~org that lists package-less flows; objectui#11553, pinned by StudioDesignSurface.packageLessFlows-11553.test.tsx) — the reachability half of the honest clause",
+        "ui/packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (a read-only base's Automations rail lists the flows its pair adds, marked 'In PAIR' — engine.studio.customize.addedIn) + FlowItemMoreMenu.tsx (New similar, the Studio door onto this endpoint) — the reachability half of the honest clause",
         "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow; TaskDoneNotifyOwnerFlow → showcase_notify_owner)",
         "#12438 (sweep) · Epic #12150",
-        "cross-ref: access-security.packaged-flow-write-door-parity (owns the packaged-base write-door question this item's ordinariness clause must not be read as answering); automation.setup-packaged-automation-board (the clone dialog UI half)"
+        "cross-ref: access-security.packaged-flow-write-door-parity (owns the packaged-base write-door question this item's ordinariness clause must not be read as answering); automation.setup-packaged-automation-board (the New similar dialog UI half)"
       ],
       "history": [
         {
@@ -2238,7 +2247,13 @@
           "change": "surface api → mixed, and steps[7] says its browser leg needs a built console. Checklist-accuracy finding of the 18.2.0 wave 2 (QA run #26476, release-18.2.0-w2-manual-api, at 756220c4; wave anchor #25807, slice A): acceptance[6] and steps[7] open Studio in a browser, so the item is not api-only, and on a `pnpm build` tree the run met /_console/ answering 503 until `pnpm console:build`. Every other step stays an api step. No clause changed",
           "ref": "#25807"
         },
-        { "revision": 10, "date": "2026-10-31", "change": "acceptance[0] and steps[1] separate an absent key from an empty one. Checklist-accuracy finding of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): an empty-string name or label answers 400 with code invalid_type, and 'required' is only for an absent key; the clause now says both and adds the empty-string arm. Re-read at base 488b3ed0: packages/runtime/src/domains/automation.ts (the clone door's name and label details: absent ⇒ 'required', otherwise 'invalid_type'). The three absent-key arms are unchanged", "ref": "#27441" }
+        { "revision": 10, "date": "2026-10-31", "change": "acceptance[0] and steps[1] separate an absent key from an empty one. Checklist-accuracy finding of QA run #27441 (18.3.0 sweep, wave 3, manual set, at c4c515ad; sweep anchor #27377): an empty-string name or label answers 400 with code invalid_type, and 'required' is only for an absent key; the clause now says both and adds the empty-string arm. Re-read at base 488b3ed0: packages/runtime/src/domains/automation.ts (the clone door's name and label details: absent ⇒ 'required', otherwise 'invalid_type'). The three absent-key arms are unchanged", "ref": "#27441" },
+        {
+          "revision": 11,
+          "date": "2026-11-02",
+          "change": "Re-pointed to ADR-0146 D4's 'new similar' (#28149: the copy lands in a package, the base's .custom pair when `package` is omitted, written status 'obsolete'). Measured input: QA run #29002 (W4-C3b1, 7fa9873f; card note 6570476620), which failed acceptance[1], [2] and [6] as stale spec. Re-read at base dfbe34d887 (flow-clone.ts FLOW_CLONE_STATUS 'obsolete' and FLOW_CLONE_NOTICE; domains/automation.ts resolveCloneTarget; new-similar-target.ts): acceptance[1]'s mutated status is 'obsolete' and the response's packageId is named as where the copy lives; acceptance[2] is inverted from 'double-fire, draft is not an off-switch' to 'switched off, never double-runs' — the property the run measured over 3 creates; acceptance[6] reads the copy on the base's Studio rail marked 'In com.example.showcase.custom', and ~org's empty list as correct; acceptance[5]'s 'tenant flow' becomes the pair's flow. New acceptance[7] asks the `package` arms the note named as unasked (blank 400, not installed 422, read-only 422, outside the closure 409). steps, fixtures, negative and source follow; no clause weakened",
+          "ref": "#28579"
+        }
       ]
     },
     {
