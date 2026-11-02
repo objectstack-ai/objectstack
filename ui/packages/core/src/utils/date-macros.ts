@@ -6,6 +6,8 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import { getDisplayTimeZone } from './date-display.js';
+
 /**
  * Resolve well-known relative-date placeholders inside a filter object so
  * both server-side aggregation and client-side `find()` calls see a real
@@ -42,9 +44,27 @@
  *
  * Walks any plain-object / array structure recursively. Non-string values
  * (and unknown tokens) are passed through untouched.
+ *
+ * ## Which clock decides "today"
+ *
+ * The calendar tokens (`today`, the period bounds, `N_days` / `N_weeks` /
+ * `N_months` / `N_years`) name a DAY, and the day is the one the workspace
+ * zone is on: the display zone the host declared through
+ * `setDisplayTimeZone` (`./date-display.ts`), which `LocalizationProvider`
+ * fills from the served `localization.timezone`. That is the zone the server
+ * resolves the same tokens in when a filter reaches it unresolved, so a view's
+ * authored `{today}` and a reader's panel `{today}` name one day. With no zone
+ * declared, the viewer's own clock decides.
+ *
+ * The instant tokens (`now`, `N_minutes`, `N_hours`) are not days: they stay
+ * on `now` itself, in every zone.
  */
 export function resolveDateMacros<T = any>(filter: T, now: Date = new Date()): T {
   if (filter == null) return filter;
+
+  // Every calendar token below reads `today`, never `now`: a local Date on the
+  // display zone's calendar day, at noon so no DST gap moves it off that day.
+  const today = calendarDayIn(now, getDisplayTimeZone());
 
   const startOfDay = (d: Date) => {
     const x = new Date(d);
@@ -83,33 +103,33 @@ export function resolveDateMacros<T = any>(filter: T, now: Date = new Date()): T
   const endOfYear = (d: Date) => new Date(d.getFullYear(), 11, 31);
 
   const macros: Record<string, () => string> = {
-    today: () => isoDate(now),
-    yesterday: () => isoDate(addDays(now, -1)),
-    tomorrow: () => isoDate(addDays(now, 1)),
+    today: () => isoDate(today),
+    yesterday: () => isoDate(addDays(today, -1)),
+    tomorrow: () => isoDate(addDays(today, 1)),
     now: () => now.toISOString(),
 
-    current_week_start: () => isoDate(startOfWeek(now)),
-    current_week_end: () => isoDate(endOfWeek(now)),
-    current_month_start: () => isoDate(startOfMonth(now)),
-    current_month_end: () => isoDate(endOfMonth(now)),
-    current_quarter_start: () => isoDate(startOfQuarter(now)),
-    current_quarter_end: () => isoDate(endOfQuarter(now)),
-    current_year_start: () => isoDate(startOfYear(now)),
-    current_year_end: () => isoDate(endOfYear(now)),
+    current_week_start: () => isoDate(startOfWeek(today)),
+    current_week_end: () => isoDate(endOfWeek(today)),
+    current_month_start: () => isoDate(startOfMonth(today)),
+    current_month_end: () => isoDate(endOfMonth(today)),
+    current_quarter_start: () => isoDate(startOfQuarter(today)),
+    current_quarter_end: () => isoDate(endOfQuarter(today)),
+    current_year_start: () => isoDate(startOfYear(today)),
+    current_year_end: () => isoDate(endOfYear(today)),
 
-    last_week_start: () => isoDate(addDays(startOfWeek(now), -7)),
-    last_week_end: () => isoDate(addDays(startOfWeek(now), -1)),
-    last_month_start: () => isoDate(addMonths(startOfMonth(now), -1)),
-    last_month_end: () => isoDate(addDays(startOfMonth(now), -1)),
-    last_quarter_start: () => isoDate(addMonths(startOfQuarter(now), -3)),
-    last_quarter_end: () => isoDate(addDays(startOfQuarter(now), -1)),
-    last_year_start: () => isoDate(new Date(now.getFullYear() - 1, 0, 1)),
-    last_year_end: () => isoDate(new Date(now.getFullYear() - 1, 11, 31)),
+    last_week_start: () => isoDate(addDays(startOfWeek(today), -7)),
+    last_week_end: () => isoDate(addDays(startOfWeek(today), -1)),
+    last_month_start: () => isoDate(addMonths(startOfMonth(today), -1)),
+    last_month_end: () => isoDate(addDays(startOfMonth(today), -1)),
+    last_quarter_start: () => isoDate(addMonths(startOfQuarter(today), -3)),
+    last_quarter_end: () => isoDate(addDays(startOfQuarter(today), -1)),
+    last_year_start: () => isoDate(new Date(today.getFullYear() - 1, 0, 1)),
+    last_year_end: () => isoDate(new Date(today.getFullYear() - 1, 11, 31)),
 
-    next_week_start: () => isoDate(addDays(startOfWeek(now), 7)),
-    next_month_start: () => isoDate(addMonths(startOfMonth(now), 1)),
-    next_quarter_start: () => isoDate(addMonths(startOfQuarter(now), 3)),
-    next_year_start: () => isoDate(new Date(now.getFullYear() + 1, 0, 1)),
+    next_week_start: () => isoDate(addDays(startOfWeek(today), 7)),
+    next_month_start: () => isoDate(addMonths(startOfMonth(today), 1)),
+    next_quarter_start: () => isoDate(addMonths(startOfQuarter(today), 3)),
+    next_year_start: () => isoDate(new Date(today.getFullYear() + 1, 0, 1)),
   };
 
   // Aliases: bare {week_start} etc. mean the current period.
@@ -142,14 +162,14 @@ export function resolveDateMacros<T = any>(filter: T, now: Date = new Date()): T
     if (unit === 'hour') {
       return new Date(now.getTime() + sign * n * 60 * 60 * 1000).toISOString();
     }
-    if (unit === 'day') return isoDate(addDays(now, sign * n));
-    if (unit === 'week') return isoDate(addDays(now, sign * n * 7));
+    if (unit === 'day') return isoDate(addDays(today, sign * n));
+    if (unit === 'week') return isoDate(addDays(today, sign * n * 7));
     if (unit === 'month') {
-      const x = new Date(now.getFullYear(), now.getMonth() + sign * n, now.getDate());
+      const x = new Date(today.getFullYear(), today.getMonth() + sign * n, today.getDate());
       return isoDate(x);
     }
     if (unit === 'year') {
-      const x = new Date(now.getFullYear() + sign * n, now.getMonth(), now.getDate());
+      const x = new Date(today.getFullYear() + sign * n, today.getMonth(), today.getDate());
       return isoDate(x);
     }
     return null;
@@ -192,4 +212,23 @@ export function resolveDateMacros<T = any>(filter: T, now: Date = new Date()): T
   };
 
   return walk(filter) as T;
+}
+
+const dayPartsFormats = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * The calendar day `now` falls on in `timeZone`, as a local `Date` at noon of
+ * that day, so the local getters the macros read answer that zone's year,
+ * month and day. No zone: `now` itself, the viewer's own clock.
+ */
+function calendarDayIn(now: Date, timeZone: string | undefined): Date {
+  if (!timeZone) return now;
+  let format = dayPartsFormats.get(timeZone);
+  if (!format) {
+    format = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: 'numeric', day: 'numeric' });
+    dayPartsFormats.set(timeZone, format);
+  }
+  const parts = format.formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((p) => p.type === type)?.value);
+  return new Date(part('year'), part('month') - 1, part('day'), 12);
 }
