@@ -446,8 +446,9 @@ code:
 os migrate meta --stored --json    # 0 = every row canonical, 1 = work left
 ```
 
-That is what makes "this deployment is on protocol N" a CI check rather than a
-belief. Nothing gates on it having run, so get `0` before you move.
+That is what makes "this deployment is on protocol N" a CI check — valid only
+on the release you are leaving: one that dropped a row's conversions no longer
+recognises it and answers `0`. Nothing gates on it having run.
 
 ---
 

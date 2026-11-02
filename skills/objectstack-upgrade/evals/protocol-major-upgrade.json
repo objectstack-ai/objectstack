@@ -44,7 +44,7 @@
     {
       "id": 5,
       "prompt": "我们在 @objectstack/spec 18.1，想直接升到 18.3。生产库 sys_metadata 里还有 16 时代存下的行，现在读出来都正常，直接升可以吗？",
-      "expected_output": "Not yet: those rows read fine today only because `applyConversionsToStoredItem` replays the conversions 18.1 still carries, and 18.3 drops those retired at or below 16.x, so after the bump such a row is no longer rewritten at read. On 18.1, before the bump: `os migrate meta --stored` (read-only preview), then `os migrate meta --stored --apply --yes`, then `os migrate meta --stored --json` must exit 0; only then move to 18.3. Never hand-edits `sys_metadata`, and never bumps first expecting the 18.3 stored pass to repair the rows — the conversions are gone there too.",
+      "expected_output": "Not yet: those rows read fine today only because `applyConversionsToStoredItem` replays the conversions 18.1 still carries, and 18.3 drops those retired at or below 16.x, so after the bump such a row is no longer rewritten at read. On 18.1, before the bump: `os migrate meta --stored` (read-only preview), then `os migrate meta --stored --apply --yes`, then `os migrate meta --stored --json` must exit 0; only then move to 18.3. Never hand-edits `sys_metadata`, and never bumps first expecting the 18.3 stored pass to repair the rows — the conversions are gone there too, so an 18.3 `--stored --json` exit 0 proves nothing about such a row: nothing recognises it any more.",
       "files": [],
       "assertions": {
         "must_contain": ["--stored --apply --yes", "--stored --json", "18.3", "applyConversionsToStoredItem"],
