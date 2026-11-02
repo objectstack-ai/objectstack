@@ -128,9 +128,10 @@ function refuseLocaleKeysFoldingTogether(bundle: Record<string, unknown>, ctx: z
       code: 'custom',
       path: [key],
       message:
-        `locale keys \`${first}\` and \`${key}\` are one locale, \`${tag}\`: a locale tag's case is `
-        + 'corrected on parse, so both entries would land on one key and one set of strings would be '
-        + `dropped. Merge the two by hand and keep one key, \`${tag}\`.`,
+        `locale keys \`${first}\` and \`${key}\` are one locale, \`${tag}\`. Refused since `
+        + "@objectstack/spec 18, because a locale tag's case is corrected on parse, so both entries would "
+        + 'land on one key and one set of strings would be dropped. Merge the two by hand and keep one '
+        + `key, \`${tag}\`.`,
     });
   }
 }

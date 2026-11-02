@@ -4231,8 +4231,8 @@ const translationLocaleTagCaseFolded: MetadataConversion = {
             from: JSON.stringify(key),
             reason:
               `The translation bundle locale key is \`${tag}\` in another case, and the entry already holds `
-              + `different strings under \`${tag}\`. Left as stored, it is refused where it is parsed. Merge `
-              + 'the two by hand and keep one key.',
+              + `different strings under \`${tag}\`. Left as stored, it is refused where it is parsed, since `
+              + '@objectstack/spec 18. Merge the two by hand and keep one key.',
           });
           continue;
         }
