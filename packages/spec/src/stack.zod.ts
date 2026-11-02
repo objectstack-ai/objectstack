@@ -361,22 +361,20 @@ function applyCollectionItemOwnerStampGate(
  * The judged collections a `packages[]` stack's TOP LEVEL never files as
  * residual items: the boot's residual rule (`unclaimedTopLevel`,
  * `@objectstack/metadata`) walks the collections the metadata door registers
- * as items (its `ARTIFACT_FIELD_TO_TYPE`), and these three are not among them,
- * so the boot judges no stamp on a top-level item of any of them. Their readers
- * differ:
- *  - seed `data` and `jobs` are read off the stack whole, the top level merged
- *    with every body (`resolveArtifactCollections`, `@objectstack/runtime`):
- *    `AppPlugin` hands the seed `data` to the seed loader and schedules the
- *    `jobs`;
- *  - `datasets` are read off the package BODIES only, by the engine's
- *    `registerApp` (its `METADATA_ARRAY_KEYS` loop, `@objectstack/objectql`).
- *    No boot reader takes a top-level `datasets` item that no body declares.
+ * as items (its `ARTIFACT_FIELD_TO_TYPE`), and these two are not among them,
+ * so the boot judges no stamp on a top-level item of either. Both are read off
+ * the stack whole, the top level merged with every body
+ * (`resolveArtifactCollections`, `@objectstack/runtime`): `AppPlugin` hands the
+ * seed `data` to the seed loader and schedules the `jobs`.
+ * `datasets` is not here: the residual rule walks it, so a top-level dataset
+ * that no body declares is registered under `manifest.id` and its stamp is
+ * judged at both doors, like every other residual item.
  * A package BODY's items of these collections are still judged, at both doors.
  *
  * Mirrored, because `@objectstack/spec` cannot import the rule it mirrors; a
  * `@objectstack/metadata` test holds the two equal, collection by collection.
  */
-const TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL: ReadonlySet<string> = new Set(['data', 'datasets', 'jobs']);
+const TOP_LEVEL_COLLECTIONS_NEVER_RESIDUAL: ReadonlySet<string> = new Set(['data', 'jobs']);
 
 /**
  * The registry slot one item occupies, the way the boot's residual rule
