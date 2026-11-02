@@ -230,6 +230,12 @@ const ADMITTED = [
   // read, unlike `unlock-user`'s. Measured on this stack: the platform admin
   // gets `200 {"success":true,...,"managerId":null}` from the sweep's payload.
   'POST /api/v1/auth/admin/set-user-manager',
+  // #28793 — the platform-admin roster behind Setup → Users' toolbar entry. A
+  // READ: an ObjectStack raw mount carrying the ADR-0068 gate first, then the
+  // handler re-confirms the caller through `hasPlatformAdminStanding` (the
+  // gate still honours the legacy role scalar). No body is read, and no
+  // stored state moves, so it has no individual effect pin below.
+  'POST /api/v1/auth/admin/list-platform-admins',
   'POST /api/v1/auth/admin/unlock-user',
   'POST /api/v1/auth/admin/import-users',
   'POST /api/v1/auth/admin/oauth2/toggle-disabled',
@@ -531,6 +537,24 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
     ).toBe(false);
   }, 300_000);
 
+  it('C-28793 — the platform-admin roster lists the platform admin, and not the plain member', async () => {
+    // The Setup → Users toolbar entry's answer, on the booted stack. The
+    // identity control above proved the subject holds platform-admin standing
+    // WITHOUT the legacy scalar, so it must be on the roster; the disposable
+    // target is a plain member and must not be.
+    const roster = await expectAdmitted(
+      'POST /api/v1/auth/admin/list-platform-admins',
+      {},
+      'the roster is an ObjectStack raw mount behind the ADR-0068 gate (#28793)',
+    );
+    const data = roster.json.data as { count?: number; admins?: Array<{ id?: string }>; entries?: unknown[] };
+    const ids = (data.admins ?? []).map((a) => String(a.id));
+    expect(ids, `the roster omits the platform admin: ${roster.body}`).toContain(adminUserId);
+    expect(ids, `the roster lists a plain member: ${roster.body}`).not.toContain(targetUserId);
+    expect(data.count, `count disagrees with admins: ${roster.body}`).toBe(ids.length);
+    expect(data.entries?.length, `one dialog line per admin: ${roster.body}`).toBe(ids.length);
+  }, 300_000);
+
   // ── 2. THE BY-DESIGN REFUSALS ─────────────────────────────────────────────
 
   it('the eight consumer-less admin routes refuse the platform admin BY DESIGN, each with its ruled code', async () => {
@@ -678,6 +702,9 @@ describe('#9482: what an ObjectStack platform admin gets from every /admin/ rout
       // "Invalid input"/"body." message, and this is neither) — so a missing
       // payload would slip through every assertion below as a silent void.
       'POST /api/v1/auth/admin/set-user-manager': { body: { userId: targetUserId, managerId: null } },
+      // #28793. No body is read; the empty one is what the console's action
+      // sends besides the `organizationId` it adds, which the handler ignores.
+      'POST /api/v1/auth/admin/list-platform-admins': { body: {} },
       'POST /api/v1/auth/admin/oauth2/toggle-disabled': { body: { client_id: 'standing-probe-client', disabled: false } },
       'POST /api/v1/auth/admin/sso/register': {
         body: {

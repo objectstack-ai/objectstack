@@ -2480,14 +2480,18 @@ const SEARCHABLE_FIELD_UNSEARCHABLE_EXPLANATION: RuleExplanation = {
   covers: 'which searchableFields entries the runtime refuses',
   paragraphs: [
     SEARCH_FIELDS_ECHO,
-    // Held equal to `SEARCHABLE_TEXTUAL_TYPES` + `SEARCHABLE_ENUM_TYPES` by the rule's tests.
+    // Held equal to `SEARCHABLE_TEXTUAL_TYPES` + `SEARCHABLE_ENUM_TYPES`, and its flag exclusions to
+    // `SEARCH_FLAG_EXCLUDED_TYPES`, by the rule's tests.
     'The allowed set is computed by the function the ingress and the engine consult ' +
       '(`resolveSearchFieldResolution`): the object\'s declared `searchableFields` when it declares ' +
       'them, otherwise the AUTO-DEFAULT set — its text-like columns (text / email / phone / url / ' +
-      'autonumber / textarea / markdown / select), never a system/audit column or a hidden field. A ' +
-      '`lookup` or `master_detail` column stores only the referenced record\'s id, so it is never a ' +
-      'keyword target: to search by the related record\'s title, mirror it onto a stored text field ' +
-      'and declare that. Declaring `searchableFields` on the object chooses its set explicitly, and a ' +
+      'autonumber / textarea / markdown / select), never a system/audit column or a hidden field, plus ' +
+      'every field the object marks `searchable: true`, of any type but `secret` / `password` / ' +
+      '`vector`. A `lookup` or `master_detail` column stores only the referenced record\'s id, so the ' +
+      'default never picks it and marking it `searchable: true` scans that id, never the title: to ' +
+      'search by the related record\'s title, mirror it onto a stored text field and declare that. ' +
+      'Declaring `searchableFields` on the object chooses its set explicitly (a field\'s own ' +
+      '`searchable` is then not read), and a ' +
       'view then narrows that set, never widens it (ADR-0061). The verdict quotes at most three names ' +
       'of a declared set.',
     VIRTUAL_FIELD_STORAGE,
