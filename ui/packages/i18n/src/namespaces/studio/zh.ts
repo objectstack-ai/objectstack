@@ -936,6 +936,7 @@ const STUDIO_ZH: Record<string, string> = {
   'engine.inspector.action.scriptLanguage': '脚本语言',
   'engine.inspector.action.scriptBody': '脚本主体',
   'engine.inspector.action.scriptBodyHint': '在沙箱中以 {signature} 的形式运行。',
+  'engine.inspector.action.capabilitiesHint': '此函数体可调用的 ctx API。调用未授权的 API 会在动作运行时被拒绝。',
   'engine.inspector.action.method': '请求方法',
   // objectstack#26736 — 请求体形态，对应规范的两种形态。
   'engine.inspector.action.bodyShape': '请求体形态',

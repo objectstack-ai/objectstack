@@ -22,7 +22,7 @@ import {
     type ListUrlState,
     type ListSortRule,
 } from './userFilterUrlState.js';
-import { buildListFilterKey, readListFilterState } from './listFilterStorage.js';
+import { buildListFilterKey, readListFilterState, clearListFilterState } from './listFilterStorage.js';
 import type {
     useObjectListPreferences,
     ListFilterGroupPreference,
@@ -32,9 +32,25 @@ import { parseUrlEqualityFilterTriples } from './drillUrlFilters.js';
 import { selectFilterParams } from './objectViewHelpers.js';
 import type { buildViewTabs } from './objectViewTabs.js';
 import type { ConsoleObjectViewProps } from './ObjectView.js';
+import type { ListPersonalizationPart } from './ListPersonalizedMarker.js';
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     !!v && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * objectstack#28950 — the params with the reader's whole `uf_*` list state
+ * removed: the Filter panel, search, sort and grouping, and every user-filter
+ * chip. Through the owning module's own writers, so the family has one
+ * definition. Every other param (`filter[...]` drill scope, `recordId`, ...)
+ * is kept.
+ */
+export function withoutListStateParams(prev: URLSearchParams): URLSearchParams {
+    const chips = parseUserFilterParams(prev);
+    const cleared = chips
+        ? applyUserFilterParams(prev, Object.fromEntries(Object.keys(chips).map(field => [field, []])))
+        : new URLSearchParams(prev);
+    return applyListStateParams(cleared, { filters: null, search: null, sort: null, grouping: null });
+}
 
 /**
  * objectstack#28949 — the stored sort through the seed's field gate: a level
@@ -149,8 +165,12 @@ export function useObjectViewListUrlState({
     const listIdentityKey = activeView?.id
         ? `${objectName}-${activeView.id}${listResetGeneration ? `~${listResetGeneration}` : ''}`
         : undefined;
-    const listSeedRef = useRef<{ key: string; source: 'url' | 'storage'; state: ListUrlState } | undefined>(undefined);
+    const listSeedRef = useRef<{ key: string; source: 'url' | 'storage'; state: ListUrlState; reset?: boolean } | undefined>(undefined);
     const ownListParamsRef = useRef<string | undefined>(undefined);
+    // objectstack#28950 — set by "Reset to view" and taken by the next seed:
+    // that list opens from the (just cleared) stored state, never from the
+    // `uf_*` params, whoever wrote them, and its write-back strips them all.
+    const resetPendingRef = useRef(false);
     if (listIdentityKey && listPrefs.ready && listSeedRef.current?.key !== listIdentityKey) {
         // A field the object does not declare (a stale link, or a stored state
         // older than the field's deletion) or one this user cannot read is
@@ -160,7 +180,9 @@ export function useObjectViewListUrlState({
             !!objectDef.fields?.[field]
             && (!perms.isLoaded || perms.checkField(objectDef.name, field, 'read'));
         const carried = userFilterParamsKey(searchParams);
-        if (carried && carried !== ownListParamsRef.current) {
+        const reset = resetPendingRef.current;
+        resetPendingRef.current = false;
+        if (carried && carried !== ownListParamsRef.current && !reset) {
             listSeedRef.current = {
                 key: listIdentityKey,
                 source: 'url',
@@ -177,13 +199,14 @@ export function useObjectViewListUrlState({
                     search: stored?.search || undefined,
                     sort: acceptStoredSort(viewPref?.sort, acceptField),
                 },
+                reset,
             };
         }
     }
     useEffect(() => {
         const seed = listSeedRef.current;
         if (!seed || seed.key !== listIdentityKey) return;
-        const next = applyListStateParams(searchParams, {
+        const next = applyListStateParams(seed.reset ? withoutListStateParams(searchParams) : searchParams, {
             filters: seed.state.filters ?? null,
             search: seed.state.search ?? null,
             sort: seed.state.sort ?? null,
@@ -212,22 +235,63 @@ export function useObjectViewListUrlState({
     );
 
     /**
-     * objectui#12418 — "Reset view": drop this user's sort, filters and column
-     * layout for the active view, and open the list again as the view declares
-     * it. Offered only while they have stored something for it.
+     * objectstack#28950 — what of the reader's list differs from the view, as
+     * the list reports it (`ListView`'s `onPersonalizationChange`), held with
+     * the list identity it came from so a report never outlives its list. The
+     * column layout is the one part only this page knows: a stored column
+     * state is the reader's own.
      */
-    const activeViewHasPreference = !!(activeView?.id && listPrefs.preference.perView?.[activeView.id]);
+    const [reportedPersonalization, setReportedPersonalization] = useState<{
+        key: string;
+        parts: ReadonlyArray<ListPersonalizationPart>;
+    } | undefined>(undefined);
+    const handleListPersonalizationChange = useCallback(
+        (key: string, parts: ReadonlyArray<ListPersonalizationPart>) => {
+            setReportedPersonalization(prev =>
+                prev && prev.key === key && prev.parts.join(',') === parts.join(',') ? prev : { key, parts });
+        },
+        [],
+    );
+    const listPersonalizedParts: ListPersonalizationPart[] = [
+        ...(reportedPersonalization && reportedPersonalization.key === listIdentityKey
+            ? reportedPersonalization.parts
+            : []),
+    ];
+    if (activeView?.id && listPrefs.preference.perView?.[activeView.id]?.columnState
+        && !listPersonalizedParts.includes('columns')) {
+        listPersonalizedParts.push('columns');
+    }
+
+    /**
+     * objectstack#28950 — "Reset to view", the marker's one way back: the
+     * reader's whole list for the active view returns to the view's own. Their
+     * stored entry goes (sort, filters, column layout, density, hidden fields,
+     * objectui#12418), the cached search term with it, and the list opens
+     * again from that cleared state (the identity moves, so it remounts and
+     * re-seeds; a reset is the one case that WANTS the list's own state thrown
+     * away). The new seed ignores the `uf_*` params and its write-back strips
+     * them, chips included, so neither a reload nor Back brings the old list
+     * back. The remount puts the grouping, layout, row color, row numbers,
+     * inline edit and the "In a queue" toggle back to the view's.
+     *
+     * Not this view's list state, so untouched: the record-open preference,
+     * the tab order (pinned views), favorites and a `filter[...]` scope a
+     * "View all" link opened the list with.
+     */
     const handleResetView = useCallback(() => {
         if (!activeView?.id) return;
         listPrefs.resetView(activeView.id);
+        clearListFilterState(buildListFilterKey(user?.id, objectName, activeView.id));
+        resetPendingRef.current = true;
         setListResetGeneration(g => g + 1);
-    }, [activeView?.id, listPrefs.resetView]);
+    }, [activeView?.id, listPrefs.resetView, user?.id, objectName]);
     return {
         listIdentityKey,
         listSeedRef,
         ownListParamsRef,
         writeListUrlState,
-        activeViewHasPreference,
+        handleListPersonalizationChange,
+        listPersonalizedParts,
         handleResetView,
     };
 }
@@ -237,11 +301,13 @@ export function useObjectViewUrlFilters({
     setSearchParams,
     listIdentityKey,
     ownListParamsRef,
+    listSeedRef,
 }: {
     searchParams: URLSearchParams;
     setSearchParams: SetURLSearchParams;
     listIdentityKey: ReturnType<typeof useObjectViewListUrlState>['listIdentityKey'];
     ownListParamsRef: ReturnType<typeof useObjectViewListUrlState>['ownListParamsRef'];
+    listSeedRef?: ReturnType<typeof useObjectViewListUrlState>['listSeedRef'];
 }) {
     /**
      * URL-derived equality filters in the form `?filter[<field>]=<value>`.
@@ -300,7 +366,10 @@ export function useObjectViewUrlFilters({
      */
     const ufSelectionsRef = useRef<{ key: string; selections: Record<string, string[]> | undefined } | undefined>(undefined);
     if (listIdentityKey && ufSelectionsRef.current?.key !== listIdentityKey) {
-        ufSelectionsRef.current = { key: listIdentityKey, selections: parseUserFilterParams(searchParams) };
+        // objectstack#28950 — the list "Reset to view" opened starts with no
+        // chip selected: its seed strips their params from the address bar.
+        const reset = listSeedRef?.current?.key === listIdentityKey && !!listSeedRef.current.reset;
+        ufSelectionsRef.current = { key: listIdentityKey, selections: reset ? undefined : parseUserFilterParams(searchParams) };
     }
     const initialUfSelections = listIdentityKey ? ufSelectionsRef.current?.selections : undefined;
     const handleUserFilterSelectionsChange = useCallback(

@@ -170,19 +170,25 @@ export function mapFieldTypeToFormType(
     color: 'field:color',
     code: 'field:code',
     // A JSON value is edited as JSON — shown with `JSON.stringify`, saved
-    // with `JSON.parse` — by the editor `object`, `composite` and `record`
-    // below use (objectui#11448). It used to alias `field:code`, the raw-text
+    // with `JSON.parse` — by the editor `object`, `composite`, `record` and
+    // `repeater` below use (objectui#11448). It used to alias `field:code`, the raw-text
     // editor, which showed a stored object as `[object Object]` and saved an
     // edit as a string. `code` keeps the raw-text editor.
     json: 'field:object',
     qrcode: 'field:qrcode',
     vector: 'field:vector',
 
-    // Embedded structured values (stored as JSON on the row)
+    // Embedded structured values (stored as JSON on the row). The spec
+    // declares `composite`, `record` and `repeater` UNTYPED: no sub-field or
+    // column member exists for a widget to read, so all three take the JSON
+    // editor. `repeater` used to alias the line-items grid, which draws only
+    // declared columns and so showed a stored array as bare numbered rows,
+    // its content neither visible nor editable. A list that needs typed
+    // columns is a child object edited with `inlineEdit: 'grid'`.
     object: 'field:object',
     composite: 'field:object', // embedded object
     record: 'field:object', // name-keyed map
-    repeater: 'field:grid', // embedded array of rows
+    repeater: 'field:object', // embedded array of objects
 
     // Auto-generated/computed fields (typically read-only)
     formula: 'field:formula',

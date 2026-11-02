@@ -374,6 +374,52 @@ describe('#7566 — `GET /meta/app?id=` narrows the list instead of being droppe
         expect(namesFrom(res.body)).toEqual(['all_leads']);
     });
 
+    // The same class one step down the chain: `?object[]=lead` or
+    // `?object[0]=lead` reached the view switcher under the key as spelled,
+    // so the filter, which reads `query.object`, never saw it and the caller
+    // who asked for one object's views got every view it may see. Refused with
+    // the bracketed `id`'s answer, naming the key as sent; the dispatcher's
+    // twin is pinned in `@objectstack/runtime`'s list parity census.
+    it.each(['object[]', 'object[0]', 'object[name]'])('a BRACKETED view `%s` key is refused with 400 naming it — never every view', async (key) => {
+        const views = async ({ type: t }: any) =>
+            String(t ?? '').startsWith('view')
+                ? [{ name: 'all_leads', viewKind: 'list', object: 'lead' }, { name: 'acct_view', viewKind: 'list', object: 'account' }]
+                : [];
+        for (const perms of [['studio.access'], ['manage_users'], []]) {
+            for (const type of ['view', 'views']) {
+                const { rest, protocol } = setup(perms);
+                protocol.getMetaItems = vi.fn(views);
+                const res = await getList(rest, type, { [key]: 'lead' });
+
+                expect(res.statusCode, `${type}, caller holding [${perms}]`).toBe(400);
+                expect(res.body?.code).toBe('VALIDATION_ERROR');
+                expect(String(res.body?.error)).toBe(
+                    `Query parameter '${key}' names no object; the 'object' filter takes exactly one object name, `
+                    + `spelled ?object=NAME. The list was not served: a bracketed 'object' key is not a filter. `
+                    + 'Name one object, or leave the parameter out to list every view you can see.',
+                );
+                expect(res.body?.items).toBeUndefined();
+                expect(Array.isArray(res.body)).toBe(false);
+            }
+        }
+        // A bracketed key beside a plain one is two spellings of one filter.
+        const { rest, protocol } = setup(['manage_users']);
+        protocol.getMetaItems = vi.fn(views);
+        const both = await getList(rest, 'view', { object: 'lead', [key]: 'account' });
+        expect(both.statusCode).toBe(400);
+        expect(both.body?.code).toBe('VALIDATION_ERROR');
+        // Controls: the plain spelling still switches, an absent one lists all.
+        expect(namesFrom((await getList(rest, 'view', { object: 'lead' })).body)).toEqual(['all_leads']);
+        expect(namesFrom((await getList(rest, 'view')).body).sort()).toEqual(['acct_view', 'all_leads']);
+    });
+
+    it('a bracketed `object` key on another list type is not read, as no other `object` spelling is (control)', async () => {
+        const res = await getList(setup(['manage_users']).rest, 'app', { 'object[]': 'lead' });
+
+        expect(res.statusCode).toBe(200);
+        expect(namesFrom(res.body).sort()).toEqual(['account', 'crm']);
+    });
+
     it('a WHITESPACE id keeps its answer — a value no app is named, so an empty list (#28548 control)', async () => {
         const { rest } = setup(['manage_users']);
         const res = await getList(rest, 'app', { id: ' ' });
