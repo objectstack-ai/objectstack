@@ -81,15 +81,19 @@ function makeDataSource() {
   };
 }
 
-/** A full record page of the user object whose body names the page, so the drawn page is readable. */
+/**
+ * A full record page of the user object. Its accessible name (`aria.ariaLabel`,
+ * stamped on the page root) names the page, so the drawn page is readable.
+ */
 function userPage(name: string, extra: Record<string, unknown> = {}) {
   return {
     name,
     label: name,
     type: 'record',
     object: OBJECT,
+    aria: { ariaLabel: name },
     ...extra,
-    regions: [{ name: 'main', components: [{ type: 'text', value: `drawn page: ${name}` }] }],
+    regions: [{ name: 'main', components: [] }],
   };
 }
 
@@ -133,10 +137,10 @@ async function drawnPage(url: string, pages: unknown[], drawer = false): Promise
     </MemoryRouter>,
   );
   await waitFor(() => expect(ds.findOne).toHaveBeenCalled());
-  await waitFor(() => expect(utils.container.textContent).toMatch(/drawn page: \w+/));
-  const text = utils.container.textContent ?? '';
+  await waitFor(() => expect(utils.container.querySelector('[data-page-type="record"][aria-label]')).not.toBeNull());
+  const drawn = utils.container.querySelector('[data-page-type="record"][aria-label]')?.getAttribute('aria-label') ?? undefined;
   cleanup();
-  return /drawn page: (\w+)/.exec(text)?.[1];
+  return drawn;
 }
 
 const recordUrl = (segment: string) => `/apps/${segment}/${OBJECT}/record/${REC}`;
