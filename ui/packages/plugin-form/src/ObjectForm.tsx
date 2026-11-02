@@ -68,6 +68,8 @@ import {
 import { useOccSave } from './occSave';
 import {
   NO_LOAD_FAILURES,
+  RecordNotFoundError,
+  RecordNotFoundState,
   beginLoadRun,
   shownLoadFailure,
   type LoadFailures,
@@ -859,6 +861,14 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
       try {
         const data = await dataSource.findOne(schema.objectName, schema.recordId);
         if (cancelled) return;
+        // `findOne` answers `null` for a record that does not exist: there is
+        // nothing to edit, so the read failed, and the form is not seeded. On a
+        // bus re-read this is the record deleted while the form is open, drawn
+        // the same way.
+        if (data == null) {
+          run.fail(new RecordNotFoundError(schema.objectName, schema.recordId));
+          return;
+        }
         // Tagged with the object and record it was read for, so a save that
         // runs against a different one finds no baseline and sends everything.
         loadedRecordRef.current = snapshotLoadedRecord(schema, data);
@@ -1500,6 +1510,9 @@ const SimpleObjectForm: React.FC<{ schema: LocalizedObjectFormSchema; dataSource
   const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>({});
 
   // Render error state
+  if (error instanceof RecordNotFoundError) {
+    return <RecordNotFoundState testId="simple-form-record-not-found" />;
+  }
   if (error) {
     return (
       <div className="p-3 sm:p-4 border border-red-300 bg-red-50 rounded-md">
