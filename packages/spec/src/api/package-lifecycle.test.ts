@@ -198,7 +198,7 @@ describe('RollbackToPackageCommitResponseSchema declares the COMMIT-rollback bod
   });
 });
 
-describe('PackageExportManifestSchema declares the five fixed keys and stays open', () => {
+describe('PackageExportManifestSchema declares the seven fixed keys and stays open', () => {
   /** A verbatim-shaped capture of a real `assemblePackageManifest` return. */
   const realResponse = {
     id: 'com.example.crm',

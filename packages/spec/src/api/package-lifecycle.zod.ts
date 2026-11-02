@@ -179,10 +179,10 @@ export const RollbackToPackageCommitResponseSchema = lazySchema(() => z.object({
  * `GET /packages/:id/export` — the package's portable manifest (ADR-0070
  * offline export), the same shape `marketplace-install-local` consumes.
  *
- * Two fixed keys beyond the four counted below come from the package's
- * registry row rather than from its items: `namespace` and `dependencies`,
- * each the install manifest's own declaration (`ManifestSchema`), so an
- * export reinstalled elsewhere keeps both. Without them an install door falls
+ * Two of the fixed keys below come from the package's registry row rather
+ * than from its items: `namespace` and `dependencies`, each the install
+ * manifest's own declaration (`ManifestSchema`), so an export reinstalled
+ * elsewhere keeps both. Without them an install door falls
  * back to the namespace derived from the id (a `.custom` pair lands under
  * `custom`, not the namespace it was installed with), and the pair loses its
  * edge to its base, which orders the install after the base (ADR-0141 D5) and
@@ -193,7 +193,7 @@ export const RollbackToPackageCommitResponseSchema = lazySchema(() => z.object({
  * (`runtime/src/domains/packages.ts`) builds the key set DYNAMICALLY from the
  * metadata type registry — one plural key per type present
  * (`manifest[plural] = items.map(clean)`), partitioning `views` per #5320 —
- * plus the five fixed keys below. Only the fixed keys are pinnable;
+ * plus the seven fixed keys below. Only the fixed keys are pinnable;
  * enumerating the registry here would freeze this contract against future
  * metadata types, so everything else deliberately falls to the open
  * catch-all. Freezes nothing.
