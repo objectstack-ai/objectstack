@@ -286,11 +286,22 @@ shell; the bridge contract is owned by the mobile app (`docs/HYBRID-SHELL.md`,
 - `useNativeHost()` returns the bridge, or `null` outside the shell. It reads the
   global lazily and re-checks at `DOMContentLoaded`, `load` and a few points after
   `load`, so a bridge injected after the first render still arrives.
+- `platform` is the shell's platform string, an open set: `ios` and `android` from
+  the mobile app, another value from another shell (the desktop one). Do not branch
+  on it; branch on the viewport or on a capability.
+- This package speaks bridge protocol version `1`; the bridge's `version` bumps only
+  on a breaking change. A bridge whose `version` is higher, or not a number, reads as
+  no bridge: `null` from `useNativeHost()` and `getNativeHost()`, so the page keeps
+  its browser behaviour.
 - `useNativeHostRouting({ route, navigate })` wires a router to the shell: `ready()`
   once per page load after the first commit, `routeChanged(route)` once per route
   change, and the shell's cancelable `objectstack-native:navigate` window event moves
   the router (in-app paths only) instead of reloading the page. Outside the shell it
   installs nothing.
+- `ready()` means "the page has painted its own UI", which may be a loading fallback,
+  such as an auth guard's spinner while the session is read. The shell lifts its
+  loading cover on it, so the cover hands over to that spinner instead of staying up
+  through the session round-trip.
 - `nativeGetPushToken`, `nativeHaptic`, `nativeOpenExternal`, `nativeNavigate` and
   `nativeResetServer` check `has(capability)` and that the method exists before
   calling. They never throw: each resolves `{ status: 'unavailable' }` without the
@@ -298,10 +309,9 @@ shell; the bridge contract is owned by the mobile app (`docs/HYBRID-SHELL.md`,
   `{ status: 'failed', code, message }` when the shell refuses the call.
 
 ```tsx
-import { nativeHaptic, useNativeHost } from '@object-ui/mobile';
+import { nativeHaptic } from '@object-ui/mobile';
 
 export function SaveButton({ onSave }: { onSave: () => Promise<void> }) {
-  const host = useNativeHost();
   return (
     <button
       type="button"
@@ -311,7 +321,7 @@ export function SaveButton({ onSave }: { onSave: () => Promise<void> }) {
         await nativeHaptic('success');
       }}
     >
-      {host ? 'Save' : 'Save changes'}
+      Save
     </button>
   );
 }
