@@ -279,12 +279,31 @@
  *     reading state `draft` — and the run
  *     names that id in an annotation this file reads and hands on as
  *     `result.annotations.advisories` (`--json`: `advisories`), so the seat
- *     follows with `advisory_collaborators_add` and then reads the report under
- *     its own account. `advisory_collaborators_add` and `advisory_state` carry
+ *     follows with `advisory_collaborators_add` and then reads the advisory
+ *     with `advisory_read`. `advisory_collaborators_add` and `advisory_state` carry
  *     no body and are confirmed inside the run on their own PATCH answer (every
  *     login sent listed, the state asked for shown) after the executor's fences
  *     on the advisory. A run that failed (a fence refused it, or the answer did
- *     not show the result) is exit 5 like any failed run, ⛔ never re-sent.
+ *     not show the result) is exit 5 like any failed run, ⛔ never re-sent;
+ *   - `advisory_read` has NO byte read-back either, and needs none: it writes
+ *     nothing. Its outcome is the sealed answer, and reading it back IS the
+ *     outcome. This file makes the read's key pair (`armAdvisoryReads`: one
+ *     X25519 pair per read action, the public half put in the action, the
+ *     private half a `KeyObject` held in this process's memory alone — never
+ *     exported, never written, never printed, and gone when the process exits;
+ *     a `public_key` already in the actions file is refused, because it would
+ *     mean a private key kept somewhere). After a `success` run it reads the
+ *     read's notice parts off the run's annotations (`readRunAnnotations`),
+ *     reassembles them (`assembleAdvisoryReads`: parts 1..n each exactly once)
+ *     and opens them with that key (`openRunAdvisoryReads`, `ops.mjs`'s
+ *     `openAdvisoryRead`) — handed on as `result.reads`. A read whose parts are
+ *     missing, ambiguous, tampered with or sealed for another key or read is
+ *     `unverified`, exit 6, and nothing of it is printed. ⛔ The opened text is
+ *     printed to THIS process's stdout and only with `--reveal`; never to
+ *     stderr, a log, a file or `--json`, which carries its byte count and
+ *     field names alone. A run that failed (a fence refused the read, the
+ *     seal failed or did not fit) is exit 5; a read writes nothing, so it may
+ *     be re-sent with a fresh key.
  *
  * ## The started run — the one outcome only the seat can name
  *
@@ -454,7 +473,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -465,7 +484,25 @@ import { EXIT_PREREQUISITE_NOT_MET, PROXY_FLAG, proxyRearmPlan, proxyRoute, read
 import { ROSTER_MARKER } from '../fleet-roster.mjs';
 import { classifyHttp } from '../label-write.mjs';
 import { DEFAULT_BATCH_GAP_MS, DEFAULT_BATCH_THRESHOLD, EXIT_WRITE_PACE_REFUSED, fmtDuration, isWriteMethod, noteResponse, paceWrite, releaseWriteLease } from '../write-pace.mjs';
-import { CONTAINER_SESSION_ENV, CONTAINER_SESSION_SHAPE, FIELDS, MAX_REQUEST_ID_CHARS, OPS, OP_NAMES, RELAY_EVENT_TYPE, RELAY_REPO, SESSION_ENV, SESSION_SHAPE, TRANSPORTS, TRANSPORT_ENV } from './ops.mjs';
+import {
+  ADVISORY_READ_KEY_TYPE,
+  ADVISORY_READ_MAX_PARTS,
+  ADVISORY_READ_PART_CHARS,
+  CONTAINER_SESSION_ENV,
+  CONTAINER_SESSION_SHAPE,
+  FIELDS,
+  MAX_REQUEST_ID_CHARS,
+  OPS,
+  OP_NAMES,
+  RELAY_EVENT_TYPE,
+  RELAY_REPO,
+  SESSION_ENV,
+  SESSION_SHAPE,
+  TRANSPORTS,
+  TRANSPORT_ENV,
+  advisoryReadAad,
+  openAdvisoryRead,
+} from './ops.mjs';
 import { EVENT_PATH_ENV, refusalText, validatePayload } from './validate.mjs';
 
 const SELF_PATH = fileURLToPath(import.meta.url);
@@ -914,6 +951,9 @@ export const RUN_READ_BACK_WINDOW_MS = 60_000;
  * nothing is `unverified` — an object that was not found was not measured.
  * The self-test pins that this table names exactly `BODY_OPS`.
  */
+// ⛔ No locator for `advisory_read`: it has NO byte read-back, because it writes nothing — no body, no object. Its
+// read-back is the seat opening the sealed answer the run's notices carry with the key only this process holds
+// (`openRunAdvisoryReads`); an answer that does not open is `unverified` (header, "How the callers").
 // ⛔ No locator for `advisory_report`, on purpose — nor for `advisory_create`, the same shape: its prose rides `summary`
 // and `description`, never `body`, so it is not in `BODY_OPS`, and a byte-for-byte read-back cannot apply to it — the seat cannot read a private report before it
 // is a collaborator, and the executor must not print the answer that holds the stored bytes. Its confirmation is the
@@ -1112,6 +1152,133 @@ export function parseRelayAdvisoryAnnotation(message) {
   const m = RELAY_ADVISORY_ANNOTATION_SHAPE.exec(typeof message === 'string' ? message : '');
   if (!m || !ADVISORY_ANNOTATED_OPS.includes(m[2])) return null;
   return { action: Number(m[1]), op: m[2], ghsaId: m[3] };
+}
+
+/**
+ * The ops whose answer comes back SEALED (`ops.mjs`, "The one row that READS an advisory") — derived from the table:
+ * the rows that require a `public_key`. The executor emits a read's sealed answer as notice parts, each
+ * `fleet-write action=<i> op=<op> part=<k>/<n> sealed=<chunk>` and nothing else — no id, no state, no field — and the
+ * seat opens them with the key it holds (`openRunAdvisoryReads`).
+ */
+export const ADVISORY_READ_OPS = Object.freeze(OP_NAMES.filter((op) => OPS[op].required.includes('public_key')));
+
+const RELAY_ADVISORY_READ_SHAPE = new RegExp(`^${RELAY_ANNOTATION_PREFIX} action=([1-9][0-9]*) op=([a-z_]+) part=([1-9][0-9]*)/([1-9][0-9]*) sealed=([A-Za-z0-9_-]{1,${ADVISORY_READ_PART_CHARS}})$`);
+
+/** The message of one notice part of a read's sealed answer. Pure. */
+export function relayAdvisoryReadAnnotationMessage({ action, op, part, of, sealed }) {
+  return `${RELAY_ANNOTATION_PREFIX} action=${action} op=${op} part=${part}/${of} sealed=${sealed}`;
+}
+
+/** A read part's `message` as `{ action, op, part, of, sealed }`, or null for anything else. Pure; never throws. */
+export function parseRelayAdvisoryReadAnnotation(message) {
+  const m = RELAY_ADVISORY_READ_SHAPE.exec(typeof message === 'string' ? message : '');
+  if (!m || !ADVISORY_READ_OPS.includes(m[2])) return null;
+  const part = Number(m[3]);
+  const of = Number(m[4]);
+  if (part > of || of > ADVISORY_READ_MAX_PARTS) return null;
+  return { action: Number(m[1]), op: m[2], part, of, sealed: m[5] };
+}
+
+/**
+ * Make each read's key pair, in THIS process (header, "How the callers"): one X25519 pair per `advisory_read`
+ * action, its public half put in the action as `public_key`, its private half a `KeyObject` kept in the returned
+ * `keys` map (action index → key) — ⛔ never exported, written or printed; it dies with the process. A `public_key`
+ * already in an action is REFUSED, never used: a key made elsewhere means a private key kept elsewhere. The value is
+ * never echoed. Returns `{ actions, keys, refused }`; `actions` is a new array, the file's own untouched. Pure but
+ * for the key generation, which `generate` stands in for in the self-test.
+ */
+export function armAdvisoryReads(actions, { generate = () => generateKeyPairSync(ADVISORY_READ_KEY_TYPE) } = {}) {
+  const keys = new Map();
+  const refused = [];
+  if (!Array.isArray(actions)) return { actions, keys, refused };
+  const armed = actions.map((a, i) => {
+    if (a === null || typeof a !== 'object' || Array.isArray(a) || !ADVISORY_READ_OPS.includes(a.op)) return a;
+    if (Object.hasOwn(a, 'public_key')) {
+      refused.push(
+        `fleet-write/dispatch: REFUSED — actions[${i}].public_key is set in the actions file: an ${a.op}'s key pair is made by this door for that one read, and its private half never leaves this process, so a key from a file (which means a private key kept somewhere) is refused, not used. Drop the key; the door makes one.`,
+      );
+      return a;
+    }
+    const pair = generate();
+    keys.set(i + 1, pair.privateKey);
+    return { ...a, public_key: pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+  });
+  return { actions: armed, keys, refused };
+}
+
+/**
+ * Each read action's sealed answer, reassembled from the run's parts: `[{ action, op, sealed, parts, why }]` in the
+ * stroke's order — `sealed` the parts 1..n joined, when every one is there EXACTLY once under one n (a part repeated
+ * with the same text is the same part); otherwise `sealed` null and `why` naming what is missing or ambiguous. A
+ * reader never picks between two answers. Pure.
+ */
+export function assembleAdvisoryReads(payload, parts) {
+  const actions = Array.isArray(payload?.actions) ? payload.actions : [];
+  const out = [];
+  for (const [i, a] of actions.entries()) {
+    if (!ADVISORY_READ_OPS.includes(a?.op)) continue;
+    const mine = (Array.isArray(parts) ? parts : []).filter((p) => p.action === i + 1 && p.op === a.op);
+    const row = { action: i + 1, op: a.op, sealed: null, parts: 0, why: '' };
+    if (mine.length === 0) {
+      out.push({ ...row, why: 'no part of its sealed answer is on the run' });
+      continue;
+    }
+    const counts = new Set(mine.map((p) => p.of));
+    if (counts.size > 1) {
+      out.push({ ...row, why: `its parts disagree on their count (${[...counts].sort((x, y) => x - y).join(', ')})` });
+      continue;
+    }
+    const of = mine[0].of;
+    const byPart = new Map();
+    let clash = false;
+    for (const p of mine) {
+      if (byPart.has(p.part) && byPart.get(p.part) !== p.sealed) clash = true;
+      byPart.set(p.part, p.sealed);
+    }
+    const missing = Array.from({ length: of }, (_, k) => k + 1).filter((k) => !byPart.has(k));
+    if (clash) out.push({ ...row, why: 'two different parts carry one part number' });
+    else if (missing.length) out.push({ ...row, why: `part(s) ${missing.join(', ')} of ${of} are not on the run` });
+    else out.push({ ...row, sealed: Array.from({ length: of }, (_, k) => byPart.get(k + 1)).join(''), parts: of });
+  }
+  return out;
+}
+
+/**
+ * Open each read with the key this process made for it (`keys`, from `armAdvisoryReads`): `[{ action, op, state,
+ * plaintext, bytes, fields, parts, why }]` — `state` `opened` with the plaintext, byte for byte what the executor
+ * sealed, its UTF-8 byte count and its top-level field names; or `unverified`, `plaintext` null, `why` saying why
+ * (no key in this process, parts missing, or an answer that does not open — tampered with, or sealed for another
+ * key or read). ⛔ Nothing here prints; the caller prints the plaintext on `--reveal` alone. Never throws.
+ */
+export function openRunAdvisoryReads(payload, parts, keys = new Map()) {
+  return assembleAdvisoryReads(payload, parts).map((r) => {
+    const shut = (why) => ({ action: r.action, op: r.op, state: 'unverified', plaintext: null, bytes: null, fields: null, parts: r.parts, why });
+    if (r.sealed === null) return shut(r.why);
+    const privateKey = keys.get(r.action);
+    if (!privateKey) return shut("this process holds no key for it — a read opens only in the process that made its key");
+    let plaintext;
+    try {
+      plaintext = openAdvisoryRead({ sealed: r.sealed, privateKey, aad: advisoryReadAad({ requestId: payload.request_id, action: r.action, ghsaId: payload.actions[r.action - 1].ghsa_id }) });
+    } catch (e) {
+      return shut(e.message);
+    }
+    let fields = null;
+    try {
+      const json = JSON.parse(plaintext);
+      if (json !== null && typeof json === 'object' && !Array.isArray(json)) fields = Object.keys(json);
+    } catch {
+      fields = null;
+    }
+    return { action: r.action, op: r.op, state: 'opened', plaintext, bytes: Buffer.byteLength(plaintext, 'utf8'), fields, parts: r.parts, why: '' };
+  });
+}
+
+/** The line a read's outcome earns on stderr — counts and field names, ⛔ never the text. Pure. */
+export function advisoryReadLine(row, { runId = '?', reveal = false } = {}) {
+  if (row.state === 'opened') {
+    return `fleet-write: run ${runId}'s notices carry action ${row.action} ${row.op}'s sealed answer in ${row.parts} part(s) — opened with this process's one-time key: ${row.bytes} byte(s), fields ${(row.fields ?? []).join(', ') || 'none'}. ${reveal ? 'The text follows on stdout.' : "Not printed: pass --reveal to print it to this process's stdout (never a file)."}`;
+  }
+  return `fleet-write: run ${runId}'s sealed answer for action ${row.action} ${row.op} is UNVERIFIED — ${row.why}; ⛔ nothing of it is printed. A read writes nothing, so it may be re-sent with a fresh key; a run whose parts do not open twice goes to the maintainer.`;
 }
 
 /**
@@ -1339,9 +1506,10 @@ async function listAll(api, path, t, maxPages = 10) {
 
 /**
  * The relay annotations on a run's check runs — its jobs, then each job's
- * check-run annotations, every message through `parseRelayAnnotation` (the
+ * check-run annotations, every message through `parseRelayAnnotation`,
+ * `parseRelayAdvisoryAnnotation` and `parseRelayAdvisoryReadAnnotation` (the
  * rest of the check run's annotations are ignored). Returns `{ state, parsed,
- * why }`: `read`, or `unread` naming the call that did not answer, with
+ * advisories, reads, why }`: `read`, or `unread` naming the call that did not answer, with
  * whatever was parsed before it. Reads only — never paced; never throws.
  */
 export async function readRunAnnotations(runId, deps = {}) {
@@ -1349,34 +1517,40 @@ export async function readRunAnnotations(runId, deps = {}) {
   const t = { fetch: deps.fetch, token: deps.token };
   const said = (r) => `${r.call} -> HTTP ${r.status}${r.detail ? ` (${r.detail})` : ''}`;
   const jobs = await rest(api, `/repos/${RELAY_REPO}/actions/runs/${runId}/jobs?per_page=100`, {}, t);
-  if (jobs.status !== 200 || !Array.isArray(jobs.json?.jobs)) return { state: 'unread', parsed: [], advisories: [], why: said(jobs) };
+  if (jobs.status !== 200 || !Array.isArray(jobs.json?.jobs)) return { state: 'unread', parsed: [], advisories: [], reads: [], why: said(jobs) };
   const parsed = [];
   const advisories = [];
+  const reads = [];
   for (const job of jobs.json.jobs) {
     const id = checkRunIdOf(job);
     if (id === null) continue;
     const r = await rest(api, `/repos/${RELAY_REPO}/check-runs/${id}/annotations?per_page=100`, {}, t);
-    if (r.status !== 200 || !Array.isArray(r.json)) return { state: 'unread', parsed, advisories, why: said(r) };
+    if (r.status !== 200 || !Array.isArray(r.json)) return { state: 'unread', parsed, advisories, reads, why: said(r) };
     for (const a of r.json) {
       const row = parseRelayAnnotation(a?.message);
       if (row) parsed.push(row);
       const filed = parseRelayAdvisoryAnnotation(a?.message);
       if (filed) advisories.push(filed);
+      const part = parseRelayAdvisoryReadAnnotation(a?.message);
+      if (part) reads.push(part);
     }
   }
-  return { state: 'read', parsed, advisories, why: '' };
+  return { state: 'read', parsed, advisories, reads, why: '' };
 }
 
 /**
  * The annotations a stroke's success run carries, matched to its actions and
  * said: one line per row, per ignored row, per annotated action no row names,
  * and one when the read did not answer. A stroke with no annotated op reads
- * nothing (`state: 'none'`). Returns `{ state, rows, ignored, why }`.
+ * nothing (`state: 'none'`). Returns `{ state, rows, ignored, advisories,
+ * reads, why }` — `reads` the parsed parts of a read's sealed answer, never
+ * logged here: `sendFleetWrite` opens them.
  */
 async function runAnnotationsFor(payload, run, deps) {
   const annotated = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => Object.hasOwn(ANNOTATED_OPS, a.op));
   const filing = payload.actions.map((a, i) => ({ action: i + 1, op: a.op })).filter((a) => ADVISORY_ANNOTATED_OPS.includes(a.op));
-  if (!annotated.length && !filing.length) return { state: 'none', rows: [], ignored: [], advisories: [], why: '' };
+  const reading = payload.actions.some((a) => ADVISORY_READ_OPS.includes(a.op));
+  if (!annotated.length && !filing.length && !reading) return { state: 'none', rows: [], ignored: [], advisories: [], reads: [], why: '' };
   const read = await readRunAnnotations(run.id, deps);
   const { rows, ignored } = matchRunAnnotations(payload, read.parsed);
   const filed = matchRunAdvisories(payload, read.advisories ?? []);
@@ -1393,7 +1567,7 @@ async function runAnnotationsFor(payload, run, deps) {
   for (const a of filing) {
     if (!filed.rows.some((r) => r.action === a.action)) log(`fleet-write: no annotation on run ${run.id} names action ${a.action} ${a.op}'s advisory id — the run's summary row holds it, which a seat container cannot read, and the seat cannot list the repository's advisories: ask the maintainer for the id; ⛔ do not re-send the ${a.op === 'advisory_create' ? 'draft' : 'report'}.`);
   }
-  return { state: read.state, rows, ignored, advisories: filed.rows, why: read.why };
+  return { state: read.state, rows, ignored, advisories: filed.rows, reads: read.reads ?? [], why: read.why };
 }
 
 /**
@@ -1580,6 +1754,9 @@ export function runReadBackLine(row) {
  * body could not be read back) · `no-run` · `timeout` · `refused` (the dispatch itself). `readBack` is `readBackStroke`'s
  * answer, present once the run succeeded, and so is `annotations` — `{ state, rows, ignored, why }`, the run's
  * annotations matched to the stroke (`state` `none` when it carries no annotated op). Never throws on an HTTP status.
+ * `reads` is `openRunAdvisoryReads`' answer for an `advisory_read` stroke, opened with `deps.advisoryReadKeys` (the
+ * keys `armAdvisoryReads` made in this process); a read that does not open makes the state `unverified`. The log
+ * says a read's counts alone (`advisoryReadLine`); ⛔ the plaintext is in `reads` and nowhere else this prints.
  */
 export async function sendFleetWrite(payload, deps = {}) {
   const api = deps.api ?? DEFAULT_API;
@@ -1646,6 +1823,11 @@ export async function sendFleetWrite(payload, deps = {}) {
 
   // ── the run's annotations — the numbers it created or moved, where a seat CAN read them (header) ─────
   const annotations = await runAnnotationsFor(payload, run, { api, fetch: deps.fetch, token: deps.token, log });
+  // ── a read's sealed answer — opened with the key only this process holds; its read-back, and its only one (header) ─────
+  const reads = openRunAdvisoryReads(payload, annotations.reads ?? [], deps.advisoryReadKeys);
+  for (const row of reads) log(advisoryReadLine(row, { runId: run.id, reveal: deps.reveal === true }));
+  const unopened = reads.find((r) => r.state !== 'opened');
+  if (unopened) return { ...done, state: 'unverified', ok: false, annotations, reads, detail: `conclusion success, but UNVERIFIED — action ${unopened.action} (${unopened.op}): ${unopened.why}` };
 
   // ── read it back — the run's success is the executor's, not the write's ─────
   const readBack = await readBackStroke(payload, { dispatchedAt, annotations: annotations.rows }, { api, fetch: deps.fetch, token: deps.token, judge: deps.judge, sleep, log });
@@ -1655,13 +1837,13 @@ export async function sendFleetWrite(payload, deps = {}) {
   for (const row of runs.rows) log(runReadBackLine(row));
   if (readBack.state === 'not-stored') {
     const first = readBack.rows.find((r) => r.verdict === 'not-stored');
-    return { ...done, state: 'failure', ok: false, notStored: true, readBack, runs, annotations, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
+    return { ...done, state: 'failure', ok: false, notStored: true, readBack, runs, annotations, reads, detail: `conclusion success, but NOT STORED — action ${first.action} (${first.op} ${first.where}) first differs from the bytes sent at byte ${first.offset}` };
   }
   if (readBack.state === 'unverified' || runs.state === 'unverified') {
     const first = [...readBack.rows, ...runs.rows].find((r) => r.verdict === 'unverified');
-    return { ...done, state: 'unverified', ok: false, readBack, runs, annotations, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
+    return { ...done, state: 'unverified', ok: false, readBack, runs, annotations, reads, detail: `conclusion success, but UNVERIFIED — action ${first.action} (${first.op}): ${first.why ?? first.cls}` };
   }
-  return { ...done, state: 'success', ok: true, readBack, runs, annotations, detail: `conclusion ${run.conclusion}` };
+  return { ...done, state: 'success', ok: true, readBack, runs, annotations, reads, detail: `conclusion ${run.conclusion}` };
 }
 
 /** The exit a tool takes from a result that is not `success`. */
@@ -3128,7 +3310,7 @@ export async function selfTest() {
 // ---------------------------------------------------------------------------
 
 export function parseArgs(argv) {
-  const opts = { repo: null, actionsFile: null, session: null, requestId: null, dryRun: false, json: false, selfTest: false, help: false, route: false, errors: [] };
+  const opts = { repo: null, actionsFile: null, session: null, requestId: null, dryRun: false, json: false, reveal: false, selfTest: false, help: false, route: false, errors: [] };
   const args = [...argv];
   const value = (flag) => {
     const v = args.shift();
@@ -3145,6 +3327,7 @@ export function parseArgs(argv) {
     else if (a === '--route') opts.route = true;
     else if (a === '--dry-run') opts.dryRun = true;
     else if (a === '--json') opts.json = true;
+    else if (a === '--reveal') opts.reveal = true;
     else if (a === '--repo') opts.repo = value(a);
     else if (a === '--actions-file') opts.actionsFile = value(a);
     else if (a === '--session') opts.session = value(a);
@@ -3165,6 +3348,7 @@ const USAGE = [
   'usage:',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json [--session session_…] [--request-id id] [--json]',
   '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file actions.json --dry-run',
+  '  node scripts/pm/fleet-write/dispatch.mjs --repo owner/name --actions-file read.json [--reveal]   # one advisory_read: { op, ghsa_id }',
   '  node scripts/pm/fleet-write/dispatch.mjs --route        # ONE JSON line: the transport this environment resolves to, and why',
   '  node scripts/pm/fleet-write/dispatch.mjs --self-test',
   '',
@@ -3176,6 +3360,9 @@ const USAGE = [
   '  refused (2) before anything is packed; the fleet roster\'s generated body is the one exemption. A pull request\'s',
   `  issue_patch body may instead end with ${PR_BODY_TRAILER_SHAPE} on its last non-empty line: the target is then`,
   '  read from the platform, a dry run included — an issue refused (2), an unread target refused (3).',
+  '  An advisory_read names ghsa_id alone: this process makes its one-time key pair, sends the public half, and opens',
+  '  the sealed answer with the private half, which never leaves memory. --reveal prints the opened text to stdout, and',
+  '  nothing else ever prints it; a public_key in the actions file is refused (2).',
   `  Exits: ${EXIT_OK} run succeeded, every body reads back as sent and every started run is listed · ${EXIT_USAGE} usage / payload refused · ${EXIT_PREREQUISITE} prerequisite ·`,
   `         ${EXIT_NOT_STORED} NOT STORED (the run succeeded, a body reads back otherwise — go READ, never retry) · ${EXIT_PLATFORM_REFUSAL} dispatch refused or run failed ·`,
   `         ${EXIT_UNCONFIRMED} UNCONFIRMED (no run, no completion within the ceiling, a body not read back, or a started run not listed) · ${EXIT_WRITE_PACE_REFUSED} throttle refused`,
@@ -3246,6 +3433,20 @@ export async function main(argv, deps = {}) {
     console.error('fleet-write/dispatch: nothing was sent.');
     return EXIT_USAGE;
   }
+  // A read's one-time key pair, made HERE, in memory (header, "How the callers"): the public half goes in the action;
+  // the private half stays in `armed.keys` and dies with this process. A process re-executed through the proxy below
+  // makes its own; this one's is discarded with it.
+  const armed = armAdvisoryReads(actions);
+  if (armed.refused.length > 0) {
+    for (const line of armed.refused) console.error(line);
+    console.error('fleet-write/dispatch: nothing was sent.');
+    return EXIT_USAGE;
+  }
+  if (opts.reveal && armed.keys.size === 0) {
+    console.error("fleet-write/dispatch: --reveal prints an advisory_read's opened answer, and this stroke carries no advisory_read. Nothing was sent.");
+    return EXIT_USAGE;
+  }
+  actions = armed.actions;
   const session = opts.session ?? sessionFrom(env);
   if (!session || !SESSION_SHAPE.test(session)) {
     console.error(
@@ -3301,7 +3502,9 @@ export async function main(argv, deps = {}) {
     if (rearmed !== null) return rearmed;
   }
   const tool = 'scripts/pm/fleet-write/dispatch.mjs';
-  const result = await sendFleetWrite(packed.payload, { token, ...(deps.send ?? {}) });
+  const result = await sendFleetWrite(packed.payload, { token, advisoryReadKeys: armed.keys, reveal: opts.reveal, ...(deps.send ?? {}) });
+  // ⛔ The opened text reaches THIS process's stdout, and only on --reveal — never stderr, a log, a file or --json.
+  if (opts.reveal) for (const r of result.reads ?? []) if (r.state === 'opened') console.log(r.plaintext);
   if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, tool));
   if (result.notStored) console.error(notStoredText(result, tool));
   if (result.state === 'unverified') console.error(unverifiedText(result, tool));
@@ -3317,6 +3520,8 @@ export async function main(argv, deps = {}) {
         read_back: (result.readBack?.rows ?? []).map((r) => ({ action: r.action, op: r.op, where: r.where, verdict: r.verdict, class: r.cls, first_difference_byte: r.offset ?? null, sent_bytes: r.sentBytes ?? null, stored_bytes: r.storedBytes ?? null, found_by: r.foundBy ?? null, assignees: r.assignees ?? null, assignees_missing: r.assigneesMissing ?? null })),
         annotations: (result.annotations?.rows ?? []).map((a) => ({ action: a.action, op: a.op, number: a.number, url: a.url })),
         advisories: (result.annotations?.advisories ?? []).map((a) => ({ action: a.action, op: a.op, ghsa_id: a.ghsaId })),
+        // A read's outcome, its counts and field names alone — ⛔ never its text, which --reveal alone prints, above.
+        advisory_reads: (result.reads ?? []).map((r) => ({ action: r.action, op: r.op, state: r.state, bytes: r.bytes, fields: r.fields, parts: r.parts, why: r.why || null })),
         runs: (result.runs?.rows ?? []).map((r) => ({ action: r.action, op: r.op, workflow: r.workflow, verdict: r.verdict, class: r.cls, candidates: r.candidates ?? 0, run: r.run ? { id: r.run.id, url: r.run.url, status: r.run.status, conclusion: r.run.conclusion, created_at: r.run.created_at, actor: r.run.actor } : null })),
       }),
     );
