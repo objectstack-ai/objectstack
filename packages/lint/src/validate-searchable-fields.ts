@@ -524,7 +524,7 @@ export function checkSearchableFieldList(
       // `searchable: true`, except the hard exclusions — so "cannot scan" is
       // said only of those, and every other type names the opt-in it lacks.
       why = SEARCH_FLAG_EXCLUDED_TYPES.has(meta.type)
-        ? `of type '${meta.type}', which 'search' never scans, even marked \`searchable: true\``
+        ? `of type '${meta.type}', never scanned even with \`searchable: true\``
         : `of type '${meta.type}' and not marked \`searchable: true\``;
     } else {
       continue; // no readable type — unresolvable, not wrong (ADR-0072 D1)
