@@ -53,6 +53,7 @@
  * type is still `idle` (`MetadataProvider`'s `readType`). No consumer of this
  * hook adds a request; the point is to remove one.
  */
+import { useCallback, useMemo, useState } from 'react';
 import { useMetadata, type MetadataContextValue, type MetadataTypeStatus } from '@object-ui/react';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
 
@@ -96,6 +97,66 @@ export function readObjectsByName(
     return (readObjectScope as ReadNamesWithoutViews)({ names: asked, views: false }).objects;
   }
   return metadata.objects ?? NO_OBJECTS;
+}
+
+/**
+ * {@link readObjectsByName} for a type the cache keeps no names-only scope for
+ * (a dashboard, a page, a report): `read(type, names, list)`.
+ */
+export type ReadItemsByName = (
+  type: string,
+  names: readonly string[],
+  list: () => readonly unknown[] | undefined,
+) => readonly unknown[];
+
+const NO_ANSWERS: ReadonlyMap<string, unknown> = new Map();
+
+/**
+ * The definitions of `names` of one metadata type, without that type's whole
+ * list (objectstack#29235): what {@link readObjectsByName} is to objects, for
+ * a reader that labels a few rows (a recent dashboard, page or report). While
+ * nothing has asked for the type's list, each name is asked once through the
+ * provider's by-name read (`getItem`, which the app bundle answers for an item
+ * it holds), and the answer is the names that have landed so far; the reader
+ * re-renders as each lands. Once the list is loaded, or on its way, it is
+ * `list()`, and nothing more is asked. A provider without a status or a
+ * by-name read (a hand-rolled context) answers with `list()`, as before.
+ *
+ * A name that answered an item is asked again once the provider's metadata
+ * changes (a refresh, an invalidation): the provider's by-name cache answers it
+ * at once, without a request, unless that change dropped it, so a renamed item
+ * shows its new label. A name that answered none (absent, or a failed read) is
+ * not asked again while the reader is mounted.
+ *
+ * Asking for no name asks for nothing.
+ */
+export function useReadItemsByName(
+  metadata: Pick<MetadataContextValue, 'getItem' | 'getTypeStatus'>,
+): ReadItemsByName {
+  const { getItem, getTypeStatus } = metadata;
+  const [answers, setAnswers] = useState(NO_ANSWERS);
+  // One asked-set per provider value (its `getTypeStatus` is rebuilt with it).
+  const asked = useMemo(() => new Set<string>(), [getItem, getTypeStatus]);
+  return useCallback<ReadItemsByName>(
+    (type, names, list) => {
+      if (typeof getItem !== 'function' || getTypeStatus?.(type) !== 'idle') return list() ?? NO_OBJECTS;
+      const found: unknown[] = [];
+      for (const name of names) {
+        if (typeof name !== 'string' || name === '') continue;
+        const key = `${type}/${name}`;
+        if (!asked.has(key) && answers.get(key) !== null) {
+          asked.add(key);
+          const settle = (item: unknown) =>
+            setAnswers((prev) => (prev.has(key) && prev.get(key) === item ? prev : new Map(prev).set(key, item)));
+          void getItem(type, name).then((item) => settle(item ?? null), () => settle(null));
+        }
+        const item = answers.get(key);
+        if (item) found.push(item);
+      }
+      return found;
+    },
+    [getItem, getTypeStatus, asked, answers],
+  );
 }
 
 /** What the metadata registry can say about one object name. */
