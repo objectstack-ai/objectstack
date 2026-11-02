@@ -93,16 +93,18 @@
  *
  * ⚠️ A THIRD limb was security as well: the EVALUATE positions of a field
  * declared `internal: true`. The engine omits such a field from every row, but
- * it still evaluates one named in a filter or a sort, and the protocol's data
- * door is where those positions are refused — for every caller, administrators
- * included, before the engine is asked. This engine-only bridge evaluated them.
- * `query` and `aggregate` now ask that door's ONE gate of the `protocol`
- * service before the engine ({@link refuseInternalFieldEvaluation}), so a
- * filter, a sort, a group key or an aggregation over such a field answers the
- * door's `400 INVALID_FIELD`, word for word, on this transport as on REST and
- * on the HTTP bridge. ⛔ Never a copy of that gate here: a second definition is
- * the fork this note exists to close. What remains of the divergence above is
- * genuinely not security.
+ * it would still evaluate one named in a filter or a sort. Those positions are
+ * refused by the ENGINE itself now, on its own read path, for every caller but
+ * a system context (`QueryEvaluationGate`, `@objectstack/objectql`'s
+ * `internal-field-evaluation-guard.ts`) — the one definition the protocol's
+ * data door asks too. This transport's principal is never a system context
+ * (it is admitted from an API key alone), so `query` and `aggregate` hand the
+ * engine the caller's query and a filter, a sort, a group key or an
+ * aggregation over such a field answers the door's `400 INVALID_FIELD`, word
+ * for word, on this transport as on REST and on the HTTP bridge — whether or
+ * not the host registers a `protocol` service. ⛔ Never a copy of that gate
+ * here: a second definition is the fork this note exists to close. What
+ * remains of the divergence above is genuinely not security.
  */
 
 import { omitInternalFieldsFromWriteResponse, relationConditionSites } from '@objectstack/core';
@@ -164,14 +166,6 @@ export interface StdioProtocolObjectReads {
   getMetaItem?(request: { type: string; name: string }): Promise<unknown>;
   /** The by-name read without the serving decorations. */
   getMetaItemForExecution?(request: { type: string; name: string }): Promise<unknown>;
-  /**
-   * The data door's evaluate refusal for a field declared `internal: true`:
-   * throws its `400 INVALID_FIELD` when `query` filters, sorts, groups or
-   * aggregates on one, and returns otherwise. Not a read, but asked of the
-   * same service at the same moment, so it rides this slot
-   * ({@link refuseInternalFieldEvaluation}).
-   */
-  assertNoInternalFieldEvaluated?(object: string, query: Record<string, unknown>): void;
 }
 
 /** [#25138] Where this transport reads an object's definition from. */
@@ -570,38 +564,6 @@ async function enforceRelationTargetExposure(
   for (const site of relationConditionSites(def?.fields, where)) {
     await enforceApiExposure(reads, site.target, GATED_ACTIONS.query, context, `where.${site.field}`);
   }
-}
-
-/**
- * The data door's evaluate refusal for a field declared `internal: true`,
- * asked of the `protocol` service before the engine reads anything: the
- * protocol's own `assertNoInternalFieldEvaluated`, the gate `findData` asks
- * for REST and for the HTTP bridge's `query_records` — ⛔ never a copy of it
- * here (route-ownership rule 1). It throws that door's `400 INVALID_FIELD`,
- * naming the object, the field and the position in the door's own sentence,
- * for a filter (`where`, each aggregation's own `filter`, a nested-relation
- * condition judged on its target), a sort, a group key or an aggregation
- * operand on such a field — for every principal this transport admits. A
- * query over ordinary fields passes untouched.
- *
- * Asked whatever the caller's context, as the door asks it: the engine's
- * privileged lookups that legitimately match on such a field call the engine
- * directly and never reach this bridge.
- *
- * Structural absence answers nothing: on a host that registers no protocol,
- * or one whose protocol has no such face, there is no data door whose verdict
- * this transport could match, and the call proceeds to the engine as before.
- * An object the protocol's registry does not hold is likewise left to the
- * engine's existence answer, as the door leaves it.
- */
-function refuseInternalFieldEvaluation(
-  reads: StdioObjectReads,
-  object: string,
-  query: Record<string, unknown>,
-): void {
-  const protocol = protocolOf(reads);
-  if (typeof protocol?.assertNoInternalFieldEvaluated !== 'function') return;
-  protocol.assertNoInternalFieldEvaluated(object, query);
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,9 +983,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // [#21207] …and the same for a stored content-hash column.
       const hashRefusal = storedMetadataHashRefusal(object, { where: opts?.where, orderBy: opts?.orderBy });
       if (hashRefusal) throw hashRefusal;
-      // …and a filter or sort on an `internal: true` field, by the data door's
-      // own gate, after the stored-metadata refusals as the door orders them.
-      refuseInternalFieldEvaluation(reads, object, { where: opts?.where, orderBy: opts?.orderBy });
+      // A filter or sort on an `internal: true` field is refused by the engine
+      // itself (see the module header), after the refusals above, as the
+      // data door orders them.
       const read = storedMetadataBodyReadFields(object, opts?.fields);
       const query: Record<string, unknown> = {};
       if (opts?.where) query.where = opts.where;
@@ -1178,14 +1140,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
         aggregations: opts?.aggregations,
       });
       if (hashRefusal) throw hashRefusal;
-      // …and a filter (`where` or an aggregation's own), a group key or an
-      // aggregation operand on an `internal: true` field, by the data door's
-      // own gate ({@link refuseInternalFieldEvaluation}).
-      refuseInternalFieldEvaluation(reads, object, {
-        where: opts?.where,
-        groupBy: opts?.groupBy,
-        aggregations: opts?.aggregations,
-      });
+      // A filter (`where` or an aggregation's own), a group key or an
+      // aggregation operand on an `internal: true` field is refused by the
+      // engine itself (see the module header).
       // No casts: `McpDataBridge.aggregate` declares the engine's own
       // `EngineAggregateOptions` slices since #8032, so the honest call
       // compiles — the two `as unknown as` casts this line used to carry

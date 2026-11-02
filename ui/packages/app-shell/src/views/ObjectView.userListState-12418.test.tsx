@@ -46,6 +46,10 @@
  *      hidden fields in `viewDefaults`, beside the user's in `schema`, so
  *      its Display reset compares against the view; on an unprojected saved
  *      view the view hides nothing.
+ *   6d. objectstack#28948 — the list's "Reset to view default" (Display and
+ *      sort) is told apart from a choice: the reset parts are CLEARED from
+ *      the stored entry, so the user follows later changes to the view; a
+ *      deliberate `sort: []` / `hiddenFields: []` is still stored.
  *   7. CONTROL — no provider (a host without the console shell): the state is
  *      this browser's, as the tab order and filters were before; a sort still
  *      writes no view; the older `viewOrder:<object>` key is still honoured.
@@ -703,10 +707,10 @@ describe('the list is handed the view\'s own density and hidden fields beside th
 
     expect(listProps.schema.rowHeight).toBe('compact');
     expect(listProps.schema.hiddenFields).toEqual(['name']);
-    expect(listProps.viewDefaults).toEqual({ hiddenFields: AUTHORED_HIDDEN, rowHeight: AUTHORED_ROW_HEIGHT });
+    expect(listProps.viewDefaults).toEqual({ hiddenFields: AUTHORED_HIDDEN, rowHeight: AUTHORED_ROW_HEIGHT, sort: AUTHORED_SORT });
   });
 
-  it('the list\'s reset writes the view\'s own through the controls\' doors, and it lands as the user\'s choice', async () => {
+  it('a choice equal to the view\'s own, made through the controls\' doors, lands as the user\'s choice', async () => {
     const ds = makeDataSource();
     const { family } = makeFamily(structuredClone(STORED));
     mountWithFamily(ds, family);
@@ -725,7 +729,7 @@ describe('the list is handed the view\'s own density and hidden fields beside th
     });
     expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
     expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
-    expect(listProps.viewDefaults).toEqual({ hiddenFields: AUTHORED_HIDDEN, rowHeight: AUTHORED_ROW_HEIGHT });
+    expect(listProps.viewDefaults).toEqual({ hiddenFields: AUTHORED_HIDDEN, rowHeight: AUTHORED_ROW_HEIGHT, sort: AUTHORED_SORT });
   });
 
   it('CONTROL: another user, with no state of their own, is handed the same value twice', async () => {
@@ -737,7 +741,9 @@ describe('the list is handed the view\'s own density and hidden fields beside th
 
     expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
     expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
-    expect(listProps.viewDefaults).toEqual({ hiddenFields: listProps.schema.hiddenFields, rowHeight: listProps.schema.rowHeight });
+    expect(listProps.viewDefaults).toEqual({
+      hiddenFields: listProps.schema.hiddenFields, rowHeight: listProps.schema.rowHeight, sort: listProps.schema.sort,
+    });
   });
 
   it('on a saved view that declares no `columns`, the view hides nothing: its authored key stays unapplied (objectui#12505)', async () => {
@@ -749,6 +755,130 @@ describe('the list is handed the view\'s own density and hidden fields beside th
 
     expect(listProps.schema.hiddenFields).toEqual(['amount']);
     expect(listProps.viewDefaults.hiddenFields).toBeUndefined();
+  });
+});
+
+describe('the list\'s "Reset to view default" clears the user\'s stored part instead of copying the view into it (objectstack#28948)', () => {
+  /** A stored choice that differs from the view's on the sort, the density and the hidden fields. */
+  const STORED = {
+    [LIST_KEY]: {
+      perView: {
+        [SYSTEM_ID]: { sort: [{ field: 'amount', order: 'desc' }], rowHeight: 'compact', hiddenFields: ['name'] },
+      },
+    },
+  };
+  const VIEW = OBJECT.listViews[SYSTEM_ID] as Record<string, unknown>;
+
+  it('the list is wired to tell a reset from a choice, and is handed the view\'s own sort', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily(structuredClone(STORED));
+    mountWithFamily(ds, family);
+    await listReady();
+
+    expect(typeof listProps.onRestoreViewDefaults).toBe('function');
+    // `schema.sort` is the user's; the reset's baseline is the view's own.
+    expect(listProps.schema.sort).toEqual([{ field: 'amount', order: 'desc' }]);
+    expect(listProps.viewDefaults.sort).toEqual(AUTHORED_SORT);
+  });
+
+  it('a Display reset of density and hidden fields leaves neither in the stored entry', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily(structuredClone(STORED));
+    mountWithFamily(ds, family);
+    await listReady();
+
+    act(() => listProps.onRestoreViewDefaults(['hiddenFields', 'rowHeight']));
+    await wait(700);
+
+    expect(viewWrites(ds)).toBe(0);
+    expect(family.save).toHaveBeenCalledTimes(1);
+    expect(family.save).toHaveBeenCalledWith(LIST_KEY, {
+      perView: { [SYSTEM_ID]: { sort: [{ field: 'amount', order: 'desc' }] } },
+    });
+    // The list is handed the view's own again.
+    expect(listProps.schema.rowHeight).toBe(AUTHORED_ROW_HEIGHT);
+    expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
+  });
+
+  it('after the reset the user follows the view: a changed `rowHeight` and `hiddenFields` reach them on the next open', async () => {
+    const rows = structuredClone(STORED) as Record<string, any>;
+    const ds = makeDataSource();
+    const { family } = makeFamily(rows);
+    const { unmount } = mountWithFamily(ds, family);
+    await listReady();
+    act(() => listProps.onRestoreViewDefaults(['hiddenFields', 'rowHeight']));
+    await wait(700);
+    unmount();
+
+    // The view's author changes its defaults.
+    const before = { rowHeight: VIEW.rowHeight, hiddenFields: VIEW.hiddenFields };
+    VIEW.rowHeight = 'short';
+    VIEW.hiddenFields = ['name'];
+    try {
+      listProps = null;
+      mountWithFamily(makeDataSource(), makeFamily(rows).family);
+      await listReady();
+      expect(listProps.schema.rowHeight).toBe('short');
+      expect(listProps.schema.hiddenFields).toEqual(['name']);
+    } finally {
+      VIEW.rowHeight = before.rowHeight;
+      VIEW.hiddenFields = before.hiddenFields;
+    }
+  });
+
+  it('a sort reset leaves no sort stored; with nothing else stored the entry and "Reset view" go', async () => {
+    const ds = makeDataSource();
+    const { family } = makeFamily({ [LIST_KEY]: { perView: { [SYSTEM_ID]: { sort: [{ field: 'amount', order: 'desc' }] } } } });
+    mountWithFamily(ds, family);
+    await listReady();
+    expect(await overflowTestIds()).toContain('object-view-reset-view-button');
+
+    act(() => listProps.onRestoreViewDefaults(['sort']));
+    await wait(700);
+
+    expect(viewWrites(ds)).toBe(0);
+    expect(family.save).toHaveBeenCalledTimes(1);
+    expect(family.save).toHaveBeenCalledWith(LIST_KEY, {});
+    expect(await overflowTestIds()).not.toContain('object-view-reset-view-button');
+  });
+
+  it('after a sort reset a changed view sort reaches the user on the next open', async () => {
+    const rows: Record<string, any> = { [LIST_KEY]: { perView: { [SYSTEM_ID]: { sort: [{ field: 'amount', order: 'desc' }] } } } };
+    const { unmount } = mountWithFamily(makeDataSource(), makeFamily(rows).family);
+    await listReady();
+    act(() => listProps.onRestoreViewDefaults(['sort']));
+    await wait(700);
+    unmount();
+
+    const before = VIEW.sort;
+    VIEW.sort = [{ field: 'amount', order: 'asc' }];
+    try {
+      listProps = null;
+      mountWithFamily(makeDataSource(), makeFamily(rows).family);
+      await listReady();
+      expect(listProps.schema.sort).toEqual([{ field: 'amount', order: 'asc' }]);
+    } finally {
+      VIEW.sort = before;
+    }
+  });
+
+  it('CONTROL: a deliberate "no sort" and "show every column" are still stored, and survive a reload', async () => {
+    const rows: Record<string, any> = {};
+    const { unmount } = mountWithFamily(makeDataSource(), makeFamily(rows).family);
+    await listReady();
+    act(() => {
+      listProps.onSortChange([]);
+      listProps.onHiddenFieldsChange([]);
+    });
+    await wait(700);
+    expect(rows[LIST_KEY]).toEqual({ perView: { [SYSTEM_ID]: { sort: [], hiddenFields: [] } } });
+    unmount();
+
+    listProps = null;
+    mountWithFamily(makeDataSource(), makeFamily(rows).family);
+    await listReady();
+    expect(listProps.schema.sort).toEqual([]);
+    expect(listProps.schema.hiddenFields).toEqual([]);
   });
 });
 

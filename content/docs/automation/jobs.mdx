@@ -191,6 +191,14 @@ What running in the sandbox means for the code in `source`:
   `ctx.api.object(…)`, and only with the tokens it declares: `api.read`,
   `api.write`, `api.transaction`. Logging is `ctx.log`, under `log`. An undeclared
   call throws at run time. Outbound HTTP is not available; use a Connector.
+- **Time-zone date maths works.** `Intl.DateTimeFormat` is in the sandbox, whole
+  (`format`, `formatToParts`, `formatRange`, `formatRangeToParts`,
+  `resolvedOptions`), and answers exactly as the server's own does, so a body can
+  find the calendar date or period of an instant in a named IANA zone:
+  `new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now())`.
+  Nothing else of `Intl` is there (`Intl.NumberFormat` is `undefined`); test for
+  it with `typeof Intl.DateTimeFormat === 'function'`. Hook and action bodies run
+  in the same sandbox and get the same `Intl.DateTimeFormat`.
 - **Not the handler's context.** The `JobHandlerContext` a `handler` receives —
   `ql`, `logger`, `bundle` — does not exist inside the sandbox. A handler is not
   turned into a body by copying its source: rewrite its `ql.find(…)` reads as
