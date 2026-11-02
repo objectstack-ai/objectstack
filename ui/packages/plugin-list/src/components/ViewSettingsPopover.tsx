@@ -67,11 +67,11 @@ export interface ViewSettingsDensity {
 
 /**
  * How a reader prefers a drawer-mode record to open (objectstack#26681): the
- * pane beside the list (the default since objectstack#27545) or the drawer
- * over it. The full page is a third choice only a host that offers it draws
- * (`ViewSettingsRecordOpen.selectPage`).
+ * drawer over the list (the default), or the full page (objectstack#27545).
+ * The pane beside the list retired (objectstack#28915, maintainer ruling
+ * 2026-11-02: 「默认改抽屉，分屏彻底退役，只留抽屉和整页」).
  */
-export type ViewSettingsRecordOpenPreference = 'split' | 'drawer';
+export type ViewSettingsRecordOpenPreference = 'drawer' | 'page';
 
 /**
  * The Open records section (objectstack#26681): how a row opens its record.
@@ -81,10 +81,10 @@ export type ViewSettingsRecordOpenPreference = 'split' | 'drawer';
  * default) or `page` (maintainer ruling 2026-10-27, objectstack#26677). So the
  * section answers by the mode the host resolved for this object and view:
  *
- *   - `drawer`: two segments, Split | Drawer, writing the reader's preference
- *     through `setPreference` — and a third, Full page, when the host passes
- *     `selectPage` (objectstack#27545) — with a one-line note that the choice
- *     is the reader's own and that a record's `↗` always opens the full page;
+ *   - `drawer`: two segments, Drawer | Full page, writing the reader's
+ *     preference through `setPreference`, with a one-line note that the
+ *     choice is the reader's own and that a record's `↗` always opens the
+ *     full page;
  *   - `page`: one read-only line saying the object is declared to open as a
  *     full page — the declaration wins, so there is nothing to choose;
  *   - `new_window` / `none`: no section. The preference changes nothing there
@@ -95,18 +95,12 @@ export interface ViewSettingsRecordOpen {
   resolvedMode: 'drawer' | 'page' | 'new_window' | 'none';
   /**
    * The reader's current preference; read only when `resolvedMode` is
-   * `drawer`. `'page'` selects the Full page segment, drawn only with
-   * `selectPage`. Read, never handed back: a choice is written through
-   * `setPreference` or `selectPage`.
+   * `drawer`. Read, never handed back: a choice is written through
+   * `setPreference`.
    */
-  preference: ViewSettingsRecordOpenPreference | 'page';
-  /** Keep the reader's choice of Split or Drawer. The host owns where it is kept. */
+  preference: ViewSettingsRecordOpenPreference;
+  /** Keep the reader's choice of Drawer or Full page. The host owns where it is kept. */
   setPreference: (next: ViewSettingsRecordOpenPreference) => void;
-  /**
-   * Keep the reader's choice of the full page (objectstack#27545). The Full
-   * page segment is drawn only when the host passes it.
-   */
-  selectPage?: () => void;
 }
 
 export interface ViewSettingsPopoverProps {
@@ -323,7 +317,7 @@ function RecordOpenSection({
   t: ViewSettingsPopoverProps['t'];
   recordOpen: ViewSettingsRecordOpen;
 }) {
-  const { resolvedMode, preference, setPreference, selectPage } = recordOpen;
+  const { resolvedMode, preference, setPreference } = recordOpen;
   if (resolvedMode !== 'drawer' && resolvedMode !== 'page') return null;
   const title = t('list.recordOpen', { defaultValue: 'Open records' });
   return (
@@ -340,36 +334,26 @@ function RecordOpenSection({
             // one segment is always the choice, so that writes nothing.
             onValueChange={(next) => {
               if (next === preference) return;
-              if (next === 'split' || next === 'drawer') setPreference(next);
-              else if (next === 'page') selectPage?.();
+              if (next === 'drawer' || next === 'page') setPreference(next);
             }}
             aria-label={title}
             className="gap-0"
             data-testid="display-record-open-choice"
           >
             <ToggleGroupItem
-              value="split"
-              className="h-7 rounded-r-none px-2.5 text-xs"
-              data-testid="display-record-open-split"
-            >
-              {t('list.recordOpenSplit', { defaultValue: 'Split' })}
-            </ToggleGroupItem>
-            <ToggleGroupItem
               value="drawer"
-              className={cn('-ml-px h-7 px-2.5 text-xs', selectPage ? 'rounded-none' : 'rounded-l-none')}
+              className="h-7 rounded-r-none px-2.5 text-xs"
               data-testid="display-record-open-drawer"
             >
               {t('list.recordOpenDrawer', { defaultValue: 'Drawer' })}
             </ToggleGroupItem>
-            {selectPage && (
-              <ToggleGroupItem
-                value="page"
-                className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
-                data-testid="display-record-open-page"
-              >
-                {t('list.recordOpenPage', { defaultValue: 'Full page' })}
-              </ToggleGroupItem>
-            )}
+            <ToggleGroupItem
+              value="page"
+              className="-ml-px h-7 rounded-l-none px-2.5 text-xs"
+              data-testid="display-record-open-page"
+            >
+              {t('list.recordOpenPage', { defaultValue: 'Full page' })}
+            </ToggleGroupItem>
           </ToggleGroup>
         ) : (
           <span className="min-w-0 text-right text-xs text-muted-foreground" data-testid="display-record-open-declared">

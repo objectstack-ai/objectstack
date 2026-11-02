@@ -922,7 +922,6 @@ const ru = {
     resetToViewDefault: "Сбросить к настройкам представления",
     recordOpen: "Открытие записей",
     recordOpenDrawer: "Боковая панель",
-    recordOpenSplit: "Разделённый вид",
     recordOpenPage: "Вся страница",
     recordOpenNote: "Ваша личная настройка, не входит в объявление объекта. ↗ у записи всегда открывает её на всю страницу.",
     recordOpenDeclaredPage: "Этот объект объявлен для открытия на всю страницу",

@@ -866,7 +866,6 @@ const de = {
     resetToViewDefault: "Auf Standard der Ansicht zurücksetzen",
     recordOpen: "Datensätze öffnen",
     recordOpenDrawer: "Seitenleiste",
-    recordOpenSplit: "Geteilt",
     recordOpenPage: "Ganze Seite",
     recordOpenNote: "Ihre persönliche Einstellung, nicht Teil der Objektdeklaration. Das ↗ eines Datensatzes öffnet immer die ganze Seite.",
     recordOpenDeclaredPage: "Dieses Objekt ist so deklariert, dass es als ganze Seite geöffnet wird",

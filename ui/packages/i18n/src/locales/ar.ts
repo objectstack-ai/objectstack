@@ -975,7 +975,6 @@ const ar = {
     resetToViewDefault: "إعادة التعيين إلى الإعدادات الافتراضية للعرض",
     recordOpen: "فتح السجلات",
     recordOpenDrawer: "درج جانبي",
-    recordOpenSplit: "عرض مقسوم",
     recordOpenPage: "صفحة كاملة",
     recordOpenNote: "تفضيلك الشخصي، وليس جزءًا من تعريف الكائن. يفتح ↗ الخاص بالسجل الصفحة الكاملة دائمًا.",
     recordOpenDeclaredPage: "هذا الكائن مُعرَّف ليُفتح كصفحة كاملة",
