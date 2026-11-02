@@ -106,7 +106,7 @@
     "ui/UserActionsConfig:editInline = true",
     "ui/UserActionsConfig:filter = true",
     "ui/UserActionsConfig:group = true",
-    "ui/UserActionsConfig:hideFields = false",
+    "ui/UserActionsConfig:hideFields = true",
     "ui/UserActionsConfig:refresh = true",
     "ui/UserActionsConfig:rowColor = false",
     "ui/UserActionsConfig:rowHeight = true",
