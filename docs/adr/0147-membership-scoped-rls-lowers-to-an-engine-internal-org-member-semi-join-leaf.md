@@ -22,11 +22,12 @@ are cut after acceptance and ⛔ never before it. **This record declares; it imp
   (the RLS compiler's deliberate lack of a subquery form, unchanged here), [ADR-0105](./0105-group-tenancy-posture-and-first-class-org-scope.md)
   D2 / D11 (`accessible_org_ids`; the `rls-membership-resolver` seam), [ADR-0091](./0091-grant-lifecycle-and-recertification.md) (validity windows), [ADR-0049](./0049-no-unenforced-security-properties.md)
   (enforce-or-remove), [ADR-0112](./0112-error-code-vocabulary-and-ledger.md) (the refusal envelope).
-- **Amends**: three places, each by a dated, append-only pointer note and nothing else (no Status line moves) —
+- **Amends**: three places, each by a dated, append-only pointer note and nothing else —
   [ADR-0139](./0139-engine-internal-semi-join-leaf-readable-parent-ids.md) D1 ("No second leaf") and D3 ("No
   `DriverCapabilities` bit returns"), each revisited for this one leaf; and
   [ADR-0057-erp-authorization-core-business-units-and-scope-depth](./0057-erp-authorization-core-business-units-and-scope-depth.md)
-  D3's "mirroring the `org_user_ids` cap" (the cap it cites no longer exists).
+  D3's "mirroring the `org_user_ids` cap" (the cap it cites no longer exists). That record's Status line also gains one
+  inline `· **Amended**` entry pointing at the note, after its ADR-0131 entry. ADR-0139's Status line does not move.
 - **Leaves unchanged**: the authoring spelling of every RLS predicate, `defaultRowScope` and shipped permission set; the
   RLS compiler's closed pushdown form set and its lack of an authorable subquery form; `ReadableIds` (ADR-0139) and
   its six consumers; the `rlsMembership` contract ([D-f](#d-f--the-same-class-rlsmembership-is-out-of-scope-with-the-reason));
@@ -52,7 +53,7 @@ backend's bound-parameter limit every `sys_user` read fails with a 500 (measured
 32,000 members and refused 40,000; the Postgres protocol caps a statement at 65,535 parameters).
 
 **Decision.** The spelling stays. The compiler lowers `FIELD in current_user.org_user_ids` to a second branded
-engine-internal comparand, a sibling of ADR-0139's `ReadableIds`, provisionally named `OrgMemberIds`. It means exactly
+engine-internal comparand, a sibling of ADR-0139's `ReadableIds`, named `OrgMemberIds`. It means exactly
 the set the list holds today: the caller, plus every non-blank `user_id` of the active organization's `sys_member` rows,
 read with system authority and filtered by nothing else. The SQL family compiles it to `IN (SELECT user_id FROM
 sys_member WHERE …)`. Every other evaluator (a driver that does not compile it, a federated object, an in-process
@@ -164,8 +165,7 @@ when the read runs, where the array was read when the request was resolved ([Con
   ```
 
   With no active organization the leaf composes to the plain `$in: [caller]`, and no subquery is issued.
-- **The name is provisional.** `OrgMemberIds` would be a new export of `@objectstack/spec` (as `ReadableIds` is), so it
-  lands only under a name the maintainer approves (O1).
+- **The name.** `OrgMemberIds` is the proposed name, a new export of `@objectstack/spec` beside `ReadableIds` (O1).
 
 ### D-b — The inner filter: exactly today's read
 
@@ -226,8 +226,8 @@ the floor path the evaluator is handed `$in: S` and answers exactly as today. �
   choose the plan is consulted, so it is not the inert bit ADR-0049 removes. **This revisits ADR-0139 D3's "⛔ No
   `DriverCapabilities` bit returns" for this one leaf:** D3's reason (a bit the engine does not consult is inert)
   holds for `ReadableIds`, whose answer is compile-or-refuse, and fails here, where a refusal is excluded. ADR-0139 D3
-  carries a dated pointer to this record; `ReadableIds` keeps D3 as written. The declaration's name and shape are the
-  spec card's, under the maintainer's naming approval (O1).
+  carries a dated pointer to this record; `ReadableIds` keeps D3 as written. The declaration's name and shape are fixed by
+  the S1 spec card (O1).
 - **Every occurrence, nested ones included.** The choice is made for every occurrence of the leaf in the filter an
   evaluator receives, including one inside a `ReadableIds` leaf's composed `scope`. That happens when the parent P is
   `sys_user` or any object whose RLS names `org_user_ids`, and ADR-0139 D2 composes P's scope from `getReadFilter(P)`:
@@ -348,8 +348,9 @@ caller's own memberships, not by an organization's size, and are out of scope to
 
 ## Open items (not blocking acceptance; each becomes a reading on its card)
 
-- **O1** — The leaf's name (provisionally `OrgMemberIds`) and the driver's compile declaration are new public names in
-  `@objectstack/spec`. They land under names the maintainer approves, decided with this record's approval.
+- **O1** — Names. The leaf's proposed name is `OrgMemberIds`. The driver's compile declaration is named by the S1
+  spec card. Both are new public names in `@objectstack/spec`; naming is the lane seat's call, with no separate
+  maintainer gate.
 - **O7** — The analytics read-scope compiler takes the floor. Compiling the leaf in its own SQL is a later card in the
   `service-analytics` lane, measured against the floor-parity pin.
 - **O2** — `driver-mongodb`: the cost of a `$lookup` compilation is unprototyped (shared with ADR-0139 O3). It takes
@@ -369,8 +370,8 @@ caller's own memberships, not by an organization's size, and are out of scope to
 
 The maintainer approves this record (Tier H), with the three pointer notes it carries: ADR-0139 D1 ("No second
 leaf"), ADR-0139 D3 ("No `DriverCapabilities` bit returns"), and ADR-0057-erp D3's "`org_user_ids` cap" bullet. Each is
-append-only and dated, and none moves a Status line. The maintainer also approves the names O1 asks for, with this
-record.
+append-only and dated. ADR-0057-erp's Status line carries the one inline `· **Amended**` entry that points at its note;
+ADR-0139's Status line does not move.
 
 ## Execution plan (after acceptance)
 
