@@ -36,7 +36,9 @@
  *      refused naming the pair, and stores nothing; the same save into the
  *      pair, declaring the override, is accepted, stores exactly one row,
  *      bound to the pair, the row names no organization, and the item's read
- *      serves the body that was written;
+ *      serves the body that was written; [#28905, ADR-0146 D1] and the save
+ *      naming the read-only package itself, active and draft, is refused
+ *      naming the same pair, and stores nothing;
  *   2. the read of a stored overlay — a stored environment-wide row is served
  *      by `getMetaItem`. The row is inserted through the engine, never a write
  *      door, so this leg asks the read alone (the engine, not the driver, so
@@ -392,6 +394,27 @@ describe('the five overlay-enabled types keep their environment customization of
             expect(rows[0].organization_id ?? null).toBeNull();
             const read: any = await protocol.getMetaItem({ type, name });
             expect(read?.item?.label).toBe(OVERLAY_LABEL);
+        });
+
+        // [#28905, ADR-0146 D1] …and the save NAMING the read-only base
+        // itself, active and draft: refused naming the same pair, and nothing
+        // is written, so the read keeps serving the package's item.
+        it.each(OVERLAY_ENABLED)(`${topology}: a save naming the read-only package itself over its %s is refused naming its pair, and nothing is written`, async (type) => {
+            const { protocol, rowsOf } = await boot(topology);
+            const { name, body } = ITEMS[type];
+
+            for (const mode of ['publish', 'draft'] as const) {
+                const refused: any = await protocol
+                    .saveMetaItem({ type, name, packageId: PKG, mode, item: body(OVERLAY_LABEL) })
+                    .then(() => undefined, (e: any) => ({ code: e?.code, status: e?.status, message: String(e?.message ?? '') }));
+                expect(refused, mode).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+                expect(refused.message).toContain(`'${PAIR}' (?package=${PAIR})`);
+                expect(refused.message).toContain(`overrides: { package: '${PKG}', basedOn }`);
+                expect(refused.message.length).toBeLessThan(500);
+            }
+            expect(rowsOf(type, name)).toHaveLength(0);
+            const read: any = await protocol.getMetaItem({ type, name, packageId: PKG });
+            expect(read?.item?.label).toBe(PACKAGED_LABEL);
         });
 
         it.each(OVERLAY_ENABLED)(`${topology}: a stored environment-wide overlay of the packaged %s is what its read serves`, async (type) => {

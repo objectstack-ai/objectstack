@@ -1292,6 +1292,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.named-base-stored-binding.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -5003,6 +5018,11 @@
     },
     {
       "file": "packages/services/service-automation/src/builtin/notify-both-channels-unheld-address.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-email-field-cache.integration.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

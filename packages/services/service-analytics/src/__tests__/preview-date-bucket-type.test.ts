@@ -23,9 +23,11 @@
  * (`preview-date-bucket-door.ts`) and gives the same refusal, field for field.
  * A date and a datetime bucket are served alike on every face, as before.
  *
- * [#28977] Pinned too: a `time` column, a dataset dimension's declared
- * `dateGranularity` over a text column, and the `formula` skip (the engine
- * does not judge a formula, so neither does the door). And the preview now
+ * [#28977] Pinned too: a `time` column and a dataset dimension's declared
+ * `dateGranularity` over a text column. [#29167] A `formula` (virtual, no
+ * stored column) is refused on every face with the engine's virtual-field
+ * refusal; #28977 pinned it as skipped, and the preview served one `null`
+ * group for it. And the preview now
  * lowers its row filters before the column-asked-twice and date-bucket doors,
  * where the live strategy lowers them, so an unrecognised `dateRange` beside
  * either fault is refused about the `dateRange` on every face; the preview
@@ -61,6 +63,7 @@ const DATASET = DatasetSchema.parse({
     { name: 'opened_time', field: 'opened_time', type: 'date' },
     { name: 'calc', field: 'calc', type: 'date' },
     { name: 'region_month', field: 'region', type: 'date', dateGranularity: 'month' },
+    { name: 'calc_month', field: 'calc', type: 'date', dateGranularity: 'month' },
   ],
   measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
 });
@@ -188,16 +191,29 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
     expect(refusal).toMatchObject({ path: 'groupBy.0.dateGranularity', field: 'region', fields: ['region'] });
   });
 
-  it('[#28977] does not judge a bucket over a formula, as the engine does not', async () => {
-    // The engine skips a `formula` (its value class is the expression's), so
-    // both live faces answer the next refusal, the driver's for a column the
-    // table does not store. No face answers the date-bucket refusal. (The
-    // preview serves the selection over its drafted rows, a separate gap.)
-    for (const face of FACES) {
-      const outcome = await ask(face, { measures: ['total'], timeDimensions: [{ dimension: 'calc', granularity: 'month' }] })
-        .then(() => 'served', (e: Error & { path?: string }) => e.path ?? e.message);
-      expect(outcome, face).not.toBe('groupBy.0.dateGranularity');
-    }
+  it('[#29167] refuses a bucket over a formula (virtual: no stored column) with the engine\'s refusal, where the preview served one null group', async () => {
+    // [#28977] pinned the skip this replaces: the engine judged no formula, so
+    // the live faces answered the SQL driver's missing-column backstop (no
+    // path, a "run schema sync" prescription) and the preview served one
+    // `null` group holding the total. The engine's door now refuses a virtual
+    // field, and the service's copy gives the same refusal on the preview.
+    const refusal = await refusedAlike({ measures: ['total'], timeDimensions: [{ dimension: 'calc', granularity: 'month' }] });
+    expect(refusal).toEqual({
+      message:
+        `aggregate('${OBJECT}'): groupBy.0.dateGranularity buckets 'calc' by 'month', but 'calc' is a formula field — `
+        + 'its value is computed on read and never stored, so no driver materialises a column to bucket. The query was '
+        + `NOT run. Denormalise the value onto '${OBJECT}' (a stored date or datetime field, written when the source `
+        + 'changes) and bucket that. A formula field is virtual: with no column behind it the bucket reached the driver '
+        + 'as a column that does not exist, and an engine that aggregates in memory put every row into one null group '
+        + 'while the answer looked served.',
+      code: 'INVALID_FIELD', status: 400, httpStatus: 400,
+      object: OBJECT, param: 'groupBy', path: 'groupBy.0.dateGranularity', field: 'calc', fields: ['calc'],
+    });
+  });
+
+  it("[#29167] refuses a dataset dimension's declared dateGranularity over a formula", async () => {
+    const refusal = await refusedAlike({ dimensions: ['calc_month'], measures: ['total'] });
+    expect(refusal).toMatchObject({ path: 'groupBy.0.dateGranularity', field: 'calc', fields: ['calc'] });
   });
 
   /** Every face refuses `selection` with one refusal of `code`, message included. */
