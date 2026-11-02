@@ -192,6 +192,74 @@ export const PackageExportManifestSchema = lazySchema(() => z.object({
 )));
 
 /**
+ * `GET /packages/export` — the deployment's whole ontology as installable
+ * packages, in one read (#28914): the exit right that
+ * {@link PackageExportManifestSchema}'s route grants one package at a time.
+ *
+ * Unlike its lifecycle siblings this is not a transcription: the route is new,
+ * and this declaration is its contract (Clause-②, widening). Served by the
+ * runtime dispatcher and enveloped like them (`{ success, data }`); this
+ * schema declares the `data`.
+ *
+ * ## One producer
+ *
+ * Each entry is exactly what `GET /packages/:id/export` answers for that
+ * package. The bundle composes the per-package export and never assembles,
+ * cleans or redacts an item a second way, so the two reads cannot disagree
+ * about a package. Two consequences are this record's on purpose:
+ *
+ * - **A `.custom` pair is its own entry**, carrying its overriding items with
+ *   their `overrides` blocks (ADR-0146 D8 item 3), and its base's entry carries
+ *   the base unchanged. Environment-scope customizations are where the
+ *   per-package export already places them: under the package that owns them.
+ * - **No credential value leaves.** The per-package export withholds credential
+ *   positions as every served metadata read does, and the bundle adds no rule
+ *   of its own: a `credentialRef` stays the reference it is.
+ *
+ * ## Which packages, in which order
+ *
+ * Every package the deployment holds, enabled or not, each once, except the
+ * platform's own: a package whose manifest `scope` is `system` is shipped by
+ * every runtime for itself, so an install of the bundle never re-installs it.
+ * A pair of such a base is still exported. A metadata item bound to no package
+ * is in no entry; ADR-0146 D11's migration binds it to one first.
+ *
+ * The order is ADR-0141 D5's, the order a boot hydrates installed packages in:
+ * dependencies first. An entry comes after every entry its package's
+ * `manifest.dependencies` names, so a pair comes after its base, and installing
+ * the entries in the order listed is the whole consumption rule: a consumer
+ * never re-sorts. Members of a dependency cycle keep the read's listing order
+ * among themselves, as a boot hydrates them.
+ *
+ * ## The door
+ *
+ * The read gate is the per-package export's: `studio.access` or `setup.access`,
+ * or a system context, asked before anything is read. The query set is CLOSED
+ * and empty: a query parameter is refused `400 VALIDATION_ERROR` naming it. No
+ * request schema is declared, because the door reads no path id, no body and
+ * no parameter. `export` can never be a package id (one has at least two
+ * dot-separated segments, `MANIFEST_ID_PATTERN`), so the path never shadows
+ * `GET /packages/:id`.
+ *
+ * The answer is whole or absent: a package whose export cannot be assembled
+ * fails the read, naming that package. ⛔ Never a bundle that silently lacks a
+ * package. Strict at the top level: a member the door starts serving is a
+ * change to this declaration first. Each entry stays open, as ruled for
+ * {@link PackageExportManifestSchema}.
+ */
+export const PackageExportBundleSchema = lazySchema(() => z.object({
+  packages: z.array(PackageExportManifestSchema).describe(
+    'Every package of the deployment but the platform\'s own (manifest `scope` `system`), each once and each as '
+    + '`GET /packages/:id/export` answers it, dependencies first: an entry comes after every entry its package\'s '
+    + '`manifest.dependencies` names, so a `.custom` pair comes after its base. Install the entries in this order; '
+    + 'never re-sort them. Empty when the deployment holds only platform packages.',
+  ),
+}).strict().describe(
+  'Whole-deployment export: every installed package but the platform\'s own, as installable packages in '
+  + 'dependency order. Carries no credential value.',
+));
+
+/**
  * `POST /packages/:id/adopt-orphans` — bulk-rebind package-less (orphaned)
  * metadata into this base (ADR-0070 D5); the client method is
  * `packages.adoptOrphans`.
@@ -508,6 +576,9 @@ export type RollbackToPackageCommitResponseParsed = z.infer<typeof RollbackToPac
 export type PackageExportManifest = z.input<typeof PackageExportManifestSchema>;
 /** Post-parse shape of {@link PackageExportManifest} — defaults applied, transforms run (ADR-0122). */
 export type PackageExportManifestParsed = z.infer<typeof PackageExportManifestSchema>;
+export type PackageExportBundle = z.input<typeof PackageExportBundleSchema>;
+/** Post-parse shape of {@link PackageExportBundle} — defaults applied, transforms run (ADR-0122). */
+export type PackageExportBundleParsed = z.infer<typeof PackageExportBundleSchema>;
 export type ReassignOrphanedMetadataResponse = z.input<typeof ReassignOrphanedMetadataResponseSchema>;
 /** Post-parse shape of {@link ReassignOrphanedMetadataResponse} — defaults applied, transforms run (ADR-0122). */
 export type ReassignOrphanedMetadataResponseParsed = z.infer<typeof ReassignOrphanedMetadataResponseSchema>;
