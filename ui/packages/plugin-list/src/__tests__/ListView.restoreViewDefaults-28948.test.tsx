@@ -100,7 +100,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
-  if (previousGrid) ComponentRegistry.register('object-grid', previousGrid as any);
+  if (previousGrid) ComponentRegistry.register('object-grid', previousGrid as never);
 });
 
 describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed the view\'s values as a choice (objectstack#28948)', () => {
@@ -168,6 +168,7 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
       { viewDefaults: { sort: [{ field: 'name', order: 'asc' }] }, onSortChange, onRestoreViewDefaults },
     );
     await openSort(dataSource);
+    expect((dataSource.find.mock.calls.at(-1)?.[1] as { $orderby?: unknown }).$orderby).toEqual([{ field: 'amount', order: 'desc' }]);
     const reset = screen.getByTestId('sort-reset-default');
     expect(reset).toBeEnabled();
 
@@ -178,8 +179,8 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
     // The list is now at the view's own sort, and asks the server for it.
     await waitFor(() => expect(screen.getByTestId('sort-reset-default')).toBeDisabled());
     await waitFor(() => {
-      const lastQuery = dataSource.find.mock.calls.at(-1)?.[1] as Record<string, unknown> | undefined;
-      expect(JSON.stringify(lastQuery?.$orderby ?? lastQuery?.sort ?? lastQuery)).toContain('name');
+      const lastQuery = dataSource.find.mock.calls.at(-1)?.[1] as { $orderby?: unknown } | undefined;
+      expect(lastQuery?.$orderby).toEqual([{ field: 'name', order: 'asc' }]);
     });
   });
 
@@ -202,7 +203,7 @@ describe('a host wiring `onRestoreViewDefaults` is told the reset, not handed th
     const onRestoreViewDefaults = vi.fn();
     mount({}, { viewDefaults: {}, onRestoreViewDefaults, defaultRowNumbers: true });
     const content = await openDisplay();
-    fireEvent.click(within(content).getByTestId('view-settings-row-numbers'));
+    fireEvent.click(within(content).getByTestId('display-row-numbers-toggle'));
     await waitFor(() => expect(within(content).getByTestId('display-reset-button')).toBeEnabled());
     fireEvent.click(within(content).getByTestId('display-reset-button'));
     expect(onRestoreViewDefaults).not.toHaveBeenCalled();
