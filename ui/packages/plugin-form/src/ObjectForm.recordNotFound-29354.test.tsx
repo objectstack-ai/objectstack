@@ -29,7 +29,7 @@ import { render, screen, waitFor, act, cleanup } from '@testing-library/react';
 import { notifyDataChanged } from '@object-ui/react';
 import { registerAllFields } from '@object-ui/fields';
 import type { DataSource } from '@object-ui/types';
-import { ObjectForm } from './ObjectForm';
+import { ObjectForm, type ObjectFormComponentProps } from './ObjectForm';
 
 registerAllFields();
 
@@ -72,7 +72,7 @@ function open(
     fields: ['title'],
     ...shape,
   };
-  render(<ObjectForm schema={schema as any} dataSource={ds as unknown as DataSource} />);
+  render(<ObjectForm schema={schema as ObjectFormComponentProps['schema']} dataSource={ds as unknown as DataSource} />);
 }
 
 const titleBox = () =>
