@@ -80,6 +80,15 @@ export interface NativeSafeArea {
   right: number;
 }
 
+/** Options of `scan()`. */
+export interface NativeScanOptions {
+  /**
+   * The code formats to read, as the shell's barcode type names (`qr`,
+   * `ean13`, `code128`, ...). Omitted, the shell reads every format it lists.
+   */
+  formats?: string[];
+}
+
 /** The callable bridge methods. Each is announced as a capability of the same name. */
 export type NativeHostMethod =
   | 'getPushToken'
@@ -87,6 +96,7 @@ export type NativeHostMethod =
   | 'openExternal'
   | 'navigate'
   | 'resetServer'
+  | 'scan'
   | 'showConnectionSwitcher';
 
 /** `window.ObjectStackNative`, as the shell's bridge contract declares it. */
@@ -114,10 +124,18 @@ export interface ObjectStackNative {
   /** Forget the configured server and return to the shell's server picker. */
   resetServer(): Promise<null>;
   /**
-   * Open the shell's native connection switcher: the saved organizations and
-   * company servers, plus an add action.
+   * Open the shell's full-screen code scanner. Resolves to the decoded text,
+   * or `null` when the user closed the scanner. Optional: a shell older than
+   * the scanner does not carry it, so feature-detect with `has('scan')`.
    */
-  showConnectionSwitcher(): Promise<null>;
+  scan?(opts?: NativeScanOptions): Promise<string | null>;
+  /**
+   * Open the shell's native connection switcher: the saved organizations and
+   * company servers, plus an add action. Optional: a shell older than the
+   * switcher does not carry it, so feature-detect with
+   * `has('showConnectionSwitcher')`.
+   */
+  showConnectionSwitcher?(): Promise<null>;
 
   /**
    * Event: the Console has painted its own UI, which may be a loading
@@ -222,9 +240,20 @@ export function nativeResetServer(): Promise<NativeCallResult<null>> {
   return callNative('resetServer', (host) => host.resetServer());
 }
 
+/**
+ * Scan a code with the shell's scanner. `ok` carries the decoded text, or
+ * `null` when the user closed the scanner; `failed` carries the shell's
+ * message (camera permission denied, a scan already open, bad options).
+ */
+export function nativeScan(opts?: NativeScanOptions): Promise<NativeCallResult<string | null>> {
+  // `callNative` calls this only once it has seen `scan` is a function.
+  return callNative('scan', (host) => host.scan!(opts));
+}
+
 /** Open the shell's native connection switcher (organizations and company servers). */
 export function nativeShowConnectionSwitcher(): Promise<NativeCallResult<null>> {
-  return callNative('showConnectionSwitcher', (host) => host.showConnectionSwitcher());
+  // `callNative` calls this only once it has seen the method is a function.
+  return callNative('showConnectionSwitcher', (host) => host.showConnectionSwitcher!());
 }
 
 // ── Events ──────────────────────────────────────────────────────────────────

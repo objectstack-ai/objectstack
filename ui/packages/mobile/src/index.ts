@@ -74,6 +74,7 @@ export {
   nativeOpenExternal,
   nativeNavigate,
   nativeResetServer,
+  nativeScan,
   nativeShowConnectionSwitcher,
   nativeHostCan,
   postNativeReady,
@@ -85,6 +86,7 @@ export {
   type NativeHostMethod,
   type NativePushToken,
   type NativeSafeArea,
+  type NativeScanOptions,
 } from './nativeHost.js';
 
 // Re-export types for convenience
