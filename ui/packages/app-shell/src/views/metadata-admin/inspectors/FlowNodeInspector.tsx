@@ -910,7 +910,7 @@ export function FlowNodeInspector({
         <TooltipTrigger asChild>
           <div
             role="group"
-            aria-label={node.label || node.id}
+            aria-label={flowNodeDisplayName(node, locale)}
             tabIndex={0}
             aria-describedby={readOnlyReasonId}
             data-disabled-reason=""
