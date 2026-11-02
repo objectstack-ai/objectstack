@@ -141,6 +141,12 @@ reason.
   `os validate` when the target is in the same stack. A field whose options come from a
   shared picklist has no option labels of its own to patch. At boot, an unmatched patch
   is not applied and is named once in the log; the boot carries on.
+- **Options are the owner's too.** A patch is judged against the options the owner
+  declares, everywhere: an option another extension (or your own) adds by replacing the
+  field through `fields`, or one a tenant's customization adds, is not one a patch can
+  name, so the install door and `os validate` refuse it and at boot it is not applied
+  and is named once. If an earlier layer leaves out an option the owner declares, a patch
+  of that option is admitted but has nothing to relabel, and the boot names it once.
 
 ---
 

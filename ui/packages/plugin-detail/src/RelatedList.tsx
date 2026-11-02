@@ -1774,12 +1774,20 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   // is the FALLBACK half: the auto-fetch above now asks the server to expand
   // the same family, so this path runs for data a CALLER supplied, and for a
   // backend that does not honour `$expand`.
+  //
+  // objectstack#28470 — never the parent FK (`referenceField`): `filterFK`
+  // drops it from every column list this component draws, so its name is one
+  // nothing renders, and every row holds the same id — the record whose page
+  // this is. It was the one lookup a seeded or self-read row always left bare
+  // (the expansion above leaves it out for that reason), so each card paid a
+  // `?$top=1` read of the page's own record after its rows arrived.
   React.useEffect(() => {
     if (!dataSource?.find || !objectSchema?.fields || !relatedData.length) return;
     const fields = objectSchema.fields as Record<string, any>;
     const tasks: Array<{ fieldName: string; target: string; ids: string[] }> = [];
     for (const [fieldName, def] of Object.entries(fields)) {
       if (!isExpandableFieldType(def)) continue;
+      if (fieldName === referenceField) continue;
       // objectui#6837 half 2 — maintainer 2026-08-31: protocol normalization
       // belongs on the SERVER, the front end just executes the protocol.
       // `reference` is the only target spelling `@objectstack/spec`'s
@@ -1846,7 +1854,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
     // Intentionally exclude `lookupLabels` from deps: we add to the cache and
     // would otherwise loop. We dedupe via the `missing` check.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dataSource, objectSchema, relatedData]);
+  }, [dataSource, objectSchema, relatedData, referenceField]);
 
   // Confirm-delete dialog state. Replaces window.confirm() so the related
   // list matches the rest of the app's Shadcn AlertDialog UX.

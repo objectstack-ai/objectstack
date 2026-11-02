@@ -145,9 +145,9 @@ describe('the default subject vocabulary ↔ the engine (objectui#9855)', () => 
     // narrows it by DECLARING a `context` instead. Both legs are asserted so
     // this cannot be satisfied by an empty dropdown.
     const subjects = contextSubjectsOf(await defaultSubjects());
-    expect(subjects).toContain('user.isAdmin');
+    expect(subjects).toContain('user.isPlatformAdmin');
     expect(subjects).toContain('record.id');
-    expect(await errorsFor('user.isAdmin')).toEqual([]);
+    expect(await errorsFor('user.isPlatformAdmin')).toEqual([]);
   });
 });
 

@@ -407,6 +407,21 @@ export interface RecordPagePayload {
   fieldAccess?: RecordFieldAccess | { error: RecordPagePartRefusal };
   explain?: Partial<Record<RecordPageOperation, unknown>>;
   approvals?: { requests: Record<string, any>[]; lock: { locked: boolean } | null } | { error: RecordPagePartRefusal };
+  /**
+   * The record's comment thread and those comments' reactions
+   * (objectstack#28470), or the comment read's refusal. The reactions carry
+   * their own refusal, which leaves the comments answered.
+   */
+  discussion?:
+    | {
+        comments: Record<string, any>[];
+        reactions: { records: Record<string, any>[] } | { error: RecordPagePartRefusal };
+      }
+    | { error: RecordPagePartRefusal };
+  /** The record's newest activity rows and their count, or their read's refusal (objectstack#28470). */
+  activity?: { total: number; records: Record<string, any>[] } | { error: RecordPagePartRefusal };
+  /** The record's newest attachments and their count, or their read's refusal (objectstack#28470). */
+  attachments?: { total: number; records: Record<string, any>[] } | { error: RecordPagePartRefusal };
 }
 
 /**

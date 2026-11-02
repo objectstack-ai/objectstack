@@ -370,6 +370,7 @@ export const RecordActivityRenderer: React.FC<RecordActivityRendererProps> = ({
         onEditComment={discussion?.onEditComment}
         onDeleteComment={discussion?.onDeleteComment}
         mentionSuggestions={mentionsEnabled ? (discussion?.mentionSuggestions as any) : undefined}
+        onMentionSuggestionsWanted={mentionsEnabled ? discussion?.onMentionSuggestionsWanted : undefined}
         onUploadAttachments={discussion?.onUploadAttachments as any}
         activityDenied={activityDenied}
         commentsDenied={commentsDenied}
