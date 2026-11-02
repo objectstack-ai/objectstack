@@ -162,7 +162,16 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   AuthProvider: passthrough,
-  useAuth: () => ({ user: { id: 'u1' } }),
+  // `ConsolePermissionsScope` holds the organization gate (objectstack#29114): a
+  // session in an organization the list confirms, so the gate renders through.
+  useAuth: () => ({
+    user: { id: 'u1' },
+    getAuthConfig: () => Promise.resolve({ features: { multiOrgEnabled: true } }),
+    session: { activeOrganizationId: 'org_1' },
+    organizations: [{ id: 'org_1', name: 'Acme', slug: 'acme' }],
+    activeOrganization: { id: 'org_1', name: 'Acme', slug: 'acme' },
+    isOrganizationsLoading: false,
+  }),
 }));
 
 vi.mock('../components/RootLandingRedirect', () => ({ RootLandingRedirect: stub('root-landing') }));

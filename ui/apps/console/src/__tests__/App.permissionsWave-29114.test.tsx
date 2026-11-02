@@ -41,14 +41,14 @@ interface AuthState {
 const h = vi.hoisted(() => {
   const listeners = new Set<() => void>();
   return {
-    /** Every URL the console's authenticated fetcher was asked for, in order. */
-    calls: [] as string[],
-    auth: null as unknown as AuthState,
-    listeners,
-    set(next: Partial<AuthState>) {
-      h.auth = { ...h.auth, ...next };
-      for (const l of Array.from(listeners)) l();
-    },
+      /** Every URL the console's authenticated fetcher was asked for, in order. */
+      calls: [] as string[],
+      auth: null as unknown as AuthState,
+      listeners,
+      set(next: Partial<AuthState>) {
+        h.auth = { ...h.auth, ...next };
+        for (const l of Array.from(listeners)) l();
+      },
   };
 });
 
@@ -96,10 +96,23 @@ vi.mock('@object-ui/auth', async (importOriginal) => {
   };
 });
 
-vi.mock('@object-ui/app-shell', async (importOriginal) => ({
+vi.mock('@object-ui/app-shell', async (importOriginal) => {
+  const { MetadataCtx } = await import('@object-ui/react');
+  // What `ConnectedShell` provides that this order reads: one active app, so the
+  // launcher's `/me/apps` read has something to ask about.
+  const metadata = {
+    apps: [{ name: 'crm', label: 'CRM', active: true }],
+    objects: [], dashboards: [], reports: [], pages: [],
+    loading: false, error: null,
+    refresh: async () => {}, invalidate: () => {}, ensureType: async () => [],
+    getItem: async () => null, getItemsByType: () => [], getTypeStatus: () => 'ready',
+  } as never;
+  return {
   ...(await importOriginal<Record<string, unknown>>()),
   ConsoleShell: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  ConnectedShell: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  ConnectedShell: ({ children }: { children?: ReactNode }) => (
+    <MetadataCtx.Provider value={metadata}>{children}</MetadataCtx.Provider>
+  ),
   ConsoleToaster: () => null,
   LoadingScreen: () => <div data-testid="loading-screen" />,
   DefaultHomeLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -109,7 +122,8 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
   DefaultOrganizationsPage: () => <div data-testid="organizations-page" />,
   getProductName: () => 'ObjectOS',
   getFaviconUrl: () => '',
-}));
+  };
+});
 
 vi.mock('../LocalizationFetchProvider', () => ({
   LocalizationFetchProvider: ({ children }: { children?: ReactNode }) => <>{children}</>,
@@ -142,11 +156,13 @@ import { App } from '../App';
 const permissionsCalls = () => h.calls.filter((u) => u.includes('/auth/me/permissions'));
 const launcherCalls = () => h.calls.filter((u) => u.includes('/me/apps'));
 
-/** Flush the effects and microtasks the first render queues (the fetches, their answers). */
+/** Let the first render's effects and the answers they await run out (a negative reading needs it). */
 async function settle() {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 0));
-  });
+  for (let i = 0; i < 5; i++) {
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+  }
 }
 
 function openAt(url: string, session: AuthState['session']) {
@@ -174,9 +190,9 @@ afterEach(() => {
 describe('/auth/me/permissions leaves in the organization/list wave when the session names the active organization (objectstack#29114)', () => {
   it('the session names the organization: the request leaves while organization/list is still in flight, once; the page waits for the list', async () => {
     openAt('/home', { activeOrganizationId: ORG.id });
+    // Asked now, beside organization/list (still unanswered: the test holds it), not after it.
+    await waitFor(() => expect(permissionsCalls()).toHaveLength(1));
     await settle();
-    // Asked now, beside organization/list, not after it.
-    expect(permissionsCalls()).toHaveLength(1);
     // What needs the chosen organization still waits for it.
     expect(screen.queryByTestId('home-page')).not.toBeInTheDocument();
     expect(launcherCalls()).toHaveLength(0);
@@ -191,8 +207,8 @@ describe('/auth/me/permissions leaves in the organization/list wave when the ses
 
   it('an app route takes the same path', async () => {
     openAt('/apps/crm', { activeOrganizationId: ORG.id });
+    await waitFor(() => expect(permissionsCalls()).toHaveLength(1));
     await settle();
-    expect(permissionsCalls()).toHaveLength(1);
     expect(screen.queryByTestId('app-content')).not.toBeInTheDocument();
     organizationsAnswer(ORG);
     await waitFor(() => expect(screen.getByTestId('app-content')).toBeInTheDocument());
