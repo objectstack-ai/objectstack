@@ -79,8 +79,8 @@ export class SummaryRecomputeError extends Error {
  *
  * That refusal says "this write is stored, only a roll-up recompute failed",
  * and every answering surface turns it into the write's own success. It is
- * true for the write that raised it, and only while that write stands. Two
- * engine units carry a nested write's refusal past the point where it stops
+ * true for the write that raised it, and only while that write stands. Three
+ * engine seams carry a nested write's refusal past the point where it stops
  * being true:
  *
  *  - a delete's cascade walk deletes (or clears) each dependent through the
@@ -88,7 +88,10 @@ export class SummaryRecomputeError extends Error {
  *    refusal stops the walk, so the parent's row is never removed — and under
  *    the `'atomic'` plan the transaction then rolls the dependent back too;
  *  - a `transaction()` whose callback lets the refusal escape rolls back every
- *    write in it, the refusing one included.
+ *    write in it, the refusing one included;
+ *  - a hook that writes through `ctx.api` and lets that write's refusal escape
+ *    stops the write it is hooked to, whose caller would otherwise read the
+ *    hook's write as its own.
  *
  * Either way the caller's own write did not land, so it is told so: an error
  * with no `code` (an internal failure, which is what an unrecomputable roll-up
@@ -124,6 +127,34 @@ export function cascadeStoppedRefusal(e: unknown, object: string): unknown {
     `The delete of "${object}" did not complete: its cascade stopped before the record was removed. ` +
       'Under a transaction that rolls back nothing was written; otherwise the dependents written before ' +
       'that point stay written.',
+  );
+}
+
+/**
+ * {@link unlandedWriteRefusal} for a write whose hook a nested write's refusal
+ * stopped.
+ *
+ * A hook that writes through `ctx.api` makes a write of its own. When that
+ * write raises {@link SummaryRecomputeError}, the refusal leaves the handler
+ * carrying the HOOK's write as `written`. Let through, it reached the outer
+ * write's caller as that caller's own refusal, so a door answered the hook's
+ * record as the result of the write it was asked for. The outer write did not
+ * complete either: the rest of its chain, its own roll-ups and its events never
+ * ran. An `after*` hook's unit (`inAfterAbortUnit`) now rolls back both rows,
+ * as `HookSchema.onError` `abort` says.
+ *
+ * Only the refusal is converted; every other error a hook throws passes
+ * through unchanged. And only one a handler let escape: a hook whose `onError`
+ * is `log` swallows it before it gets here.
+ */
+export function hookStoppedRefusal(e: unknown, event: string, object: string | undefined, hook: string | undefined): unknown {
+  const verb = event.replace(/^(before|after)/, '').toLowerCase() || event;
+  return unlandedWriteRefusal(
+    e,
+    // Double quotes, as in `cascadeStoppedRefusal`.
+    `The ${verb} of "${object ?? '?'}" did not complete: its ${event} hook${hook ? ` "${hook}"` : ''} stopped. ` +
+      'Under a transaction that rolls back nothing was written; otherwise what was written before that point ' +
+      'stays written.',
   );
 }
 
