@@ -86,6 +86,15 @@ const OVERLAY = { name: 'crm_lead.board', object: 'crm_lead', viewKind: 'list' a
 const issuesAt = (r: Parse, at: PropertyKey[]) =>
   (r.error?.issues ?? []).filter((i) => at.every((seg, k) => i.path[k] === seg));
 
+type Nested = Issue & { errors?: Nested[][] };
+/**
+ * Every leaf issue, a union door's per-arm diagnoses included: the `view` save
+ * door and the assembled-manifest channel are unions, and report the member's
+ * refusal inside `invalid_union.errors` (paths relative to the arm).
+ */
+const leafIssues = (issues: readonly Nested[]): Issue[] =>
+  issues.flatMap((i) => (i.code === 'invalid_union' && i.errors ? i.errors.flatMap((arm) => leafIssues(arm)) : [i]));
+
 // ─── 1. `scope: 'personal'` ─────────────────────────────────────────────────
 
 /** Every door that reads a view item's `scope`, with the body around the member. */
@@ -110,7 +119,9 @@ describe("view.scope 'personal' — a retired member at every door that reads `s
 
   it.each(SCOPE_DOORS.map((d) => [d.name, d] as const))("%s refuses `scope: 'personal'` with its prescription", (_, door) => {
     // A union door may report the member under more than one arm; every one says the same thing.
-    const issues = issuesAt(door.parse({ scope: 'personal' }), door.at);
+    const r = door.parse({ scope: 'personal' });
+    expect(r.success).toBe(false);
+    const issues = leafIssues((r.error?.issues ?? []) as Nested[]).filter((i) => door.at.every((seg, k) => i.path[k] === seg));
     expect(issues.length, JSON.stringify(issues)).toBeGreaterThan(0);
     for (const issue of issues) expect(issue.message.startsWith(SCOPE_FIRST_SENTENCE), issue.message).toBe(true);
   });
