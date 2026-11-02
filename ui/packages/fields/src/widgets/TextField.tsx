@@ -5,6 +5,7 @@ import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
 import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { CurrencyCodeField, isCurrencyCodeField } from './CurrencyCodeField.js';
+import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
 
 /**
  * TextField - Standard single-line or multi-line text input
@@ -12,6 +13,8 @@ import { CurrencyCodeField, isCurrencyCodeField } from './CurrencyCodeField.js';
  */
 export function TextField({ value, onChange, field, readonly, error, ...props }: FieldWidgetComponentProps<string>) {
   const fieldData = field;
+  // Read before any early return: hooks run in the same order on every render.
+  const scanOffered = useFieldScanOffered();
 
   // A record-currency code field (ADR-0144 D2) — `valueDomain:
   // 'iso_4217_currency'` declared on the field — is chosen from the ISO 4217
@@ -74,10 +77,11 @@ export function TextField({ value, onChange, field, readonly, error, ...props }:
     );
   }
 
-  return (
+  const isPassword = fieldData?.type === 'password';
+  const input = (
     <Input
       {...domProps}
-      type={fieldData?.type === 'password' ? 'password' : 'text'}
+      type={isPassword ? 'password' : 'text'}
       className={cn(PHONE_TOUCH_HEIGHT, domProps.className)}
       value={value || ''}
       onChange={(e) => onChange(e.target.value)}
@@ -86,5 +90,18 @@ export function TextField({ value, onChange, field, readonly, error, ...props }:
       disabled={readonly || domProps.disabled}
       aria-invalid={!!error}
     />
+  );
+
+  // Inside the mobile shell, an editable single-line text input offers the
+  // shell's code scanner. The decoded text REPLACES the value through
+  // `onChange`, the same path a keystroke takes, so the host's validation
+  // judges it; it is not cut to `maxLength` (that would lose scanned data
+  // silently). A password input and a disabled one offer no scan.
+  if (!scanOffered || isPassword || domProps.disabled) return input;
+  return (
+    <div className="flex items-center gap-1.5">
+      {input}
+      <ScanFieldButton onScan={onChange} />
+    </div>
   );
 }

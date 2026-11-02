@@ -1877,7 +1877,7 @@
       "title": "Disabling a packaged flow writes a durable sys_metadata_activation row that survives a cold restart with the trigger left unbound; re-enable UPDATES the row and restores firing",
       "since": "v17",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1889,9 +1889,6 @@
           "a FILE-backed database — restart survival is structurally unreachable on the in-memory store; record the db path in the run env (the same requirement automation.durable-suspend-restart carries, and its cold-restart recipe — stop the process entirely, boot a second server over the SAME database file — is the one to reuse here)",
           "showcase_urgent_task_alert (examples/app-showcase/src/automation/flows/index.ts UrgentTaskAlertFlow) — a PACKAGED record_change flow (package com.example.showcase, examples/app-showcase/objectstack.config.ts) with NO packaged subflow callers, so its disable is never refused by the §7.3 guard this item does not test",
           "⚠️ export OS_PORT=<port> as well as passing -p <port> (RUNNER.md's connector self-URL standing fact) — the showcase's self-pinging connectors otherwise fail every unrelated flow run in the boot"
-        ],
-        "knownGaps": [
-          "TRANSITIONAL — acceptance[1] and negative[3] (ADR-0146 D4/D11): the FLOW_DISABLED sentence this item pins verbatim still tells the reader to turn the flow on 'under Setup › Packaged automation, or copy it there under a new name' (describeTurnedOffPackagedItem('flow'), packages/types/src/packaged-item-turned-off.ts), and that page is retired: the flow's ledger switch and its New similar are on the flow in Studio's Automations pillar, and the old page's bookmark redirects there (#28785, #28818). The item drives only the API doors (toggle, trigger, _status, the data API), so nothing else in it moved. The clause keeps the sentence exactly as served at dfbe34d887, so a run still scores it PASS on that text; the remedy's wrong place is a product defect of the sentence's producer, carried in the #28579 slice-1 report's out_of_scope_findings and not re-pointed here. When the producer names the live door, acceptance[1].verify's quoted sentence and negative[3]'s remedy phrase are re-pointed to it in the same change"
         ]
       },
       "steps": [
@@ -1914,9 +1911,9 @@
           "evidence": "the row read (the four ledger columns, and the key set showing no tenant column) + the toggle response"
         },
         {
-          "clause": "the FLOW_DISABLED refusal message says the flow was switched off by the deployment's packaged-automation switch, in plain words: triggering the disabled flow answers 409 FLOW_DISABLED whose message is the switched-off packaged flow sentence — the flow is turned off for this deployment, an administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name — and names no system table and no ADR (the engine's info log line carries those)",
+          "clause": "the FLOW_DISABLED refusal message says the flow was switched off by the deployment's packaged-automation switch, in plain words: triggering the disabled flow answers 409 FLOW_DISABLED whose message is the switched-off packaged flow sentence — the flow is turned off for this deployment, an administrator can turn it on again in its package's Automations in Studio, or copy it there under a new name — and names no system table and no ADR (the engine's info log line carries those)",
           "oracle": "api",
-          "verify": "the step-5 error message is exactly \"This flow is turned off for this deployment. An administrator can turn it on again under Setup › Packaged automation, or copy it there under a new name.\" (engine.ts describeDisabledFlow, built by describeTurnedOffPackagedItem in @objectstack/types — the one sentence the switched-off action refusal also reads as) and contains neither 'sys_metadata_activation' nor an ADR number. ⛔ The CODE alone is NOT the oracle: ADR-0126 §7.2 deliberately REUSES FLOW_DISABLED for the ledger dimension (no new ADR-0112 entry), and a status-disabled flow answers the same 409 FLOW_DISABLED with the old bare \"Flow '<name>' is disabled\" — the ledger-vs-status distinction rides the MESSAGE, so a verdict keyed on code alone cannot tell this item's dimension from the authoring one",
+          "verify": "the step-5 error message is exactly \"This flow is turned off for this deployment. An administrator can turn it on again in its package's Automations in Studio, or copy it there under a new name.\" (engine.ts describeDisabledFlow, built by describeTurnedOffPackagedItem in @objectstack/types — the one sentence the switched-off action refusal also reads as) and contains neither 'sys_metadata_activation' nor an ADR number. ⛔ The CODE alone is NOT the oracle: ADR-0126 §7.2 deliberately REUSES FLOW_DISABLED for the ledger dimension (no new ADR-0112 entry), and a status-disabled flow answers the same 409 FLOW_DISABLED with the old bare \"Flow '<name>' is disabled\" — the ledger-vs-status distinction rides the MESSAGE, so a verdict keyed on code alone cannot tell this item's dimension from the authoring one",
           "evidence": "the full 409 body with the message quoted"
         },
         {
@@ -1942,7 +1939,7 @@
         "a toggle answering 2xx with NO sys_metadata_activation row written is a FAIL on this boot — the engine has a legitimate ledger-less degraded mode, but it WARNS 'IN PROCESS ONLY … will NOT survive a restart' (engine.ts) and the showcase composition attaches the ledger, so silence plus no row means the durable write was skipped where it was promised",
         "a restart that re-arms the flow (enabled or bound true, or a run row from the post-restart create) is a FAIL against the whole point of ADR-0126 §7.2 — it is the retired flowEnabled map's behaviour reappearing",
         "a re-enable that DELETES the row is a FAIL of the row contract even though firing resumes — absence-means-active makes deletion look equivalent right up until something needs the recorded choice",
-        "a ledger-disabled flow's trigger answered 409 FLOW_DISABLED with the status dimension's bare sentence (\"Flow 'showcase_urgent_task_alert' is disabled\", with no 'turned off for this deployment' sentence and no Setup › Packaged automation remedy is a FAIL: the refusal then reports the administrator's ledger choice as an authoring status, and the code alone cannot tell the two apart, because ADR-0126 §7.2 shares it between them by design"
+        "a ledger-disabled flow's trigger answered 409 FLOW_DISABLED with the status dimension's bare sentence (\"Flow 'showcase_urgent_task_alert' is disabled\", with no 'turned off for this deployment' sentence and no Studio Automations remedy is a FAIL: the refusal then reports the administrator's ledger choice as an authoring status, and the code alone cannot tell the two apart, because ADR-0126 §7.2 shares it between them by design"
       ],
       "traps": [
         "first-boot-cold-start",
@@ -2015,6 +2012,12 @@
           "date": "2026-11-02",
           "change": "Re-measured against main after N-28/N-30 (#28818, #29264), at base dfbe34d887: the item drives the API doors only (POST /automation/:name/toggle, /trigger, _status, the data API), none of which moved, so steps and clauses stand. fixtures.knownGaps[0] (new) marks acceptance[1]'s and negative[3]'s remedy phrase TRANSITIONAL: the served FLOW_DISABLED sentence (describeTurnedOffPackagedItem('flow'), @objectstack/types) still names 'Setup › Packaged automation' and a copy made 'there', a page ADR-0146 D4/D11 retired into Studio's Automations pillar. The clause keeps the sentence exactly as served, so no clause is weakened; the remedy's wrong place is reported as a product defect for its own card, not fixed here",
           "ref": "#28579"
+        },
+        {
+          "revision": 10,
+          "date": "2026-11-02",
+          "change": "The producer now names the live door: describeTurnedOffPackagedItem('flow') (@objectstack/types) tells the reader an administrator can turn the flow on again in its package's Automations in Studio, or copy it there under a new name (New similar), not the retired Setup › Packaged automation page. acceptance[1] (clause and the verbatim sentence in its verify) and negative[3]'s remedy phrase are re-pointed to it, as fixtures.knownGaps[0] said they would be, and that TRANSITIONAL entry, the item's only known gap, is retired. The item still drives the API doors only; the code FLOW_DISABLED and the ledger-vs-status distinction by message are unchanged",
+          "ref": "#29374"
         }
       ]
     },
