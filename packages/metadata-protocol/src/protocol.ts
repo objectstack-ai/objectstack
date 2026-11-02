@@ -458,6 +458,8 @@ import { withNullMasterRowCounts } from './protocol-destructive-null-master.js';
 // [#25467 E0] The module preamble that stood here moved, verbatim, into the themed
 // `protocol-*.ts` modules below. What this file exported from it, it still exports;
 // the module order below is the order the rolled-up `.d.ts` keeps their declarations in.
+// A byte-offset shift in this file can surface a class comment inside an inferred type
+// of the published `.d.ts`: read its raw diff after any edit here.
 import {
     HAND_CRAFTED_SCHEMAS,
     TYPE_TO_FORM,
