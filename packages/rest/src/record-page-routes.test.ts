@@ -22,14 +22,17 @@
  * - [#28470] a related list's `expand` is its read's own `$expand`, and each
  *   stream part — the discussion (the thread, then its reactions), the
  *   activity and the attachments — is the `findData` the console's own read of
- *   it makes, behind that object's exposure gate, refused on its own.
+ *   it makes, behind that object's exposure gate, refused on its own;
+ * - [#28737] the timeline part is a count of each source the body names, by
+ *   that source's own read as the caller, summed as the spec's timeline table
+ *   spells it.
  *
  * The end-to-end half, under row-level and field-level security as a member who
  * is not an admin, is `record-page.dogfood.test.ts`.
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { RecordPageResponseSchema } from '@objectstack/spec/api';
+import { RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES, RecordPageResponseSchema } from '@objectstack/spec/api';
 import { RestServer } from './rest-server.js';
 import { RECORD_PAGE_PARAMS } from './record-page-routes.js';
 import { unknownQueryParamMessage } from './query-allowlist.js';
@@ -513,6 +516,144 @@ describe('[#28470] the record\'s streams and the related rows\' names ride in th
             { discussion: 'yes' },
             { related: [{ object: 'note', field: 'account', top: 3, expand: 'owner' }] },
             { mentions: { top: 50 } },
+        ]) {
+            const answer = await call(body);
+            expect(answer.status, JSON.stringify(body)).toBe(400);
+            expect(answer.body.error.code).toBe('VALIDATION_FAILED');
+        }
+        expect(getData).not.toHaveBeenCalled();
+        expect(findData).not.toHaveBeenCalled();
+    });
+});
+
+describe('[#28737] the timeline part is the 动态 stream\'s size, counted by the caller\'s own reads', () => {
+    const items = { ...ITEMS, sys_audit_log: systemObject('sys_audit_log') };
+    // Each count read answers its own total, so a sum that took one source's
+    // count for another's would show.
+    const countOf = (req: any) => {
+        const where = req.query?.where ?? {};
+        if (req.object === 'sys_comment') return { records: [], total: 3 };
+        if (req.object === 'sys_audit_log') return { records: [], total: 40 };
+        if (req.object === 'sys_activity') return { records: [], total: where.type === 'updated' ? 30 : 250 };
+        return { records: [], total: 0 };
+    };
+    const ofRecord = { object_name: 'account', record_id: 'a1' };
+
+    it('counts each named source as the caller, and the updates step aside once a field change is counted', async () => {
+        const { call, findData } = boot({ items, findData: async (req) => countOf(req) });
+        const answer = await call({ timeline: { discussion: true, activity: true, fieldChanges: true } });
+        expect(answer.status).toBe(200);
+        const data = RecordPageResponseSchema.parse(answer.body.data);
+        // 3 comments + 40 field changes + 250 drawn activity rows − their 30 updates.
+        expect(data.timeline).toEqual({ total: 263 });
+        const reads = findData.mock.calls.map(([req]) => req);
+        expect(reads).toEqual(expect.arrayContaining([
+            { object: 'sys_comment', query: { object: 'sys_comment', where: { thread_id: 'account:a1' }, limit: 0, count: true }, context: CTX },
+            {
+                object: 'sys_audit_log',
+                query: { object: 'sys_audit_log', where: { ...ofRecord, action: { $in: ['create', 'update', 'delete'] } }, limit: 0, count: true },
+                context: CTX,
+            },
+            {
+                object: 'sys_activity',
+                query: {
+                    object: 'sys_activity',
+                    where: { ...ofRecord, type: { $nin: [...RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES] } },
+                    limit: 0,
+                    count: true,
+                },
+                context: CTX,
+            },
+            {
+                object: 'sys_activity',
+                query: { object: 'sys_activity', where: { ...ofRecord, type: 'updated' }, limit: 0, count: true },
+                context: CTX,
+            },
+        ]));
+        expect(reads).toHaveLength(4);
+    });
+
+    it('counts only the sources named, and no update steps aside without a field change', async () => {
+        const { call, findData } = boot({ items, findData: async (req) => countOf(req) });
+        const activityOnly = RecordPageResponseSchema.parse((await call({ timeline: { discussion: false, activity: true, fieldChanges: false } })).body.data);
+        expect(activityOnly.timeline).toEqual({ total: 250 });
+        expect(findData.mock.calls.map(([req]) => req.object)).toEqual(['sys_activity']);
+
+        const noChanges = boot({
+            items,
+            findData: async (req) => (req.object === 'sys_audit_log' ? { records: [], total: 0 } : countOf(req)),
+        });
+        const data = RecordPageResponseSchema.parse((await noChanges.call({ timeline: { discussion: true, activity: true, fieldChanges: true } })).body.data);
+        expect(data.timeline).toEqual({ total: 253 });
+    });
+
+    it('a record with no entry counts 0', async () => {
+        const { call } = boot({ items, findData: async () => ({ records: [], total: 0 }) });
+        const data = RecordPageResponseSchema.parse((await call({ timeline: { discussion: true, activity: true, fieldChanges: true } })).body.data);
+        expect(data.timeline).toEqual({ total: 0 });
+    });
+
+    it('a refused comment or activity count refuses the part; the record and the other parts answer', async () => {
+        for (const refused of ['sys_comment', 'sys_activity']) {
+            const { call } = boot({
+                items,
+                findData: async (req) => {
+                    if (req.object === refused) throw permissionDenied();
+                    return countOf(req);
+                },
+            });
+            const answer = await call({ attachments: { top: 5 }, timeline: { discussion: true, activity: true, fieldChanges: true } });
+            expect(answer.status, refused).toBe(200);
+            const data = RecordPageResponseSchema.parse(answer.body.data);
+            expect(data.timeline, refused).toEqual({ error: { code: 'PERMISSION_DENIED', status: 403, message: expect.any(String) } });
+            expect(data.record).toEqual(RECORD);
+            expect(data.attachments).toEqual({ total: 0, records: [] });
+        }
+    });
+
+    it('a refused ledger count is no field change, so the updates stay in the count', async () => {
+        const { call } = boot({
+            items,
+            findData: async (req) => {
+                if (req.object === 'sys_audit_log') throw permissionDenied();
+                return countOf(req);
+            },
+        });
+        const data = RecordPageResponseSchema.parse((await call({ timeline: { discussion: true, activity: true, fieldChanges: true } })).body.data);
+        expect(data.timeline).toEqual({ total: 253 });
+    });
+
+    it('a source this deployment does not serve holds no entry', async () => {
+        const withoutLedger = { ...items };
+        delete (withoutLedger as Record<string, unknown>).sys_audit_log;
+        delete (withoutLedger as Record<string, unknown>).sys_comment;
+        const { call } = boot({
+            items: withoutLedger,
+            findData: async (req) => {
+                if (req.object === 'sys_audit_log' || req.object === 'sys_comment') throw objectNotFound(req.object);
+                return countOf(req);
+            },
+        });
+        const data = RecordPageResponseSchema.parse((await call({ timeline: { discussion: true, activity: true, fieldChanges: true } })).body.data);
+        expect(data.timeline).toEqual({ total: 250 });
+    });
+
+    it('a source on an object the API does not expose is refused as its list read is, and never read', async () => {
+        const hidden = { ...items, sys_activity: { ...items.sys_activity, enable: { apiEnabled: false } } };
+        const { call, findData } = boot({ items: hidden, findData: async (req) => countOf(req) });
+        const data = RecordPageResponseSchema.parse((await call({ timeline: { discussion: false, activity: true, fieldChanges: false } })).body.data);
+        expect(data.timeline).toEqual({ error: expect.objectContaining({ code: 'OBJECT_API_DISABLED', status: 404 }) });
+        expect(findData).not.toHaveBeenCalled();
+    });
+
+    it('the timeline body is strict: a missing or non-boolean source, or an undeclared key, is a 400 and nothing is read', async () => {
+        const { call, getData, findData } = boot({ items });
+        for (const body of [
+            { timeline: true },
+            { timeline: {} },
+            { timeline: { discussion: true, activity: true } },
+            { timeline: { discussion: 'yes', activity: true, fieldChanges: true } },
+            { timeline: { discussion: true, activity: true, fieldChanges: true, top: 5 } },
         ]) {
             const answer = await call(body);
             expect(answer.status, JSON.stringify(body)).toBe(400);

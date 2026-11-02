@@ -1,8 +1,11 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it } from 'vitest';
+import { SYS_ACTIVITY_BUILTIN_TYPES } from '../data/feed.zod';
 import {
   RECORD_PAGE_MAX_ACTIVITY_ROWS,
+  RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES,
+  RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE,
   RECORD_PAGE_MAX_ATTACHMENT_ROWS,
   RecordPageDiscussionSchema,
   RecordPageExplainOperationSchema,
@@ -110,5 +113,36 @@ describe('[#28470] a stream part answers its rows or its refusal, never both and
     ]) {
       expect(RecordPageDiscussionSchema.safeParse(answer).success && parses({ discussion: answer }), JSON.stringify(answer)).toBe(false);
     }
+  });
+});
+
+describe('[#28737] the timeline part names its sources strictly and answers the stream\'s size or a refusal', () => {
+  const base = { object: 'account', id: 'a1', record: { id: 'a1' }, related: [] };
+  const all = { discussion: true, activity: true, fieldChanges: true };
+
+  it('takes the three sources, each a boolean, and nothing else', () => {
+    expect(RecordPageRequestSchema.safeParse({ timeline: all }).success).toBe(true);
+    expect(RecordPageRequestSchema.safeParse({ timeline: { ...all, fieldChanges: false } }).success).toBe(true);
+    for (const timeline of [true, {}, { discussion: true, activity: true }, { ...all, discussion: 'yes' }, { ...all, top: 5 }]) {
+      expect(RecordPageRequestSchema.safeParse({ timeline }).success, JSON.stringify(timeline)).toBe(false);
+    }
+  });
+
+  it('answers a non-negative whole count, or a refusal alone', () => {
+    const parses = (timeline: unknown) => RecordPageResponseSchema.safeParse({ ...base, timeline }).success;
+    expect(parses({ total: 0 })).toBe(true);
+    expect(parses({ total: 263 })).toBe(true);
+    expect(parses({ error: refusal })).toBe(true);
+    for (const timeline of [{ total: -1 }, { total: 1.5 }, {}, { total: 1, error: refusal }, { total: 1, records: [] }]) {
+      expect(parses(timeline), JSON.stringify(timeline)).toBe(false);
+    }
+  });
+
+  it('leaves out only built-in activity types, and an update is not one of them', () => {
+    for (const type of RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES) {
+      expect(SYS_ACTIVITY_BUILTIN_TYPES as readonly string[], type).toContain(type);
+    }
+    expect(SYS_ACTIVITY_BUILTIN_TYPES as readonly string[]).toContain(RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE);
+    expect(RECORD_TIMELINE_UNDRAWN_ACTIVITY_TYPES as readonly string[]).not.toContain(RECORD_TIMELINE_UPDATE_ACTIVITY_TYPE);
   });
 });
