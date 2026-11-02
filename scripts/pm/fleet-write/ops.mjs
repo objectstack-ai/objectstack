@@ -557,15 +557,22 @@
  * raising the row to write is the maintainer's ruling, ⛔ never a retry under
  * a wider token.
  *
- * The sender gate, recorded beside the row as the card asks: every stroke
- * passes the target-write gate first, and the executor then holds a read to
- * the row's `senderGate`, one of `ADVISORY_READ_SENDER_GATES`. It is
- * `collaborator`, the card's recommendation: the sender must be a login the
- * advisory's own `collaborating_users` lists, compared case-insensitively (a
- * team is not read), or nothing is sealed — holding an id is not reading its
- * text. The other value, `target-write`, keeps the gate the four rows above
- * keep. The maintainer rules which stands, on the pull request; switching is
- * that one value, and an unknown one fails closed.
+ * The sender gate is `target-write`, by the maintainer's ruling, verbatim as
+ * the body of issue 29644 records it: 「同意改成对仓库有写权限,立卡派发修复」.
+ * Every stroke passes the target-write gate before its first request
+ * (`execute.mjs`, the sender gate), and the executor then holds a read to the
+ * row's `senderGate`, a key of `ADVISORY_READ_SENDER_GATES`; `target-write`
+ * asks nothing more: write, maintain or admin on the target, the gate the
+ * four rows above keep. The ruling settles the question this row landed
+ * with, whether a read should instead need the sender on the advisory's own
+ * `collaborating_users`. That gate excluded no one, since a sender with write
+ * on the target can add itself to any advisory whose id it holds (above), and
+ * the first live reads were each refused at it (runs 41545143476,
+ * 41545259848 and 41546082963) for a sender the advisory's write-grant GET
+ * already listed (run 41546190167). Why the fence refused them is
+ * unmeasured; one hypothesis is that the read-grant answer omits
+ * `collaborating_users`. The table holds that one value, and any other, the
+ * retired `collaborator` among them, fails closed with nothing sealed.
  *
  * ## The platform's `client_payload` ceilings — pinned, with their source
  *
@@ -1308,19 +1315,18 @@ export function advisoryReadParts(sealed) {
 }
 
 /**
- * The sender gates a read may be held to (header) — the row's `senderGate` is one of them. `collaborator`: the
- * sender must be on the advisory's own `collaborating_users`. `target-write`: the gate every stroke already
- * passed, write, maintain or admin on the target, and nothing more.
+ * The sender gates a read may be held to (header) — the row's `senderGate` is a key of this table. One, by the
+ * maintainer's ruling: `target-write`, the gate every stroke already passed, write, maintain or admin on the
+ * target, and nothing more. The table stays so that a row naming any other value fails closed.
  */
 export const ADVISORY_READ_SENDER_GATES = Object.freeze({
-  collaborator: "a sender the advisory's own collaborating_users lists",
   'target-write': 'a sender with write, maintain or admin on the target',
 });
 
 /**
- * The fences on a read, each judged on the executor's own GET — `ctx` is `{ ghsaId, answer, sender, gate }`. A
- * fence whose read did not answer an advisory FAILS, naming that. ⛔ No sentence carries the answer's id, its state
- * or any field of it: an answer naming another advisory is said to, and no more.
+ * The fences on a read, each judged on the executor's own GET — `ctx` is `{ ghsaId, answer, gate }`. A fence
+ * whose read did not answer an advisory FAILS, naming that. ⛔ No sentence carries the answer's id, its state,
+ * any field of it or the gate's value: an answer naming another advisory is said to, and no more.
  */
 const readGateOf = (c) => (Object.hasOwn(ADVISORY_READ_SENDER_GATES, c.gate) ? c.gate : null);
 export const ADVISORY_READ_FENCES = Object.freeze([
@@ -1340,14 +1346,8 @@ export const ADVISORY_READ_FENCES = Object.freeze([
   Object.freeze({
     fence: 'sender',
     wants: (c) => ADVISORY_READ_SENDER_GATES[readGateOf(c)] ?? 'a sender gate the table names',
-    fails: (c) => {
-      const gate = readGateOf(c);
-      if (gate === null) return 'the row names no sender gate the table knows, so no read is sealed';
-      if (gate === 'target-write') return null;
-      if (!advisoryRead(c)) return 'not judged, because the advisory was not read';
-      const sender = typeof c.sender === 'string' ? c.sender.toLowerCase() : null;
-      return sender && advisoryCollaboratorLogins(c.answer.json).some((l) => l.toLowerCase() === sender) ? null : `${advisoryPrintable(c.sender, LOGIN_SHAPE, 'login')} is not a collaborator on it`;
-    },
+    // `target-write` was judged before this GET, on the stroke (header), so it asks nothing of the answer; any other value is closed.
+    fails: (c) => (readGateOf(c) === 'target-write' ? null : 'the row names no sender gate the table knows, so no read is sealed'),
   }),
 ]);
 
@@ -1659,9 +1659,9 @@ export function transferRemedy(source, target) {
  *   `grant`       (optional) the level the row spends it at, when lower than
  *                 `PERMISSIONS` holds — `advisory_read`'s `read` alone, on a
  *                 stroke-scoped permission (header above);
- *   `senderGate`  (optional) the sender gate a read is held to beside the
- *                 target's — `advisory_read`'s, one of
- *                 `ADVISORY_READ_SENDER_GATES` (header above);
+ *   `senderGate`  (optional) the sender gate a read is held to —
+ *                 `advisory_read`'s, a key of `ADVISORY_READ_SENDER_GATES`
+ *                 (header above); any other value fails closed;
  *   `required`    keys that must be present;
  *   `optional`    keys that may be; anything else on the action is refused;
  *   `atLeastOne`  (optional) of these keys, at least one must be present;
@@ -1977,13 +1977,13 @@ export const OPS = Object.freeze({
   }),
   // The one row that READS an advisory — see the header. ONE GET, nothing written; the executor seals the answer to the
   // seat's one-time key and prints nothing of it, not even the id. It spends repository-advisories at READ alone and
-  // travels alone. ⚖ The sender gate, recorded here as the card asks and open for the maintainer's ruling on the pull
-  // request: `collaborator` — the card's recommendation, the sender on the advisory's own collaborating_users — or
-  // `target-write`, the gate the four rows above keep (`ADVISORY_READ_SENDER_GATES`). Switching it is this one value.
+  // travels alone. ⚖ The sender gate is `target-write`, the gate the four rows above keep (`ADVISORY_READ_SENDER_GATES`),
+  // by the maintainer's ruling, verbatim: 「同意改成对仓库有写权限,立卡派发修复」 (the header says why). ⛔ The grant stays
+  // `read`: a read refused under it is the maintainer's to rule on, never a raise to write.
   advisory_read: Object.freeze({
     permission: 'repository-advisories',
     grant: 'read',
-    senderGate: 'collaborator',
+    senderGate: 'target-write',
     required: Object.freeze(['ghsa_id', 'public_key']),
     optional: Object.freeze([]),
     alone: true,
