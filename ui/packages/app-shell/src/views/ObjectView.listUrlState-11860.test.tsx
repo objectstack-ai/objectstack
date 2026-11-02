@@ -95,7 +95,7 @@ import { ObjectView } from './ObjectView';
 import '@object-ui/plugin-grid';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { buildListFilterKey } from './listFilterStorage';
-import { LIST_FILTER_PARAM, LIST_GROUP_PARAM, LIST_SEARCH_PARAM, LIST_SORT_PARAM } from './userFilterUrlState';
+import { LIST_FILTER_PARAM, LIST_GROUP_PARAM, LIST_SEARCH_PARAM, LIST_SORT_PARAM, withoutListStateParams } from './userFilterUrlState';
 import { localListStateKey } from '../context/ListPreferencesProvider';
 import { acceptStoredFilters, acceptStoredSort } from './objectViewListUrlState';
 
@@ -699,5 +699,48 @@ describe('a link\'s sort wins over the sort its view declares (objectui#11860)',
     const host = await mountHost([`${VIEW}/sorted`]);
     expect(lastQuery().$orderby).toEqual([{ field: 'name', order: 'asc' }]);
     expect(new URLSearchParams(host.search()).has(LIST_SORT_PARAM)).toBe(false);
+  });
+});
+
+describe('the link a sign-in hands over opens the next user\'s list on their own state (objectstack#29174)', () => {
+  /** A's list, as A left it when the session ended: a filter, a search and a sort on a view that declares its own sort. */
+  const A_LEFT = link(`${VIEW}/sorted`, { filter: URGENT, search: 'pipeline', sort: [{ field: 'due_date', order: 'desc' }] });
+  /** The return link the Console's signed-out guard composes from it (`LoginRedirect` in `apps/console`). */
+  const handedOver = () => {
+    const [path, query] = A_LEFT.split('?');
+    const kept = withoutListStateParams(new URLSearchParams(query)).toString();
+    return kept ? `${path}?${kept}` : path!;
+  };
+  const firstQuery = () => listQueries[0];
+
+  it('CONTROL: A\'s URL as A left it puts A\'s state into the first data request', async () => {
+    await mountHost([A_LEFT]);
+    const first = firstQuery();
+    expect(filterOf(first)).toContain('"priority","=","urgent"');
+    expect(first.$search).toBe('pipeline');
+    expect(first.$orderby).toEqual([{ field: 'due_date', order: 'desc' }]);
+  });
+
+  it('at the handed-over URL, the next user\'s first data request carries none of it: the view\'s default', async () => {
+    const host = await mountHost([handedOver()]);
+    const first = firstQuery();
+    expect(filterOf(first)).not.toContain('urgent');
+    expect(first.$search).toBeUndefined();
+    expect(first.$orderby).toEqual([{ field: 'name', order: 'asc' }]);
+    // Nor is any of it written back into the address bar.
+    expect(host.search()).not.toContain('pipeline');
+    expect(host.search()).not.toContain('urgent');
+  });
+
+  it('the next user\'s own stored state applies there, and nothing of A\'s is merged in', async () => {
+    storeListState('sorted', {
+      filters: { id: 'root', logic: 'and', conditions: [{ id: 'r', field: 'status', operator: 'equals', value: 'open' }] },
+      search: 'mine',
+    });
+    await mountHost([handedOver()]);
+    const first = firstQuery();
+    expect(filterOf(first)).toContain('"status","=","open"');
+    expect(filterOf(first)).not.toContain('urgent');
+    expect(first.$search).toBe('mine');
   });
 });

@@ -2644,6 +2644,41 @@ describe('ListView', () => {
       expect(indicator).not.toHaveAttribute('role');
       expect(indicator).not.toHaveAttribute('tabindex');
     });
+
+    // The lock keys on `lockedBy`, never on `type`: the spec defaults `type`
+    // to `collaborative` and the served view carries the authored body, so a
+    // view that writes only `lockedBy` arrives with `type` absent.
+    it.each([
+      ['no `type` (the spec default)', { lockedBy: 'admin@objectos.ai' }, 'Shared view'],
+      ['`type: collaborative`', { type: 'collaborative' as const, lockedBy: 'admin@objectos.ai' }, 'Shared view'],
+      ['`type: personal`', { type: 'personal' as const, lockedBy: 'admin@objectos.ai' }, 'Personal view'],
+    ])('shows the lock from `sharing.lockedBy` with %s', (_case, sharing, typeLabel) => {
+      const schema: ListViewSchema = {
+        type: 'list-view',
+        objectName: 'contacts',
+        viewType: 'grid',
+        fields: ['name', 'email'],
+        sharing,
+      };
+
+      renderWithProvider(<ListView schema={schema} />);
+      expect(screen.getByTestId('sharing-locked-by')).toHaveTextContent('Locked by admin@objectos.ai');
+      expect(screen.getByTestId('share-button')).toHaveAttribute('title', `${typeLabel} · Locked by admin@objectos.ai`);
+    });
+
+    it('shows no sharing indicator for a `sharing` block with neither `type` nor `lockedBy`', () => {
+      const schema: ListViewSchema = {
+        type: 'list-view',
+        objectName: 'contacts',
+        viewType: 'grid',
+        fields: ['name', 'email'],
+        sharing: {},
+      };
+
+      renderWithProvider(<ListView schema={schema} />);
+      expect(screen.queryByTestId('share-button')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('sharing-locked-by')).not.toBeInTheDocument();
+    });
   });
 
   // ============================
