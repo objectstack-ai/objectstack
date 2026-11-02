@@ -207,6 +207,47 @@ carry and forbid; exact key spelling is the spec slice's, reviewed against this 
 >   `credentialRef`" this decision names. It resolves through the same chain as `credentialRef`, and
 >   an instance whose public key does not resolve is degraded, not served unverified.
 
+> **Amended (2026-11-02, #28864) — D2.1: the installing administrator may supply the OAuth client.** The
+> maintainer ruled on 2026-11-02, verbatim: 「同意」, accepting letter B of director record 6566728470 on
+> #28702: an open-edition OAuth connector app ships no client of its publisher's, and the administrator of
+> each deployment registers their own client with the vendor and enters it on the connection.
+>
+> - **Why.** D5 fixes the redirect URI per deployment, and a vendor accepts a client only at the callbacks
+>   that client's owner registered. A `clientId` written into the definition is the publisher's client, so
+>   an app installed on a deployment its publisher never sees cannot connect there.
+> - **What the variant carries.** An `authorization_code` instance may declare `clientSource: 'installer'`.
+>   The administrator of each deployment then registers their own client with the vendor, against that
+>   deployment's callback, and enters its id and secret on the instance's connection. The definition names
+>   no client on any provider: a `clientId` beside `clientSource` is refused at publish, located at
+>   `auth.clientId`, and a `credentialRef` without its `clientId` already was. The endpoints do not move.
+>   They are declared, or discovered on `provider: 'mcp'` over http: the installer owns the client, not the
+>   vendor's authorization server. The shape is
+>   `packages/spec/src/shared/connector-auth.zod.ts#ConnectorInstanceOAuth2AuthorizationCodeAuthSchema`,
+>   and the client-key rule is on `packages/spec/src/integration/connector.zod.ts#DeclarativeConnectorEntrySchema`.
+> - **Where the installer's client lives.** In the instance's connection record (D3, Q2), in the same
+>   per-connection client record that keeps a dynamically registered client, encrypted at rest through the
+>   `secret` channel and masked on every read. D3's list of what is persisted therefore reads: the
+>   refresh token, a dynamically registered or installer-supplied client, and the grant's status, scopes
+>   and expiry. The client secret entered there is not a `credentialRef`, and D3's first bullet still
+>   holds: the administrator names it, not the author. A connection belongs to one organization (Q1), so
+>   each organization's connection carries its own client, and replacing it is a reconnect.
+> - **A packaged `clientId` is kept, for private apps.** An instance that names its `clientId` works as
+>   D2.1 states, because its author registers the callback of every deployment that installs it: an
+>   organization's own app, or a vendor MCP server without dynamic registration whose client the author
+>   registered (HubSpot, Q3). Refusing it would narrow what such an app may write today, and the schema
+>   cannot tell a private app from a listing. The ruling's rule for an official listing, that it ships no
+>   ObjectStack-owned client id or secret, is held where listings are reviewed, not by the schema.
+> - **`client_credentials` is unchanged.** It keeps no connection record (D3), so there is nowhere to
+>   enter a client. Its client stays `clientId` with the `credentialRef` of its secret, which the
+>   installing administrator sets in the secrets layer, and `clientSource` is refused on it.
+> - **Not decided here: an API host per account.** Some vendors split sandbox and production
+>   authorization hosts and give each production account its own API host, learned after the grant
+>   (DocuSign, per its documentation; not measured here). The endpoints stay in the definition, so an app
+>   targets one host set, sandbox first. Discovering an API host per connection is a follow-up.
+> - **Slices.** The server slice keeps the installer's client on the connection and sends it: the connect
+>   door takes it, and the grant handle uses it in place of a declared one. The ui slice asks for it on
+>   the connection form and shows the deployment's redirect URI.
+
 ### D3 — Secrets are references; tokens are runtime state in a connection record
 
 - Every secret an author names is a `credentialRef`, resolved through `CredentialResolver` (ADR-0097 §3,
