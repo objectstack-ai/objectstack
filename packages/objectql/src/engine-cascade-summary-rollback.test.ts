@@ -17,9 +17,10 @@
  *
  * Pinned here: the parent delete refuses with an error that is NOT the
  * stale-roll-up refusal, on the atomic plan (nothing stored changes) and on a
- * runtime that cannot roll back (the parent is still stored); a refusal that
- * escapes a caller's own `transaction()` that rolls back is converted the same
- * way. Controls: a delete of the dependent itself — its own write landed, only
+ * runtime that cannot roll back (the parent is still stored), by id and by
+ * predicate; a refusal that
+ * escapes a caller's own `transaction()` (engine or scoped context) that rolls
+ * back is converted the same way. Controls: a delete of the dependent itself — its own write landed, only
  * its recompute failed — still answers `ERR_SUMMARY_RECOMPUTE` carrying its
  * result, and so does a caller's transaction that catches it and commits.
  *
@@ -81,6 +82,11 @@ function makeDriver(transactional: boolean) {
       return row;
     },
     async delete(o: string, id: string) { return storeFor(o).delete(String(id)); },
+    async deleteMany(o: string, ast: any) {
+      const doomed = Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
+      for (const r of doomed) storeFor(o).delete(String(r.id));
+      return doomed.length;
+    },
     async count(o: string, ast: any) { return (await this.find(o, ast)).length; },
     async bulkCreate(o: string, rows: Row[]) { return Promise.all(rows.map((r) => this.create(o, r))); },
     async bulkUpdate() { return []; }, async bulkDelete() {},
@@ -155,6 +161,15 @@ describe('a cascade dependent\'s ERR_SUMMARY_RECOMPUTE never answers for a paren
     expect(ids(driver.rowsOf('acct'))).toEqual(['a1']);
     // The dependent the walk reached first is gone: nothing can roll it back.
     expect(ids(driver.rowsOf('line'))).toEqual(['l2']);
+  });
+
+  it('a predicate delete (multi) on a runtime that cannot roll back: refused the same way, the parent still stored', async () => {
+    const { engine, driver } = await makeEngine(false);
+    const err: any = await engine.delete('acct', { where: { name: 'A' }, multi: true } as any).then(() => null, (e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.code).toBeUndefined();
+    expect(err.cause?.code).toBe('ERR_SUMMARY_RECOMPUTE');
+    expect(ids(driver.rowsOf('acct'))).toEqual(['a1']);
   });
 
   it('a caller\'s own transaction that the refusal rolls back: refused with another error, nothing stored', async () => {
