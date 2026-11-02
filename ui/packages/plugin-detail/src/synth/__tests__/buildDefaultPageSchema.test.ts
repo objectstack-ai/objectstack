@@ -7,7 +7,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { getRecordDisplayName } from '@object-ui/core';
 import {
   buildDefaultPageSchema,
   buildDefaultHeader,
@@ -167,50 +166,11 @@ describe('deriveHighlightFields', () => {
     ).toEqual(['a', 'b', 'c']);
   });
 
-  it('prefers owner / rating / source / phone / email and skips status', () => {
-    const fields = deriveHighlightFields(leadDef, 'status');
-    expect(fields).not.toContain('status');
-    expect(fields).not.toContain('created_at');
-    expect(fields).toContain('owner_id');
-    // Six since objectstack#27055 (「要点 6 项等宽」).
-    expect(fields.length).toBeLessThanOrEqual(6);
-  });
-
-  it('falls back to any field order when preferred names absent, minus the H1 field', () => {
-    const def: ObjectDefLike = { fields: { foo: {}, bar: {}, baz: {} } };
-    // No conventional name field here, so the shared ADR-0079 ladder DERIVES
-    // the title: the first title-eligible field in declaration order, `foo`.
-    // The page H1 renders ITS value — so the strip sitting directly beneath
-    // must not repeat it. Before objectui#7287 this module ran its own ladder,
-    // whose literal five-name walk did not know `foo`; it returned null, and
-    // `foo` was the first chip under a heading already showing it.
-    expect(
-      getRecordDisplayName(def, { id: 'r1', foo: 'Acme', bar: 'x', baz: 'y' }),
-    ).toBe('Acme');
-    expect(deriveHighlightFields(def, null)).toEqual(['bar', 'baz']);
-  });
-
-  it('skips system tenancy + audit fields (organization_id, created_by, etc.)', () => {
-    const def: ObjectDefLike = {
-      fields: {
-        id: {},
-        organization_id: {},
-        created_by: {},
-        updated_by: {},
-        tenant_id: {},
-        workspace_id: {},
-        useful_field: {},
-        another_useful: {},
-      },
-    };
-    const fields = deriveHighlightFields(def, null);
-    expect(fields).not.toContain('organization_id');
-    expect(fields).not.toContain('created_by');
-    expect(fields).not.toContain('updated_by');
-    expect(fields).not.toContain('tenant_id');
-    expect(fields).not.toContain('workspace_id');
-    expect(fields).toContain('useful_field');
-    expect(fields).toContain('another_useful');
+  it('an object that declares no highlightFields gets none: nothing is guessed (objectstack#28868)', () => {
+    // leadDef has owner_id, rating, source, phone and email, the names the
+    // retired preferred-name walk picked first.
+    expect(deriveHighlightFields(leadDef, 'status')).toEqual([]);
+    expect(deriveHighlightFields({ fields: { foo: {}, bar: {}, baz: {} } }, null)).toEqual([]);
   });
 
   it('skips the record title field to avoid duplicating the page H1', () => {
@@ -220,20 +180,18 @@ describe('deriveHighlightFields', () => {
       // payload can carry, and whose read this module dropped in
       // objectui#7287.
       nameField: 'subject',
+      highlightFields: ['subject', 'priority', 'status', 'due_date'],
       fields: {
         subject: {},
-        name: {}, // common candidate also skipped
         priority: {},
         status: {},
         due_date: {},
         notes: {},
       },
     } as unknown as ObjectDefLike;
-    const fields = deriveHighlightFields(def, 'status');
-    expect(fields).not.toContain('subject');
-    expect(fields).not.toContain('name');
-    expect(fields).not.toContain('status');
-    expect(fields).toContain('priority');
+    // The declared list is the author's: only the title leaves it, the stage
+    // field included in it stays.
+    expect(deriveHighlightFields(def, 'status')).toEqual(['priority', 'status', 'due_date']);
   });
 });
 
@@ -744,7 +702,7 @@ describe('semantic-role hints (ADR-0085 / #2065)', () => {
       ).toEqual(['phone', 'rating']);
     });
 
-    it('ignores the retired compactLayout spelling (framework#2536) — heuristic applies instead', () => {
+    it('ignores the retired compactLayout spelling (framework#2536) — no strip instead', () => {
       // The cast is the case, not a workaround for it: `compactLayout` was
       // RETIRED, so `ObjectDefLike` rejecting it is the type doing its job, and
       // spelling it here in a typed position would only be asserting that the
@@ -757,8 +715,9 @@ describe('semantic-role hints (ADR-0085 / #2065)', () => {
         string,
         unknown
       > as ObjectDefLike;
-      const derived = deriveHighlightFields(retiredSpelling, 'status');
-      expect(derived).not.toEqual(['email', 'phone']);
+      // Nothing is declared under the live key, so there is no strip at all
+      // (objectstack#28868): the retired key is not read back as a list.
+      expect(deriveHighlightFields(retiredSpelling, 'status')).toEqual([]);
     });
 
     it('drops non-string entries and caps the declared list at max', () => {

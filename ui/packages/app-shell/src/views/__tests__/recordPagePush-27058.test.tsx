@@ -235,9 +235,10 @@ describe('the phone header of a default record page (objectstack#27058, Target 4
     });
   });
 
-  it('no declared highlights: no subtitle, and the strip is derived as on any width', () => {
+  it('no declared highlights: no subtitle and no strip, as on any width (objectstack#28868)', () => {
+    // Nothing is guessed: the object above has seven highlight-friendly
+    // fields, and none of them is picked.
     const header = phoneRecordHeader(def, undefined, { company: 'Atlas' });
-    expect(header.subtitle).toBe('');
-    expect(header.highlightFields.length).toBeLessThanOrEqual(PHONE_HIGHLIGHTS_MAX);
+    expect(header).toEqual({ subtitle: '', highlightFields: [] });
   });
 });
