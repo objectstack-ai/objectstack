@@ -22,9 +22,10 @@
  * (`id > cursor`, ordered by `id`): a hand-written double that ignores the
  * cursor or the order cannot tell a completed read from a repeated page.
  *
- * A table that does not exist is still no holders: a stack that never
- * materialises `sys_member` has no role holders to lose, and the driver's
- * missing-table refusal is the one failure that says so.
+ * A membership object that does not exist is still no holders: a stack that
+ * never materialises `sys_member` has no role holders to lose. The driver's
+ * missing-table refusal and the engine's `OBJECT_NOT_FOUND` for `sys_member`
+ * are the two failures that say so; every other failure is loud.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -162,6 +163,12 @@ describe('[#29362] TeamGraphService.expandRoleUsers reads every holder (driver-s
     const positions = new PositionGraphService({ engine: rig.engine as never, organizationId: ORG, teamGraph: team });
 
     await expect(positions.expandPositionUsers(ROLE, ORG)).rejects.toThrow(/could not be read/);
+  });
+
+  it('a composition that never registers sys_member holds no role: [] as before', async () => {
+    const rig = await boot(0, { registerMember: false });
+
+    expect(await graph(rig.engine).expandRoleUsers(ROLE, ORG)).toEqual([]);
   });
 
   it('a stack whose sys_member table was never created holds no role: [] as before', async () => {

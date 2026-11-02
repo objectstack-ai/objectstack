@@ -67,7 +67,7 @@ afterEach(async () => {
  * rows the predicate must keep out. Membership ids are scrambled against the
  * user ids, so an unordered first read is not the lowest ids.
  */
-async function boot(n: number): Promise<Rig> {
+async function boot(n: number, opts: { registerMember?: boolean } = {}): Promise<Rig> {
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as never);
   const engine = new ObjectQL();
   engine.registerDriver(driver as never, true);
@@ -78,7 +78,7 @@ async function boot(n: number): Promise<Rig> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysOrganization, SysMember],
+    objects: opts.registerMember === false ? [SysOrganization] : [SysOrganization, SysMember],
   } as never);
   await engine.syncSchemas();
   engines.push(engine);
@@ -92,8 +92,10 @@ async function boot(n: number): Promise<Rig> {
   }));
   rows.push({ id: 'mem_elsewhere', user_id: 'usr_elsewhere', organization_id: ELSEWHERE, role: TIER });
   rows.push({ id: 'mem_other_tier', user_id: 'usr_other_tier', organization_id: ORG, role: 'member' });
-  const memberDriver = e.getDriverForObject('sys_member');
-  for (let i = 0; i < rows.length; i += 250) await memberDriver.bulkCreate('sys_member', rows.slice(i, i + 250));
+  if (opts.registerMember !== false) {
+    const memberDriver = e.getDriverForObject('sys_member');
+    for (let i = 0; i < rows.length; i += 250) await memberDriver.bulkCreate('sys_member', rows.slice(i, i + 250));
+  }
 
   let reads = 0;
   (driver as any).knex.on('query', (q: { sql: string }) => {
@@ -156,6 +158,14 @@ describe('[#29362] approvals membership-tier expansion reads every holder (drive
     failMemberReads(rig, new Error('SQLITE_IOERR: disk I/O error'));
 
     await expect(position(rig, TIER)).rejects.toThrow(/could not be read/);
+  });
+
+  it('a composition that never registers sys_member holds no tier: [] as before, and the position keeps its literal', async () => {
+    const rig = await boot(0, { registerMember: false });
+
+    expect(await tier(rig, TIER)).toEqual([]);
+    expect(await resolveSpec(rig, { type: 'position', value: TIER })).toEqual([`position:${TIER}`]);
+    expect(rig.warn.mock.calls.some(([, meta]) => typeof meta?.error === 'string')).toBe(false);
   });
 
   it('⛔ what the caller sees: the slot falls back to its literal, and the warning names the failed read', async () => {

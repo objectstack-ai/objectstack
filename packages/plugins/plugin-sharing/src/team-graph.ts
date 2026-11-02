@@ -151,22 +151,38 @@ const ROLE_HOLDER_PAGE_ROWS = 10000;
  *   - a read that fails throws, carrying the driver's error as `cause`;
  *   - a walk that cannot vouch for completion (a row without an `id` to resume
  *     after, a page the driver returned without honouring the cursor) throws;
- *   - a table that does not exist is the one failure that IS an answer — a
- *     stack that never materialises `sys_member` has no role holders — and
- *     answers `[]` as it always did, judged by the shared missing-table
- *     predicate rather than by swallowing every error.
+ *   - a membership object that does not exist is the one failure that IS an
+ *     answer — a stack that never materialises `sys_member` has no role
+ *     holders — and answers `[]` as it always did; see
+ *     {@link membershipObjectAbsent}.
  */
+/**
+ * [#29362] Did the role read fail because this stack has no `sys_member` at
+ * all — the one failure whose empty answer is the truth? Two spellings of the
+ * same absence, each attributed to `sys_member` so a failure about another
+ * object is not evidence about this one: the driver's missing-table refusal
+ * (the shared `isMissingTableError`, the table registered but never created),
+ * and the engine's `OBJECT_NOT_FOUND` (a composition that never registers the
+ * object, refused before any driver is asked — the reading
+ * `sys-metadata-repository.ts` gives its own history object). Anything else
+ * is an outage and stays loud.
+ */
+function membershipObjectAbsent(err: unknown): boolean {
+  if (isMissingTableError(err, 'sys_member')) return true;
+  const refused = err as { code?: unknown; object?: unknown } | null | undefined;
+  return refused?.code === 'OBJECT_NOT_FOUND' && refused.object === 'sys_member';
+}
+
 async function readRoleHoldersToCompletion(
   engine: SharingEngine,
   roleName: string,
   org: string | null | undefined,
 ): Promise<string[]> {
-  const refusal = (reason: string, cause?: unknown) => new Error(
+  const refusal = (reason: string, cause?: unknown) => Object.assign(new Error(
     `[sharing] the holders of role '${roleName}'${org ? ` in organization '${org}'` : ''} could not be read: `
       + `${reason}. A shortened or empty holder set would withhold or revoke the grants it confers, so the `
       + 'expansion refuses instead.',
-    cause === undefined ? undefined : { cause },
-  );
+  ), cause === undefined ? {} : { cause });
   const users = new Set<string>();
   const walk = keysetWalk<Record<string, unknown>>(
     (page) => engine.find('sys_member', { ...page, fields: ['id', 'user_id'], context: SYSTEM_CTX }),
@@ -180,7 +196,7 @@ async function readRoleHoldersToCompletion(
       }
     }
   } catch (err) {
-    if (isMissingTableError(err, 'sys_member')) return [];
+    if (membershipObjectAbsent(err)) return [];
     throw refusal(err instanceof Error ? err.message : String(err), err);
   }
   if (walk.truncated) {

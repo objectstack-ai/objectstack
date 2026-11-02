@@ -1127,6 +1127,23 @@ const MEMBER_SCREEN_READ_LIMIT = 50000;
 const MEMBER_TIER_PAGE_ROWS = 10000;
 
 /**
+ * [#29362] Did a `sys_member` read fail because this stack has no membership
+ * object at all — the one failure whose empty answer is the truth? Two
+ * spellings of the same absence, each attributed to `sys_member` so a failure
+ * about another object is not evidence about this one: the driver's
+ * missing-table refusal (the shared `isMissingTableError`, the table
+ * registered but never created), and the engine's `OBJECT_NOT_FOUND` (a
+ * composition that never registers the object, refused before any driver is
+ * asked — the reading `sys-metadata-repository.ts` gives its own history
+ * object). Anything else is an outage and stays loud.
+ */
+function membershipObjectAbsent(err: unknown): boolean {
+  if (isMissingTableError(err, 'sys_member')) return true;
+  const refused = err as { code?: unknown; object?: unknown } | null | undefined;
+  return refused?.code === 'OBJECT_NOT_FOUND' && refused.object === 'sys_member';
+}
+
+/**
  * Approver types resolved by QUERYING a graph rather than by taking `value`
  * literally (#3807). Each can legitimately come back empty — an unstaffed
  * position, an emptied team, a mis-pointed unit — and the caller then falls
@@ -3393,10 +3410,10 @@ export class ApprovalService implements IApprovalService {
    * to its literal and says the read failed. Answering `[]` instead routed a
    * `position` approver to its assignment holders alone — a shrunk slate that
    * looks complete — and logged an `org_membership_level` one as "expanded to
-   * nobody", indistinguishable from a tier no one holds. A table that does not
-   * exist is the one failure that IS an answer (a stack that never materialises
-   * `sys_member` has no tier holders) and keeps answering `[]`, judged by the
-   * shared missing-table predicate.
+   * nobody", indistinguishable from a tier no one holds. A membership object
+   * that does not exist is the one failure that IS an answer (a stack that never
+   * materialises `sys_member` has no tier holders) and keeps answering `[]`;
+   * see {@link membershipObjectAbsent}.
    */
   private async expandMembershipTierUsers(tier: string, organizationId?: string | null): Promise<string[]> {
     if (!tier) return [];
@@ -3416,12 +3433,11 @@ export class ApprovalService implements IApprovalService {
         }
       }
     } catch (err) {
-      if (isMissingTableError(err, 'sys_member')) return [];
-      throw new Error(
+      if (membershipObjectAbsent(err)) return [];
+      throw Object.assign(new Error(
         `[approvals] ${scope} could not be read: ${err instanceof Error ? err.message : String(err)}. `
         + 'Routing to a shortened slate would leave holders unasked, so the expansion refuses instead.',
-        { cause: err },
-      );
+      ), { cause: err });
     }
     if (walk.truncated) {
       throw new Error(
