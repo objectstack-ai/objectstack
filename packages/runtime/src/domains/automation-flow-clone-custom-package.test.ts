@@ -42,6 +42,7 @@ import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { SysMetadata, SysMetadataHistoryObject, SysMetadataAuditObject } from '@objectstack/platform-objects/metadata';
 import { CloneFlowRequestSchema, CloneFlowResponseSchema } from '@objectstack/spec/api';
+import { FlowSchema } from '@objectstack/spec/automation';
 import { ROUTE_LEDGER } from '../route-ledger.js';
 import { HttpDispatcher } from '../http-dispatcher.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from '../validation-failure.js';
@@ -97,7 +98,13 @@ interface Answer {
     body: any;
 }
 
-async function boot() {
+/**
+ * `parse`: the engine's registration as a strict `FlowSchema` parse — the
+ * check `registerFlow` runs first (`canonicalizeFlow`), so a definition the
+ * protocol refuses (an illegal machine name among it) throws the way the real
+ * engine throws. The default rig's engine is a map that accepts anything.
+ */
+async function boot(options: { parse?: boolean } = {}) {
     const engine = new ObjectQL();
     liveEngines.push(engine);
     engine.registerDriver(new SqlDriver({
@@ -126,7 +133,11 @@ async function boot() {
     const protocol = new ObjectStackProtocolImplementation(engine as any, () => services);
 
     const flows = new Map<string, any>([[SOURCE, shipped], [LOCAL, flowOf(LOCAL)]]);
-    const registerFlow = vi.fn((name: string, definition: unknown) => { flows.set(name, definition); return definition; });
+    const registerFlow = vi.fn((name: string, definition: unknown) => {
+        if (options.parse) FlowSchema.parse(definition);
+        flows.set(name, definition);
+        return definition;
+    });
     const unregisterFlow = vi.fn((name: string) => { flows.delete(name); });
     const getFlow = vi.fn(async (name: string) => flows.get(name) ?? null);
     const named: Record<string, unknown> = {
@@ -307,6 +318,37 @@ describe('[#28149] a source no package ships has no pair', () => {
         expect(answer.data.packageId).toBe(OTHER.id);
         expect((await rig.rows('local_digest_copy')).map((r) => r.package_id)).toEqual([OTHER.id]);
         expect(answer.data.flow.status).toBe('obsolete');
+    }, 60_000);
+});
+
+describe('[#29016] a clone the engine refuses installs no pair', () => {
+    it('control — with the parsing engine, a legal name still lands in the ensured pair', async () => {
+        const rig = await boot({ parse: true });
+
+        const answer = await rig.clone(SOURCE, { name: 'acme_lead_followup', label: 'Lead follow-up (ACME)' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+        expect(answer.data.packageId).toBe(PAIR);
+        expect(rig.installed()).toContain(PAIR);
+    }, 60_000);
+
+    it('an illegal machine name is refused 400 and the package list is unchanged', async () => {
+        const rig = await boot({ parse: true });
+        const before = rig.installed();
+        const publishedBefore = rig.published.length;
+
+        const answer = await rig.clone(SOURCE, { name: 'Bad-Name!', label: 'Illegal' });
+
+        expect(answer.status, JSON.stringify(answer.body)).toBe(400);
+        expect(answer.code).toBe('VALIDATION_FAILED');
+        expect(answer.body.error.details.fields).toMatchObject([{ field: 'name' }]);
+        // A refused clone changes nothing: no pair installed or persisted…
+        expect(rig.installed()).toEqual(before);
+        expect(rig.installed()).not.toContain(PAIR);
+        expect(rig.published.length).toBe(publishedBefore);
+        // …and no copy registered or stored.
+        expect(rig.flows.has('Bad-Name!')).toBe(false);
+        expect(await rig.rows('Bad-Name!')).toEqual([]);
     }, 60_000);
 });
 
