@@ -191,6 +191,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // package scope is the area's, never picked or repaired here, and a
   // read-only package offers no create.
   const host = useMetadataAreaHost();
+  // objectstack#29566 — the area's cross-package leg (`/studio/~all/metadata`)
+  // outside the environment scope: the list of a type across packages. It
+  // names no package and never repairs one into the URL (`?package=X` would
+  // move it onto X's leg, `areaLocationRedirect`); only create picks one.
+  const allLeg = !!host && host.packageId === null && !envScope;
   // objectstack ADR-0146 D3 (#28568) — "On top, one surface": with a base open
   // in the area, its list holds the base's items and its paired
   // `<base>.custom` package's items together, each item of the pair marked
@@ -312,11 +317,11 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     return () => { cancelled = true; };
   }, [client, appName]);
 
-  // Resolve the active package from the URL, validated against the project
-  // package set. `null` while packages are still loading (fail closed).
+  // Resolve the package Setup's list would scope to from the URL, validated
+  // against the project package set. `null` while packages are still loading
+  // (fail closed).
   const urlPackage = searchParams.get('package');
-  const activePackage = React.useMemo(() => {
-    if (host?.packageId) return host.packageId;
+  const pickedPackage = React.useMemo(() => {
     if (!projectPackages) return null;
     if (urlPackage && projectPackages.some((p) => p.id === urlPackage)) return urlPackage;
     if (projectPackages.length === 0) return null;
@@ -339,7 +344,10 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       if (n > bestN) { best = p.id; bestN = n; }
     }
     return best ?? projectPackages[0]?.id ?? null;
-  }, [host, projectPackages, urlPackage, items, appPackage]);
+  }, [projectPackages, urlPackage, items, appPackage]);
+  // The package the list is scoped to: the area's own, none on the
+  // cross-package leg, else the pick above.
+  const activePackage = host?.packageId ? host.packageId : allLeg ? null : pickedPackage;
 
   // Repair `?package=` so the sidebar selector, deep-links and create/edit
   // navigation all agree on the active scope. Runs once packages resolve
@@ -347,8 +355,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   React.useEffect(() => {
     // The environment scope lists every package's items: no package to repair.
     if (envScope) return;
-    // The area's package is its route's.
-    if (host?.packageId) return;
+    // The area's package is its route's; its cross-package leg has none.
+    if (host) return;
     if (!projectPackages || projectPackages.length === 0) return;
     if (urlPackage && projectPackages.some((p) => p.id === urlPackage)) return;
     // If the current app's package is known we can repair immediately; otherwise
@@ -362,7 +370,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     next.set('package', activePackage);
     setSearchParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectPackages, urlPackage, items, activePackage, appPackage]);
+  }, [projectPackages, urlPackage, items, activePackage, appPackage, host]);
 
   // Carry the active package into create/edit navigation as `?package=` so
   // the editor binds newly-saved rows to that software package.
@@ -388,6 +396,14 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       return;
     }
     const bases = projectPackages ?? [];
+    // The cross-package leg creates into the package Setup's list would pick;
+    // the area then opens that package's create (`areaLocationRedirect`).
+    if (allLeg) {
+      const pick = pickedPackage ?? bases[0]?.id;
+      if (pick) navigate(`./new?package=${encodeURIComponent(pick)}`);
+      else if (projectPackages !== null) setShowCreateBase(true);
+      return;
+    }
     if (projectPackages !== null && bases.length === 0) {
       setShowCreateBase(true);
       return;
@@ -397,7 +413,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       return;
     }
     navigate(`./new${pkgSuffix}`);
-  }, [projectPackages, activePackage, pkgSuffix, navigate, envScope, host?.packageId]);
+  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg]);
 
   // objectui#7611 — the activation state the switch column shows. Re-read on
   // the list's own refresh, never on an unrelated render. The anchors arrive
@@ -543,8 +559,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         // Per-type hide hook (e.g. `view` drops the bare aggregated
         // container the framework keeps for runtime dual-read).
         if (config.listFilter && !config.listFilter(row.item)) return false;
-        // objectui#7611 — the environment scope is the whole registry list.
-        if (envScope) return true;
+        // objectui#7611 — the environment scope is the whole registry list,
+        // and so is the area's cross-package leg (objectstack#29566).
+        if (envScope || allLeg) return true;
         // Mandatory project-package scope: show nothing until a concrete
         // project package is active, then only rows tagged with it. The
         // 'sys_metadata' sentinel and untagged rows never match.
@@ -556,7 +573,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
         // Under the area a base's list also holds its pair's items (ADR-0146 D3).
         return pkg === activePackage || (pairId !== null && pkg === pairId);
       }),
-    [items, activePackage, config, envScope, pairId],
+    [items, activePackage, config, envScope, allLeg, pairId],
   );
 
   // The customization mark of each row, from the base's served read only.
@@ -652,9 +669,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // write: a type with no runtime write channel is read-only for the operator
   // too, and its page says nothing about the wall.
   const walledDeciding = walled && typeWritable;
-  // Packages load only for the package scope; the environment scope never
-  // waits on them.
-  const packagesPending = !envScope && !host?.packageId && projectPackages === null;
+  // Packages load only for the package scope; the environment scope and the
+  // area never wait on them.
+  const packagesPending = !envScope && !host && projectPackages === null;
 
   // Localise default column labels — registered columns keep their
   // hand-authored labels (consumers may want bespoke wording).
@@ -849,7 +866,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             {error}
           </div>
         )}
-        {!loading && !error && !envScope && !host?.packageId && projectPackages !== null && projectPackages.length === 0 && (
+        {!loading && !error && !envScope && !host && projectPackages !== null && projectPackages.length === 0 && (
           <Empty>
             <EmptyTitle>No project packages installed</EmptyTitle>
             <EmptyDescription>
@@ -858,7 +875,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             </EmptyDescription>
           </Empty>
         )}
-        {!loading && !error && !packagesPending && (envScope || !!host?.packageId || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
+        {!loading && !error && !packagesPending && (envScope || !!host || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
           <Empty>
             <EmptyTitle>
               {scopedItems.length === 0

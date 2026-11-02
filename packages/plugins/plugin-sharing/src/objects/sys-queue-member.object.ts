@@ -29,7 +29,6 @@ export const SysQueueMember = ObjectSchema.create({
   description: 'Who belongs to a queue: a user, a team, a position or a business unit.',
   displayNameField: 'queue',
   nameField: 'queue',
-  titleFormat: '{queue}',
   highlightFields: ['queue', 'recipient_type', 'recipient_id'],
 
   listViews: {

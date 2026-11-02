@@ -31,7 +31,6 @@ export const SysScimIdentityTombstone = ObjectSchema.create({
   description: 'Tombstones of IdP-deleted SCIM identities, kept so a re-provision is recognized',
   displayNameField: 'external_id',
   nameField: 'external_id', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{external_id}',
   highlightFields: ['external_id', 'connection_id', 'deleted_at'],
 
   listViews: {

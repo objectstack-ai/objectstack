@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { TITLE_ELIGIBLE_TYPES } from '@objectstack/spec/data';
 import {
   validateRecordTitle as validateRecordTitleUnrecorded,
+  validateTitleFormatRetired as validateTitleFormatRetiredUnrecorded,
   TITLE_FORMAT_RETIRED,
   TITLE_UNRESOLVABLE,
 } from './validate-record-title.js';
@@ -16,6 +17,16 @@ const validateRecordTitle: typeof validateRecordTitleUnrecorded = (...args) => {
   fired.push(...findings);
   return findings;
 };
+const validateTitleFormatRetired: typeof validateTitleFormatRetiredUnrecorded = (...args) => {
+  const findings = validateTitleFormatRetiredUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
+/** Both record-title rules, as one stack sees them across the two registry entries. */
+const bothRules = (stack: Record<string, unknown>) => [
+  ...validateTitleFormatRetired(stack),
+  ...validateRecordTitle(stack),
+];
 
 /** One-object stack; `fields` is a name-keyed map (the parsed-config shape). */
 function objStack(obj: Record<string, unknown>) {
@@ -45,21 +56,36 @@ describe('validateRecordTitle (record-title contract, ADR-0079)', () => {
     expect(findings).toHaveLength(0);
   });
 
-  it('warns (not errors) when titleFormat is declared', () => {
-    const findings = validateRecordTitle(
-      objStack({
-        titleFormat: '{{record.first}} {{record.last}}',
-        fields: { name: { type: 'text' } },
-      }),
-    );
+  it('REFUSES (errors) when titleFormat is declared — ruling of record 6574393684, letter B', () => {
+    const stack = objStack({
+      titleFormat: '{{record.first}} {{record.last}}',
+      fields: { name: { type: 'text' } },
+    });
+    const findings = validateTitleFormatRetired(stack);
     expect(findings).toHaveLength(1);
-    expect(findings[0].severity).toBe('warning');
+    expect(findings[0].severity).toBe('error');
     expect(findings[0].rule).toBe(TITLE_FORMAT_RETIRED);
     expect(findings[0].where).toBe('object "invoice"');
     expect(findings[0].path).toBe('objects[0]');
     expect(findings[0].message).toContain('titleFormat is retired (ADR-0079)');
     expect(findings[0].message).toContain('migrate to nameField');
     expect(findings[0].hint).toContain('nameField');
+    // The title pair is the other entry's: a resolvable object with a
+    // template draws nothing from `validateRecordTitle`.
+    expect(validateRecordTitle(stack)).toHaveLength(0);
+  });
+
+  it('a single-field and an expression-envelope template are refused alike', () => {
+    for (const titleFormat of ['{name}', { dialect: 'template', source: '{name} · {code}' }]) {
+      const findings = validateTitleFormatRetired(objStack({ titleFormat, fields: { name: { type: 'text' } } }));
+      expect(findings.map((f) => [f.rule, f.severity]), JSON.stringify(titleFormat)).toEqual([
+        [TITLE_FORMAT_RETIRED, 'error'],
+      ]);
+    }
+  });
+
+  it('an object with no titleFormat draws nothing from the refusal (control)', () => {
+    expect(validateTitleFormatRetired(objStack({ nameField: 'name', fields: { name: { type: 'text' } } }))).toEqual([]);
   });
 
   it('warns (not errors) when no title is resolvable (status: none)', () => {
@@ -83,29 +109,28 @@ describe('validateRecordTitle (record-title contract, ADR-0079)', () => {
   });
 
   it('reports BOTH rules when an object has titleFormat and no resolvable title', () => {
-    const findings = validateRecordTitle(
+    const findings = bothRules(
       objStack({
         titleFormat: '{{record.amount}}',
         fields: { amount: { type: 'currency' } },
       }),
     );
     expect(findings).toHaveLength(2);
-    expect(findings.map((f) => f.rule).sort()).toEqual(
-      [TITLE_FORMAT_RETIRED, TITLE_UNRESOLVABLE].sort(),
+    expect(findings.map((f) => [f.rule, f.severity]).sort()).toEqual(
+      [[TITLE_FORMAT_RETIRED, 'error'], [TITLE_UNRESOLVABLE, 'warning']].sort(),
     );
-    expect(findings.every((f) => f.severity === 'warning')).toBe(true);
   });
 
   it('an empty-string titleFormat is not flagged', () => {
-    const findings = validateRecordTitle(
+    const findings = bothRules(
       objStack({ titleFormat: '', fields: { name: { type: 'text' } } }),
     );
     expect(findings).toHaveLength(0);
   });
 
   it('a stack with no objects is clean', () => {
-    expect(validateRecordTitle({})).toHaveLength(0);
-    expect(validateRecordTitle({ objects: [] })).toHaveLength(0);
+    expect(bothRules({})).toHaveLength(0);
+    expect(bothRules({ objects: [] })).toHaveLength(0);
   });
 });
 
@@ -115,7 +140,7 @@ describe('validateRecordTitle (record-title contract, ADR-0079)', () => {
 describe('[#22161] one-line fixes — title-format-retired and title-unresolvable', () => {
   it('every `fix:` line the cases above fired is one line of at most 200 characters', () => {
     // A long object name, so the bound is not read on a short one alone.
-    validateRecordTitle({
+    bothRules({
       objects: [{ name: 'regional_enterprise_account_hierarchy_snapshot', titleFormat: '{{record.a}}', fields: {} }],
     });
     const converted = fired.filter((f) => f.rule === TITLE_FORMAT_RETIRED || f.rule === TITLE_UNRESOLVABLE);
@@ -128,7 +153,7 @@ describe('[#22161] one-line fixes — title-format-retired and title-unresolvabl
   });
 
   it('each reads as one remedy', () => {
-    const findings = validateRecordTitle(objStack({ titleFormat: '{{record.amount}}', fields: { amount: { type: 'currency' } } }));
+    const findings = bothRules(objStack({ titleFormat: '{{record.amount}}', fields: { amount: { type: 'currency' } } }));
     const byRule = new Map(findings.map((f) => [f.rule, f.hint]));
     expect(byRule.get(TITLE_FORMAT_RETIRED)).toBe(
       "Set nameField: '<field>' for one field; a composite title to import, sort or search by is a text " +
@@ -148,6 +173,8 @@ describe('[#22161] one-line fixes — title-format-retired and title-unresolvabl
         'an explicit `nameField` takes precedence',
         'ADR-0079',
         'the schema still parses the key',
+        'refused at the metadata save gate',
+        '`os validate`',
       ],
       [TITLE_UNRESOLVABLE]: [
         'auto-provisions a primary',
