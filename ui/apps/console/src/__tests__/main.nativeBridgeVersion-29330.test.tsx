@@ -51,8 +51,12 @@ vi.mock('@object-ui/mobile', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   MobileProvider: passthrough,
 }));
-vi.mock('@object-ui/components', () => ({ registerPlaceholders: () => undefined }));
-vi.mock('@object-ui/app-shell', () => ({
+vi.mock('@object-ui/components', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  registerPlaceholders: () => undefined,
+}));
+vi.mock('@object-ui/app-shell', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   initSentry: async () => undefined,
   initRuntimeConfig: async () => undefined,
   getProductName: () => 'ObjectOS',
