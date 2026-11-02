@@ -26,9 +26,11 @@ import type { ReactNode } from 'react';
 import type { Root } from 'react-dom/client';
 import { NATIVE_HOST_GLOBAL } from '../../../../packages/mobile/src/nativeHost';
 
-const { passthrough, roots } = vi.hoisted(() => ({
+const { passthrough, roots, resolveManifestIcons } = vi.hoisted(() => ({
   passthrough: ({ children }: { children?: ReactNode }) => <>{children}</>,
   roots: [] as Root[],
+  /** The manifest's icon step; the manifest link lands once it settles. */
+  resolveManifestIcons: vi.fn(async () => []),
 }));
 
 vi.mock('react-dom/client', async (importOriginal) => {
@@ -68,6 +70,10 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => ({
 vi.mock('../loadLanguage', () => ({ loadLanguage: async () => ({}) }));
 vi.mock('../loadLocales', () => ({ loadLocales: async () => [] }));
 vi.mock('../languageSeed', () => ({ seedTenantLanguage: async () => undefined }));
+vi.mock('../pwaManifestIcons', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  resolveManifestIcons,
+}));
 vi.mock('../lib/auth-preflight', () => ({ preflightAuth: async () => undefined }));
 vi.mock('../register-plugins', () => ({}));
 vi.mock('../registerDeveloperComponents', () => ({}));
@@ -93,12 +99,15 @@ function installBridge(version: number): void {
 }
 
 /** Run `main.tsx` once, as a page load does, and wait for it to render. */
-async function boot(): Promise<string[]> {
+async function boot(): Promise<void> {
   vi.resetModules();
   await import('../main');
   await waitFor(() => expect(screen.getByTestId('app')).toBeInTheDocument());
-  return Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="manifest"]')).map((link) =>
-    link.getAttribute('href') ?? '',
+}
+
+function manifestHrefs(): string[] {
+  return Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel="manifest"]')).map(
+    (link) => link.getAttribute('href') ?? '',
   );
 }
 
@@ -106,6 +115,7 @@ beforeEach(() => {
   document.head.innerHTML = '<link rel="manifest" href="./manifest.json" />';
   document.body.innerHTML = '<div id="root"></div>';
   vi.spyOn(URL, 'createObjectURL').mockReturnValue(BLOB_MANIFEST);
+  resolveManifestIcons.mockClear();
 });
 
 afterEach(() => {
@@ -121,15 +131,22 @@ afterEach(() => {
 describe('the boot manifest and the bridge protocol version', () => {
   it('a version 2 bridge is no shell: the generated manifest replaces the static one', async () => {
     installBridge(2);
-    expect(await boot()).toEqual([BLOB_MANIFEST]);
+    await boot();
+    expect(resolveManifestIcons).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(manifestHrefs()).toEqual([BLOB_MANIFEST]));
   });
 
   it('control: a version 1 bridge is the shell, and the manifest is dropped', async () => {
     installBridge(1);
-    expect(await boot()).toEqual([]);
+    await boot();
+    // The manifest step never started, so no link can land later either.
+    expect(resolveManifestIcons).not.toHaveBeenCalled();
+    expect(manifestHrefs()).toEqual([]);
   });
 
   it('control: without a bridge the generated manifest replaces the static one', async () => {
-    expect(await boot()).toEqual([BLOB_MANIFEST]);
+    await boot();
+    expect(resolveManifestIcons).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(manifestHrefs()).toEqual([BLOB_MANIFEST]));
   });
 });
