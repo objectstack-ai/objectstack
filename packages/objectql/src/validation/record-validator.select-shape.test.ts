@@ -126,12 +126,15 @@ describe('#29244 — what the rule leaves alone', () => {
     expect(errorsOf({ decl_multi: ['z'] }).map((e) => e.code)).toEqual(['invalid_option']);
   });
 
-  it('a lone scalar on a multi-value select is still wrapped, and a lone object still answers invalid_type_array', () => {
-    expect(errorsOf({ free_multi: 'x' })).toEqual([]);
-    const errs = errorsOf({ free_multi: { a: 1 } });
-    expect(errs.map((e) => e.code)).toEqual(['invalid_type']);
-    expect(errs[0].message).toMatch(/array/i);
-    expect(errs[0].message).not.toContain('option values');
+  it('a value that is not an array on a multi-value select keeps its existing invalid_type_array sentence', () => {
+    // (The engine wraps a lone scalar before this validator runs; the write
+    // path test below lands one.)
+    for (const value of ['x', { a: 1 }]) {
+      const errs = errorsOf({ free_multi: value });
+      expect(errs.map((e) => e.code)).toEqual(['invalid_type']);
+      expect(errs[0].message).toMatch(/must be an array/i);
+      expect(errs[0].message).not.toContain('option values');
+    }
   });
 
   it('null and undefined are unchanged', () => {
@@ -194,9 +197,13 @@ describe('#29244 — write path end to end: no object or array reaches the drive
     expect(rows.get('rec_1')).toEqual({ id: 'rec_1', stage: 'orig' });
   });
 
-  it('a scalar and an array of scalars on the same path still land', async () => {
+  it('a scalar, an array of scalars and a lone scalar (wrapped) on the same path still land', async () => {
     const { engine, writes } = await boot();
     await engine.update('shape_deal', { stage: 'won', labels: ['x', 'y'] } as any, { where: { id: 'rec_1' } } as any);
-    expect(writes).toEqual([expect.objectContaining({ stage: 'won', labels: ['x', 'y'] })]);
+    await engine.insert('shape_deal', { stage: 'open', labels: 'x' } as any);
+    expect(writes).toEqual([
+      expect.objectContaining({ stage: 'won', labels: ['x', 'y'] }),
+      expect.objectContaining({ stage: 'open', labels: ['x'] }),
+    ]);
   });
 });
