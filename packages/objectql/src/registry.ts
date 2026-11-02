@@ -5326,10 +5326,14 @@ export class SchemaRegistry {
    * Why this is public API rather than the protocol reaching for the
    * contributor list: `GET /meta/object/:name` reaches an object body through a
    * source this registry never sees — the copy `MetadataPlugin` registers into
-   * the `metadata` SERVICE when a deployment ingests a compiled artifact, where
-   * `objects` and `objectExtensions` are stored as SEPARATE collections. That
-   * body is ONE LAYER, and serving a layer as the resolved schema is what
-   * dropped every `objectExtensions` field from the by-name read (and from both
+   * the `metadata` SERVICE when a deployment ingests a compiled artifact. That
+   * service holds the owner's declaration only: a code package's
+   * `objectExtensions` are never stored there as items, because the ObjectQL
+   * engine's `registerApp` registers each one as an `'extend'` contributor
+   * here, and `MetadataPlugin` files no item from that collection (an
+   * extension carries `extend` and no `name`). That body is ONE LAYER, and
+   * serving a layer as the resolved schema is what dropped every
+   * `objectExtensions` field from the by-name read (and from both
    * layers of `?layers=true`) while `GET /meta/object` — which reads
    * `resolveObject` — kept them. Two folds would re-open exactly that seam one
    * level down, so there is one.
