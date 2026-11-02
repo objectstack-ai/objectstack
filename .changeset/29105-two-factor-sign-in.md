@@ -16,4 +16,4 @@ The sign-in form now shows a second step: the 6-digit code from the authenticato
 
 Added to `@object-ui/auth`: `AuthClient.signIn` answers `{ twoFactor: { methods } }` for such an account (exported `SignInResult`, `TwoFactorChallenge`, `TwoFactorMethod`); `AuthClient.verifySignInTwoFactor(code, 'totp' | 'backup-code')` finishes it (`SignInTwoFactorCodeKind`); `useAuth()` gains `twoFactorChallenge`, `verifySignInTwoFactor` and `cancelTwoFactorChallenge`, and its `signIn` resolves `{ twoFactorRequired }`; `LoginFormLabels` gains ten `twoFactor*` labels. `@object-ui/i18n` gains the matching `auth.login.twoFactor*` and `auth.login.errors.twoFactor*` keys.
 
-What to do: nothing. A custom `AuthClient` implementation should add `verifySignInTwoFactor` to support accounts with two-factor sign-in.
+What to do: nothing, unless you pass your own `AuthClient` to `AuthProvider`. `verifySignInTwoFactor` is a required member of `AuthClient`, so such an implementation must add it to type-check (and its `signIn` may now answer `{ twoFactor }`).
