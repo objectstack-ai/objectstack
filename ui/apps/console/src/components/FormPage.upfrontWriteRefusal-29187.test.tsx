@@ -23,6 +23,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
+import { createI18n } from '@object-ui/i18n';
 import { FormPage } from './FormPage';
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
@@ -50,6 +51,7 @@ function answer(status: number, body: unknown): Response {
 
 beforeEach(() => {
   posts = 0;
+  createI18n({ defaultLanguage: 'en', detectBrowserLanguage: false });
   const view = {
     name: `${OBJECT}.form`,
     object: OBJECT,
@@ -74,7 +76,9 @@ beforeEach(() => {
       }
       if (u.includes('/meta/view/')) return answer(200, view);
       if (u.includes('/meta/object/')) return answer(200, { name: OBJECT, label: 'Feedback', fields: FIELDS });
-      if (u.includes(`/data/${OBJECT}/r1`)) return answer(200, { id: 'r1', name: 'Ada', email: 'ada@example.com' });
+      if (u.includes(`/data/${OBJECT}/r1`)) {
+        return answer(200, { object: OBJECT, id: 'r1', record: { id: 'r1', name: 'Ada', email: 'ada@example.com' } });
+      }
       if (u.includes('/forms/feedback')) return answer(200, publicPayload);
       throw new Error(`unstubbed fetch: ${u}`);
     }),
