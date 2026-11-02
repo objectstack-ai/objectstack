@@ -12,7 +12,8 @@
  *   - Density
  *   - Row numbers (a session-only switch, grid only)
  *   - Edit inline (a switch, grid only, when the principal may edit)
- *   - footer: Reset to view default · Refresh · Export
+ *   - footer: Reset to view default · Refresh, then the export entries on a
+ *     row of their own that wraps, so every format stays inside the panel
  *
  * It began as UX Sprint 2 (P1-4)'s "View settings" gear behind
  * `compactToolbar: true`; the wide form — one toolbar button per control — is
@@ -682,23 +683,28 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                 {t('list.resetToViewDefault', { defaultValue: 'Reset to view default' })}
               </Button>
             )}
-            <div className="ml-auto flex items-center gap-1">
-              {onRefresh && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
-                  onClick={onRefresh}
-                  disabled={refreshing}
-                  title={t('list.refresh', { defaultValue: 'Refresh' })}
-                  aria-label={t('list.refresh', { defaultValue: 'Refresh' })}
-                  data-testid="refresh-button"
-                >
-                  <RotateCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
-                </Button>
-              )}
-              {hasExport &&
-                exportFormats!.map((format) => (
+            {onRefresh && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                onClick={onRefresh}
+                disabled={refreshing}
+                title={t('list.refresh', { defaultValue: 'Refresh' })}
+                aria-label={t('list.refresh', { defaultValue: 'Refresh' })}
+                data-testid="refresh-button"
+              >
+                <RotateCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
+              </Button>
+            )}
+            {/* The export entries take a full row and wrap within it: the panel
+                is a fixed width, and one entry per format can outgrow it. */}
+            {hasExport && (
+              <div
+                className="flex basis-full flex-wrap items-center justify-end gap-1"
+                data-testid="display-export-group"
+              >
+                {exportFormats!.map((format) => (
                   <Button
                     key={format}
                     variant="ghost"
@@ -714,7 +720,8 @@ export function ViewSettingsPopover(props: ViewSettingsPopoverProps) {
                     {t('list.exportAs', { format: format.toUpperCase(), defaultValue: `Export as ${format.toUpperCase()}` })}
                   </Button>
                 ))}
-            </div>
+              </div>
+            )}
             {exportError && (
               <div className="basis-full px-1 pt-1 text-xs text-destructive" role="alert">
                 {exportError}
