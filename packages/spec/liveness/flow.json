@@ -62,7 +62,7 @@
     "variables": {
       "status": "live",
       "evidence": "packages/services/service-automation/src/engine.ts",
-      "note": "{name,isInput,isOutput} wired."
+      "note": "{name,isInput,isOutput} wired. `objectName` (#29425 ruling A, declared by #29442): an input's declaration that its value is the id of a record of the named object. PLANNED consumer, not yet wired: the start doors in packages/runtime/src/flow-start-admission.ts load a declared input from that object in the caller's scope before the run exists — the server half, Blocked-by #29442. Until it lands the key is parsed, validated (input-only, an object name) and linted (flow-input-unknown-object), and no door reads it. `variables` is an undrilled container (scripts/liveness/undrilled-containers.baseline.json), so the key has no row of its own and this note is its record."
     },
     "edges": {
       "status": "live",

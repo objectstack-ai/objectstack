@@ -85,6 +85,7 @@ export const flowForm = defineForm({
             { field: 'isInput', label: 'Input' },
             { field: 'isOutput', label: 'Output' },
             { field: 'defaultValue', label: 'Default Value' },
+            { field: 'objectName', label: 'Record Object' },
           ],
         },
       ],
