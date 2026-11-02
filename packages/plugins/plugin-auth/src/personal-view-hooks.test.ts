@@ -250,6 +250,23 @@ describe('the owner cannot hand a view to someone else', () => {
     const [row] = await stored(engine);
     expect(row.user_id).toBe(ALICE);
   });
+
+  it('the write rule holds it on its own: a platform administrator, whom no row scope binds, cannot re-parent a view either', async () => {
+    const engine = await rig();
+    const own = await save(engine, ALICE, 'Alice only');
+    const err = await refusalOf(engine.update(OBJ, { id: own.id, user_id: BOB }, as(CAROL, ['admin_full_access'])));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    const [row] = await stored(engine);
+    expect(row.user_id).toBe(ALICE);
+  });
+
+  it('control: an update that echoes the stored owner is not a re-parent, and is accepted', async () => {
+    const engine = await rig();
+    const own = await save(engine, ALICE, 'Alice only');
+    await engine.update(OBJ, { id: own.id, user_id: ALICE, label: 'Alice, renamed' }, as(ALICE));
+    const [row] = await stored(engine);
+    expect({ user_id: row.user_id, label: row.label }).toEqual({ user_id: ALICE, label: 'Alice, renamed' });
+  });
 });
 
 describe('the body is spec\'s ListView, judged on every save', () => {

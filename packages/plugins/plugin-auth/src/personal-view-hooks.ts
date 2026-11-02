@@ -18,6 +18,14 @@
  * predicate guard refuses that filter when the list is queried, so this rule
  * does not grow a second copy of field security.
  *
+ * **The owner is fixed when the view is saved.** An update that sends a
+ * `user_id` other than the stored one is refused `403 PERMISSION_DENIED`, for
+ * every caller but the system. The row scope alone does not hold this: for an
+ * organization member, `member_default`'s `'*'` update floor
+ * (`created_by == current_user.id`) is a held update policy, so the object's
+ * declared default does not apply to an update, and the post-image of a
+ * re-parent still carries the member's own `created_by`.
+ *
  * Which view opens by default is not this object's: the reader's existing
  * per-object pin holds a view id (seat ruling 6587007982 on #29443).
  *
@@ -87,6 +95,23 @@ export function assertPersonalViewConfig(config: unknown, objectName?: unknown):
   );
 }
 
+/** The string form two stored ids are compared by (an echo of the stored owner is no change). */
+function sameId(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown) => (v === undefined || v === null || v === '' ? null : String(v));
+  return norm(a) === norm(b);
+}
+
+/** The refusal for an update that would hand a view to another user: `PERMISSION_DENIED` / `403`. */
+export function ownerChangeError(id: unknown): Error {
+  const err = new Error(
+    `Personal view ${String(id ?? '')} was not changed: a view's owner (user_id) is fixed when the view is saved, `
+      + 'and nobody can hand a view to another user. Save a new view in that user\'s name instead. The view is unchanged.',
+  ) as Error & { code?: string; status?: number };
+  err.code = 'PERMISSION_DENIED';
+  err.status = 403;
+  return err;
+}
+
 const sets = (data: Record<string, unknown> | null | undefined, key: string): boolean =>
   !!data && typeof data === 'object' && Object.prototype.hasOwnProperty.call(data, key);
 
@@ -105,11 +130,19 @@ export function registerPersonalViewHooks(engine: any, opts: PersonalViewHooksOp
   const validateOnUpdate = async (ctx: any): Promise<void> => {
     if (ctx?.object !== PERSONAL_VIEW_OBJECT) return;
     const data = ctx.input?.data as Record<string, unknown> | undefined;
-    const sendsConfig = sets(data, CONFIG_FIELD);
-    if (!sendsConfig && !sets(data, 'object_name')) return;
     // The row as it will be: what the write sends, over what is stored
     // (`ctx.previous`, present on the by-id path and per row on a multi-row update).
     const previous = (ctx.previous ?? undefined) as Record<string, unknown> | undefined;
+    if (
+      ctx?.session?.isSystem !== true
+      && sets(data, 'user_id')
+      && previous
+      && !sameId(data!.user_id, previous.user_id)
+    ) {
+      throw ownerChangeError(previous.id ?? ctx.input?.id);
+    }
+    const sendsConfig = sets(data, CONFIG_FIELD);
+    if (!sendsConfig && !sets(data, 'object_name')) return;
     const config = sendsConfig ? data![CONFIG_FIELD] : previous?.[CONFIG_FIELD];
     const objectName = sets(data, 'object_name') ? data!.object_name : previous?.object_name;
     if (sendsConfig || (config !== null && config !== undefined)) assertPersonalViewConfig(config, objectName);
@@ -119,6 +152,6 @@ export function registerPersonalViewHooks(engine: any, opts: PersonalViewHooksOp
   engine.registerHook('beforeUpdate', validateOnUpdate, { object: PERSONAL_VIEW_OBJECT, packageId: opts.packageId });
   opts.logger?.info(
     '[PersonalViewHooks] sys_personal_view hooks registered: a save is validated as a ListView '
-      + 'for the row\'s own object',
+      + 'for the row\'s own object, and a view\'s owner never changes',
   );
 }
