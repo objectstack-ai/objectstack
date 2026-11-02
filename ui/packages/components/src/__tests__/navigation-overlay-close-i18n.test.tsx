@@ -10,12 +10,11 @@
  * The record overlay's close affordances speak the session locale —
  * objectstack#5430.
  *
- * `NavigationOverlay` had two hardcoded English accessible names:
- *   - drawer mode: the header `X` button (`aria-label`/`title` = "Close")
- *   - split mode:  the detail panel's `X` button (`aria-label` = "Close panel")
- *
- * Both are icon-only, so the literal WAS the control to a screen reader and to
- * the hover tooltip. They now read `common.close` / `common.closePanel`.
+ * `NavigationOverlay` had a hardcoded English accessible name on the drawer
+ * header's `X` button (`aria-label`/`title` = "Close"). It is icon-only, so
+ * the literal WAS the control to a screen reader and to the hover tooltip. It
+ * now reads `common.close`, over a list too: the split pane's "Close panel"
+ * retired with the split pane (objectstack#28915).
  * `common.close` is deliberately the key the rest of the console already uses
  * for a bare "Close" rather than a new overlay-private one.
  */
@@ -45,14 +44,14 @@ function renderDrawerIn(language: string) {
   );
 }
 
-function renderSplitIn(language: string) {
+function renderOverListIn(language: string) {
   return render(
     <I18nProvider config={{ defaultLanguage: language, detectBrowserLanguage: false }}>
       <NavigationOverlay
         isOpen
         isOverlay
         selectedRecord={record}
-        mode="split"
+        mode="drawer"
         close={() => {}}
         setIsOpen={() => {}}
         title="Acme Corp"
@@ -113,24 +112,25 @@ describe('NavigationOverlay drawer close — accessible name (objectstack#5430)'
   });
 });
 
-describe('NavigationOverlay split close panel — accessible name (objectstack#5430)', () => {
+describe('NavigationOverlay drawer over a list close — accessible name (objectstack#5430)', () => {
   it('still reads English under an en session', () => {
-    renderSplitIn('en');
+    renderOverListIn('en');
 
-    expect(screen.getByRole('button', { name: 'Close panel' })).toBeTruthy();
+    expect(screen.getByTitle('Close').getAttribute('aria-label')).toBe('Close');
+    expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
   });
 
   it('reads the zh bundle value under a zh session', () => {
-    renderSplitIn('zh');
+    renderOverListIn('zh');
 
-    expect(screen.getByRole('button', { name: '关闭面板' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
+    expect(screen.getByTitle('关闭').getAttribute('aria-label')).toBe('关闭');
+    expect(screen.queryByRole('button', { name: '关闭面板' })).toBeNull();
   });
 
   it('reads the ja bundle value under a ja session', () => {
-    renderSplitIn('ja');
+    renderOverListIn('ja');
 
-    expect(screen.getByRole('button', { name: 'パネルを閉じる' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Close panel' })).toBeNull();
+    expect(screen.getByTitle('閉じる').getAttribute('aria-label')).toBe('閉じる');
+    expect(screen.queryByRole('button', { name: 'パネルを閉じる' })).toBeNull();
   });
 });

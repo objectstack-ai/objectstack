@@ -15,6 +15,7 @@
  * - PWA utilities (manifest generation, service worker registration)
  * - Mobile-aware component wrappers
  * - Pull-to-refresh and infinite scroll support
+ * - Native shell mode: `useNativeHost` and typed `window.ObjectStackNative` calls
  * 
  * @packageDocumentation
  */
@@ -57,6 +58,30 @@ export {
   type ServiceWorkerStrategy,
 } from './serviceWorkerSource.js';
 export { BREAKPOINTS } from './breakpoints.js';
+export {
+  useNativeHost,
+  useNativeHostRouting,
+  type UseNativeHostRoutingOptions,
+} from './useNativeHost.js';
+export {
+  NATIVE_HOST_GLOBAL,
+  NATIVE_NAVIGATE_EVENT,
+  getNativeHost,
+  isInAppRoute,
+  nativeGetPushToken,
+  nativeHaptic,
+  nativeOpenExternal,
+  nativeNavigate,
+  nativeResetServer,
+  postNativeReady,
+  postNativeRouteChanged,
+  type ObjectStackNative,
+  type NativeCallResult,
+  type NativeHapticKind,
+  type NativeHostMethod,
+  type NativePushToken,
+  type NativeSafeArea,
+} from './nativeHost.js';
 
 // Re-export types for convenience
 export type {

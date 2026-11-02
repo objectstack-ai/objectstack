@@ -8,9 +8,16 @@
 
 /**
  * objectui#10636 — the console `ObjectView`'s record-count footer
- * (`data-testid="record-count-footer"`, drawn beside the record in the split
- * pane — a READER's preference since objectstack#26677, `os:record-open-mode`,
- * no longer an authored `navigation.mode`) read `1 records` in `en` at one record. It rendered one key,
+ * (`data-testid="record-count-footer"`, then drawn beside the record in the
+ * split pane) read `1 records` in `en` at one record.
+ *
+ * objectstack#28915 retired the split pane and its footer: a record opens in
+ * the drawer over the list, which keeps its full width and its own
+ * record-count bar (`data-testid="record-count-bar"`, `list.recordCount`).
+ * So the count a reader reads while a record is open is that bar, and this
+ * file now reads it there, under the open drawer. The strings are unchanged:
+ * every pack words `console.objectView.recordCount` the way it words
+ * `list.recordCount` (the last rows below). It rendered one key,
  * `console.objectView.recordCount`, at every count: no singular key and no
  * switch, while the list view's record-count bar and the record picker's count
  * beside it both pick a `…One` key at exactly one.
@@ -132,8 +139,8 @@ const OBJECTS = [
 ];
 
 beforeEach(() => {
-  // The split pane is the reader's preference (objectstack#26677): the view
-  // declares nothing, the browser remembers `split`.
+  // A stored `split` (objectstack#26677) is an unknown value since
+  // objectstack#28915: the record opens in the drawer over the full list.
   window.localStorage.setItem(RECORD_OPEN_PREFERENCE_KEY, 'split');
   vi.stubGlobal(
     'fetch',
@@ -160,12 +167,12 @@ function boot(lang: Lang) {
   return i18n;
 }
 
-/** The footer text with `count` records, as the view's count query reports it. */
+/** The count the list's bar prints with `count` records, under the open drawer. */
 async function footer(lang: Lang, count: number): Promise<string> {
-  // Every query answers with no rows and the total: the footer reads the
-  // total, and no row means the list's own record-count bar stays out of it.
+  // Every query answers with the rows and their total: the bar counts them.
+  const rows = Array.from({ length: count }, (_, i) => ({ id: `r${i + 1}`, name: `Row ${i + 1}` }));
   const dataSource = {
-    find: vi.fn(async () => ({ data: [], total: count })),
+    find: vi.fn(async () => ({ data: rows, total: count })),
     findOne: vi.fn(async () => null),
     create: vi.fn(async () => ({})),
     update: vi.fn(async () => ({})),
@@ -174,7 +181,7 @@ async function footer(lang: Lang, count: number): Promise<string> {
   render(
     <I18nProvider instance={boot(lang)}>
       <ExpressionProvider user={{ id: 'u1', name: 'Ada', profile: 'user' }}>
-        {/* `?recordId=` opens the split pane, the way a row click does. */}
+        {/* `?recordId=` opens the drawer, the way a row click does. */}
         <MemoryRouter initialEntries={[`/apps/demo/${OBJECT_NAME}/view/${VIEW_ID}?recordId=r1`]}>
           <Routes>
             <Route
@@ -186,8 +193,11 @@ async function footer(lang: Lang, count: number): Promise<string> {
       </ExpressionProvider>
     </I18nProvider>,
   );
-  const node = await screen.findByTestId('record-count-footer', undefined, { timeout: 5000 });
-  const text = node.textContent ?? '';
+  await screen.findByRole('dialog', undefined, { timeout: 5000 });
+  const bar = await screen.findByTestId('record-count-bar', undefined, { timeout: 5000 });
+  // The split pane's footer is gone: the bar is the one count on the page.
+  expect(screen.queryByTestId('record-count-footer')).toBeNull();
+  const text = bar.querySelector('span')?.textContent ?? '';
   cleanup();
   return text;
 }

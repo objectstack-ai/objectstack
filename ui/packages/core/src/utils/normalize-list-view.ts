@@ -397,8 +397,9 @@ function readListViewKind(value: unknown): string | undefined {
  *    per-flag, so a view may carry `userActions` for some toggles and a legacy
  *    flag for others. NOTE the fold does not apply any default: an absent flag
  *    stays absent, because the defaults are per-toggle (search/sort/filter/
- *    rowHeight/group default ON, hideFields/rowColor default OFF) and belong to
- *    the renderer, not to the vocabulary bridge.
+ *    rowHeight/group/hideFields default ON, rowColor default OFF — the spec's
+ *    own defaults, `hideFields` ON since objectstack#28912) and belong to the
+ *    renderer, not to the vocabulary bridge.
  *  - the view's `inlineEdit` → `userActions.editInline` (objectui#5144), with
  *    the value carried over and an explicit `editInline` winning. `inlineEdit`
  *    stays on the result, because `ListView` seeds the grid's edit mode from

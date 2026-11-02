@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
-import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
+import { PROTOCOL_MAJOR, customizationNamespace } from '@objectstack/spec/kernel';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -402,6 +402,26 @@ describe('sanitizeNamespace', () => {
   it('always produces a value matching the manifest namespace regex', () => {
     for (const input of ['my-app', '@acme/my-app', '123app', 'sys', 'a', 'A__B', 'really-long-name-truncated-here']) {
       expect(sanitizeNamespace(input)).toMatch(NS_RE);
+    }
+  });
+
+  // A namespace too long for a paired customization namespace (ADR-0146 D3)
+  // makes `os validate` warn `namespace-no-customization-pair` on the fresh
+  // scaffold, about objects its author never wrote.
+  it.each([
+    ['qa-console-first-paint', 'qa_console_fi'],
+    ['abcdefghijkl-mnop', 'abcdefghijkl'], // the 13th character is `_`: dropped
+    ['@acme/very-long-project-name', 'very_long_pro'],
+    ['1234567890123456', 'a123456789012'],
+    ['abcdefghijklm', 'abcdefghijklm'],
+  ])('caps %s at the customization-pair limit → %s', (input, expected) => {
+    expect(sanitizeNamespace(input)).toBe(expected);
+  });
+
+  it('always produces a namespace that has a customization pair', () => {
+    for (const input of ['my-app', '123app', 'sys', 'a', '', 'qa-console-first-paint', 'really-long-name-truncated-here', 'abcdefghijkl-mnop']) {
+      const ns = sanitizeNamespace(input);
+      expect(customizationNamespace(ns), ns).toEqual({ ok: true, value: `${ns}_custom` });
     }
   });
 });

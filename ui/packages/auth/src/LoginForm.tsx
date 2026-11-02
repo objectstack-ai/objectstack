@@ -16,6 +16,7 @@ import {
   AUTH_INPUT_CLASS,
   AUTH_LINK_CLASS,
   AUTH_PRIMARY_BUTTON_CLASS,
+  AUTH_TOUCH_TARGET_CLASS,
   AuthErrorBanner,
   AuthFormHeader,
   AuthSpinner,
@@ -522,7 +523,7 @@ export function LoginForm({
                 type="button"
                 onClick={handleSendOtp}
                 disabled={otpSending || otpCooldown > 0 || !phone.trim() || isLoading}
-                className="shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50"
+                className={`shrink-0 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50 ${AUTH_TOUCH_TARGET_CLASS}`}
               >
                 {otpSending && <AuthSpinner />}
                 {otpCooldown > 0
@@ -544,7 +545,7 @@ export function LoginForm({
           <button
             type="button"
             onClick={() => switchMode('password')}
-            className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+            className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
           >
             {l.usePasswordSignInText}
           </button>
@@ -584,7 +585,7 @@ export function LoginForm({
               {forgotPasswordUrl && (
                 <LinkComp
                   href={forgotPasswordUrl}
-                  className="text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+                  className={`inline-flex items-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
                 >
                   {l.forgotPasswordText}
                 </LinkComp>
@@ -600,7 +601,7 @@ export function LoginForm({
                 required
                 autoComplete="current-password"
                 disabled={isLoading}
-                className={`${AUTH_INPUT_CLASS} pr-10`}
+                className={`${AUTH_INPUT_CLASS} pr-12 sm:pr-10`}
               />
               <button
                 type="button"
@@ -611,7 +612,7 @@ export function LoginForm({
                 aria-label={passwordVisible ? l.hidePasswordText : l.showPasswordText}
                 aria-controls="login-password"
                 disabled={isLoading}
-                className="absolute right-1.5 top-1/2 inline-flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-50"
+                className="absolute right-0 top-1/2 inline-flex size-11 -translate-y-1/2 sm:right-1.5 sm:size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-50"
               >
                 {passwordVisible ? <EyeOffIcon /> : <EyeIcon />}
               </button>
@@ -633,7 +634,7 @@ export function LoginForm({
               onClick={handleSso}
               disabled={isLoading || ssoSubmitting}
               aria-busy={ssoSubmitting}
-              className="flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50"
+              className={`flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-input bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent disabled:opacity-50 ${AUTH_TOUCH_TARGET_CLASS}`}
             >
               {ssoSubmitting && <AuthSpinner />}
               {l.ssoButton}
@@ -644,7 +645,7 @@ export function LoginForm({
             <button
               type="button"
               onClick={() => switchMode('phone-otp')}
-              className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+              className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
             >
               {l.usePhoneOtpText}
             </button>
@@ -656,7 +657,7 @@ export function LoginForm({
             <button
               type="button"
               onClick={() => setShowPasswordFallback(false)}
-              className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+              className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
             >
               {l.backToSsoText}
             </button>
@@ -672,7 +673,7 @@ export function LoginForm({
             <button
               type="button"
               onClick={() => setShowPasswordFallback(true)}
-              className="w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline"
+              className={`w-full text-center text-xs text-muted-foreground underline-offset-4 transition-colors hover:text-primary hover:underline ${AUTH_TOUCH_TARGET_CLASS}`}
             >
               {l.usePasswordText}
             </button>
