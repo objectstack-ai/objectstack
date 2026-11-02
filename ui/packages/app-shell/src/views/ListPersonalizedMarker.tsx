@@ -50,6 +50,20 @@ export function ListPersonalizedMarker({
   const [open, setOpen] = useState(false);
   if (parts.length === 0) return null;
   const ordered = LIST_PERSONALIZATION_PART_ORDER.filter((part) => parts.includes(part));
+  // Each label a literal key, so the i18n call-site and dead-key gates read it.
+  const partLabels: Record<ListPersonalizationPart, string> = {
+    filters: t('console.objectView.personalizedParts.filters'),
+    search: t('console.objectView.personalizedParts.search'),
+    sort: t('console.objectView.personalizedParts.sort'),
+    grouping: t('console.objectView.personalizedParts.grouping'),
+    columns: t('console.objectView.personalizedParts.columns'),
+    hiddenFields: t('console.objectView.personalizedParts.hiddenFields'),
+    density: t('console.objectView.personalizedParts.density'),
+    layout: t('console.objectView.personalizedParts.layout'),
+    rowColor: t('console.objectView.personalizedParts.rowColor'),
+    rowNumbers: t('console.objectView.personalizedParts.rowNumbers'),
+    inlineEdit: t('console.objectView.personalizedParts.inlineEdit'),
+  };
   const label = t('console.objectView.personalized');
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -79,7 +93,7 @@ export function ListPersonalizedMarker({
               data-part={part}
               className="rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground"
             >
-              {t(`console.objectView.personalizedParts.${part}`)}
+              {partLabels[part]}
             </li>
           ))}
         </ul>
