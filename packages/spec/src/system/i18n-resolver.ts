@@ -17,6 +17,7 @@
  *   objects.<object>._actions.<action_name>.successMessage
  *   objects.<object>._actions.<action_name>.disabledReason
  *   objects.<object>._actions.<action_name>.submitText
+ *   objects.<object>._actions.<action_name>.cancelText
  *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
  *   objects.<object>._actions.<action_name>.params.<param_name>.label
  *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -48,7 +49,7 @@
  * object-less action (no `objectName`) reads only:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .disabledReason / .submitText /
+ *     .successMessage / .disabledReason / .submitText / .cancelText /
  *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.*
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
@@ -235,6 +236,12 @@ export interface ActionLike {
    * label. Narrowed to `string` for the same reason `label` is.
    */
   submitText?: string;
+  /**
+   * `ActionSchema.cancelText` (#28519) — the dismiss button label of the
+   * action's confirm or param dialog. Narrowed to `string` for the same reason
+   * `label` is.
+   */
+  cancelText?: string;
   /**
    * `ActionSchema.outcomeMessages` — success copy per handler `outcome`, each
    * entry a `template` slot like `successMessage` (#27948).
@@ -667,7 +674,7 @@ function actionTranslationNode(
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason' | 'submitText',
+  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason' | 'submitText' | 'cancelText',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1545,7 +1552,8 @@ export function translateView<T extends ViewLike>(
 /**
  * Apply the active locale to an action metadata document by overwriting
  * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
- * `submitText` (for an action that declares `params`), each declared
+ * `submitText` (for an action that declares `params`), `cancelText` (for an
+ * action that declares `confirmText` or `params`), each declared
  * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy
  * with translated values when available. The
  * original document is not mutated; a shallow copy is returned.
@@ -1587,6 +1595,15 @@ export function translateAction<T extends ActionLike>(
   const submitText = Array.isArray(action.params) && action.params.length > 0
     ? lookupActionField(bundle, action, 'submitText', opts) ?? action.submitText
     : action.submitText;
+  // [#28519] The dismiss button, overlaid the same way, for an action that
+  // opens either dialog that carries it: the confirm dialog of a declared
+  // `confirmText`, or the param dialog of a non-empty `params`. Judged on the
+  // AUTHORED `confirmText`, the declaration `ActionSchema` judges the key
+  // against, so a bundle cannot give a button to a dialog that never opens.
+  const opensDialog = action.confirmText != null || (Array.isArray(action.params) && action.params.length > 0);
+  const cancelText = opensDialog
+    ? lookupActionField(bundle, action, 'cancelText', opts) ?? action.cancelText
+    : action.cancelText;
   const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
@@ -1598,6 +1615,7 @@ export function translateAction<T extends ActionLike>(
     ...(successMessage !== undefined ? { successMessage } : {}),
     ...(disabledReason !== undefined ? { disabledReason } : {}),
     ...(submitText !== undefined ? { submitText } : {}),
+    ...(cancelText !== undefined ? { cancelText } : {}),
     ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
     ...(params !== action.params ? { params } : {}),
