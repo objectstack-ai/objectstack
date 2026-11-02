@@ -4,13 +4,13 @@
 
 feat(spec)!: an object extension's `fieldPatches` refuses a field the same extension replaces in `fields`, keys option patches by the option-value grammar, refuses `__proto__`, and carries the field's and option's display renames
 
-`ObjectExtensionSchema.fieldPatches` (ADR-0146 D10) is applied by the registry merge, so what it accepts now changes what every read serves. Four things it accepted are refused, each located at its key:
+`ObjectExtensionSchema.fieldPatches` (ADR-0146 D10) is applied by the registry merge, so what it accepts now changes what every read serves. Three things it accepted are refused, each located at its key:
 
 - a field named in both `fields` and `fieldPatches` of one extension (`fieldPatches.industry`): `fields` takes the vendor's field over whole, so the patch landed on the extension's own replacement and the author got neither answer;
 - an option-patch key no option `value` can be (`fieldPatches.industry.options.Tech Sector`): the map is now keyed by `SelectOptionSchema.shape.value` itself, so the patch can address only an option that can exist;
 - a `__proto__` own key in `fields`, `fieldPatches` or an option-patch map, which zod's record parser dropped while reporting success. Measured at the `/api/v1/meta` save door: the body parsed, the stored row kept the key, and the registered extension did not.
 
-A field patch written with the field's own renames (`helpText`, `help`, `hint`, `tooltip` → `inlineHelpText`; `title`, `displayName` → `label`) and an option patch written with the option's (`text`, `name`, `title` → `label`) now get the rename hint instead of a bare unknown-key refusal. The rows are taken by filter from the one table each source shape reads, so a rename onto a whitelisted key reaches the patch the day it lands. The `fieldPatches` description lists its members from `BASE_FIELD_DISPLAY_WHITELIST`.
+A field patch that spells a key the way the field's own rename table knows (`helpText`, `help`, `hint` or `tooltip` for `inlineHelpText`; `title` or `displayName` for `label`), and an option patch that spells one the option's table knows (`text`, `name` or `title` for `label`), now gets the rename hint instead of a bare unknown-key refusal. The rows are taken by filter from the one table each source shape reads, so a rename onto a whitelisted key reaches the patch the day it lands. The `fieldPatches` description lists its members from `BASE_FIELD_DISPLAY_WHITELIST`.
 
 Clause-②: no (narrowing) — `ObjectExtensionSchema` refuses three inputs it accepted: a field both replaced and patched, an option-patch key outside the option-value grammar, and a `__proto__` own key in its three record slots. Nothing is widened: the renames are hints on keys already refused.
 
