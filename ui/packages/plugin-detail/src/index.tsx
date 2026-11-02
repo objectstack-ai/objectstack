@@ -166,7 +166,7 @@ export type { SectionGroupProps } from './SectionGroup';
 export type { HeaderHighlightProps } from './HeaderHighlight';
 export type { RecordCommentsProps } from './RecordComments';
 export type { ActivityTimelineProps, ActivityFilterType } from './ActivityTimeline';
-export type { HistoryTimelineProps, HistoryEntry } from './HistoryTimeline';
+export type { HistoryTimelineProps, HistoryEntry, HistoryActionField } from './HistoryTimeline';
 export type { RichTextCommentInputProps, MentionSuggestion } from './RichTextCommentInput';
 export { extractMentions } from './extractMentions';
 export type { MentionTarget } from './extractMentions';
