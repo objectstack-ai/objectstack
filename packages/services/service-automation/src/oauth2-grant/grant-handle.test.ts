@@ -413,3 +413,48 @@ describe('ADR-0143 D2.1 — an MCP instance whose connection keeps the client it
         expect(onGrantRefused).toHaveBeenCalledWith('org_a');
     });
 });
+
+describe('[#28863] the stored reason of a connection marked reconnect required names the cause that happened', () => {
+    const storedReason = (held: Map<string, ConnectorConnectionRecord>) => String(held.get('org_a')?.statusReason);
+
+    it('no refresh token: the reason names the missing refresh token, claims no refusal and no expiry', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch });
+        const refused = await handle.get({ organizationId: 'org_a' }).catch((e) => e);
+        const reason = storedReason(held);
+        expect(reason).toContain("connector instance 'crm' needs to be reconnected for organization 'org_a'");
+        expect(reason).toContain('issued no refresh token, so an access token the connection has to renew cannot be renewed');
+        expect(reason).not.toMatch(/refused/);
+        expect(reason).not.toMatch(/expired/);
+        expect(refused.message).toBe(reason);
+        expect(idp.state.requests).toHaveLength(0);
+    });
+
+    it('no client: the reason names the missing client, claims no refusal and no expiry', async () => {
+        const idp = tokenEndpoint();
+        const { store, held } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'notion', config: { grant: 'authorization_code' }, connections: store, fetch: idp.fetch });
+        const refused = await handle.get({ organizationId: 'org_a' }).catch((e) => e);
+        const reason = storedReason(held);
+        expect(reason).toContain("connector instance 'notion' needs to be reconnected for organization 'org_a'");
+        expect(reason).toContain('keeps no client to refresh with, so an access token it has to renew cannot be renewed');
+        expect(reason).not.toMatch(/refused/);
+        expect(reason).not.toMatch(/expired/);
+        expect(refused.message).toBe(reason);
+        expect(idp.state.requests).toHaveLength(0);
+    });
+
+    it('control: a refresh the authorization server refuses (`invalid_grant`) stores a reason naming the refusal', async () => {
+        const idp = tokenEndpoint();
+        idp.state.answer = () => ({ status: 400, body: { error: 'invalid_grant' } });
+        const { store, held } = fakeConnections([{ org: 'org_a', refreshToken: 'dummy-rt-a' }]);
+        const handle = createOAuth2GrantHandle({ connector: 'crm', config: AUTH_CODE, connections: store, fetch: idp.fetch });
+        const refused = await handle.get({ organizationId: 'org_a' }).catch((e) => e);
+        const reason = storedReason(held);
+        expect(reason).toContain('its authorization server refused the grant (revoked, or expired with no usable refresh)');
+        expect(reason).not.toContain('dummy-rt-a');
+        expect(refused.message).toBe(reason);
+        expect(idp.state.requests).toHaveLength(1);
+    });
+});
