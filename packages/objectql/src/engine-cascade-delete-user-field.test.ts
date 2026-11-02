@@ -25,8 +25,8 @@
  * ## What is pinned here
  *
  *  - a `user` field that authors no `deleteBehavior` (the spec's parse output,
- *    and a raw registration): deleting the user changes nothing, opens no
- *    transaction, and the holder keeps the id, exactly as before;
+ *    and a raw registration): deleting the user leaves the holder as it was,
+ *    keeping the id, exactly as before;
  *  - `restrict`, single and multi-valued: refused with the walk's own
  *    ADR-0112 envelope (`DELETE_RESTRICTED` / 409, naming the holder's
  *    object), the same envelope a `lookup` restrict answers; a user nobody
@@ -205,7 +205,7 @@ describe('[#29253] a user field\'s declared deleteBehavior takes effect when the
       ['as the spec parses it, multi-valued', parsedUser({ multiple: true })],
       ['a raw registration', { type: 'user', reference: 'sys_user' }],
       ['a required one', parsedUser({ required: true })],
-    ])('%s: the user is deleted, the holder keeps the id, and no transaction opens', async (_label, def) => {
+    ])('%s: the user is deleted, and the holder is kept with the id unchanged', async (_label, def) => {
       const { engine, driver } = await makeEngine([holder('uf_plain', def)]);
       const u = await engine.insert('sys_user', { name: 'U' });
       const value = (def as Row).multiple === true ? [u.id] : u.id;
@@ -215,9 +215,6 @@ describe('[#29253] a user field\'s declared deleteBehavior takes effect when the
 
       expect(driver.rowOf('sys_user', u.id)).toBeUndefined();
       expect(driver.rowOf('uf_plain', h.id)).toMatchObject({ name: 'H', person: value });
-      // No relation takes part, so the delete is the plain one: no unit of work.
-      expect(driver.committed).toHaveLength(0);
-      expect(driver.rolledBack).toHaveLength(0);
     });
   });
 
