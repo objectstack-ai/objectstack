@@ -22,13 +22,18 @@
  *    saved (a save does not judge field security), and the list query that
  *    applies its filter is refused `403 PERMISSION_DENIED` by the existing
  *    predicate guard, naming the field;
- *  - `[meta]` the metadata API never serves a personal view as a view item.
+ *  - `[meta]` the metadata API never serves a personal view as a view item;
+ *  - `[door]` the owner's delete door, `DELETE /api/v1/personal-views/:id`
+ *    (seat ruling 6583289013 on #29443, the #26161 shape): the owner removes
+ *    their own view; another member and an organization administrator get
+ *    the unknown-id 404 and the row stays; a platform administrator, whose
+ *    bare wildcard reads the row, is refused loudly (403) and the row stays;
+ *    anonymous is 401; and the generic data DELETE of the owner's own row is
+ *    still 403, because the door grants nothing (`member_default` is bound to
+ *    the `everyone` anchor and carries no delete bit, ADR-0090 D5).
  *
- * What it deliberately does not pin: the owner's own delete. No shipped set
- * grants a member delete on any platform object (`member_default` is bound to
- * the `everyone` anchor, ADR-0090 D5); the delete door is a separate decision
- * on #29443. A platform administrator's wildcard keeps reading every row, as it
- * does on `sys_user_preference` (the recorded admin rescue path).
+ * A platform administrator's wildcard keeps reading every row, as it does on
+ * `sys_user_preference` (the recorded admin rescue path).
  *
  * Refusals assert `code` AND `status` (ADR-0112).
  */
@@ -67,6 +72,7 @@ describe('sys_personal_view over REST: a reader\'s own named list views (ruling 
   let aliceTok: string;
   let bobTok: string;
   let carolTok: string;
+  let adminTok: string;
   let aliceId: string;
 
   const userIdOf = async (email: string): Promise<string> => {
@@ -88,7 +94,7 @@ describe('sys_personal_view over REST: a reader\'s own named list views (ruling 
 
   beforeAll(async () => {
     stack = await bootShowcase({ security: showcaseAppDefaultSecurity() });
-    const adminTok = await stack.signIn();
+    adminTok = await stack.signIn();
     aliceTok = await stack.signUp(ALICE);
     bobTok = await stack.signUp(BOB);
     carolTok = await stack.signUp(CAROL);
@@ -231,5 +237,61 @@ describe('sys_personal_view over REST: a reader\'s own named list views (ruling 
 
     const byId = await stack.apiAs(aliceTok, 'GET', `/meta/view/${row.id}`);
     expect(byId.status).toBe(404);
+  });
+
+  describe('[door] DELETE /personal-views/:id removes the owner\'s own view, and nobody else\'s', () => {
+    const door = (id: string) => `/personal-views/${id}`;
+    const stillThere = async (id: string) => ql.findOne(OBJ, { where: { id }, context: SYS });
+
+    it('[door] the owner removes their own view: 200 { id, deleted: true }, and the row is gone', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: to remove');
+      const r = await stack.apiAs(aliceTok, 'DELETE', door(row.id));
+      expect(r.status, await r.clone().text()).toBe(200);
+      const body: any = await r.json();
+      expect(body?.data ?? body).toEqual({ id: row.id, deleted: true });
+      expect(await stillThere(row.id)).toBeFalsy();
+    });
+
+    it('[door] another member: 404 RECORD_NOT_FOUND, and the row stays', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: not Bob\'s to remove');
+      const r = await stack.apiAs(bobTok, 'DELETE', door(row.id));
+      expect(r.status, await r.clone().text()).toBe(404);
+      expect(errorCodeOf(await r.json())).toBe('RECORD_NOT_FOUND');
+      expect((await stillThere(row.id))?.label).toBe('Alice: not Bob\'s to remove');
+    });
+
+    it('[door] an organization administrator: 404 RECORD_NOT_FOUND, and the row stays', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: not the org admin\'s to remove');
+      const r = await stack.apiAs(carolTok, 'DELETE', door(row.id));
+      expect(r.status, await r.clone().text()).toBe(404);
+      expect(errorCodeOf(await r.json())).toBe('RECORD_NOT_FOUND');
+      expect((await stillThere(row.id))?.label).toBe('Alice: not the org admin\'s to remove');
+    });
+
+    it('[door] a platform administrator, who reads the row, is refused loudly: 403 PERMISSION_DENIED, and the row stays', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: not the platform admin\'s to remove');
+      const read = await stack.apiAs(adminTok, 'GET', `/data/${OBJ}/${row.id}`);
+      expect(read.status, 'the platform administrator\'s wildcard reads the row (the recorded boundary)').toBe(200);
+      const r = await stack.apiAs(adminTok, 'DELETE', door(row.id));
+      expect(r.status, await r.clone().text()).toBe(403);
+      expect(errorCodeOf(await r.json())).toBe('PERMISSION_DENIED');
+      expect((await stillThere(row.id))?.label).toBe('Alice: not the platform admin\'s to remove');
+    });
+
+    it('[door] anonymous: 401 UNAUTHENTICATED, and the row stays', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: not anonymous\'s to remove');
+      const r = await stack.api(door(row.id), { method: 'DELETE' });
+      expect(r.status, await r.clone().text()).toBe(401);
+      expect(errorCodeOf(await r.json())).toBe('UNAUTHENTICATED');
+      expect(await stillThere(row.id)).toBeTruthy();
+    });
+
+    it('[door] the grant model does not move: the generic data DELETE of the owner\'s own row is still 403', async () => {
+      const row = await save(aliceTok, aliceId, 'Alice: generic delete');
+      const r = await stack.apiAs(aliceTok, 'DELETE', `/data/${OBJ}/${row.id}`);
+      expect(r.status, await r.clone().text()).toBe(403);
+      expect(errorCodeOf(await r.json())).toBe('PERMISSION_DENIED');
+      expect(await stillThere(row.id)).toBeTruthy();
+    });
   });
 });

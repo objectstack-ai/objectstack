@@ -19,6 +19,12 @@
  *  - at most one default per owner and object: a new default clears the
  *    previous one in the same write, and touches no other object or owner;
  *  - the id is the engine's record id, never the `object.key` view syntax.
+ *  - the owner's delete door (`removeOwnPersonalView`, the core of
+ *    `DELETE /api/v1/personal-views/:id`): the owner's own row is removed;
+ *    another member's and an organization administrator's attempt reads
+ *    nothing and answers 404 with the row kept; a platform administrator, who
+ *    CAN read the row, is refused loudly with 403 and the row kept; and the
+ *    generic engine delete is still refused for the owner (no grant moved).
  *
  * Refusals are asserted on the ADR-0112 pair (`code` + `status`) and on the
  * row left unchanged.
@@ -31,6 +37,7 @@ import { SecurityPlugin } from '@objectstack/plugin-security';
 
 import { authIdentityObjects } from './manifest.js';
 import { PERSONAL_VIEW_OBJECT, registerPersonalViewHooks } from './personal-view-hooks.js';
+import { removeOwnPersonalView } from './personal-view-routes.js';
 
 const SYS = { context: { isSystem: true } } as any;
 const ORG = 'org_default';
@@ -287,5 +294,59 @@ describe('at most one default per owner and object', () => {
       'A lead new default': true,
       'B lead default': true,
     });
+  });
+});
+
+describe('the owner\'s delete door removes the owner\'s own view, and nobody else\'s', () => {
+  /** The context the door resolves for a caller, as the transports hand one to the engine. */
+  const caller = (userId: string, permissions: string[] = []) => as(userId, permissions).context;
+
+  it('own row: removed, and the owner\'s other views stay', async () => {
+    const engine = await rig();
+    const gone = await save(engine, ALICE, 'A gone');
+    await save(engine, ALICE, 'B kept');
+    await removeOwnPersonalView(engine as any, gone.id, caller(ALICE));
+    expect((await stored(engine)).map((r) => r.label)).toEqual(['B kept']);
+  });
+
+  it('another member\'s row: 404 RECORD_NOT_FOUND (unreadable, the unknown-id answer), and the row stays', async () => {
+    const engine = await rig();
+    const alices = await save(engine, ALICE, 'Alice only');
+    const err = await refusalOf(removeOwnPersonalView(engine as any, alices.id, caller(BOB)));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
+    expect((await stored(engine)).map((r) => r.label)).toEqual(['Alice only']);
+  });
+
+  it.each(['organization_admin', 'organization_admin_no_bypass'])(
+    '%s deleting a member\'s row: 404 RECORD_NOT_FOUND, and the row stays',
+    async (adminSet) => {
+      const engine = await rig();
+      const alices = await save(engine, ALICE, 'Alice only');
+      const err = await refusalOf(removeOwnPersonalView(engine as any, alices.id, caller(CAROL, [adminSet])));
+      expect({ code: err?.code, status: err?.status }).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
+      expect((await stored(engine)).map((r) => r.label)).toEqual(['Alice only']);
+    },
+  );
+
+  it('a platform administrator, who reads the row, is refused loudly: 403 PERMISSION_DENIED, and the row stays', async () => {
+    const engine = await rig();
+    const alices = await save(engine, ALICE, 'Alice only');
+    const err = await refusalOf(removeOwnPersonalView(engine as any, alices.id, caller(CAROL, ['admin_full_access'])));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect((await stored(engine)).map((r) => r.label)).toEqual(['Alice only']);
+  });
+
+  it('an unknown id: 404 RECORD_NOT_FOUND', async () => {
+    const engine = await rig();
+    const err = await refusalOf(removeOwnPersonalView(engine as any, 'no_such_view', caller(ALICE)));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'RECORD_NOT_FOUND', status: 404 });
+  });
+
+  it('the grant model does not move: the generic engine delete of the owner\'s own row is still refused', async () => {
+    const engine = await rig();
+    const own = await save(engine, ALICE, 'Alice only');
+    const err = await refusalOf(engine.delete(OBJ, { where: { id: own.id }, ...as(ALICE) } as any));
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'PERMISSION_DENIED', status: 403 });
+    expect((await stored(engine)).map((r) => r.label)).toEqual(['Alice only']);
   });
 });

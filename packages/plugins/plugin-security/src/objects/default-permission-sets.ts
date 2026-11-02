@@ -441,8 +441,10 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // default row scope and hand the admin every member's saved lists. The
       // same grant as `member_default`'s, so the admin loses nothing of their
       // own; the derived no-bypass variant inherits this line. ⛔ No
-      // `allowDelete`: no shipped set grants a member delete here, and an
-      // admin-only delete would be the admin management the ruling leaves out.
+      // `allowDelete`: an owner removes their own view through plugin-auth's
+      // own-row door (`DELETE /api/v1/personal-views/:id`), which grants
+      // nothing, and an admin-only delete would be the admin management the
+      // ruling leaves out.
       sys_personal_view: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
     },
     // `manage_mailboxes` (ruling 6116489638, Q4 → A): an organization
@@ -776,8 +778,11 @@ const baseDefaultPermissionSets: PermissionSet[] = [
       // declared on the object, `operation: 'all'`) decides WHICH rows, so the
       // grant reaches the holder's own views only. The object is `private`
       // posture, so this explicit line is the only way a member reaches it.
-      // ⛔ No `allowDelete`, for the anchor reason above: the owner's delete is
-      // a separate decision on #29443, not a bit this set can carry.
+      // ⛔ No `allowDelete`, for the anchor reason above: the owner removes
+      // their own view through plugin-auth's own-row door
+      // (`DELETE /api/v1/personal-views/:id`, seat ruling 6583289013 on
+      // #29443), whose authorization is structural (owner == caller), not a
+      // bit this set carries.
       sys_personal_view: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false },
       // [#7344] The personal inbox, READ-ONLY. Same reasoning as the line above,
       // applied to the other pair of platform objects a platform app points every

@@ -33,7 +33,10 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * (`plugin-auth/src/personal-view-hooks.ts`): a save whose `config` is not a
  * valid `ListView` is refused with `400 VALIDATION_FAILED`, and a write that
  * makes a row the owner's default clears the default flag on the owner's other
- * rows for the same object in the same write.
+ * rows for the same object in the same write. The owner removes a view through
+ * the registrar's own-row door, `DELETE /api/v1/personal-views/:id`
+ * (`plugin-auth/src/personal-view-routes.ts`): no shipped set grants delete on
+ * this object, and the door's authorization is structural (owner == caller).
  *
  * @namespace sys
  */
@@ -132,7 +135,8 @@ export const SysPersonalView = ObjectSchema.create({
     trackHistory: false,
     searchable: false,
     apiEnabled: true,
-    // No `apiMethods` — default-open, like `sys_user_preference`. The owner's
-    // delete is not granted by any shipped set yet; see `member_default`.
+    // No `apiMethods` — default-open, like `sys_user_preference`. No shipped
+    // set grants delete on this object; the owner removes their own view
+    // through plugin-auth's own-row door (`DELETE /api/v1/personal-views/:id`).
   },
 });
