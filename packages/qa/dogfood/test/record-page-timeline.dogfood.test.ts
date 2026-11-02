@@ -5,11 +5,12 @@
 // org-bound boot with plugin-audit's real writers: the comments, the activity
 // mirror and the ledger rows are the ones the member's own writes produce.
 //
-// The count is of rows the caller could read, and of no other: for each
-// member it equals the sum of the separate list reads it stands for, asked as
-// that member (the spec's timeline table). A member who may read the ledger
-// counts its field changes, and the activity's `updated` rows step aside; a
-// member refused the ledger counts no field change, and the updates stay.
+// The count is of rows the caller could read, and of no other: it equals the
+// sum of the separate list reads it stands for, asked as the same member (the
+// spec's timeline table), and the activity's `updated` rows step aside once a
+// field change is counted. A refused ledger read counting no field change is
+// pinned at the route (`record-page-routes.test.ts`): on this boot the
+// platform's member floor reads the ledger rows of a record the member reads.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
@@ -23,19 +24,12 @@ import { catalogPermissionSet } from './catalog-permission-set.js';
 
 const SYS = { isSystem: true } as const;
 const AUTHOR_EMAIL = 'timeline-author@verify.test';
-const PEER_EMAIL = 'timeline-peer@verify.test';
 
-/** Object-level reads of the activity stream and the ledger — the author holds both. */
+/** Object-level reads of the activity stream and the ledger. */
 const streamReaderSet: PermissionSet = PermissionSetSchema.parse({
   name: 'tl_stream_reader',
   label: 'Timeline fixture — object-level sys_activity and sys_audit_log read',
   objects: { sys_activity: { allowRead: true }, sys_audit_log: { allowRead: true } },
-});
-/** The activity stream alone — the peer holds this, and no ledger read. */
-const activityReaderSet: PermissionSet = PermissionSetSchema.parse({
-  name: 'tl_activity_reader',
-  label: 'Timeline fixture — object-level sys_activity read',
-  objects: { sys_activity: { allowRead: true } },
 });
 
 const ALL_SOURCES = { discussion: true, activity: true, fieldChanges: true } as const;
@@ -44,7 +38,6 @@ describe('[#28737] the timeline part counts the 动态 stream the caller could r
   let stack: VerifyStack;
   let ql: any;
   let authorTok: string;
-  let peerTok: string;
   let recordId: string;
 
   const grant = async (email: string, set: PermissionSet) => {
@@ -57,7 +50,7 @@ describe('[#28737] the timeline part counts the 动态 stream the caller could r
   beforeAll(async () => {
     stack = await bootStack(commentsFixtureStack as never, {
       security: new SecurityPlugin({
-        defaultPermissionSets: [...securityDefaultPermissionSets, cmtFixtureBaselineSet, streamReaderSet, activityReaderSet],
+        defaultPermissionSets: [...securityDefaultPermissionSets, cmtFixtureBaselineSet, streamReaderSet],
         fallbackPermissionSet: cmtFixtureBaselineSet.name,
       }),
       extraPlugins: [new AuditPlugin()],
@@ -65,10 +58,8 @@ describe('[#28737] the timeline part counts the 动态 stream the caller could r
     });
     await stack.signIn();
     authorTok = await stack.signUp(AUTHOR_EMAIL);
-    peerTok = await stack.signUp(PEER_EMAIL);
     ql = await stack.kernel.getServiceAsync('objectql');
     await grant(AUTHOR_EMAIL, streamReaderSet);
-    await grant(PEER_EMAIL, activityReaderSet);
 
     // The record's stream, from its real producers: a create and two renames
     // (ledger rows and their activity mirror), two comments and a reply.
@@ -98,13 +89,14 @@ describe('[#28737] the timeline part counts the 动态 stream the caller could r
         armed: (o) => o.comments === 3 && o.ledger >= 3 && o.updates === 2,
       }),
       armedWhen({
-        control: 'the author reads the ledger and the peer is refused it',
-        disarmedBy: 'a peer who could read the ledger would make the refused-ledger case a statement about nothing',
+        control: 'the member reads each source the count stands for',
+        disarmedBy: 'a refused source read would leave the sum below a statement about a stream nobody counted',
         observe: async () => ({
-          author: (await stack.apiAs(authorTok, 'GET', `/data/sys_audit_log?$top=1`)).status,
-          peer: (await stack.apiAs(peerTok, 'GET', `/data/sys_audit_log?$top=1`)).status,
+          comments: (await stack.apiAs(authorTok, 'GET', '/data/sys_comment?$top=1')).status,
+          activity: (await stack.apiAs(authorTok, 'GET', '/data/sys_activity?$top=1')).status,
+          ledger: (await stack.apiAs(authorTok, 'GET', '/data/sys_audit_log?$top=1')).status,
         }),
-        armed: (o) => o.author === 200 && o.peer >= 400,
+        armed: (o) => o.comments === 200 && o.activity === 200 && o.ledger === 200,
       }),
     ]);
   }, 180_000);
@@ -138,7 +130,7 @@ describe('[#28737] the timeline part counts the 动态 stream the caller could r
     return RecordPageResponseSchema.parse(json.data).timeline;
   };
 
-  it('a member who reads the ledger counts its field changes, and the updates step aside', async () => {
+  it('counts the stream as the separate reads answer it, and the updates step aside for the field changes', async () => {
     const expected = await expectedAs(authorTok);
     expect(expected.comments).toBe(3);
     expect(expected.changes).toBeGreaterThanOrEqual(3);
@@ -146,11 +138,13 @@ describe('[#28737] the timeline part counts the 动态 stream the caller could r
     expect(await timelineAs(authorTok)).toEqual({ total: expected.total });
   }, 60_000);
 
-  it('a member refused the ledger counts no field change, and the updates stay', async () => {
-    const expected = await expectedAs(peerTok);
-    expect(expected.changes).toBe(0);
-    expect(await timelineAs(peerTok)).toEqual({ total: expected.total });
-    expect(expected.total).toBe(expected.comments + expected.drawn);
+  it('without the field changes, the updates stay in the count', async () => {
+    const expected = await expectedAs(authorTok);
+    const res = await stack.apiAs(authorTok, 'POST', `/data/cmt_open/${recordId}/page`, {
+      timeline: { discussion: true, activity: true, fieldChanges: false },
+    });
+    expect(res.status).toBe(200);
+    expect(RecordPageResponseSchema.parse(((await res.json()) as any).data).timeline).toEqual({ total: expected.comments + expected.drawn });
   }, 60_000);
 
   it('counts only the sources named', async () => {
