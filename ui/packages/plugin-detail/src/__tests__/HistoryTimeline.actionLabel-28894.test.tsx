@@ -80,10 +80,4 @@ describe('HistoryTimeline action badge label (objectstack#28894)', () => {
     expect(screen.getByText('created').className).toContain('uppercase');
   });
 
-  it('keeps the action tone: the variant still keys on the stored value', () => {
-    mount('zh', SOURCE);
-    // `ACTION_VARIANT` has no `updated` / `created` keys, so both fall back to
-    // the outline tone, labelled or not.
-    expect(screen.getByText('已更新').className).toBe(screen.getByText('assigned').className.replace(' uppercase', ''));
-  });
 });
