@@ -235,7 +235,7 @@ export const CrmTranslationBundle = defineTranslationBundle({
             },
           },
           lead_score: { label: '线索评分' },
-          assigned_to: { label: '负责人' },
+          assigned_to: { label: '分配给' },
           account: { label: '所属客户' },
           converted_opportunity: { label: '转化商机' },
           notes: { label: '备注' },
