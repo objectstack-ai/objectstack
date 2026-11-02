@@ -17,7 +17,7 @@
 feat!: an object that declares `titleFormat` is refused at save and by `os validate`, with the `nameField` prescription (#29007)
 
 Clause-②: no (narrowing)
-Metadata-protocol: semantic
+Metadata-protocol: narrowed
 
 <!-- adr-0087: registered object-title-format-refused -->
 
