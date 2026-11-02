@@ -318,6 +318,15 @@ A field or flow another package contributes to one of the base's objects.
 | **name** | `string` | ✅ | The exported package's machine name. |
 | **version** | `string` | ✅ | The exported package's version. |
 | **label** | `string` | optional | Display label, when the package declares one. |
+| **withheldMaps** | `{ type: 'connector'; name: string; path: Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …> }[]` | optional | Every map the export withheld WHOLE because a served read never carries it: a connector's header and environment-variable maps. The item is written with that map absent, so an import reads this list to tell an incomplete map from one the package never had, and names each one for an operator to re-enter. Positions only: no header or variable name is listed. Absent when the export withheld nothing. |
+
+### Nested Shape: `PackageExportManifest.withheldMaps[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `'connector'` | ✅ | Metadata type of the item whose map was withheld. |
+| **name** | `string` | ✅ | Name of the item whose map was withheld. |
+| **path** | `Enum<'providerConfig.headers' \| 'providerConfig.defaultHeaders' \| …>` | ✅ | Dot path of the withheld map inside the item. |
 
 
 ---
