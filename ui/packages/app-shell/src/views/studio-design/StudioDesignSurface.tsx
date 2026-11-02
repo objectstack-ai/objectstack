@@ -10858,13 +10858,25 @@ export function AutomationsPillar({
             : flowEnabled
               ? 'bg-emerald-500'
               : 'bg-muted-foreground/40';
+          // objectstack#29376 — while a save is in flight the switch is
+          // `aria-disabled`, never `disabled`: a focused control that turns
+          // `disabled` drops focus to the page, and nothing hands it back when
+          // the save lands, so a keyboard author would tab back from the top
+          // after every flip. The press is refused in the handler instead, so a
+          // second Space sends no second save. A switch that cannot be flipped
+          // at all (no canvas, or a read-only package) stays `disabled`.
+          const inert = !isEditable || readOnly;
+          const busy = !inert && !!saving;
           const toggle = (
             <button
               type="button"
               role="switch"
               aria-checked={flowEnabled}
-              onClick={toggleEnabled}
-              disabled={!isEditable || !!saving || readOnly}
+              onClick={() => {
+                if (!saving) void toggleEnabled();
+              }}
+              disabled={inert}
+              aria-disabled={busy || undefined}
               aria-describedby={readOnly ? toggleReadOnlyReasonId : undefined}
               // A read-only package's reason is the wrapper's (objectui#12303),
               // not a `title` the disabled button can never show.
@@ -10877,7 +10889,7 @@ export function AutomationsPillar({
                 'inline-flex h-7 items-center gap-2 rounded-md px-1 text-[12px] ' +
                 (readOnly
                   ? 'text-muted-foreground disabled:pointer-events-none'
-                  : 'text-foreground hover:bg-muted disabled:opacity-50')
+                  : 'text-foreground hover:bg-muted disabled:opacity-50 aria-disabled:opacity-50')
               }
             >
               <span className={'relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ' + track}>
