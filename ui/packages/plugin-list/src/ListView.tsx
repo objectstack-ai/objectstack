@@ -11,7 +11,7 @@ import { cn, Button, Input, Popover, PopoverContent, PopoverTrigger, FilterBuild
 import type { SortItem } from '@object-ui/components';
 import { Search, Funnel, ArrowUpDown, X, EyeOff, Pencil, Group, Paintbrush, Download, Rows4, Rows3, Rows2, Share2, Lock, Printer, Plus, Trash2, CheckSquare, AlertTriangle, ShieldAlert, RotateCw, Loader2, Info, Inbox } from 'lucide-react';
 import type { FilterBuilderRowGroup } from '@object-ui/components';
-import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion, useRecordListFace } from '@object-ui/components';
+import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCompanion } from '@object-ui/components';
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
@@ -525,7 +525,7 @@ export interface ListViewProps {
   /**
    * The Display control's Open records section (objectstack#26681): how a row
    * opens its record — the mode the host resolved for this object and view,
-   * the reader's own drawer | split preference and its setter. See
+   * the reader's own drawer | page preference and its setter. See
    * `ViewSettingsRecordOpen`.
    *
    * A HOST prop, never a schema key: the preference is the reader's, kept by
@@ -1241,7 +1241,6 @@ export const LIST_DEFAULT_TRANSLATIONS: Record<string, string> = {
   // The Display control's Open records section (objectstack#26681).
   'list.recordOpen': 'Open records',
   'list.recordOpenDrawer': 'Drawer',
-  'list.recordOpenSplit': 'Split',
   'list.recordOpenPage': 'Full page',
   'list.recordOpenNote': 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
   'list.recordOpenDeclaredPage': 'This object is declared to open as a full page',
@@ -5638,11 +5637,6 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // not take the summaries down with the count.
   const recordCountShown =
     !loading && data.length > 0 && surfaceDrawsFetchedRows && schema.showRecordCount !== false;
-  // objectstack#27545 — beside a record pane (a narrowed face) the host prints
-  // the count under the list it handed over, so the bar does not print it a
-  // second time. The rest of the row (the cap warning, the summaries) stays.
-  const recordListFace = useRecordListFace();
-  const recordCountInBar = recordCountShown && recordListFace === 'full';
   const dataLimitWarningShown =
     recordCountShown && dataLimitReached && !(paginate && serverTotal != null);
   // objectui#12619 — a board that pages its own lanes draws every record of the
@@ -7080,7 +7074,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           tooltip when they do not fit. */}
       {/* The compact posture prints its count in its header (objectui#12703),
           the capped one in its 「View all N」 link (objectstack#26613). */}
-      {listChromeShown && (recordCountInBar || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
+      {listChromeShown && (recordCountShown || dataLimitWarningShown || boardRecordCountShown || footerSummaryText) && (
         <div
           className="border-t px-4 py-2 flex items-center gap-3 text-xs text-muted-foreground bg-background shrink-0"
           data-testid="record-count-bar"
@@ -7090,7 +7084,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             {t('list.recordCount', { count: fetchedTotal })}
           </span>
           )}
-          {recordCountInBar && (
+          {recordCountShown && (
           <span className="shrink-0 font-medium text-foreground/80">
             {/* Under server pagination `data` is only the current page, so the
                 honest record count is the server's grand total (#586). When the
