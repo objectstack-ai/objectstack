@@ -1,20 +1,20 @@
 ---
-'@objectstack/core': minor
-'@objectstack/objectql': minor
-'@objectstack/metadata-protocol': minor
-'@objectstack/plugin-hono-server': minor
-'@objectstack/plugin-security': minor
+'@objectstack/core': patch
+'@objectstack/objectql': patch
+'@objectstack/metadata-protocol': patch
+'@objectstack/plugin-hono-server': patch
+'@objectstack/plugin-security': patch
 ---
 
 fix: a disabled package's objects are no longer granted by `/auth/me/permissions`, and an action that launches into a disabled package is no longer served
 
 Clause-②: yes (narrowing)
-Metadata-protocol: narrowed
+Metadata-protocol: none
 Skills-docs: none — no file under `skills/**` describes what `/auth/me/permissions` answers for a disabled package, or which actions a disabled package withholds; every taught use of `current_user.can(object, verb)` and of `type: 'flow'` actions stays true.
 
 <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is two served answers while a package is disabled, and re-enabling the package restores both with no restart; nobody's code or metadata changes. No exported declaration is removed or narrowed (one optional member and one function are added); every package publishes; no ADR-0087 id is named or touched. -->
 
-**BREAKING** (a served-answer narrowing, only while a package is disabled), shipped as `minor`. A disabled package is hidden, and refused on the data plane (#28117 ruling A). Two faces still answered as if it were on.
+**BREAKING** (a served-answer narrowing, only while a package is disabled), shipped as `patch`: a non-protocol narrowing takes `patch` and keeps this banner and its ADR-0087 disposition (no authored value is refused). A disabled package is hidden, and refused on the data plane (#28117 ruling A). Two faces still answered as if it were on.
 
 **FROM.** With a package disabled, on `origin/main`:
 
