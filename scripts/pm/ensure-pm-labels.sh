@@ -214,7 +214,7 @@ for R in objectstack-ai/objectstack objectstack-ai/objectui objectstack-ai/cloud
   # no machine exit ages out of sight unless a human is re-asked), H13's
   # PM_STATE_LABELS (a card in this state HAS a state, so it must not read as
   # the half-annotated shape) and H22's PM_RESIDUE_LABELS (a claim that an act
-  # is still owed is residue on a closed card). Five-repo loop for the same
+  # is still owed is residue on a closed card). Per-repo loop for the same
   # reason priority:p0 and pm:retriage are in it: the sweep is repo-parameterized
   # (PM_SWEEP_REPO) and the state-model row requires the label in every repo of the loop.
   # Colour: needs-user-decision's family (a HUMAN owes something), one shade

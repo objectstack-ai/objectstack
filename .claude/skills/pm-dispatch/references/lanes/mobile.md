@@ -10,6 +10,7 @@
 - 信箱随召唤开、随退席关。
 - 前提:mobile 仓的原生壳改造已进其 `main`;之前 ⛔ 不召唤本席。
 - 座位贴住 mobile 仓,带 `pm:seat`;车队总表经 `fleet-roster.mjs` 默认仓列读到它。
+- 存根的巡查行写 `Patrol: none — 按需席`:表明无 routine,半状态巡查只核此行在不在。
 - ⛔ 不产 `domain:*`;机械三务(含首触定级)按 cross-repo-coordination.md 单车道仓条自理。
 
 ## 范围
