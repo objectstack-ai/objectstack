@@ -5015,6 +5015,31 @@ const FORM_VIEW_BUTTONS_RESET_RETIRED =
   + 'longer clears after a save, and a form that should declares `submitBehavior: { kind: \'continue\' }`. '
   + FORM_VIEW_TYPE_RETIRED_FIX;
 
+// [#29012] The drawer keys (ADR-0049 enforce-or-remove, triage ruling: retire).
+// `type: 'drawer'` left the form view in #27155, so no form view opens in a
+// drawer, and no metadata form-view surface (the console's form page, its New
+// / Edit dialogs, the record form page, Studio) reads either key: a stored
+// `drawerSide: 'left'` saved, served and changed nothing. The one drawer that
+// reads them is the container the React `ObjectForm` block opens with
+// `formType='drawer'`, and that block keeps both as props of its own
+// (`react-blocks.ts` overlay; the `object-form` page block's
+// `ObjectFormPropsSchema` declares them too). The
+// `form-view-drawer-keys-removed` conversion (ADR-0087 D2) strips them from
+// stored rows and sources.
+const FORM_VIEW_DRAWER_SIDE_RETIRED =
+  '`view.form.drawerSide` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form view opens in a '
+  + 'drawer, so no form view ever read it. Delete the key: a list opens a clicked record in its drawer '
+  + '(`navigation.mode`), and the React `ObjectForm` block keeps its own `drawerSide` prop for the drawer it '
+  + 'opens with `formType=\'drawer\'`. '
+  + FORM_VIEW_TYPE_RETIRED_FIX;
+
+const FORM_VIEW_DRAWER_WIDTH_RETIRED =
+  '`view.form.drawerWidth` was removed in @objectstack/spec 18.3.0 (ADR-0049) — no form view opens in a '
+  + 'drawer, so no form view ever read it, and a pixel width cannot be chosen without knowing the client '
+  + 'viewport. Delete the key: a list\'s record drawer takes its starting width from the `navigation.size` '
+  + 'bucket, and the React `ObjectForm` block keeps its own `drawerWidth` prop for the drawer it opens. '
+  + FORM_VIEW_TYPE_RETIRED_FIX;
+
 // Form-view `layout` retired-value prescriptions (#20221, ADR-0049
 // enforce-or-remove). Declared with `//` on purpose — the
 // `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too. An
@@ -5163,16 +5188,13 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /** [#27155] RETIRED with `type: 'split'` — {@link FORM_VIEW_SPLIT_RESIZABLE_RETIRED}. */
   splitResizable: retiredKey(FORM_VIEW_SPLIT_RESIZABLE_RETIRED),
   /**
-   * Drawer side and width. [#27155] Inert on a form view since `type: 'drawer'`
-   * was retired. [#27159] Both keep a live reader: the React `ObjectForm` block
-   * takes its contract from this schema (`react-blocks.ts`), and a React page's
-   * `formType='drawer'` opens the drawer container the block supplies, which
-   * reads them. The drawer half of their enforce-or-remove question stays open
-   * on #27153.
+   * [#29012] RETIRED — {@link FORM_VIEW_DRAWER_SIDE_RETIRED}. Inert on a form
+   * view since `type: 'drawer'` left it (#27155); the React `ObjectForm` block
+   * declares its own `drawerSide` in its overlay (`react-blocks.ts`).
    */
-  drawerSide: z.enum(['top', 'bottom', 'left', 'right']).optional().describe("Edge the drawer container opens from, when the React `ObjectForm` block opens this form with formType 'drawer'"),
-  /** @deprecated [#2578 → `modalSize` / size buckets] A pixel width can't be authored blind (unknown client viewport); the renderer derives width from content + viewport. */
-  drawerWidth: z.string().optional().describe('[DEPRECATED → size buckets] Width of the drawer container the React `ObjectForm` block opens with formType \'drawer\', e.g. "480px". A pixel width cannot be chosen without knowing the client viewport — the renderer derives it.'),
+  drawerSide: retiredKey(FORM_VIEW_DRAWER_SIDE_RETIRED),
+  /** [#29012] RETIRED — {@link FORM_VIEW_DRAWER_WIDTH_RETIRED}. */
+  drawerWidth: retiredKey(FORM_VIEW_DRAWER_WIDTH_RETIRED),
   /**
    * Size bucket of the dialog a caller opens this form in. Live on every
    * layout: the console's New / Edit dialog reads it off the form view it
