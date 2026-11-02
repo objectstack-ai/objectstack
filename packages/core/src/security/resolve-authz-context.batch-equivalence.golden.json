@@ -1767,7 +1767,13 @@
         "peer_0995",
         "peer_0996",
         "peer_0997",
-        "peer_0998"
+        "peer_0998",
+        "peer_0999",
+        "peer_1000",
+        "peer_1001",
+        "peer_1002",
+        "peer_1003",
+        "peer_1004"
       ],
       "accessible_org_ids": [
         "org_0000",
@@ -1997,6 +2003,14 @@
           "organization_id": "org_0000"
         },
         "limit": 1000,
+        "isSystem": true
+      },
+      {
+        "object": "sys_member",
+        "where": {
+          "organization_id": "org_0000"
+        },
+        "limit": 10000,
         "isSystem": true
       },
       {

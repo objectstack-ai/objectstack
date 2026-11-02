@@ -87,6 +87,18 @@
  * it joins the activation-ledger read's wave, so the fixture still resolves in
  * two legs. That read is in the golden because the code genuinely issues it —
  * the organization-less row this fixture used to hold asked none.
+ *
+ * ⚠️ A fifth recorded move ([#29281], the visible set it corrects is the
+ * defect the card reports): the fellow-org `sys_member` read that comes back
+ * AT its 1,000-row bound is a first page, no longer the membership, and the
+ * resolver reads the active organization's membership to completion. One
+ * fixture's golden moved, `read-limits-truncate`, whose 1,006 rows for
+ * `org_0000` came back at the bound: `grants.org_user_ids` gains the six
+ * members the bound cut (`peer_0999` … `peer_1004`), `queries` gains the
+ * completion read (`sys_member {organization_id}`, limit 10,000), and the
+ * fixture resolves in three legs, the completion read being its own. The
+ * first read itself, its bound and every other recorded read are unchanged,
+ * and so is every other fixture: none comes back at the bound.
  */
 
 import { readFileSync } from 'node:fs';
@@ -143,7 +155,9 @@ const BATCHED_LEGS: Record<string, number> = {
   'ai-seat-and-email-from-sys-user': 2,
   'ai-seat-denied': 2,
   'seeded-permissions-and-email': 2,
-  'read-limits-truncate': 2,
+  // [#29281] Three: the fellow-org read came back at its bound, so the
+  // membership is read to completion after wave 1, in a leg of its own.
+  'read-limits-truncate': 3,
   'no-active-org': 2,
 };
 
@@ -283,6 +297,9 @@ describe('[#10825] batched resolveUserAuthzGrants — equivalence with the seque
           // Wave 2: the activation ledger and the Default Organization read,
           // which are issued together after wave 1 (#10757 leg 4).
           .filter((c) => c.object !== 'sys_metadata_activation' && c.object !== 'sys_organization')
+          // [#29281] …and the membership completion read (limit 10,000), which
+          // exists only because wave 1's fellow-org read came back at its bound.
+          .filter((c) => !(c.object === 'sys_member' && c.limit === 10000))
           .map((c) => c.object)
           .sort(),
       );
