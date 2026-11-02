@@ -17,7 +17,8 @@
  *    all three keys;
  *  - a page component's inline `properties.action` (`InlineActionSchema`, the
  *    pick of `ActionSchema` an `element:button` carries): `confirmText`,
- *    `successMessage` and each `params[].helpText`.
+ *    `successMessage`, `description` (each with the locale map) and each
+ *    `params[].helpText`.
  *
  * The same two steps the bulk `confirmText` pass takes, through the same
  * judge: `closedScopeTemplateRefusal` names a `${…}` or single-brace token
@@ -60,16 +61,21 @@ type CopyKey = 'confirmText' | 'successMessage' | 'errorMessage' | 'description'
 const ACTION_KEYS: readonly CopyKey[] = ['confirmText', 'successMessage'];
 
 /**
- * [#27948] The keys only a REGISTERED action carries as `template` slots, past
+ * [#27948] The keys a REGISTERED action carries as `template` slots past
  * {@link ACTION_KEYS}: the param dialog's `description`, each
  * `outcomeMessages` entry, each `params[].helpText`. An inline action's pick
- * has `params` but neither of the other two, so it is judged on `helpText`
- * alone ({@link INLINE_KEYS}).
+ * has `params` and `description` but not `outcomeMessages`, so it is judged on
+ * `description` and `helpText` ({@link INLINE_KEYS}).
  */
 const REGISTERED_KEYS: readonly CopyKey[] = [...ACTION_KEYS, 'description', 'outcomeMessages', 'helpText'];
 
-/** The keys an inline `properties.action` carries as `template` slots. */
-const INLINE_KEYS: readonly CopyKey[] = [...ACTION_KEYS, 'helpText'];
+/**
+ * The keys an inline `properties.action` carries as `template` slots.
+ * `description` joined when `InlineActionSchema` picked it (cloud#3281, ruling
+ * A): the same slot, so the same judge, or an inline sentence the registered
+ * door refuses would publish.
+ */
+const INLINE_KEYS: readonly CopyKey[] = [...ACTION_KEYS, 'description', 'helpText'];
 
 /** The keys a page action row carries as `template` slots. */
 const ROW_KEYS: readonly CopyKey[] = ['confirmText', 'successMessage', 'errorMessage'];

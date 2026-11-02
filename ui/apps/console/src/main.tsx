@@ -23,6 +23,7 @@ import { loadLocales } from './loadLocales';
 import { seedTenantLanguage } from './languageSeed';
 import { preflightAuth } from './lib/auth-preflight';
 import { withConsoleBaseRootRelative } from './utils/consoleBase';
+import { resolveManifestIcons } from './pwaManifestIcons';
 
 const AUTH_URL = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
 
@@ -157,36 +158,7 @@ Promise.all([
   // leaves the manifest in place, which a WebView never acts on.
   const existingManifest = document.querySelector<HTMLLinkElement>('link[rel="manifest"]');
   if (existingManifest) existingManifest.remove();
-  if (!getNativeHost()) {
-    const manifestJson = generatePWAManifest({
-      enabled: true,
-      name: getProductName(),
-      shortName: getProductShortName(),
-      description: getPwaDescription(),
-      themeColor: getPwaThemeColor(),
-      backgroundColor: '#ffffff',
-      display: 'standalone',
-      // Absolute URLs, because a Blob URL is no base to resolve `./` against:
-      // the installed app opens at, and stays inside, the Console's mount.
-      startUrl: CONSOLE_SCOPE,
-      scope: CONSOLE_SCOPE,
-      orientation: 'any',
-      icons: [
-        {
-          src: new URL(faviconUrl || './favicon.svg', document.baseURI).href,
-          sizes: 'any',
-          type: 'image/svg+xml',
-          purpose: 'any',
-        },
-      ],
-    });
-    const blob = new Blob([JSON.stringify(manifestJson)], { type: 'application/json' });
-    const manifestUrl = URL.createObjectURL(blob);
-    const manifestLink = document.createElement('link');
-    manifestLink.rel = 'manifest';
-    manifestLink.href = manifestUrl;
-    document.head.appendChild(manifestLink);
-  }
+  if (!getNativeHost()) void injectPwaManifest(faviconUrl);
 
   // The Console's Service Worker (objectstack#29155): the offline app shell
   // and the push handlers. Not awaited — it must never hold up first paint.
@@ -206,6 +178,36 @@ Promise.all([
     </React.StrictMode>
   );
 });
+
+/**
+ * Generates the Console's web app manifest from runtime branding and links it
+ * as a Blob URL. Not awaited: a raster branding favicon is measured first
+ * (`./pwaManifestIcons.ts`), and that load must never hold up first paint, so
+ * the manifest link lands once the measurement settles.
+ */
+async function injectPwaManifest(faviconUrl: string | undefined): Promise<void> {
+  const icons = await resolveManifestIcons(faviconUrl, document.baseURI);
+  const manifestJson = generatePWAManifest({
+    enabled: true,
+    name: getProductName(),
+    shortName: getProductShortName(),
+    description: getPwaDescription(),
+    themeColor: getPwaThemeColor(),
+    backgroundColor: '#ffffff',
+    display: 'standalone',
+    // Absolute URLs, because a Blob URL is no base to resolve `./` against:
+    // the installed app opens at, and stays inside, the Console's mount.
+    startUrl: CONSOLE_SCOPE,
+    scope: CONSOLE_SCOPE,
+    orientation: 'any',
+    icons,
+  });
+  const blob = new Blob([JSON.stringify(manifestJson)], { type: 'application/json' });
+  const manifestLink = document.createElement('link');
+  manifestLink.rel = 'manifest';
+  manifestLink.href = URL.createObjectURL(blob);
+  document.head.appendChild(manifestLink);
+}
 
 /**
  * Registers the Console's Service Worker (`service-worker.js`, emitted at the

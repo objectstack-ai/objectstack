@@ -3599,13 +3599,15 @@ export interface ObjectLike {
  * Minimal field shape consumed by `translateObject`. It names only keys
  * `FieldSchema` declares: there is no `help` here, because a field spells its
  * help text `description` / `inlineHelpText`. The bundle's field `help` entry
- * is served on `description`, and on `inlineHelpText` when the field authors
- * one (see {@link translateObject}).
+ * is served on an authored `inlineHelpText` when the field has one, and on
+ * `description` only when it has none (see {@link translateObject}).
  */
 export interface ObjectFieldLike {
   name?: string;
   label?: string;
   description?: string;
+  /** `FieldSchema.inlineHelpText` — the help line the console draws first; `''` reads as absent. */
+  inlineHelpText?: string;
   /** `FieldSchema.inlineTitle` — the inline child grid's heading on the parent's form. */
   inlineTitle?: string;
   options?: Array<{ label?: string; value: string | number | boolean }>;
@@ -4127,6 +4129,18 @@ function valueOverridesPackagedBase(base: unknown, key: string, value: unknown):
 }
 
 /**
+ * Whether a field authors help text on `inlineHelpText` — a non-empty string,
+ * as the i18n extractor and the console's `inlineHelpText || description`
+ * read it (`''` is absent). {@link translateObject} asks it of the served
+ * field and of the packaged one to find the slot a field's `help` entry was
+ * seeded from.
+ */
+function authorsInlineHelpText(field: Record<string, unknown> | undefined): boolean {
+  const value = field?.inlineHelpText;
+  return typeof value === 'string' && value.length > 0;
+}
+
+/**
  * Overlay the catalog onto an object document's EMBEDDED `listViews` — each
  * view's `label`, `description` and `bulkActionDefs[]` copy, the same strings
  * {@link translateView} overlays on a served view document — returning the
@@ -4325,8 +4339,8 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
 /**
  * Apply the active locale to an object metadata document. Translates the
  * object's `label` / `pluralLabel` / `description`, walks each field to
- * translate its `label`, its `description` and authored `inlineHelpText`
- * (both from the bundle's field `help` entry — see below), and per-option
+ * translate its `label`, its authored `inlineHelpText` or else its
+ * `description` (from the bundle's field `help` entry — see below), and per-option
  * `label`s, walks any
  * inline-declared `actions` through {@link translateAction}, and overlays the
  * copy of each EMBEDDED `listViews` entry from the `_views` keys the i18n
@@ -4382,34 +4396,42 @@ function packagedRulesByName(packagedBase: unknown): Map<string, Record<string, 
  * Each `validations[].message` follows it too, judged against the packaged
  * rule of the same name — see {@link translateObjectValidations}.
  *
- * ## A field's translated help — on `description`, and on an authored `inlineHelpText` — ADR-0029 D9.2a
+ * ## A field's translated help — on the slot the entry was seeded from — ADR-0029 D9.2a
  *
  * The bundle addresses a field's help as `objects.<object>.fields.<field>.help`
  * (`FieldTranslationSchema.help`). One derivation decides which text that
  * entry translates, and three places hold it:
  *
  *   - the i18n extractor writes the entry from `help ?? inlineHelpText ??
- *     description` (`packages/cli/src/utils/i18n-extract.ts`; `help` is a key
- *     `FieldSchema` refuses and points at `inlineHelpText`, so no stored field
- *     carries it);
+ *     description`, an empty string reading as absent
+ *     (`packages/cli/src/utils/i18n-extract.ts`; `help` is a key `FieldSchema`
+ *     refuses and points at `inlineHelpText`, so no stored field carries it);
  *   - the console draws a field's help line from `inlineHelpText ||
  *     description` (`fieldHelpText` in `@object-ui/fields`);
- *   - so this translator serves the entry on BOTH slots the console can draw:
- *     on `description`, and on `inlineHelpText` when the field authors a
- *     non-empty one. Serving it on `description` alone left the translation
- *     masked: the console read the source-language `inlineHelpText` first.
+ *   - so this translator serves the entry on the ONE slot it translates: on
+ *     the field's non-empty `inlineHelpText` when it authors one, and on
+ *     `description` only when it authors none. Serving it on `description`
+ *     alone left the translation masked (the console read the source-language
+ *     `inlineHelpText` first); serving it on both put the `inlineHelpText`'s
+ *     translation on a `description` that says something else, which every
+ *     reader of `description` (Studio, the designer) then showed.
  *
  * A field that authors no `inlineHelpText` (absent or `''`, which the console
  * reads as absent) gains no `inlineHelpText` key: the console already draws
- * `description` for it. The entry is ⛔ never served on a `help` key, which
+ * `description` for it. A field that authors one keeps its source-language
+ * `description`, and gains none when it has none, until a description-specific
+ * bundle key exists. "Authors one" is asked of the served field AND of the
+ * packaged field the extractor read: a served `inlineHelpText` blanked over a
+ * packaged one leaves an entry that still translates the packaged
+ * `inlineHelpText`, never the `description`. The entry is ⛔ never served on a `help` key, which
  * `FieldSchema` does not declare: the served field def then carried a key the
  * contract refuses, every consumer that reads only declared keys rendered the
  * source-language text, and the console's ingestion step warned once per such
  * field (#21948).
  *
  * `description` and `inlineHelpText` are keys the catalog had never touched,
- * so each follows the rule above, as every string this translator added since
- * does, judged per key: the catalog applies to a slot only while the served
+ * so the slot chosen above follows the rule above, as every string this
+ * translator added since does, judged per key: the catalog applies to a slot only while the served
  * field's value there still equals the same field's in
  * {@link TranslateDocumentOptions.packagedBase}, judged by
  * {@link valueOverridesPackagedBase} (⛔ never a second comparison). A field
@@ -4459,22 +4481,25 @@ export function translateObject<T extends ObjectLike>(
       lookupObjectFieldAttr(bundle, objectName, name, 'label', opts) ??
       builtinSystemFieldLabel(name, def.label, opts);
     if (translatedLabel) next.label = translatedLabel;
-    // The bundle's field `help` entry is served on `description`, and on the
-    // field's own `inlineHelpText` when it authors one — the slot the console
-    // draws first — never on an undeclared `help`. Each slot keeps a value
-    // that diverged from the packaged field's (ADR-0029 D9.2a; see the docblock).
+    // The bundle's field `help` entry is served on the slot the extractor
+    // seeded it from: the field's own `inlineHelpText` when it authors one —
+    // the slot the console draws first — and `description` only when neither
+    // the served nor the packaged field authors one; never on an undeclared
+    // `help`. The slot keeps a value that diverged from the packaged field's
+    // (ADR-0029 D9.2a; see the docblock).
     const packagedField = packagedObjectField(packagedObject, name);
     const translatedHelp = lookupObjectFieldAttr(bundle, objectName, name, 'help', opts);
     if (translatedHelp) {
-      if (!valueOverridesPackagedBase(packagedField, 'description', def.description)) {
-        next.description = translatedHelp;
-      }
-      if (
-        typeof def.inlineHelpText === 'string' &&
-        def.inlineHelpText.length > 0 &&
-        !valueOverridesPackagedBase(packagedField, 'inlineHelpText', def.inlineHelpText)
+      const servedInlineHelp = authorsInlineHelpText(def);
+      if (servedInlineHelp) {
+        if (!valueOverridesPackagedBase(packagedField, 'inlineHelpText', def.inlineHelpText)) {
+          next.inlineHelpText = translatedHelp;
+        }
+      } else if (
+        !authorsInlineHelpText(packagedField) &&
+        !valueOverridesPackagedBase(packagedField, 'description', def.description)
       ) {
-        next.inlineHelpText = translatedHelp;
+        next.description = translatedHelp;
       }
     }
     // The inline child grid's heading, under the same divergence rule. The

@@ -1806,23 +1806,69 @@ export function declaredMultiValued(field: { type?: unknown; multiple?: unknown 
  * materialized default included, was inert: a parent delete left its children
  * holding the deleted id.
  *
- * ⛔ `user` stays out. It stores like a `lookup`, but the spec's parse puts it
- * on the other side of the line and materializes no `deleteBehavior` on it, so
- * no `user` field declares a delete outcome by default. Moving it is a change
- * to the declaration, made in the spec, never here.
+ * `user` is not a member of this set: see {@link USER_REFERENCE_TYPE}, which
+ * takes part only when it declares a delete outcome of its own.
  */
 const DELETE_SEMANTICS_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'tree']);
 
 /**
- * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}? This
+ * [#29253] A `user` field takes part in the referential delete walk when, and
+ * only when, it DECLARES a `deleteBehavior` (one of the enum's three values).
+ *
+ * It stores like a `lookup` (the target is fixed to `sys_user` by the type,
+ * {@link referenceTargetOf}), but the spec's parse materializes no
+ * `deleteBehavior` on it: a `user` field that authors nothing declares no
+ * delete outcome, so deleting the user leaves it as it was, exactly as before.
+ * A `user` field that authors one is a declaration the spec accepts and
+ * round-trips, and the walk used to read it never, so an authored `restrict`
+ * refused nothing and an authored `cascade` deleted nothing. It now reads like
+ * a `lookup`'s authored value: `cascade` deletes the rows holding the deleted
+ * user, `set_null` clears them (on a multi-valued field, removes the member),
+ * and `restrict` refuses the delete with the walk's own `DELETE_RESTRICTED`;
+ * a `set_null` on a REQUIRED `user` field escalates to that refusal as a
+ * required `lookup`'s does.
+ *
+ * Every door that deletes a user reaches this walk: better-auth deletes the
+ * user row (admin remove-user, self delete-user) through the plugin-auth
+ * adapter's `engine.delete` by id, and the generic data doors refuse a
+ * caller-context `sys_user` delete before it (ADR-0092 D2).
+ *
+ * ⛔ No default is invented here. "Absent" stays outside the walk, because the
+ * spec's parse decides what a bare `user` field declares, not this file.
+ */
+const USER_REFERENCE_TYPE = 'user';
+const DECLARED_DELETE_BEHAVIORS: ReadonlySet<string> = new Set(['set_null', 'cascade', 'restrict']);
+
+/**
+ * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}, or
+ * [#29253] is it a `user` field that declares a `deleteBehavior`
+ * ({@link USER_REFERENCE_TYPE})? This
  * is the ONE family test every reader of the referential delete walk asks:
  * {@link ObjectQL.cascadeRelationBehavior}, through it the collection walk and
  * the dependents walk, and {@link ObjectQL.planCascadeAtomicity}. So the walk
  * that runs and the verdict on whether it runs as one unit of work cannot
  * disagree about which relations take part. ⛔ Never a type literal at a site.
  */
-function statesDeleteSemantics(fdef: { type?: unknown } | null | undefined): boolean {
-  return typeof fdef?.type === 'string' && DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+function statesDeleteSemantics(fdef: { type?: unknown; deleteBehavior?: unknown } | null | undefined): boolean {
+  if (typeof fdef?.type !== 'string') return false;
+  if (fdef.type === USER_REFERENCE_TYPE) {
+    return typeof fdef.deleteBehavior === 'string' && DECLARED_DELETE_BEHAVIORS.has(fdef.deleteBehavior);
+  }
+  return DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+}
+
+/**
+ * [#29253] The object a delete-walk relation points at. The `reference`
+ * carrier is read through the one arbiter ({@link referenceCarrierOf}), so an
+ * unreadable carrier still throws and an absent one still answers `undefined`.
+ * A `user` field's target is fixed by its type, so it answers `sys_user`
+ * ({@link referenceTargetOf}) whether or not the carrier spells it: a raw
+ * `{ type: 'user' }` registration names no `reference` and still references a
+ * user.
+ */
+function deleteWalkTargetOf(fdef: { type?: unknown } | null | undefined, reader: string): string | undefined {
+  const carrier = referenceCarrierOf(fdef, reader);
+  return fdef?.type === USER_REFERENCE_TYPE ? referenceTargetOf(fdef) : carrier;
 }
 
 /**
@@ -18938,7 +18984,7 @@ export class ObjectQL implements IObjectQLEngine {
           //    verdict that asserts something POSITIVE about the schema
           //    ("nothing references this object"). An unreadable carrier can
           //    no more support that claim than an unreadable registry can.
-          const ref = referenceCarrierOf(fdef, 'ObjectQL.planCascadeAtomicity');
+          const ref = deleteWalkTargetOf(fdef, 'ObjectQL.planCascadeAtomicity');
           if (!ref) continue;
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
@@ -19321,7 +19367,8 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`,
-   * `lookup` or `tree` field ({@link statesDeleteSemantics}) referencing
+   * `lookup` or `tree` field, or a `user` field that declares a
+   * `deleteBehavior` ({@link statesDeleteSemantics}), referencing
    * `object`, honor the field's `deleteBehavior`:
    *   - `cascade`  → delete the dependent rows (recursively, so grandchildren
    *                  are handled by each child's own delete),
@@ -19516,7 +19563,7 @@ export class ObjectQL implements IObjectQLEngine {
     // removed the parent, left a `master_detail` child behind, and
     // reported success. No `restrict` refusal, no `set_null`, nothing
     // logged. Absence still skips the field here exactly as before.
-    const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
+    const ref = deleteWalkTargetOf(fdef, 'ObjectQL.cascadeDeleteRelations');
     if (!ref) return undefined;
     // Match the target object by raw or resolved name.
     let resolvedRef: string | undefined;
@@ -19558,6 +19605,10 @@ export class ObjectQL implements IObjectQLEngine {
     // honoured as written. Its `cascade` is a subtree delete, and a cycle in
     // the data (a corrupt row pointing at its own descendant) terminates on
     // the cascade set, the same membership test any self-reference has.
+    //
+    // [#29253] A `user` field reaches here only with an authored value
+    // ({@link statesDeleteSemantics}), and reads it as a `lookup` reads its
+    // own: the `|| 'set_null'` fallback below is never what a `user` gets.
     //
     // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
     // every other value a master_detail can declare — including an
