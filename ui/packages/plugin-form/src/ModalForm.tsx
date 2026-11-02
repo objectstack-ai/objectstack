@@ -33,9 +33,6 @@ import {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
-  Empty,
-  EmptyTitle,
-  EmptyDescription,
   toast,
 } from '@object-ui/components';
 import { Loader2 } from 'lucide-react';
@@ -77,6 +74,7 @@ import { useOccSave } from './occSave';
 import {
   NO_LOAD_FAILURES,
   RecordNotFoundError,
+  RecordNotFoundState,
   beginLoadRun,
   shownLoadFailure,
   type LoadFailures,
@@ -113,10 +111,6 @@ const useDiscardTranslation = createSafeTranslation(
     // The footer's declared Reset button (objectstack#27247).
     'common.reset': 'Reset',
     'form.errorLoading': 'Error loading form',
-    // The record not-found state, the console's shared copy (the same keys and
-    // values `RecordDetailView` draws), for an edit read that finds no record.
-    'empty.recordNotFound': 'Record not found',
-    'empty.recordNotFoundDescription': 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
   },
   'form.discardTitle',
 );
@@ -919,12 +913,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
 
   const renderContent = () => {
     if (error instanceof RecordNotFoundError) {
-      return (
-        <Empty data-testid="modal-form-record-not-found">
-          <EmptyTitle>{t('empty.recordNotFound')}</EmptyTitle>
-          <EmptyDescription>{t('empty.recordNotFoundDescription')}</EmptyDescription>
-        </Empty>
-      );
+      return <RecordNotFoundState testId="modal-form-record-not-found" />;
     }
     if (error) {
       return (
