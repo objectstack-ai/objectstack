@@ -21,6 +21,18 @@
  * child's whose own child can suspend, transitively. A child's region-nested
  * call is not read as a way for the CHILD to suspend: it fails the run at the
  * child's own region instead, so it never parks the caller.
+ *
+ * [#29166, seat ruling record 6576815635, option B] So the decline is one
+ * level deep BY DESIGN, not by omission. A caller whose call (top-level or
+ * not) reaches a child that itself makes a region call to a suspending flow is
+ * armed: that child's region refusal fails the CHILD run, and the caller meets
+ * it as an ordinary child failure, which the `subflow` / `map` contract makes
+ * routable. Measured: with no `fault` edge on the caller's call node, the
+ * caller's run fails loudly naming the child's region; with one, the caller's
+ * run completes. Declining such a caller would refuse a flow whose author
+ * routed that failure. The defect is the child's, and this gate names it on
+ * the child the moment the child has a trigger of its own. Keeping the
+ * refusal un-routable one level up would be a separate narrowing decision.
  */
 
 import { collectFlowGraphs } from '@objectstack/spec/automation';

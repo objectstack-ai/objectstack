@@ -5,7 +5,7 @@
     "object": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/objectql/src/engine.ts#fillQueryAstDefaults (`const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object }` — the resolved name is spread LAST so a stray body `object` cannot split `ast.object` from the table actually read); packages/metadata-protocol/src/protocol.ts#QUERY_AST_KEYS (reserves it at the REST boundary so a POST body's `object` is never read as a field filter, and a body/route mismatch is refused rather than resolved by picking a winner)",
+      "evidence": "packages/objectql/src/engine.ts#fillQueryAstDefaults (`const ast: QueryAST = { ...this.fillQueryAstDefaults(findQuery), object }` — the resolved name is spread LAST so a stray body `object` cannot split `ast.object` from the table actually read); packages/metadata-protocol/src/protocol-list-query-params.ts#QUERY_AST_KEYS (reserves it at the REST boundary so a POST body's `object` is never read as a field filter, and a body/route mismatch is refused rather than resolved by picking a winner)",
       "note": "2026-08-28: RE-ANCHORED (commit 8cb96ec41) and REPOINTED — `protocol.ts:780` had rotted onto `if (seen.has(key)) return;` in an unrelated walker; `QUERY_AST_KEYS` is at ~:2426 today, ~1,650 lines away, in a 20,255-line file. The engine leg was PATH-ONLY (`engine.ts` with no line), which the line bound cannot falsify at all — it is now the narrowest symbol that assembles the AST. Re-closed by hand against 93ea19bca."
     },
     "fields": {
@@ -53,7 +53,7 @@
     "top": {
       "status": "live",
       "verifiedAt": "2026-08-28",
-      "evidence": "packages/objectql/src/engine.ts#ENGINE_QUERY_SLOTS (the engine's slot set — the `where` and `limit` canonicals, of which `top` is the OData alias); packages/objectql/src/engine.ts#foldEngineOptionAliases (applied on `find`/`findOne` before anything reads the AST, so the driver only ever sees `limit`); packages/metadata-protocol/src/protocol.ts#WIRE_DOLLAR_ALIASES (`['$top', 'top']` — the wire spelling folded on the REST list path)",
+      "evidence": "packages/objectql/src/engine.ts#ENGINE_QUERY_SLOTS (the engine's slot set — the `where` and `limit` canonicals, of which `top` is the OData alias); packages/objectql/src/engine.ts#foldEngineOptionAliases (applied on `find`/`findOne` before anything reads the AST, so the driver only ever sees `limit`); packages/metadata-protocol/src/protocol-list-query-params.ts#WIRE_DOLLAR_ALIASES (`['$top', 'top']` — the wire spelling folded on the REST list path)",
       "note": "2026-08-28: RE-ANCHORED (commit 8cb96ec41), REPOINTED, and the MECHANISM had moved too — this is the one entry in the batch where re-closing the call graph changed the story rather than just the coordinates. `engine.ts:2850-2853` claimed an inline `top → limit` normalization; both citations had rotted onto docblocks (`:2853` in engine.ts, `:3486` in protocol.ts), and the inline fold no longer exists: the alias now lives in the spec's ONE alias table (`RPC_QUERY_ALIAS_SLOTS`), filtered into `ENGINE_QUERY_SLOTS` and applied by `foldEngineOptionAliases` at every engine entry point (#4346/#4371). The verdict `live` was never in doubt; the pointer had stopped describing how. Re-closed by hand against 93ea19bca."
     },
     "cursor": {

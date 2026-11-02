@@ -30,11 +30,20 @@
 // reverting it through the showcase's own path removes the overlay. That is
 // the undo of an ADR-0131 D6 customization, which `POST /packages/:id/revert`
 // also answers for a read-only package (stored rows first), so the commit
-// doors take no read-only guard; the last case pins it.
+// doors take no read-only guard.
+//
+// [#28905, ADR-0146 D1] That draft naming the read-only showcase itself is
+// refused now (`403 NOT_OVERRIDABLE`, naming its `.custom` pair), so a fresh
+// boot can no longer give the showcase such a commit; one recorded before
+// keeps its revert, as the commit doors still take no read-only guard. The
+// last case pins the refusal, then the same customization written where D1
+// puts it, the showcase's pair: its commit reverts through the pair's own
+// path, and through no other.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 
 const SHOWCASE = 'com.example.showcase';
 const OVERLAY = 'showcase_task.default';
@@ -154,26 +163,33 @@ describe('dogfood: package commit revert and rollback act only on a commit of th
     expect(await isServed('cmtpb_first')).toBe(true);
   });
 
-  it('control: a read-only package\'s overlay commit reverts through its own path, and through no other', async () => {
-    const saved = await call('PUT', `/meta/view/${OVERLAY}?mode=draft&package=${SHOWCASE}`, {
+  it('control: the showcase\'s customization commit, in its pair, reverts through the pair\'s own path, and through no other', async () => {
+    const view = {
       name: OVERLAY, object: 'showcase_task', viewKind: 'list', label: 'Overlay probe',
       config: { type: 'grid', columns: [{ field: 'title' }] },
-    });
+    };
+    // [#28905] The draft naming the read-only showcase itself is closed, naming its pair.
+    const named = await call('PUT', `/meta/view/${OVERLAY}?mode=draft&package=${SHOWCASE}`, view);
+    expect(named.status, JSON.stringify(named.json)).toBe(403);
+    expect(JSON.stringify(named.json)).toContain(`?package=${SHOWCASE}.custom`);
+
+    const pair = await ensurePair(stack, admin, SHOWCASE);
+    const saved = await call('PUT', inPair(`/meta/view/${OVERLAY}?mode=draft`, SHOWCASE), declaredOverride(view, SHOWCASE, '0.1.0'));
     expect(saved.status, JSON.stringify(saved.json)).toBe(200);
-    const published = await call('POST', `/packages/${SHOWCASE}/publish-drafts`, {});
+    const published = await call('POST', `/packages/${pair}/publish-drafts`, {});
     expect(published.status, JSON.stringify(published.json)).toBe(200);
-    const before = await commitsOf(SHOWCASE);
+    const before = await commitsOf(pair);
     expect(before[0]).toMatchObject({ operation: 'apply', id: published.json?.data?.commitId });
 
     const cross = await call('POST', `/packages/${B}/commits/${before[0].id}/revert`, {});
     expect(cross.status, JSON.stringify(cross.json)).toBe(404);
-    expect(await commitsOf(SHOWCASE)).toEqual(before);
+    expect(await commitsOf(pair)).toEqual(before);
 
-    const res = await call('POST', `/packages/${SHOWCASE}/commits/${before[0].id}/revert`, {});
+    const res = await call('POST', `/packages/${pair}/commits/${before[0].id}/revert`, {});
     expect(res.status, JSON.stringify(res.json)).toBe(200);
     expect(res.json?.data).toMatchObject({
       success: true, revertedCount: 1, reverted: [{ type: 'view', name: OVERLAY, action: 'removed' }],
     });
-    expect(await commitsOf(SHOWCASE)).toHaveLength(before.length + 1);
+    expect(await commitsOf(pair)).toHaveLength(before.length + 1);
   });
 });
