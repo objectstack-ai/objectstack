@@ -62,6 +62,7 @@ import { fileURLToPath } from 'node:url';
 import { ObjectStackAdapter } from '@object-ui/data-objectstack';
 import { RuntimeDraftBar } from './RuntimeDraftBar';
 import { createRuntimeMetadata, publishRuntimeMetadata } from './runtime-metadata-persistence';
+import { answerObjectViewRead } from './__tests__/objectViewRoute';
 
 const PUBLISHED_VIEW = {
   name: 'account.all',
@@ -88,11 +89,19 @@ const NEW_VIEW = {
 function makeAdapter() {
   const published: any[] = [PUBLISHED_VIEW];
   const getItems = vi.fn(async () => ({ items: [...published] }));
+  // objectstack#29550: the adapter reads one object's views on
+  // `GET /meta/view?object=`, served here from the same `published` rows.
+  // Each such request is one read of the published views.
+  const objectReads: string[] = [];
 
   const adapter: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => {
+        objectReads.push(String(input));
+        return [...published];
+      }))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }),
@@ -108,9 +117,12 @@ function makeAdapter() {
       deleteItem: vi.fn(async () => ({ deleted: true })),
       getItem: vi.fn(async () => ({ item: PUBLISHED_VIEW })),
     },
+    getLocale: () => undefined,
   };
 
-  return { adapter: adapter as ObjectStackAdapter, getItems, published };
+  /** Reads of the published views that reached the transport. */
+  const viewReads = () => objectReads.length + getItems.mock.calls.length;
+  return { adapter: adapter as ObjectStackAdapter, getItems, published, viewReads };
 }
 
 /** The `/meta` draft-publish client the ADR-0034 seam talks to. */
@@ -129,7 +141,7 @@ describe('objectui#4373 — the console publish flow invalidates the override ma
   });
 
   it('a Publish click makes the next listViewOverrides read fresh', async () => {
-    const { adapter, getItems, published } = makeAdapter();
+    const { adapter, published, viewReads } = makeAdapter();
     const metadataClient = makeMetadataClient({
       type: 'view',
       name: NEW_VIEW.name,
@@ -141,7 +153,7 @@ describe('objectui#4373 — the console publish flow invalidates the override ma
     //    here is CORRECT — this snapshot is honest at the moment it is taken.
     const before = await adapter.listViewOverrides('account');
     expect(Object.keys(before)).toEqual(['account.all']);
-    expect(getItems).toHaveBeenCalledTimes(1);
+    expect(viewReads()).toBe(1);
 
     // 2. The user clicks Publish in the view config panel's draft bar.
     render(
@@ -171,7 +183,7 @@ describe('objectui#4373 — the console publish flow invalidates the override ma
     //    pre-publish snapshot for the rest of the 5-minute TTL — one call to
     //    the transport, and a map that never learns about the new view.
     const after = await adapter.listViewOverrides('account');
-    expect(getItems).toHaveBeenCalledTimes(2);
+    expect(viewReads()).toBe(2);
     expect(Object.keys(after).sort()).toEqual(['account.all', 'account.mine']);
   });
 
@@ -200,11 +212,11 @@ describe('objectui#4373 — the console publish flow invalidates the override ma
     // own draft half (objectui#4363). An unnecessary invalidation costs one
     // refetch; a per-function exception list is how this key set got forgotten
     // twice already.
-    const { adapter, getItems } = makeAdapter();
+    const { adapter, viewReads } = makeAdapter();
     const metadataClient = makeMetadataClient();
 
     await adapter.listViewOverrides('account');
-    expect(getItems).toHaveBeenCalledTimes(1);
+    expect(viewReads()).toBe(1);
 
     await createRuntimeMetadata('view', NEW_VIEW.name, NEW_VIEW, {
       metadataClient,
@@ -213,18 +225,18 @@ describe('objectui#4373 — the console publish flow invalidates the override ma
     });
 
     await adapter.listViewOverrides('account');
-    expect(getItems).toHaveBeenCalledTimes(2);
+    expect(viewReads()).toBe(2);
   });
 
   it('a report publish touches no view key — the type guard is real', async () => {
     // The control in the opposite direction. `RuntimeDraftBar` is shared with
     // ReportConfigPanel, and over-invalidating there would be a silent cost on
     // an unrelated surface.
-    const { adapter, getItems } = makeAdapter();
+    const { adapter, viewReads } = makeAdapter();
     const metadataClient = makeMetadataClient();
 
     await adapter.listViewOverrides('account');
-    expect(getItems).toHaveBeenCalledTimes(1);
+    expect(viewReads()).toBe(1);
 
     await publishRuntimeMetadata('report', 'pipeline', {
       metadataClient,
@@ -234,7 +246,7 @@ describe('objectui#4373 — the console publish flow invalidates the override ma
 
     await adapter.listViewOverrides('account');
     // Still served from cache: one transport call, not two.
-    expect(getItems).toHaveBeenCalledTimes(1);
+    expect(viewReads()).toBe(1);
   });
 
   it('a call site with no adapter still persists — invalidation is additive', async () => {
