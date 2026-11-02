@@ -213,6 +213,15 @@ const SHARED_NON_REGISTRY_GATES: readonly string[] = [
   // (#28727), so the row moved here — deleted there rather than reworded, for
   // the reason the `runPerPackageAuthoringRules` row above gives.
   'findExtensionFieldSuffixRefusals',
+  // [#28893] Flow region shape (ADR-0031): every `loop` body, `parallel`
+  // branch and `try_catch` region single-entry/single-exit and acyclic, and a
+  // `parallel` with two branches, judged by the automation engine's own
+  // registration call (`FlowSchema`, then the spec's `validateControlFlow`).
+  // Wired into both commands in one card. Not a registry rule today, so
+  // `os lint` is blind to it: the parity test pins that gap
+  // (`authoring-rule-command-parity.test.ts`, `OUTSIDE_THE_TABLE`), and moving
+  // it into `authoring-rules.ts` is the reported follow-up.
+  'findFlowRegionRefusals',
 ];
 
 /**

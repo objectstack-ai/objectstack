@@ -111,6 +111,9 @@ describe('the list toolbar defaults to Filter · Sort · Display · Search (obje
       'toolbar-sort-trigger',
       'toolbar-display-trigger',
       'search-icon-button',
+      // Search's phone form (objectstack#28911), drawn below `sm` only. No
+      // stylesheet is mounted here, so both forms of Search are in the DOM.
+      'phone-search-trigger',
     ]);
     // Named absences, each one a control the fixture offers.
     expect(screen.queryByRole('button', { name: /^hide fields/i })).toBeNull();

@@ -20,6 +20,7 @@
 import {
   compileCel,
   firstUndeclaredReference,
+  firstDateTextVerdict,
   firstTypeMismatch,
   inferCelType,
   parseCelToAst,
@@ -308,15 +309,20 @@ function toCelFieldTypes(fieldTypes: Readonly<Record<string, string>>): Record<s
  *  - `type-mismatch` (**warning**): a text/boolean field used with an
  *    arithmetic/ordering operator against a number — nulls unless the text value
  *    happens to be numeric, so it stays advisory.
+ *  - `date-text-arithmetic` / `date-duration-value` (**error**, #28944): what
+ *    the Timestamp typing passes, re-checked with a date field declared as the
+ *    text the runtime holds — see {@link dateTextIssue}.
  * `scope` selects `record.<field>` vs bare field binding, shaping the message.
  */
 function typeSoundnessIssue(
   source: string,
   fieldTypes: Readonly<Record<string, string>>,
   scope: 'record' | 'flattened',
+  role: 'predicate' | 'value',
 ): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
-  const mismatch = firstTypeMismatch(source, toCelFieldTypes(fieldTypes), scope);
-  if (!mismatch) return null;
+  const celFieldTypes = toCelFieldTypes(fieldTypes);
+  const mismatch = firstTypeMismatch(source, celFieldTypes, scope);
+  if (!mismatch) return dateTextIssue(source, celFieldTypes, scope, role);
   const reference = mismatch.field
     ? (scope === 'record' ? `record.${mismatch.field}` : mismatch.field)
     : undefined;
@@ -353,6 +359,63 @@ function typeSoundnessIssue(
       `type mismatch \`${mismatch.operands}\` — ${subject} but is used with \`${mismatch.operator}\` ` +
         `against a number. This faults at runtime, so the expression silently evaluates to null ` +
         `(unless the value happens to be numeric). Use a number field, or drop the arithmetic/comparison.`,
+    ),
+  };
+}
+
+/**
+ * #28944 — the date shapes the Timestamp typing of {@link firstTypeMismatch}
+ * passes and the runtime cannot answer, judged by {@link firstDateTextVerdict}
+ * with every `date`/`datetime` field declared as the text the runtime holds:
+ *  - `date-text-arithmetic`: arithmetic on that text the evaluator faults on —
+ *    `record.end_date - record.start_date` (either field kind), `record.d -
+ *    duration('24h')` — so the expression reads null. Any role.
+ *  - `date-duration-value`: a formula (`value` role) that computes a
+ *    `google.protobuf.Duration` — `today() - record.start_date` — which a field
+ *    serialises as `{}`. A predicate that COMPARES a duration
+ *    (`today() - record.d > duration('72h')`) evaluates, and is not touched.
+ * Runs only when there is something to find: a date field to retype, or a
+ * `value` whose computed type is the question.
+ */
+function dateTextIssue(
+  source: string,
+  celFieldTypes: Readonly<Record<string, FieldCelType>>,
+  scope: 'record' | 'flattened',
+  role: 'predicate' | 'value',
+): { issue: ExprValidationError; severity: 'error' | 'warning' } | null {
+  if (role !== 'value' && !Object.values(celFieldTypes).includes('timestamp')) return null;
+  const verdict = firstDateTextVerdict(source, celFieldTypes, scope);
+  if (!verdict) return null;
+  const reference = verdict.field
+    ? (scope === 'record' ? `record.${verdict.field}` : verdict.field)
+    : undefined;
+  const ref = reference !== undefined ? `\`${reference}\`` : null;
+  const shift = `\`daysFromNow(n)\` / \`addDays(d, n)\` / \`addMonths(d, n)\` to shift a date.`;
+  if (verdict.kind === 'fault') {
+    const subject = ref ? `${ref} is a date field` : 'a date field is an operand';
+    return {
+      severity: 'error',
+      issue: refusal(
+        'date-text-arithmetic',
+        { operands: verdict.operands, ...(reference !== undefined ? { reference } : {}) },
+        source,
+        `date arithmetic \`${verdict.operands}\` — ${subject}, and the runtime holds a date field as ` +
+          `its text (\`YYYY-MM-DD\`, or an ISO-8601 instant for a date-time), which CEL can't do ` +
+          `arithmetic on: this faults at runtime, so the field silently evaluates to null. Use ` +
+          `\`daysBetween(a, b)\` for the span in whole days, and ${shift}`,
+      ),
+    };
+  }
+  if (role !== 'value' || verdict.type !== 'google.protobuf.Duration') return null;
+  return {
+    severity: 'error',
+    issue: refusal(
+      'date-duration-value',
+      reference !== undefined ? { reference } : {},
+      source,
+      `date arithmetic — this computes a \`google.protobuf.Duration\`${ref ? ` from ${ref}` : ''}, and a ` +
+        `field can't hold a duration: it reads \`{}\` at runtime. Use \`daysBetween(a, b)\` for the ` +
+        `span in whole days, and ${shift}`,
     ),
   };
 }
@@ -1148,7 +1211,7 @@ export function validateExpression(
         // numeric text value can succeed), or date-field arithmetic (hard error —
         // always nulls). Only runs when there is no bare-ref error (the typed
         // check needs the canonical `record.<field>` form).
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'record');
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'record', role);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     } else if (schema?.fields && schema.fields.length > 0) {
@@ -1183,7 +1246,7 @@ export function validateExpression(
       // date-field arithmetic (error). Flow variables stay `dyn` (never flagged);
       // equality/ordering of a date is runtime-safe (never flagged).
       if (schema.fieldTypes) {
-        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened');
+        const r = typeSoundnessIssue(source, schema.fieldTypes, 'flattened', role);
         if (r) (r.severity === 'error' ? errors : warnings).push(r.issue);
       }
     }
