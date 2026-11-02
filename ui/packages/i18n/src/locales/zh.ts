@@ -10,6 +10,7 @@ const zh = {
     banner: {
       message: '您正在以 {{user}} 的身份操作 —— 所有操作都会记录为该用户。',
       startedBy: '由管理员 {{admin}} 发起。',
+      startedByUnnamed: '由管理员发起。',
       stop: '结束模拟登录',
       stopping: '正在结束…',
       stopFailed: '无法结束模拟登录:{{reason}}',

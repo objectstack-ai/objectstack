@@ -7,6 +7,7 @@ const de = {
     banner: {
       message: 'Sie handeln als {{user}} — jede Aktion wird dieser Person zugeschrieben.',
       startedBy: 'Gestartet von Administrator {{admin}}.',
+      startedByUnnamed: 'Von einem Administrator gestartet.',
       stop: 'Identitätswechsel beenden',
       stopping: 'Wird beendet…',
       stopFailed: 'Identitätswechsel konnte nicht beendet werden: {{reason}}',

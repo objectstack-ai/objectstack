@@ -225,6 +225,9 @@ export type {
   ScreenSpec,
   ScreenFieldSpec,
 } from './views/index.js';
+// The list's URL state stays behind when the session ends: the Console's
+// signed-out guard composes the sign-in page's return link without it.
+export { withoutListStateParams } from './views/userFilterUrlState.js';
 
 // Hooks
 export {

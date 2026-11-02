@@ -74,7 +74,7 @@ import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { partitionBulkRows } from './bulkEligibility';
-import { formatActionLabel } from './components/RowActionMenu';
+import { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 import { BulkActionBar } from './components/BulkActionBar';
 import { RowContextMenuItems, SelectionContextMenuItems } from './components/RowContextMenu';
 import { BulkActionDialog } from './components/BulkActionDialog';
@@ -3313,6 +3313,16 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
           {showStatus && (
             <div data-testid="grid-card-status" className="max-w-[45%] shrink-0 truncate text-xs">
               {cardCell(statusCol, row)}
+            </div>
+          )}
+          {/* objectstack#29150 — the row's actions, the desktop row's own
+              resolver and handlers in one 44 px "⋮" (inline budget 0, as the
+              row context menu reads it). The menu stops its own clicks, so a
+              tap on the card still opens the record; `-my-2` keeps the 44 px
+              target from growing the card. */}
+          {rowOffersAction(row) && (
+            <div data-testid="grid-card-actions" className="-my-2 shrink-0">
+              <RowActionMenu {...rowActionMenuProps(row)} maxInlineActions={0} />
             </div>
           )}
         </div>

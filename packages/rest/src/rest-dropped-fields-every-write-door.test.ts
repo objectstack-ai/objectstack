@@ -54,9 +54,10 @@ const PROJ = {
   },
 };
 
-// Clone copies every column of the source it does not reset, readonly ones
-// included, so a clone of a PROJ row also reports the source's `ro2`. Clone is
-// read on its own objects: one readonly column, and none.
+// Clone copies the source's readonly columns that hold a value (#15703: the
+// strip of a copied value is reported), so a clone of a PROJ row would also
+// report any `ro2` the source carried. Clone is read on its own objects: one
+// readonly column, and none.
 const CLONE_OBJECT = 'hdr_drops_clone';
 const PLAIN_OBJECT = 'hdr_drops_plain';
 const CLONE_PROJ = {
@@ -116,6 +117,8 @@ async function boot() {
   // `readonlyWhen` already true; seeded under `isSystem`.
   await engine.insert(OBJECT, { id: 'closed1', title: 'closed', status: 'closed', locked: 'L' } as any, { context: { isSystem: true } } as any);
   await engine.insert(CLONE_OBJECT, { id: 'src1', title: 'source', ro: 'seeded' } as any, { context: { isSystem: true } } as any);
+  // #29200: the same object, its readonly column left empty (null).
+  await engine.insert(CLONE_OBJECT, { id: 'src_empty', title: 'empty source' } as any);
   await engine.insert(PLAIN_OBJECT, { id: 'plain1', title: 'source' } as any);
 
   const protocol = new ObjectStackProtocolImplementation(engine as any);
@@ -145,6 +148,38 @@ describe('clone: the header names what the body reports', () => {
     expect(r.status, JSON.stringify(r.body)).toBe(201);
     expect(r.body.droppedFields).toEqual([{ object: CLONE_OBJECT, fields: ['ro'], reason: 'readonly' }]);
     expect(r.header).toBe('ro;reason=readonly');
+  });
+
+  // #29200: the caller sent no readonly key and the copy carried none with a
+  // value, so the engine stripped nothing the caller or the source supplied.
+  it('a plain clone of a row whose readonly column is empty: no droppedFields, no header', async () => {
+    const b = await boot();
+    const r = await b.call('/api/v1/data/:object/:id/clone', {}, { object: CLONE_OBJECT, id: 'src_empty' });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body).not.toHaveProperty('droppedFields');
+    expect(r.header).toBeUndefined();
+    expect(r.body.record.ro ?? null).toBeNull();
+    expect(r.body.record.title).toBe('empty source');
+  });
+
+  it('overrides setting the readonly field on that empty source: still reported, body and header', async () => {
+    const b = await boot();
+    const r = await b.call('/api/v1/data/:object/:id/clone', { overrides: { ro: 'forged' } }, { object: CLONE_OBJECT, id: 'src_empty' });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body.droppedFields).toEqual([{ object: CLONE_OBJECT, fields: ['ro'], reason: 'readonly' }]);
+    expect(r.header).toBe('ro;reason=readonly');
+    expect(r.body.record.ro ?? null).toBeNull();
+  });
+
+  // #15703 ruled that a clone REPORTS the readonly value it copied and the
+  // engine stripped: the caller reads the default back and is told why.
+  it('a plain clone of a row whose readonly column holds a value: still reported, body and header', async () => {
+    const b = await boot();
+    const r = await b.call('/api/v1/data/:object/:id/clone', {}, { object: CLONE_OBJECT, id: 'src1' });
+    expect(r.status, JSON.stringify(r.body)).toBe(201);
+    expect(r.body.droppedFields).toEqual([{ object: CLONE_OBJECT, fields: ['ro'], reason: 'readonly' }]);
+    expect(r.header).toBe('ro;reason=readonly');
+    expect(r.body.record.ro ?? null).toBeNull();
   });
 
   it('a clone that strips nothing: no droppedFields, no header (the control)', async () => {
