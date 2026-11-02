@@ -1892,7 +1892,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   // names it re-runs on a switch into or out of such a view and on nothing else.
   const searchTerm = searchlessViewOnScreen || searchlessObject ? '' : searchInput;
   const [showSearchPopover, setShowSearchPopover] = React.useState(false);
-  
+  // Below `sm` the list search is an icon that expands into a field in place.
+  const [phoneSearchOpen, setPhoneSearchOpen] = React.useState(false);
+
   // Sort State
   const [showSort, setShowSort] = React.useState(false);
   const [currentSort, setCurrentSort] = React.useState<SortItem[]>(() =>
@@ -5742,6 +5744,85 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     onRowsChangeRef.current?.(shownRowsRef.current);
   }, [shownRowsKey, shownRowsSettled]);
 
+  // The Display panel (objectui#12423) is the default form of the toolbar's
+  // settings cluster, drawn whenever it has a control to offer.
+  const displayOffered = toolbarFlags.compactToolbar && !!(
+    viewSwitcherOffered || toolbarFlags.showGroup || toolbarFlags.showColor || toolbarFlags.showDensity
+    || toolbarFlags.showHideFields || currentView === 'grid' || toolbarFlags.showRefresh
+    || (resolvedExportOptions && exportPermitted && exportableFormats.length > 0)
+  );
+  // Below `sm` the bar keeps Filter and Display only, so Sort rides in the
+  // Display panel there. Without a Display panel the Sort trigger stays on the
+  // bar at every width. Either way it follows `userActions.sort`.
+  const sortInDisplay = toolbarFlags.showSort && displayOffered;
+  // The Sort panel: the toolbar Sort popover draws it, and so does the
+  // Display panel below `sm` (`sortInDisplay`).
+  const sortPanelBody = (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between border-b pb-2">
+        <div className="flex items-center gap-1">
+          <h4 className="font-medium text-sm">{t('list.sortRecords')}</h4>
+          {/* objectui#12528 — the note on why linked columns are not
+              listed, as this control's tooltip and accessible name
+              beside the field list, instead of a standing paragraph
+              that took about half the popover on every open. Drawn
+              under the paragraph's own condition: a relational field
+              was left out. */}
+          {sortHasRelationalField && (
+            <span
+              role="img"
+              tabIndex={0}
+              title={t('list.sortRelationalHint')}
+              aria-label={t('list.sortRelationalHint')}
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="sort-relational-info"
+            >
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+          )}
+        </div>
+        {/* Reset to the view's declared sort (objectui#4243).
+            Rendered only when the view DECLARES one: with nothing
+            declared there is no default to return to, and a control
+            under this label that merely cleared the sort would be a
+            second, differently-named way to do what removing the
+            rows already does. Disabled — not hidden — while the
+            active sort already equals the declared one, so the
+            affordance stays discoverable and says "you are at the
+            default" instead of vanishing. */}
+        {declaredSort.length > 0 && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-primary"
+            disabled={!sortDiffersFromDeclared}
+            onClick={handleResetSort}
+            data-testid="sort-reset-default"
+          >
+            {t('list.resetSortToDefault')}
+          </Button>
+        )}
+      </div>
+      <SortBuilder
+        fields={sortFields}
+        value={currentSort}
+        onChange={(newSort) => {
+          // `setCurrentSort` takes the array WHOLE (the in-use
+          // exception depends on it); `emitSortChange` is what the
+          // host persists. See the boundary's docblock above.
+          setCurrentSort(newSort);
+          emitSortChange(newSort);
+        }}
+      />
+      {sortPicksRelationalField && (
+        <p className="truncate text-xs text-muted-foreground" data-testid="sort-relational-picked">
+          {t('list.sortRelationalPicked')}
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <div
       ref={pullRef}
@@ -6056,8 +6137,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           </Popover>
           )}
 
-          {/* Sort — desktop only. Mobile relies on the (typically pre-sorted)
-              default view; users who need ad-hoc sorting switch to desktop. */}
+          {/* Sort. Below `sm` the Display panel carries the Sort panel when it
+              is drawn (`sortInDisplay`), so this trigger hides there; with no
+              Display panel it stays on the bar at every width. */}
           {toolbarFlags.showSort && (
           <Popover open={showSort} onOpenChange={setShowSort}>
             <PopoverTrigger asChild>
@@ -6065,7 +6147,8 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  "hidden sm:inline-flex h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  sortInDisplay && "hidden sm:inline-flex",
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
@@ -6083,69 +6166,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               </Button>
             </PopoverTrigger>
             <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between border-b pb-2">
-                  <div className="flex items-center gap-1">
-                    <h4 className="font-medium text-sm">{t('list.sortRecords')}</h4>
-                    {/* objectui#12528 — the note on why linked columns are not
-                        listed, as this control's tooltip and accessible name
-                        beside the field list, instead of a standing paragraph
-                        that took about half the popover on every open. Drawn
-                        under the paragraph's own condition: a relational field
-                        was left out. */}
-                    {sortHasRelationalField && (
-                      <span
-                        role="img"
-                        tabIndex={0}
-                        title={t('list.sortRelationalHint')}
-                        aria-label={t('list.sortRelationalHint')}
-                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        data-testid="sort-relational-info"
-                      >
-                        <Info className="h-3.5 w-3.5" aria-hidden="true" />
-                      </span>
-                    )}
-                  </div>
-                  {/* Reset to the view's declared sort (objectui#4243).
-                      Rendered only when the view DECLARES one: with nothing
-                      declared there is no default to return to, and a control
-                      under this label that merely cleared the sort would be a
-                      second, differently-named way to do what removing the
-                      rows already does. Disabled — not hidden — while the
-                      active sort already equals the declared one, so the
-                      affordance stays discoverable and says "you are at the
-                      default" instead of vanishing. */}
-                  {declaredSort.length > 0 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs text-muted-foreground hover:text-primary"
-                      disabled={!sortDiffersFromDeclared}
-                      onClick={handleResetSort}
-                      data-testid="sort-reset-default"
-                    >
-                      {t('list.resetSortToDefault')}
-                    </Button>
-                  )}
-                </div>
-                <SortBuilder
-                  fields={sortFields}
-                  value={currentSort}
-                  onChange={(newSort) => {
-                    // `setCurrentSort` takes the array WHOLE (the in-use
-                    // exception depends on it); `emitSortChange` is what the
-                    // host persists. See the boundary's docblock above.
-                    setCurrentSort(newSort);
-                    emitSortChange(newSort);
-                  }}
-                />
-                {sortPicksRelationalField && (
-                  <p className="truncate text-xs text-muted-foreground" data-testid="sort-relational-picked">
-                    {t('list.sortRelationalPicked')}
-                  </p>
-                )}
-              </div>
+              {sortPanelBody}
             </PopoverContent>
           </Popover>
           )}
@@ -6279,11 +6300,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               Every control writes through the same door as its wide-form
               button above; the panel adds no storage of its own. Drawn on
               mobile too (icon only): Refresh and Export live in it. */}
-          {toolbarFlags.compactToolbar && (
-            viewSwitcherOffered || toolbarFlags.showGroup || toolbarFlags.showColor || toolbarFlags.showDensity
-            || toolbarFlags.showHideFields || currentView === 'grid' || toolbarFlags.showRefresh
-            || (resolvedExportOptions && exportPermitted && exportableFormats.length > 0)
-          ) && (
+          {displayOffered && (
             <ViewSettingsPopover
               t={t as any}
               allFields={allFields as any}
@@ -6300,6 +6317,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 />
               ) : undefined}
               recordOpen={recordOpen}
+              sort={sortInDisplay ? sortPanelBody : undefined}
               showGroup={toolbarFlags.showGroup}
               groupingConfig={groupingConfig}
               setGroupingConfig={changeGrouping}
@@ -6473,10 +6491,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
             ) : null;
           })()}
 
-          {/* Search (icon button + popover) — desktop only. The global
-              top-bar search (⌘K) is already prominent on mobile, so an
-              additional list-scoped search popover would be redundant chrome.
-              Filter remains the primary way to narrow data on phones. */}
+          {/* Search, scoped to this list. From `sm` up an icon button opens
+              a popover; below `sm` the icon expands into a field in place (the
+              phone form after this popover). Both write the same term. */}
           {toolbarFlags.showSearch && (
             <Popover open={showSearchPopover} onOpenChange={setShowSearchPopover}>
               <PopoverTrigger asChild>
@@ -6532,6 +6549,70 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               </PopoverContent>
             </Popover>
           )}
+
+          {/* Search, phone form: the icon expands into a field in place, with
+              the bar's touch size. Enter or Escape folds it back to the icon,
+              which then carries the active keyword as the desktop trigger
+              does; the clear button empties the term and folds it. */}
+          {toolbarFlags.showSearch && (phoneSearchOpen ? (
+            <div className="relative flex items-center sm:hidden" data-testid="phone-search">
+              <Search
+                className="pointer-events-none absolute left-2 h-3.5 w-3.5 text-muted-foreground"
+                aria-hidden="true"
+              />
+              <Input
+                type="search"
+                placeholder={t('table.search')}
+                aria-label={t('list.search')}
+                value={searchTerm}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === 'Escape') setPhoneSearchOpen(false);
+                }}
+                onBlur={() => {
+                  if (!searchTerm) setPhoneSearchOpen(false);
+                }}
+                // 16px text: a smaller font makes iOS Safari zoom on focus.
+                className="h-7 w-36 pl-7 pr-7 text-base [&::-webkit-search-cancel-button]:hidden"
+                autoFocus
+                data-testid="phone-search-input"
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                aria-label={t('list.clearSearch')}
+                title={t('list.clearSearch')}
+                onClick={() => {
+                  handleSearchChange('');
+                  setPhoneSearchOpen(false);
+                }}
+                data-testid="phone-search-clear"
+              >
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                searchTerm && "text-foreground font-medium",
+              )}
+              aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+              title={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}
+              onClick={() => setPhoneSearchOpen(true)}
+              data-testid="phone-search-trigger"
+            >
+              <Search className="h-3.5 w-3.5" />
+              {searchTerm && (
+                <span className="max-w-[5rem] truncate text-[11px]" data-testid="phone-search-active-keyword">
+                  {searchTerm}
+                </span>
+              )}
+            </Button>
+          ))}
 
           {/* Add Record (top position) */}
           {toolbarFlags.showAddRecordTop && (
