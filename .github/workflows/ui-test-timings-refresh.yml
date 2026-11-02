@@ -57,6 +57,12 @@
 # merges. With no eligible run on `main` (the state right after the reporter
 # first lands, until a full-battery run has uploaded sixteen reports) it reads
 # NOT MEASURED and stays green: nothing was regenerated and nothing failed.
+#
+# Its steps are a generator's select and merge, not a named local check: the
+# scripts it loads are pinned by ui/scripts/__tests__/test-file-timings.test.ts,
+# which Test UI runs on any change to them.
+# dispatch-gates: no-check-families -- a weekly regeneration (select, download, merge, open a PR), not a verification; the scripts it loads are pinned by Test UI's test-file-timings.test.ts
+
 name: UI Test Timings Refresh
 
 on:

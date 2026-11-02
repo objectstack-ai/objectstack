@@ -224,7 +224,8 @@ describe('the root ci.yml and the refresh spell what this file spells (objectsta
     expect(whole).toHaveLength(1);
     expect(affected).toHaveLength(1);
     const argv = whole[0].split(/\s+/);
-    for (const reporter of ['--reporter=default', '--reporter=github-actions', '--reporter=./scripts/test-file-timings.mjs']) {
+    // From the workspace root: a `./scripts/` spelling is read as the ROOT `scripts/` by the root's workflow readers.
+    for (const reporter of ['--reporter=default', '--reporter=github-actions', '--reporter="${GITHUB_WORKSPACE}/ui/scripts/test-file-timings.mjs"']) {
       expect(argv).toContain(reporter);
     }
     expect(affected[0]).not.toContain('test-file-timings');

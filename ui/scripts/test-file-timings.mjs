@@ -16,7 +16,8 @@
  *   as the `test-file-timings-N` artifact of shard N:
  *
  *     pnpm --dir ui run test --shard=N/M --reporter=default \
- *       --reporter=github-actions --reporter=./scripts/test-file-timings.mjs
+ *       --reporter=github-actions \
+ *       --reporter="${GITHUB_WORKSPACE}/ui/scripts/test-file-timings.mjs"
  *     -> $OBJECTUI_TEST_TIMINGS_OUT   (no variable, no file: one stderr line)
  *
  *   THE SELECTOR, `select`: the newest completed full-battery `CI` runs on

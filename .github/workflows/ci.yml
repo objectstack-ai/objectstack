@@ -3898,6 +3898,9 @@ jobs:
       # a slice of the suite is not a measurement of it.
       # ui/scripts/__tests__/test-file-timings.test.ts holds this step, the
       # upload and the refresh's `--shards` to the names that script spells.
+      # The reporter is spelled from the workspace root, never `./scripts/…`
+      # relative to ui/: the root's workflow readers (check-self-test-wired)
+      # key a `./scripts/` path to the ROOT `scripts/`, where it is not.
       - name: Run the ui tests (shard ${{ matrix.shard }}/16)
         env:
           MODE: ${{ steps.select.outputs.mode }}
@@ -3908,7 +3911,7 @@ jobs:
             echo "Affected speed: ${#filters[@]} vitest filter(s), shard ${{ matrix.shard }} of 16."
             pnpm --dir ui exec vitest run --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions "${filters[@]}"
           else
-            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions --reporter=./scripts/test-file-timings.mjs
+            pnpm --dir ui run test --shard=${{ matrix.shard }}/16 --reporter=default --reporter=github-actions --reporter="${GITHUB_WORKSPACE}/ui/scripts/test-file-timings.mjs"
           fi
 
       # Diagnostics only, so it can never red a shard: `continue-on-error`, and
