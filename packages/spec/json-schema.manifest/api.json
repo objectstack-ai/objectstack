@@ -334,6 +334,8 @@
     "api/PublishMetaItemResponse",
     "api/PublishPackageDraftsRequest",
     "api/PublishPackageDraftsResponse",
+    "api/PushDeliveryData",
+    "api/PushRoute",
     "api/QueryAdapterConfig",
     "api/QueryAdapterTarget",
     "api/QueryOptimizationConfig",

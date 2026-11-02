@@ -405,8 +405,9 @@ const DASHBOARD_FILTER_BINDING_UNKNOWN_EXPLANATION: RuleExplanation = {
       'way the widget counts different rows than the author wrote, with nothing on the page to say so, ' +
       'which is why the rule is an error and is not suppressible.',
     'To fix it, rename the key to a declared filter name (the finding names the nearest one), declare ' +
-      'the filter on the dashboard, or delete the entry. A `dateRange` key on a dashboard that declares ' +
-      'no `dateRange` is reported the same way: there is no date range for it to bind.',
+      'the filter on the dashboard, or delete the entry. A `dateRange` key is reported the same way ' +
+      'only when the dashboard declares neither `dateRange` nor a `globalFilters` entry named `dateRange`: ' +
+      'either one is a declared filter under that name, and with neither there is nothing for it to bind.',
   ],
 };
 
@@ -5462,6 +5463,29 @@ const NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// The verdict is `validateControlFlow` from `@objectstack/spec/automation`, the
+// call the automation engine's `registerFlow` makes; the rule file holds no copy.
+const FLOW_REGION_SHAPE_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'flow-region-shape-invalid',
+  covers: 'what makes a flow region one the engine registers',
+  paragraphs: [
+    'A `loop` body, each `parallel` branch and a `try_catch` try or catch region is a small graph of its ' +
+      'own (ADR-0031). The automation engine runs it from its one entry node to its one exit node, so when ' +
+      'it registers a flow it refuses a region that has more than one entry or exit, or a cycle, at any ' +
+      'depth, and a `parallel` with fewer than two branches. A refused flow is not registered: the server ' +
+      'logs a warning at boot and runs without it, so its trigger never fires.',
+    'The rule asks the engine\'s own question: each flow is parsed with the flow schema and handed to the ' +
+      'same region check the engine runs when it registers the flow, and the message is the engine\'s ' +
+      'refusal behind the flow\'s name. Like the engine it reports a flow\'s first malformed region, so a ' +
+      'flow with two may need two fixes. A flow the flow schema refuses cannot be judged and is reported ' +
+      'as such, with the schema\'s issues.',
+    'Not judged: a cycle in the flow\'s top-level graph, outside any region. The engine refuses that too, ' +
+      'with a check this rule cannot reach.',
+    'To fix a multi-exit region, add one node every exit of the region leads to; to fix a cycle, remove ' +
+      'the edge that leads back; give a `parallel` a second branch or replace it with its one branch.',
+  ],
+};
+
 export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Object.freeze({
   [FIELD_NO_CONSUMERS_EXPLANATION.rule]: FIELD_NO_CONSUMERS_EXPLANATION,
   [SECURITY_OWD_UNSET_EXPLANATION.rule]: SECURITY_OWD_UNSET_EXPLANATION,
@@ -5674,6 +5698,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_AMBIGUOUS_EXPLANATION,
   [REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION.rule]: REPORT_DATE_RANGE_DIMENSION_NONE_EXPLANATION,
   [NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION.rule]: NAMESPACE_NO_CUSTOMIZATION_PAIR_EXPLANATION,
+  [FLOW_REGION_SHAPE_INVALID_EXPLANATION.rule]: FLOW_REGION_SHAPE_INVALID_EXPLANATION,
 });
 
 /** The explanation for `rule`, or `undefined` when the rule has none. Exact id match. */

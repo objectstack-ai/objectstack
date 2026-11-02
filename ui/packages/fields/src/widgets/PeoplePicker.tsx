@@ -120,6 +120,12 @@ export interface PeoplePickerProps {
   inline?: boolean;
   /** The element the inline dropdown/sheet anchors to (the field trigger). */
   trigger?: React.ReactNode;
+  /**
+   * A search term the picker opens with (e.g. a code scanned into a lookup).
+   * Applied each time `open` turns true while it is set; the user can edit it
+   * like any typed search.
+   */
+  initialSearch?: string;
 }
 
 const DEFAULT_PAGE_SIZE = 25;
@@ -146,6 +152,7 @@ export function PeoplePicker({
   onSelectRecords,
   inline = false,
   trigger,
+  initialSearch,
 }: PeoplePickerProps) {
   const { t } = useFieldTranslation();
   const isMobile = useIsMobile();
@@ -239,6 +246,18 @@ export function PeoplePicker({
     expand: effectiveExpand,
     searchFields,
   });
+
+  // Seed the search on open. The query is enabled by `open`, so its own fetch
+  // runs first with an empty term; this debounced search supersedes it. Keyed
+  // on `open` and the term only: the setter is read through a ref, so a new
+  // setter identity never re-applies the seed over what the user typed.
+  const setSearchRef = useRef(query.setSearch);
+  useEffect(() => {
+    setSearchRef.current = query.setSearch;
+  });
+  useEffect(() => {
+    if (open && initialSearch) setSearchRef.current(initialSearch);
+  }, [open, initialSearch]);
 
   // Recent ids captured once per open.
   const recentIds = useMemo(

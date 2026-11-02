@@ -11,9 +11,10 @@
  * asks the scope as soon as the app list names the app: the package list,
  * then by name the route object's lookup targets outside the package.
  *
- * CONTROLs: a route outside an app, a record form overlay and an app item
- * with no package id ask nothing here (`AppContent` reads the whole registry
- * there). A record drawer (`?recordId=`) asks the scope of the list under it,
+ * CONTROLs: a route outside an app and a record form overlay ask nothing here
+ * (`AppContent` reads the whole registry there). An app item with no package
+ * id asks the route's object and its lookup targets by name, never the whole
+ * registry (objectstack#29416). A record drawer (`?recordId=`) asks the scope of the list under it,
  * as `AppContent` does (objectstack#27626).
  */
 
@@ -129,7 +130,7 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
     expect(entered).toEqual(['crm', 'hr', 'crm']);
   });
 
-  it('CONTROL: outside an app, on a record form overlay, or for an app without a package id, it asks nothing', async () => {
+  it('CONTROL: outside an app, or on a record form overlay, it asks nothing; an app without a package id asks by name (objectstack#29416)', async () => {
     const outside = mount('/home', APPS);
     const overlay = mount('/apps/crm/crm_account?form=new', APPS);
     const noPackage = mount('/apps/crm/crm_account', [{ name: 'crm', navigation: [] }]);
@@ -139,6 +140,6 @@ describe('the console root starts the app object scope (objectui#12811)', () => 
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(objectCalls(outside)).toEqual([]);
     expect(objectCalls(overlay)).toEqual([]);
-    expect(objectCalls(noPackage)).toEqual([]);
+    expect([...objectCalls(noPackage)].sort()).toEqual(['object/crm_account', 'object/sys_user']);
   });
 });

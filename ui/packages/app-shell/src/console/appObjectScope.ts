@@ -54,8 +54,12 @@
  * landed. Dropping the scope for the registry had swapped the list for the
  * route skeleton on every first open (remounting it, and re-reading its
  * rows), and handed it new object documents on every open and close. The
- * record form overlay still reads the whole registry instead. An app item
- * without a package id has no package to scope by.
+ * record form overlay still reads the whole registry instead.
+ *
+ * An app item without a package id (an app created in the console) has no
+ * package to scope by: an object's route reads the same names by name through
+ * the names-only scope (objectstack#29416), and its root keeps the whole
+ * registry.
  *
  * Two readers ask the same question with the same answer: `AppContent`, which
  * renders the route, and the console root (`ConsoleShell`), which asks it as
@@ -509,7 +513,16 @@ export function readAppObjectScope(
     }
     return { candidate, ...readPageObjectScope(readObjectScope, app, pageRead.page, extra), routeObjectRefusal: null };
   }
-  if (!candidate || !packageId || !readObjectScope || !route) return { candidate, scope: null, ready: false, ...NOT_READ };
+  if (!candidate || !readObjectScope || !route) return { candidate, scope: null, ready: false, ...NOT_READ };
+  if (!packageId) {
+    // objectstack#29416 — an app with no package: an object's route reads its
+    // names by name through the names-only scope (the route's object, its
+    // lookup targets and the app's `requiresObject` entries), as an app whose
+    // package holds no objects does below. The app's root keeps the whole
+    // registry, as there. Until the app list names the app, nothing is read.
+    if (!app || !route.objectName) return { candidate, scope: null, ready: false, ...NOT_READ };
+    return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, undefined) };
+  }
   // The package list first: no name is asked until it has answered.
   const own = readObjectScope({ packageId });
   if (!own.settled) return { candidate, scope: own, ready: false, ...NOT_READ };
@@ -519,25 +532,47 @@ export function readAppObjectScope(
   if (!route.objectName && !own.served.some((o: any) => o?._packageId === packageId)) {
     return { candidate, scope: null, ready: false, ...NOT_READ };
   }
-  const routeRead = readObjectScope({ packageId, names: route.objectName ? [route.objectName] : [] });
+  return { candidate, ...readObjectRouteNames(readObjectScope, app, route.objectName, search, packageId) };
+}
+
+/**
+ * An app route's object names, read through the app's package scope
+ * (`packageId`) or, in an app with no package, the names-only scope
+ * (objectstack#29416): the route's object (`objectName`, none on the app's
+ * root), the objects the app's own navigation and area entries require (the
+ * sidebar's capability gate answers from this scope), the navigation's objects
+ * while the command palette is open, and the route object's lookup targets.
+ * Only the route's object holds the route.
+ */
+function readObjectRouteNames(
+  readObjectScope: ReadObjectScope,
+  app: Record<string, any> | undefined,
+  objectName: string | undefined,
+  search: string,
+  packageId: string | undefined,
+): Omit<AppObjectScopeRead, 'candidate'> {
+  const read = (names: readonly string[]): AppObjectScope =>
+    packageId ? readObjectScope({ packageId, names }) : readObjectScope({ names });
+  const routeRead = read(objectName ? [objectName] : []);
   const ready = routeReadDone(routeRead);
-  const routeOutcome = { failedNames: failedNamesOf(routeRead), routeObjectRefusal: refusalOf(routeRead, route.objectName) };
-  // The objects the app's own navigation entries require, in its `navigation`
-  // and its `areas`: the sidebar's capability gate answers from this scope.
+  const routeOutcome = { failedNames: failedNamesOf(routeRead), routeObjectRefusal: refusalOf(routeRead, objectName) };
   const names = appRequiredObjectNames(app);
-  if (route.objectName) names.push(route.objectName);
+  if (objectName) names.push(objectName);
   if (new URLSearchParams(search).has(COMMAND_PALETTE_PARAM)) {
     names.push(...navigationNames(app?.navigation, (item) => (item.type === 'object' ? item.objectName : undefined)));
   }
-  const first = readObjectScope({ packageId, names });
-  const routeDef = route.objectName ? first.objects.find((o: any) => o?.name === route.objectName) : undefined;
+  const first = read(names);
+  const routeDef = objectName ? first.objects.find((o: any) => o?.name === objectName) : undefined;
   const lookups = routeDef ? lookupTargetNames(routeDef) : [];
-  return {
-    candidate,
-    scope: lookups.length > 0 ? readObjectScope({ packageId, names: [...names, ...lookups] }) : first,
-    ready,
-    ...routeOutcome,
-  };
+  if (lookups.length === 0) return { scope: first, ready, ...routeOutcome };
+  if (packageId) return { scope: read([...names, ...lookups]), ready, ...routeOutcome };
+  // In an app with no package the lookup targets are asked without views: a
+  // lookup cell links and names its target and reads none of its views, and a
+  // target outside the app bundle (`sys_user`) composed with them read the
+  // whole `/meta/view` list. They join the names-only scope's objects as they
+  // land.
+  (readObjectScope as ReadNamesWithoutViews)({ names: lookups, views: false });
+  return { scope: first, ready, ...routeOutcome };
 }
 
 /** An adapter that loads app metadata bundles (`ObjectStackAdapter.loadAppBundle`). */

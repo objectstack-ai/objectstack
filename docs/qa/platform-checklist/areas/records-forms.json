@@ -140,7 +140,7 @@
     },
     "qa-crm-import-console": {
       "title": "app-crm boot + the console dev server + env, so ui/e2e/import-console/import-console-undo.spec.ts runs UNMODIFIED on its own defaults (crm_app / crm_lead, console on port 5180)",
-      "why": "records-forms.import-job-undo-cancel names two objectui specs as its automation, and neither runs on the stock showcase boot as written: the console spec defaults to LIVE_IMPORT_APP crm_app and LIVE_IMPORT_OBJECT crm_lead, and its goto path has no /_console mount, so a showcase run needed a scratch copy of the spec plus a scratch qa_lead object (fixtures.requires[2], runs #21845 and #23949) or was hand-driven instead (QA runs #24616 and #26450). crm_lead carries the spec's name, email and status columns, so on an app-crm boot behind the console dev server the spec runs as committed. The harness twin has no door at all (knownGaps[0])",
+      "why": "records-forms.import-job-undo-cancel names an objectui spec as its automation, and it does not run on the stock showcase boot as written: the console spec defaults to LIVE_IMPORT_APP crm_app and LIVE_IMPORT_OBJECT crm_lead, and its goto path has no /_console mount, so a showcase run needed a scratch copy of the spec plus a scratch qa_lead object (fixtures.requires[2], runs #21845 and #23949) or was hand-driven instead (QA runs #24616 and #26450). crm_lead carries the spec's name, email and status columns, so on an app-crm boot behind the console dev server the spec runs as committed. The harness twin was retired on #25921 (knownGaps[0])",
       "provenance": "#26625: driven at main 1708115e2f on 2026-10-27 after a full `pnpm exec turbo run build`: step 3 passed (1 passed, 35.9 s) on the third run; the first two failed on Playwright's default 30 s test timeout (31.1 s) at different steps, both after the import had landed. The item's API half (steps[1]-[4]) was replayed on the same boot against crm_lead and passed every clause. #27377 (wave-3 accuracy slice S1, from QA run #27438 at c4c515ad): the teardown gained the one-path-per-tree warning. The run met parallel runners clobbering ui/e2e/live/.auth/state.json, and suggested pointing storageState at a scratch path through a copied config; read at base a0f865491d that does not hold, because global-setup.ts writes the fixed path, so the warning prescribes one runner per tree instead.",
       "app": "app-crm (examples/app-crm) — its own boot, not the item's showcase boot",
       "requires": [
@@ -176,7 +176,7 @@
       ],
       "teardown": "stop the boot and the console dev server by their recorded PIDs (--fresh discards the DB), then delete ui/e2e/live/.auth/ — its state.json holds a live bearer token — and ui/test-results/. ⚠️ That state file is one fixed path per tree: ui/e2e/live/global-setup.ts writes it at e2e/live/.auth/state.json, rooted on its own file and with no env override, and both live configs (playwright.live.config.ts, playwright.import-console.config.ts) read the same path, so a copied config that points storageState elsewhere reads a file the global setup never writes. Two runners in one tree overwrite each other's token, and one runner's teardown deletes the other's: run this recipe from a worktree of its own, or one runner at a time per tree (QA run #27438)",
       "knownGaps": [
-        "The harness twin ui/e2e/import-harness/import-undo.spec.ts has NO door in this tree. ui/playwright.import-harness.config.ts says to serve the harness with packages/plugin-grid/demo/vite.live.config.ts at http://localhost:5200/live.html, and neither file exists (ui/packages/plugin-grid/demo holds index.html and bulk-actions.html only). Its CSV (first_name,last_name,email) also has no column for crm_lead's required name. It stays a self-skip, which is the control and never a result; tracked on #25921",
+        "The import harness twin was retired on #25921: the harness its config named never existed in this tree, so it could only self-skip. The console spec is the item's only automation",
         "The spec counts rows with an unfiltered, page-bounded GET /api/v1/data/crm_lead and reads records.length (the item's automated.ref). On an accumulated DB whose leads overflow that page the count stops moving and the spec fails without a defect, so run it on a --fresh boot"
       ]
     }
@@ -3915,7 +3915,7 @@
       "title": "Async import job: terminal state + per-row results, undo removes exactly the imported rows, cancel mid-job leaves a coherent partial",
       "since": "v17",
       "status": "active",
-      "revision": 8,
+      "revision": 9,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3925,7 +3925,7 @@
         "app": "showcase",
         "requires": [
           "an import-job-capable client wired into the console AND an object with an async-import route (framework packages/rest/src/rest-route-ledger.ts: POST /api/v1/data/:object/import/jobs, /import/jobs/:jobId/{cancel,undo,results}) — the STOCK console already satisfies the client half (run #21845, console pin 2e818d0b51ec); no extra wiring is needed",
-          "the objectui import specs (ui/e2e/import-console and ui/e2e/import-harness in this checkout), which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html",
+          "the objectui import spec (ui/e2e/import-console in this checkout; its harness twin was retired on #25921), which self-gates on IMPORT_CONSOLE_LIVE=1",
           "RUNTIME FIXTURE — the live-gated console spec runs UNMODIFIED on the qa-crm-import-console recipe (#26625): an app-crm boot behind the console dev server meets the spec's own defaults (crm_app / crm_lead, port 5180). The older showcase route (run #21845, QA run #23949) still works: from ui/, run a SCRATCH COPY of e2e/import-console/import-console-undo.spec.ts whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under), after authoring a scratch object carrying the spec's name / email / status columns, since NO showcase object has all three (e.g. qa_lead with name / email / status text fields and a declared sharingModel, in a writable package, published), with LIVE_IMPORT_APP=showcase_app LIVE_IMPORT_OBJECT=qa_lead"
         ],
         "provisioning": {
@@ -3933,13 +3933,13 @@
           "why": "lets the console spec run as committed instead of from a scratch copy: on an app-crm boot behind the console dev server it meets its own defaults (crm_app / crm_lead, port 5180), and the API half replays against crm_lead on the same boot. Without the recipe a run either rebuilds requires[2]'s scratch copy and qa_lead object on showcase or hand-drives the console route (knownGaps[2]), as both 18.2.0 waves did"
         },
         "knownGaps": [
-          "CLOSED for runs by the qa-crm-import-console recipe (#26625): on an app-crm boot behind the console dev server, e2e/import-console/import-console-undo.spec.ts runs UNMODIFIED with IMPORT_CONSOLE_LIVE=1 and LIVE_API_URL set (passed at main 1708115e2f). The showcase route in requires[2] (a scratch copy with the /_console goto path and a scratch qa_lead object, #21845) still works and is no longer needed. A skip without the gate is the control, never a result. The harness twin e2e/import-harness/import-undo.spec.ts has NO door in this tree: the harness its config names (packages/plugin-grid/demo/vite.live.config.ts serving /live.html) does not exist, and its CSV has no column for crm_lead's required name (the recipe's knownGaps[0], tracked on #25921). It is optional evidence; the API half below needs no gate at all",
+          "CLOSED for runs by the qa-crm-import-console recipe (#26625): on an app-crm boot behind the console dev server, e2e/import-console/import-console-undo.spec.ts runs UNMODIFIED with IMPORT_CONSOLE_LIVE=1 and LIVE_API_URL set (passed at main 1708115e2f). The showcase route in requires[2] (a scratch copy with the /_console goto path and a scratch qa_lead object, #21845) still works and is no longer needed. A skip without the gate is the control, never a result. The harness twin was retired on #25921 (the recipe's knownGaps[0]). The API half below needs no gate at all",
           "AUTOMATION LIVES IN THE objectui TREE, WHICH IS ui/ IN THIS CHECKOUT — `automated.ref` names objectui specs exclusively, by objectui-relative paths that resolve under ui/ (a unit suite at ui/packages/…, a Playwright spec at ui/e2e/…). They run from that tree: a unit suite with cwd ui/ (pnpm exec vitest run FILE), a live spec only against a booted stack serving a console built by pnpm console:build. Drive the item by hand in the browser and score it as a manual run, OR run the pin from ui/ and cite its output naming the framework commit it ran at. ⛔ Never score it as covered on the strength of the `automated` field alone — an unrun pin is a claim, not evidence. Full protocol: RUNNER.md, the objectui-pinned-automation standing fact, whose 'none of those specs exist here' predates the ui/ import.",
           "HAND-DRIVEN CONSOLE ROUTE, measured by QA run #24616 without the gated spec: on showcase_task's list, Import → Preview → tick 'Import in the background (runs as an undoable job)' → import → History → 'Undo import'. The Undo asks a NATIVE window.confirm (objectui plugin-grid ImportWizard.tsx), which Playwright dismisses by default, so an unhandled dialog makes Undo a silent no-op (automation-input): accept it (page.on('dialog', d => d.accept())). showcase_contact's list shows no Import button (it sits in the header's overflow menu there); showcase_task's does"
         ]
       },
       "steps": [
-        "run the console spec with its gate on, on the qa-crm-import-console recipe: from ui/, IMPORT_CONSOLE_LIVE=1 LIVE_API_URL=http://localhost:PORT pnpm exec playwright test --config=playwright.import-console.config.ts --timeout=120000 (on a showcase boot instead, the scratch copy of fixtures.requires[2]). The harness twin e2e/import-harness/import-undo.spec.ts has no door in this tree (fixtures.knownGaps[0]). Capture the suite output, naming the commit it ran at, as the primary evidence",
+        "run the console spec with its gate on, on the qa-crm-import-console recipe: from ui/, IMPORT_CONSOLE_LIVE=1 LIVE_API_URL=http://localhost:PORT pnpm exec playwright test --config=playwright.import-console.config.ts --timeout=120000 (on a showcase boot instead, the scratch copy of fixtures.requires[2]). The harness twin was retired on #25921 (fixtures.knownGaps[0]). Capture the suite output, naming the commit it ran at, as the primary evidence",
         "API half (no gate needed): create with POST /api/v1/data/:object/import/jobs with a marker-tagged CSV — every other job route lives under /api/v1/data/import/jobs: poll progress at GET /api/v1/data/import/jobs/:jobId until terminal; GET /api/v1/data/import/jobs/:jobId/results for per-row results",
         "count marker rows via a filtered GET before and after the import; then POST /api/v1/data/import/jobs/:jobId/undo and re-count",
         "GET /api/v1/data/import/jobs and confirm the job list distinguishes undoable/non-undoable and reverted state ({ jobId, undoable, revertedAt, createdAt } — revertedAt is ABSENT from an entry until that job is reverted, not null) so the fresh job is findable",
@@ -3949,7 +3949,7 @@
         {
           "clause": "an async import creates an UNDOABLE job that reaches a terminal state and exposes per-row results",
           "oracle": "test",
-          "verify": "the job list shows { jobId, undoable:true } with revertedAt ABSENT (the key is omitted until the job is reverted — read absence, not null, as not-yet-reverted) and GET /import/jobs/:jobId/results returns per-row outcomes (the undoable-job half is pinned by import-console-undo.spec.ts / import-undo.spec.ts under their gate; neither reads the per-row results)",
+          "verify": "the job list shows { jobId, undoable:true } with revertedAt ABSENT (the key is omitted until the job is reverted — read absence, not null, as not-yet-reverted) and GET /import/jobs/:jobId/results returns per-row outcomes (the undoable-job half is pinned by import-console-undo.spec.ts under its gate, its harness twin retired on #25921; it does not read the per-row results)",
           "evidence": "the gated spec output + the jobs/results reads"
         },
         {
@@ -3983,11 +3983,11 @@
       ],
       "automated": {
         "kind": "e2e",
-        "ref": "objectui: e2e/import-console/import-console-undo.spec.ts and its harness twin e2e/import-harness/import-undo.spec.ts — each holds acceptance[0]'s undoable-job half and is evidence beside two more clauses, never their pass: for acceptance[1] it counts rows with an unfiltered GET /api/v1/data/OBJECT and reads records.length, a page-bounded list length rather than the clause's marker-filter count; for acceptance[3] it reads the job list once, before the undo (filter j.undoable && !j.revertedAt), and confirms the revert only through the console testid import-history-reverted-ID, so 'revertedAt once a job is reverted' is never read off GET /import/jobs; neither reads a job's per-row results, and no pin covers acceptance[2] (cancel). Both self-gate (fixtures.knownGaps[0]), run under their own Playwright configs (playwright.import-console.config.ts, playwright.import-harness.config.ts) and default to crm_app / crm_lead: a skip or a non-showcase target scores nothing, so a showcase run sets LIVE_IMPORT_APP and LIVE_IMPORT_OBJECT (IMPORT_HARNESS_OBJECT for the twin)"
+        "ref": "objectui: e2e/import-console/import-console-undo.spec.ts (its harness twin was retired on #25921) — it holds acceptance[0]'s undoable-job half and is evidence beside two more clauses, never their pass: for acceptance[1] it counts rows with an unfiltered GET /api/v1/data/OBJECT and reads records.length, a page-bounded list length rather than the clause's marker-filter count; for acceptance[3] it reads the job list once, before the undo (filter j.undoable && !j.revertedAt), and confirms the revert only through the console testid import-history-reverted-ID, so 'revertedAt once a job is reverted' is never read off GET /import/jobs; neither reads a job's per-row results, and no pin covers acceptance[2] (cancel). It self-gates (fixtures.knownGaps[0]), runs under playwright.import-console.config.ts and defaults to crm_app / crm_lead: a skip or a non-showcase target scores nothing, so a showcase run sets LIVE_IMPORT_APP and LIVE_IMPORT_OBJECT"
       },
       "source": [
         "framework: packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (POST /data/:object/import/jobs; /import/jobs/:jobId/{cancel,undo,results}; GET /import/jobs[/:jobId] — re-pointed #18104: jobId is a route PATH PARAMETER, carried in this file only inside a route string)",
-        "objectui: e2e/import-console/import-console-undo.spec.ts, e2e/import-harness/import-undo.spec.ts",
+        "objectui: e2e/import-console/import-console-undo.spec.ts",
         "PENDING-GAPS §C import-job-undo-cancel",
         "#21845 (follow-up run: the console spec passed twice with its live gate on, and the API half passed)"
       ],
@@ -4039,6 +4039,12 @@
           "date": "2026-10-27",
           "change": "fixtures.provisioning opts into the new area recipe qa-crm-import-console and knownGaps[0] is rewritten (#26625, maintainer-directed 「补测试数据配方。立卡」). On an app-crm boot (`pnpm dev:crm -- --fresh -p PORT`) behind the console dev server (`DEV_PROXY_TARGET=… pnpm --filter @object-ui/console dev`), ui/e2e/import-console/import-console-undo.spec.ts ran unmodified at main 1708115e2f with IMPORT_CONSOLE_LIVE=1, LIVE_API_URL and --timeout=120000: 1 passed. The API half was re-driven on crm_lead on the same boot: acceptance[0] PASS (20-row job succeeded, 20 per-row results), acceptance[1] PASS (marker count 0 → 20 → 0 after undo, deleted 20; unfiltered total unchanged), acceptance[2] PASS (a 4000-row job cancelled at 1400: status cancelled, the marker count equals processed, every row read back whole), acceptance[3] PASS (revertedAt absent before the undo, present with undoable false after). The harness twin e2e/import-harness/import-undo.spec.ts has no door in this tree: the harness its config names is absent and its CSV does not fit crm_lead. It stays a self-skip and is reported on #26625. fixtures.requires[2] and steps[0] now name the recipe route, the showcase scratch-copy route kept as the alternative (folded at the seat's request). No clause changed",
           "ref": "#26625"
+        },
+        {
+          "revision": 9,
+          "date": "2026-11-02",
+          "change": "The import harness twin (ui/e2e/import-harness/import-undo.spec.ts under ui/playwright.import-harness.config.ts) was retired: the harness its config named never existed in this tree, so it could only self-skip. automated.ref, source, fixtures.requires[1], fixtures.knownGaps[0], steps[0], acceptance[0].verify and the recipe's knownGaps[0] now name the console spec alone. No clause changed",
+          "ref": "#25921"
         }
       ]
     },
