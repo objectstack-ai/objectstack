@@ -16,6 +16,7 @@ import { useDisplayLocale } from '@object-ui/i18n';
 import { useDetailTranslation } from './useDetailTranslation';
 import { hasCellValue } from './emptiness';
 import { useDefaultRecordPage } from './defaultRecordPage';
+import { deriveHighlightFields } from './synth/buildDefaultPageSchema';
 
 /**
  * The record's reassignable owner column — the canonical injected
@@ -246,7 +247,12 @@ export const RecordMetaFooter: React.FC<RecordMetaFooterProps> = ({
   const hasUpdated =
     !!(updatedAt || updatedBy) && !(updateIsSameAsCreate && (sameUser || !updatedBy));
 
-  const owner = v3MetaLine ? actorOrNone(data[OWNER_FIELD]) : undefined;
+  // The owner is named ONCE on the page (objectstack#28868): when the
+  // highlight strip carries the owner field, the strip names it and this line
+  // leaves it out. The strip is the object's declared highlights, read by the
+  // one function every reader of the strip asks.
+  const stripNamesOwner = deriveHighlightFields(objectSchema, null).includes(OWNER_FIELD);
+  const owner = v3MetaLine && !stripNamesOwner ? actorOrNone(data[OWNER_FIELD]) : undefined;
   const recordId = v3MetaLine && hasCellValue(data.id) ? String(data.id) : undefined;
 
   if (!hasCreated && !hasUpdated && !owner && !recordId) return null;
