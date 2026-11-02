@@ -23,7 +23,8 @@
  *   "Add record";
  * - a list emptied by the view's DECLARED filter alone shows no clear action:
  *   that filter is not the reader's, and the action never removes it;
- * - user-filter chips are not this action's: each chip clears in place.
+ * - user-filter chips are the reader's filter too since objectstack#29052:
+ *   `ListView.clearFiltersChips-29052.test.tsx` pins them.
  */
 
 import * as React from 'react';
@@ -88,7 +89,7 @@ const PANEL_MISS = {
 
 type Session = Pick<
   React.ComponentProps<typeof ListView>,
-  'initialFilters' | 'initialSearchTerm' | 'onFilterChange' | 'onSearchChange' | 'userFilterSelections'
+  'initialFilters' | 'initialSearchTerm' | 'onFilterChange' | 'onSearchChange'
 >;
 
 function mount(schema: ListViewSchema, props: Session = {}) {
@@ -207,17 +208,5 @@ describe('ListView empty state — clear the reader\'s filters (objectstack#2890
     const lastQuery = JSON.stringify(ds.find.mock.calls.at(-1));
     expect(lastQuery).not.toContain(MISS);
     expect(lastQuery).toContain('closed');
-  });
-
-  it('a list emptied by a user-filter chip alone draws no clear action (the chip clears in place)', async () => {
-    const { container } = mount(
-      authored({ userFilters: { element: 'dropdown', fields: [{ field: 'status', options: [{ label: 'Miss', value: MISS }] }] } }),
-      { userFilterSelections: { status: [MISS] } },
-    );
-    const panel = await emptyPanel(container);
-
-    expect(panel.textContent).toMatch(/your current filters or search/i);
-    expect(q(panel, 'empty-state-clear-filters')).toBeNull();
-    expect(q(panel, 'empty-state-clear-search')).toBeNull();
   });
 });
