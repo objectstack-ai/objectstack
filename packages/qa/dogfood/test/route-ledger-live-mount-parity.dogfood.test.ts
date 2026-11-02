@@ -72,6 +72,7 @@ import { STORAGE_ROUTE_LEDGER } from '../../../services/service-storage/src/stor
 import { I18N_ROUTE_LEDGER } from '../../../services/service-i18n/src/i18n-route-ledger.js';
 import { SETTINGS_ROUTE_LEDGER } from '../../../services/service-settings/src/settings-route-ledger.js';
 import { PRINT_ROUTE_LEDGER } from '../../../services/service-print/src/print-route-ledger.js';
+import { PERSONAL_VIEW_ROUTE_LEDGER } from '../../../plugins/plugin-auth/src/personal-view-route-ledger.js';
 
 /** One ledger row, normalized to a wire pattern this gate can probe. */
 interface LedgerRow {
@@ -108,6 +109,9 @@ function collectLedgerRows(): LedgerRow[] {
   for (const r of I18N_ROUTE_LEDGER) add('service-i18n/i18n-route-ledger.ts', r.route, '');
   for (const r of SETTINGS_ROUTE_LEDGER) add('service-settings/settings-route-ledger.ts', r.route, '');
   for (const r of PRINT_ROUTE_LEDGER) add('service-print/print-route-ledger.ts', r.route, '');
+  // [#29443] AuthPlugin's own-row delete door for a personal view, mounted on
+  // the IHttpServer port (unlike its raw-app `/auth/*` catch-all above).
+  for (const r of PERSONAL_VIEW_ROUTE_LEDGER) add('plugin-auth/personal-view-route-ledger.ts', r.route, '');
   return rows;
 }
 
