@@ -1130,7 +1130,6 @@ const en = {
     resetToViewDefault: 'Reset to view default',
     recordOpen: 'Open records',
     recordOpenDrawer: 'Drawer',
-    recordOpenSplit: 'Split',
     recordOpenPage: 'Full page',
     recordOpenNote: 'Your own preference, not part of the object’s declaration. A record’s ↗ always opens the full page.',
     recordOpenDeclaredPage: 'This object is declared to open as a full page',

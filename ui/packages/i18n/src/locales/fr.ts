@@ -892,7 +892,6 @@ const fr = {
     resetToViewDefault: "Rétablir les valeurs par défaut de la vue",
     recordOpen: "Ouvrir les enregistrements",
     recordOpenDrawer: "Panneau latéral",
-    recordOpenSplit: "Partagé",
     recordOpenPage: "Pleine page",
     recordOpenNote: "Votre préférence personnelle, hors de la déclaration de l’objet. Le ↗ d’un enregistrement ouvre toujours la pleine page.",
     recordOpenDeclaredPage: "Cet objet est déclaré pour s’ouvrir en pleine page",

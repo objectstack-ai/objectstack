@@ -890,7 +890,6 @@ const zh = {
     resetToViewDefault: '恢复视图默认设置',
     recordOpen: '打开记录',
     recordOpenDrawer: '抽屉',
-    recordOpenSplit: '分屏',
     recordOpenPage: '整页',
     recordOpenNote: '个人偏好，不进对象声明；记录的 ↗ 总能打开整页',
     recordOpenDeclaredPage: '此对象声明为整页打开',

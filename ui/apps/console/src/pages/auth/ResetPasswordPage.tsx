@@ -24,6 +24,9 @@ import {
 } from '@object-ui/components';
 import { AuthLayout } from './AuthLayout';
 
+/** A phone (below `sm`) gets the 44 px touch-target floor; wider screens keep 40 px. */
+const PHONE_TARGET_CLASS = 'min-h-[44px] sm:min-h-0';
+
 export function ResetPasswordPage() {
   const { t } = useObjectTranslation();
   const navigate = useNavigate();
@@ -106,6 +109,7 @@ export function ResetPasswordPage() {
                 </Label>
                 <Input
                   id="new-password"
+                  className={PHONE_TARGET_CLASS}
                   type="password"
                   autoComplete="new-password"
                   required
@@ -122,6 +126,7 @@ export function ResetPasswordPage() {
                 </Label>
                 <Input
                   id="confirm-password"
+                  className={PHONE_TARGET_CLASS}
                   type="password"
                   autoComplete="new-password"
                   required
@@ -130,7 +135,7 @@ export function ResetPasswordPage() {
                   onChange={(e) => setConfirmPassword(e.target.value)}
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={submitting}>
+              <Button type="submit" className={`w-full ${PHONE_TARGET_CLASS}`} disabled={submitting}>
                 {submitting
                   ? t('auth.resetPassword.submitting', { defaultValue: 'Updating…' })
                   : t('auth.resetPassword.submit', { defaultValue: 'Update password' })}
