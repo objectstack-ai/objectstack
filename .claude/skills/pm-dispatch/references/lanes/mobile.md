@@ -4,7 +4,7 @@
 
 ## 形态
 
-- 本席为姊妹仓执行座位:在 mobile 仓认领、派发、复核;落地窗口止于 ACCEPT 加交棒。
+- 本席为姊妹仓执行座位:mobile 仓认领、派发、复核,按落地条落地;余止于 ACCEPT,归维护者。
 - 按需席:维护者以指令行 `pm-dispatch mobile` 召唤;本席不建巡查 routine。
 - 退席按 SKILL.md 自退四件(队列空、无在飞、无待复核、决策箱无新答复)。
 - 信箱随召唤开、随退席关。
@@ -37,11 +37,11 @@
 - 逐张核交付 PR 是否已合并或关闭,先处置半状态;⛔ 无锚不等于免检。
 - 壳不持 API 凭据、不调平台 API;⛔ 不重新引入 `@objectstack/*` 客户端依赖。
 - `main` 上的 push 跑 `eas-build.yml` 与 `eas-update.yml`;`eas-submit.yml` 手动触发即商店提交。
-- 三者皆按发布动作对待(AGENTS.md 发布条),⛔ 不由席位触发。
-- `EXPO_TOKEN` 是否配置席位读不到,恒按已配置。
-- ⇒ 本仓 PR 的合并恒归维护者;改 `.github/workflows/**` 的 PR 同此,不因触发方式改变而解除。
+- `eas-submit.yml` 与版本切割按发布动作对待(AGENTS.md 发布条),⛔ 不由席位触发。
+- 本席落地(裁决评论 6578710331)非受管、不改 `.github/workflows/**`、ACCEPT 且现 head 全绿的 PR。
+- 落地前读 `main` 最新 EAS Build/Update 运行:有 build/publish 步骤真跑即停落,升决策箱求新裁定。
 - 设备验证无 CI 载体:需真机的验收项写进 PR `## 维护者速读` 的「需要你做的」。
-- ⛔ 未上真机的项不报已验。
+- ⛔ 未上真机的项不报已验;落地不等于已上真机。
 - 本仓有 `.changeset/` 而无 changeset 门禁:用户可见变更随 PR 带 changeset,席位复核时核对。
 - 不扩散需求:创业阶段聚焦原则全额适用;原生能力卡第一问恒为 Web 是否真做不到。
 - 框架单源在 SKILL.md 〈升级与决策〉,⛔ 不另抄。

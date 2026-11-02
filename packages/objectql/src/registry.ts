@@ -81,8 +81,12 @@ import {
   defaultRecordPageHolderKey,
   describeDefaultRecordPageHolder,
   type DefaultRecordPageHolder,
+  holdsRecordPageSlot,
+  recordPageSlotKey,
+  recordPageSlotsOf,
+  type RecordPageSlot,
 } from './default-record-page.js';
-import { defaultRecordPageObject, misplacedDefaultPageRefusal } from '@objectstack/spec/ui';
+import { misplacedDefaultPageRefusal } from '@objectstack/spec/ui';
 // [#14553] The ONE resolution of "does this nav group id exist?" and the ONE
 // wording of the diagnostic when it does not. `os build` calls the same two
 // (`checkNavContributionGroups`), so the compile-time door and this read-time
@@ -2647,6 +2651,11 @@ export class SecurityCatalogNameConflictError extends Error {
 export interface DefaultRecordPageConflict {
   /** The object both pages are the default record page of. */
   readonly object: string;
+  /**
+   * The app both pages are the record page of `object` inside (`PageSchema.apps`,
+   * ruling A on objectstack#28979); absent for the deployment's default.
+   */
+  readonly app?: string;
   /** The page whose registration this refusal stopped. */
   readonly incoming: DefaultRecordPageHolder;
   /** The page that already holds the object's default record page. */
@@ -2693,16 +2702,30 @@ export class DefaultRecordPageConflictError extends Error {
     const [first] = conflicts;
     const lines = conflicts.map(
       (c) =>
-        `${describeDefaultRecordPageHolder(c.incoming)} cannot be the default record page of object ` +
-        `"${c.object}": ${describeDefaultRecordPageHolder(c.existing)} already is`,
+        c.app === undefined
+          ? `${describeDefaultRecordPageHolder(c.incoming)} cannot be the default record page of object ` +
+            `"${c.object}": ${describeDefaultRecordPageHolder(c.existing)} already is`
+          : `${describeDefaultRecordPageHolder(c.incoming)} cannot be the record page of object ` +
+            `"${c.object}" in app "${c.app}": ${describeDefaultRecordPageHolder(c.existing)} already is`,
     );
-    super(
-      `Default record page conflict: ${lines.join('; ')}. Keep one default per object: set ` +
-        `\`isDefault: false\` on one of the two pages, or compose the deployment without the other ` +
-        `package's page. At most one \`isDefault: true\` record page may exist for an object in a ` +
-        `deployment: the record view opens that page with no tie-break, so with two the page would be ` +
-        `chosen by registration order.`,
-    );
+    const remedies: string[] = [];
+    if (conflicts.some((c) => c.app === undefined)) {
+      remedies.push(
+        `Keep one default per object: set \`isDefault: false\` on one of the two pages, or compose the ` +
+          `deployment without the other package's page. At most one \`isDefault: true\` record page may ` +
+          `exist for an object in a deployment: the record view opens that page with no tie-break, so with ` +
+          `two the page would be chosen by registration order.`,
+      );
+    }
+    if (conflicts.some((c) => c.app !== undefined)) {
+      remedies.push(
+        `Keep one page per object per app: remove the app from \`apps\` on one of the two pages, or ` +
+          `compose the deployment without the other package's page. At most one record page may name an ` +
+          `app in \`apps\` for an object: that app's record view opens it with no tie-break, so with two ` +
+          `the page would be chosen by registration order.`,
+      );
+    }
+    super(`Default record page conflict: ${lines.join('; ')}. ${remedies.join(' ')}`);
     this.name = 'DefaultRecordPageConflictError';
     this.conflicts = conflicts;
     this.object = first.object;
@@ -3714,6 +3737,8 @@ export class SchemaRegistry {
    * its holders' original order.
    */
   private noteDefaultRecordPageClaims(packageId: string): void {
+    // Keyed by slot (`recordPageSlotKey`): an object's default, or one app's
+    // page of it. Every slot is put back the same way.
     this.restorePoint?.note(`defaultPageClaims\u0000${packageId}`, () => {
       const saved = new Map<string, Map<string, string>>();
       for (const [object, byPackage] of this.defaultRecordPageClaims) saved.set(object, new Map(byPackage));
@@ -3789,8 +3814,10 @@ export class SchemaRegistry {
   // ==========================================
 
   /**
-   * Object → package → the page that package declared as the object's default
-   * record page at install, recorded by {@link installPackage} once its
+   * Slot → package → the page that package declared for the slot at install —
+   * a slot is an object's default record page, keyed by the object alone, or
+   * the record page of an object inside one app (`PageSchema.apps`, ruling A
+   * on objectstack#28979), keyed by `recordPageSlotKey` — recorded by {@link installPackage} once its
    * declarations pass {@link refuseDefaultRecordPageConflicts}, forgotten by
    * {@link uninstallPackage}.
    *
@@ -3820,7 +3847,7 @@ export class SchemaRegistry {
    * onto an overlay of a packaged page), and is named as that package's page.
    * A disabled package is still installed, and its pages still hold.
    */
-  private defaultRecordPageSlots(object: string): Array<{ holder: DefaultRecordPageHolder; bare: boolean }> {
+  private defaultRecordPageSlots(slot: RecordPageSlot): Array<{ holder: DefaultRecordPageHolder; bare: boolean }> {
     const found = new Map<string, { holder: DefaultRecordPageHolder; bare: boolean }>();
     const add = (holder: DefaultRecordPageHolder, bare: boolean) => {
       found.set(defaultRecordPageHolderKey(holder), { holder, bare });
@@ -3832,7 +3859,7 @@ export class SchemaRegistry {
       const stamped = (item as { _packageId?: unknown } | null | undefined)?._packageId;
       if (sep < 0) {
         bareNames.add(key);
-        if (defaultRecordPageObject(item) !== object) continue;
+        if (!holdsRecordPageSlot(item, slot)) continue;
         const packaged =
           typeof stamped === 'string' && stamped !== '' && stamped !== 'sys_metadata' && !isTenantAuthored(item);
         add(packaged ? { kind: 'package', packageId: stamped, page: key } : { kind: 'environment', page: key }, true);
@@ -3845,10 +3872,10 @@ export class SchemaRegistry {
       }
     }
     for (const { packageId, page, item } of composites) {
-      if (bareNames.has(page) || defaultRecordPageObject(item) !== object) continue;
+      if (bareNames.has(page) || !holdsRecordPageSlot(item, slot)) continue;
       add({ kind: 'package', packageId, page }, false);
     }
-    for (const [packageId, page] of this.defaultRecordPageClaims.get(object) ?? []) {
+    for (const [packageId, page] of this.defaultRecordPageClaims.get(recordPageSlotKey(slot)) ?? []) {
       if (bareNames.has(page)) continue;
       add({ kind: 'package', packageId, page }, false);
     }
@@ -3865,9 +3892,13 @@ export class SchemaRegistry {
    * An environment item under a page's name stands in for that page, so a
    * name appears once, as the bare slot's verdict, whatever the slots it
    * shadows say. See {@link defaultRecordPageSlots}.
+   *
+   * With `app` passed, the holders of the record page of `object` inside that
+   * app instead (`PageSchema.apps`, ruling A on objectstack#28979) — the slot
+   * the save door meets an app-scoped page with.
    */
-  defaultRecordPageHoldersOf(object: string): DefaultRecordPageHolder[] {
-    return this.defaultRecordPageSlots(object).map(({ holder }) => holder);
+  defaultRecordPageHoldersOf(object: string, app?: string): DefaultRecordPageHolder[] {
+    return this.defaultRecordPageSlots(app === undefined ? { object } : { object, app }).map(({ holder }) => holder);
   }
 
   /**
@@ -3876,8 +3907,8 @@ export class SchemaRegistry {
    * the package's own pages and the bare-slot item of the same name (the
    * environment's overlay of the very page being registered).
    */
-  private otherDefaultRecordPageHolders(object: string, page: string, packageId: string): DefaultRecordPageHolder[] {
-    return this.defaultRecordPageSlots(object)
+  private otherDefaultRecordPageHolders(slot: RecordPageSlot, page: string, packageId: string): DefaultRecordPageHolder[] {
+    return this.defaultRecordPageSlots(slot)
       .filter(({ holder, bare }) => {
         if (holder.kind === 'package' && holder.packageId === packageId) return false;
         return !(bare && holder.page === page);
@@ -3908,20 +3939,21 @@ export class SchemaRegistry {
     if (misplaced.length > 0) throw new MisplacedDefaultPageError(selfId, misplaced);
     if (selfId === undefined) return;
     const conflicts: DefaultRecordPageConflict[] = [];
-    // object → the first page this manifest declares for it.
+    // slot → the first page this manifest declares for it.
     const firstDeclared = new Map<string, string>();
-    for (const { object, page } of declaredDefaultRecordPages(manifest)) {
+    for (const { page, ...slot } of declaredDefaultRecordPages(manifest)) {
       const incoming: DefaultRecordPageHolder = { kind: 'package', packageId: selfId, page };
-      const first = firstDeclared.get(object);
+      const key = recordPageSlotKey(slot);
+      const first = firstDeclared.get(key);
       if (first === undefined) {
-        firstDeclared.set(object, page);
-        for (const existing of this.otherDefaultRecordPageHolders(object, page, selfId)) {
-          conflicts.push({ object, incoming, existing });
+        firstDeclared.set(key, page);
+        for (const existing of this.otherDefaultRecordPageHolders(slot, page, selfId)) {
+          conflicts.push({ ...slot, incoming, existing });
         }
       } else if (first !== page) {
-        // Two pages of one manifest for one object. One page declared twice
+        // Two pages of one manifest for one slot. One page declared twice
         // under one name is one page (the stack contract refuses the repeat).
-        conflicts.push({ object, incoming, existing: { kind: 'package', packageId: selfId, page: first } });
+        conflicts.push({ ...slot, incoming, existing: { kind: 'package', packageId: selfId, page: first } });
       }
     }
     if (conflicts.length > 0) throw new DefaultRecordPageConflictError(conflicts);
@@ -3934,11 +3966,12 @@ export class SchemaRegistry {
   private recordDefaultRecordPageClaims(packageId: string, manifest: ObjectStackManifest): void {
     this.noteDefaultRecordPageClaims(packageId);
     this.forgetDefaultRecordPageClaims(packageId);
-    for (const { object, page } of declaredDefaultRecordPages(manifest)) {
-      let byPackage = this.defaultRecordPageClaims.get(object);
+    for (const { page, ...slot } of declaredDefaultRecordPages(manifest)) {
+      const key = recordPageSlotKey(slot);
+      let byPackage = this.defaultRecordPageClaims.get(key);
       if (!byPackage) {
         byPackage = new Map();
-        this.defaultRecordPageClaims.set(object, byPackage);
+        this.defaultRecordPageClaims.set(key, byPackage);
       }
       if (!byPackage.has(packageId)) byPackage.set(packageId, page);
     }
@@ -6745,14 +6778,16 @@ export class SchemaRegistry {
       // prints at `os validate` and at save.
       const refusal = misplacedDefaultPageRefusal(item);
       if (refusal !== undefined) throw new MisplacedDefaultPageError(packageId, [{ page: baseName, refusal }]);
-      const object = defaultRecordPageObject(item);
-      if (object !== undefined) {
-        const holders = this.otherDefaultRecordPageHolders(object, baseName, packageId);
-        if (holders.length > 0) {
-          const incoming: DefaultRecordPageHolder = { kind: 'package', packageId, page: baseName };
-          throw new DefaultRecordPageConflictError(holders.map((existing) => ({ object, incoming, existing })));
+      // Every slot the page holds: its object's default, and one per app its
+      // `apps` names (ruling A on objectstack#28979).
+      const incoming: DefaultRecordPageHolder = { kind: 'package', packageId, page: baseName };
+      const conflicts: DefaultRecordPageConflict[] = [];
+      for (const slot of recordPageSlotsOf(item)) {
+        for (const existing of this.otherDefaultRecordPageHolders(slot, baseName, packageId)) {
+          conflicts.push({ ...slot, incoming, existing });
         }
       }
+      if (conflicts.length > 0) throw new DefaultRecordPageConflictError(conflicts);
     }
 
     // ADR-0010 §3.7 — translate the author-facing `protection` block
