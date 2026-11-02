@@ -23,9 +23,15 @@
 //    (the CONTROL that the field is sortable for a caller who may read it).
 //
 // This file writes /meta (the zh-CN member), so it boots its own showcase.
+//
+// [#28576] ADR-0146 D11 closed the package-less write onto a packaged item, so
+// the zh-CN member is authored into the showcase's `.custom` pair. The base
+// ships `en-US` only, so the member declares no `overrides`: it is the pair's
+// own member, and the by-name read serves it the same.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { type VerifyStack } from '@objectstack/verify';
+import { ensurePair, inPair } from './customization-pair.js';
 import { bootShowcase } from './showcase-boot.js';
 import { showcaseAppDefaultSecurity } from './showcase-security.js';
 
@@ -85,7 +91,8 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
       expect(read.status).toBe(200);
       const shipped: Record<string, unknown> = ((await read.json()) as any).item;
       const authored = Object.fromEntries(Object.entries(shipped).filter(([k]) => !k.startsWith('_')));
-      const res = await stack.apiAs(admin, 'PUT', `/meta/email_template/${TEMPLATE}`, {
+      await ensurePair(stack, admin, PKG);
+      const res = await stack.apiAs(admin, 'PUT', inPair(`/meta/email_template/${TEMPLATE}`, PKG), {
         ...authored, locale: 'zh-CN', subject: ZH_SUBJECT, bodyText: 'mrd-live zh-CN body', bodyHtml: '<p>mrd-live zh-CN body</p>',
       });
       expect(res.status, await res.clone().text()).toBe(200);
@@ -209,6 +216,89 @@ describe('[#26572] the v18 /meta read doors, over HTTP on a booted showcase', ()
       expect(adminApps, JSON.stringify({ adminApps, memberApps })).toContain('showcase_app');
       expect(memberApps, JSON.stringify({ adminApps, memberApps })).toContain('showcase_app');
       expect(memberApps, 'a member never sees setup').not.toContain('setup');
+    });
+  });
+
+  // The same class on the view switcher's `object` and on the list's
+  // `package` scope: a bracketed key (`?object[]=`, `?package[]=`) reached the
+  // door under the key as spelled, so the filter never read it, and a caller
+  // who asked for one object's views (or one package's items) got every view
+  // (or every package's items). Each is refused: 400 VALIDATION_ERROR naming
+  // the key, no list.
+  describe('GET /meta/view with a bracketed `object` key, and a list with a bracketed `package` key, are refused', () => {
+    const itemsOf = (body: any): any[] => (Array.isArray(body) ? body : body?.items) ?? [];
+    const OBJ = 'showcase_task';
+
+    for (const [path, key] of [
+      ['/meta/view', 'object[]'], ['/meta/view', 'object[0]'],
+      ['/meta/object', 'package[]'], ['/meta/object', 'package[0]'],
+    ] as const) {
+      it(`${path}?${key}=…: 400 VALIDATION_ERROR naming the key, for the admin and for a member`, async () => {
+        const value = key.startsWith('object') ? OBJ : PKG;
+        const names = key.startsWith('object') ? 'object' : 'package';
+        for (const [who, token] of [['admin', admin], ['member', liaison]] as const) {
+          const res = await stack.apiAs(token, 'GET', `${path}?${key}=${encodeURIComponent(value)}`);
+          const body: any = await res.json();
+          expect({ who, status: res.status, code: codeOf(body) }, JSON.stringify(body).slice(0, 400))
+            .toEqual({ who, status: 400, code: 'VALIDATION_ERROR' });
+          expect(messageOf(body)).toMatch(new RegExp(`^Query parameter '${key.replace(/[[\]]/g, '\\$&')}' names no ${names}`));
+          expect(itemsOf(body)).toEqual([]);
+        }
+      });
+    }
+
+    it('CONTROLS — ?object=NAME is that object\'s views and ?package=ID that package\'s items, each narrower than no filter', async () => {
+      const all = itemsOf(await (await stack.apiAs(admin, 'GET', '/meta/view')).json());
+      const switched = await stack.apiAs(admin, 'GET', `/meta/view?object=${OBJ}`);
+      expect(switched.status).toBe(200);
+      const views = itemsOf(await switched.json());
+      expect(views.length, 'the showcase ships views of showcase_task').toBeGreaterThan(0);
+      expect(views.every((v: any) => v?.object === OBJ), JSON.stringify(views.map((v: any) => v?.object))).toBe(true);
+      expect(views.length).toBeLessThan(all.length);
+
+      const everyPackage = itemsOf(await (await stack.apiAs(admin, 'GET', '/meta/object')).json());
+      const scoped = await stack.apiAs(admin, 'GET', `/meta/object?package=${encodeURIComponent(PKG)}`);
+      expect(scoped.status).toBe(200);
+      const objects = itemsOf(await scoped.json());
+      expect(objects.length, 'the showcase package declares objects').toBeGreaterThan(0);
+      expect(objects.length).toBeLessThan(everyPackage.length);
+    });
+  });
+
+  // The same class on `_drafts`' own filters: `?packageId[]=` / `?type[]=`
+  // reached the door under the key as spelled, so the list was not narrowed
+  // and an author who asked for one package's (or one type's) drafts got
+  // every draft. Each is refused: 400 VALIDATION_ERROR naming the key, no list.
+  describe('GET /meta/_drafts with a bracketed `packageId` or `type` key is refused', () => {
+    const draftsOf = (body: any): any[] => body?.drafts ?? body?.data?.drafts ?? [];
+
+    for (const [key, value, names] of [
+      ['packageId[]', PKG, 'package'], ['packageId[0]', PKG, 'package'],
+      ['type[]', 'view', 'metadata type'], ['type[0]', 'view', 'metadata type'],
+    ] as const) {
+      it(`/meta/_drafts?${key}=…: 400 VALIDATION_ERROR naming the key, for the admin`, async () => {
+        const res = await stack.apiAs(admin, 'GET', `/meta/_drafts?${key}=${encodeURIComponent(value)}`);
+        const body: any = await res.json();
+        expect({ status: res.status, code: codeOf(body) }, JSON.stringify(body).slice(0, 400))
+          .toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+        expect(messageOf(body)).toMatch(new RegExp(`^Query parameter '${key.replace(/[[\]]/g, '\\$&')}' names no ${names};`));
+        expect(draftsOf(body)).toEqual([]);
+      });
+    }
+
+    it('CONTROLS — the plain spellings narrow, and a member is still refused at the capability gate first', async () => {
+      const scoped = await stack.apiAs(admin, 'GET', `/meta/_drafts?packageId=${encodeURIComponent(PKG)}`);
+      expect(scoped.status).toBe(200);
+      const inPackage = draftsOf(await scoped.json());
+      expect(inPackage.every((d: any) => d?.packageId === PKG), JSON.stringify(inPackage).slice(0, 400)).toBe(true);
+
+      const typed = await stack.apiAs(admin, 'GET', '/meta/_drafts?type=view');
+      expect(typed.status).toBe(200);
+      const views = draftsOf(await typed.json());
+      expect(views.every((d: any) => d?.type === 'view'), JSON.stringify(views).slice(0, 400)).toBe(true);
+
+      const member = await stack.apiAs(liaison, 'GET', `/meta/_drafts?packageId[]=${encodeURIComponent(PKG)}`);
+      expect(member.status).toBe(403);
     });
   });
 });

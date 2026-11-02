@@ -30,6 +30,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+  useIsMobile,
 } from '@object-ui/components';
 import { CalendarIcon, RotateCcw } from 'lucide-react';
 import { useSafeTranslate, useObjectTranslation, useSafeFieldLabel, pickLocalized } from '@object-ui/i18n';
@@ -99,6 +100,13 @@ function useFilterLabel(def: DashboardFilterDef): string {
 const ALL_VALUE = '__all__';
 /** Sentinel for the date-range Select's "Custom…" item. */
 const CUSTOM_VALUE = '__custom__';
+
+// objectstack#29078 — at phone width every control of the bar is a 44 px touch
+// target (the #29040 audit's floor); from `sm` up the bar keeps its compact
+// desktop sizes. `min-h` rather than `h`, so the `h-8` the desktop draws
+// stays the one height rule and the phone only raises its floor. The option
+// rows of the bar's two lists take the same floor.
+const PHONE_TARGET = 'min-h-11 sm:min-h-0';
 
 export interface DashboardFilterBarProps {
   defs: DashboardFilterDef[];
@@ -229,6 +237,9 @@ function useCustomRangePopover() {
 }
 
 function DateRangeFilter({ def, value, onChange }: { def: DashboardFilterDef; value: DateRangeValue | undefined; onChange: (v: DateRangeValue | undefined) => void }) {
+  // Below `md` the custom-range calendar shows one month with 44 px day cells:
+  // two months stacked at that size run past a phone's viewport (#29078).
+  const isMobile = useIsMobile();
   const tt = useSafeTranslate();
   const label = useFilterLabel(def);
   const custom = useCustomRangePopover();
@@ -263,19 +274,19 @@ function DateRangeFilter({ def, value, onChange }: { def: DashboardFilterDef; va
           else onChange({ preset: v });
         }}
       >
-        <SelectTrigger {...custom.selectTrigger} className="h-8 w-auto min-w-36 gap-1" aria-label={label || tt('dashboard.filters.dateRange', 'Date range')}>
+        <SelectTrigger {...custom.selectTrigger} className={cn('h-8 w-auto min-w-36 gap-1', PHONE_TARGET)} aria-label={label || tt('dashboard.filters.dateRange', 'Date range')}>
           <CalendarIcon className="size-3.5 opacity-60" />
           <SelectValue placeholder={tt('dashboard.filters.dateRange', 'Date range')}>
             {rangeLabel(value, presetLabel) ?? tt('dashboard.filters.allTime', 'All time')}
           </SelectValue>
         </SelectTrigger>
         <SelectContent {...custom.selectContent}>
-          <SelectItem value={ALL_VALUE}>{tt('dashboard.filters.allTime', 'All time')}</SelectItem>
+          <SelectItem value={ALL_VALUE} className={PHONE_TARGET}>{tt('dashboard.filters.allTime', 'All time')}</SelectItem>
           {DATE_RANGE_PRESETS.map((p) => (
-            <SelectItem key={p} value={p}>{presetLabel(p)}</SelectItem>
+            <SelectItem key={p} value={p} className={PHONE_TARGET}>{presetLabel(p)}</SelectItem>
           ))}
           {allowCustom && (
-            <SelectItem value={CUSTOM_VALUE} {...custom.customItem}>{tt('dashboard.filters.custom', 'Custom…')}</SelectItem>
+            <SelectItem value={CUSTOM_VALUE} className={PHONE_TARGET} {...custom.customItem}>{tt('dashboard.filters.custom', 'Custom…')}</SelectItem>
           )}
         </SelectContent>
       </Select>
@@ -288,7 +299,8 @@ function DateRangeFilter({ def, value, onChange }: { def: DashboardFilterDef; va
           <PopoverContent {...custom.popoverContent} className="w-auto p-0" align="start">
             <Calendar
               mode="range"
-              numberOfMonths={2}
+              numberOfMonths={isMobile ? 1 : 2}
+              className="max-md:[--cell-size:2.75rem]"
               defaultMonth={openingMonth}
               selected={{ from: rangeFrom, to: rangeTo }}
               onSelect={(range: any) => {
@@ -529,13 +541,13 @@ function SelectFilter({ def, value, onChange, dataSource }: { def: DashboardFilt
       value={value ? String(value) : ALL_VALUE}
       onValueChange={(v) => onChange(v === ALL_VALUE ? undefined : v)}
     >
-      <SelectTrigger className="h-8 w-auto min-w-32" aria-label={label} data-testid={`dashboard-filter-${def.name}`}>
+      <SelectTrigger className={cn('h-8 w-auto min-w-32', PHONE_TARGET)} aria-label={label} data-testid={`dashboard-filter-${def.name}`}>
         <SelectValue>{selectedLabel ?? `${label}: ${tt('dashboard.filters.all', 'All')}`}</SelectValue>
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value={ALL_VALUE}>{tt('dashboard.filters.all', 'All')}</SelectItem>
+        <SelectItem value={ALL_VALUE} className={PHONE_TARGET}>{tt('dashboard.filters.all', 'All')}</SelectItem>
         {options.map((o) => (
-          <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+          <SelectItem key={o.value} value={o.value} className={PHONE_TARGET}>{o.label}</SelectItem>
         ))}
       </SelectContent>
     </Select>
@@ -553,7 +565,7 @@ function TextFilter({ def, value, onChange }: { def: DashboardFilterDef; value: 
   };
   return (
     <Input
-      className="h-8 w-36"
+      className={cn('h-8 w-36', PHONE_TARGET)}
       type={def.type === 'number' ? 'number' : 'text'}
       placeholder={label}
       value={draft}
@@ -600,7 +612,7 @@ export function DashboardFilterBar({ defs, values, onChange, onReset, dataSource
         return <TextFilter key={def.name} def={def} value={value} onChange={set} />;
       })}
       {onReset && isDirty && (
-        <Button variant="ghost" size="sm" onClick={onReset} className="text-muted-foreground">
+        <Button variant="ghost" size="sm" onClick={onReset} className={cn('text-muted-foreground', PHONE_TARGET)}>
           <RotateCcw className="size-3.5" />
           {tt('dashboard.filters.reset', 'Reset')}
         </Button>

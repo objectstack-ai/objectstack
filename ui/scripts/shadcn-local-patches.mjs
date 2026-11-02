@@ -528,6 +528,44 @@ const sheetHideOverlayPatches = [
 ];
 
 /**
+ * The sheet close-button touch-target patch (objectstack#29078).
+ *
+ * The Console runs inside the mobile app's WebView, and its phone-width audit
+ * (objectstack#29040) holds every control to a 44 px touch target. Upstream's
+ * Sheet close button is its 16 px glyph and nothing more, so every drawer in
+ * the Console closed from a 16 px box at 375 and 390 px. Below `sm` the button
+ * becomes a 44 px box, its glyph centred where it was; from `sm` up the class
+ * list is upstream's, unchanged.
+ *
+ * The payload is the class list itself, so it is inline, for the reason the
+ * sidebar offcanvas family gives. One anchor, the button's own line, written
+ * from `scripts/__tests__/fixtures/shadcn-registry/sheet.registry.txt`.
+ *
+ * @type {LocalPatch[]}
+ */
+const SHEET_CLOSE_UPSTREAM_CLASSES =
+  'absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 ' +
+  'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none ' +
+  'data-[state=open]:bg-secondary';
+const SHEET_CLOSE_PHONE_CLASSES =
+  'max-sm:right-1 max-sm:top-1 max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center';
+const sheetCloseTouchTargetPatches = [
+  {
+    id: 'sheet-close-phone-touch-target',
+    issue: 'objectstack#29078',
+    reason:
+      'Makes the Sheet close button a 44 px touch target below `sm` (the ' +
+      'phone-width floor of objectstack#29040). Upstream draws only the 16 px ' +
+      'glyph; a sync that dropped this would shrink every drawer close back ' +
+      'to 16 px at phone width, silently and compilably.',
+    find: `      <SheetPrimitive.Close className="${SHEET_CLOSE_UPSTREAM_CLASSES}">`,
+    replace: `      <SheetPrimitive.Close className="${SHEET_CLOSE_UPSTREAM_CLASSES} ${SHEET_CLOSE_PHONE_CLASSES}">`,
+    marker: SHEET_CLOSE_PHONE_CLASSES,
+    occurrences: 1,
+  },
+];
+
+/**
  * The calendar display-locale patch (objectui#10722).
  *
  * `Calendar` mounts react-day-picker's `DayPicker`, which spells its month
@@ -610,14 +648,189 @@ const calendarDisplayLocalePatches = [
   },
 ];
 
+/** The phone-only classes the close-touch-target family adds (objectstack#29107). */
+const PHONE_CLOSE_TOUCH_TARGET =
+  'max-sm:right-1 max-sm:top-1 max-sm:flex max-sm:size-11 max-sm:items-center max-sm:justify-center';
+
+/**
+ * The phone-width close-button touch-target patch (objectstack#29107).
+ *
+ * `DialogContent` auto-renders its close button as the bare 16 px lucide glyph
+ * inside `absolute right-4 top-4`, with no padding and no minimum size, so on a
+ * phone the whole tap target is 16 x 16 px — under the 44 px floor the
+ * Console's phone-width audit holds every control to. Every modal a phone user
+ * opens draws this one button (the declared-action param dialog, the command
+ * palette), so the floor belongs in the primitive, not at each call site.
+ *
+ * The payload is phone-only (`max-sm:`), so from `sm` up the button keeps
+ * upstream's classes and the desktop header does not grow. Below `sm` the
+ * button becomes a 44 px flex box anchored 4 px from the corner, the glyph
+ * centred in it at its own 16 px size. The Sheet close takes the same class
+ * set through its own family, `sheetCloseTouchTargetPatches`.
+ *
+ * Inline, like the `hideOverlay` family: the payload is utility classes on the
+ * primitive's own element, so there is no implementation to host in `src/lib/`.
+ * One anchor, written from the vendored registry bytes
+ * (`scripts/__tests__/fixtures/shadcn-registry/dialog.registry.txt`): the
+ * opening of the Close element's class list, which names the element and its
+ * desktop placement and nothing incidental. The phone classes sit right after
+ * the placement they override.
+ *
+ * @param {string} primitive Radix namespace prefix, e.g. `Dialog`.
+ * @returns {LocalPatch[]}
+ */
+function phoneCloseTouchTargetPatches(primitive) {
+  const anchor = `<${primitive}Primitive.Close className="absolute right-4 top-4 `;
+  return [
+    {
+      id: `${primitive.toLowerCase()}-phone-close-touch-target`,
+      issue: 'objectstack#29107',
+      reason:
+        `${primitive}Content's close button is a 16 x 16 px tap target upstream ` +
+        '(the bare glyph, no padding or minimum size). Below `sm` this makes it a ' +
+        '44 px box with the glyph centred; from `sm` up upstream classes apply ' +
+        'unchanged, so the desktop header does not grow.',
+      find: anchor,
+      replace: `${anchor}${PHONE_CLOSE_TOUCH_TARGET} `,
+      marker: `${anchor}${PHONE_CLOSE_TOUCH_TARGET} `,
+      occurrences: 1,
+    },
+  ];
+}
+
+/**
+ * The phone-only height floor the menu-row and tab touch-target families add
+ * (objectstack#29215): 44 px below `sm`, nothing from `sm` up.
+ */
+const PHONE_ROW_TOUCH_HEIGHT = 'max-sm:min-h-11';
+
+/**
+ * Builds one touch-target patch: `insertAfter`, the last token of `find`, gets
+ * `phoneClass` written straight after it. Shared by the two families below.
+ *
+ * @param {{ id: string, reason: string, find: string, insertAfter: string,
+ *           phoneClass: string, occurrences: number }} spec
+ * @returns {LocalPatch}
+ */
+function phoneTouchTargetPatch({ id, reason, find, insertAfter, phoneClass, occurrences }) {
+  if (!find.includes(insertAfter)) {
+    throw new Error(`${id}: insertAfter ${JSON.stringify(insertAfter)} is not inside its anchor`);
+  }
+  const replace = find.replace(insertAfter, `${insertAfter} ${phoneClass}`);
+  return {
+    id,
+    issue: 'objectstack#29215',
+    reason,
+    find,
+    replace,
+    marker: replace,
+    occurrences,
+  };
+}
+
+/**
+ * The dropdown-menu row touch-target patch (objectstack#29215).
+ *
+ * Every row of a `DropdownMenu` (plain, checkbox and radio items, and the
+ * sub-menu trigger, which a phone user taps to open the sub-menu) is
+ * `py-1.5 text-sm` upstream with no minimum height: 32 px tall. The Console
+ * runs inside the mobile app's WebView, and its phone-width audit
+ * (objectstack#29040) holds every control to a 44 px touch target, so every
+ * record "more" menu and list row-action menu failed it. Below `sm` each row
+ * is at least 44 px tall, its text and icon centred by the row's own
+ * `items-center`; from `sm` up the class list is upstream's, token for token.
+ *
+ * Inline, for the reason the close-button families give: the payload is one
+ * utility class. Every `find` is written from
+ * `scripts/__tests__/fixtures/shadcn-registry/dropdown-menu.registry.txt`. The
+ * checkbox and radio items share one class string upstream, so one anchor with
+ * two occurrences covers both. `DropdownMenuLabel` is not a control and keeps
+ * its height.
+ *
+ * @type {LocalPatch[]}
+ */
+const dropdownMenuRowTouchTargetPatches = [
+  phoneTouchTargetPatch({
+    id: 'dropdown-menu-sub-trigger-phone-touch-target',
+    reason:
+      'DropdownMenuSubTrigger is a 32 px row upstream. Below `sm` it is at least ' +
+      '44 px tall (objectstack#29040); from `sm` up upstream classes apply unchanged.',
+    find: 'px-2 py-1.5 text-sm outline-none focus:bg-accent data-[state=open]:bg-accent',
+    insertAfter: 'py-1.5',
+    phoneClass: PHONE_ROW_TOUCH_HEIGHT,
+    occurrences: 1,
+  }),
+  phoneTouchTargetPatch({
+    id: 'dropdown-menu-item-phone-touch-target',
+    reason:
+      'DropdownMenuItem is a 32 px row upstream. Below `sm` it is at least 44 px ' +
+      'tall (objectstack#29040); from `sm` up upstream classes apply unchanged.',
+    find: 'px-2 py-1.5 text-sm outline-none transition-colors',
+    insertAfter: 'py-1.5',
+    phoneClass: PHONE_ROW_TOUCH_HEIGHT,
+    occurrences: 1,
+  }),
+  phoneTouchTargetPatch({
+    id: 'dropdown-menu-choice-item-phone-touch-target',
+    reason:
+      'DropdownMenuCheckboxItem and DropdownMenuRadioItem share one 32 px row class ' +
+      'upstream. Below `sm` both are at least 44 px tall (objectstack#29040); from ' +
+      '`sm` up upstream classes apply unchanged.',
+    find: 'py-1.5 pl-8 pr-2 text-sm',
+    insertAfter: 'py-1.5',
+    phoneClass: PHONE_ROW_TOUCH_HEIGHT,
+    occurrences: 2,
+  }),
+];
+
+/**
+ * The tabs touch-target patch (objectstack#29215).
+ *
+ * `TabsTrigger` is `py-1.5 text-sm` upstream, 38 px tall inside the fixed
+ * `h-10` `TabsList`, under the 44 px phone floor (objectstack#29040) on every
+ * record tab strip and Studio tab strip. Below `sm` the trigger is at least
+ * 44 px tall and the list drops its fixed height so it grows with it; from
+ * `sm` up both class lists are upstream's, token for token.
+ *
+ * Inline, like the menu-row family. Both anchors are written from
+ * `scripts/__tests__/fixtures/shadcn-registry/tabs.registry.txt`. The list's
+ * phone class goes at the end of its class string, so the string still opens
+ * with upstream's `inline-flex h-10` (`e2e/approvals-inbox-phone.spec.ts`
+ * reads it by that opening).
+ *
+ * @type {LocalPatch[]}
+ */
+const tabsTouchTargetPatches = [
+  phoneTouchTargetPatch({
+    id: 'tabs-list-phone-auto-height',
+    reason:
+      'TabsList is a fixed `h-10` upstream, too short for a 44 px trigger. Below ' +
+      '`sm` its height follows its triggers; from `sm` up it is upstream `h-10`.',
+    find: 'rounded-md bg-muted p-1 text-muted-foreground"',
+    insertAfter: 'text-muted-foreground',
+    phoneClass: 'max-sm:h-auto',
+    occurrences: 1,
+  }),
+  phoneTouchTargetPatch({
+    id: 'tabs-trigger-phone-touch-target',
+    reason:
+      'TabsTrigger is 38 px tall upstream. Below `sm` it is at least 44 px tall ' +
+      '(objectstack#29040); from `sm` up upstream classes apply unchanged.',
+    find: 'whitespace-nowrap rounded-sm px-3 py-1.5 text-sm',
+    insertAfter: 'py-1.5',
+    phoneClass: PHONE_ROW_TOUCH_HEIGHT,
+    occurrences: 1,
+  }),
+];
+
 /**
  * Component name (as tracked in `shadcn-components.json`) → patches it needs.
  *
  * @type {Record<string, LocalPatch[]>}
  */
 export const LOCAL_PATCHES = {
-  sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches],
-  dialog: i18nCloseLabelPatches('Dialog'),
+  sheet: [...i18nCloseLabelPatches('Sheet'), ...sheetHideOverlayPatches, ...sheetCloseTouchTargetPatches],
+  dialog: [...i18nCloseLabelPatches('Dialog'), ...phoneCloseTouchTargetPatches('Dialog')],
   sidebar: [
     ...sidebarCookieReadPatches,
     ...sidebarOptionalContextPatches,
@@ -625,6 +838,8 @@ export const LOCAL_PATCHES = {
   ],
   slider: sliderThumbPassThroughPatches,
   calendar: calendarDisplayLocalePatches,
+  'dropdown-menu': dropdownMenuRowTouchTargetPatches,
+  tabs: tabsTouchTargetPatches,
 };
 
 /** Components that carry at least one declared patch. */

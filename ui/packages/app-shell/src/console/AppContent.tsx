@@ -201,6 +201,34 @@ function preloadAppRouteChunk(subPath: string, hostPaths: readonly string[] = []
   if (chunk) void chunk.preload().catch(() => {});
 }
 
+/**
+ * The object-scoped route paths that name no record: the default list, a saved
+ * list view, the bare data surface (objectstack#28988) and the create form
+ * (objectstack#29102). Record-scoped paths (`:objectName/record/...`, the
+ * `:objectName/:maybeRecordId` shorthand) are deliberately absent; see
+ * `appSurfaceAwaitsVerdict`.
+ */
+const OBJECT_COLLECTION_ROUTE_PATHS: ReadonlySet<string> = new Set([
+  ':objectName',
+  ':objectName/view/:viewId',
+  ':objectName/data',
+  ':objectName/new',
+]);
+
+/**
+ * Whether the route at `subPath` (the path below `/apps/:appName`) is one of
+ * `OBJECT_COLLECTION_ROUTE_PATHS`. Matched the way `<Routes>` ranks paths,
+ * beside every path `AppContent` and the host declare, so a static route or a
+ * host route that shadows `:objectName` (`search`, `reports`, `system/...`) is
+ * not one.
+ */
+function isObjectCollectionAppRoute(subPath: string, hostPaths: readonly string[] = []): boolean {
+  const routes = [...APP_ROUTE_METADATA_READS.map(({ path }) => ({ path })), ...hostPaths.map((path) => ({ path }))];
+  const matches = matchRoutes(routes, `/${subPath.replace(/^\/+/, '')}`);
+  const path = matches?.[matches.length - 1].route.path;
+  return path !== undefined && OBJECT_COLLECTION_ROUTE_PATHS.has(path);
+}
+
 interface AppContentProps {
   /**
    * Extra <Route> elements appended to the inner /apps/:appName/* router.
@@ -472,6 +500,19 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
         settled: status === undefined || status === 'ready' || status === 'error',
       };
     },
+    // objectstack#28784 — a dashboard route reads the objects its widgets
+    // require: the bundle's dashboard when it holds this package's; the
+    // `/meta/dashboard` list, prefer-local, for one it does not hold.
+    (dashboardName) => {
+      const bundled = bundledReads?.item('dashboard', dashboardName, (activeApp as any)?._packageId);
+      if (bundled?.state === 'hit') return { dashboard: bundled.value, settled: true };
+      if (bundled?.state === 'pending') return { dashboard: undefined, settled: false };
+      const status = getTypeStatus?.('dashboard');
+      return {
+        dashboard: preferLocal(metadata.dashboards as any[], dashboardName, (activeApp as any)?._packageId),
+        settled: status === undefined || status === 'ready' || status === 'error',
+      };
+    },
   );
   // Until the app list has loaded, a scope candidate does not know its package
   // yet, and reads nothing (the splash is up).
@@ -497,11 +538,16 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // objectstack#28645 — a page route reads its page bundle-first (`PageView`,
   // the page scope above), so it does not wait for the `/meta/page` list: a
   // page outside the bundle is read from the list by those readers, which
-  // wait for it themselves.
+  // wait for it themselves. objectstack#28784 — a dashboard route reads its
+  // dashboard the same way (`DashboardView`, the dashboard scope above).
   const pageRouteReadsBundle = !!bundledReads && /^page\/[^/]+$/.test(appSubPath);
+  const dashboardRouteReadsBundle = !!bundledReads && /^dashboard\/[^/]+$/.test(appSubPath);
   const routeReadsKey = [
     ...routeReads.filter(
-      (type) => (type !== 'object' || readsWholeRegistry) && !(type === 'page' && pageRouteReadsBundle),
+      (type) =>
+        (type !== 'object' || readsWholeRegistry) &&
+        !(type === 'page' && pageRouteReadsBundle) &&
+        !(type === 'dashboard' && dashboardRouteReadsBundle),
     ),
     ...(searchParamsHasRecordForm(location.search) && !routeReads.includes('object') ? ['object'] : []),
   ].join(',');
@@ -550,12 +596,29 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
   // settings registered"), the raw capability error on a settings page, the
   // marketplace's admin-only notice. Each now reads as the app root does; the
   // pages' inner states stay for a caller the app lets in.
+  //
+  // objectstack#28988 — and the object LIST routes under the `setup` alias
+  // (`/apps/setup/OBJECT`, `…/view/ID`, `…/data`; the legacy
+  // `/apps/setup/system/users` forwards onto one). The `/apps/setup` subtree is
+  // a pseudo-route, so a member got the default app's chrome around the list
+  // while the canonical `/apps/com.objectstack.setup/OBJECT`, an ordinary
+  // unmatched app, already drew the refusal. The record routes the approvals
+  // inbox links to stay outside this gate, as above; the list paths are
+  // matched by route rank (`isObjectCollectionAppRoute`), so they never reach
+  // one.
+  //
+  // objectstack#29102 — and the create form beside them (`/apps/setup/OBJECT/
+  // new`), which a member reached the same way. It names no record, so no
+  // inbox link lands on it.
   const isSetupRootRoute = location.pathname === '/apps/setup' || location.pathname === '/apps/setup/';
   const [appSubRoot, appSubPage] = appSubPath.split('/');
   const isSettingsOrMarketplaceRoute =
     appSubRoot === 'system' && (appSubPage === 'settings' || appSubPage === 'marketplace');
+  const isSetupObjectCollectionRoute = isSetupRoute && isObjectCollectionAppRoute(appSubPath, hostRoutePaths);
   const appSurfaceAwaitsVerdict =
-    !!appName && !matchedApp && (isMetadataRoute || isSetupRootRoute || isSettingsOrMarketplaceRoute);
+    !!appName &&
+    !matchedApp &&
+    (isMetadataRoute || isSetupRootRoute || isSettingsOrMarketplaceRoute || isSetupObjectCollectionRoute);
 
   // Post-publish readiness: when a requested app isn't in the loaded metadata,
   // re-check ONCE (the registry can lag a beat behind a publish) before

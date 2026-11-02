@@ -21,7 +21,8 @@
         "$TURBO_ROOT$/ui/scripts/build-plugin-stylesheet.mjs",
         "$TURBO_ROOT$/ui/scripts/check-dist-completeness.mjs",
         "$TURBO_ROOT$/ui/scripts/invoked-as.mjs",
-        "$TURBO_ROOT$/ui/scripts/vitest-invocation-guard.mjs"
+        "$TURBO_ROOT$/ui/scripts/vitest-invocation-guard.mjs",
+        "$TURBO_ROOT$/ui/packages/mobile/src/serviceWorkerSource.ts"
       ]
     },
     "test": {
@@ -40,7 +41,8 @@
         "$TURBO_ROOT$/ui/scripts/test-shard-*",
         "$TURBO_ROOT$/ui/scripts/vite-*.ts",
         "$TURBO_ROOT$/ui/apps/console/vitest.config.ts",
-        "$TURBO_ROOT$/ui/apps/console/vite.config.ts"
+        "$TURBO_ROOT$/ui/apps/console/vite.config.ts",
+        "$TURBO_ROOT$/ui/packages/mobile/src/serviceWorkerSource.ts"
       ]
     },
     "test:repo": {
@@ -69,7 +71,8 @@
         "$TURBO_ROOT$/ui/packages/cli/src/utils/issue-path.ts",
         "$TURBO_ROOT$/ui/packages/cli/src/utils/union-arm-diagnostics.ts",
         "$TURBO_ROOT$/ui/scripts/check-doc-component-types.mjs",
-        "$TURBO_ROOT$/ui/scripts/markdown-fence-scan.mjs"
+        "$TURBO_ROOT$/ui/scripts/markdown-fence-scan.mjs",
+        "$TURBO_ROOT$/ui/packages/mobile/src/serviceWorkerSource.ts"
       ]
     },
     "lint": {
@@ -343,7 +346,8 @@
         "$TURBO_ROOT$/packages/drivers/driver-memory/src/memory-exists-non-boolean-refusal.test.ts",
         "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-date-bucket.test.ts",
         "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts",
-        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts"
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts",
+        "$TURBO_ROOT$/packages/services/service-analytics/src/__tests__/objectql-echo-non-date-bucket.test.ts"
       ]
     },
     "@objectstack/lint#test": {
@@ -675,7 +679,8 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs"
+        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
       ]
     },
     "@objectstack/downstream-contract#test": {

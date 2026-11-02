@@ -52,7 +52,8 @@ import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
-import { matchAppBySegment, appRouteSegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { matchAppBySegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 // Aliased for symmetry with objectui's own `resolveKeyedI18nLabel` above (the
@@ -184,7 +185,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
   // An entry with no `label` shows its target's CURRENT label, read from the
   // metadata cache at render time (objectui#9868). `nav:menu` wires the same
   // hook, so the two surfaces cannot name one entry two ways.
-  const resolveNavTargetLabel = useNavTargetLabel();
+  const resolveNavTargetLabel = useNavTargetLabel({ byName: true });
   // Below the fold width the sidebar is the icon rail and expands over the
   // content (objectstack#27593); `useResponsiveSidebar` folds and unfolds it.
   const rail = useConsoleSidebarRail({ enabled: railOverlay });
@@ -213,6 +214,18 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       document.removeEventListener('touchend', handleTouchEnd);
     };
   }, [isMobile, setOpenMobile]);
+
+  // On a phone the sidebar is a drawer over the page, so a route change closes
+  // it: an entry tapped in the drawer opens its page uncovered, whichever row
+  // (navigation, favorite, recent) it was (objectstack#29075). Keyed on the
+  // route, not on any one row's handler, so a row added later closes it too.
+  const routeKey = `${location.pathname}${location.search}`;
+  const lastRouteKey = React.useRef(routeKey);
+  React.useEffect(() => {
+    if (lastRouteKey.current === routeKey) return;
+    lastRouteKey.current = routeKey;
+    if (isMobile) setOpenMobile(false);
+  }, [routeKey, isMobile, setOpenMobile]);
 
   const { recentItems: allRecentItems } = useRecentItems();
   // A Studio package entry is labelled from the package list (objectui#11863),
@@ -329,7 +342,7 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       ? {
           pathname: location.pathname,
           search: location.search,
-          basePath: `/apps/${appRouteSegment(activeApp)}`,
+          basePath: `/apps/${appAddressSegment(apps, activeApp)}`,
           templateContext: navTemplateContext,
         }
       : null;
@@ -418,7 +431,10 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
 
   // Determine which navigation to show based on context
   const navigationItems = context === 'home' ? homeNavigation : appNavigation;
-  const basePath = context === 'app' && activeApp ? `/apps/${appRouteSegment(activeApp)}` : '';
+  // ADR-0048 (A) — the app's one address among the full metadata list, the
+  // list `/apps/SEGMENT` resolves on: its package id when that reaches this
+  // app, else its name (a package's second app shares the first app's id).
+  const basePath = context === 'app' && activeApp ? `/apps/${appAddressSegment(apps, activeApp)}` : '';
   const isStudioApp = context === 'app' && activeApp?.name === 'studio';
   // Studio's package-management link carries the active package scope. Read
   // (and re-emit) it through the SAME per-selector key derivation the selector

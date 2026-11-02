@@ -145,8 +145,8 @@ It saves an ordinary `dataset` draft in the package, published with the rest of
 the package, and the picker selects it. Every dataset written this way counts
 its records (a `count` measure), so a report or a chart can bind it at once.
 Nothing is derived without the author: there are no implicit datasets. Joins,
-filters, date dimensions and derived measures are edited afterwards in
-**Setup › Datasets**.
+filters, date dimensions and derived measures are edited afterwards on the
+dataset's page in Studio's **All metadata** area.
 
 While no dataset reads one of the package's objects, the Studio pickers say so
 beside the button, and they list the package's own datasets first.
@@ -261,6 +261,13 @@ POST {basePath}/analytics/dataset/query
 { datasetName: 'sales',
   selection: { dimensions: ['stage'], measures: ['revenue'], runtimeFilter: {...} } }
 ```
+
+The body takes `selection`, `previewDrafts`, and exactly one of `dataset` (an
+inline definition) or `datasetName` (a saved one). Every selection member, the
+filter included, goes inside `selection`: any other top-level key is refused
+with `400 VALIDATION_FAILED` naming it (a `runtimeFilter` beside `selection`
+answers "did you mean `selection.runtimeFilter`?"), and so is a body naming
+both `dataset` and `datasetName`.
 
 The same governed path backs the Studio dataset preview, dashboard widgets, and
 dataset-bound reports — so the numbers match everywhere.

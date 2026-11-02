@@ -448,7 +448,9 @@ describe('[#20603] /security/explain — a classified service refusal keeps its 
         [
             'batch — POST recordIds, refused by the object-level pass',
             (api) => api.explainPost({ object: 'deal', operation: 'read', recordIds: ['deal_1', 'deal_missing'] }),
-            { object: 'deal', operation: 'read' },
+            // [#29112] The service is handed the batch, whose object-level
+            // pass refuses before any record is judged.
+            { object: 'deal', operation: 'read', recordIds: ['deal_1', 'deal_missing'] },
         ],
     ];
 

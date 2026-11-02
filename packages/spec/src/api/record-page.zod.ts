@@ -43,7 +43,12 @@ import type { SysActivityBuiltinType } from '../data/feed.zod';
  * their own routes. [#28737] The `timeline` part is the size of the record's
  * 动态 stream — the comments, the activity and the field changes it merges —
  * counted by those reads as the caller (`RecordPageTimelineRequestSchema`), so
- * a page draws the stream's count without holding every row of it. Object permissions, row-level security, sharing and
+ * a page draws the stream's count without holding every row of it. The total
+ * counts the sources' rows as that schema's table defines them, so it is an
+ * upper bound of the entries the 动态 panel draws, not their number. The panel
+ * draws fewer where its `showCompleted` / `types` configuration filters entries
+ * out, and where a ledger row has no displayable diff and so draws no entry.
+ * Object permissions, row-level security, sharing and
  * field-level security therefore apply exactly as they apply to those reads.
  * A part whose read refuses carries that refusal in place of an answer — a
  * related list the caller may not read carries neither a count nor rows — and
@@ -167,7 +172,11 @@ export type RecordPageActivityRequestParsed = z.infer<typeof RecordPageActivityR
  * | `fieldChanges` | `sys_audit_log` where `object_name` = `{object}`, `record_id` = `{id}` and `action` is a    |
  * |                | write (`create`, `update`, `delete`)                                                         |
  *
- * The total is their sum. A source this deployment does not serve (its read
+ * The total is their sum: it counts the sources' rows as this table defines
+ * them, so it is an upper bound of the entries the 动态 panel draws, not their
+ * number. The panel draws fewer where its `showCompleted` / `types`
+ * configuration filters entries out, and where a ledger row has no
+ * displayable diff and so draws no entry. A source this deployment does not serve (its read
  * answers `OBJECT_NOT_FOUND`) holds no entry, as the page reads such a stream
  * as an empty one. The field changes are the history the stream merges only
  * where the caller may read it: a refused `sys_audit_log` read counts none, as
@@ -304,10 +313,18 @@ export const RecordPageStreamRowsSchema = lazySchema(() => z.object({
 export type RecordPageStreamRows = z.input<typeof RecordPageStreamRowsSchema>;
 export type RecordPageStreamRowsParsed = z.infer<typeof RecordPageStreamRowsSchema>;
 
-/** [#28737] The `timeline` part: how many entries the record's 动态 stream holds. */
+/**
+ * [#28737] The `timeline` part: the size of the record's 动态 stream, counted
+ * by the reads `RecordPageTimelineRequestSchema` names, as the caller. The
+ * total counts the sources' rows as that schema's table defines them, so it is
+ * an upper bound of the entries the 动态 panel draws, not their number. The
+ * panel draws fewer where its `showCompleted` / `types` configuration filters
+ * entries out, and where a ledger row has no displayable diff and so draws no
+ * entry.
+ */
 export const RecordPageTimelineCountSchema = lazySchema(() => z.object({
   total: z.number().int().min(0).describe(
-    'How many entries the record\'s timeline stream holds for this caller, over the sources the request named.',
+    'The rows of the sources the request named, counted as this caller may read them: an upper bound of the entries the timeline panel draws, not their number. The panel draws fewer where its `showCompleted` / `types` configuration filters entries out, and where a ledger row has no displayable diff.',
   ),
 }).strict());
 export type RecordPageTimelineCount = z.input<typeof RecordPageTimelineCountSchema>;

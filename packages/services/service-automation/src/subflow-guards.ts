@@ -5,19 +5,21 @@
  * subflow and its callers are found and described, and the refusals that keep
  * an enable, a toggle or a caller from reaching a disabled subflow.
  *
- * [#25222] Slice 7 of the `engine.ts` split, move-only. Each function here is
- * the body of the `AutomationEngine` method of the same name, moved unedited.
- * The class keeps that method (its name, docblock and position are in the
+ * [#25222] Slice 7 of the `engine.ts` split. Each function here is the body of
+ * the `AutomationEngine` method of the same name, moved there unedited; a body
+ * edited since says so in its own docblock, which then drops "moved unedited"
+ * (`describeDisabledFlow`, `subflowTargets`, `rejudgeSubflowCallers`). The
+ * class keeps that method (its name, docblock and position are in the
  * published `.d.ts`) and calls the body with a {@link SubflowGuardsHost}
  * literal holding exactly the members the body reads. An async method's stub is
  * no longer `async`: it returns the promise the moved function makes.
  */
 
-import { collectFlowGraphs } from '@objectstack/spec/automation';
 import type { FlowParsed } from '@objectstack/spec/automation';
 import { describeTurnedOffPackagedItem } from '@objectstack/types';
 import type { AutomationEngine } from './engine.js';
 import { subflowNoticeTrap, transitiveSubflowCallers } from './subflow-notice-guard.js';
+import { regionSuspendingCall, subflowCalls } from './subflow-region-guard.js';
 
 /**
  * The `AutomationEngine` members the moved bodies read, each typed as the class
@@ -42,6 +44,7 @@ export interface SubflowGuardsHost {
     readonly boundFlowTriggers: AutomationEngine['boundFlowTriggers'];
     readonly subflowDeclinedFlows: AutomationEngine['subflowDeclinedFlows'];
     readonly subflowNoticeDeclinedFlows: AutomationEngine['subflowNoticeDeclinedFlows'];
+    readonly subflowRegionDeclinedFlows: AutomationEngine['subflowRegionDeclinedFlows'];
     readonly packagedSubflowCallers: AutomationEngine['packagedSubflowCallers'];
     readonly deactivateFlowTrigger: AutomationEngine['deactivateFlowTrigger'];
     readonly activateFlowTrigger: AutomationEngine['activateFlowTrigger'];
@@ -60,16 +63,9 @@ export function describeDisabledFlow(this: Pick<SubflowGuardsHost, 'flowLedgerDi
 
 /** The body of {@link AutomationEngine.subflowTargets}; that method's docblock is its contract. */
 export function subflowTargets(flow: FlowParsed): string[] {
-    const targets: string[] = [];
     // [#28846] The top-level graph and every region body, in walk order.
-    for (const graph of collectFlowGraphs(flow)) {
-        for (const node of graph.nodes) {
-            const n = node as { type?: unknown; config?: { flowName?: unknown } } | null;
-            if (!n || (n.type !== 'subflow' && n.type !== 'map')) continue;
-            if (typeof n.config?.flowName === 'string') targets.push(n.config.flowName);
-        }
-    }
-    return targets;
+    // [#28897] Through the reading the arming gate's region half shares.
+    return subflowCalls(flow).map((call) => call.flowName);
 }
 
 /** The body of {@link AutomationEngine.packagedSubflowCallers}, moved unedited; that method's docblock is its contract. */
@@ -250,8 +246,13 @@ export function describeDisabledSubflows(
 }
 
 /** The body of {@link AutomationEngine.rejudgeSubflowCallers}; that method's docblock is its contract. */
-export function rejudgeSubflowCallers(this: Pick<SubflowGuardsHost, 'boundFlowTriggers' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'flows' | 'subflowTargets' | 'packagedSubflowCallers' | 'disabledPackagedSubflows' | 'deactivateFlowTrigger' | 'activateFlowTrigger'>, subflow: string): void {
-    if (this.boundFlowTriggers.size === 0 && this.subflowDeclinedFlows.size === 0 && this.subflowNoticeDeclinedFlows.size === 0) return;
+export function rejudgeSubflowCallers(this: Pick<SubflowGuardsHost, 'boundFlowTriggers' | 'subflowDeclinedFlows' | 'subflowNoticeDeclinedFlows' | 'subflowRegionDeclinedFlows' | 'flows' | 'subflowTargets' | 'packagedSubflowCallers' | 'disabledPackagedSubflows' | 'deactivateFlowTrigger' | 'activateFlowTrigger'>, subflow: string): void {
+    if (
+        this.boundFlowTriggers.size === 0 &&
+        this.subflowDeclinedFlows.size === 0 &&
+        this.subflowNoticeDeclinedFlows.size === 0 &&
+        this.subflowRegionDeclinedFlows.size === 0
+    ) return;
     const reoffered = new Set<string>();
     for (const caller of this.packagedSubflowCallers(subflow)) {
         const settled = this.boundFlowTriggers.has(caller)
@@ -264,11 +265,12 @@ export function rejudgeSubflowCallers(this: Pick<SubflowGuardsHost, 'boundFlowTr
     }
     // [#28840] The save-notice half reads the child's own calls, so every
     // caller whose calls reach `subflow` can move, packaged or not.
+    // [#28897] So does the region half, which reads the same children.
     for (const caller of transitiveSubflowCallers(this.flows, this.subflowTargets, subflow)) {
         if (reoffered.has(caller)) continue;
         const settled = this.boundFlowTriggers.has(caller)
-            ? subflowNoticeTrap(this.flows, caller) === undefined
-            : !this.subflowNoticeDeclinedFlows.has(caller);
+            ? subflowNoticeTrap(this.flows, caller) === undefined && regionSuspendingCall(this.flows, caller) === undefined
+            : !this.subflowNoticeDeclinedFlows.has(caller) && !this.subflowRegionDeclinedFlows.has(caller);
         if (settled) continue;
         this.deactivateFlowTrigger(caller);
         this.activateFlowTrigger(caller);

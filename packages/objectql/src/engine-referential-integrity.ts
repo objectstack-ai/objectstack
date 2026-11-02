@@ -15,7 +15,8 @@
  * read door and the same warning when that read fails. Each method's
  * docblock stays on the method in `engine.ts`, which is still the contract.
  * `isEmptyReferenceValue` moves with its docblock, byte for byte, and is not
- * exported.
+ * exported. [#28881] Since the move, the system-caller exit keeps the check for
+ * a flow run's elevated write (the method's docblock, Scope).
  *
  * What stays in the class: `referenceExists`, `resolveMasterDetailParent` and
  * `resolveMasterDetailParents`, which read the private static
@@ -46,6 +47,7 @@
 
 import { referenceTargetOf, type EngineQueryOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { keepsFlowWriteReferenceCheck } from '@objectstack/core';
 import { ValidationError, buildFieldError } from './validation/record-validator.js';
 import type { ObjectQL } from './engine.js';
 
@@ -85,12 +87,16 @@ export async function assertReferencesResolve(
   supplied: Record<string, unknown> | null | undefined,
   context: any,
   msgCtx?: { locale?: string; translate?: any; objectName?: string },
+  storedRows?: StoredReferenceRows,
 ): Promise<void> {
-  if (context?.isSystem) return;
+  // [#28881] A system caller is exempt, except a flow run's elevated write:
+  // its elevation is for authorization, and it keeps this check (see
+  // `keepsFlowWriteReferenceCheck`, @objectstack/core).
+  if (context?.isSystem && !keepsFlowWriteReferenceCheck(context)) return;
   const fields = schema?.fields;
   if (!fields || !data) return;
 
-  const failures: any[] = [];
+  const refused: Array<{ name: string; def: any; value: unknown; target: string }> = [];
   for (const name of Object.keys(fields)) {
     // [#4441, narrowing kept by #4743] A `readonly` field is never the
     // caller's to answer for — BY CONSTRUCTION, not by exemption.
@@ -150,21 +156,47 @@ export async function assertReferencesResolve(
       const resolved = def?.type === 'master_detail'
         ? await this.masterDetailHeaderExists(target, v, context)
         : await this.referenceExists(target, v, context);
-      if (resolved === false) {
-        failures.push(buildFieldError(
-          {
-            field: name,
-            code: 'reference_not_found',
-            def,
-            value: String(v),
-            constraint: { target },
-          },
-          msgCtx as any,
-        ));
-      }
+      if (resolved === false) refused.push({ name, def, value: v, target });
     }
   }
+  if (refused.length === 0) return;
+  // [#29062] A refused value every row this write lands on already stores
+  // is not a reference the write ADDS, so it is not this caller's to answer
+  // for. The stored rows are read only now, once a probe has refused.
+  const stored = storedRows ? (await storedRows() ?? []).filter(isRow) : [];
+  const failures = refused
+    .filter((r) => stored.length === 0 || !stored.every((row) => storedReferenceIds(row[r.name]).has(String(r.value))))
+    .map((r) => buildFieldError(
+      {
+        field: r.name,
+        code: 'reference_not_found',
+        def: r.def,
+        value: String(r.value),
+        constraint: { target: r.target },
+      },
+      msgCtx as any,
+    ));
   if (failures.length > 0) throw new ValidationError(failures);
+}
+
+/**
+ * [#29062] The rows a write lands on, as stored before it, read on demand by
+ * {@link assertReferencesResolve}: the by-id update's prior row, or the
+ * matched rows of a predicate update. Absent (an insert), every value the
+ * caller supplied is the write's own.
+ */
+export type StoredReferenceRows = () => Promise<ReadonlyArray<Record<string, unknown> | null | undefined> | null>;
+
+function isRow(row: unknown): row is Record<string, unknown> {
+  return row !== null && typeof row === 'object';
+}
+
+/** The ids a stored reference value holds: each member of a multi-valued one, or the one scalar. */
+function storedReferenceIds(value: unknown): ReadonlySet<string> {
+  const members = Array.isArray(value) ? value : [value];
+  const ids = new Set<string>();
+  for (const m of members) if (typeof m === 'string' || typeof m === 'number') ids.add(String(m));
+  return ids;
 }
 
 /** The body of `ObjectQL#masterDetailHeadersCallerReads`; the method's docblock there is its contract. */

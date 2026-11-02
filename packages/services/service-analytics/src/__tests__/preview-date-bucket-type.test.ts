@@ -22,6 +22,16 @@
  * preview now judges the same keys with the same reading
  * (`preview-date-bucket-door.ts`) and gives the same refusal, field for field.
  * A date and a datetime bucket are served alike on every face, as before.
+ *
+ * [#28977] Pinned too: a `time` column and a dataset dimension's declared
+ * `dateGranularity` over a text column. [#29167] A `formula` (virtual, no
+ * stored column) is refused on every face with the engine's virtual-field
+ * refusal; #28977 pinned it as skipped, and the preview served one `null`
+ * group for it. And the preview now
+ * lowers its row filters before the column-asked-twice and date-bucket doors,
+ * where the live strategy lowers them, so an unrecognised `dateRange` beside
+ * either fault is refused about the `dateRange` on every face; the preview
+ * answered the door's refusal.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -50,6 +60,10 @@ const DATASET = DatasetSchema.parse({
     { name: 'flag', field: 'flag', type: 'boolean' },
     { name: 'closed_at', field: 'closed_at', type: 'date' },
     { name: 'closed_on', field: 'closed_on', type: 'date' },
+    { name: 'opened_time', field: 'opened_time', type: 'date' },
+    { name: 'calc', field: 'calc', type: 'date' },
+    { name: 'region_month', field: 'region', type: 'date', dateGranularity: 'month' },
+    { name: 'calc_month', field: 'calc', type: 'date', dateGranularity: 'month' },
   ],
   measures: [{ name: 'total', aggregate: 'sum', field: 'amount' }],
 });
@@ -94,6 +108,9 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
         flag: { name: 'flag', type: 'boolean' },
         closed_at: { name: 'closed_at', type: 'datetime' },
         closed_on: { name: 'closed_on', type: 'date' },
+        opened_time: { name: 'opened_time', type: 'time' },
+        // A formula the table stores no column for.
+        calc: { name: 'calc', type: 'formula', expression: 'closed_on', returnType: 'date' },
       },
     } as never);
     await engine.syncSchemas();
@@ -145,6 +162,7 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
     ['select', 'stage', 'stage', 'select', 'month'],
     ['number', 'amount_d', 'amount', 'number', 'year'],
     ['boolean', 'flag', 'flag', 'boolean', 'month'],
+    ['time', 'opened_time', 'opened_time', 'time', 'day'],
   ])('refuses a bucket over a %s column, where the preview served one null (or 1970) group', async (_label, dimension, field, type, granularity) => {
     const refusal = await refusedAlike({ measures: ['total'], timeDimensions: [{ dimension, granularity }] });
     expect(refusal).toEqual({
@@ -166,6 +184,76 @@ describe('[#28852] a date bucket over a column that is not a date, on every face
       timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'region', granularity: 'month' }],
     });
     expect(refusal).toMatchObject({ path: 'groupBy.2.dateGranularity', fields: ['region'] });
+  });
+
+  it("[#28977] refuses a dataset dimension's declared dateGranularity over a text column", async () => {
+    const refusal = await refusedAlike({ dimensions: ['region_month'], measures: ['total'] });
+    expect(refusal).toMatchObject({ path: 'groupBy.0.dateGranularity', field: 'region', fields: ['region'] });
+  });
+
+  it('[#29167] refuses a bucket over a formula (virtual: no stored column) with the engine\'s refusal, where the preview served one null group', async () => {
+    // [#28977] pinned the skip this replaces: the engine judged no formula, so
+    // the live faces answered the SQL driver's missing-column backstop (no
+    // path, a "run schema sync" prescription) and the preview served one
+    // `null` group holding the total. The engine's door now refuses a virtual
+    // field, and the service's copy gives the same refusal on the preview.
+    const refusal = await refusedAlike({ measures: ['total'], timeDimensions: [{ dimension: 'calc', granularity: 'month' }] });
+    expect(refusal).toEqual({
+      message:
+        `aggregate('${OBJECT}'): groupBy.0.dateGranularity buckets 'calc' by 'month', but 'calc' is a formula field — `
+        + 'its value is computed on read and never stored, so no driver materialises a column to bucket. The query was '
+        + `NOT run. Denormalise the value onto '${OBJECT}' (a stored date or datetime field, written when the source `
+        + 'changes) and bucket that. A formula field is virtual: with no column behind it the bucket reached the driver '
+        + 'as a column that does not exist, and an engine that aggregates in memory put every row into one null group '
+        + 'while the answer looked served.',
+      code: 'INVALID_FIELD', status: 400, httpStatus: 400,
+      object: OBJECT, param: 'groupBy', path: 'groupBy.0.dateGranularity', field: 'calc', fields: ['calc'],
+    });
+  });
+
+  it("[#29167] refuses a dataset dimension's declared dateGranularity over a formula", async () => {
+    const refusal = await refusedAlike({ dimensions: ['calc_month'], measures: ['total'] });
+    expect(refusal).toMatchObject({ path: 'groupBy.0.dateGranularity', field: 'calc', fields: ['calc'] });
+  });
+
+  /** Every face refuses `selection` with one refusal of `code`, message included. */
+  const refusedAlikeWith = async (selection: Selection, code: string) => {
+    const refusals: Array<Record<string, unknown>> = [];
+    for (const face of FACES) {
+      const err = (await ask(face, selection).then(
+        () => { throw new Error(`${face}: expected a refusal, but the query resolved`); },
+        (e: unknown) => e,
+      )) as Error & Record<string, unknown>;
+      expect(err.code, `${face}: ${err.message}`).toBe(code);
+      expect(err.status, face).toBe(400);
+      refusals.push({ message: err.message, code: err.code, status: err.status });
+    }
+    for (const [i, refusal] of refusals.entries()) expect(refusal, `${FACES[i]} vs native`).toEqual(refusals[0]);
+  };
+
+  it.each<[string, Selection, string]>([
+    [
+      'an unrecognised dateRange on a text bucket',
+      { measures: ['total'], timeDimensions: [{ dimension: 'region', granularity: 'month', dateRange: 'not a range' }] },
+      'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
+    ],
+    [
+      'a one-entry dateRange on a text bucket',
+      { measures: ['total'], timeDimensions: [{ dimension: 'region', granularity: 'month', dateRange: ['2026-01-01'] }] },
+      'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
+    ],
+    [
+      'an unrecognised dateRange beside one column asked twice',
+      { measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: 'month', dateRange: 'not a range' }, { dimension: 'closed_at', granularity: 'year' }] },
+      'ANALYTICS_DATE_RANGE_UNRECOGNIZED',
+    ],
+    [
+      'a refused runtimeFilter beside an unrecognised dateRange (the filter first)',
+      { measures: ['total'], runtimeFilter: { amount: { $lt: null } }, timeDimensions: [{ dimension: 'region', granularity: 'month', dateRange: 'not a range' }] } as Selection,
+      'INVALID_FILTER',
+    ],
+  ])('[#28977] answers %s with the refusal the live faces give', async (_label, selection, code) => {
+    await refusedAlikeWith(selection, code);
   });
 
   it.each([

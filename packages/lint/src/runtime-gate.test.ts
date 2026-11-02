@@ -339,6 +339,9 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
       // (`validateSearchableFields` / `validateSortableFields`) on the
       // per-write snapshot — see `runtime-gate.view-writes.test.ts`.
       'validateReferenceIntegrity',
+      // #29309 — a form section naming an unknown field or field group;
+      // advisory, against the same `objects` context.
+      'validateFormLayout',
       // #25650 — a form open to anonymous intake declaring a file field;
       // the snapshot's `objects` context carries the field types it reads.
       'validatePublicFormFileFields',
@@ -545,6 +548,7 @@ describe('the views[] visibility-predicate family at the runtime publish gate (#
       'validateStackExpressions', // #24798 — its bulk `confirmText` pass alone, clean here
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
+      'validateFormLayout', // #29309 — a form's field and group references, clean here
       'validatePublicFormFileFields', // #25650 — a public form's file fields, clean here
       'validateThankYouRecordFields', // #28005 — a thank-you panel's named fields, clean here
       'validateVisibilityPredicates',
@@ -642,6 +646,7 @@ describe('the publish gate judges a schema-bound form at its own layer (#7815)',
       'validateStackExpressions', // #24798 — its bulk `confirmText` pass alone, clean here
       'validatePresetComparands', // #8793 — dispatched for `view`, clean here
       'validateReferenceIntegrity', // #9313 — its two list-view field members, clean here
+      'validateFormLayout', // #29309 — a form's field and group references, clean here
       'validatePublicFormFileFields', // #25650 — a public form's file fields, clean here
       'validateThankYouRecordFields', // #28005 — a thank-you panel's named fields, clean here
       'validateVisibilityPredicates',

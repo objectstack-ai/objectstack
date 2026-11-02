@@ -12,6 +12,7 @@ import { cn,
 import { Search, X, Loader2, AlertCircle, Plus, TableProperties } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import type { DataSource, FormField, QueryParams, LookupColumnDef, LookupFieldMetadata } from '@object-ui/types';
 import { RecordPickerDialog, lookupFiltersToRecord } from './RecordPickerDialog.js';
 import type { RecordPickerFilterColumn } from './RecordPickerDialog.js';
@@ -37,6 +38,7 @@ import { useSafeFieldLabel, useDisplayLocale } from '@object-ui/i18n';
 import { SchemaRendererContext as ImportedSchemaRendererContext, useAction, useHasActionProvider } from '@object-ui/react';
 import { usePermissions } from '@object-ui/permissions';
 import { useFieldTranslation } from './useFieldTranslation.js';
+import { ScanFieldButton, useFieldScanOffered } from './ScanFieldButton.js';
 
 export interface LookupOption {
   value: string | number;
@@ -309,6 +311,7 @@ function OptionPreviewLine({ children }: { children: React.ReactNode }) {
 export function LookupField({ value, onChange, field, readonly, error: fieldError, ...props }: FieldWidgetComponentProps<any>) {
   const [isOpen, setIsOpen] = useState(false);
   const { t } = useFieldTranslation();
+  const scanOffered = useFieldScanOffered();
   // Same two i18n channels RecordPickerDialog reads, so the inline dropdown
   // resolves option labels and formats dates exactly as the picker does
   // (objectui#5492). Both are provider-safe.
@@ -721,6 +724,9 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
   // State for the full Record Picker dialog (Level 2)
   const [isPickerOpen, setIsPickerOpen] = useState(false);
+  // The search a scanned code opens the search-first picker with; cleared when
+  // that picker closes, so the next ordinary open starts with an empty box.
+  const [pickerInitialSearch, setPickerInitialSearch] = useState<string | undefined>(undefined);
 
   // Dependent-lookup chain as a hard QueryParams.$filter record. Shared by
   // EVERY candidate surface — quick-select popover, Level-2 table picker and
@@ -813,6 +819,22 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       popoverQuery.setSearch(query);
     },
     [popoverQuery.setSearch],
+  );
+
+  // A scanned code searches the lookup's target: the search-first variant
+  // opens its picker seeded with the code; the classic and static-option
+  // variants open the dropdown with the code in its search box.
+  const handleScanned = useCallback(
+    (code: string) => {
+      if (pickerVariant === 'search' && hasDataSource) {
+        setPickerInitialSearch(code);
+        setIsPickerOpen(true);
+        return;
+      }
+      setIsOpen(true);
+      handleSearchChange(code);
+    },
+    [pickerVariant, hasDataSource, handleSearchChange],
   );
 
   /**
@@ -1604,6 +1626,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         // clip instead (objectui#3466). flex-1/min-w-0 keep handling the
         // flex-parent (form row) case.
         'min-w-0 max-w-full flex-1 justify-start text-left font-normal',
+        PHONE_TOUCH_HEIGHT,
         compact && 'h-8 rounded-none border-0 bg-transparent px-2 shadow-none focus-visible:ring-1 focus-visible:ring-ring/60',
       )}
       type="button"
@@ -1682,7 +1705,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     <Button
       variant="ghost"
       size="icon"
-      className="shrink-0 text-muted-foreground hover:text-destructive"
+      className={cn('shrink-0 text-muted-foreground hover:text-destructive', PHONE_TOUCH_SQUARE)}
       type="button"
       onClick={() => handleRemove(selectedOptions[0]?.value)}
       aria-label={t('lookup.remove', { label: singleSelectedLabel })}
@@ -1691,6 +1714,18 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
       <X className="size-4" />
     </Button>
   ) : null;
+
+  /**
+   * The scan button (inside the mobile shell only, `useFieldScanOffered`).
+   * Gated like the trigger and the browse button: a disabled field or one
+   * whose `dependsOn` is unmet offers no scan, and a classic lookup whose
+   * target has no search (`searchOffered`) has nothing to search with.
+   */
+  const searchVariant = pickerVariant === 'search' && hasDataSource && !!dataSource && !!referenceTo;
+  const lookupScan =
+    scanOffered && !compact && !props.disabled && !dependenciesMissing && (searchVariant || searchOffered) ? (
+      <ScanFieldButton onScan={handleScanned} />
+    ) : null;
 
   return (
     <div className={compact ? '' : 'space-y-2'}>
@@ -1751,7 +1786,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
 
       {/* Field control: search-first inline combobox (anchored dropdown / mobile
           sheet), else the classic quick-select popover. */}
-      {pickerVariant === 'search' && hasDataSource && dataSource && referenceTo ? (
+      {searchVariant && dataSource && referenceTo ? (
         // A single-select field's row holds the trigger and its clear control,
         // as the classic row below does; a multi-select field is unchanged.
         <div className={multiple ? 'contents' : 'flex items-center gap-1.5'}>
@@ -1759,7 +1794,11 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           inline
           trigger={triggerButton}
           open={isPickerOpen}
-          onOpenChange={setIsPickerOpen}
+          onOpenChange={(o) => {
+            setIsPickerOpen(o);
+            if (!o) setPickerInitialSearch(undefined);
+          }}
+          initialSearch={pickerInitialSearch}
           title={lookupField?.label || t('common.select')}
           multiple={multiple}
           dataSource={dataSource}
@@ -1775,6 +1814,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
           lookupFilters={lookupFilters}
           baseFilter={dependentFilter}
         />
+        {lookupScan}
         {singleClear}
         </div>
       ) : (
@@ -1801,7 +1841,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   value={searchQuery}
                   onChange={(e) => handleSearchChange(e.target.value)}
                   onKeyDown={handleSearchKeyDown}
-                  className="w-full pl-9 h-8 text-sm"
+                  className={cn('w-full pl-9 h-8 text-sm', PHONE_TOUCH_HEIGHT)}
                   role="combobox"
                   aria-autocomplete="list"
                   aria-controls={listboxId}
@@ -1855,7 +1895,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="mt-2 gap-1"
+                      className={cn('mt-2 gap-1', PHONE_TOUCH_HEIGHT)}
                       type="button"
                       disabled={creating}
                       onClick={() => handleCreateNew(searchQuery)}
@@ -1932,7 +1972,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   {hasDataSource && totalCount > filteredOptions.length && (
                     <button
                       type="button"
-                      className="w-full text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5"
+                      className={cn('w-full text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5', PHONE_TOUCH_HEIGHT)}
                       onClick={() => {
                         setIsOpen(false);
                         setIsPickerOpen(true);
@@ -1947,7 +1987,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   {canCreate && (
                     <button
                       type="button"
-                      className="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground"
+                      className={cn('w-full text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground', PHONE_TOUCH_HEIGHT)}
                       disabled={creating}
                       onClick={() => handleCreateNew(searchQuery)}
                     >
@@ -1962,6 +2002,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         </PopoverContent>
       </Popover>
 
+      {lookupScan}
       {singleClear}
 
       {/* "Browse All" button — classic lookups only; search fields open the
@@ -1970,7 +2011,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         <Button
           variant="outline"
           size="icon"
-          className="shrink-0"
+          className={cn('shrink-0', PHONE_TOUCH_SQUARE)}
           type="button"
           // Gated exactly like the main trigger (#2215) — pre-fix this button
           // opened the full unscoped table while the dependency was missing.

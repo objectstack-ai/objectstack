@@ -326,7 +326,9 @@ describe('[#15981] a D4 `sys_user_position` row spelling `platform_admin` confer
 
     const outcome = await attemptDecide(context, req.id);
 
-    expect(outcome.threw).toBe('FORBIDDEN');
+    // Another tenant's request is behind the wall the read door keeps, so a
+    // caller the override does not admit is answered as for a missing id.
+    expect(outcome.threw).toBe('REQUEST_NOT_FOUND');
     // The state half, asserted because a refusal that still moved the request
     // would be no refusal at all — and because `READ_BACK_FAILED` is exactly
     // what an ADMITTED cross-tenant write throws.
@@ -345,9 +347,10 @@ describe('[#15981] a D4 `sys_user_position` row spelling `platform_admin` confer
     const b = await openVictimRequest();
     const viaPlain = await attemptDecide(plain.context, b.id);
 
-    // The floor: a plain member of another tenant is refused. If this arm ever
-    // stops being FORBIDDEN, the comparison above is measuring nothing.
-    expect(viaPlain).toEqual({ threw: 'FORBIDDEN', status: 'pending', decided: false });
+    // The floor: a plain member of another tenant is refused — answered as for
+    // a missing id, since the request is behind the tenancy wall for them. If
+    // this arm ever stops being refused, the comparison above is measuring nothing.
+    expect(viaPlain).toEqual({ threw: 'REQUEST_NOT_FOUND', status: 'pending', decided: false });
     expect(viaName).toEqual(viaPlain);
   });
 });
@@ -431,9 +434,10 @@ describe('[#15981] CONTROL — a genuine Default Organization admin_full_access 
     expect(orgless.grants.posture).not.toBe('PLATFORM_ADMIN');
     expect(orgless.rung).toBe(false);
 
+    // No override, and no reader of another tenant's request: answered as for a missing id.
     await expect(
       svc.decideNode(req.id, { decision: 'approve', actorId: ATTACKER }, orgless.context),
-    ).rejects.toThrow(/^FORBIDDEN/);
+    ).rejects.toThrow(/^REQUEST_NOT_FOUND/);
     const [row] = await engine.find('sys_approval_request', { where: { id: req.id } });
     const actions = (await svc.listActions(req.id, SYS)).filter((a: any) => a.actor_id === ATTACKER);
     expect({ status: row?.status, decided: actions.length > 0 }).toEqual({ status: 'pending', decided: false });

@@ -317,6 +317,47 @@ describe('validateStackExpressions — description, params[].helpText and outcom
     expect(onObjectWrite.map((i) => i.where)).toEqual(["object 'crm_account' · action 'invite' description"]);
   });
 
+  // cloud#3281 (ruling A): `InlineActionSchema` picks `description`, so an
+  // inline sentence is judged by the same slot rules as a registered one —
+  // otherwise a text the registered door refuses would publish from a page.
+  it('judges an inline `properties.action` description like a registered one, locale map included', () => {
+    const button = (description: unknown) => ({
+      type: 'element:button',
+      properties: { label: 'Invite', action: { type: 'api', target: '/api/v1/invite', description } },
+    });
+    const page = pageWith([
+      button('Invite ${record.name}?'),
+      button({ en: 'Invite {{ record.name }}?', 'zh-CN': '邀请 ${record.name}？' }),
+      button(' '),
+      button('Sent to {{ result.email }}'),
+      button('Invite {{ record.name }} to this account.'),
+      button({ en: 'Sends an invitation e-mail.', 'zh-CN': '发送邀请邮件。' }),
+    ]);
+    const issues = runStackExpressionPasses({ objects, pages: [page] }, { runtimeWriteType: 'page' })
+      .filter((i) => /description/.test(i.where));
+    expect(issues.map((i) => [i.where, i.severity])).toEqual([
+      ["page 'account_home'.regions[0].components[0] (element:button) · action description", 'error'],
+      ["page 'account_home'.regions[0].components[1] (element:button) · action description.zh-CN", 'error'],
+      ["page 'account_home'.regions[0].components[2] (element:button) · action description", 'error'],
+      ["page 'account_home'.regions[0].components[3] (element:button) · action description", 'error'],
+    ]);
+    expect(issues[0]!.message).toContain("An action's `description`");
+    expect(issues[0]!.message).toContain('as `Invite {{ record.name }}?`');
+    expect(issues[2]!.message).toMatch(/^An action's `description` is blank/);
+  });
+
+  it('the publish gate answers an inline `${…}` description on a page write with one error and no advisory', () => {
+    const page = pageWith([{
+      type: 'element:button',
+      properties: { label: 'Invite', action: { type: 'api', target: '/api/v1/invite', description: 'Invite ${record.name}?' } },
+    }]);
+    const { errors, advisories } = runRuntimeAuthoringRules({ type: 'page', item: page, context: { objects } });
+    const copy = (f: { where: string }) => /description/.test(f.where);
+    expect(errors.filter(copy)).toHaveLength(1);
+    expect(errors.filter(copy)[0]!.where).toContain('(element:button) · action description');
+    expect(advisories.filter(copy)).toEqual([]);
+  });
+
   it('the publish gate answers each `${…}` with one error and no advisory', () => {
     const gate = (item: unknown) => {
       const { errors, advisories } = runRuntimeAuthoringRules({ type: 'action', item, context: { objects } });

@@ -1678,7 +1678,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 11,
+      "revision": 13,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1710,9 +1710,9 @@
       ],
       "acceptance": [
         {
-          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence, written for the end user: it says the action is turned off for this deployment and that an administrator can turn it on again under Setup › Packaged automation, and names no system table and no ADR (the engine's log line carries those) — and no side effect lands (mark_done's declared done/progress write never ran)",
+          "clause": "the REST door refuses a disabled packaged action 409 ACTION_DISABLED and dispatches NOTHING: status 409, code ACTION_DISABLED (registered in the ADR-0112 ledger, error-code-ledger.zod.ts), message = the engine's own describeDisabledAction sentence, written for the end user: it says the action is turned off for this deployment and that an administrator can turn it on again under Setup › Packaged Actions, and names no system table and no ADR (the engine's log line carries those) — and no side effect lands (mark_done's declared done/progress write never ran)",
           "oracle": "api",
-          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated. packaged-action-disabled-dispatch-live.dogfood.test.ts scores it over HTTP: the exact code, the sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged automation remedy, and no ledger table or ADR in it), and the real task re-read with done, progress and updated_at unchanged. packaged-activation-ledger-reach.dogfood.test.ts still asserts 409 and the code ACTION_DISABLED only",
+          "verify": "step-3 trace: 409 + code ACTION_DISABLED + the disabled-action sentence; follow-up reads show no task mutated. packaged-action-disabled-dispatch-live.dogfood.test.ts scores it over HTTP: the exact code, the sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged Actions remedy, and no ledger table or ADR in it), and the real task re-read with done, progress and updated_at unchanged. packaged-activation-ledger-reach.dogfood.test.ts still asserts 409 and the code ACTION_DISABLED only",
           "evidence": "the trace + the control re-reads"
         },
         {
@@ -1748,7 +1748,7 @@
         {
           "clause": "a disabled `type: flow` action is refused by its OWN switch, ahead of the type branch — the refusal is 409 ACTION_DISABLED on the action's own route (POST /api/v1/actions/showcase_task/showcase_bulk_reassign) with the turned-off sentence of acceptance[0], which names no action (describeDisabled ignores the name, packages/objectql/src/action-activation.ts), independent of anything the target flow's own ledger row says, and the target flow is left untouched",
           "oracle": "api",
-          "verify": "step-8 on /actions/showcase_task/showcase_bulk_reassign: status 409, body.error.code ACTION_DISABLED and body.error.message the turned-off sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged automation remedy). Do not look for the action's name in it: the sentence names none, and the live pin's expectDisabledSentence ignores the name too. The automation service is never consulted for the run, so showcase_reassign_wizard records no run from it",
+          "verify": "step-8 on /actions/showcase_task/showcase_bulk_reassign: status 409, body.error.code ACTION_DISABLED and body.error.message the turned-off sentence (first sentence \"This action is turned off for this deployment.\", the Setup › Packaged Actions remedy). Do not look for the action's name in it: the sentence names none, and the live pin's expectDisabledSentence ignores the name too. The automation service is never consulted for the run, so showcase_reassign_wizard records no run from it",
           "evidence": "the trace"
         }
       ],
@@ -1849,6 +1849,18 @@
           "date": "2026-11-01",
           "change": "QA run #28545 (W3-C1R) finding: acceptance[6] (clause and verify) expected ACTION_DISABLED 'naming showcase_bulk_reassign', but since #27842 the sentence names no action (action-activation.ts describeDisabled returns describeTurnedOffPackagedItem('action'), and packaged-action-disabled-dispatch-live.dogfood.test.ts expectDisabledSentence ignores its action argument). The clause now asks 409 ACTION_DISABLED with the turned-off sentence on the /actions/showcase_task/showcase_bulk_reassign route, and the target flow untouched. The status, the code and the own-switch ordering are kept; only the expectation that could never hold is replaced. Read from source at base 6b9c1ca991. Wave anchor #27377, wave-3 accuracy slice S9 (#28641); finding parked in anchor comment 6554042054",
           "ref": "#28545"
+        },
+        {
+          "revision": 12,
+          "date": "2026-11-02",
+          "change": "Re-measured against main after N-28/N-30 (#28818, #29264), at base dfbe34d887: the REST and MCP doors, the 409 ACTION_DISABLED, the D4 → activation → params → record order and the restart leg are all unchanged, so steps and clauses stand. fixtures.knownGaps[2] (new) marks the remedy half of acceptance[0] and [6] TRANSITIONAL: the served sentence (describeTurnedOffPackagedItem('action'), @objectstack/types) still names 'Setup › Packaged automation', which ADR-0146 D4/D11 retired; the action switch is Setup › Packaged actions. No clause is weakened: the sentence is still pinned as served. The wrong place is reported as a product defect for its own card, not fixed here",
+          "ref": "#28579"
+        },
+        {
+          "revision": 13,
+          "date": "2026-11-02",
+          "change": "The producer now names the live page: describeTurnedOffPackagedItem('action') (@objectstack/types) tells the reader an administrator can turn the action on again under Setup › Packaged Actions (nav_packaged_actions), not the retired Setup › Packaged automation page. acceptance[0] (clause and verify) and acceptance[6] (verify) re-point their remedy phrase to Setup › Packaged Actions, as fixtures.knownGaps[2] said they would, and that TRANSITIONAL entry is retired. The doors, the 409, the code and every ordering leg are unchanged; only the quoted remedy moved, and the live pin (packaged-action-disabled-dispatch-live.dogfood.test.ts expectDisabledSentence) asserts the same phrase",
+          "ref": "#29374"
         }
       ]
     },

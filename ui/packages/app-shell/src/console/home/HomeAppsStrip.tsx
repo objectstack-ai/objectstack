@@ -41,7 +41,8 @@ import { Link } from 'react-router-dom';
 import { LayoutGrid, Plus, Settings, Star } from 'lucide-react';
 import { cn } from '@object-ui/components';
 import { useDisplayLocale, useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
-import { appRouteSegment, resolveKeyedI18nLabel } from '../../utils/index.js';
+import { resolveKeyedI18nLabel } from '../../utils/index.js';
+import { appAddressSegment } from '../../utils/appRoute.js';
 import { getIcon } from '../../utils/getIcon.js';
 import { timeAgo } from '../../utils/relativeTime.js';
 import { TILE_OPENED_TIME_FORMAT } from './appLastOpened.js';
@@ -51,9 +52,9 @@ import { BRANDED_TILE_CLASSES, appTileColors, appTileStyle } from '../../layout/
 
 const COMPACT_LIMIT = 19;
 
-/** The 12 px links at the heading's right. */
+/** The 12 px links at the heading's right; 44 px tall below `sm`, the touch target. */
 const HEADER_LINK_CLASSES =
-  'inline-flex items-center gap-1.5 rounded-sm text-xs transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'inline-flex items-center gap-1.5 rounded-sm text-xs transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11';
 
 /**
  * One app's 56 px icon square, drawn from the app's branding (see the module
@@ -101,6 +102,7 @@ function LauncherAppIcon({ app, children }: { app: any; children?: ReactNode }) 
 
 export function HomeAppsStrip({
   apps,
+  routeApps,
   favorites,
   onBrowseMarketplace,
   isAdmin,
@@ -111,6 +113,14 @@ export function HomeAppsStrip({
   lastOpened,
 }: {
   apps: any[];
+  /**
+   * Every app the console's `/apps/SEGMENT` route resolves against: the
+   * metadata app list, hidden apps included. A tile links to its app's one
+   * address among THESE (`appAddressSegment`), never among `apps`: a package
+   * whose first app is hidden or withheld still opens that first app on its
+   * package id, so the tile list alone would misaddress the package's others.
+   */
+  routeApps: readonly any[];
   favorites: FavoriteItem[];
   onBrowseMarketplace: () => void;
   isAdmin: boolean;
@@ -224,9 +234,10 @@ export function HomeAppsStrip({
           return (
             <Link
               key={app.name}
-              // ADR-0048: the route segment is the package id, falling back to
-              // the app name for apps with none.
-              to={`/apps/${appRouteSegment(app)}`}
+              // ADR-0048: the app's one address — its package id, or its name
+              // when it is not its package's first app (the package id opens
+              // that first app instead).
+              to={`/apps/${appAddressSegment(routeApps, app)}`}
               className={TILE_CLASSES}
               data-testid={`app-tile-${app.name}`}
             >
@@ -300,7 +311,8 @@ export function HomeAppsStrip({
         <button
           type="button"
           onClick={() => setShowAll(false)}
-          className="mt-2.5 text-xs text-primary hover:underline"
+          className="mt-2.5 text-xs text-primary hover:underline max-sm:min-h-11 max-sm:min-w-11"
+          data-testid="apps-show-less"
         >
           {t('home.showLess', { defaultValue: 'Show less' })}
         </button>

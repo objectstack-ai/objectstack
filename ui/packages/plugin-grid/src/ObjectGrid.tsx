@@ -55,7 +55,6 @@ import {
   DataEmptyState, EmptyStateLink, resolveIcon,
   HorizontalOverflowBox,
   toast,
-  useRecordListFace, ActiveListRow, listRecordIdOf, RECORD_LIST_NARROW_COLUMN_COUNT,
 } from '@object-ui/components';
 import { resolveConditionalFormatting, declaredNameField, buildExportFileName, resolveAffordance, type SchemaLike, isExpandableFieldType, isUnmaterializedFieldType, readObjectSortability, isPlatformSortableField, filterPlatformSortableSort, filterRefusalSubject, FilterOperatorError, resolveRecordSourceConfig, resolveRecordSourceObjectName, partitionRowsByPredicate } from '@object-ui/core';
 import { usePermissions } from '@object-ui/permissions';
@@ -75,7 +74,7 @@ import { useRecordCrudVerdicts } from './hooks/useRecordCrudVerdicts';
 import { resolveLegacyRowActions } from './resolveLegacyRowActions';
 import { resolveBulkActions, resolvePromotedBulkParams } from './resolveBulkActions';
 import { partitionBulkRows } from './bulkEligibility';
-import { formatActionLabel } from './components/RowActionMenu';
+import { RowActionMenu, formatActionLabel } from './components/RowActionMenu';
 import { BulkActionBar } from './components/BulkActionBar';
 import { RowContextMenuItems, SelectionContextMenuItems } from './components/RowContextMenu';
 import { BulkActionDialog } from './components/BulkActionDialog';
@@ -148,38 +147,6 @@ export function parseSchemaSort(sort: unknown): TableSortItem[] {
     }
   }
   return items;
-}
-
-/**
- * Whether a column draws an avatar: by its own type, or by its field's
- * declared type (a column's `type` is only the type its editor needs).
- */
-function isAvatarColumn(column: { accessorKey?: string; type?: string }, fieldTypeOf: (key: string) => unknown): boolean {
-  return column.type === 'avatar' || (!!column.accessorKey && fieldTypeOf(column.accessorKey) === 'avatar');
-}
-
-/**
- * The columns of a list a record pane has narrowed to its `columns` face
- * (objectstack#27545): its first {@link RECORD_LIST_NARROW_COLUMN_COUNT} view
- * columns that are not avatars, in the view's order, and its row actions.
- *
- * The row-actions column keeps its header's name for assistive technology but
- * draws no label: the column is as wide as its widest cell, and beside a pane
- * the label alone (wider than a row's ⋮) pushed the third column under it.
- */
-function narrowListColumns<C extends { accessorKey?: string; type?: string; header?: string; headerIcon?: React.ReactNode }>(
-  columns: readonly C[],
-  fieldTypeOf: (key: string) => unknown,
-): C[] {
-  let kept = 0;
-  return columns.flatMap((column) => {
-    if (column.accessorKey === '_actions') {
-      return [{ ...column, header: '', headerIcon: <span className="sr-only">{column.header}</span> }];
-    }
-    if (isAvatarColumn(column, fieldTypeOf) || kept >= RECORD_LIST_NARROW_COLUMN_COUNT) return [];
-    kept += 1;
-    return [column];
-  });
 }
 
 /**
@@ -735,9 +702,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   const metadata = useMetadata();
   const [objectSchema, setObjectSchema] = useState<any>(null);
   const [useCardView, setUseCardView] = useState(false);
-  // objectstack#27545 — the face a record pane beside this list narrowed it
-  // to: `full` under no pane.
-  const listFace = useRecordListFace();
   // objectstack#28434 — the record URL a row links to, for its context menu's
   // "Open in new tab": the host's own builder, the one `LinkCell` draws the
   // row's anchor from.
@@ -856,8 +820,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    */
   const objectFields: Record<string, any> | undefined =
     objectSchema?.fields ?? hostObjectFields ?? undefined;
-  /** A field's declared type, for the narrowed faces' avatar rule (objectstack#27545). */
-  const fieldTypeOf = (key: string): unknown => objectFields?.[key]?.type;
   /**
    * Are this grid's OBJECT field types still unknown (objectui#10657, which
    * folded objectui#10706)? True while an object definition is expected (an
@@ -2701,7 +2663,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // and the whole block failed to render.
     caption: resolveInlineI18nLabel(schema.label, displayLocale)
       || resolveInlineI18nLabel(schema.title, displayLocale),
-    columns: listFace === 'columns' ? narrowListColumns(tableColumns, fieldTypeOf) : tableColumns,
+    columns: tableColumns,
     data,
     pagination: paginationEnabled,
     pageSize: manualPaginationOn ? manualPageSize : pageSize,
@@ -3253,8 +3215,8 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // views: the plain list below, and a grouped list on a phone (the grouped
   // `gridContent`), which draws each group's band followed by its rows as
   // these same cards rather than keeping the desktop table.
-  const buildMobileCardRenderer = ({ compact = false }: { compact?: boolean } = {}) => {
-    const displayColumns = generateColumns().filter((c) => c.accessorKey !== '_actions' && !(compact && isAvatarColumn(c, fieldTypeOf)));
+  const buildMobileCardRenderer = () => {
+    const displayColumns = generateColumns().filter((c) => c.accessorKey !== '_actions');
 
     // Build a lookup of column metadata for smart rendering
     const colMap = new Map<string, ObjectGridColumnDraft>();
@@ -3292,61 +3254,6 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // its `cell` draws the mask.
     const isMaskedCardColumn = (key: string) =>
       isMaskedGridColumn(colMap.get(key)?.type, objectFields?.[key]?.type, objectTypesPending);
-
-    // objectstack#27545 — the card row of a list a record pane narrowed below
-    // its columns face: the name and two chips, the open record highlighted
-    // and kept in view as the pane steps.
-    if (compact) {
-      const chipColumns = bodyColumns.slice(0, 2);
-      return (row: any, idx: number) => {
-        const recordId = listRecordIdOf(row);
-        return (
-          <ActiveListRow<HTMLDivElement> key={recordId ?? idx} recordId={recordId}>
-            {(active, activeRef) => (
-              <div
-                ref={activeRef}
-                role="button"
-                tabIndex={0}
-                data-testid="grid-compact-card"
-                data-active-record={active ? '' : undefined}
-                aria-current={active ? 'true' : undefined}
-                className="cursor-pointer rounded-md border bg-card px-3 py-2 transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[active-record]:border-primary/40 data-[active-record]:bg-primary/10"
-                onClick={(e) => navigation.handleClick(row, e)}
-                onKeyDown={(e) => {
-                  if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
-                  e.preventDefault();
-                  navigation.handleClick(row);
-                }}
-              >
-                {titleKey !== undefined && (
-                  <div data-testid="grid-card-title" className="truncate text-sm font-medium">
-                    {isMaskedCardColumn(titleKey)
-                      ? (titleCol ? titleCol.cell?.(row[titleKey], row) : <MaskedCellRenderer value={row[titleKey]} />)
-                      : (coerceToSafeValue(row[titleKey]) ?? '—')}
-                    {rowAdornment ? <span className="ml-1.5 inline-flex align-middle">{rowAdornment(row)}</span> : null}
-                  </div>
-                )}
-                <div className="mt-1 flex min-w-0 flex-wrap gap-1 empty:hidden">
-                  {chipColumns.map((col: any) => {
-                    const val = row[col.accessorKey];
-                    if ((val == null || val === '') && !isMaskedCardColumn(col.accessorKey)) return null;
-                    return (
-                      <span
-                        key={col.accessorKey}
-                        data-testid="grid-compact-card-chip"
-                        className="inline-flex min-w-0 max-w-full items-center truncate rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground"
-                      >
-                        {col.cell ? col.cell(val, row) : String(coerceToSafeValue(val) ?? '')}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </ActiveListRow>
-        );
-      };
-    }
 
     // objectstack#28484 — a phone's card row is the board's list row: the
     // title, ONE subtitle line and ONE status chip at the right, with no
@@ -3408,15 +3315,57 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
               {cardCell(statusCol, row)}
             </div>
           )}
+          {/* objectstack#29150 — the row's actions, the desktop row's own
+              resolver and handlers in one 44 px "⋮" (inline budget 0, as the
+              row context menu reads it). The menu stops its own clicks, so a
+              tap on the card still opens the record; `-my-2` keeps the 44 px
+              target from growing the card. */}
+          {rowOffersAction(row) && (
+            <div data-testid="grid-card-actions" className="-my-2 shrink-0">
+              <RowActionMenu {...rowActionMenuProps(row)} maxInlineActions={0} />
+            </div>
+          )}
         </div>
       );
     };
   };
 
-  // A phone draws its own cards; a list a record pane narrowed draws card rows.
-  const cardFace = useCardView || listFace === 'cards';
+  // A phone draws its own cards.
+  const cardFace = useCardView;
   if (cardFace && data.length > 0 && !isGrouped) {
-    const renderMobileCard = buildMobileCardRenderer({ compact: !useCardView });
+    const renderMobileCard = buildMobileCardRenderer();
+
+    // The card list's pager. Under server pagination `data` is one page of
+    // the match set, so without it a card list never reached past its first
+    // page. It turns the same page the table's pager turns, with the table's
+    // words, at a touch size, and returns the reader to the top of the list.
+    const cardPageCount = manualPaginationOn && typeof resolvedTotalMatching === 'number' && manualPageSize > 0
+      ? Math.ceil(resolvedTotalMatching / manualPageSize)
+      : 1;
+    const cardPage = Math.min(Math.max(1, manualPage ?? 1), cardPageCount);
+    const goToCardPage = (next: number, from: HTMLElement) => {
+      from.closest('[data-testid="object-grid-card-scroller"]')?.scrollTo({ top: 0 });
+      manualOnPageChange(Math.min(cardPageCount, Math.max(1, next)));
+    };
+    const cardPager = cardPageCount > 1 ? (
+      <div data-testid="object-grid-card-pager" className="flex items-center justify-center gap-1 px-2 pb-2">
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(1, e.currentTarget)} disabled={cardPage === 1} aria-label={t('table.firstPage')}>
+          <ChevronsLeft className="h-4 w-4" />
+        </Button>
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(cardPage - 1, e.currentTarget)} disabled={cardPage === 1} aria-label={t('table.previousPage')}>
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="px-2 text-xs text-muted-foreground tabular-nums" data-testid="object-grid-card-page-info">
+          {t('table.pageInfo', { current: cardPage, total: cardPageCount })}
+        </span>
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(cardPage + 1, e.currentTarget)} disabled={cardPage === cardPageCount} aria-label={t('table.nextPage')}>
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+        <Button variant="outline" size="icon" className="h-11 w-11" onClick={(e) => goToCardPage(cardPageCount, e.currentTarget)} disabled={cardPage === cardPageCount} aria-label={t('table.lastPage')}>
+          <ChevronsRight className="h-4 w-4" />
+        </Button>
+      </div>
+    ) : null;
 
     // objectui#13134 — the card list scrolls in a box of its own, as the
     // table does in its own body. Its host bounds it (`ListView`'s view area
@@ -3441,6 +3390,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         <div className="space-y-2 p-2">
           {data.map(renderMobileCard)}
         </div>
+        {cardPager}
         </div>
         {navigation.isOverlay && (
           <NavigationOverlay
@@ -3825,7 +3775,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
         data-testid="grouped-grid-card-scroller"
       >
         {(() => {
-          const renderMobileCard = buildMobileCardRenderer({ compact: !useCardView });
+          const renderMobileCard = buildMobileCardRenderer();
           return groupBandsOf(pagedGroups).map((group) => (
             <div key={group.key} data-testid="grouped-grid-card-band">
               {group.band}

@@ -154,7 +154,8 @@ export function ObjectViewTitleSwitcher({
             : t('view.switcher.pin', { defaultValue: 'Pin: open this view by default' });
         // Shown on hover or focus, and always while set, so a starred or pinned
         // view says so without a hover.
-        const reveal = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100';
+        // A touch screen has no hover, so there they always show.
+        const reveal = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100';
         return (
             <div
                 key={`${section}:${view.id}`}
@@ -167,7 +168,7 @@ export function ObjectViewTitleSwitcher({
                     onClick={() => choose(view.id)}
                     aria-current={active ? 'true' : undefined}
                     className={cn(
-                        'flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm',
+                        'flex min-w-0 flex-1 items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm max-sm:min-h-11',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         active ? 'font-medium text-foreground' : 'text-foreground/90',
                     )}
@@ -188,7 +189,7 @@ export function ObjectViewTitleSwitcher({
                         aria-disabled={inMenu || undefined}
                         onClick={() => { if (!inMenu) favorites.toggle(view.id, view.label); }}
                         className={cn(
-                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm',
+                            'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm max-sm:h-11 max-sm:w-11',
                             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                             inMenu
                                 ? 'cursor-default text-muted-foreground/40'
@@ -207,7 +208,7 @@ export function ObjectViewTitleSwitcher({
                     aria-pressed={isPinned}
                     onClick={() => onPinnedViewChange(isPinned ? null : view.id)}
                     className={cn(
-                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground',
+                        'flex h-7 w-7 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground max-sm:h-11 max-sm:w-11',
                         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                         isPinned ? 'text-foreground' : reveal,
                     )}
@@ -229,7 +230,8 @@ export function ObjectViewTitleSwitcher({
                         // No negative margin: the title's width is its content's, and a
                         // margin pulled out of it truncated the label it was sized for.
                         className={cn(
-                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left',
+                            // Below `sm` the trigger is a 44 px touch target.
+                            'inline-flex min-w-0 max-w-full items-center gap-1 rounded-md px-1 text-left max-sm:min-h-11 max-sm:min-w-11',
                             // Inset: the title clips what overflows it (`truncate`), an outer ring included.
                             'hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring',
                             open && 'bg-muted',
@@ -253,7 +255,7 @@ export function ObjectViewTitleSwitcher({
                             placeholder={t('view.searchViews', { defaultValue: 'Search views' })}
                             aria-label={t('view.searchViews', { defaultValue: 'Search views' })}
                             data-testid="list-view-switcher-search"
-                            className="h-8"
+                            className="h-8 max-sm:h-11"
                         />
                     </div>
                     <div className="max-h-80 overflow-y-auto p-1">
@@ -295,7 +297,7 @@ export function ObjectViewTitleSwitcher({
                                     type="button"
                                     data-testid="list-view-switcher-new"
                                     onClick={() => { onOpenChange(false); onAddView(); }}
-                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
                                 >
                                     <Plus className="h-4 w-4 text-muted-foreground" />
                                     {t('view.addNewView', { defaultValue: 'Add new view' })}
@@ -306,7 +308,7 @@ export function ObjectViewTitleSwitcher({
                                     type="button"
                                     data-testid="list-view-switcher-manage"
                                     onClick={() => { onOpenChange(false); onManageViews(); }}
-                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring max-sm:min-h-11"
                                 >
                                     <ListOrdered className="h-4 w-4 text-muted-foreground" />
                                     {t('view.manageViews', { defaultValue: 'Manage views' })}

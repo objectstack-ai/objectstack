@@ -1081,10 +1081,16 @@ describe('objectui#6024 — the derivation this pin is built on', () => {
    * it newly admits are admitted by relaxation.
    *
    * The control is the `plugin-form` entries' own shape with ONE thing changed:
-   * a `recordId` the fixture does not serve. Same renderer, same object, same
-   * mode, same harness — so what it measures is the record and nothing else.
-   * Its controls still render, which is asserted first: without that, a form
-   * that painted nothing would satisfy the line below while measuring nothing.
+   * a `recordId` whose record holds none of the fixture's values. Same
+   * renderer, same object, same mode, same harness — so what it measures is the
+   * record and nothing else. Its controls still render, which is asserted
+   * first: without that, a form that painted nothing would satisfy the line
+   * below while measuring nothing.
+   *
+   * That record is an EMPTY one, answered by `findOne` for this case's id only.
+   * It cannot be a record the fixture lacks: `findOne` answers `null` for such
+   * an id, and an edit form draws the record not-found state for `null`
+   * (objectstack#29354), with no controls to measure.
    *
    * (`mode: 'create'` was tried first and is NOT usable here: it paints its
    * shell before the object schema resolves, so `renderEntry` — which settles
@@ -1092,13 +1098,23 @@ describe('objectui#6024 — the derivation this pin is built on', () => {
    * its first paint until the fetch lands, which is why this shape settles.)
    */
   it('the provenance instrument still fails on a surface with no record behind it', async () => {
+    // An empty record for this case's id alone; every other id reads the fixture.
+    // Typed as a fixture row because the spy keeps `findOne`'s signature; it
+    // carries none of a row's values, which is the point.
+    const findOne = galleryDataSource.findOne;
+    const EMPTY_RECORD = {} as (typeof USERS_ROWS)[number];
+    const emptyRecord = vi
+      .spyOn(galleryDataSource, 'findOne')
+      .mockImplementation(async (objectName, id) =>
+        String(id) === 'empty-record' ? EMPTY_RECORD : findOne(objectName, id),
+      );
     // The entries' spelling: the props in the `properties` bag (objectui#10859 batch 4).
     const r = await renderEntry({
       type: 'object-form',
       properties: {
         objectName: 'users',
         mode: 'edit',
-        recordId: 'no-such-record',
+        recordId: 'empty-record',
         fields: ['name', 'email', 'department'],
       },
     });
@@ -1111,6 +1127,7 @@ describe('objectui#6024 — the derivation this pin is built on', () => {
       expect(carriesFixtureRecord(r)).toBe(false);
     } finally {
       teardown(r);
+      emptyRecord.mockRestore();
     }
   });
 

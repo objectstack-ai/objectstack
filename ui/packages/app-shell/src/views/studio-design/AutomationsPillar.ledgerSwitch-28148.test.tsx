@@ -19,9 +19,13 @@
  *  - under a wall a non-operator gets a disabled switch with the console's
  *    sentence, and nothing is sent; `single` and the operator under the same
  *    wall (CONTROLS) get a live switch;
- *  - a refusal is the server's sentence, verbatim;
+ *  - a refusal is the server's sentence, verbatim, announced as an alert
+ *    (objectstack#29139), and announced again when the next flip is refused;
  *  - a writable package's flow (CONTROL) keeps its definition switch and its
- *    Delete, with no ledger switch.
+ *    Delete, with no ledger switch;
+ *  - a keyboard flip keeps focus on the switch while the request is in flight
+ *    and after its answer lands, accepted or refused, and a second Space in
+ *    flight sends nothing (objectstack#29228).
  *
  * The harness is `AutomationsPillar.deleteFlow-27356`'s: the metadata server
  * doubled at the client, the `/automation` doors doubled at `fetch`.
@@ -31,6 +35,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -111,6 +116,8 @@ const doors = {
   enabled: true,
   unbound: null as null | { unboundCause: string; reason: string },
   toggle: null as null | { status: number; body: unknown },
+  // Held until released: the toggle request is in flight meanwhile.
+  toggleGate: null as null | Promise<void>,
 };
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -123,6 +130,7 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
     return json(200, { success: true, data: { flows: [row] } });
   }
   if (url.endsWith('/automation/approval/toggle')) {
+    if (doors.toggleGate) await doors.toggleGate;
     if (doors.toggle) return json(doors.toggle.status, doors.toggle.body);
     doors.enabled = (JSON.parse(String(init?.body)) as { enabled: boolean }).enabled;
     return json(200, { success: true, data: { name: 'approval', enabled: doors.enabled } });
@@ -140,6 +148,7 @@ beforeEach(() => {
   doors.enabled = true;
   doors.unbound = null;
   doors.toggle = null;
+  doors.toggleGate = null;
   fetchMock.mockClear();
   for (const fn of Object.values(mockClient)) (fn as unknown as { mockClear: () => void }).mockClear();
   vi.mocked(toast.success).mockClear();
@@ -242,6 +251,42 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     expect(toast.success).not.toHaveBeenCalled();
   });
 
+  // objectstack#29139 — the refusal is announced, as Setup › Packaged
+  // automation announced it: the sentence is an alert, and nothing is one
+  // before a refusal or while the next flip is in flight.
+  it('announces the subflow guard\'s 409: one alert, the sentence verbatim, and again on a second refusal', async () => {
+    const sentence =
+      "Flow 'approval' cannot be disabled while 1 packaged flow still calls it as a subflow: 'notify_owner'. " +
+      'Disabling it would break that caller mid-run at its subflow node with a late, inexplicable failure ' +
+      "(ADR-0126 §7.3). Switch 'notify_owner' off first — or leave this one armed.";
+    doors.toggle = { status: 409, body: { success: false, error: { code: 'DELETE_RESTRICTED', message: sentence } } };
+    mount();
+    const sw = await ledgerSwitch();
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    fireEvent.click(sw);
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toBe(sentence);
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.getByTestId('studio-refusal')).toContainElement(alert);
+
+    // Flipped again and refused with the same sentence: the strip leaves while
+    // the request is in flight, and the alert that comes back is a new element,
+    // which is what makes the same sentence announced a second time.
+    let release!: () => void;
+    doors.toggleGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    fireEvent.click(screen.getByTestId('auto-ledger-switch'));
+    await waitFor(() => expect(calls('/automation/approval/toggle')).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    release();
+    const again = await screen.findByRole('alert');
+    expect(again).not.toBe(alert);
+    expect(again.textContent).toBe(sentence);
+    expect(screen.getByTestId('auto-ledger-switch')).toHaveAttribute('aria-checked', 'true');
+  });
+
   it('a writable package\'s flow keeps its definition switch and Delete, with no ledger switch', async () => {
     mount(false);
     expect(await screen.findByTestId('auto-canvas-caption', undefined, { timeout: 8000 })).toHaveTextContent('Approval');
@@ -254,5 +299,79 @@ describe('Automations — the ledger switch on a read-only package (ADR-0146 D4)
     expect(calls('/toggle')).toHaveLength(0);
     fireEvent.pointerDown(await screen.findByTestId('auto-item-more'), { button: 0, ctrlKey: false });
     expect(await screen.findByTestId('auto-item-delete')).toBeInTheDocument();
+  });
+});
+
+// objectstack#29228 — a focused control that turns `disabled` drops focus to
+// the page, and nothing hands it back. In flight the switch is refused to a
+// press but stays focusable, so a keyboard author's focus never leaves it.
+// A browser runs the HTML focus fixup: a focused control that turns `disabled`
+// drops focus to the body (measured in Chromium 153, and not handed back when
+// it is enabled again). happy-dom keeps focus on it, so the test runs the
+// fixup on the switch the way the browser does, else the focus pins could not
+// fail. (happy-dom's `blur()` does nothing on a disabled control, so focus is
+// moved to the body itself.)
+function runFocusFixup(el: HTMLElement): () => void {
+  const observer = new MutationObserver(() => {
+    if (el.hasAttribute('disabled') && document.activeElement === el) document.body.focus();
+  });
+  observer.observe(el, { attributes: true, attributeFilter: ['disabled'] });
+  return () => observer.disconnect();
+}
+
+describe('Automations — the ledger switch keeps keyboard focus across a flip (objectstack#29228)', () => {
+  const subflowSentence =
+    "Flow 'approval' cannot be disabled while 1 packaged flow still calls it as a subflow: 'notify_owner'.";
+
+  it.each([
+    ['accepted', null],
+    ['refused (409)', { status: 409, body: { success: false, error: { code: 'DELETE_RESTRICTED', message: subflowSentence } } }],
+  ])('a keyboard flip that is %s leaves focus on the switch, and a second Space in flight sends nothing', async (_answer, refusal) => {
+    doors.toggle = refusal;
+    let release!: () => void;
+    doors.toggleGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const user = userEvent.setup();
+    mount();
+    const sw = await ledgerSwitch();
+    const stopFixup = runFocusFixup(sw);
+    sw.focus();
+    expect(document.activeElement).toBe(sw);
+
+    await user.keyboard(' ');
+    await waitFor(() => expect(calls('/automation/approval/toggle')).toHaveLength(1));
+    await waitFor(() => expect(sw).toHaveAttribute('aria-disabled', 'true'));
+    // In flight: still focused, refused to a press, still focusable.
+    expect(document.activeElement).toBe(sw);
+    expect(sw).toBeEnabled();
+    await user.keyboard(' ');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls('/automation/approval/toggle')).toHaveLength(1);
+
+    release();
+    await waitFor(() => expect(sw).not.toHaveAttribute('aria-disabled'));
+    if (refusal) {
+      expect((await screen.findByRole('alert')).textContent).toBe(subflowSentence);
+      expect(sw).toHaveAttribute('aria-checked', 'true');
+    } else {
+      await waitFor(() => expect(sw).toHaveAttribute('aria-checked', 'false'));
+    }
+    // The answer landed on the same switch, and focus is still on it.
+    expect(screen.getByTestId('auto-ledger-switch')).toBe(sw);
+    expect(document.activeElement).toBe(sw);
+    stopFixup();
+  });
+
+  it('a walled switch stays disabled, out of the tab order, and described by its reason', async () => {
+    posture = 'group';
+    operator = false;
+    mount();
+    const sw = await ledgerSwitch();
+    expect(sw).toBeDisabled();
+    expect(sw).not.toHaveAttribute('aria-disabled');
+    expect(sw.getAttribute('aria-describedby')).toContain(screen.getByTestId('auto-ledger-walled-reason').id);
+    sw.focus();
+    expect(document.activeElement).not.toBe(sw);
   });
 });

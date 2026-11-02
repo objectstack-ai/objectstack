@@ -66,6 +66,14 @@ export interface RecordChatterPanelProps {
   activityDenied?: boolean;
   /** The same, for the feed's comment read. */
   commentsDenied?: boolean;
+  /** The feed's activity read failed (5xx, network); forwarded to the
+   *  timeline, which shows a load-failure notice with a Retry for it
+   *  (objectstack#29188). */
+  activityFailed?: boolean;
+  /** The same, for the feed's comment read. */
+  commentsFailed?: boolean;
+  /** Read the failed feed reads again; forwarded to the timeline's Retry. */
+  onRetryFeed?: () => void;
   className?: string;
 }
 
@@ -99,6 +107,9 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
   onUploadAttachments,
   activityDenied,
   commentsDenied,
+  activityFailed,
+  commentsFailed,
+  onRetryFeed,
   className,
 }) => {
   const position = config?.position ?? 'right';
@@ -125,10 +136,10 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
    */
   const feedAria = useRecordAriaProps(config?.feed?.aria);
 
-  // A refused read leaves the count unknown, not zero (see the timeline's
-  // header), so the collapsed toggle names the panel without one.
+  // A refused or failed read leaves the count unknown, not zero (see the
+  // timeline's header), so the collapsed toggle names the panel without one.
   const showLabel =
-    activityDenied || commentsDenied
+    activityDenied || commentsDenied || activityFailed || commentsFailed
       ? t('detail.openDiscussion')
       : t('detail.showDiscussion', { count: items.length });
 
@@ -213,6 +224,9 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               emptyLabel={t('detail.noCommentsYet')}
               activityDenied={activityDenied}
               commentsDenied={commentsDenied}
+              activityFailed={activityFailed}
+              commentsFailed={commentsFailed}
+              onRetryFeed={onRetryFeed}
               className="border-0 shadow-none"
             />
           </div>
@@ -277,6 +291,9 @@ export const RecordChatterPanel: React.FC<RecordChatterPanelProps> = ({
               emptyLabel={t('detail.noCommentsYet')}
               activityDenied={activityDenied}
               commentsDenied={commentsDenied}
+              activityFailed={activityFailed}
+              commentsFailed={commentsFailed}
+              onRetryFeed={onRetryFeed}
             />
           </div>
         </div>

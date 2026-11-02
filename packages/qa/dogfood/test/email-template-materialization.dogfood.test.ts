@@ -35,9 +35,12 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
+import { declaredOverride, ensurePair, inPair } from './customization-pair.js';
 import { EmailServicePlugin } from '@objectstack/plugin-email';
 import { emailTemplateFixtureStack, etPasswordReset } from './fixtures/email-template-materialization-fixture.js';
 
+/** The fixture app that ships the authored `auth.password_reset`. */
+const FIXTURE = 'com.dogfood.email-template-fixture';
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 
 /**
@@ -120,10 +123,13 @@ describe('objectstack verify EMAIL TEMPLATE: authored template materializes and 
 
   it('a Studio save over the authored template sends on the very next mail, with no restart', async () => {
     const token = await stack.signIn();
-    const put = await stack.apiAs(token, 'PUT', '/meta/email_template/auth.password_reset', {
+    // [#28576] ADR-0146 D11: the Studio save of a packaged item goes into the
+    // app's `.custom` pair, declaring the app's template it overrides.
+    await ensurePair(stack, token, FIXTURE);
+    const put = await stack.apiAs(token, 'PUT', inPair('/meta/email_template/auth.password_reset', FIXTURE), declaredOverride({
       ...etPasswordReset,
       subject: 'Studio reset for {{user.name}}',
-    });
+    }, FIXTURE, '0.0.0'));
     expect(put.status, await put.clone().text()).toBe(200);
 
     const email = (await stack.kernel.getServiceAsync('email')) as any;

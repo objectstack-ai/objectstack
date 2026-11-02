@@ -144,7 +144,7 @@ import { buildEvalUser, buildProvenance, buildSession, buildUser } from './engin
 // [#25522 cut 10] The write path's reference check and the caller's read of a
 // master-detail header; the methods of the same names below hand each body the
 // members it reads (`ReferentialIntegrityHost`).
-import { assertReferencesResolve, masterDetailHeadersCallerReads } from './engine-referential-integrity.js';
+import { assertReferencesResolve, masterDetailHeadersCallerReads, type StoredReferenceRows } from './engine-referential-integrity.js';
 // [#25522 cut 11] File-field hydration on read; the methods of the same names
 // below hand each body the members it reads (`FileReferenceHydrationHost`).
 import { callerMayReadSysFile, readParentDerivedFiles, resolveFileReferences, servableFileRows, serveRefusedFileHydration } from './engine-file-reference-hydration.js';
@@ -201,7 +201,7 @@ import {
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
-import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -1806,23 +1806,69 @@ export function declaredMultiValued(field: { type?: unknown; multiple?: unknown 
  * materialized default included, was inert: a parent delete left its children
  * holding the deleted id.
  *
- * ⛔ `user` stays out. It stores like a `lookup`, but the spec's parse puts it
- * on the other side of the line and materializes no `deleteBehavior` on it, so
- * no `user` field declares a delete outcome by default. Moving it is a change
- * to the declaration, made in the spec, never here.
+ * `user` is not a member of this set: see {@link USER_REFERENCE_TYPE}, which
+ * takes part only when it declares a delete outcome of its own.
  */
 const DELETE_SEMANTICS_REFERENCE_TYPES: ReadonlySet<string> = new Set(['master_detail', 'lookup', 'tree']);
 
 /**
- * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}? This
+ * [#29253] A `user` field takes part in the referential delete walk when, and
+ * only when, it DECLARES a `deleteBehavior` (one of the enum's three values).
+ *
+ * It stores like a `lookup` (the target is fixed to `sys_user` by the type,
+ * {@link referenceTargetOf}), but the spec's parse materializes no
+ * `deleteBehavior` on it: a `user` field that authors nothing declares no
+ * delete outcome, so deleting the user leaves it as it was, exactly as before.
+ * A `user` field that authors one is a declaration the spec accepts and
+ * round-trips, and the walk used to read it never, so an authored `restrict`
+ * refused nothing and an authored `cascade` deleted nothing. It now reads like
+ * a `lookup`'s authored value: `cascade` deletes the rows holding the deleted
+ * user, `set_null` clears them (on a multi-valued field, removes the member),
+ * and `restrict` refuses the delete with the walk's own `DELETE_RESTRICTED`;
+ * a `set_null` on a REQUIRED `user` field escalates to that refusal as a
+ * required `lookup`'s does.
+ *
+ * Every door that deletes a user reaches this walk: better-auth deletes the
+ * user row (admin remove-user, self delete-user) through the plugin-auth
+ * adapter's `engine.delete` by id, and the generic data doors refuse a
+ * caller-context `sys_user` delete before it (ADR-0092 D2).
+ *
+ * ⛔ No default is invented here. "Absent" stays outside the walk, because the
+ * spec's parse decides what a bare `user` field declares, not this file.
+ */
+const USER_REFERENCE_TYPE = 'user';
+const DECLARED_DELETE_BEHAVIORS: ReadonlySet<string> = new Set(['set_null', 'cascade', 'restrict']);
+
+/**
+ * [#22957] Does `fdef` belong to {@link DELETE_SEMANTICS_REFERENCE_TYPES}, or
+ * [#29253] is it a `user` field that declares a `deleteBehavior`
+ * ({@link USER_REFERENCE_TYPE})? This
  * is the ONE family test every reader of the referential delete walk asks:
  * {@link ObjectQL.cascadeRelationBehavior}, through it the collection walk and
  * the dependents walk, and {@link ObjectQL.planCascadeAtomicity}. So the walk
  * that runs and the verdict on whether it runs as one unit of work cannot
  * disagree about which relations take part. ⛔ Never a type literal at a site.
  */
-function statesDeleteSemantics(fdef: { type?: unknown } | null | undefined): boolean {
-  return typeof fdef?.type === 'string' && DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+function statesDeleteSemantics(fdef: { type?: unknown; deleteBehavior?: unknown } | null | undefined): boolean {
+  if (typeof fdef?.type !== 'string') return false;
+  if (fdef.type === USER_REFERENCE_TYPE) {
+    return typeof fdef.deleteBehavior === 'string' && DECLARED_DELETE_BEHAVIORS.has(fdef.deleteBehavior);
+  }
+  return DELETE_SEMANTICS_REFERENCE_TYPES.has(fdef.type);
+}
+
+/**
+ * [#29253] The object a delete-walk relation points at. The `reference`
+ * carrier is read through the one arbiter ({@link referenceCarrierOf}), so an
+ * unreadable carrier still throws and an absent one still answers `undefined`.
+ * A `user` field's target is fixed by its type, so it answers `sys_user`
+ * ({@link referenceTargetOf}) whether or not the carrier spells it: a raw
+ * `{ type: 'user' }` registration names no `reference` and still references a
+ * user.
+ */
+function deleteWalkTargetOf(fdef: { type?: unknown } | null | undefined, reader: string): string | undefined {
+  const carrier = referenceCarrierOf(fdef, reader);
+  return fdef?.type === USER_REFERENCE_TYPE ? referenceTargetOf(fdef) : carrier;
 }
 
 /**
@@ -10403,10 +10449,28 @@ export class ObjectQL implements IObjectQLEngine {
    *   would turn an ordering detail into a boot failure. This leaves a real
    *   residual — an `isSystem` caller can still write a dangling reference —
    *   which is recorded on the issue rather than silently accepted.
+   *   [#28881] ⛔ Except a flow run's elevated write (`runAs: 'system'`):
+   *   its context carries the flow-write mark (`keepsFlowWriteReferenceCheck`,
+   *   `@objectstack/core`, set by `resolveRunDataContext` in
+   *   service-automation) and is checked like a user write. Its elevation is
+   *   for authorization (other people's rows, past RLS and FLS), never for a
+   *   link to a row that does not exist, and it keeps every authorization
+   *   exemption `isSystem` gives it. A write it sets off (a hook's `ctx.api`,
+   *   its `sudo()`, a cascade leg) spreads that context and is checked as
+   *   the flow's own.
    * - **Empty values are not references.** `null` / `undefined` / `''` mean
    *   "no link", which is what `deleteBehavior: 'set_null'` produces.
    * - **Already-expanded objects are skipped.** A read round-trip can hand back
    *   `{id, name, …}` in the slot; that is not an id write.
+   * - **A value the row already stores is not the write's (#29062).** The
+   *   check judges only the references a write ADDS. An update's `storedRows`
+   *   (the by-id prior row; a predicate update's matched rows) forgive a
+   *   refused value, or a multi-valued member, that every one of those rows
+   *   already holds: an edit form carries the whole record back, and a stored
+   *   id that has since stopped resolving (the delete walk leaves a `user`
+   *   value in place, `DELETE_SEMANTICS_REFERENCE_TYPES`) is not the editor's
+   *   to answer for. A value new to any of the rows is refused as before, and
+   *   an insert has no stored rows, so every value it supplies is judged.
    *
    * ## Why the probe bypasses RLS — and why it keeps the tenant wall
    *
@@ -10461,13 +10525,14 @@ export class ObjectQL implements IObjectQLEngine {
     supplied: Record<string, unknown> | null | undefined,
     context: any,
     msgCtx?: { locale?: string; translate?: any; objectName?: string },
+    storedRows?: StoredReferenceRows,
   ): Promise<void> {
     // [#25522 cut 10] The body moved to `engine-referential-integrity.ts` (see `ReferentialIntegrityHost`).
     const host: ThisParameterType<typeof assertReferencesResolve> = {
       masterDetailHeaderExists: (...a) => this.masterDetailHeaderExists(...a),
       referenceExists: (...a) => this.referenceExists(...a),
     };
-    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx);
+    return assertReferencesResolve.call(host, schema, data, supplied, context, msgCtx, storedRows);
   }
 
   /**
@@ -10516,8 +10581,11 @@ export class ObjectQL implements IObjectQLEngine {
    * that exists nowhere.
    *
    * `null` (fail-open) only where {@link referenceExists} answers it, and for
-   * an unregistered master, which has no read door to ask either. Never reached
-   * by a SYSTEM caller: {@link assertReferencesResolve} returns before it.
+   * an unregistered master, which has no read door to ask either. A SYSTEM
+   * caller reaches it only as a flow run's elevated write, or a write that
+   * write sets off (#28881): its read door returns every header
+   * ({@link masterDetailHeadersCallerReads}), so the header's existence in the
+   * caller's tenant is what is asked.
    *
    * ⛔ `master_detail` only — the plain `lookup` probe is not this rule's.
    */
@@ -18148,9 +18216,12 @@ export class ObjectQL implements IObjectQLEngine {
                const permissionsForUpdate = (await this.resolveOptionPermissions(updateSchema, [updatePayload], permissionResolution))(updatePayload);
                emitValidationAdvisories(options?.onValidationAdvisory, evaluateValidationRules(updateSchema as any, hookContext.input.data as Record<string, unknown>, 'update', { previous: priorRecord, logger: this.logger, currentUser: this.buildEvalUser(opCtx.context), skipStateMachine: shouldSkipStateMachine(opCtx.context), messages: updateMsgCtx, parent: roWhenParent, previousParent: roWhenPreviousParent, related: relatedForUpdate, permissions: permissionsForUpdate }), this.logger, object);
                // [#4441] A repoint is as capable of dangling as an initial link.
+               // [#29062] …but a value the row already stores is not a repoint:
+               // the prior row is what the check forgives a refused value against.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 async () => [priorRecord],
                );
                // [commit 9d7f7259f] The by-id driver exit — where a driver's refusal
                // leaves this door, and where a recognised unique violation
@@ -18574,9 +18645,13 @@ export class ObjectQL implements IObjectQLEngine {
                // [#4441] The bulk call site too — a guard wired into single-id
                // writes only is still a hole one call site over (AGENTS.md
                // PD #10's own worked example, #3106).
+               // [#29062] A refused value is forgiven only when EVERY matched row
+               // already stores it (the `readPriorRows` memo, read only then);
+               // a row it is new to makes it this write's reference.
                await this.assertReferencesResolve(
                  updateSchema, hookContext.input.data as Record<string, unknown>,
                  opCtx.data as Record<string, unknown>, opCtx.context, updateMsgCtx,
+                 readPriorRows,
                );
                // `updateMany` presence is part of the ladder verdict resolved above.
                // [commit 9d7f7259f] The predicate driver exit, enveloped on the same
@@ -18909,7 +18984,7 @@ export class ObjectQL implements IObjectQLEngine {
           //    verdict that asserts something POSITIVE about the schema
           //    ("nothing references this object"). An unreadable carrier can
           //    no more support that claim than an unreadable registry can.
-          const ref = referenceCarrierOf(fdef, 'ObjectQL.planCascadeAtomicity');
+          const ref = deleteWalkTargetOf(fdef, 'ObjectQL.planCascadeAtomicity');
           if (!ref) continue;
           let resolvedRef: string | undefined;
           try { resolvedRef = this.resolveObjectName(ref); } catch { resolvedRef = undefined; }
@@ -19292,7 +19367,8 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Apply referential delete behavior for relations pointing AT this record,
    * before it is removed. For every registered object with a `master_detail`,
-   * `lookup` or `tree` field ({@link statesDeleteSemantics}) referencing
+   * `lookup` or `tree` field, or a `user` field that declares a
+   * `deleteBehavior` ({@link statesDeleteSemantics}), referencing
    * `object`, honor the field's `deleteBehavior`:
    *   - `cascade`  → delete the dependent rows (recursively, so grandchildren
    *                  are handled by each child's own delete),
@@ -19487,7 +19563,7 @@ export class ObjectQL implements IObjectQLEngine {
     // removed the parent, left a `master_detail` child behind, and
     // reported success. No `restrict` refusal, no `set_null`, nothing
     // logged. Absence still skips the field here exactly as before.
-    const ref = referenceCarrierOf(fdef, 'ObjectQL.cascadeDeleteRelations');
+    const ref = deleteWalkTargetOf(fdef, 'ObjectQL.cascadeDeleteRelations');
     if (!ref) return undefined;
     // Match the target object by raw or resolved name.
     let resolvedRef: string | undefined;
@@ -19529,6 +19605,10 @@ export class ObjectQL implements IObjectQLEngine {
     // honoured as written. Its `cascade` is a subtree delete, and a cycle in
     // the data (a corrupt row pointing at its own descendant) terminates on
     // the cascade set, the same membership test any self-reference has.
+    //
+    // [#29253] A `user` field reaches here only with an authored value
+    // ({@link statesDeleteSemantics}), and reads it as a `lookup` reads its
+    // own: the `|| 'set_null'` fallback below is never what a `user` gets.
     //
     // [#9625] "Only an explicit `restrict` deviates" is the whole of it:
     // every other value a master_detail can declare — including an
@@ -20888,8 +20968,13 @@ export class ObjectQL implements IObjectQLEngine {
               // wrapping its cascade. `buildDriverOptions` only fills keys that
               // are still `undefined`, so re-running it adds the handle and
               // changes nothing else.
+              //
+              // A dependent's stale-roll-up refusal stops the walk before this
+              // row is removed, so it is not this delete's answer:
+              // `cascadeStoppedRefusal` says what it is instead.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext);
+                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext)
+                  .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 return await driver.delete(
                   object,
                   hookContext.input.id as string,
@@ -20981,8 +21066,11 @@ export class ObjectQL implements IObjectQLEngine {
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
                    deletedSecrets = deletedSecretSlots(deleteSchema, matched);
-                   // [#27004] One walk, rooted at the whole matched set.
-                   await this.cascadeDeleteRelations(object, matchedIds, writeContext);
+                   // [#27004] One walk, rooted at the whole matched set. A
+                   // dependent's stale-roll-up refusal is not this delete's
+                   // answer, as in the by-id branch.
+                   await this.cascadeDeleteRelations(object, matchedIds, writeContext)
+                     .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                    // The id set rides an `$in`; batched so one statement never
                    // outgrows a driver's bind-parameter limit.
                    const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
@@ -21835,8 +21923,9 @@ export class ObjectQL implements IObjectQLEngine {
       // [#21274] A boundary outside the middleware seam: a commit failure, or
       // a callback that reached the driver through the transaction handle.
       // An error that already crossed an engine boundary inside the callback
-      // comes back as the same reference.
-      throw redactPropagatedDriverFault(err);
+      // comes back as the same reference. A stale-roll-up refusal ("stored")
+      // is no longer true once this rollback has run: `rolledBackRefusal`.
+      throw redactPropagatedDriverFault(rolledBackRefusal(err));
     }
   }
 
@@ -22826,8 +22915,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     } catch (error) {
       if (driver.rollback) await driver.rollback(trx);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
-      // [#21274] The engine surface's twin (`ObjectQL.transaction`).
-      throw redactPropagatedDriverFault(error);
+      // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
+      // stale-roll-up conversion included.
+      throw redactPropagatedDriverFault(rolledBackRefusal(error));
     }
   }
 

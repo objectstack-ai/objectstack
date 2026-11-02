@@ -36,6 +36,7 @@ import {
 import { ChevronDown, Check, Eye, Home, LayoutGrid, Pencil, Settings } from 'lucide-react';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { resolveKeyedI18nLabel, matchAppBySegment, appRouteSegment } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
 import { useHomePath } from '../hooks/useHomePath.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
@@ -142,7 +143,7 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, st
           type="button"
           data-testid="app-switcher-trigger"
           title={appLabelText}
-          className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-foreground/80 hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring max-w-[40vw] sm:max-w-none"
+          className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-foreground/80 hover:bg-accent hover:text-foreground transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring max-w-[40vw] sm:max-w-none max-md:min-h-11 max-md:min-w-11 max-md:justify-center"
         >
           <AppMark app={activeApp} size="sm" />
           {/* Below `sm` the pill is the glyph alone; `title` names the app
@@ -151,7 +152,11 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, st
           <ChevronDown className="hidden sm:block h-3.5 w-3.5 text-muted-foreground shrink-0" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" sideOffset={8} className="w-64">
+      {/* Below `md` every row is 44 px tall, a phone's touch target
+          (objectstack#29075); the primitive's rows are 32 px. The class rides
+          on the menu so each row it holds takes it. The top bar's other menus
+          spell the same class. */}
+      <DropdownMenuContent align="start" sideOffset={8} className="w-64 max-md:[&_[role=menuitem]]:min-h-11">
         <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
           {t('layout.appSwitcher.switchApplication', { defaultValue: 'Switch Application' })}
         </DropdownMenuLabel>
@@ -162,7 +167,7 @@ export function AppSwitcher({ activeAppName, onAppChange, designInStudioPath, st
           return (
             <DropdownMenuItem
               key={app.name}
-              onClick={() => onAppChange(appRouteSegment(app) ?? app.name)}
+              onClick={() => onAppChange(appAddressSegment(apps, app) ?? app.name)}
               className="flex items-center gap-2.5 py-2"
               data-testid={`app-switcher-row-${app.name}`}
             >
