@@ -24,6 +24,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { buildShareLinkResolveAnswer } from '@objectstack/types';
+import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
 
@@ -59,11 +60,20 @@ function makeEngine() {
     getSchema: (name: string) => SCHEMAS[name],
     async find(object: string, options?: any) {
       const where = options?.where ?? {};
-      return (tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      const rows = (tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: any) { (tables[object] ??= []).push({ ...data }); return data; },
-    async update() { return {}; },
-    async delete() { return { id: null }; },
+    async update(object: string, data: any, options?: any) {
+      const verdict = assertEngineUpdateDispatch(data, options);
+      const targets = verdict.kind === 'by-id' ? (tables[object] ?? []).filter((r) => r.id === verdict.id) : [];
+      for (const r of targets) Object.assign(r, data);
+      return verdict.kind === 'by-id' ? (targets[0] ?? null) : targets.length;
+    },
+    async delete(_object: string, options?: any) {
+      assertEngineDeleteDispatch(options);
+      return { ok: true };
+    },
   };
 }
 
