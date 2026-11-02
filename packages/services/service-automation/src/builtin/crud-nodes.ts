@@ -17,7 +17,7 @@ import type {
     DeleteRecordConfigParsed,
 } from '@objectstack/spec/automation';
 import type { AutomationContext, IDataEngine } from '@objectstack/spec/contracts';
-import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import { isAcceptedFilterComparand, type DroppedFieldsEvent } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import { isStoredMetadataBodyObject, STORED_METADATA_BODY_PRESCRIPTION } from '@objectstack/spec/kernel';
 import {
@@ -72,6 +72,23 @@ import { staleSummaryAnswerLines, staleSummaryRefusalOrThrow } from '@objectstac
  * empty": losing ONE of two conditions still widens the blast radius from "my
  * open records" to "all open records".
  *
+ * **A computed operand is a value, never filter structure.** The filter's
+ * structure — its fields, its operators, its `$and` / `$or` / `$not`
+ * conditions — is what the author wrote; an operand envelope supplies only
+ * what a condition compares against. So an operand must evaluate to a value
+ * the query takes as a literal ({@link operandValueRefusal}): a string, a
+ * number, a boolean or a date, and, at the comparand of an operator whose
+ * comparand is a list (`$in`, `$nin`, `$between`), a list of them. Anything
+ * else — an object, a list where one value belongs, a list holding anything
+ * but values — REFUSES the node before any query, whatever the value's origin
+ * (a start input, an assignment, a node output) and whatever the key: handed
+ * to the query, a plain object at an operand position is read as structure
+ * (an operator map, a nested condition, a field reference), which changes
+ * which rows the filter matches instead of what it compares against. It is
+ * refused as the nothing guard above is, a guard {@link refuseNode}: the
+ * filter the author wrote is not the filter that would run. An operand the
+ * author wrote as a literal is not judged here; the query engine judges it.
+ *
  * `consequence` names the operation in the refusal, so the message says what
  * WOULD have happened ("would have matched every remaining row and deleted it").
  */
@@ -86,13 +103,19 @@ function resolveNodeFilter(
     const authored = rawFilter ?? {};
     const filter = copyFilter(authored) as Record<string, unknown>;
     const nothing: Array<{ path: string; source: string }> = [];
+    const notValues: Array<{ path: string; source: string; kind: string }> = [];
     for (const operand of flowFilterOperands(authored)) {
         if (!isExpressionEnvelopeShaped(operand.value)) continue;
         const at = filterOperandPath(operand.path);
         const value = engine.evaluateValueEnvelope(operand.value, variables, at, context);
+        const source = (operand.value as { source?: unknown }).source;
         if (value === null || value === undefined) {
-            const source = (operand.value as { source?: unknown }).source;
             nothing.push({ path: at, source: typeof source === 'string' ? source : '' });
+            continue;
+        }
+        const kind = operandValueRefusal(value, operand.path);
+        if (kind !== undefined) {
+            notValues.push({ path: at, source: typeof source === 'string' ? source : '', kind });
             continue;
         }
         setFilterOperand(filter, operand.path, value);
@@ -108,7 +131,62 @@ function resolveNodeFilter(
                 `with a \`decision\`. To match an empty field, write the literal \`null\` as the operand.`,
         };
     }
+    if (notValues.length > 0) {
+        const detail = notValues.map((e) => `\`${e.source}\` (at ${e.path}) evaluated to ${e.kind}`).join(', ');
+        return {
+            error:
+                `${nodeType}: refusing to run — ${notValues.length} filter operand(s) evaluated to something other ` +
+                `than a value: ${detail}. A computed filter operand is the value a condition compares against — a ` +
+                `string, number, boolean or date, or a list of them at an \`$in\` / \`$nin\` / \`$between\` ` +
+                `comparand — and is never read as part of the filter's structure, so the query was not run. Make ` +
+                `the expression evaluate to that value (for a record, read its \`id\`), and check the input that ` +
+                `feeds it; a condition the flow needs is written in the filter itself.`,
+        };
+    }
     return { filter };
+}
+
+/**
+ * The operators whose comparand is a LIST — the split
+ * `@objectstack/spec`'s comparand faces read (`LIST_COMPARAND_OPERATORS` in
+ * `data/filter-comparand-operators.ts`, kept out of the published barrel on
+ * purpose). `crud-filter-guard.test.ts` reconciles this set against
+ * `FieldOperatorsSchema`: every declared operator whose enforced slot takes a
+ * list is here, and no other.
+ */
+const LIST_COMPARAND_OPERATORS: ReadonlySet<string> = new Set(['$in', '$nin', '$between']);
+
+/**
+ * What an evaluated filter operand is when it is NOT a value its position
+ * takes, worded for the refusal (`an object`, `a list`, `a list whose entry
+ * [1] is an object`); `undefined` when it is one ({@link resolveNodeFilter}).
+ *
+ * A value is a literal comparand of the accepted set
+ * (`isAcceptedFilterComparand`, `@objectstack/spec/data`: a string, number,
+ * bigint, boolean, `null` or `Date`). At the comparand of a list operator
+ * ({@link LIST_COMPARAND_OPERATORS}: the operand's path ends in that
+ * operator) a list of such values is one too. Every other position takes one
+ * value: a field's implicit equality, a scalar operator's comparand, a list
+ * operator's single element, and a combinator's member or `$not`, which take
+ * a condition: a condition is written in the filter, never supplied by an
+ * expression, so there too only a value passes on, for the query engine to
+ * judge. The value itself is never echoed: an input may carry it from a
+ * caller.
+ */
+function operandValueRefusal(value: unknown, path: readonly (string | number)[]): string | undefined {
+    if (isAcceptedFilterComparand(value)) return undefined;
+    if (!Array.isArray(value)) return kindOfOperand(value);
+    const last = path[path.length - 1];
+    if (typeof last !== 'string' || !LIST_COMPARAND_OPERATORS.has(last)) return 'a list';
+    const index = value.findIndex((member) => !isAcceptedFilterComparand(member));
+    return index < 0 ? undefined : `a list whose entry [${index}] is ${kindOfOperand(value[index])}`;
+}
+
+/** A non-value's kind, in words (`an object`, `a list`, `a function`). */
+function kindOfOperand(value: unknown): string {
+    if (Array.isArray(value)) return 'a list';
+    if (typeof value === 'object' && value !== null) return 'an object';
+    return typeof value === 'undefined' ? 'nothing' : `a ${typeof value}`;
 }
 
 /** A filter operand's path, in the ledger's spelling (`filter.id.$in[0]`). */
@@ -365,10 +443,12 @@ function projectionNamingId(fields: string[] | undefined): string[] | undefined 
  *    then the content-hash refusal (`storedMetadataHashEvaluateRefusal`).
  *
  * `query` is the option bag the node hands the engine, so the collector reads
- * exactly the filter the engine would run: the RESOLVED one, since an operand
- * envelope can evaluate to a comparand (a `{ $field }` reference among them)
- * whose columns the authored envelope does not show. The node configs declare
- * no sort and no grouping, so the refusals are fed filter fields only.
+ * exactly the filter the engine would run: the RESOLVED one. An operand
+ * envelope evaluates to a value only ({@link resolveNodeFilter} refuses
+ * anything else, a `{ $field }` reference among them), so the resolved filter
+ * names no column the authored one does not; reading it keeps the collector
+ * on what the engine runs. The node configs declare no sort and no grouping,
+ * so the refusals are fed filter fields only.
  *
  * The answer is a guard refusal ({@link refuseNode}: the metadata is wrong,
  * and re-running it unchanged never succeeds) carrying the door's own error
