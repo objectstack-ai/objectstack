@@ -37,7 +37,15 @@ import { isRecordPagePushed, useRecordPageScrollMemory } from './recordPagePush.
 import { phoneRecordHeader } from './recordPhoneHeader.js';
 import { usePhoneViewport } from '../hooks/usePhoneViewport.js';
 import { PrefetchUpcomingRelatedCounts, RecordDrawerReturnLink, RecordDrawerUpcomingContext, RecordPageDrawerHost, RecordPaneBarToggles, useRecordPane, useRecordPaneBar, useRecordPageReturn } from './recordDrawerStack.js';
-import { recordPageRelatedLists, recordPageRequestOf, seedRecordPageReaders } from './recordPagePayload.js';
+import {
+  RECORD_PAGE_ACTIVITY_ROWS,
+  RECORD_PAGE_ATTACHMENT_ROWS,
+  recordPageActivity,
+  recordPageComments,
+  recordPageRelatedLists,
+  recordPageRequestOf,
+  seedRecordPageReaders,
+} from './recordPagePayload.js';
 import { withPageTabsUrlSync } from '../utils/pageTabsUrlSync.js';
 import { RECORD_DETAIL_TAB_PARAM, RECORD_DRAWER_PARAM, RECORD_RELATED_ENLARGE_PARAM, RECORD_RELATED_ENLARGE_PUSHED_STATE as RELATED_ENLARGE_PUSHED, RECORD_TRAIL_PARAM, decodeRecordTrail, buildRecordTrailHref } from '../urlParams.js';
 import { resolveActionParams } from '@object-ui/fields';
@@ -260,6 +268,9 @@ export { isSecondaryField } from './recordDetailSections.js';
  * pipeline on every render of a record with no comments.
  */
 const EMPTY_FEED: FeedItem[] = [];
+
+/** One `@`-mention picker entry: a `sys_user` row of the directory read, by id and display label. */
+type MentionSuggestion = { id: string; label: string; avatarUrl?: string };
 
 /**
  * objectui#13010 — the blocks that draw what this view's feed reads fetch. All
@@ -820,9 +831,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // rows (objectui#11195), so a refusal on record A never reaches record B's
   // panel.
   const [feedRefusalByRecord, setFeedRefusalByRecord] = useState<Record<string, FeedRefusal>>({});
-  const [mentionSuggestions, setMentionSuggestions] = useState<
-    Array<{ id: string; label: string; avatarUrl?: string }>
-  >([]);
+  const [mentionSuggestions, setMentionSuggestions] = useState<MentionSuggestion[]>([]);
   // Screen-flow runtime: a paused `screen`-node flow launched from a record action.
   const [screenFlow, setScreenFlow] = useState<ScreenFlowState | null>(null);
   // A record-action flow launch that ended `refused` without pausing (objectui#9973).
@@ -1082,6 +1091,14 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     recordKey: string;
     generation: number;
     payload: Promise<RecordPagePayload | null>;
+    /**
+     * objectstack#28470 — the feed's record (`object:id`, the thread id) and
+     * which of its reads the payload answers: the feed effect takes those
+     * from it and reads only the others.
+     */
+    feedKey: string;
+    discussion: boolean;
+    activity: boolean;
   } | null>(null);
   // objectstack#26589 — the record this viewer just decided an approval on,
   // as `objectName` + `recordId`. A pending approver with no standing access
@@ -2216,6 +2233,24 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // approver. So a request's page asks each part on its own through the
   // adapter, whose `findOne` the console routes to the approvals service
   // (`routeApprovalRecordReads`); the page never widens what the data API reads.
+  //
+  // objectstack#28470 — and the record's own streams the page draws when it
+  // opens: the discussion and the activity when a block that draws the feed is
+  // on screen at open (the 动态 panel of a laid-out page, or a feed block on
+  // the tab the page opens on — the same reading `feedConsumerOnScreen` makes
+  // below, taken with the page's `?tab=`), and the attachments when the page
+  // draws them. They ride the payload the plan asks and never ask one (see
+  // `recordPageStreams`), so a later tab switch asks nothing again. A related
+  // list names the lookups of its rows to resolve, as `RelatedList`'s own read
+  // expands them (every declared reference of the child but the parent's,
+  // gated by field-level security), so its rows carry the names the list draws.
+  const feedOnOpen = useMemo(() => {
+    if (!effectivePage) return false;
+    const page = objectDef?.enable?.feeds !== false ? effectivePage : stripDiscussionNodes(effectivePage);
+    if (page == null) return false;
+    return (pageColumnsEligible && buildDefaultPageColumns(page) !== null)
+      || pageShowsNodeOnOpen(page, FEED_CONSUMER_TYPES, activeTabParam);
+  }, [effectivePage, objectDef, pageColumnsEligible, activeTabParam]);
   const recordPagePlan = useMemo(() => {
     if (!hasPage || !objectName || !pureRecordId || typeof dataSource?.getRecordPage !== 'function') return '';
     if (objectName === SYS_APPROVAL_REQUEST_OBJECT) return '';
@@ -2225,14 +2260,44 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // Claim asks a transfer verdict only of a record sitting in a queue; the
     // payload asks it of every record of an object that has the column.
     if (objectDef?.fields && Object.prototype.hasOwnProperty.call(objectDef.fields, 'queue')) explain.push('transfer');
+    const relatedExpand = (child: string, field: string): string[] => {
+      const childDef = objects.find((o: any) => o?.name === child) as { fields?: Record<string, any> } | undefined;
+      const expandable = buildExpandFields(childDef?.fields as any).filter((f) => f !== field);
+      return perms?.isLoaded ? expandable.filter((f) => perms.checkField(child, f, 'read')) : expandable;
+    };
     return JSON.stringify({
       expand: JSON.parse(pageRecordExpand) as string[],
-      related: recordPageRelatedLists(effectivePage, assignedPage ? undefined : childRelations),
+      related: recordPageRelatedLists(effectivePage, assignedPage ? undefined : childRelations, relatedExpand),
       explain,
       fieldAccess: typeof dataSource.getRecordFieldAccess === 'function',
       approvals: true,
     });
-  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, pageRecordExpand, effectivePage, assignedPage, childRelations]);
+  }, [hasPage, objectName, pureRecordId, dataSource, objectDef, editOffByObject, deleteOffByObject, pageRecordExpand, effectivePage, assignedPage, childRelations, objects, perms]);
+  // The stream parts ride whichever payload the plan above asks; they never ask
+  // one of their own. So they are read off a ref when the payload goes out, not
+  // keyed into the plan: an assigned page landing after a synthesized one (which
+  // draws the 动态 panel the assigned one may not) changes them and asks nothing
+  // again (objectui#11699). The feed effect reads which streams the payload
+  // carries off `recordPageRead`, and asks the rest itself.
+  const recordPageStreams = {
+    ...(feedOnOpen && objectDef?.enable?.feeds !== false ? { discussion: true } : {}),
+    ...(feedOnOpen && objectDef?.enable?.activities !== false ? { activity: RECORD_PAGE_ACTIVITY_ROWS } : {}),
+    ...(objectDef?.enable?.files === true || hasExplicitAttachments(effectivePage as any)
+      ? { attachments: RECORD_PAGE_ATTACHMENT_ROWS }
+      : {}),
+  };
+  const recordPageStreamsRef = useRef(recordPageStreams);
+  recordPageStreamsRef.current = recordPageStreams;
+  // objectstack#28470 — whether the page has asked its payload yet, for the
+  // feed effect: `false` only while a page that asks one has not. The effect
+  // reads which of its reads the payload answers off `recordPageRead` when it
+  // runs; a later plan change (an assigned page landing, a grant narrowing an
+  // expand) re-runs nothing, as no plan change re-read the feed before.
+  const feedPlanReady =
+    typeof dataSource?.getRecordPage !== 'function'
+    || objectName === SYS_APPROVAL_REQUEST_OBJECT
+    || !hasPage
+    || recordPagePlan !== '';
   const recordPagePrincipal = perms.userId ?? null;
   const recordPageGeneration = recordInvalidationNonce + childInvalidationNonce;
   const recordPageGenerationRef = useRef(recordPageGeneration);
@@ -2242,12 +2307,15 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       recordPageRead.current = null;
       return;
     }
-    const plan = JSON.parse(recordPagePlan);
+    const plan = { ...JSON.parse(recordPagePlan), ...recordPageStreamsRef.current };
     const payload = dataSource.getRecordPage(objectName, pureRecordId, recordPageRequestOf(plan));
     recordPageRead.current = {
       recordKey: JSON.stringify([objectName, pureRecordId, JSON.stringify(plan.expand)]),
       generation: recordPageGenerationRef.current,
       payload,
+      feedKey: `${objectName}:${pureRecordId}`,
+      discussion: plan.discussion === true,
+      activity: plan.activity !== undefined,
     };
     seedRecordPageReaders({ payload, objectName, recordId: pureRecordId, principal: recordPagePrincipal, ...plan });
   }, [recordPagePlan, objectName, pureRecordId, dataSource, recordPagePrincipal]);
@@ -2263,7 +2331,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     if (!opened || !recordPagePlan || !upcomingKey || !objectName) return;
     if (typeof dataSource?.prefetchRecordPage !== 'function') return;
     let cancelled = false;
-    const request = recordPageRequestOf(JSON.parse(recordPagePlan));
+    // A neighbour's page asks the streams this one asked, so its prefetch does too.
+    const request = recordPageRequestOf({ ...JSON.parse(recordPagePlan), ...recordPageStreamsRef.current });
     const prefetch = () => {
       if (cancelled) return;
       for (const upcomingId of upcomingKey.split('\n')) dataSource.prefetchRecordPage!(objectName, upcomingId, request);
@@ -2673,30 +2742,33 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // them as @-mention suggestions to the DiscussionContext. Capped at 50 to
   // keep the dropdown tight; hosts can swap in a paginated/server-search
   // implementation later by mounting their own DiscussionContextProvider.
-  // Only the comment composer of a feed block reads the list, so it waits for
-  // one to be on screen (objectui#13010, `feedWanted` above).
-  useEffect(() => {
-    if (!dataSource || !feedWanted) return;
-    let cancelled = false;
-
+  // Only a comment write reads the list, so it waits until one wants it
+  // (objectstack#28470), never the record's open: the composer's first focus
+  // (`onMentionSuggestionsWanted` on the DiscussionContext) draws the picker,
+  // and a write whose text holds an `@` before then (a reply, an edit) reads it
+  // to resolve its mentions (`mentionRosterFor`). One read per data source and
+  // user, shared by both: the directory is not the record's.
+  const mentionUserKey = JSON.stringify([user?.id ?? null, user?.name ?? null, user?.email ?? null]);
+  const mentionRosterRef = useRef<{ dataSource: unknown; userKey: string; read: Promise<MentionSuggestion[]> } | null>(null);
+  const readMentionRoster = useCallback((): Promise<MentionSuggestion[]> => {
+    const held = mentionRosterRef.current;
+    if (held && held.dataSource === dataSource && held.userKey === mentionUserKey) return held.read;
     // Always seed with the current user so the @-mention dropdown shows at
     // least one entry even when the backend has no sys_user directory.
     // Hosts wanting a richer roster should provide it via dataSource.
-    const selfSuggestion = user
+    const selfSuggestion: MentionSuggestion[] = user
       ? [{
           id: String(user.id),
           label: user.name || user.email || String(user.id),
           avatarUrl: (user as any).image || undefined,
         }]
       : [];
-
-    (async () => {
+    const read = (async () => {
       try {
         const res = await dataSource.find('sys_user', {
           $top: 50,
           $select: ['id', 'name', 'email', 'image'],
         } as any);
-        if (cancelled) return;
         const rows: any[] = Array.isArray(res) ? res : res?.data || [];
         const fetched = rows
           .map((u) => ({
@@ -2711,15 +2783,33 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           ...selfSuggestion,
           ...fetched.filter((s) => !seen.has(s.id)),
         ];
-        setMentionSuggestions(merged.length > 0 ? merged : selfSuggestion);
+        return merged.length > 0 ? merged : selfSuggestion;
       } catch {
-        if (cancelled) return;
         // Fall back to just the current user so mentions still work.
-        setMentionSuggestions(selfSuggestion);
+        return selfSuggestion;
       }
     })();
+    mentionRosterRef.current = { dataSource, userKey: mentionUserKey, read };
+    return read;
+    // `user` is read through `mentionUserKey`, its id, name and email.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dataSource, mentionUserKey]);
+  const [mentionsWanted, setMentionsWanted] = useState(false);
+  const wantMentionSuggestions = useCallback(() => setMentionsWanted(true), []);
+  useEffect(() => {
+    if (!dataSource || !mentionsWanted) return;
+    let cancelled = false;
+    void readMentionRoster().then((roster) => {
+      if (!cancelled) setMentionSuggestions(roster);
+    });
     return () => { cancelled = true; };
-  }, [dataSource, user?.id, user?.name, user?.email, feedWanted]);
+  }, [dataSource, mentionsWanted, readMentionRoster]);
+  /** The roster a write resolves `text`'s mentions through: read now if the text names someone before the picker did. */
+  const mentionRosterFor = useCallback(async (text: string): Promise<MentionSuggestion[]> => {
+    if (mentionSuggestions.length > 0 || !dataSource || !text.includes('@')) return mentionSuggestions;
+    setMentionsWanted(true);
+    return readMentionRoster();
+  }, [mentionSuggestions, dataSource, readMentionRoster]);
 
   // Memoize so the object identity is stable across renders — otherwise
   // any effect that depends on it (e.g. the feed loader below) would
@@ -2831,8 +2921,16 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // The comment read needs to know where reactions are stored; until the
     // registry says, nothing is read and the panel stays in its loading state.
     if (feedsEnabled && reactionStore === null) return;
+    // objectstack#28470 — the page payload carries the feed's reads it was
+    // asked for: until the page has asked, nothing is read here.
+    if (!feedPlanReady) return;
     let cancelled = false;
     const threadId = `${objectName}:${pureRecordId}`;
+    // The payload this open asked, when it is this record's: the discussion
+    // and the activity it carries are taken from it, never read again. A read
+    // it was not asked for is this effect's own, as before.
+    const opened = recordPageRead.current;
+    const fromPage = opened && opened.feedKey === threadId ? opened : null;
     // The two reads below run in PARALLEL and are collected here so the
     // loading flag can close over BOTH of them — see the `allSettled` at the
     // end of this effect.
@@ -2889,7 +2987,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       return toReactions(parsed);
     };
 
-    if (feedsEnabled) inFlight.push(dataSource.find('sys_comment', { $filter: { thread_id: threadId }, $orderby: { created_at: 'asc' } })
+    const commentsRead: Promise<{ data?: any[]; reactionRows?: Array<Record<string, unknown>> | null }> | null = !feedsEnabled
+      ? null
+      : fromPage?.discussion
+        ? recordPageComments(fromPage.payload)
+        : dataSource.find('sys_comment', { $filter: { thread_id: threadId }, $orderby: { created_at: 'asc' } });
+    if (commentsRead) inFlight.push(commentsRead
       .then(async (res: any) => {
         recordRefusal('comments', false);
         if (!res?.data?.length) return;
@@ -2904,7 +3007,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         if (reactionStore === 'records') {
           const commentIds: string[] = res.data.map((c: { id: unknown }) => String(c.id));
           try {
-            records = groupReactionRows(await readCommentReactionRows(dataSource, commentIds), currentUser.id);
+            // From the payload, the reactions of these very comments; a
+            // refused reaction read there is `null`, as a failed one here.
+            const rows = fromPage?.discussion
+              ? res.reactionRows
+              : await readCommentReactionRows(dataSource, commentIds);
+            records = rows ? groupReactionRows(rows, currentUser.id) : null;
           } catch {
             records = null;
           }
@@ -2998,16 +3106,23 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // activity to sees the panel say so, not "no activity". The verdict is
     // `isRefusedFeedRead`, the one the `record:activity` block's self-fetch
     // uses, so the two surfaces cannot disagree about what a refusal is.
-    if (activitiesEnabled) inFlight.push(dataSource.find('sys_activity', {
-      $filter: { object_name: objectName, record_id: pureRecordId },
-      $orderby: { timestamp: 'asc' },
-      $top: 200,
-      // The actor's record in place of its id, so a row with no `actor_name`
-      // names its user instead of reading "System" (objectui#12067). The
-      // shared constructor reads it; the `record:activity` block's own read
-      // passes the same expand.
-      $expand: ['actor_id'],
-    })
+    const activityRead: Promise<any> | null = !activitiesEnabled
+      ? null
+      : fromPage?.activity
+        // objectstack#28470 — the payload's activity: the newest
+        // RECORD_PAGE_ACTIVITY_ROWS rows, the actor expanded.
+        ? recordPageActivity(fromPage.payload)
+        : dataSource.find('sys_activity', {
+            $filter: { object_name: objectName, record_id: pureRecordId },
+            $orderby: { timestamp: 'desc' },
+            $top: RECORD_PAGE_ACTIVITY_ROWS,
+            // The actor's record in place of its id, so a row with no `actor_name`
+            // names its user instead of reading "System" (objectui#12067). The
+            // shared constructor reads it; the `record:activity` block's own read
+            // passes the same expand.
+            $expand: ['actor_id'],
+          });
+    if (activityRead) inFlight.push(activityRead
       .then((res: any) => {
         recordRefusal('activity', false);
         if (!res?.data?.length) return;
@@ -3048,7 +3163,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     });
 
     return () => { cancelled = true; };
-  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted]);
+  }, [dataSource, objectName, pureRecordId, currentUser, feedsEnabled, activitiesEnabled, feedFetchKey, reactionStore, feedWanted, feedPlanReady]);
 
   /**
    * Note: comment-mention → notification fan-out lives on the server
@@ -3140,7 +3255,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       };
       // Persist to backend (M10.10: snake_case fields per sys_comment schema)
       const threadId = `${objectName}:${pureRecordId}`;
-      const mentionIds = extractMentions(text, mentionSuggestions);
+      const roster = await mentionRosterFor(text);
+      const mentionIds = extractMentions(text, roster);
       try {
         await dataSource.create('sys_comment', {
           id: newItem.id,
@@ -3151,7 +3267,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           body: text,
           mentions: JSON.stringify(mentionIds),
           created_at: newItem.createdAt,
-        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, mentionSuggestions) });
+        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, roster) });
       } catch (err) {
         throw commentWriteFailed(err);
       }
@@ -3161,7 +3277,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         [key]: [...(prev[key] ?? EMPTY_FEED), newItem],
       }));
     },
-    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionSuggestions, commentWriteFailed, tellMentionsWithheld],
+    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionRosterFor, commentWriteFailed, tellMentionsWithheld],
   );
 
   const handleAddReply = useCallback(
@@ -3180,7 +3296,8 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         authoredByViewer: isCommentAuthor(currentUser.id, currentUser.id),
       };
       const threadId = `${objectName}:${pureRecordId}`;
-      const mentionIds = extractMentions(text, mentionSuggestions);
+      const roster = await mentionRosterFor(text);
+      const mentionIds = extractMentions(text, roster);
       try {
         await dataSource.create('sys_comment', {
           id: newItem.id,
@@ -3192,7 +3309,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           mentions: JSON.stringify(mentionIds),
           created_at: newItem.createdAt,
           parent_id: parentId,
-        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, mentionSuggestions) });
+        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, roster) });
       } catch (err) {
         throw commentWriteFailed(err);
       }
@@ -3212,7 +3329,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         };
       });
     },
-    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionSuggestions, commentWriteFailed, tellMentionsWithheld],
+    [currentUser, dataSource, objectName, pureRecordId, feedRecordKey, mentionRosterFor, commentWriteFailed, tellMentionsWithheld],
   );
 
   /**
@@ -3256,11 +3373,12 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       const row = (feedItemsByRecord[key] ?? EMPTY_FEED).find(item => item.id === itemId);
       if (!row || row.type !== 'comment') return;
       let stored: { is_edited?: unknown } | null | undefined;
+      const roster = await mentionRosterFor(text);
       try {
         stored = await dataSource.update(COMMENT_OBJECT, String(itemId), {
           body: text,
-          mentions: JSON.stringify(extractMentions(text, mentionSuggestions)),
-        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, mentionSuggestions) });
+          mentions: JSON.stringify(extractMentions(text, roster)),
+        }, { onMentionsWithheld: (ids: string[]) => tellMentionsWithheld(ids, roster) });
       } catch (err) {
         throw editFailed(err);
       }
@@ -3272,7 +3390,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         ),
       }));
     },
-    [dataSource, feedRecordKey, feedItemsByRecord, mentionSuggestions, t, tellMentionsWithheld],
+    [dataSource, feedRecordKey, feedItemsByRecord, mentionRosterFor, t, tellMentionsWithheld],
   );
 
   /**
@@ -4622,6 +4740,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
               : undefined
           }
           mentionSuggestions={mentionSuggestions}
+          onMentionSuggestionsWanted={wantMentionSuggestions}
         >
         {/* objectstack#27055 — the field changes of the timeline stream,
             for the synthesized page's `record:activity`. */}
