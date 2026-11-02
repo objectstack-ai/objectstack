@@ -118,6 +118,24 @@ describe('objectstack#29550 — an object route reads one object\'s views', () =
     expect(answered.overrides).toEqual(expected.overrides);
   });
 
+  it('with the whole list on the wire, both readers join it: no one-object read beside it, the same answers', async () => {
+    const scoped = makeServer();
+    const expected = await openObjectRoute(makeAdapter(scoped.fetchImpl), 'crm_lead');
+
+    const { fetchImpl, requests } = makeServer();
+    const ds = makeAdapter(fetchImpl);
+    // The app object scope's whole-list read (objectstack#29551), not landed
+    // yet when the object route opens.
+    const listing = ds.getClient().meta.getItems('view');
+
+    const answered = await openObjectRoute(ds, 'crm_lead');
+    await listing;
+
+    expect(viewReads(requests).map((r) => r.url)).toEqual(['/api/v1/meta/view']);
+    expect(answered.tabs).toEqual(expected.tabs);
+    expect(answered.overrides).toEqual(expected.overrides);
+  });
+
   it('a second object route asks its own object only', async () => {
     const { fetchImpl, requests } = makeServer();
     const ds = makeAdapter(fetchImpl);

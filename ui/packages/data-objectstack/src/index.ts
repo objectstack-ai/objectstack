@@ -6227,6 +6227,12 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    *   narrowed and ordered by the same rule
    *   ({@link ObjectStackAdapter.objectBoundViewRows}), so the tabs do not
    *   reorder with what else has loaded.
+   * - When the whole list is on the wire under that key, the reader joins it,
+   *   narrowed by the same rule, and nothing more is asked. On a packaged
+   *   app's object route the app object scope reads the whole list while a
+   *   route object's lookup target lies outside the app bundle
+   *   (objectstack#29551); a one-object read beside it would be one request
+   *   more, not one fewer.
    * - Otherwise the one-object read, which both readers share while it is on
    *   the wire. Its answer goes through the same rule too: a server that does
    *   not read `?object=` answers its whole list, and the rule keeps one
@@ -6247,6 +6253,13 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     const settled = this.metadataCache.getCachedSync(VIEW_LIST_KEY);
     if (settled !== undefined) {
       return Promise.resolve(ObjectStackAdapter.objectBoundViewRows(structuredClone(settled), objectName));
+    }
+    // The whole list on the wire (on a packaged app's object route the app
+    // object scope reads it, objectstack#29551): join it rather than put a
+    // second, narrower request beside it.
+    const listing = this.metadataCache.peekInflight<any>(VIEW_LIST_KEY);
+    if (listing) {
+      return listing.then((answer) => ObjectStackAdapter.objectBoundViewRows(structuredClone(answer), objectName));
     }
     let read = this.objectViewReads.get(objectName);
     if (!read) {

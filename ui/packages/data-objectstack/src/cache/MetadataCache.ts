@@ -291,6 +291,16 @@ export class MetadataCache {
   }
 
   /**
+   * The read in flight for `key`, if one is on the wire, without starting one
+   * and without counting a hit or a miss (objectstack#29550). A caller that
+   * would otherwise ask a narrower question joins it; a detached read (see
+   * {@link load}) is not returned.
+   */
+  peekInflight<V = unknown>(key: string): Promise<V> | undefined {
+    return this.inflight.get(key) as Promise<V> | undefined;
+  }
+
+  /**
    * Get a cached value synchronously without triggering a fetch.
    * Returns undefined if not in cache or expired.
    */
