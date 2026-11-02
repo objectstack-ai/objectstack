@@ -14,7 +14,8 @@ export const entry: SemanticMigration = {
   reason:
     'The authored entry was a plain object, so an undeclared top-level key parsed green at every door and ' +
     'meant nothing to the runtime: no provider, the automation service or the dispatcher ever read one. It is ' +
-    'refused now, by name and located at the key, with a prescription for the two families an author most ' +
+    'refused now, by name, in one `unrecognized_keys` issue located at the entry (not at the key) that lists ' +
+    'every undeclared key, with a prescription for the two families an author most ' +
     'often misplaces: a credential and a provider setting. There is deliberately no mechanical rewrite: an ' +
     'undeclared key may be a misplaced provider setting whose right home depends on the provider, or a secret ' +
     'whose only copy is the value written there, and where either goes next is a judgement about the ' +

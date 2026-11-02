@@ -14,6 +14,7 @@ import { DATE_RANGE_PRESETS } from '../data/date-range-presets';
 import { ChartTypeSchema, ChartConfigSchema, type ChartType } from './chart.zod';
 import { ActionType } from './action.zod';
 import { navigationTargetRefusal } from './navigation-target';
+import { duplicateGlobalFilterNames } from './duplicate-global-filter-names';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 // `AriaPropsSchema` is no longer imported here: `widgets[].aria` was retired
 // (#5010). The shape itself is NOT removed — it stays live on `page.aria` /
@@ -1669,6 +1670,25 @@ export const GlobalFilterSchema = lazySchema(() => strictObject({
   .superRefine(checkGlobalFilterDateDefaultValue));
 
 /**
+ * A dashboard's `globalFilters` declares each filter key once (#29023). One
+ * located issue per repeated key, at the SECOND declaration's `name` (or its
+ * `field`, when that entry is keyed by `field`), naming the key and every
+ * index. Before this, the dashboard save door saved two filters under one
+ * name: the board drew one control, and its value filtered the other
+ * definition's field, so a tile read a number the author never asked for.
+ *
+ * Attached to the array, not to the dashboard object, so the rule travels with
+ * `DashboardSchema.shape.globalFilters` into any mirror that spreads the
+ * shape. Predicate and message: `duplicate-global-filter-names.ts`
+ * ({@link duplicateGlobalFilterNames}). Not exported: the schema is the door.
+ */
+function refuseDuplicateGlobalFilterNames(globalFilters: readonly unknown[], ctx: z.RefinementCtx): void {
+  for (const duplicate of duplicateGlobalFilterNames(globalFilters)) {
+    ctx.addIssue({ code: 'custom', path: [duplicate.indexes[1]!, duplicate.secondKey], message: duplicate.message });
+  }
+}
+
+/**
  * Dashboard Schema
  * Represents a page containing multiple visualizations.
  * 
@@ -1768,8 +1788,17 @@ export const DashboardSchema = lazySchema(() => strictObject({
     allowCustomRange: z.boolean().default(true).describe('Allow users to pick a custom date range'),
   }).optional().describe('Global dashboard date range filter configuration'),
 
-  /** Global Filters */
-  globalFilters: z.array(GlobalFilterSchema).optional().describe('Global filters that apply to all widgets in the dashboard'),
+  /**
+   * Global Filters. Each filter's key (its `name`, else its `field`) is
+   * declared once per dashboard: the key is what the filter bar draws a
+   * control under and what a widget's `filterBindings` names, so two entries
+   * under one key are two definitions behind one control. Refused by
+   * {@link refuseDuplicateGlobalFilterNames} (#29023).
+   */
+  globalFilters: z.array(GlobalFilterSchema)
+    .superRefine(refuseDuplicateGlobalFilterNames)
+    .optional()
+    .describe('Global filters that apply to all widgets in the dashboard. Each filter name (its field when it has no name) is declared once'),
 
   /**
    * [#22611] The audience gate — the platform's one capability key, with the

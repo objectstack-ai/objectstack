@@ -131,7 +131,7 @@
         "radix-ui"
       ],
       "registryDependencies": [],
-      "localEdits": "objectstack#5505 i18n close patch: `DialogContent` auto-renders an icon-only close button whose `sr-only` span IS its accessible name, and upstream hardcodes the English literal — so under zh/ja/es every modal in the console announced \"Close\" in English. The span is replaced by `<CloseSrLabel />` (`packages/components/src/lib/close-label.tsx`), which resolves `common.close` for the session locale and falls back to English with no I18nProvider mounted. The edit is DECLARED as data in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`, and `pnpm shadcn:check` exits non-zero if it is ever missing from the file or can no longer be re-applied to upstream."
+      "localEdits": "objectstack#5505 i18n close patch: `DialogContent` auto-renders an icon-only close button whose `sr-only` span IS its accessible name, and upstream hardcodes the English literal — so under zh/ja/es every modal in the console announced \"Close\" in English. The span is replaced by `<CloseSrLabel />` (`packages/components/src/lib/close-label.tsx`), which resolves `common.close` for the session locale and falls back to English with no I18nProvider mounted. It also carries the objectstack#29107 phone close touch-target patch: below `sm` the close button is a 44 px box with the 16 px glyph centred, and from `sm` up its classes are upstream's. Both edits are DECLARED as data in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`, and `pnpm shadcn:check` exits non-zero if either is ever missing from the file or can no longer be re-applied to upstream."
     },
     "drawer": {
       "source": "https://ui.shadcn.com/r/styles/default/drawer.json",
@@ -146,7 +146,7 @@
         "radix-ui"
       ],
       "registryDependencies": [],
-      "localEdits": "Tailwind v4 syntax. Local uses `origin-(--radix-dropdown-menu-content-transform-origin)`; upstream still ships v3's `origin-[--radix-…]`, which on Tailwind 4.x compiles to the bare `transform-origin: --radix-…` rather than `var(--radix-…)` — invalid CSS that browsers drop, so the open/close animation would scale from the default origin instead of the one Radix computes. Verified against tailwindcss 4.3.3: the paren form emits `var()`, the bracket form does not. Applied repo-wide in 925051db6; do not revert piecemeal."
+      "localEdits": "Tailwind v4 syntax. Local uses `origin-(--radix-dropdown-menu-content-transform-origin)`; upstream still ships v3's `origin-[--radix-…]`, which on Tailwind 4.x compiles to the bare `transform-origin: --radix-…` rather than `var(--radix-…)` — invalid CSS that browsers drop, so the open/close animation would scale from the default origin instead of the one Radix computes. Verified against tailwindcss 4.3.3: the paren form emits `var()`, the bracket form does not. Applied repo-wide in 925051db6; do not revert piecemeal. It also carries the objectstack#29215 phone touch-target patch: below `sm` every menu row (item, checkbox item, radio item, sub-menu trigger) is at least 44 px tall (`max-sm:min-h-11`), and from `sm` up its classes are upstream's. That edit is DECLARED as data in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`, and `pnpm shadcn:check` exits non-zero if it is ever missing from the file or can no longer be re-applied to upstream."
     },
     "form": {
       "source": "https://ui.shadcn.com/r/styles/default/form.json",
@@ -316,7 +316,8 @@
       "dependencies": [
         "radix-ui"
       ],
-      "registryDependencies": []
+      "registryDependencies": [],
+      "localEdits": "objectstack#29215 phone touch-target patch: below `sm` `TabsTrigger` is at least 44 px tall (`max-sm:min-h-11`) and `TabsList` drops its fixed `h-10` (`max-sm:h-auto`) so it grows with its triggers; from `sm` up both class lists are upstream's. The edit is DECLARED as data in `scripts/shadcn-local-patches.mjs` and re-applied on every `--update`, and `pnpm shadcn:check` exits non-zero if it is ever missing from the file or can no longer be re-applied to upstream."
     },
     "textarea": {
       "source": "https://ui.shadcn.com/r/styles/default/textarea.json",

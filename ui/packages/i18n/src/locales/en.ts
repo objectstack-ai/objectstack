@@ -10,6 +10,7 @@ const en = {
     banner: {
       message: 'You are impersonating {{user}} — every action is recorded as them.',
       startedBy: 'Started by administrator {{admin}}.',
+      startedByUnnamed: 'Started by an administrator.',
       stop: 'Stop impersonating',
       stopping: 'Stopping…',
       stopFailed: 'Could not stop impersonating: {{reason}}',
@@ -232,6 +233,12 @@ const en = {
     // allows it: sharing, ownership or row-level security (objectstack#27138).
     noPermissionToEditRecord: "You don't have permission to edit this record. The fields are read-only.",
     submitFailed: 'Could not save. Please try again.',
+    // The banner an edit form shows when its record read is refused: a
+    // denial, a not-found (which row-level security answers for a hidden row,
+    // so the line never tells the two apart), and any other failure.
+    noPermissionToOpenRecord: "You don't have access to this record.",
+    recordNotFoundOrHidden: "This record doesn't exist, or you don't have access to it.",
+    openRecordFailed: 'Could not open this record. Please try again.',
     uploadInFlight: 'Wait for the upload to finish before saving.',
     // The notice the record form raises when a field's own `visibleWhen` turns
     // it invisible and the form clears the value it held (objectui#8070 names
@@ -2835,8 +2842,23 @@ const en = {
       // (rename / pin / set-as-default / configure), so the copy has to cover
       // any change to a built-in view rather than name one operation.
       cannotEditMetaView: 'This view is built in and defined in code — it cannot be changed.',
-      resetView: 'Reset view',
-      resetViewTitle: 'Set this view back to its own sort, filters and column widths. Only yours change.',
+      resetView: 'Reset to view',
+      resetViewTitle: 'Puts back this view’s own filters, search, sort, grouping, column layout, hidden fields, density, layout, row color, row numbers and inline editing. Pinned views, favorites and how records open stay as they are. Only your list changes.',
+      personalized: 'Personalized',
+      personalizedHeading: 'Your list differs from this view in',
+      personalizedParts: {
+        filters: 'Filters',
+        search: 'Search',
+        sort: 'Sort',
+        grouping: 'Grouping',
+        columns: 'Column layout',
+        hiddenFields: 'Hidden fields',
+        density: 'Density',
+        layout: 'Layout',
+        rowColor: 'Row color',
+        rowNumbers: 'Row numbers',
+        inlineEdit: 'Inline editing',
+      },
       cannotDeleteMetaView: 'This view is built in and defined in code — it cannot be deleted.',
       expandToPage: 'Open as full page',
       openAsPage: 'Open as full page',
@@ -3195,8 +3217,22 @@ const en = {
       // the same with or without the pack.
       ssoButton: 'Sign in with SSO',
       ssoOnlyDescription: "Sign in with your organization's single sign-on",
+      noSignInMethodText: 'No sign-in method is available. Contact your administrator.',
       usePasswordText: 'Use a password instead',
       backToSsoText: 'Back to single sign-on',
+      // objectstack#29105 — the second step of a password sign-in for an account
+      // with two-factor sign-in on: the code from the authenticator app, or a
+      // backup code. Each English value is `LoginForm`'s own default.
+      twoFactorTitle: 'Two-factor authentication',
+      twoFactorDescription: 'Enter the 6-digit code from your authenticator app.',
+      twoFactorBackupDescription: 'Enter one of the backup codes you saved when you set up two-factor authentication.',
+      twoFactorCodeLabel: 'Authentication code',
+      twoFactorBackupCodeLabel: 'Backup code',
+      twoFactorVerifyButton: 'Verify',
+      twoFactorVerifyingButton: 'Verifying…',
+      twoFactorUseBackupCodeText: 'Use a backup code instead',
+      twoFactorUseAuthenticatorText: 'Use your authenticator app instead',
+      twoFactorBackText: 'Back to sign in',
       // objectui#12600 — the console login card's own header, the password
       // field's reveal toggle, and the footer's legal links.
       welcomeTitle: 'Welcome back',
@@ -3234,6 +3270,13 @@ const en = {
         invalidCredentials: 'Invalid email or password. Please try again.',
         emailNotVerified: 'Please verify your email address before signing in.',
         oauthCallbackFailed: 'Single sign-on could not be completed — the sign-in link expired or was already used. Please try again.',
+        // objectstack#29105 — refusals of the two-factor sign-in step, by the
+        // server's code (`signInRefusalMessages`).
+        twoFactorInvalidCode: 'That code is not valid. Check your authenticator app and try again.',
+        twoFactorInvalidBackupCode: 'That backup code is not valid or has already been used.',
+        twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
+        twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
+        twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
       },
     },
     register: {

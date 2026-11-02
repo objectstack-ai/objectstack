@@ -27,11 +27,9 @@ record-change triggers, scheduled automation, vendor integrations and their
 callbacks, and **assignment rules** that route a new record to a queue or a person.
 
 > **Predicates and conditions are CEL** — every `condition` / `guard` /
-> `entryCondition` / filter `value` here is an **Expression** envelope evaluated
-> by `@objectstack/formula`. A slot takes a plain CEL string; the
-> `P\`...\`` / `cel\`...\`` tags wrap the same string with author-time validation.
-> Both parse — pick one per file. See
-> **objectstack-formula** for the CEL contract, stdlib and legacy → CEL table.
+> `entryCondition` / filter `value` is an **Expression** envelope: a plain CEL
+> string, or the `P\`...\`` / `cel\`...\`` tag (author-time validation); pick one
+> per file. Contract, stdlib, legacy → CEL table: **objectstack-formula**.
 
 ---
 
@@ -48,6 +46,19 @@ A **Flow** is a directed graph of nodes — the primary automation building bloc
 | `schedule` | Runs on a cron/interval cadence declared on the **start node's `config.schedule`** — or a **per-record date sweep** via `config.timeRelative`, see *Time-relative triggers* |
 | `record_change` | Fires automatically on record create/update/delete. `autolaunched` + the same `record-*` binding behaves identically; `record_change` also opts into the trigger-readiness lint |
 | `api` | Inbound **webhook** — needs a start-node `secretRef` (or a literal `secret`; see *Inbound webhook triggers* below); a flow only ever started explicitly is `autolaunched` |
+
+**A flow an installed package ships** is read-only. To change what it does, save
+a same-named flow in the base's paired `.custom` package declaring
+`overrides: { package: '<base>', basedOn: '<base version>' }`
+(**objectstack-platform** § Customizing an installed package): it is armed in the
+base's place, keeps the base's name and its one activation switch
+(`POST /api/v1/automation/:name/toggle`, `{ enabled: false }` = off for this
+deployment), and a run suspended on the old body finishes on that body. An
+undeclared same-named flow in the pair or in a dependent is refused at publish.
+A flow *beside* it is "new similar": `POST /api/v1/automation/:name/clone`
+`{ name, label, package? }` lands the copy switched off in the pair, never
+package-less; a flow holding a `secret` / `signingSecret` is refused (`409`): author
+it anew.
 
 ### Flow Node Types
 
@@ -140,29 +151,25 @@ type: 'text', isInput: true }, { name: 'approval_result', type: 'boolean', isOut
 | 404, rate-limit, rejected write, failed subflow | missing required config key (`objectName`, `url`, `flowName`, `connectorId`/`actionId`); filter operand that evaluated to `null`; graph past the nesting ceiling; unscoped run |
 
 > **Writing a `readonly` field? Set `runAs: 'system'`.** Under the default
-> `runAs: 'user'` the engine **strips** a `readonly` field from `create_record`
-> and `update_record` alike — the step reports success, the value never lands,
-> the drop is named in the step's warnings — so a flow maintaining one (approval
-> stamps, conversion flags, SLA markers, rollups) runs `runAs: 'system'`.
-> `os validate` / `os build` fail a `runAs:'user'` `update_record` writing one
-> (`readonlyWhen`: a warning, per record state). Do **not** remove `readonly`
-> instead; that loses the field's edit protection.
+> `runAs: 'user'` the engine **strips** it from `create_record` / `update_record`
+> — the step succeeds, the value never lands, the drop is named in the step's
+> warnings — so a flow maintaining one (approval stamps, SLA markers, rollups)
+> runs `runAs: 'system'`; `os validate` / `os build` fail a `runAs:'user'`
+> `update_record` writing one (`readonlyWhen`: a warning). Do **not** remove
+> `readonly` instead.
 
 > **Elevate the write, not the flow.** A `screen` flow stays `runAs: 'user'`; a
 > step that must write a `readonly` field moves into a dedicated `runAs: 'system'`
 > flow called from a `subflow` node — raising the whole flow silently elevates
 > every other write in it.
 >
-> **Elevation stops at identity assignment.** A `runAs: 'system'` flow's
-> insert, update, delete, transfer, restore or purge of `sys_user_position`,
-> `sys_user_permission_set`, `sys_invitation` or `sys_member` is refused with
-> `PERMISSION_DENIED`, and moving that step into a dedicated `runAs: 'system'`
-> subflow does not lift it: a governed identity write is judged by a door that
-> judges a person. Grant positions and permission sets from a flow whose
-> `runAs` is `'user'` — the delegated-administration gate then judges the user
-> the run acts for and records them as the grant's `granted_by`. Invitations
-> and memberships change through the organization endpoints (row 1b,
-> https://objectstack.ai/docs/permissions/system-context#1-authorization-and-scoping).
+> **Elevation stops at identity assignment.** A `runAs: 'system'` write (insert
+> through purge) of `sys_user_position`, `sys_user_permission_set`,
+> `sys_invitation` or `sys_member` is refused `PERMISSION_DENIED`, a system
+> subflow included. Grant positions and permission sets from a `runAs: 'user'`
+> flow — the delegated-administration gate judges that user and records them as
+> `granted_by`; invitations and memberships change through the organization
+> endpoints (row 1b, https://objectstack.ai/docs/permissions/system-context#1-authorization-and-scoping).
 >
 > **A `runAs: 'system'` sweep must pin its organization.** System context has no
 > trigger user, so a scan or rollup with no organization predicate reads and
@@ -219,11 +226,7 @@ write them right the first time:
      CEL refuses an absent key where the template wrote nothing, so nothing /
      `null` / a default is now YOUR call; `'{record.tags.0}'` → `'record.tags[0]'`;
      a deep path guards each step: `has(vars.source) && has(vars.source.id) ? vars.source.id : null`
-   - money: `source: 'round(x * 100) / 100.0'` — CEL divides two integers as
-     integers, so `/ 100` turns `123.46` into `123`
-   - dates: `{TODAY()}` → `isoDate(today())`, `{TODAY() ± N}` →
-     `isoDate(daysFromNow(N))` / `isoDate(daysAgo(N))`, `{NOW()}` →
-     `isoDatetime(now())`, `{NOW() ± N}` → `isoDatetime(addDays(now(), N))`
+   - dates and money: the legacy → CEL table in **objectstack-formula**
    - run user: `{$User.Id}` → `current_user.id`; a flow that can run without a
      user guards it, `current_user != null ? current_user.id : null`.
      `current_user` holds `id`, `positions`, `organizationId`, `isPlatformAdmin`
@@ -420,10 +423,9 @@ reason to write code.
 
 ## CRM Automation Blueprint
 
-Model the business lifecycle in Flow / Approval metadata first (integrations:
-above): flows in `src/flows/*.flow.ts` with explicit `variables`, `nodes` +
-`edges` (approval config: the approvals reference), exported as `allFlows: Flow[]`
-from `src/flows/index.ts` and registered centrally in `defineStack({ flows })`.
+Lifecycle first, as Flow / Approval metadata: `src/flows/*.flow.ts` with explicit
+`variables`, `nodes` + `edges`, exported from `src/flows/index.ts` into
+`defineStack({ flows })`.
 
 ---
 

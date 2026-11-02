@@ -15,7 +15,13 @@ import { VALUELESS_FILTER_BUILDER_OPERATORS, isFilterValueComplete, isCurrencyCo
 import { ViewSwitcherDropdown } from './ViewSwitcher';
 import { ListEmptyState, hasDeclaredFilter, filterNamesCurrentUser } from './ListEmptyState';
 import { ListViewCompactHeader, ListViewCompactRows, ListViewCappedRows, CAPPED_LIST_DEFAULT_LIMIT } from './ListViewCompact';
-import { ViewSettingsPopover, type ViewSettingsRecordOpen } from './components/ViewSettingsPopover';
+import {
+  ViewSettingsPopover,
+  type ViewSettingsRecordOpen,
+  PHONE_POPOVER_GUTTER,
+  PHONE_TOUCH_TARGET,
+  useBelowSm,
+} from './components/ViewSettingsPopover';
 import { UserFilters, type UserFiltersHandle } from './UserFilters';
 import {
   calendarWindowCovers,
@@ -42,7 +48,7 @@ import { useObjectLabel, useSafeFieldLabel, createSafeTranslation, useDisplayLoc
 // objectui's keyed `{ key, defaultValue, params }` ref — that vocabulary lives
 // on the FLAT `schema.ariaLabel` and is resolved by `SchemaRenderer` instead
 // (objectui#5134).
-import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema } from '@objectstack/spec/ui';
+import { resolveI18nLabel as resolveInlineI18nLabel, normalizeFilterOperator, PaginationConfigSchema, ViewSharingSchema } from '@objectstack/spec/ui';
 import type { GroupingConfig } from '@objectstack/spec/ui';
 import { resolveInjectedSystemColumns, resolveSearchFieldResolution, type SearchFieldMeta } from '@objectstack/spec/data';
 import { SystemFieldName } from '@objectstack/spec/system';
@@ -266,6 +272,23 @@ export interface ListViewRowGroup {
   rows: ReadonlyArray<Record<string, unknown>>;
 }
 
+/**
+ * A part of a list that can differ from its view (objectstack#28950): what a
+ * host's 「personalized」 marker names. See `onPersonalizationChange`.
+ */
+export type ListPersonalizationPart =
+  | 'sort'
+  | 'filters'
+  | 'search'
+  | 'grouping'
+  | 'columns'
+  | 'hiddenFields'
+  | 'density'
+  | 'layout'
+  | 'rowColor'
+  | 'rowNumbers'
+  | 'inlineEdit';
+
 export interface ListViewProps {
   schema: ListViewSchema;
   className?: string;
@@ -444,8 +467,14 @@ export interface ListViewProps {
    * sort. Absent ⇒ `schema` is the view's own, exactly as before. A HOST prop,
    * never a schema key: it is the host's split of one composed value into its
    * two sources, nothing an author writes.
+   *
+   * `grouping` (objectstack#28950) is read only to tell a personalized list
+   * (`onPersonalizationChange`), for a host that lays a grouping the URL
+   * carries over the view's in `schema`. Unlike the three above, a
+   * `viewDefaults` without the `grouping` key leaves the grouping `schema`
+   * opened with as the view's own.
    */
-  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort'>;
+  viewDefaults?: Pick<ListViewSchema, 'hiddenFields' | 'rowHeight' | 'sort' | 'grouping'>;
   /**
    * A reset to the view's own, told apart from a choice (objectstack#28948).
    * For a host that stores the user's preference and passes `viewDefaults`:
@@ -465,6 +494,30 @@ export interface ListViewProps {
    * reset exactly as without it. A HOST prop, never a schema key.
    */
   onRestoreViewDefaults?: (parts: ReadonlyArray<'sort' | 'hiddenFields' | 'rowHeight'>) => void;
+  /**
+   * What of the list on screen differs from the view (objectstack#28950), for
+   * a host that marks a personalized list and owns the one way back to the
+   * view. Called with the parts each time that set changes, and once at
+   * mount; an empty list means the list on screen is the view's own.
+   *
+   * Every part is judged against the VIEW: `sort`, `hiddenFields`, the table
+   * density and the grouping against `viewDefaults` when the host passes it
+   * (else against `schema`); `filters` is the reader's query apart from the
+   * search (the Filter panel's finished conditions, the user-filter chips, the
+   * "In a queue" toggle; the view's declared `filter` is never one); `search`
+   * is a term the list applies. The Display-only settings (`layout`,
+   * `rowColor`, `rowNumbers`, `inlineEdit`) are those the Display control
+   * counts. The gallery card size is not a part: it is kept per object, not
+   * per view. `columns` is never reported here, since the column layout is
+   * the host's own stored state; it is in the type so a host can add it.
+   *
+   * When it is passed the host owns the reset, so the Display control draws
+   * no "Reset to view default" of its own. The sort popover's reset and the
+   * Filter panel's "Clear all" stay: each puts back one control. A HOST prop,
+   * never a schema key. Absent ⇒ nothing is reported and the Display control
+   * keeps its reset, exactly as before.
+   */
+  onPersonalizationChange?: (parts: ReadonlyArray<ListPersonalizationPart>) => void;
   /**
    * Draw the COMPACT posture (objectui#12703): a header with the list's title
    * and record count over two-line rows (the view's first visible column, its
@@ -1312,6 +1365,23 @@ function readSpecDisplayPageSize(): number {
 const DEFAULT_LIST_DISPLAY_PAGE_SIZE = readSpecDisplayPageSize();
 
 /**
+ * The ownership type a `sharing` block means when it declares none. READ from
+ * `@objectstack/spec`, not restated, the same read as the page size above:
+ * `ViewSharingSchema` declares `type` with a default, nothing on the render
+ * path parses the served view, so an authored `{ lockedBy }` arrives with
+ * `type` absent, and parsing an empty block is the spec's own answer.
+ */
+const SPEC_DEFAULT_SHARING_TYPE = ViewSharingSchema.parse({}).type;
+
+/**
+ * Whether the toolbar draws the sharing indicator: a declared `type` or a
+ * `lockedBy`. The lock keys on `lockedBy` alone and never waits on `type`.
+ */
+function hasSharingIndicator(sharing: { type?: string; lockedBy?: string } | undefined): boolean {
+  return !!(sharing?.type || sharing?.lockedBy);
+}
+
+/**
  * The `$top` of the ONE unpaged fetch a list view makes when no usable page
  * size is declared: every view this component does not page on the server
  * (`paginate` is false), which is every kind but the flat grid, plus a grouped
@@ -1682,6 +1752,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   onRowsChange,
   viewDefaults,
   onRestoreViewDefaults,
+  onPersonalizationChange,
   recordOpen,
   ...props
 }: ListViewProps & { [key: string]: any }, ref) => {
@@ -2581,6 +2652,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
   const handlePullRefresh = React.useCallback(async () => {
     setRefreshKey(k => k + 1);
   }, []);
+
+  // Below `sm` the Filter and Sort panels keep 16 px from both screen edges.
+  const belowSm = useBelowSm();
 
   const { ref: pullRef, isRefreshing, pullDistance } = usePullToRefresh<HTMLDivElement>({
     onRefresh: handlePullRefresh,
@@ -5511,6 +5585,45 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
     inlineEdit: currentView === 'grid' && inlineEditOffered && inlineEdit !== !!schema.inlineEdit,
   };
   const displayChangedCount = Object.values(displayDeviation).filter(Boolean).length;
+
+  /**
+   * objectstack#28950 — what of this list differs from its view, reported to a
+   * host that marks a personalized list (`onPersonalizationChange`). Judged
+   * against the view's own wherever the host composes the reader's state into
+   * `schema`: the sort and the grouping against `viewDefaults`, as the Display
+   * deviations above already are for hidden fields and density. The gallery
+   * card size is kept per object, so it is no part of this view's list.
+   * Reported by its joined key, so an equal set re-renders nothing upstream
+   * (AGENTS.md #10: no memo identity is named).
+   */
+  const viewGroupingFields = viewDefaults && 'grouping' in viewDefaults
+    ? viewDefaults.grouping?.fields
+    : initialGroupingConfig?.fields;
+  const groupingKey = (fields: ReadonlyArray<{ field: string; order?: string }> | undefined) =>
+    JSON.stringify((fields ?? []).map((f) => [f.field, f.order ?? 'asc']));
+  const personalizationParts: ListPersonalizationPart[] = [];
+  if (sortDiffersFromDeclared) personalizationParts.push('sort');
+  if (
+    appliedFilterGroup(currentFilters).conditions.length > 0
+    || userFilterConditions.length > 0
+    || appliedQueueSittingConditions.length > 0
+  ) personalizationParts.push('filters');
+  if (searchTerm.trim()) personalizationParts.push('search');
+  if (groupingKey(groupingConfig?.fields) !== groupingKey(viewGroupingFields)) personalizationParts.push('grouping');
+  if (displayDeviation.hiddenFields) personalizationParts.push('hiddenFields');
+  if (displayDeviation.density && currentView !== 'gallery') personalizationParts.push('density');
+  if (displayDeviation.layout) personalizationParts.push('layout');
+  if (displayDeviation.color) personalizationParts.push('rowColor');
+  if (displayDeviation.rowNumbers) personalizationParts.push('rowNumbers');
+  if (displayDeviation.inlineEdit) personalizationParts.push('inlineEdit');
+  const personalizationKey = personalizationParts.join(',');
+  const onPersonalizationChangeRef = React.useRef(onPersonalizationChange);
+  React.useEffect(() => {
+    onPersonalizationChangeRef.current = onPersonalizationChange;
+  });
+  React.useEffect(() => {
+    onPersonalizationChangeRef.current?.(personalizationKey ? (personalizationKey.split(',') as ListPersonalizationPart[]) : []);
+  }, [personalizationKey]);
   /**
    * Every setting back to the view's own, each through the door its control
    * writes through. objectstack#28948 — except, under `onRestoreViewDefaults`,
@@ -6071,6 +6184,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 size="sm"
                 className={cn(
                   "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                  PHONE_TOUCH_TARGET,
                   hasFilters && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-filter-trigger"
@@ -6091,7 +6205,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
               <div className="space-y-4">
                 <div className="flex items-center justify-between border-b pb-2">
                   <h4 className="font-medium text-sm">{t('list.filterRecords')}</h4>
@@ -6162,8 +6276,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           )}
 
           {/* Sort. Below `sm` the Display panel carries the Sort panel when it
-              is drawn (`sortInDisplay`), so this trigger hides there; with no
-              Display panel it stays on the bar at every width. */}
+              is drawn (`sortInDisplay`), so this trigger hides there while no
+              sort is active; with no Display panel it stays on the bar at
+              every width. */}
           {toolbarFlags.showSort && (
           <Popover open={showSort} onOpenChange={setShowSort}>
             <PopoverTrigger asChild>
@@ -6172,7 +6287,12 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 size="sm"
                 className={cn(
                   "h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
-                  sortInDisplay && "hidden sm:inline-flex",
+                  PHONE_TOUCH_TARGET,
+                  // On a phone an active sort keeps this trigger, with its
+                  // level count, on the bar: the Display panel holds the
+                  // builder, but only the bar can show the list is sorted.
+                  // The open search field takes its slot while it is open.
+                  sortInDisplay && (currentSort.length === 0 || phoneSearchOpen) && "hidden sm:inline-flex",
                   currentSort.length > 0 && "text-foreground font-medium"
                 )}
                 data-testid="toolbar-sort-trigger"
@@ -6189,7 +6309,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent align="start" className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
+            <PopoverContent align="start" collisionPadding={belowSm ? PHONE_POPOVER_GUTTER : undefined} className="w-[calc(100vw-2rem)] sm:w-[600px] max-w-[600px] p-3 sm:p-4">
               {sortPanelBody}
             </PopoverContent>
           </Popover>
@@ -6370,7 +6490,9 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               inlineEdit={inlineEdit}
               setInlineEdit={updateInlineEdit}
               changedCount={displayChangedCount}
-              onReset={resetDisplayToViewDefault}
+              // objectstack#28950 — a host that marks a personalized list owns
+              // the one reset; the Display control then offers none of its own.
+              onReset={onPersonalizationChange ? undefined : resetDisplayToViewDefault}
               onRefresh={toolbarFlags.showRefresh ? () => setRefreshKey(k => k + 1) : undefined}
               refreshing={loading}
               exportFormats={resolvedExportOptions && exportPermitted && exportableFormats.length > 0 ? exportableFormats : undefined}
@@ -6454,12 +6576,15 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               (`type` + optional `lockedBy`), never a button. No view-sharing
               control or endpoint exists to open, so a clickable "Share" here
               was a dead button. `lockedBy` is the spec's free string ("User
-              who locked the view configuration"), rendered as written. */}
-          {schema.sharing?.type && (() => {
-            const sharingLabel = schema.sharing.type === 'personal'
+              who locked the view configuration"), rendered as written. A
+              block with `lockedBy` and no `type` shows the lock beside the
+              spec's default type. */}
+          {hasSharingIndicator(schema.sharing) && (() => {
+            const sharingType = schema.sharing?.type ?? SPEC_DEFAULT_SHARING_TYPE;
+            const sharingLabel = sharingType === 'personal'
               ? t('list.sharingPersonal')
               : t('list.sharingCollaborative');
-            const lockedBy = schema.sharing.lockedBy;
+            const lockedBy = schema.sharing?.lockedBy;
             const lockedLabel = lockedBy ? t('list.sharingLockedBy', { user: lockedBy }) : undefined;
             const hint = lockedLabel ? `${sharingLabel} · ${lockedLabel}` : sharingLabel;
             return (
@@ -6508,7 +6633,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
 
           {/* --- Separator: Print/Share/Export | Search --- */}
           {(() => {
-            const hasLeftSideItems = schema.allowPrinting || !!schema.sharing?.type
+            const hasLeftSideItems = schema.allowPrinting || hasSharingIndicator(schema.sharing)
               || (!toolbarFlags.compactToolbar && resolvedExportOptions && exportPermitted && exportableFormats.length > 0);
             return toolbarFlags.showSearch && hasLeftSideItems ? (
               <div className="h-5 w-px bg-border/50 mx-1 shrink-0" />
@@ -6597,14 +6722,14 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
                   if (!searchTerm) setPhoneSearchOpen(false);
                 }}
                 // 16px text: a smaller font makes iOS Safari zoom on focus.
-                className="h-7 w-36 pl-7 pr-7 text-base [&::-webkit-search-cancel-button]:hidden"
+                className="h-7 w-36 pl-7 pr-7 text-base max-sm:h-11 max-sm:pr-11 [&::-webkit-search-cancel-button]:hidden"
                 autoFocus
                 data-testid="phone-search-input"
               />
               <Button
                 variant="ghost"
                 size="sm"
-                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                className="absolute right-0 h-7 w-7 p-0 text-muted-foreground hover:text-primary max-sm:h-11 max-sm:w-11"
                 aria-label={t('list.clearSearch')}
                 title={t('list.clearSearch')}
                 onClick={() => {
@@ -6622,6 +6747,7 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
               size="sm"
               className={cn(
                 "sm:hidden h-7 min-w-7 gap-1 px-1.5 text-muted-foreground hover:text-primary text-xs transition-colors duration-150",
+                PHONE_TOUCH_TARGET,
                 searchTerm && "text-foreground font-medium",
               )}
               aria-label={searchTerm ? `${t('list.search')}: ${searchTerm}` : t('list.search')}

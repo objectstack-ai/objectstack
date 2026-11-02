@@ -65,7 +65,8 @@ import {
 // Who may START a flow by name — the one rule the trigger door, this door and
 // the declared endpoint share (the maintainer's rulings, letters B and A, and
 // the flow's own `requiredPermissions`).
-import { flowStartRefusal } from './flow-start-admission.js';
+import { flowRunsElevated, flowStartRefusal } from './flow-start-admission.js';
+import { validationFailure } from './validation-failure.js';
 // [ADR-0066 D4] The capability arithmetic the action gate and the flow start
 // gate share.
 import { missingCapabilities } from './required-capabilities.js';
@@ -88,8 +89,11 @@ import {
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
+    SummaryRecomputeError,
 } from '@objectstack/objectql';
 import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+// [#28861] A landed write answers its success to the action handler's code.
+import { answerLandedWritesDespiteStaleSummary, landedWriteAnswer } from './landed-write-answer.js';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
 // @objectstack/objectql (the engine owns the map they describe, and its
@@ -2348,6 +2352,41 @@ function flowActionCallerParamKeys(action: any, objectName: string, params: Reco
 }
 
 /**
+ * The row slots the CALLER's own `params` fill at this door, as flow start
+ * admission's third question reads them ({@link refuseUnreadableFlowStartRecords}):
+ * each row-id key ({@link flowActionRowIdKeys}) the caller's bag names, whose
+ * value reaches the run over the seeded id because the caller's params win
+ * ({@link seedFlowActionParams}). Two cases name none:
+ *
+ *  - an action whose `recordIdField` names a field other than `id`: the door
+ *    seeds every row slot with that field's VALUE, never an id of this
+ *    object, so there is no row of this object to load a slot's value as;
+ *  - a value equal to the routed `recordId` this door's subject load already
+ *    delivered (an object-bound action): that row was judged by that load.
+ */
+function flowActionCallerRecordKeys(
+    action: any,
+    objectName: string,
+    params: Record<string, unknown>,
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): Array<readonly [string, unknown]> {
+    const idField: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+    if (idField !== 'id') return [];
+    const judged = recordId !== undefined && recordId !== '' && !isObjectLessActionKey(objectName) && !subject.recordLoadDenied
+        ? recordId
+        : undefined;
+    const keys: Array<readonly [string, unknown]> = [];
+    for (const key of flowActionRowIdKeys(action, objectName)) {
+        if (!Object.prototype.hasOwnProperty.call(params, key)) continue;
+        const value = params[key];
+        if (judged !== undefined && (typeof value === 'string' || typeof value === 'number') && String(value) === judged) continue;
+        keys.push([key, value]);
+    }
+    return keys;
+}
+
+/**
  * Brand for {@link FlowActionRefusal} — `Symbol.for`, so recognition keeps
  * working even if two module instances of this file ever coexist (src vs
  * dist), where an `instanceof` would silently answer false.
@@ -2563,6 +2602,21 @@ export async function dispatchFlowAction(deps: ActionExecutionDeps,
             code: startRefusal.code,
         });
     }
+    // Flow start admission's third question, the row the start addresses
+    // (`flow-start-admission.ts`): the routed row was judged by this door's
+    // subject load upstream, so what is asked here is every row slot the
+    // CALLER's own params fill, whose value reaches the run over that row's id.
+    // Each is loaded in the caller's scope by the read the subject load makes
+    // (the request's own driver, environment and identity, as both entrances
+    // load the routed row), and refused with that load's 404 before the run
+    // exists. Thrown with `code` + `status`, like the refusals above.
+    await refuseUnreadableFlowStartRecords(
+        automation,
+        action.target,
+        { objectName, recordKeys: flowActionCallerRecordKeys(action, objectName, params, recordId, subject) },
+        ec,
+        (object, id) => callData(deps, requestContext, 'get', { object, id }, requestContext?.dataDriver, envId, ec),
+    );
     // Pass a proper AutomationContext (the engine never read the former
     // `triggerData` envelope).
     const result: any = await automation.execute(action.target, {
@@ -3199,22 +3253,34 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * hash keyed) and never the stored row. [#21594] An action BODY's API is built
  * over this one by the sandbox (`buildSandboxApi`), whose body layers refuse a
  * family read or write before it reaches this seam.
+ *
+ * [#28861] A write through it that the engine stored, whose parent roll-up
+ * could not be recomputed after it, answers the write's success to the
+ * handler (`landed-write-answer.ts`), on this context and every one it
+ * derives. That layer sits beneath the reader seam, so the answer is served
+ * like any write's return.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
+    const served = (scoped: unknown) =>
+        serveStoredMetadataReadsThrough(answerLandedWritesDespiteStaleSummary(scoped, ACTION_API_SURFACE), ql);
     try {
-        return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(ec)), ql);
+        return served(ql.createContext(buildActionExecutionContext(ec)));
     } catch {
         // A malformed caller envelope must not sink the action — fall back to
         // the bare elevated context (the same shape hooks default to), marked
         // as the body's elevation like every other (#25653).
         try {
-            return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(undefined)), ql);
+            return served(ql.createContext(buildActionExecutionContext(undefined)));
         } catch {
             return undefined;
         }
     }
 }
+
+/** [#28861] The surfaces the stale-column line names, for an action handler's two data handles. */
+const ACTION_API_SURFACE = 'action ctx.api';
+const ACTION_ENGINE_SURFACE = 'action ctx.engine';
 
 /**
  * The sentence a caller still on the WITHDRAWN bare-filter shape must read
@@ -3303,17 +3369,31 @@ function assertActionEngineFindEnvelope(object: string, query: Record<string, un
  * use. Every call carries {@link buildActionExecutionContext} so `ctx.engine`
  * and `ctx.api` write under the SAME identity (#3914); passing `ec` is what
  * separates a trusted write from a context-less one.
+ *
+ * [#28861] A write the engine stored, whose parent roll-up could not be
+ * recomputed after it, answers the write's success here, as on `ctx.api`
+ * ({@link landedWriteAnswer}): the handler's next line runs. Every other
+ * throw, a refusal before the write among them, reaches the handler as is.
  */
 export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?: any): any {
     const context = buildActionExecutionContext(ec);
     return {
         async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data, { context });
+            let res: unknown;
+            try {
+                res = await ql.insert(object, data, { context });
+            } catch (e) {
+                res = landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+            }
             const id = (res && (res as any).id) ?? (data as any).id;
             return { id };
         },
         async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id }, context });
+            try {
+                await ql.update(object, data, { where: { id }, context });
+            } catch (e) {
+                landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+            }
         },
         // Both spellings are DECLARED contract (#15117), not a tolerance: the
         // spec's `ActionEngineFacade.delete` takes `string | string[]`.
@@ -3332,10 +3412,17 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
         // it pulls the runtime back onto the contract that is already on the
         // record, here, in the spec member doc, and in the `never a null id`
         // pin at `packages/spec/src/ui/action-params.test.ts`.
+        //
+        // [#28861] Each id's landed delete is answered on its own, so a stale
+        // roll-up after one id's delete does not leave the later ids undeleted.
         async delete(object: string, idOrIds: string | string[]): Promise<void> {
             const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
             for (const id of ids) {
-                await ql.delete(object, { where: { id }, context });
+                try {
+                    await ql.delete(object, { where: { id }, context });
+                } catch (e) {
+                    landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+                }
             }
         },
         // [#15124] The ENVELOPE goes through — this arm no longer builds one.
@@ -3635,6 +3722,95 @@ export function apiForwardSubjectRecord(
 ): Record<string, unknown> {
     if (!subject.recordLoadDenied) return subject.record;
     return recordId ? { id: recordId } : {};
+}
+
+/**
+ * The row-slot keys a start hands a run, each with the value the run will
+ * receive under it — what {@link refuseUnreadableFlowStartRecords} loads.
+ */
+export type FlowStartRecordKeys = ReadonlyArray<readonly [key: string, value: unknown]>;
+
+/**
+ * Flow start admission's THIRD question, the row a start addresses
+ * (`flow-start-admission.ts`), as the ONE function every door that starts a
+ * flow by name calls after `flowStartRefusal` and before `execute()`.
+ *
+ * ## The rule
+ *
+ * Every record key a door hands the run in a row slot the door defines
+ * (`recordId`, the `<object>Id` alias, an action's declared `recordIdParam`)
+ * is loaded first, in the CALLER's own scope, through
+ * {@link loadActionSubjectRecord}, and a key that scope does not deliver is
+ * refused by {@link refuseDeniedSubjectLoad}: the action door's own
+ * `404 RECORD_NOT_FOUND`, one envelope for a row the caller cannot read and an
+ * id that names nothing, so no door is an existence oracle the action door
+ * declines to be. Before `execute()`, so a refused start persists no run.
+ *
+ * It holds for every run, as the action door's load does: a persisted run is
+ * built only on a row the caller has shown it can read. A `runAs: 'system'`
+ * run is where the rule bites, because its nodes read and write past the
+ * caller's own access.
+ *
+ * ## The object a key is loaded from
+ *
+ * `objectName` is the object the start names: the action's own object at the
+ * action door, the request's `objectName` (or `object`) at the trigger routes
+ * and a declared endpoint, the object the door hands the run as `object` and
+ * derives the `<object>Id` alias from. A start whose keys come with no object
+ * to load them from (none named, or an object-less action key) cannot be
+ * judged:
+ *
+ *  - an ELEVATED run ({@link flowRunsElevated}) is refused
+ *    `400 VALIDATION_FAILED` naming `objectName`, the one thing the caller
+ *    adds to be judged;
+ *  - a user run starts as before: it reads in the caller's own scope.
+ *
+ * A key whose value is not one record id (a string or a number) is never
+ * loaded and is refused `400 VALIDATION_FAILED` naming the key: only an id
+ * names one row.
+ *
+ * ## What stays as it was
+ *
+ *  - **The system principal** (`isSystem`, never set on inbound HTTP) starts
+ *    every flow on every row, as the two admission rules let it.
+ *  - **A start that names no record key** loads nothing.
+ *  - **A key the door already loaded** is not passed here: the action door's
+ *    subject load judged the routed id, and its tests stay as they are.
+ *
+ * `readRecord` is the door's own caller-scope read, the `callData('get', …)`
+ * its subject load uses, so there is no second loader.
+ */
+export async function refuseUnreadableFlowStartRecords(
+    automation: unknown,
+    flowName: string,
+    start: { objectName: unknown; recordKeys: FlowStartRecordKeys },
+    executionContext: { isSystem?: boolean } | null | undefined,
+    readRecord: (objectName: string, recordId: string) => Promise<unknown>,
+): Promise<void> {
+    if (executionContext?.isSystem === true) return;
+    const named = start.recordKeys.filter(([, value]) => value !== undefined && value !== null && value !== '');
+    if (named.length === 0) return;
+    const objectName = typeof start.objectName === 'string' && start.objectName !== '' && !isObjectLessActionKey(start.objectName)
+        ? start.objectName
+        : undefined;
+    if (objectName === undefined) {
+        if (!(await flowRunsElevated(automation, flowName))) return;
+        const message = 'A start that names a record must also name the record\'s object (`objectName`), '
+            + 'so the caller\'s access to that record can be checked before the flow starts.';
+        throw validationFailure(message, [{ field: 'objectName', code: 'required', message }]);
+    }
+    const loaded = new Set<string>();
+    for (const [key, value] of named) {
+        if (typeof value !== 'string' && typeof value !== 'number') {
+            const message = `The record key \`${key}\` must name one record by its id.`;
+            throw validationFailure(message, [{ field: key, code: 'invalid_type', message }]);
+        }
+        const recordId = String(value);
+        if (loaded.has(recordId)) continue;
+        const subject = await loadActionSubjectRecord(objectName, recordId, () => readRecord(objectName, recordId));
+        refuseDeniedSubjectLoad(objectName, recordId, subject);
+        loaded.add(recordId);
+    }
 }
 
 /**
@@ -4106,13 +4282,37 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     } catch (err) {
         // [#28856] A refusal carrying the action's answer is answered as the
         // success it is by the `run_action` tool, so the row records that.
-        await recordActionInvocation(deps, requestContext, envId, earnedAnswerOf(err)
+        //
+        // [#28861] Read on the declarative-update arm only: that arm composes
+        // the ACTION's answer and attaches it (`dispatchAdmittedBusinessAction`).
+        // Any other arm's refusal can carry only a WRITE's data answer — a
+        // handler that let out a refusal a data door attached its answer to —
+        // and the action that threw has no result. It is answered as the
+        // failure it is, and leaves this door with nothing attached, so the
+        // `run_action` tool, which reads every throw, cannot relay it either.
+        const declarative = isDeclarativeUpdateAction(action);
+        await recordActionInvocation(deps, requestContext, envId, declarative && earnedAnswerOf(err)
             ? { ...invocation, outcome: 'succeeded' }
             : { ...invocation, outcome: 'failed', ...actionInvocationFailure(err) });
-        throw err;
+        throw declarative ? err : withoutWriteAnswer(err);
     }
     await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
     return answer;
+}
+
+/**
+ * [#28861] `err` with no write answer attached: a stale-roll-up refusal a data
+ * door attached its answer to comes back as the same refusal — objectql's
+ * class, `failures`, `written`, message and stack — with nothing attached;
+ * every other value is returned as is. For a non-declarative arm's throw,
+ * whose attached answer is a write's, never the action's.
+ */
+function withoutWriteAnswer(err: unknown): unknown {
+    if (earnedAnswerOf(err) === undefined) return err;
+    const stale = err as SummaryRecomputeRefusal;
+    const bare = new SummaryRecomputeError([...(stale.failures ?? [])] as SummaryRecomputeError['failures'], stale.written);
+    if (typeof stale.stack === 'string') bare.stack = stale.stack;
+    return bare;
 }
 
 /**

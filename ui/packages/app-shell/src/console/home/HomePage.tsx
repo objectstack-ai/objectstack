@@ -799,6 +799,7 @@ export function HomePage() {
               the heading's "System Settings" link rather than a tile */}
           <HomeAppsStrip
             apps={launcherApps}
+            routeApps={apps}
             favorites={favorites}
             settingsHref={setupApp ? setupPath : undefined}
             settingsLabel={

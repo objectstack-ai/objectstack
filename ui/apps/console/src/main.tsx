@@ -9,13 +9,20 @@ import ReactDOM from 'react-dom/client';
 import './index.css';
 import { App } from './App';
 import { I18nProvider, preloadBootstrapLocale } from '@object-ui/i18n';
-import { MobileProvider, generatePWAManifest, getNativeHost } from '@object-ui/mobile';
+import {
+  MobileProvider,
+  cacheLoadedResources,
+  generatePWAManifest,
+  getNativeHost,
+  registerServiceWorker,
+} from '@object-ui/mobile';
 import { registerPlaceholders } from '@object-ui/components';
 import { initSentry, initRuntimeConfig, getProductName, getProductShortName, getFaviconUrl, getPwaDescription, getPwaThemeColor } from '@object-ui/app-shell';
 import { loadLanguage } from './loadLanguage';
 import { loadLocales } from './loadLocales';
 import { seedTenantLanguage } from './languageSeed';
 import { preflightAuth } from './lib/auth-preflight';
+import { withConsoleBaseRootRelative } from './utils/consoleBase';
 
 const AUTH_URL = `${import.meta.env.VITE_SERVER_URL || ''}/api/v1/auth`;
 
@@ -70,6 +77,16 @@ registerPlaceholders();
 // Change the spelling here and that script has to change with it;
 // `src/__tests__/runtimeConfigBootDedup.test.ts` fails when the two stop agreeing.
 const SERVER_BASE = (import.meta.env.VITE_SERVER_URL || '').replace(/\/+$/, '');
+
+/**
+ * The Console's mount as an absolute URL with its trailing slash
+ * (`https://host/_console/`): the Service Worker's scope and the installed
+ * app's `start_url` and `scope`. `/` resolves through the same
+ * `withConsoleBaseRootRelative` the auth pages use, so it agrees with where a
+ * full-page navigation lands under every mount.
+ */
+const CONSOLE_SCOPE = new URL(withConsoleBaseRootRelative('/'), window.location.origin).href;
+
 // The third entry seeds the UI language from the server's resolved locale for
 // the signed-in caller (objectui#4035). It joins this existing gate rather than adding one of its
 // own, which is what keeps it off the critical path: it runs CONCURRENTLY with
@@ -149,10 +166,19 @@ Promise.all([
       themeColor: getPwaThemeColor(),
       backgroundColor: '#ffffff',
       display: 'standalone',
-      startUrl: './',
-      scope: './',
+      // Absolute URLs, because a Blob URL is no base to resolve `./` against:
+      // the installed app opens at, and stays inside, the Console's mount.
+      startUrl: CONSOLE_SCOPE,
+      scope: CONSOLE_SCOPE,
       orientation: 'any',
-      icons: [{ src: faviconUrl || './favicon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' }],
+      icons: [
+        {
+          src: new URL(faviconUrl || './favicon.svg', document.baseURI).href,
+          sizes: 'any',
+          type: 'image/svg+xml',
+          purpose: 'any',
+        },
+      ],
     });
     const blob = new Blob([JSON.stringify(manifestJson)], { type: 'application/json' });
     const manifestUrl = URL.createObjectURL(blob);
@@ -161,6 +187,10 @@ Promise.all([
     manifestLink.href = manifestUrl;
     document.head.appendChild(manifestLink);
   }
+
+  // The Console's Service Worker (objectstack#29155): the offline app shell
+  // and the push handlers. Not awaited — it must never hold up first paint.
+  void syncServiceWorker();
 
   // The two loaders wait for this page load's session answer. Signed in, they
   // read `/i18n` with the session's credentials; signed out, they request
@@ -176,3 +206,55 @@ Promise.all([
     </React.StrictMode>
   );
 });
+
+/**
+ * Registers the Console's Service Worker (`service-worker.js`, emitted at the
+ * build root by `vite.config.ts`) under the Console's own scope, never the site
+ * root. It is the `@object-ui/mobile` `'app-shell'` worker: API requests stay
+ * network-only, the HTML entry is network-first, so the next navigation after a
+ * deploy always runs the new build (the worker installs with `skipWaiting` and
+ * no reload prompt is needed).
+ *
+ * Inside the ObjectStack mobile shell (`getNativeHost()`), the shell owns
+ * offline: no worker is registered, and one this Console registered earlier in
+ * the same WebView is unregistered. A bridge that lands after this read leaves
+ * that page load's worker in place; the next load, which sees the bridge at
+ * boot, removes it.
+ *
+ * Production builds only: a dev server's modules are not hashed build output.
+ */
+async function syncServiceWorker(): Promise<void> {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
+  try {
+    if (getNativeHost()) {
+      const registration = await navigator.serviceWorker.getRegistration(CONSOLE_SCOPE);
+      if (registration?.scope === CONSOLE_SCOPE) await registration.unregister();
+      return;
+    }
+    if (!import.meta.env.PROD) return;
+    const registration = await registerServiceWorker({
+      url: `${CONSOLE_SCOPE}service-worker.js`,
+      scope: CONSOLE_SCOPE,
+    });
+    if (!registration) return;
+    // Cache what this load fetched before the worker controlled it — the
+    // first visit's lazy chunks — so an offline start finds them. Read off this
+    // registration, not `serviceWorker.ready`, which waits on the page's URL.
+    cacheLoadedResources(await whenActive(registration));
+  } catch {
+    // A refused registration costs the offline shell, never the page.
+  }
+}
+
+/** The registration's worker once it is active (at once when it already is). */
+function whenActive(registration: ServiceWorkerRegistration): Promise<ServiceWorker | null> {
+  if (registration.active) return Promise.resolve(registration.active);
+  const worker = registration.installing ?? registration.waiting;
+  if (!worker) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    worker.addEventListener('statechange', () => {
+      if (worker.state === 'activated') resolve(worker);
+      else if (worker.state === 'redundant') resolve(registration.active);
+    });
+  });
+}

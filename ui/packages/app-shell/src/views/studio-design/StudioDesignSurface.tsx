@@ -866,6 +866,32 @@ interface StudioSavedDraft {
   name: string;
 }
 
+/**
+ * objectstack#28984 — a landed draft AUTOSAVE says what it saved, by the
+ * item's label, as Studio's other writes do (publish names what went live,
+ * discard says "Draft discarded: LABEL"). The top bar's "Saved HH:MM" stays,
+ * but it names nothing, and only feedback that names the item counts as write
+ * feedback (ruling 6545938831 ② on #28345).
+ *
+ * The autosave lands after every editing pause, so the toast carries one
+ * sonner id per item: a later save of the same item UPDATES the toast already
+ * on screen instead of stacking another (the `PACKAGE_LIST_TOAST_ID` pattern
+ * above). Typing a label is one live toast, not one per pause; another item
+ * saved meanwhile gets its own. Called only once the save has landed: a
+ * refused save keeps its refusal strip and says nothing about saving, and a
+ * conflict the author settled by reloading saved nothing.
+ */
+function announceDraftSaved(saved: StudioSavedDraft, label: string, locale: string): void {
+  toast.success(tFormat('engine.studio.draftSaved', locale, { item: label || saved.name }), {
+    id: draftSavedToastId(saved),
+  });
+}
+
+/** The one sonner id a draft save of this item announces under. */
+function draftSavedToastId(saved: StudioSavedDraft): string {
+  return `studio-draft-saved:${saved.type}:${saved.name}`;
+}
+
 /** Top-bar package switcher: list app packages (writable base vs read-only
  * code), switch by navigation, create a new writable base via the standard
  * CreatePackageDialog, and open the standard PackageDetailSheet (info +
@@ -4360,7 +4386,9 @@ export function InterfacesPillar({
   /** objectui#2600 — mirrors the unsaved-nav-edit state (`navDirty`) up to the
    * Studio header, whose pillar/Home/package navigation unmounts this whole
    * pillar (SPA nav, so no beforeunload). Reports `false` on unmount so a
-   * confirmed discard clears the surface's guard. */
+   * confirmed discard clears the surface's guard. objectstack#29113 — and an
+   * open leaf's edit whose last save was refused (`refusedUnsent`): nothing
+   * sends it again until the author edits, so it is unsaved work too. */
   onDirtyChange?: (dirty: boolean) => void;
   /** objectui#8219 — reports the open leaf's display label (tagged with the
    * leaf's type and name) up to the surface that mounts the copilot dock, for
@@ -4480,7 +4508,8 @@ export function InterfacesPillar({
       setNavSel({ kind: 'nav', id: hit.selectionId });
     },
   });
-  // Mirror `navDirty` up to the surface (see the onDirtyChange prop doc).
+  // Mirror `navDirty` up to the surface (see the onDirtyChange prop doc); the
+  // report itself sits below `refusedUnsent`, which it also reads.
   // Ref-stabilized like PermissionMatrixEditPage's report, so a non-memoized
   // callback prop doesn't refire the effect; the unmount cleanup reports
   // `false` so a deliberately-discarded pillar clears the host's guard state.
@@ -4488,9 +4517,6 @@ export function InterfacesPillar({
   React.useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange;
   });
-  React.useEffect(() => {
-    onDirtyChangeRef.current?.(navDirty);
-  }, [navDirty]);
   // objectui#11189 — `navDirty` as last committed, for the app load, which
   // installs what it read after an await. The same state, read late; only this
   // effect writes it. (A nav save completing reads the autosave's claim on the
@@ -5137,6 +5163,7 @@ export function InterfacesPillar({
       leafReadAtRef.current = null;
       setHasDraft(false);
       setIfDirty(false);
+      setLeafRefusedFor(null);
       return;
     }
     let cancelled = false;
@@ -5205,6 +5232,7 @@ export function InterfacesPillar({
         leafReadAtRef.current = { key: leafKeyOf(current), at: readAt };
         setHasDraft(!!body);
         setIfDirty(false);
+        setLeafRefusedFor(null);
       } catch (e) {
         if (!cancelled) setError(plainRefusal(e));
       } finally {
@@ -5277,6 +5305,11 @@ export function InterfacesPillar({
   // stamped with the leaf it saved, so it reads for that leaf only and expires
   // by construction when another leaf opens. A source page's editor says it.
   const [leafSavedAt, setLeafSavedAt] = React.useState<{ key: string; at: Date } | null>(null);
+  // objectstack#29113 — the leaf whose last save was refused (`leafKeyOf`), so
+  // its edit, still in the buffer and sent again only after another edit
+  // (`useDraftAutoSave`), counts as unsaved work: a save that lands, or a
+  // buffer a load installs, clears it.
+  const [leafRefusedFor, setLeafRefusedFor] = React.useState<string | null>(null);
   const onPatch = React.useCallback(
     (patch: Record<string, unknown>) => {
       setDraft((d) => ({ ...d, ...patch }));
@@ -5307,11 +5340,13 @@ export function InterfacesPillar({
           pair = await pairFor(custom, current.type, current.name);
         } catch (e) {
           setError(plainRefusal(e));
+          setLeafRefusedFor(leafKeyOf(current));
           return;
         }
         const declared = overrideDraftBody(body, custom.base, custom.basedOn);
         if (declared === null) {
           setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          setLeafRefusedFor(leafKeyOf(current));
           return;
         }
         // The buffer was read at another package (the base, before its pair
@@ -5337,8 +5372,11 @@ export function InterfacesPillar({
       if (entering) setServedNonce((n) => n + 1);
       setHasDraft(true);
       setLeafSavedAt({ key: leafKeyOf(current), at: new Date() });
+      setLeafRefusedFor(null);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setIfDirty(false);
+      // objectstack#28984 — named as the rail names the leaf.
+      announceDraftSaved({ type: current.type, name: current.name }, current.label, locale);
       onDraftSaved?.({ type: current.type, name: current.name });
     } catch (e) {
       // objectui#11785 — a page's issue paths (its blocks) name no input this
@@ -5346,6 +5384,7 @@ export function InterfacesPillar({
       // Details keep every path. objectstack#26730 — a dashboard's widget and
       // a report's own properties are placed (`leafIssueLocator`).
       setError(issueRefusal(e, locale, leafIssueLocator(current.type, body, locale)));
+      setLeafRefusedFor(leafKeyOf(current));
     } finally {
       setSaving(false);
     }
@@ -5464,6 +5503,15 @@ export function InterfacesPillar({
   });
   useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? listViewHeld?.clause ?? navRenameClause);
   const heldUnsent = leafHeld !== null || listViewHeld !== null;
+  // objectstack#29113 — an edit of the open leaf whose last save was refused:
+  // the leaf buffer's, or an object leaf's list view's. Not held (a held edit
+  // is never sent, and the publish refuses over one), but unsent all the same.
+  const listViewRefused = listView.dirty && listView.failure?.during === 'save';
+  const refusedUnsent = (ifDirty && draftLoaded && leafRefusedFor === leafKey) || listViewRefused;
+  const leafUnsent = heldUnsent || refusedUnsent;
+  React.useEffect(() => {
+    onDirtyChangeRef.current?.(navDirty || refusedUnsent);
+  }, [navDirty, refusedUnsent]);
   // objectstack#27896 — the panel's view picker (and its "Back to …") opens
   // another view of the object in the one list-view buffer, whose load
   // replaces the open view's edits, and the autosave sends nothing once the
@@ -5590,6 +5638,8 @@ export function InterfacesPillar({
       // and a clean buffer would let the re-read this save signals install the
       // served draft over it. Binding it is the edit that sends it.
       if (sent.unmoved() && !leftOut) setNavDirty(false);
+      // objectstack#28984 — the navigation is the app's: named by its label.
+      announceDraftSaved({ type: 'app', name: appName }, navItemLabelText(appLabel, locale), locale);
       onDraftSaved?.({ type: 'app', name: appName });
     } catch (e) {
       setNavError(
@@ -5602,7 +5652,7 @@ export function InterfacesPillar({
     } finally {
       setNavSaving(false);
     }
-  }, [saveNavDraft, appName, appDraft, onDraftSaved, packageId, publishNonce, locale]);
+  }, [saveNavDraft, appName, appDraft, appLabel, onDraftSaved, packageId, publishNonce, locale]);
   // objectui#5813 — nav edits auto-save while edit mode is open.
   const { flush: flushNavSave, sending: navSending } = useDraftAutoSave({
     // objectui#11232 — the app `doNavSave` addresses. The package is this
@@ -5655,13 +5705,13 @@ export function InterfacesPillar({
       // objectstack#26845 — the created item opens at once, and its load
       // replaces the buffer a held widget lives in: asked before the dialog
       // opens, so Cancel costs nothing and the create itself asks nothing.
-      if (!confirmDropUnsavedWork(heldUnsent, locale)) return;
+      if (!confirmDropUnsavedWork(leafUnsent, locale)) return;
       setCreateError(null);
       setReportBinding(NO_REPORT_BINDING);
       setPageKind(DEFAULT_PAGE_SOURCE_KIND);
       setCreateKind(kind);
     },
-    [heldUnsent, locale],
+    [leafUnsent, locale],
   );
   // objectui#12455 — the "+" kind picker's other kinds: the entry is added
   // where "Add nav item" adds one (the end of the top level, an id minted the
@@ -6747,8 +6797,9 @@ export function InterfacesPillar({
   // A rail row opens its item: a tree entry or a row of the sections under it.
   const pickSurface = (s: Surface) => {
     // objectstack#26705 — another leaf's load replaces the buffer the held
-    // widget lives in; an entry for the open leaf keeps it.
-    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(heldUnsent, locale)) return;
+    // widget lives in; an entry for the open leaf keeps it. objectstack#29113
+    // — so it does an edit whose save was refused.
+    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafUnsent, locale)) return;
     setCurrent(s);
     if (isMobile) setRailOpen(false);
   };
@@ -8248,8 +8299,13 @@ export function DataPillar({
         setObjVerdict(draftEnvelopeDiagnostics(read.answer));
         setObjVerdictBody(extractDraftBody(read.answer) ?? undefined);
       });
-      // No success toast: with auto-save (objectui#5813) it would fire after
-      // every editing pause — the quiet last-saved hint is the affordance.
+      // objectstack#28984 — named by the label this save stored; one toast per
+      // object however many editing pauses save it (`announceDraftSaved`).
+      announceDraftSaved(
+        { type: 'object', name: current.name },
+        typeof body.label === 'string' && body.label ? body.label : current.label,
+        locale,
+      );
       onDraftSaved?.({ type: 'object', name: current.name });
     } catch (e) {
       setError(objectSaveRefusal(e, body, locale));
@@ -8314,6 +8370,9 @@ export function DataPillar({
         setExtHasDraft(true);
         if (sent.unmoved()) setExtDirty(false);
         setSavedAt(new Date());
+        // objectstack#28984 — the extension customizes the open object, so it
+        // is named by that object's label.
+        announceDraftSaved({ type: OBJECT_EXTENSION_TYPE, name }, current?.label ?? '', locale);
         onDraftSaved?.({ type: OBJECT_EXTENSION_TYPE, name });
       } catch (e) {
         setError(plainRefusal(e));
@@ -8321,7 +8380,7 @@ export function DataPillar({
         setSaving(false);
       }
     },
-    [extOpen, customization, extPairFor, saveExtDraft, onDraftSaved],
+    [extOpen, customization, extPairFor, saveExtDraft, onDraftSaved, current, locale],
   );
   const { flush: flushExtSave } = useDraftAutoSave({
     target: `${OBJECT_EXTENSION_TYPE}:${current?.name ?? ''}`,
@@ -10401,6 +10460,8 @@ export function AutomationsPillar({
       rereadFlowVerdict(current.name, target.packageId);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setAutoDirty(false);
+      // objectstack#28984 — named as the rail names the flow.
+      announceDraftSaved({ type: 'flow', name: current.name }, current.label, locale);
       onDraftSaved?.({ type: 'flow', name: current.name });
     } catch (e) {
       // objectui#11785 — read against `draft`, the body this save sent.

@@ -32,16 +32,18 @@
  *   4. Cross-device: a fresh browser opens on the user's stored order, sort
  *      and filters once the family has loaded; another user sees the view's
  *      authored defaults. The list waits for that load.
- *   5. "Reset view", an entry of the header's ⋯ menu shown only while the
- *      user has stored state for the view, drops that state and the list
- *      opens on the view's own sort again.
+ *   5. "Reset to view", the one reset of the 「Personalized」 marker beside
+ *      the title (objectstack#28950; it replaced the header ⋯ "Reset view"),
+ *      drops that state and the list opens on the view's own sort again. The
+ *      marker is drawn while the list reports a part that differs, or while
+ *      a column layout is stored.
  *   6. objectui#12474 — the density toggle and a Hide Fields change are the
  *      user's too: each writes no view and lands as ONE save; a fresh browser
- *      opens on them, another user sees the view's own, and "Reset view"
+ *      opens on them, another user sees the view's own, and "Reset to view"
  *      drops them.
  *   6b. objectui#12505 — on a SAVED view that declares no `columns`, a Hide
  *      Fields change is stored the same way and applied over the drawn
- *      defaults; another user sees the defaults; "Reset view" drops it.
+ *      defaults; another user sees the defaults; "Reset to view" drops it.
  *   6c. objectui#12949 — the list is handed the view's own density and
  *      hidden fields in `viewDefaults`, beside the user's in `schema`, so
  *      its Display reset compares against the view; on an unprojected saved
@@ -286,10 +288,18 @@ async function listReady() {
   await wait(50);
 }
 
-/** Open the header's ⋯ menu (keyboard, as Radix opens it under test) and find one entry. */
-async function openOverflowItem(testId: string): Promise<HTMLElement> {
-  fireEvent.keyDown(screen.getByRole('button', { name: 'More actions' }), { key: 'Enter' });
-  return screen.findByTestId(testId);
+/**
+ * objectstack#28950 — the marker's one reset. The captured list reports what
+ * of it differs from the view first (`parts`), as the real list does; with
+ * none, the marker must already be drawn (a stored column layout).
+ */
+async function resetToView(parts: string[] = []) {
+  if (parts.length) act(() => listProps.onPersonalizationChange(parts));
+  fireEvent.click(await screen.findByTestId('list-personalized-marker'));
+  const reset = await screen.findByTestId('list-personalized-reset');
+  await act(async () => {
+    fireEvent.click(reset);
+  });
 }
 
 /** The ⋯ menu's entries by test id; `[]` when the page draws no ⋯ at all. */
@@ -452,29 +462,33 @@ describe('the user\'s state follows them, and only them (objectui#12418)', () =>
     expect(listProps.initialFilters).toBeUndefined();
     // No layout of anyone's: the grid is handed none, so its own cache cannot stand in.
     expect(listProps.schema.columnState).toEqual({});
-    // Nothing of theirs to reset: the ⋯ menu carries no "Reset view".
+    // Nothing of theirs differs: no marker, and no reset anywhere.
+    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
     expect(await overflowTestIds()).not.toContain('object-view-reset-view-button');
   });
 
-  it('"Reset view" drops the user\'s state for the view and the list opens on the view\'s own sort again', async () => {
+  it('"Reset to view" drops the user\'s state for the view and the list opens on the view\'s own sort again', async () => {
     const ds = makeDataSource();
     const { family } = makeFamily(structuredClone(STORED));
     mountWithFamily(ds, family);
     await listReady();
     expect(listProps.schema.sort).toEqual([{ field: 'amount', order: 'desc' }]);
+    expect(typeof listProps.onPersonalizationChange).toBe('function');
     const before = listProps;
 
-    // An entry of the header's ⋯ menu, not a header button: nothing of it is
-    // drawn until the menu opens, so the one-row header keeps its shape.
-    expect(screen.queryByTestId('object-view-reset-view-button')).toBeNull();
-    const item = await openOverflowItem('object-view-reset-view-button');
-    expect(item.getAttribute('role')).toBe('menuitem');
+    // The stored column layout alone draws the marker; the list adds the rest.
+    expect(screen.getByTestId('list-personalized-marker')).toBeTruthy();
+    act(() => listProps.onPersonalizationChange(['sort', 'filters']));
+    fireEvent.click(screen.getByTestId('list-personalized-marker'));
+    const parts = await screen.findByTestId('list-personalized-parts');
+    expect([...parts.querySelectorAll('li')].map((li) => li.getAttribute('data-part'))).toEqual(['filters', 'sort', 'columns']);
+    const reset = screen.getByTestId('list-personalized-reset');
     // This harness mounts no I18nProvider, so `t` answers with the key: the pin
-    // is WHICH key labels the entry and which titles it, not the English copy.
-    expect(item.textContent?.trim()).toBe('console.objectView.resetView');
-    expect(item.getAttribute('title')).toBe('console.objectView.resetViewTitle');
+    // is WHICH key labels the reset and which says what it covers.
+    expect(reset.textContent?.trim()).toBe('console.objectView.resetView');
+    expect(screen.getByTestId('list-personalized-popover').textContent).toContain('console.objectView.resetViewTitle');
     await act(async () => {
-      fireEvent.click(item);
+      fireEvent.click(reset);
     });
     await wait(700);
 
@@ -486,23 +500,22 @@ describe('the user\'s state follows them, and only them (objectui#12418)', () =>
     expect(listProps.schema.sort).toEqual(AUTHORED_SORT);
     expect(listProps.initialFilters).toBeUndefined();
     expect(listProps.schema.columnState).toEqual({});
-    // Nothing stored for the view any more: nothing to reset, so no entry.
+    // The remounted list has reported nothing yet, and nothing is stored: no marker.
+    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
+    // The header ⋯ has no reset of its own any more (objectstack#28950).
     expect(await overflowTestIds()).not.toContain('object-view-reset-view-button');
   });
 
-  it('with no favorites entry (no app segment), the ⋯ is drawn for "Reset view" alone, and only while there is state to reset', async () => {
+  it('with no favorites entry (no app segment), no ⋯ is drawn: the way back is the marker beside the title', async () => {
     const ds = makeDataSource();
     const { family } = makeFamily(structuredClone(STORED));
     mountWithFamily(ds, family, SYSTEM_ID, { app: false });
     await listReady();
 
-    expect(await overflowTestIds()).toEqual(['object-view-reset-view-button']);
-    await act(async () => {
-      fireEvent.click(await openOverflowItem('object-view-reset-view-button'));
-    });
-    await wait(700);
-    // Nothing left to reset and no favorites entry: no ⋯ at all.
     expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+    await resetToView(['sort']);
+    await wait(700);
+    expect(screen.queryByTestId('list-personalized-marker')).toBeNull();
   });
 
   it('"Clear all" in the Filter panel clears the user\'s filters for the view', async () => {
@@ -586,16 +599,14 @@ describe('the density and the hidden fields are the user\'s too (objectui#12474)
     expect(listProps.schema.hiddenFields).toEqual(AUTHORED_HIDDEN);
   });
 
-  it('"Reset view" drops the stored density and hidden fields, and the list opens on the view\'s own', async () => {
+  it('"Reset to view" drops the stored density and hidden fields, and the list opens on the view\'s own', async () => {
     const ds = makeDataSource();
     const { family } = makeFamily(structuredClone(STORED));
     mountWithFamily(ds, family);
     await listReady();
     expect(listProps.schema.rowHeight).toBe('compact');
 
-    await act(async () => {
-      fireEvent.click(await openOverflowItem('object-view-reset-view-button'));
-    });
+    await resetToView(['density', 'hiddenFields']);
     await wait(700);
 
     expect(viewWrites(ds)).toBe(0);
@@ -657,16 +668,14 @@ describe('on a saved view that declares no `columns`, the hidden fields are the 
     expect(listProps.schema.hiddenFields).toBeUndefined();
   });
 
-  it('"Reset view" drops the stored list, and the list opens on the default columns', async () => {
+  it('"Reset to view" drops the stored list, and the list opens on the default columns', async () => {
     const ds = makeDataSource(UNPROJECTED_SAVED_ROW);
     const { family } = makeFamily(structuredClone(STORED));
     mountWithFamily(ds, family, SAVED_ID);
     await listReady();
     expect(listProps.schema.hiddenFields).toEqual(['amount']);
 
-    await act(async () => {
-      fireEvent.click(await openOverflowItem('object-view-reset-view-button'));
-    });
+    await resetToView(['hiddenFields']);
     await wait(700);
 
     expect(viewWrites(ds)).toBe(0);
@@ -826,12 +835,11 @@ describe('the list\'s "Reset to view default" clears the user\'s stored part ins
     }
   });
 
-  it('a sort reset leaves no sort stored; with nothing else stored the entry and "Reset view" go', async () => {
+  it('a sort reset leaves no sort stored; with nothing else stored the entry goes', async () => {
     const ds = makeDataSource();
     const { family } = makeFamily({ [LIST_KEY]: { perView: { [SYSTEM_ID]: { sort: [{ field: 'amount', order: 'desc' }] } } } });
     mountWithFamily(ds, family);
     await listReady();
-    expect(await overflowTestIds()).toContain('object-view-reset-view-button');
 
     act(() => listProps.onRestoreViewDefaults(['sort']));
     await wait(700);
@@ -839,7 +847,6 @@ describe('the list\'s "Reset to view default" clears the user\'s stored part ins
     expect(viewWrites(ds)).toBe(0);
     expect(family.save).toHaveBeenCalledTimes(1);
     expect(family.save).toHaveBeenCalledWith(LIST_KEY, {});
-    expect(await overflowTestIds()).not.toContain('object-view-reset-view-button');
   });
 
   it('after a sort reset a changed view sort reaches the user on the next open', async () => {

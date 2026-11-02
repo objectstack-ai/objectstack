@@ -139,7 +139,7 @@ contract**, and the canonical patterns.
 
 ## Metadata Protection (`protection`)
 
-Package authors can lock shipped metadata against Studio edits / overlays / deletes.
+Package authors can lock shipped metadata against edits / deletes.
 
 The `protection` block is **declared on the source schema** (`*.object.ts`,
 `*.app.ts`, `*.view.ts`, …) and stripped at load time — it never appears in
@@ -163,11 +163,11 @@ protection?: {
 The block is `.strict()`: `reason` is **required** (min 1 / max 500 chars) and
 unknown keys are rejected.
 
-| `lock` | Edit (overlay) | Delete | Typical use |
+| `lock` | Edit | Delete | Typical use |
 |:---|:---:|:---:|:---|
 | `none` (default) | ✅ | ✅ | Normal authored metadata |
-| `no-overlay` | ❌ | ✅ | Schema is platform-defined but tenant can drop it (e.g. `sys_role`) |
-| `no-delete` | ✅ | ❌ | Tenant may customize fields but the object itself must exist |
+| `no-overlay` | ❌ | ✅ | Platform-defined schema a deployment may drop (e.g. `sys_role`) |
+| `no-delete` | ✅ | ❌ | The object may be extended but must exist |
 | `full` | ❌ | ❌ | Core admin UI / platform identity (e.g. `sys_user`, `app/setup`) |
 
 ### Example

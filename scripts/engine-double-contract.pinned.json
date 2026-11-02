@@ -947,6 +947,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.form-layout-diagnostics.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.graft-folded-form-sections.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1273,6 +1288,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.named-base-every-type.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -4292,6 +4322,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-sharing/src/share-link-redact-fields.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/plugins/plugin-sharing/src/share-link-redact-fields.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-sharing/src/sharing-rule-provenance.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -4602,6 +4642,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/action-body-write-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/action-body-write-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/action-declarative-update-stale-summary.test.ts",
       "verb": "update",
       "pinned": 1
@@ -4867,6 +4917,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/runtime/src/sandbox/body-write-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/sandbox/body-write-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/runtime/src/security/resolve-execution-context.forward-credential.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -4942,7 +5002,27 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/crud-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-automation/src/builtin/notify-both-channels-unheld-address.integration.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-automation/src/builtin/notify-email-field-cache.integration.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

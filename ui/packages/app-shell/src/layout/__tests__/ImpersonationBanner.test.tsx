@@ -79,9 +79,26 @@ function tokenBoundClient(): AuthClient {
   } as unknown as AuthClient;
 }
 
-/** Stub `fetch` for the stop-impersonating call. */
+const STOP_PATH = '/api/v1/auth/admin/stop-impersonating';
+
+/** The administrator's `sys_user` row, read by the banner to name them. */
+const ADMIN_READ_PATH = '/api/v1/data/sys_user/usr_admin';
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+}
+
+/**
+ * The data route's answer for the administrator's row: the spec's
+ * `GetDataResponse` body, unwrapped, as a live server answers it.
+ */
+function adminRow(fields: Record<string, unknown>): Response {
+  return jsonResponse({ object: 'sys_user', id: 'usr_admin', record: { id: 'usr_admin', ...fields } });
+}
+
+/** Stub `fetch` for the stop-impersonating call and the administrator read. */
 function stubStopEndpoint(
-  respond: (url: string) => Response,
+  respond: (url: string) => Response | Promise<Response>,
 ): { urls: string[]; bearers: (string | null)[] } {
   const urls: string[] = [];
   const bearers: (string | null)[] = [];
@@ -138,23 +155,80 @@ describe('ImpersonationBanner (#4467)', () => {
 
   it('names BOTH parties while the session is impersonated', async () => {
     TokenStorage.set(IMPERSONATED_TOKEN);
+    const seen = stubStopEndpoint((url) =>
+      url.endsWith(ADMIN_READ_PATH) ? adminRow({ name: 'Dev Admin', email: 'admin@objectos.ai' }) : new Response('{}'),
+    );
     renderBanner();
 
     const banner = await screen.findByTestId('impersonation-banner');
     // The impersonated user — whose name every write is recorded under.
     expect(banner.textContent).toMatch(/RT8 Dave/);
-    // The administrator who started it, as the session reports them.
-    expect(banner.textContent).toMatch(/usr_admin/);
+    // The administrator who started it, by name: the session carries only the id.
+    const startedBy = await screen.findByTestId('impersonation-started-by');
+    expect(startedBy.textContent).toBe('Started by administrator Dev Admin.');
+    expect(banner.textContent).not.toMatch(/usr_admin/);
+    // The read went out as the session the console holds: the impersonated user's.
+    const read = seen.urls.findIndex((u) => u.endsWith(ADMIN_READ_PATH));
+    expect(read).toBeGreaterThanOrEqual(0);
+    expect(seen.bearers[read]).toBe(`Bearer ${IMPERSONATED_TOKEN}`);
     // And an exit.
     expect(screen.getByTestId('impersonation-stop')).toBeTruthy();
   });
 
+  it('names the administrator by email when their row carries no name', async () => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    stubStopEndpoint((url) =>
+      url.endsWith(ADMIN_READ_PATH) ? adminRow({ name: '', email: 'admin@objectos.ai' }) : new Response('{}'),
+    );
+    renderBanner();
+
+    const startedBy = await screen.findByTestId('impersonation-started-by');
+    expect(startedBy.textContent).toBe('Started by administrator admin@objectos.ai.');
+  });
+
+  it.each([
+    // What a user outside the administrator's organization gets: the row scope
+    // hides the row, and the route answers it as missing.
+    ['outside the reader\'s row scope', () => jsonResponse({ error: 'Record usr_admin not found in sys_user', code: 'RECORD_NOT_FOUND', object: 'sys_user' }, 404)],
+    ['refused', () => jsonResponse({ error: 'Permission denied', code: 'PERMISSION_DENIED' }, 403)],
+    ['answered off the GetDataResponse shape', () => jsonResponse({ success: true, data: { name: 'Dev Admin' } })],
+    ['answered without a name or email', () => adminRow({})],
+    ['a network failure', () => {
+      throw new TypeError('Failed to fetch');
+    }],
+  ])('says "an administrator", never the id, when the read is %s', async (_case, answer) => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    stubStopEndpoint((url) => (url.endsWith(ADMIN_READ_PATH) ? answer() : new Response('{}')));
+    renderBanner();
+
+    const startedBy = await screen.findByTestId('impersonation-started-by');
+    expect(startedBy.textContent).toBe('Started by an administrator.');
+    expect(screen.getByTestId('impersonation-banner').textContent).not.toMatch(/usr_admin/);
+  });
+
+  it('shows no administrator at all while the read is still out', async () => {
+    TokenStorage.set(IMPERSONATED_TOKEN);
+    stubStopEndpoint((url) => {
+      if (url.endsWith(ADMIN_READ_PATH)) return new Promise<Response>(() => {});
+      return new Response('{}');
+    });
+    renderBanner();
+
+    const banner = await screen.findByTestId('impersonation-banner');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByTestId('impersonation-started-by')).toBeNull();
+    expect(banner.textContent).not.toMatch(/usr_admin/);
+  });
+
   it('stop: calls the endpoint, adopts the restored token, refreshes identity, banner goes', async () => {
     TokenStorage.set(IMPERSONATED_TOKEN);
-    const seen = stubStopEndpoint(() =>
+    const seen = stubStopEndpoint((url) =>
       // The server hands the ADMINISTRATOR's session back the same way it
-      // handed the impersonated one out: a rotation on the response header.
-      new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } }),
+      // handed the impersonated one out: a rotation on the stop's response
+      // header, and on no other route.
+      url.endsWith(STOP_PATH)
+        ? new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } })
+        : new Response('{}'),
     );
     renderBanner();
 
@@ -162,10 +236,10 @@ describe('ImpersonationBanner (#4467)', () => {
     await userEvent.click(screen.getByTestId('impersonation-stop'));
 
     await waitFor(() => expect(screen.queryByTestId('impersonation-banner')).toBeNull());
-    expect(seen.urls.some((u) => u.endsWith('/api/v1/auth/admin/stop-impersonating'))).toBe(true);
+    expect(seen.urls.some((u) => u.endsWith(STOP_PATH))).toBe(true);
     // The request went out AS the impersonated user (that is the session we
     // hold); the administrator is restored from the `admin_session` cookie.
-    expect(seen.bearers[0]).toBe(`Bearer ${IMPERSONATED_TOKEN}`);
+    expect(seen.bearers[seen.urls.findIndex((u) => u.endsWith(STOP_PATH))]).toBe(`Bearer ${IMPERSONATED_TOKEN}`);
     // The rotation was adopted — this is the lane fix doing the work.
     expect(TokenStorage.get()).toBe(ADMIN_TOKEN);
   });
@@ -208,8 +282,10 @@ describe('ImpersonationBanner (#4467)', () => {
 
   it('a LATER impersonation, after a stop that worked, is not reported as a failed stop', async () => {
     TokenStorage.set(IMPERSONATED_TOKEN);
-    stubStopEndpoint(() =>
-      new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } }),
+    stubStopEndpoint((url) =>
+      url.endsWith(STOP_PATH)
+        ? new Response('{}', { status: 200, headers: { 'set-auth-token': ADMIN_TOKEN } })
+        : new Response('{}'),
     );
     renderBanner();
 

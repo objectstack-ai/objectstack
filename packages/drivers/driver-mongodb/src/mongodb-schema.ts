@@ -7,9 +7,144 @@
  * JSON Schema validation for ObjectStack object definitions.
  */
 
-import type { Db, CreateIndexesOptions, IndexSpecification } from 'mongodb';
+import type { Collection, Db, CreateIndexesOptions, Document, IndexSpecification } from 'mongodb';
 
 import { StandardErrorCode } from '@objectstack/spec/api';
+
+/**
+ * Every BSON type a unique key part is constrained under: all of them except
+ * `null` and `undefined`.
+ *
+ * ## Why a unique index here carries a partial filter and no `sparse` (#29278)
+ *
+ * The NULL rule every other driver keeps is SQL's: a row whose unique column is
+ * NULL (or, in a multi-column key, a row with a NULL in ANY key part) is exempt
+ * from the constraint, so two such rows never collide. `driver-sql` gets it from
+ * the database's NULL-distinct UNIQUE; `driver-memory` reproduces it (see the
+ * `memory-unique-constraint.ts` docblock). This driver used to build
+ * `{ unique: true, sparse: true }`, and a sparse index skips only documents that
+ * LACK the field — it still indexes an explicit `null`. Measured against a real
+ * `mongod` (8.3.7): two documents storing `f: null` → the second refused
+ * `E11000`; two documents without `f` → both admitted. So two records whose
+ * optional unique field was cleared collided here and nowhere else.
+ *
+ * A `partialFilterExpression` that admits only these types excludes both
+ * shapes — missing and `null` — and constrains every other value exactly as the
+ * sparse index did (measured: two `''`, two equal strings, `1` and `1.0`, two
+ * equal dates and two equal booleans are each still refused `E11000`). It is
+ * spelled as a type list rather than "not null" because MongoDB refuses `$ne`
+ * (and `$not`) inside a partial filter: `{ $exists: true, $ne: null }` is
+ * answered `CannotCreateIndex` (code 67). It is the full non-null list rather
+ * than the field's declared type so a stored value of an unexpected type is
+ * still constrained, as it was under the sparse index.
+ *
+ * MongoDB does not allow `sparse` and `partialFilterExpression` on one index,
+ * and the filter already implies what `sparse` said, so `sparse` is gone.
+ */
+const NON_NULL_BSON_TYPES = [
+  'double', 'string', 'object', 'array', 'binData', 'objectId', 'bool', 'date',
+  'regex', 'javascript', 'int', 'timestamp', 'long', 'decimal', 'minKey', 'maxKey',
+] as const;
+
+/**
+ * The options of a NULL-distinct unique index over `fields` — see
+ * {@link NON_NULL_BSON_TYPES}. Every listed field must hold a non-null value
+ * for a document to be constrained, which is the "a NULL in ANY key part exempts
+ * the row" rule of the other drivers.
+ */
+function nullDistinctUniqueOptions(fields: readonly string[]): Pick<CreateIndexesOptions, 'unique' | 'partialFilterExpression'> {
+  const partialFilterExpression: Document = {};
+  for (const f of fields) partialFilterExpression[f] = { $type: [...NON_NULL_BSON_TYPES] };
+  return { unique: true, partialFilterExpression };
+}
+
+/**
+ * The index ops for one NULL-distinct unique constraint: a plain READ index
+ * over the same keys, then the unique index itself.
+ *
+ * Why the read index: the query planner uses a partial index only for a query
+ * whose predicate it can prove lies inside the filter, and it cannot prove that
+ * for an equality on a value. Measured on 8.3.7: `find({ f: 'x' })` is answered
+ * by `EXPRESS_IXSCAN` on the old sparse unique index and by `COLLSCAN` on the
+ * partial one (a single `$type: 'string'` filter too). The sparse index was the
+ * one serving lookups by a unique field, so dropping it without a replacement
+ * would trade a wrong refusal for a full collection scan on every such lookup.
+ *
+ * The read index is named `idx_<fields>` — the name a declared plain
+ * `indexes[]` entry over the same columns gets — so the two converge on one
+ * index. A plain index over the same keys that already exists under another name
+ * (a lookup field's `idx_FIELD_lookup`) answers `IndexOptionsConflict`, which
+ * the create loop skips: that index serves the reads. When an author-named
+ * unique index already takes the `idx_<fields>` name, no read index is added.
+ */
+function nullDistinctUniqueOps(
+  fields: readonly string[],
+  uniqueName: string,
+): Array<{ spec: IndexSpecification; options: CreateIndexesOptions }> {
+  const spec: Record<string, 1> = {};
+  for (const f of fields) spec[f] = 1;
+  const readName = `idx_${fields.join('_')}`;
+  const ops: Array<{ spec: IndexSpecification; options: CreateIndexesOptions }> = [];
+  if (readName !== uniqueName) ops.push({ spec: spec as IndexSpecification, options: { name: readName } });
+  ops.push({ spec: spec as IndexSpecification, options: { ...nullDistinctUniqueOptions(fields), name: uniqueName } });
+  return ops;
+}
+
+/**
+ * Is `existing` the unique index this driver built before #29278 for `spec` —
+ * `{ unique: true, sparse: true }` over the same keys in the same order, with no
+ * partial filter?
+ *
+ * Deliberately exact: only an index whose every option this driver itself used
+ * to write is ever rebuilt. Any other same-name index (one an operator made by
+ * hand, say) is left alone and keeps the create loop's old answer.
+ */
+function isLegacySparseUnique(existing: Document, spec: IndexSpecification): boolean {
+  if (existing.unique !== true || existing.sparse !== true) return false;
+  if (existing.partialFilterExpression !== undefined) return false;
+  const want = Object.entries(spec as Record<string, unknown>);
+  const have = Object.entries((existing.key ?? {}) as Record<string, unknown>);
+  return want.length === have.length && want.every(([k, v], i) => have[i][0] === k && have[i][1] === v);
+}
+
+/**
+ * Rebuild a legacy sparse unique index as the NULL-distinct one, in place —
+ * the migration of a collection that was synced before #29278.
+ *
+ * Asking for the new options under the old name is answered
+ * `IndexKeySpecsConflict` (code 86, measured on 8.3.7), and MongoDB cannot
+ * change an index's `sparse` / `partialFilterExpression` in place (`collMod`
+ * does not take them), so the index is dropped and created again under its own
+ * name. That always succeeds on the existing data: the new index constrains a
+ * subset of the documents the old one did, and the old one was holding.
+ *
+ * Between the drop and the create no unique index exists for a moment; a
+ * concurrent write that lands a non-null duplicate in that moment makes the
+ * create fail `E11000`, and that error is thrown, failing the sync loudly
+ * rather than leaving the field unconstrained. The read index is created
+ * before this runs, so lookups stay indexed throughout. A second process
+ * syncing at the same time is harmless: a drop that finds the index already
+ * gone (`IndexNotFound`, 27) is ignored, and creating an index that already
+ * exists with the same options is a no-op.
+ *
+ * @returns `true` when the index was the legacy shape and is now rebuilt;
+ *   `false` when it was something else, which the caller handles as before.
+ */
+async function rebuildLegacySparseUnique(
+  collection: Collection,
+  spec: IndexSpecification,
+  options: CreateIndexesOptions,
+): Promise<boolean> {
+  const existing = (await collection.indexes()).find((i) => i.name === options.name);
+  if (!existing || !isLegacySparseUnique(existing, spec)) return false;
+  try {
+    await collection.dropIndex(options.name as string);
+  } catch (error: any) {
+    if (error?.code !== 27 && error?.codeName !== 'IndexNotFound') throw error;
+  }
+  await collection.createIndex(spec, options);
+  return true;
+}
 
 /**
  * ObjectStack field definition (subset needed for schema sync).
@@ -264,10 +399,8 @@ export async function syncCollectionSchema(
   if (schema.fields) {
     for (const [fieldName, field] of Object.entries(schema.fields)) {
       if (field.unique) {
-        indexOps.push({
-          spec: { [fieldName]: 1 },
-          options: { unique: true, sparse: true, name: `idx_${fieldName}_unique` },
-        });
+        // NULL-distinct (#29278) — see {@link NON_NULL_BSON_TYPES}.
+        indexOps.push(...nullDistinctUniqueOps([fieldName], `idx_${fieldName}_unique`));
       }
 
       // Lookup + user (a lookup specialized to sys_user) fields get an index for
@@ -315,15 +448,17 @@ export async function syncCollectionSchema(
     const fields = (idx.fields ?? []).filter((f) => typeof f === 'string' && f.length > 0);
     if (fields.length === 0) continue;
     const unique = Boolean(idx.unique);
+    const name = idx.name ?? `idx_${fields.join('_')}${unique ? '_unique' : ''}`;
+    if (unique) {
+      // NULL-distinct on every key part (#29278) — a single-column declaration
+      // must also take the field-level shape, or the two routes would ask for
+      // `idx_FIELD_unique` with different options.
+      indexOps.push(...nullDistinctUniqueOps(fields, name));
+      continue;
+    }
     const spec: Record<string, 1> = {};
     for (const f of fields) spec[f] = 1;
-    indexOps.push({
-      spec: spec as IndexSpecification,
-      options: {
-        ...(unique ? { unique: true, sparse: true } : {}),
-        name: idx.name ?? `idx_${fields.join('_')}${unique ? '_unique' : ''}`,
-      },
-    });
+    indexOps.push({ spec: spec as IndexSpecification, options: { name } });
   }
 
   // Create indexes (idempotent — MongoDB ignores duplicates)
@@ -331,6 +466,13 @@ export async function syncCollectionSchema(
     try {
       await collection.createIndex(spec, options);
     } catch (error: any) {
+      // A unique index synced before #29278 under this name — rebuild it.
+      const conflict = error?.code === 85 || error?.code === 86
+        || error?.codeName === 'IndexOptionsConflict' || error?.codeName === 'IndexKeySpecsConflict';
+      if (conflict && options.partialFilterExpression !== undefined
+        && await rebuildLegacySparseUnique(collection, spec, options)) {
+        continue;
+      }
       // Index already exists with different options — skip silently
       if (error.codeName === 'IndexOptionsConflict' || error.code === 85) {
         continue;
