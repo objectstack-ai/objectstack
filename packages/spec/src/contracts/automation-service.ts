@@ -1178,6 +1178,26 @@ export interface ConnectorConnectionState {
         clientId: string;
         hasSecret: boolean;
     };
+    /**
+     * ADR-0143 D5 — the redirect URI this deployment's connect names: the
+     * absolute URL of `GET /api/v1/automation/connectors/oauth/callback` that
+     * the administrator registers with the vendor's OAuth client, answered so
+     * the Connect step can show it before any client is entered (ADR-0143 D2.1,
+     * `clientSource: 'installer'`). Derived by the server and fixed per
+     * deployment, never taken from a request: the automation plugin's
+     * `connectorOAuthRedirectUri` option, else that path under `OS_AUTH_URL`,
+     * else under `OS_BASE_URL`.
+     *
+     * Present on {@link IAutomationService.getConnectorConnection}'s answer
+     * whenever the server can derive it, whatever `status` says. Absent when
+     * the deployment has no base to derive it from — a connect is then refused
+     * `503` — and ⛔ never guessed from the request's origin. Only an
+     * `authorization_code` instance has a connection, so no other grant ever
+     * carries it. Read-only: no connection request takes it. Declared ahead of
+     * the service that answers it: until the automation service sets it, no
+     * answer carries it.
+     */
+    redirectUri?: string;
 }
 
 /** What {@link IAutomationService.getConnectorConnection} and its revoke / begin siblings are asked about. */
