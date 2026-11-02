@@ -58,17 +58,23 @@ function reasonOf(row: CensusRow): string {
   switch (row.disposition) {
     case 'multi_shipped':
       return `several packages ship this name (${row.shippers.join(', ')}), so it overlays none of them for certain. `
-        + 'Left as it is: move it by hand into the pair of the package it customizes, or delete it.';
+        + 'Left as it is: delete it (a delete naming no package removes it while no package holds a row of '
+        + 'this name), then, to keep the customization, save it into the pair of the package it customizes '
+        + '(served then at that package\'s address, ?package=<base>).';
     case 'no_pair':
       return `'${row.base}' has no paired .custom package id, so there is nowhere to move it. Left as it is.`;
     case 'foreign_declaration':
       return `its body already carries an \`overrides\` key that does not name '${row.base}'. Left as it is: `
-        + 'correct or remove the key, then re-run.';
+        + 'remove the key with a save naming no package, then re-run: the move declares the right override.';
     case 'shadowed':
-      return `'${row.pair}' already ${row.shadowDeclares ? 'overrides this item (a customization made in Studio)' : 'holds a row of this name'}, `
-        + 'and that row is the one served — this row is never merged into it. Two ways out: keep the Studio '
-        + `customization and delete this package-less row (id ${row.id}), or use "Restore package original" in `
-        + `Studio to delete '${row.pair}''s row and re-run this command to move this one.`;
+      return (row.shadowDeclares
+        ? `'${row.pair}' already overrides this item (a customization made in Studio), and that row is the one `
+          + 'served — this row is never merged into it. Left as it is: to keep the Studio customization, nothing '
+          + 'is owed (this row is not served while that one stands); to make this row the customization instead, '
+        : `'${row.pair}' already holds a row of this name that declares no override, so this row is still the one `
+          + 'served, and the ceremony does not move it beside that row. Left as it is: to have it moved, ')
+        + `use "Restore package original" in Studio to delete '${row.pair}''s row, then re-run this command to `
+        + 'move this one.';
     default:
       return '';
   }
