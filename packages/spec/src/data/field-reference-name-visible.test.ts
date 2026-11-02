@@ -5,8 +5,8 @@
  * referencing field (director ruling 6574398310, letter B).
  *
  * TRUE declares that a principal who can read the record carrying the field
- * may see the referenced record's display name (the target's `nameField`) and
- * id even when it cannot read the target; nothing else of the target. Absent
+ * may see the referenced record's display name (the target's `nameField`,
+ * else `displayNameField`, else the derived title field) and id even when it cannot read the target; nothing else of the target. Absent
  * or false keeps the restricted-reference posture. The key lives on the
  * referencing field only: the ruling refuses a target-object switch.
  *
@@ -186,5 +186,25 @@ describe('the JSON-schema projection of FieldSchema carries referenceNameVisible
     expect(d).toContain('same name and id only');
     expect(d).toContain('no link to the target');
     expect(d).toContain('no target-object switch');
+  });
+
+  it('names the display name the engine resolves and the schema of the served value', () => {
+    const d = prop!.description!;
+    // The ADR-0079 D4 order `resolveRecordDisplayName` answers, not `nameField` alone.
+    expect(d).toContain('`nameField`, else its `displayNameField`, else the derived title field');
+    expect(d).toContain('`ReferenceNameOnlyValueSchema`');
+  });
+
+  it('lists every case the `Record #` floor is served in place of the name', () => {
+    const d = prop!.description!;
+    expect(d).toContain('`Record #` floor with the id');
+    // One marker per floor case objectql's `servableNameField` serves.
+    expect(d).toContain('the reader may not read that field');
+    expect(d).toContain('it declares a `maskingRule`');
+    expect(d).toContain('a formula reading through another reference');
+    expect(d).toContain('an explicit `nameField` (or its `displayNameField` alias) points at a column that is neither title-typed nor autonumber');
+    expect(d).toContain('no field-level answer can be had for the reader');
+    // And the floor every reader gets, with or without the key.
+    expect(d).toContain('no resolvable or no non-empty name reads as the same floor');
   });
 });
