@@ -99,6 +99,7 @@ import {
     rowsToCsv,
     type RestServer,
 } from './rest-server.js';
+import { earnedAnswerLogged } from './stale-summary-answer.js';
 
 // [#23050 slice 1] Moved here from `rest-server.ts`, verbatim, because this module is
 // the first one outside that file to need it: exporting it from there changed the
@@ -442,6 +443,9 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 // Clone's domain errors (CLONE_DISABLED/RECORD_NOT_FOUND)
                 // carry an explicit `.status`; `handleRouteError` resolves
                 // that passthrough itself and logs only genuine faults.
+                // [#28782] A copy stored under a failing roll-up: the answer it earned, 201.
+                const earned = earnedAnswerLogged(error, req.params?.object);
+                if (earned) { res.status(201).json(earned); return; }
                 handleRouteError(res, error, req.params?.object);
             }
         },
