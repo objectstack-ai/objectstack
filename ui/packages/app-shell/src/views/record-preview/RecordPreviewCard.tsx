@@ -29,10 +29,11 @@
  *   ladder (`nameField`, then its deprecated alias, then `titleFormat`, then
  *   type-aware derivation, then `Record #<id>`). The record page's H1 and
  *   breadcrumb read the same function.
- * - **Key fields** — `deriveHighlightFields(def, detectStatusField(def))` from
- *   `@object-ui/plugin-detail`, the exact call the synthesized record page uses
- *   for its highlights strip (`buildDefaultHighlights`): the object's declared
- *   `highlightFields` (ADR-0085) first, else the same heuristic.
+ * - **Key fields** — `deriveHighlightFields` from `@object-ui/plugin-detail`,
+ *   the call the synthesized record page uses for its highlights strip
+ *   (`buildDefaultHighlights`): the object's declared `highlightFields`
+ *   (ADR-0085) minus the title field. An object that declares none shows the
+ *   title alone: nothing is guessed (objectstack#28868).
  * - **Field values** — `HeaderHighlight`, the strip the record page draws those
  *   fields with, so a value reads here exactly as it reads on the record page.
  * - **Field-level security** — the served row passes through
@@ -106,7 +107,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, EmptyValue, cn } from '@object-ui/components';
 import { buildExpandFields, getRecordDisplayName, withoutDeniedFields } from '@object-ui/core';
-import { deriveHighlightFields, detectStatusField, HeaderHighlight } from '@object-ui/plugin-detail';
+import { deriveHighlightFields, HeaderHighlight } from '@object-ui/plugin-detail';
 import { usePermissions } from '@object-ui/permissions';
 import {
   InlineEditProvider,
@@ -169,7 +170,7 @@ export function RecordPreviewCard({ objectName, recordId, dataSource, className 
 
   // Memoised for cost only; nothing below depends on the identity returned.
   const highlightNames = useMemo<string[]>(
-    () => (def ? deriveHighlightFields(def, detectStatusField(def)) : []),
+    () => (def ? deriveHighlightFields(def, null) : []),
     [def],
   );
   // What the read SENDS, held as a string so the effect keys on the data it

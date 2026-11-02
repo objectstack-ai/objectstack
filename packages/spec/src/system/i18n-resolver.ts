@@ -3995,7 +3995,7 @@ function lookupObjectFieldOption(
  */
 const SYSTEM_FIELD_LABELS: Record<string, Record<string, string>> = {
   organization_id: { en: 'Organization', 'zh-CN': '组织', 'ja-JP': '組織', 'es-ES': 'Organización' },
-  owner_id: { en: 'Owner', 'zh-CN': '所有者', 'ja-JP': '所有者', 'es-ES': 'Propietario' },
+  owner_id: { en: 'Owner', 'zh-CN': '负责人', 'ja-JP': '所有者', 'es-ES': 'Propietario' },
   created_at: { en: 'Created At', 'zh-CN': '创建时间', 'ja-JP': '作成日時', 'es-ES': 'Creado el' },
   created_by: { en: 'Created By', 'zh-CN': '创建人', 'ja-JP': '作成者', 'es-ES': 'Creado por' },
   updated_at: { en: 'Last Modified At', 'zh-CN': '更新时间', 'ja-JP': '更新日時', 'es-ES': 'Actualizado el' },
