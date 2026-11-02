@@ -19,7 +19,6 @@ import crmStack from '@objectstack/example-crm';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 
 const SYS = { context: { isSystem: true } };
-const PASSWORD = 'Blank-Role-Passw0rd!';
 
 for (const posture of ['single', 'group'] as const) {
   describe(`[#29158] ${posture}: invite-member refuses a blank role 400 ROLE_NOT_FOUND`, () => {
@@ -47,24 +46,10 @@ for (const posture of ['single', 'group'] as const) {
         return;
       }
 
-      // Walled: a self-registrant creates a second organization and owns it —
-      // the issuer the card measured.
-      const opened = await stack.raw('/api/settings/auth', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-        body: JSON.stringify({ values: { audience_posture: 'open' } }),
-      });
-      expect(opened.status, `open the audience: ${await opened.clone().text()}`).toBe(200);
-      const email = 'blank-role-owner@dogfood.test';
-      const signedUp = await stack.api('/auth/sign-up/email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: PASSWORD, name: 'Blank Role Owner' }),
-      });
-      expect(signedUp.status, `sign-up: ${await signedUp.clone().text()}`).toBe(200);
-      const user = await ql.findOne('sys_user', { where: { email }, ...SYS });
-      await ql.update('sys_user', { id: user.id, email_verified: true }, SYS);
-      token = await stack.signIn(email, PASSWORD);
+      // Walled: the admin creates a second organization and owns it — the
+      // issuer the card measured is the owner of an organization other than
+      // the Default one.
+      token = adminToken;
       const created = await stack.apiAs(token, 'POST', '/auth/organization/create', {
         name: 'Blank Role Org',
         slug: 'blank-role-org',
@@ -86,9 +71,14 @@ for (const posture of ['single', 'group'] as const) {
       expect(tenancy.degraded).toBe(false);
     });
 
-    for (const [label, role] of [['an empty role', ''], ['an empty entry in a role list', 'member,']] as const) {
+    const BLANK_ROLES = [
+      ['an empty role', ''],
+      ['a whitespace-only role', '   '],
+      ['an empty entry in a role list', 'member,'],
+    ] as const;
+    for (const [label, role] of BLANK_ROLES) {
       it(`${label} is refused 400 ROLE_NOT_FOUND and leaves no invitation row`, async () => {
-        const email = `blank-${posture}-${role.length}@dogfood.test`;
+        const email = `blank-${posture}-${BLANK_ROLES.findIndex(([, r]) => r === role)}@dogfood.test`;
         const res = await stack.apiAs(token, 'POST', '/auth/organization/invite-member', {
           email,
           role,
