@@ -322,11 +322,15 @@ export class ConnectorConnectionStore {
     }
 
     /**
-     * Record that the authorization server refused the grant `record` held
-     * (revoked, or expired with no usable refresh). `reason` is the platform's
-     * sentence, never the server's text. Left alone when the row moved since
-     * — checked by the write itself ({@link updateAtRevision}): a reconnect
-     * that landed between the refusal and this write keeps its fresh grant.
+     * Record that the grant `record` held stopped working: the authorization
+     * server refused it on refresh, the connection keeps nothing to renew an
+     * access token it has to renew with (no refresh token was issued, or no
+     * client to refresh with), or the upstream refused the connection's token
+     * while an `mcp` instance discovered its tools. `reason` is the platform's
+     * sentence naming which, never the server's text. Left alone when the row
+     * moved since — checked by the write itself ({@link updateAtRevision}): a
+     * reconnect that landed between the mark and this write keeps its fresh
+     * grant.
      */
     async markReconnectRequired(record: ConnectorConnectionRecord, reason: string): Promise<void> {
         const engine = this.resolveEngine();
