@@ -432,6 +432,33 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
             dimensions: [{ name: 'deal_name', field: 'name' }],
             measures: [{ name: 'deal_count', aggregate: 'count' }],
         },
+    {
+        // [#29025] Not one of #26707's six: a loop whose closing edge is not
+        // typed `back` (the card's push → check → revise → push). It saved,
+        // read valid:true and PUBLISHED, and the engine then refused to
+        // register it, so the flow never ran.
+        rule: 'flow-undeclared-cycle',
+        type: 'flow',
+        item: {
+            name: 'rework_loop',
+            label: 'Rework Loop',
+            type: 'autolaunched',
+            nodes: [
+                { id: 'start', type: 'start', label: 'Start' },
+                { id: 'push', type: 'assignment', label: 'Push' },
+                { id: 'check', type: 'decision', label: 'Check' },
+                { id: 'revise', type: 'assignment', label: 'Revise' },
+                { id: 'end', type: 'end', label: 'End' },
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'push' },
+                { id: 'e2', source: 'push', target: 'check' },
+                { id: 'e3', source: 'check', target: 'end', type: 'conditional', condition: "record.name == 'done'" },
+                { id: 'e4', source: 'check', target: 'revise', type: 'conditional', condition: "record.name != 'done'" },
+                { id: 'e5', source: 'revise', target: 'push' },
+            ],
+        },
+    },
     },
 ];
 
@@ -507,6 +534,18 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         const protocol = new ObjectStackProtocolImplementation(engine);
         const flow = structuredClone(CASES[0]!.item) as any;
         flow.edges[1].condition = "record.name == 'x'";
+        await stageDraft(protocol, 'flow', flow);
+
+        expect(await draftDiagnostics(protocol, 'flow', flow.name)).toEqual({ valid: true });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#29025] the same loop with its closing edge typed back still reads valid:true and publishes', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const flow = structuredClone(CASES.find((c) => c.item.name === 'rework_loop')!.item) as any;
+        flow.edges[4].type = 'back';
         await stageDraft(protocol, 'flow', flow);
 
         expect(await draftDiagnostics(protocol, 'flow', flow.name)).toEqual({ valid: true });
