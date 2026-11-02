@@ -77,7 +77,7 @@ async function openObjectRoute(ds: any, object: string) {
   return { tabs, overrides };
 }
 
-const viewReads = (requests: { url: string }[]) => requests.filter((r) => r.url.startsWith('/api/v1/meta/view'));
+const viewReads = <R extends { url: string }>(requests: R[]): R[] => requests.filter((r) => r.url.startsWith('/api/v1/meta/view'));
 const unscoped = (requests: { url: string }[]) =>
   viewReads(requests).filter((r) => !new URL(r.url, 'http://x').searchParams.has('object'));
 
