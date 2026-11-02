@@ -372,8 +372,8 @@ import {
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
     carryForwardRedactedCredentials,
-    droppedWithheldKeyNotices,
     credentialChannelFor,
+    droppedWithheldKeyNotices,
     restoredCredentialPathsFor,
     storedBodyForCarryForward,
 } from './protocol-credential-carry-forward.js';
