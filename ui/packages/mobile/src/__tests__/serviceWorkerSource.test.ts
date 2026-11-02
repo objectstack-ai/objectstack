@@ -102,7 +102,6 @@ function bootWorker(source: string, options: { network?: NetworkAnswer; caches?:
     },
   };
 
-  // eslint-disable-next-line no-new-func
   new Function('self', 'caches', 'fetch', source)(self, caches, fetchImpl);
 
   async function dispatch(type: string, extra: Record<string, unknown> = {}) {

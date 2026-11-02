@@ -302,7 +302,7 @@ import { getServiceWorkerSource } from '@object-ui/mobile';
 
 const source = getServiceWorkerSource({
   strategy: 'app-shell',
-  build: process.env.BUILD_ID,
+  build: '2026.11.02-4f1c9a2e',
   precache: ['./assets/index-AbC12345.js', './assets/index-XyZ98765.css'],
   notifications: true,
 });
