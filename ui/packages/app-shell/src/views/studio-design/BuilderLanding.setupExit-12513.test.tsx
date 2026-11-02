@@ -27,7 +27,9 @@ vi.mock('./packageCustomizations-io', () => ({
   fetchPackageCustomizationCounts: vi.fn(() => new Promise<never>(() => {})),
 }));
 
-import { BuilderLanding, packagedAutomationPath } from './BuilderLanding';
+import * as landing from './BuilderLanding';
+
+const { BuilderLanding } = landing;
 
 const READ_ONLY = { id: 'com.example.showcase', name: 'Showcase', writable: false, namespace: 'showcase' };
 
@@ -61,8 +63,9 @@ describe('Studio landing: the installed card’s Setup exit says where it goes (
     expect(within(link).queryByText('Customize with an overlay')).toBeNull();
   });
 
-  it('builds the packaged-automation route from its Setup component ref', () => {
-    // The URL the Setup app's `nav_packaged_automation` entry resolves to.
-    expect(packagedAutomationPath()).toBe('/apps/setup/component/automation/packaged');
+  it('no longer builds the Packaged automation route (ADR-0146 D11)', () => {
+    // Setup › Packaged automation retired: its flows half is Studio's, so
+    // Studio builds no route to it (`nav_packaged_automation` is tombstoned).
+    expect('packagedAutomationPath' in landing).toBe(false);
   });
 });

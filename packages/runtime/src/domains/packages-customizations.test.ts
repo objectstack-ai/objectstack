@@ -339,7 +339,8 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
             overrides: [{ type: 'view', name: VIEW, basedOn: '1.0.0', version: expect.any(Number) }],
             extensions: [{ object: 'showcase_task', kind: 'field', name: 'region__c' }],
             switchedOff: [{ type: 'flow', name: 'showcase_task_reminder' }],
-            counts: { overrides: 1, extensions: 1, switchedOff: 1 },
+            contributions: [],
+            counts: { overrides: 1, extensions: 1, switchedOff: 1, contributions: 0 },
         });
         const parsed = GetPackageCustomizationsResponseSchema.safeParse(data);
         expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
@@ -442,7 +443,8 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
             overrides: [],
             extensions: [],
             switchedOff: [],
-            counts: { overrides: 0, extensions: 0, switchedOff: 0 },
+            contributions: [],
+            counts: { overrides: 0, extensions: 0, switchedOff: 0, contributions: 0 },
         });
         expect(engine.registry.getAllPackages().length).toBe(before);
         expect(engine.registry.getPackage(PAIR)).toBeFalsy();
@@ -486,5 +488,123 @@ describe('[#28411] GET /packages/:id/customizations — overrides, extensions an
         expect(r.response?.status).toBe(400);
         expect(r.response?.body?.error?.code).toBe('VALIDATION_ERROR');
         expect(r.response?.body?.error?.message).toContain('includeDrafts');
+    });
+});
+
+const THIRD = 'com.example.acme-sync';
+const FOURTH = 'com.example.partner';
+
+/** A flow triggered by a record change on `object`. */
+const flowOn = (name: string, object: string) => ({
+    name,
+    label: name,
+    type: 'record_change',
+    status: 'active',
+    nodes: [
+        { id: 'start', type: 'start', label: 'Start', config: { objectName: object, triggerType: 'record-after-update' } },
+        { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'end' }],
+});
+
+/** A code package registered as the engine registers every manifest: an object extension and flows. */
+const registerContributor = (engine: ObjectQL, id: string, fields: readonly string[], flows: ReadonlyArray<ReturnType<typeof flowOn>>) =>
+    engine.registerApp({
+        id,
+        name: id.split('.').join('-'),
+        version: '1.0.0',
+        objectExtensions: [{
+            extend: 'showcase_task',
+            fields: Object.fromEntries(fields.map((f) => [f, { name: f, label: f, type: 'text' }])),
+        }],
+        flows: [...flows],
+    });
+
+/**
+ * The card's fixture (#28722): the base ships a flow on its object, the pair
+ * extends that object and carries a flow on it, and a third code package
+ * extends the same object with a field and ships a flow on it — plus a flow
+ * on an object the base does not own.
+ */
+async function contributedFixture() {
+    const booted = await boot();
+    const { engine, protocol } = booted;
+    engine.registry.registerItem('flow', flowOn('showcase_task_escalate', 'showcase_task'), 'name', BASE);
+    await install(protocol, PAIR);
+    extend(engine, PAIR, 'showcase_task', { fields: { region__c: { name: 'region__c', label: 'Region', type: 'text' } } });
+    engine.registry.registerItem('flow', flowOn('showcase_task_region_notify', 'showcase_task'), 'name', PAIR);
+    registerContributor(engine, THIRD, ['acme_sync_id'], [flowOn('acme_task_sync', 'showcase_task'), flowOn('acme_note_sync', 'other_note')]);
+    return booted;
+}
+
+describe('[#28722] GET /packages/:id/customizations — the fields and flows other packages contribute to a base', () => {
+    it('names the third package for its extension field and its flow, and names neither the base nor the pair', async () => {
+        const { dispatcher } = await contributedFixture();
+        const r = await customizations(dispatcher, BASE);
+        expect(r.response?.status).toBe(200);
+        const data = r.response?.body?.data;
+        expect(data.contributions).toEqual([
+            { kind: 'field', object: 'showcase_task', name: 'acme_sync_id', packageId: THIRD },
+            { kind: 'flow', object: 'showcase_task', name: 'acme_task_sync', packageId: THIRD },
+        ]);
+        expect(data.counts.contributions).toBe(2);
+        // The pair's member stays where N-15 serves it, and is not a contribution.
+        expect(data.extensions).toEqual([{ object: 'showcase_task', kind: 'field', name: 'region__c' }]);
+        const parsed = GetPackageCustomizationsResponseSchema.safeParse(data);
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    });
+
+    it('stamps each item with its own package: two packages adding a field of one name are two entries', async () => {
+        const { dispatcher, engine } = await contributedFixture();
+        registerContributor(engine, FOURTH, ['acme_sync_id'], []);
+        const { contributions } = (await customizations(dispatcher, BASE)).response?.body?.data;
+        expect(contributions.filter((c: any) => c.kind === 'field')).toEqual([
+            { kind: 'field', object: 'showcase_task', name: 'acme_sync_id', packageId: THIRD },
+            { kind: 'field', object: 'showcase_task', name: 'acme_sync_id', packageId: FOURTH },
+        ]);
+    });
+
+    it('a flow authored in this environment is not a package\'s contribution', async () => {
+        const { dispatcher, engine } = await contributedFixture();
+        // The bare slot every package-less registration takes: the sentinel
+        // stamp, and a tenant-authored overlay wearing a real package's id.
+        engine.registry.registerItem('flow', { ...flowOn('showcase_task_local', 'showcase_task'), _packageId: 'sys_metadata' } as any);
+        engine.registry.registerItem('flow', { ...flowOn('showcase_task_org', 'showcase_task'), _packageId: THIRD, _provenance: 'org' } as any);
+        const { contributions } = (await customizations(dispatcher, BASE)).response?.body?.data;
+        expect(contributions.map((c: any) => `${c.kind}:${c.name}`)).toEqual(['field:acme_sync_id', 'flow:acme_task_sync']);
+    });
+
+    it('reads a field\'s stamp and a flow\'s stamp the same way: each stamp lists both kinds or neither', async () => {
+        const { dispatcher, engine } = await boot();
+        // One field extension and one flow per stamp, on the base's object.
+        // A code package's stamp is a contribution; the package-less
+        // `sys_metadata` sentinel and a tenant-authored body wearing a real
+        // package's id are the environment's, whichever kind carries them.
+        const stamps = [
+            { tag: 'code', packageId: THIRD, body: {} },
+            { tag: 'sentinel', packageId: 'sys_metadata', body: {} },
+            { tag: 'tenant', packageId: FOURTH, body: { _provenance: 'org' } },
+        ] as const;
+        for (const { tag, packageId, body } of stamps) {
+            extend(engine, packageId, 'showcase_task', { ...body, fields: { [`${tag}_field`]: { name: `${tag}_field`, label: tag, type: 'text' } } });
+            engine.registry.registerItem('flow', { ...flowOn(`${tag}_flow`, 'showcase_task'), _packageId: packageId, ...body } as any);
+        }
+        const { contributions } = (await customizations(dispatcher, BASE)).response?.body?.data;
+        const listedTags = (kind: string) => contributions
+            .filter((c: any) => c.kind === kind)
+            .map((c: any) => c.name.replace(/_(field|flow)$/, ''))
+            .sort();
+        expect(listedTags('field')).toEqual(listedTags('flow'));
+        expect(contributions).toEqual([
+            { kind: 'field', object: 'showcase_task', name: 'code_field', packageId: THIRD },
+            { kind: 'flow', object: 'showcase_task', name: 'code_flow', packageId: THIRD },
+        ]);
+    });
+
+    it('another base\'s read lists what is contributed to its own objects only', async () => {
+        const { dispatcher } = await contributedFixture();
+        const data = (await customizations(dispatcher, OTHER)).response?.body?.data;
+        expect(data.contributions).toEqual([{ kind: 'flow', object: 'other_note', name: 'acme_note_sync', packageId: THIRD }]);
+        expect(data.counts.contributions).toBe(1);
     });
 });

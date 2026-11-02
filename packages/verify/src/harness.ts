@@ -75,9 +75,16 @@ interface InjectableApp {
  * ADR-0093 D5), so registering it turns a degraded deployment into a
  * non-degraded `isolated` one from every consumer's point of view.
  *
- * ⛔ It stamps no `organization_id` and scopes no query — it is the deployment's
- * POSTURE, not its WALL. See `BootOptions.multiTenant` for what that permits and
- * what it must never be used to claim.
+ * The stand-in itself stamps nothing and scopes nothing, and since ADR-0131 it
+ * does not need to: the organization wall is open-core code that keys on the
+ * POSTURE this stand-in makes true (D8 one predicate, D11 postures differ only
+ * in enforcement). The engine lands an insert in the caller's active
+ * organization (`ObjectQL#driverWriteTarget`), the SQL driver fills an absent
+ * `organization_id` from it (`SqlDriver#injectTenantOnInsert`), and reads are
+ * scoped by the one Layer 0 verdict (`computeTenantLayer0Verdict`,
+ * `packages/core/src/security/tenant-layer0-verdict.ts`), which walls whenever
+ * `postureEnforcesWall` holds. See `BootOptions.multiTenant` for what that
+ * walls and what the stand-in still does not give a fixture.
  *
  * `supportedPostures` is declared (ADR-0105 D12) so the stand-in entitles the
  * same set a runtime predating that seam does, rather than accidentally
@@ -235,32 +242,74 @@ export interface BootOptions {
    * unless the caller already set `OS_TENANCY_POSTURE` — mounting the plugin
    * entitles a walled posture but no longer activates one by itself.
    *
-   * ## `'posture-only'` — a stand-in, for proving org LIFECYCLE without isolation
+   * ## `'posture-only'` — a stand-in for the `org-scoping` service
    *
    * `multiTenant: 'posture-only'` boots the same shape but registers a built-in
    * stand-in for the `org-scoping` service instead of requiring the enterprise
    * package that no framework package may declare (ADR-0132's entitlement
    * boundary). The `tenancy` service then resolves a real, NON-DEGRADED
-   * `isolated` posture, which is what posture-gated seams key on — above all
+   * `isolated` posture (`group` when the caller sets `OS_TENANCY_POSTURE` to
+   * it), which is what posture-gated seams key on — above all
    * `POST /auth/organization/create`, which since #5261 refuses whenever the
    * EFFECTIVE posture has no organization wall.
    *
-   * ⛔ **It performs no tenant isolation whatsoever.** Nothing stamps
-   * `organization_id`, nothing scopes a query. It makes the deployment's POSTURE
-   * true, not its WALL. A fixture that asserts one tenant cannot read another's
-   * rows and boots this way would assert nothing and pass — the constant-false
-   * capability probe of #4700 wearing the opposite mask. Cross-tenant isolation
-   * has exactly one honest proof in this repo: `multiTenant: true` with the real
-   * `@objectstack/organizations` installed, which is why those gates SKIP here
-   * (see `test/enterprise-organizations.ts`) instead of pretending.
+   * ### What it walls
    *
-   * Use it only where the organization wall is the PRECONDITION of the thing
-   * under test rather than the thing itself — `org-create-default-team`
-   * (#3624: better-auth's default-team insert must not 500) is the case it was
-   * built for. Before #5261 that fixture opened the route by flipping
-   * `OS_MULTI_ORG_ENABLED` after boot and leaning on the gate's live env read;
-   * the gate now reads the tenancy service, so the honest way to open it is to
-   * simulate the deployment that legitimately has it open.
+   * The open core's organization wall. Since ADR-0131 that wall keys on the
+   * posture in force, not on which package registered the service (D8: one
+   * predicate, computed once; D11: postures differ only in enforcement):
+   *
+   *  - **Insert.** The engine lands a write in the caller's active organization
+   *    in every posture (`ObjectQL#driverWriteTarget`), and the SQL driver
+   *    fills an absent `organization_id` from it
+   *    (`SqlDriver#injectTenantOnInsert`). A row a member of organization A
+   *    creates is stamped A.
+   *  - **Read.** Layer 0 (`computeTenantLayer0Filter`, plugin-security) and the
+   *    driver scope the engine threads (`SqlDriver#applyTenantScope`) project one
+   *    verdict, `computeTenantLayer0Verdict`
+   *    (`packages/core/src/security/tenant-layer0-verdict.ts`), which walls
+   *    whenever `postureEnforcesWall` holds: `organization_id = active org`
+   *    under `isolated`, `IN accessible_org_ids` under `group`. SecurityPlugin
+   *    keeps the shipped tenant RLS policies instead of stripping them.
+   *
+   * So a fixture that asserts one organization cannot read another's rows CAN
+   * boot this way and assert something. It must still MEASURE the wall rather
+   * than assume it — read the other organization's row and see it hidden, read
+   * its own and see it served, and check the stamped `organization_id` — as the
+   * precondition case of
+   * `packages/qa/dogfood/test/create-caller-id-collision-walled.dogfood.test.ts`
+   * does. Without that, a later assertion may be comparing two visible rows.
+   *
+   * ### What it does NOT give a fixture
+   *
+   * The stand-in registers the service and nothing else, so what the real
+   * `@objectstack/organizations` runtime does BESIDES making the posture true
+   * is absent. When one of these is the subject, use `multiTenant: true` with
+   * that package installed (those gates skip in this repo — see
+   * `packages/qa/dogfood/test/enterprise-organizations.ts`):
+   *
+   *  - **No default-organization bootstrap.** The open bootstrap abstains under
+   *    every walled posture (cloud ADR-0081 D1), so the harness admin resolves
+   *    org-less. A fixture mints its own organizations
+   *    (`POST /auth/organization/create`, then `set-active`), and `orgContext`
+   *    refuses to compose with this mode.
+   *  - **No per-organization seed replay.** A new organization starts empty;
+   *    the app's seed datasets are not replayed into it.
+   *  - **No walled membership-policy gate.** The real runtime refuses a walled
+   *    boot whose membership policy is undeclared
+   *    (`assertWalledMembershipPolicyDeclared`); the stand-in does not ask.
+   *  - **No deployment declarations on the service** (`platformGlobalObjects`,
+   *    `suppressUnboundedOrgAdminGrant`); their readers see them as absent.
+   *  - **The SQL driver only.** `databaseDriver: 'memory'` refuses a walled
+   *    posture (`assertSingleTenantPosture`, driver-memory), so the wall is
+   *    measured on the default `sqlite-wasm` driver.
+   *
+   * It was built for `org-create-default-team` (#3624: better-auth's
+   * default-team insert must not 500), where the wall is the PRECONDITION of
+   * the route under test. Before #5261 that fixture opened the route by
+   * flipping `OS_MULTI_ORG_ENABLED` after boot and leaning on the gate's live
+   * env read; the gate now reads the tenancy service, so the honest way to open
+   * it is to simulate the deployment that legitimately has it open.
    */
   multiTenant?: boolean | 'posture-only';
   /**
@@ -293,16 +342,17 @@ export interface BootOptions {
    * ## ⛔ It performs NO tenant isolation whatsoever
    *
    * A bound caller is not an organization wall. With no `org-scoping` service
-   * registered — and nothing here registers one — `SecurityPlugin` STRIPS the
-   * wildcard `organization_id` RLS policies that ship in the default
-   * permission sets (`collectRLSPolicies`; see the `multiTenant` doc block
-   * above). So a fixture asserting "tenant B cannot read tenant A's rows" on a
+   * registered — and nothing here registers one — the posture stays `single`,
+   * where the Layer 0 verdict walls nothing (`postureEnforcesWall`, ADR-0131
+   * D8, D11) and `SecurityPlugin` STRIPS the wildcard `organization_id` RLS
+   * policies that ship in the default permission sets (`collectRLSPolicies`).
+   * So a fixture asserting "tenant B cannot read tenant A's rows" on a
    * `single` boot asserts nothing and passes.
    *
-   * Cross-tenant isolation has exactly one honest proof in this repo:
-   * `multiTenant: true` with the real `@objectstack/organizations` installed
-   * (which is why those gates SKIP here instead of pretending — see
-   * `test/enterprise-organizations.ts`).
+   * A cross-tenant fixture needs a WALLED posture, which this flag never
+   * requests: `multiTenant: 'posture-only'` (the open core's wall, measured as
+   * the `multiTenant` doc block above says) or `multiTenant: true` with the
+   * real `@objectstack/organizations` installed.
    *
    * The tenancy POSTURE is likewise untouched, and that is not an accident of
    * this implementation but a property of the seam: `TenancyService`'s
@@ -1088,7 +1138,8 @@ async function bootClaimed(
   // so a missing package is a hard, actionable error — not a silent
   // single-org downgrade that would flip the fixture's RLS posture.
   if (opts.multiTenant === 'posture-only') {
-    // See BootOptions.multiTenant: activates the POSTURE, never the WALL.
+    // See BootOptions.multiTenant: activates the walled POSTURE; the open
+    // core's wall (insert stamp, Layer 0 read verdict) follows from it.
     // Registered in the enterprise plugin's own slot so every downstream probe
     // (SecurityPlugin's strip decision, the `tenancy` service's `isolationActive`,
     // `requiresService: 'org-scoping'` nav gating) sees one consistent answer —

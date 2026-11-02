@@ -37,7 +37,7 @@ import '@testing-library/jest-dom/vitest';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 // The page's pencil is a button that navigates, so its target is read off the
 // navigate call it makes (objectui#12540).
@@ -198,12 +198,13 @@ import { PageView } from '../../views/PageView';
 import { ExpressionProvider } from '../../providers/ExpressionProvider';
 
 /** `/me/permissions` for a persona, with the fields these surfaces do not read left empty. */
-function mePermissions(systemPermissions: string[]): MePermissionsResponse {
+function mePermissions(systemPermissions: string[]): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: 'org_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: [],
     systemPermissions,
     objects: {},

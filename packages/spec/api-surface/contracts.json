@@ -285,6 +285,7 @@
     "RunListResult (interface)",
     "SEED_SETTLEMENT_SERVICE (const)",
     "SHARE_LINK_SERVICE (const)",
+    "SaveNoticeChannel (interface)",
     "SchemaValidationReport (interface)",
     "SchemaValidationResult (interface)",
     "ScreenFieldSpec (interface)",

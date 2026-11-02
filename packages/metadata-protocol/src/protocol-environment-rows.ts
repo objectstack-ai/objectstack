@@ -16,7 +16,8 @@
  * the code packages that ship the name. Not a moved body: the rule the two
  * by-name reads share. [#28409] …and `shippingPackageIds` /
  * `soleShippingPackage`, the code packages that ship a name, read one way by
- * those reads and by the env-wide list.
+ * those reads and by the env-wide list. [#28802] …and
+ * `baseAddressServesMember`, the member grain both apply to a bundle.
  *
  * A MOVE, not a redesign. Each function below is the body of the
  * `ObjectStackProtocolImplementation` method of the same name as it stood,
@@ -43,6 +44,7 @@
  * not move.
  */
 
+import { customizationPackageId } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
 import type { StoredOverlayRow } from './item-lock.js';
 import { overlayMemberWhere } from './migrations/overlay-index.js';
@@ -254,4 +256,25 @@ export function shippingPackageIds(shipped: readonly unknown[]): ReadonlySet<str
 export function soleShippingPackage(shipped: readonly unknown[]): string | undefined {
     const shippers = shippingPackageIds(shipped);
     return shippers.size === 1 ? [...shippers][0] : undefined;
+}
+
+/**
+ * [#28802, ADR-0146 D2, #28390 ruling A] Whether the address of `base`, a
+ * code package that ships a bundle's name (a type in
+ * `ITEM_KEY_DISCRIMINATORS`), serves a member of that name bound to `bound`.
+ * Member grain: the base's own members and a member bound to no package, and
+ * the pair's own ADDED members, a member of the name the base does not ship
+ * (`baseShipsMember` false), as the pair is the customer layer the base's
+ * address serves. A member another package binds under the base's name (a
+ * dependent's addition) is that package's own item, served under its own
+ * address only: "a dependent adds items under its own names". So is a pair's
+ * undeclared row at a member the base ships (refused at the write gate since
+ * PR #28777). A declared override is served as the base's item by the
+ * served-row resolution and is never asked about here.
+ */
+export function baseAddressServesMember(base: string, bound: string | undefined, baseShipsMember: boolean): boolean {
+    if (bound === undefined || bound === base) return true;
+    if (baseShipsMember) return false;
+    const pair = customizationPackageId(base);
+    return pair.ok && pair.value === bound;
 }

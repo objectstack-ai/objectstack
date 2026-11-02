@@ -27,6 +27,20 @@
  *                    `director`, `triage`); seat = `· seat N` or `repo:x#N`,
  *                    else 1; repo = `repo:x`'s repo, else `@ <repo>`, else the
  *                    repo the post lives on.
+ *   epic rows        an open `pm:epic` PARENT — sub-issues under it AND a
+ *                    `session_…` registration in its body, the paired
+ *                    delegation signal (`seat-lifecycle.md` 〈Epic 子树车道〉;
+ *                    H45's `h45DelegationNodeSignals`, both halves) — or a
+ *                    registered `pm:epic` issue an open mailbox names (a
+ *                    parent delegated before its first sub-issue; a child is
+ *                    never a seat's mailbox) is lane `epic:#<n>`, with no seat
+ *                    post: one row per `epic:#<n>#<k>` seat holding an open
+ *                    mailbox, matched by its slug `epic-<n>-<k>` as the mailbox
+ *                    column is (seat k, seated by the mailbox's login — opened
+ *                    at seating, closed at hand-over), else one row, seat 1,
+ *                    status unknown, so an epic seat nobody can ring shows as
+ *                    one. No epic in-flight or ruling is read, so an epic row
+ *                    is never 「疑似撞墙」.
  *   account          the login after 🟢 in the title, else the post's first
  *                    assignee while seated. `🟢 Routine` reads as Routine.
  *   project          「由 X 账户的项目负责」 in the title or body — the line
@@ -61,7 +75,7 @@
  *                    them reads it cannot be told: it is listed under the
  *                    table as assigned to no seat, ⛔ never shown on the
  *                    login's rows. So is a per-seat one whose seat no post
- *                    carries.
+ *                    or epic parent carries.
  *
  * The footer names the generation time and every read made, so a reader can
  * re-run each one.
@@ -100,7 +114,7 @@ import { ghApi, PER_PAGE, readAllPages } from './gh-pages.mjs';
 // whose mailbox a pull is have ONE owner, the mailbox opener (#25417, keyed by
 // seat since #27637); this file reads them, never re-spells them.
 import * as mailboxOpen from './mailbox-open.mjs';
-import { LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX, MAILBOX_LABEL, mailboxOwner, seatKey } from './mailbox-open.mjs';
+import { LEDGER_EXCLUSION, MAILBOX_BRANCH_PREFIX, MAILBOX_LABEL, mailboxOwner, SEAT_EPIC_KIND, seatKey } from './mailbox-open.mjs';
 // The seat record's heading and verdict have ONE reading, shared with H69 in
 // check-half-states; this file asks it, never re-spells the heading.
 import * as seatRecord from './seat-record.mjs';
@@ -241,6 +255,34 @@ export function hasLandingVerdict(comments) {
   });
 }
 
+/**
+ * Is this open `pm:epic` issue a delegated PARENT — sub-issues under it AND a `session_…` registration in its body?
+ * Both halves of H45's `h45DelegationNodeSignals` (check-half-states), which the self-test holds this equal to; it is
+ * not imported, so the relay (which imports `ROSTER_MARKER` from here) never loads the patrol. A child carries
+ * `pm:epic` and a signature's session too, never sub-issues of its own. Pure.
+ */
+export const isEpicParent = (i) => Number(i?.sub_issues_summary?.total ?? 0) > 0 && isEpicRegistered(i);
+/** H45's registration half alone: a `session_…` id in the body. Never a row on its own — every seat-filed child has one. Pure. */
+const isEpicRegistered = (i) => /session_[A-Za-z0-9]{4,}/.test(String(i?.body ?? ''));
+/**
+ * The second condition for an epic row: a registered `pm:epic` issue that an open mailbox already names — a parent
+ * delegated before its first sub-issue, whose PM opened `epic:#<n>#<k>` at seating. A child never has a mailbox named
+ * after itself. `held` is that issue's seat → login map (`epicSeatsHeld`). Pure.
+ */
+export const isSeatedFreshEpic = (i, held) => held.size > 0 && isEpicRegistered(i);
+/**
+ * Epic `lane`'s seats holding an open mailbox, seat → login, matched by `seatKey`'s slug `epic-<n>-<k>` exactly as the
+ * mailbox column matches — a `Mailbox-of:` line or a head-only `mailbox/<login>/epic-<n>-<k>` alike. Pure.
+ */
+export function epicSeatsHeld(lane, mailboxes) {
+  const stem = seatKey(lane).slug.replace(/1$/, '');
+  return new Map(mailboxes.flatMap((m) => {
+    const k = m.slug?.startsWith(stem) ? m.slug.slice(stem.length) : null;
+    return k !== null && seatKey(`${lane}#${k}`)?.slug === m.slug ? [[Number(k), m.login]] : [];
+  }));
+}
+const isEpicLane = (lane) => lane.startsWith(`${SEAT_EPIC_KIND}:`);
+
 /** A seat row's mailbox slug — its `LANE#N` as the opener spells it in a ref — or null. Pure. */
 const seatSlugOf = (row) => seatKey(`${row.lane}#${row.seat}`)?.slug ?? null;
 
@@ -264,7 +306,7 @@ export function unassignedMailboxes(snapshot, rows) {
   const read = new Set(rows.map(seatSlugOf).filter(Boolean));
   return readMailboxes(snapshot)
     .filter((m) => m.slug === null || !read.has(m.slug))
-    .map((m) => ({ ...m, why: m.slug === null ? 'legacy per-login, names no seat' : 'no seat post carries this seat' }));
+    .map((m) => ({ ...m, why: m.slug === null ? 'legacy per-login, names no seat' : 'no seat post or epic parent carries this seat' }));
 }
 
 const cardLaneMatch = (card, row) => {
@@ -287,12 +329,23 @@ export function buildRows(snapshot, { now }) {
   const cards = [];
   const rulings = [];
   const pulls = [];
+  const mailboxes = readMailboxes(snapshot);
   for (const repo of repos) {
     const s = snapshot.repos[repo] ?? {};
     for (const post of s.seats ?? []) {
       if (post.pull_request || !labelNames(post).includes('pm:seat')) continue;
       const seat = parseSeat(post, repo);
       if (seat) rows.push(seat);
+    }
+    for (const epic of s.epics ?? []) {
+      if (epic.pull_request || epic.state === 'closed' || !labelNames(epic).includes('pm:epic')) continue;
+      const lane = `${SEAT_EPIC_KIND}:#${epic.number}`;
+      // Its seats are the ones holding a mailbox; none open ⇒ seat 1, unknown.
+      const held = epicSeatsHeld(lane, mailboxes);
+      if (!isEpicParent(epic) && !isSeatedFreshEpic(epic, held)) continue;
+      for (const [seat, login] of held.size ? held : new Map([[1, null]])) {
+        rows.push({ board: repo, post: epic.number, name: lane, lane, seat, repo, status: login ? 'seated' : 'unknown', mark: login ? '🟢' : null, account: login, routine: false, project: null, wallNote: null, updatedAt: epic.updated_at ?? null });
+      }
     }
     const asCard = (i) => ({ repo, number: i.number, labels: labelNames(i), assignees: assigneeLogins(i).map(lc), updatedAt: i.updated_at ?? null });
     for (const i of s.dispatched ?? []) if (!i.pull_request && i.state !== 'closed') cards.push(asCard(i));
@@ -307,7 +360,6 @@ export function buildRows(snapshot, { now }) {
     if (mailboxOwner(pr) !== null || !String(pr?.head?.ref ?? '').startsWith(CARD_BRANCH_PREFIX) || !hasLandingVerdict(comments)) continue;
     for (const k of closingRefs(pr.body, repo)) landing.set(k, [...(landing.get(k) ?? []), ref(repo, pr.number)]);
   }
-  const mailboxes = readMailboxes(snapshot);
 
   const out = rows.map((row) => {
     const acct = lc(row.account);
@@ -326,7 +378,7 @@ export function buildRows(snapshot, { now }) {
       awaitingRuling: [],
       awaitingLanding: awaitingLanding.sort(byRef),
       lastActivity,
-      suspectedWall: row.status === 'seated' && row.wallNote === null && ageHours !== null && ageHours > STALE_HOURS,
+      suspectedWall: row.status === 'seated' && !isEpicLane(row.lane) && row.wallNote === null && ageHours !== null && ageHours > STALE_HOURS,
       // Per seat, never per account: one account holds several seats, and each seat opens its own.
       mailbox: mailboxes.filter((m) => m.slug !== null && m.slug === seatSlugOf(row)).map((m) => m.ref),
     };
@@ -358,6 +410,7 @@ function age(iso, now) {
 export function readsFor(repos) {
   return repos.flatMap((r) => [
     `GET /repos/${r}/issues?state=open&labels=pm:seat`,
+    `GET /repos/${r}/issues?state=open&labels=pm:epic`,
     `GET /repos/${r}/issues?state=open&labels=pm:dispatched`,
     `GET /repos/${r}/issues?state=open&labels=needs-user-decision`,
     `GET /repos/${r}/pulls?state=open`,
@@ -388,7 +441,7 @@ export function renderBody(rows, { now, repos, session = null, unassigned = [] }
   const seated = rows.filter((r) => r.status === 'seated');
   lines.push(
     '',
-    `${rows.length} seat posts · ${seated.length} seated · ${rows.filter((r) => r.suspectedWall).length} ${SUSPECTED_WALL} (seated, no \`Wall:\` line, last activity older than ${STALE_HOURS} h).`,
+    `${rows.length} seat rows (${rows.filter((r) => isEpicLane(r.lane)).length} epic) · ${seated.length} seated · ${rows.filter((r) => r.suspectedWall).length} ${SUSPECTED_WALL} (seated, no \`Wall:\` line, last activity older than ${STALE_HOURS} h).`,
     ...(unassigned.length
       ? ['', `⚠️ ${unassigned.length} mailbox PR(s) on no seat row — never attributed to an account's seats; close a legacy one and open one per seat: ${unassigned.map((m) => `${shortRef(m.ref)} (${[m.seat ?? m.slug, m.login].filter(Boolean).join(' · ') || 'no owner'}: ${m.why})`).join(' · ')}.`]
       : []),
@@ -440,6 +493,7 @@ function readLive(repos) {
   for (const repo of repos) {
     const s = {
       seats: need(`/repos/${repo}/issues?state=open&labels=${encodeURIComponent('pm:seat')}&per_page=100`),
+      epics: need(`/repos/${repo}/issues?state=open&labels=${encodeURIComponent('pm:epic')}&per_page=100`),
       dispatched: need(`/repos/${repo}/issues?state=open&labels=${encodeURIComponent('pm:dispatched')}&per_page=100`),
       rulings: need(`/repos/${repo}/issues?state=open&labels=needs-user-decision&per_page=100`),
       pulls: need(`/repos/${repo}/pulls?state=open&per_page=100`),
@@ -551,8 +605,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: modes and every refusal': 9,
   'seat titles: lane, seat, repo, status, account, project': 13,
   'wall notes, closing refs, verdicts and mailboxes': 13,
-  'the fixture snapshot: rows for the three repos': 18,
-  'the rendered body: marker, columns, footer, determinism': 9,
+  'the fixture snapshot: rows for the three repos': 25,
+  'the rendered body: marker, columns, footer, determinism': 10,
   'refusing to overwrite what is not the roster': 6,
   'the CLI: fixture runs offline, usage errors are exit 2': 6,
   'paging: a three-page read through the loop equals the slurped array': 4,
@@ -642,12 +696,25 @@ async function selfTest() {
     'objectstack:domain:devx:2',
     'objectstack:domain:skills:1',
     'objectstack:domain:skills:2',
+    'objectstack:epic:#26676:1',
+    'objectstack:epic:#27293:1',
+    'objectstack:epic:#27293:2',
+    'objectstack:epic:#28800:2',
     'objectstack:triage:1',
     'objectui:domain:ui:1',
     'objectui:domain:ui:4',
   ]);
-  const laneListed = (lane) => (lane.includes(':') ? mailboxOpen.SEAT_LANE_KINDS.includes(lane.slice(0, lane.indexOf(':'))) : mailboxOpen.SEAT_BARE_LANES.includes(lane));
-  t('every fixture lane is a kind or bare word from the opener\'s lane-word lists — imported, not re-spelled', [...new Set(rows.map((r) => r.lane))].map((lane) => `${lane}:${laneListed(lane)}`), ['repo:hotcrm:true', 'domain:devx:true', 'domain:skills:true', 'triage:true', 'domain:ui:true']);
+  const laneListed = (lane) => (lane.includes(':') ? [...mailboxOpen.SEAT_LANE_KINDS, mailboxOpen.SEAT_EPIC_KIND].includes(lane.slice(0, lane.indexOf(':'))) : mailboxOpen.SEAT_BARE_LANES.includes(lane));
+  t('every fixture lane is a kind or bare word from the opener\'s lane-word lists — imported, not re-spelled', [...new Set(rows.map((r) => r.lane))].map((lane) => `${lane}:${laneListed(lane)}`), ['repo:hotcrm:true', 'domain:devx:true', 'domain:skills:true', 'epic:#26676:true', 'epic:#27293:true', 'epic:#28800:true', 'triage:true', 'domain:ui:true']);
+  const os = (number) => ({ repo: 'objectstack-ai/objectstack', number });
+  const ep = (post) => (({ lane, seat, status, mark, account, mailbox, suspectedWall, inFlight }) => ({ lane, seat, status, mark, account, mailbox, suspectedWall, inFlight }))(row(post));
+  t('⭐ an epic parent is a row: lane epic:#n, the seat its open mailbox names, seated by that login, the mailbox in its column — and, stale with no in-flight read, never 疑似撞墙', ep(27293), { lane: 'epic:#27293', seat: 1, status: 'seated', mark: '🟢', account: 'sunhaolin', mailbox: [os(25397)], suspectedWall: false, inFlight: [] });
+  t('⭐ an epic parent with no mailbox open is one row, seat 1, status unknown — an epic seat nobody can ring shows as one', ep(26676), { lane: 'epic:#26676', seat: 1, status: 'unknown', mark: null, account: null, mailbox: [], suspectedWall: false, inFlight: [] });
+  t('⛔ a pm:epic child (a session, no sub-issues, no mailbox named after it) and a parent with no session registration are no row', rows.filter((r) => r.post === 28647 || r.post === 27108).length, 0);
+  t('⭐ a head-only epic mailbox (no `Mailbox-of:` line) seats its row by slug, as the mailbox column reads it', (({ post, seat, status, account, mailbox }) => ({ post, seat, status, account, mailbox }))(rows.find((r) => r.post === 27293 && r.seat === 2)), { post: 27293, seat: 2, status: 'seated', account: 'os-bill', mailbox: [os(25400)] });
+  t('⭐ a parent delegated before its first sub-issue is a row once its PM opened a mailbox — seated, never flagged as on no seat row', [ep(28800), unassignedMailboxes(fixture, rows).some((m) => m.ref.number === 25399)], [{ lane: 'epic:#28800', seat: 2, status: 'seated', mark: '🟢', account: 'os-tesla', mailbox: [os(25399)], suspectedWall: false, inFlight: [] }, false]);
+  t('the two conditions apart: registration + a held seat is a row without sub-issues; registration alone, or a held seat with no registration, is not', [isSeatedFreshEpic({ body: 'session_01Abcd' }, new Map([[1, 'a']])), isSeatedFreshEpic({ body: 'session_01Abcd' }, new Map()), isSeatedFreshEpic({ body: 'no id' }, new Map([[1, 'a']])), [...epicSeatsHeld('epic:#27293', readMailboxes(fixture)).keys()]], [true, false, false, [1, 2]]);
+  t('isEpicParent is both halves of H45\'s delegation signals, over every fixture epic and a bare card', await (async () => { const { h45DelegationNodeSignals } = await import('./check-half-states.mjs'); return [...fixture.repos['objectstack-ai/objectstack'].epics, {}].map((i) => { const h = h45DelegationNodeSignals(i); return isEpicParent(i) === (h.subIssues && h.registration); }); })(), [true, true, true, true, true, true]);
   t('the non-seat issue in the seat list is skipped', rows.some((r) => r.post === 999), false);
   t('today’s three seats carry the right accounts', [row(19287).account, row(6023).account, row(1353, 'objectstack-ai/hotcrm').account], ['os-elon-musk', 'os-elon-musk', 'os-elon-musk']);
   t('devx seat 1: its assigned dispatched card, not seat 2’s', row(6023).inFlight, [{ repo: 'objectstack-ai/objectstack', number: 25416 }]);
@@ -658,10 +725,9 @@ async function selfTest() {
   t('a PR with no verdict does not count', row(1353, 'objectstack-ai/hotcrm').awaitingLanding, []);
   t('an unassigned ruling sits on the lane’s lowest seated seat', [row(6023).awaitingRuling, row(20163).awaitingRuling], [[{ repo: 'objectstack-ai/objectstack', number: 25373 }], []]);
   t('a ruling assigned to seat 2’s account sits on seat 2', row(19287).awaitingRuling, [{ repo: 'objectstack-ai/objectstack', number: 25344 }]);
-  const os = (number) => ({ repo: 'objectstack-ai/objectstack', number });
   t('⭐ the mailbox column is the SEAT\'s pm:mailbox PR — by body line on a --head branch, by head slug, by both', [row(6023).mailbox, row(19287).mailbox, row(20163).mailbox], [[os(25392)], [os(25393)], [os(25394)]]);
   t('⛔ one login on three seats: each seat shows only its own mailbox, and a seat that opened none shows none', [row(6023).mailbox.length, row(19287).mailbox.length, row(1353, 'objectstack-ai/hotcrm').mailbox], [1, 1, []]);
-  t('⛔ a legacy per-login mailbox and a seat no post carries sit on no row — flagged, never attributed to the login\'s seats', [unassignedMailboxes(fixture, rows).map((m) => [m.ref.number, m.seat, m.login, m.why]), [row(5560, 'objectstack-ai/objectui').mailbox, row(10243, 'objectstack-ai/objectui').mailbox]], [[[25395, null, 'os-sales', 'legacy per-login, names no seat'], [25396, 'domain:spec#5', 'os-tesla', 'no seat post carries this seat']], [[], []]]);
+  t('⛔ a legacy per-login mailbox and a seat no post or open epic parent carries sit on no row — flagged, never attributed to the login\'s seats', [unassignedMailboxes(fixture, rows).map((m) => [m.ref.number, m.seat, m.login, m.why]), [row(5560, 'objectstack-ai/objectui').mailbox, row(10243, 'objectstack-ai/objectui').mailbox]], [[[25395, null, 'os-sales', 'legacy per-login, names no seat'], [25396, 'domain:spec#5', 'os-tesla', 'no seat post or epic parent carries this seat'], [25398, 'epic:#28130#1', 'os-zhuang', 'no seat post or epic parent carries this seat']], [[], []]]);
   t('stale and no wall note ⇒ 疑似撞墙; a wall note silences it; vacant never', [row(20163).suspectedWall, row(5560, 'objectstack-ai/objectui').suspectedWall, row(5560, 'objectstack-ai/objectui').wallNote, row(7623).suspectedWall], [true, false, 'limit reached, resets at 15:00Z', false]);
   t('last activity is the newest of post and in-flight cards', row(6023).lastActivity, '2026-10-23T13:28:00Z');
   t('one account on two seats of a lane: cards on the lowest seat, the other reads = seat 1', [row(5560, 'objectstack-ai/objectui').inFlight.length, row(10243, 'objectstack-ai/objectui').sharesWith, row(10243, 'objectstack-ai/objectui').inFlight, row(10243, 'objectstack-ai/objectui').suspectedWall], [1, 1, [], true]);
@@ -676,8 +742,9 @@ async function selfTest() {
   t('a shared seat reads = seat N in the in-flight cell', body.includes('| = seat 1 |'), true);
   t('the mailboxes on no seat row are flagged under the table, each with its owner and why', (() => {
     const flagged = renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort(), unassigned: unassignedMailboxes(fixture, rows) });
-    return [flagged.includes('⚠️ 2 mailbox PR(s) on no seat row'), flagged.includes('objectstack#25395 (os-sales: legacy per-login, names no seat)'), flagged.includes('objectstack#25396 (domain:spec#5 · os-tesla: no seat post carries this seat)'), body.includes('on no seat row')];
+    return [flagged.includes('⚠️ 3 mailbox PR(s) on no seat row'), flagged.includes('objectstack#25395 (os-sales: legacy per-login, names no seat)'), flagged.includes('objectstack#25396 (domain:spec#5 · os-tesla: no seat post or epic parent carries this seat)'), body.includes('on no seat row')];
   })(), [true, true, true, false]);
+  t('an epic row renders its lane, its parent card as the seat link, its seat holder or `? —`, and the summary counts it', [body.includes('| objectstack | epic:#27293 | [1](https://github.com/objectstack-ai/objectstack/issues/27293) | 🟢 `sunhaolin` |'), body.includes('| objectstack | epic:#26676 | [1](https://github.com/objectstack-ai/objectstack/issues/26676) | ? — |'), body.includes(`${rows.length} seat rows (4 epic) ·`)], [true, true, true]);
   t('the attribution footer closes the body', body.endsWith('\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01ABC)_'), true);
   const shuffled = { ...fixture, repos: Object.fromEntries(Object.entries(fixture.repos).reverse().map(([k, v]) => [k, { ...v, seats: [...v.seats].reverse() }])) };
   t('the same facts in another read order render the same body', renderBody(buildRows(shuffled, { now: fixture.now }), { now: fixture.now, repos: Object.keys(fixture.repos).sort() }), renderBody(rows, { now: fixture.now, repos: Object.keys(fixture.repos).sort() }));
@@ -720,7 +787,7 @@ async function selfTest() {
   } catch {}
   t('--fixture --json exits 0 with no gh on PATH (nothing reached for)', jsonRun.status, EXIT_OK);
   t('the printed rows are the built rows', parsed?.rows?.length, rows.length);
-  t('the printed JSON carries the mailboxes on no seat row', parsed?.unassignedMailboxes?.map((m) => m.ref.number), [25395, 25396]);
+  t('the printed JSON carries the mailboxes on no seat row', parsed?.unassignedMailboxes?.map((m) => m.ref.number), [25395, 25396, 25398]);
   t('--fixture prints the markdown table', cli(['--fixture', FIXTURE_PATH]).stdout.split('\n')[0], ROSTER_MARKER);
   t('a usage error is exit 2', cli(['--write', 'x']).status, EXIT_USAGE);
   t('a missing fixture is exit 3', cli(['--fixture', join(PM_DIR, 'no-such-fixture.json')]).status, EXIT_PREREQUISITE);

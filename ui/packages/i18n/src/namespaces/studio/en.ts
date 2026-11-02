@@ -237,17 +237,21 @@ const STUDIO_EN: Record<string, string> = {
   // set on it. The hint names the hatch only to say so, as the server's own
   // refusal sentence does.
   'perm.readOnly.artifact.hint':
-    'A code package ships this permission set, so it is locked here: an environment-scope edit would overlay a packaged item, and the metadata-type registry declares allowEnvironmentOverlay false for permission (ADR-0131 D6 forbids an environment overlay of a packaged set: silent privilege drift). The server refuses the write with 403 not_overridable. Clone to customize: the copy is an ordinary permission set authored in this system, under a new name, that you edit here, and upgrades keep flowing to this base. Other routes: edit the source artifact and redeploy, or create a new runtime set. The OS_METADATA_WRITABLE escape hatch does not open a set a package ships (ADR-0131 D6).',
-  // objectui#5987 — "Clone to customize", the locked editor's primary action.
+    'A code package ships this permission set, so it is locked here: an environment-scope edit would overlay a packaged item, and the metadata-type registry declares allowEnvironmentOverlay false for permission (ADR-0131 D6 forbids an environment overlay of a packaged set: silent privilege drift). The server refuses the write with 403 not_overridable. New similar: the server copies this set under a new name into the package that holds your changes (for a read-only package, its paired .custom package) and says where it went; you edit the copy, and upgrades keep flowing to this base. Other routes: edit the source artifact and redeploy, or create a new runtime set. The OS_METADATA_WRITABLE escape hatch does not open a set a package ships (ADR-0131 D6).',
+  // objectui#5987 — the locked editor's primary action. objectstack ADR-0146
+  // D6 (#28573) names it "New similar", on Setup's catalog and in Studio's
+  // Access pillar alike: the copy is a NEW set beside the base, never an
+  // override of it.
   // objectui#7611 — it asks for a new name and label (`PermissionSetCloneDialog.tsx`)
   // and calls the server's clone door (`permission-set-clone.ts`), which copies
-  // the whole definition; never a hand-rolled copy.
-  'perm.clone.action': 'Clone to customize',
+  // the whole definition and decides the package the copy lands in; never a
+  // hand-rolled copy.
+  'perm.clone.action': 'New similar',
   'perm.clone.hint':
-    'Copies this set under a new name you choose. The copy is an ordinary permission set authored in this system, editable here, and upgrades keep flowing to the package-provided base.',
+    'Copies this set under a new name you choose. The server saves the copy beside this base, in the package that holds your changes, and says where; upgrades keep flowing to the package-provided base.',
   'perm.clone.guidance':
-    'Locked: a code package provides this permission set, so it cannot be edited in place here (upgrades keep flowing to it). Clone to customize — the copy is an ordinary permission set authored in this system, editable here.',
-  'perm.clone.dialogTitle': 'Clone permission set',
+    'Locked: a code package provides this permission set, so it cannot be edited in place here (upgrades keep flowing to it). New similar — the server saves a copy under a new name, in the package that holds your changes, and you edit the copy.',
+  'perm.clone.dialogTitle': 'New similar permission set',
   'perm.clone.dialogBody':
     'Copies {name} under a new machine name and label. The server decides what the copy carries, and says what it left out.',
   'perm.clone.name': 'New machine name',
@@ -265,7 +269,7 @@ const STUDIO_EN: Record<string, string> = {
   // the same guidance as the lock, keyed on the refusal's code (never its
   // prose), instead of the transport's generic message.
   'perm.save.locked':
-    'Save refused (403 not_overridable): a code package provides this permission set, so the server does not accept an in-place edit. Clone to customize instead — the copy is an ordinary permission set authored in this system, and upgrades keep flowing to this base.',
+    'Save refused (403 not_overridable): a code package provides this permission set, so the server does not accept an in-place edit. Use New similar instead — the server saves a copy under a new name, in the package that holds your changes, and upgrades keep flowing to this base.',
   // Designer wrapper
   'designer.unsavedChanges': 'Unsaved changes',
   'designer.editingOverlay': 'Editing overlay',
@@ -2430,6 +2434,26 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.auto.heading': 'Automations',
   'engine.studio.auto.deleteFlow': 'Delete flow',
   'engine.studio.auto.flowDeleted': 'Deleted flow "{item}"',
+  // objectstack#28567 (ADR-0146 D4) — "New similar" on a flow: the clone door
+  // copies it under a new machine name and label, switched off, into the
+  // package that holds the changes; its answer and refusals are shown as sent.
+  'engine.studio.auto.newSimilar.action': 'New similar',
+  'engine.studio.auto.newSimilar.hint': 'Copy this flow under a new name. The copy is switched off until you switch it on.',
+  'engine.studio.auto.newSimilar.title': 'New similar flow',
+  'engine.studio.auto.newSimilar.bodyPair':
+    'Copies "{item}" under a new machine name and label. This package is read-only, so the server saves the copy in the package that holds your changes to it, switched off, and says where it landed.',
+  'engine.studio.auto.newSimilar.bodyHere':
+    'Copies "{item}" under a new machine name and label into this package, switched off. The copy takes the flow as it runs now: unpublished changes are not copied.',
+  'engine.studio.auto.newSimilar.copyLabel': '{label} (copy)',
+  'engine.studio.auto.newSimilar.name': 'New machine name',
+  'engine.studio.auto.newSimilar.label': 'New label',
+  'engine.studio.auto.newSimilar.submit': 'Create copy',
+  'engine.studio.auto.newSimilar.failedHttp': 'Could not create the copy (HTTP {status}).',
+  'engine.studio.auto.newSimilar.failed': 'Could not create the copy.',
+  'engine.studio.auto.newSimilar.done': 'Saved the copy {name} in package {package}.',
+  'engine.studio.auto.newSimilar.noPackage':
+    'The server saved the copy {name}, but its answer does not name the package it landed in, so nothing was opened.',
+  'engine.studio.auto.newSimilar.dismiss': 'Dismiss',
   // ADR-0146 D4 — a read-only package's flow: the activation-ledger switch
   // (this deployment only, never the definition), offered on the item.
   'engine.studio.auto.ledger.on': 'On for this deployment',
@@ -2551,6 +2575,13 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.access.bulkHint': 'Bulk actions (R · CRUD · All · None) appear on the row under the pointer or with keyboard focus.',
   // ── Access explain panel (ADR-0090 D6 — "why can this user access?") ────
   'engine.studio.access.explain.open': 'Explain access',
+  // objectstack#28573 (ADR-0146 D6) — "New similar" on a read-only base's
+  // permission set: the clone door saves the copy where it decides, and the
+  // pillar opens it only where the answer says it landed.
+  'engine.studio.access.newSimilar.noPackage':
+    'The server saved the copy {name}, but its answer does not name the package it landed in, so nothing was opened. Find it from the package that holds your changes.',
+  'engine.studio.access.newSimilar.done': 'Saved the copy {name} in package {package}.',
+  'engine.studio.access.newSimilar.dismiss': 'Dismiss',
   'engine.studio.access.explain.title': 'Why can this user access?',
   'engine.studio.access.explain.description':
     'Runs the same evaluation pipeline as enforcement and reports what each layer contributed — permission set → position → binding chain, OWD/sharing verdicts.',
@@ -3165,6 +3196,27 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.pkg.readonlyHint': 'Read-only package — switch to or create a writable package to edit.',
   // objectui#12453 — the item header's read-only link, every pillar.
   'engine.studio.pkg.readonlyLink': 'Read-only · Customize with an overlay',
+  // objectstack#28562 (ADR-0146 D2, D3) — Customize a read-only package's view, dashboard or report.
+  'engine.studio.customize.action': 'Customize',
+  'engine.studio.customize.actionTitle': 'Change this item for this deployment. Your first edit is saved as a customization draft, and {package} itself stays as it was installed.',
+  'engine.studio.customize.walled': 'On this deployment, only the platform operator can customize an installed package.',
+  'engine.studio.customize.noVersion': 'The package list does not say which version of {package} is installed, so its items cannot be customized here.',
+  'engine.studio.customize.overrides': 'Overrides {package}',
+  'engine.studio.customize.overridesTitle': 'This item replaces {package}’s item of the same name on this deployment. It was taken from {package} {basedOn}.',
+  'engine.studio.customize.draftFooter': 'Edits save as a draft of this deployment’s customization; Publish applies them.',
+  'engine.studio.customize.restore': 'Restore package original',
+  'engine.studio.customize.restoreConfirm': 'Restore {package}’s “{item}”?',
+  'engine.studio.customize.restoreBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s version is served again.',
+  'engine.studio.customize.restoreFlowBody': 'This deployment’s customization of “{item}” is deleted, and {package}’s flow runs again in its place, under the same on/off switch.',
+  'engine.studio.customize.restoreDraft': 'Its unpublished draft is discarded first.',
+  'engine.studio.customize.restoreDone': '“{item}” is back to {package}’s version',
+  // objectstack#28572 — one surface for a read-only base and its customization package.
+  'engine.studio.customize.addedIn': 'In {pair}',
+  'engine.studio.customize.addedInTitle': 'This item is added by {pair}, this deployment’s customization package, and is saved there.',
+  'engine.studio.pkg.withPair': 'with {pair}',
+  'engine.studio.if.addInPairTitle': 'New in the customization of {baseName}',
+  'engine.studio.interfaces.create.descriptionInPair':
+    'Saved as a draft in this deployment’s customization of {baseName}, and opened on the canvas. The navigation of {baseName} stays as it was installed.',
   'engine.studio.app.scaffoldNav': "Add this package's objects as menu items",
   'engine.studio.landing.title': 'App Builder',
   'engine.studio.landing.description': 'Design objects, forms, automations and interfaces inside a writable package; edits save as drafts and the whole package publishes in one release. Code and installed packages are read-only: browse them here, and customize them with an environment overlay.',
@@ -3199,9 +3251,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.org.name': 'Organization flows',
   'engine.studio.org.hint': 'Flows that belong to no package',
   'engine.studio.org.description': 'The organization’s own flows that belong to no package, such as a clone of a packaged flow. They open editable.',
-  'engine.studio.org.none': 'No flows outside a package yet. Clone a packaged flow in Setup › Packaged automation to edit the copy here.',
-  // objectui#12513 — the empty block's way to that Setup list: a link, since this scope creates nothing.
-  'engine.studio.org.openSetup': 'Open in Setup',
+  // ADR-0146 D11 — no link out: no Setup page copies a flow into this scope any more.
+  'engine.studio.org.none': 'No flows outside a package. To change a packaged flow, open its package and use New similar.',
   // objectstack#28561 — the "All metadata" area's cross-package leg: the
   // environment catalog, entered from the landing.
   'engine.studio.landing.envCatalog.name': 'Environment catalog',
@@ -3211,6 +3262,10 @@ const STUDIO_EN: Record<string, string> = {
   'engine.studio.area.assignments.position': 'The people who hold this position are assigned in Setup.',
   'engine.studio.area.assignments.permission': 'The people this permission set is assigned to are managed in Setup.',
   'engine.studio.area.assignments.open': 'Open in Setup',
+  // objectstack#28569 — the area's form editor of an email template or a translation.
+  'engine.studio.area.formEditor.locale': 'Locale {locale}',
+  'engine.studio.area.formEditor.oneLocale': 'Only the {locale} version of this template is customized. {package}’s other languages of it stay as they are.',
+  'engine.studio.area.formEditor.translationWhole': 'Customizing a translation replaces {package}’s whole {locale} bundle: every string in it is then served from your copy, the ones you leave unchanged included.',
   'engine.studio.publishedAllFlows': 'Published {count} flows',
   'engine.studio.publishedAllFlowsOne': 'Published flow "{label}"',
   'engine.studio.designer.search': 'Search…',
@@ -3497,6 +3552,19 @@ const STUDIO_EN: Record<string, string> = {
   'engine.directory.invalidTooltip': '{count} invalid item(s) — click to fix',
   'engine.directory.warnTooltip': '{count} item(s) with warnings',
   'engine.directory.itemCountTooltip': '{count} item(s) of this type',
+  // objectstack ADR-0146 D3 (#28568) — the customization marks, counts and
+  // filter of the All metadata area, from a base's customization read.
+  'engine.customizationMark.customized': 'Customized ({baseName})',
+  'engine.customizationMark.customizedTitle': 'The customization package {pair} overrides this item of {baseName}',
+  'engine.customizationMark.added': 'Added',
+  'engine.customizationMark.addedTitle': 'Added to {baseName} by its customization package {pair}',
+  'engine.customizationMark.customizationOf': 'Customization of {baseName}',
+  'engine.customizationMark.customizationOfTitle': 'An item of {pair}, the customization package of {baseName}',
+  'engine.customizationMark.readFailed': 'Couldn’t read customizations: {message}',
+  'engine.directory.customizations.total': '{customized} customized on {baseName}',
+  'engine.directory.customizations.tile': '{customized} customized',
+  'engine.directory.customizations.tileTitle': 'Customized items of this type: {customized}',
+  'engine.list.customizations.only': 'Only customizations ({marked})',
   'engine.home.recent': 'Recently viewed',
   'engine.diagnostics.title': 'Metadata Diagnostics',
   'engine.diagnostics.description':

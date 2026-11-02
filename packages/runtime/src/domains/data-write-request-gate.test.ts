@@ -417,6 +417,9 @@ describe('[#23491] the two POST doors answer each non-record body alike', () => 
 const QUERY_REFUSED: ReadonlyArray<readonly [string, unknown, string]> = [
     ['a mistyped clause, `limit: "ten"`', { limit: 'ten' }, 'query.limit'],
     ['the retired `joins`', { joins: [] }, 'query.joins'],
+    // [#28609] An aggregation entry is closed at the producer
+    // (`AggregationNodeSchema`): both doors stripped `bogusKey` and answered.
+    ['an aggregation entry\'s undeclared key', { aggregations: [{ function: 'count', alias: 'n', bogusKey: true }] }, 'query.aggregations.0'],
     ['a string', 'garbage', 'query'],
     ['an array', [{}], 'query'],
     ['a number', 42, 'query'],

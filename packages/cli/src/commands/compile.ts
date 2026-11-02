@@ -76,6 +76,13 @@ import { findViewContainerNameRefusals } from '../utils/view-container-names.js'
 // A field `picklist` that names no picklist the stack declares — the walk
 // `os validate` step 2d runs, over the same judge.
 import { judgePicklistReferences, picklistRefusalHeading, printPicklistReferenceNotices } from '../utils/picklist-references.js';
+// [ADR-0146 D2, #28643] The override write gate — the walk `os validate` step
+// 3a-iii runs, over the publish door's own judge (`judgeOverrideWrite`).
+import { findOverrideDeclarationRefusals } from '../utils/override-declarations.js';
+// [ADR-0146 D10, #28727] The `__c` extension-field reservation — the walk
+// `os validate` step 3a-iv runs, over the save and install doors' own judge
+// (`judgeExtensionFieldSuffix`).
+import { findExtensionFieldSuffixRefusals } from '../utils/extension-field-suffix.js';
 
 export default class Compile extends Command {
   static override description = 'Compile ObjectStack configuration to JSON artifact';
@@ -766,6 +773,68 @@ export default class Compile extends Command {
           await formatPermissionSetNameCollisions(permissionSetCollisionWarnings),
           { noun: 'permission-set collision diagnostic' },
         );
+      }
+
+      // 3b-iii. [ADR-0146 D2, #28643] The override write gate, at build time —
+      //     the SAME call `os validate` makes at its step 3a-iii, over the
+      //     walk `utils/override-declarations.ts` takes and the publish door's
+      //     own judge (`judgeOverrideWrite`). Only the base's paired
+      //     `<base>.custom` declares an override; a dependent's item bearing a
+      //     name a package in its closure ships, and an `overrides` declaration
+      //     the gate does not admit, are refused. Before this the build emitted
+      //     such an artifact and the managed install or a publish door refused
+      //     it later with the same judge; now the door that ships refuses it
+      //     and writes no artifact.
+      //
+      //     Beside the dependency-range check below and ahead of every artifact
+      //     write. The `--json` face is this command's failure envelope
+      //     (`errors`, the rows `os validate --json` carries); the text face is
+      //     `os validate`'s. No step line, as on `os validate`.
+      const overrideRefusals = findOverrideDeclarationRefusals(result.data as Record<string, unknown>);
+      if (overrideRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: overrideRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = overrideRefusals.length;
+        console.log('');
+        printError(`The publish door would refuse ${n} item${n > 1 ? 's' : ''} under the override write gate (ADR-0146 D2)`);
+        printBulletList(
+          overrideRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'override refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
+      }
+
+      // 3b-iii-bis. [ADR-0146 D10, #28727] The `__c` extension-field
+      //     reservation, at build time — the SAME call `os validate` makes at
+      //     its step 3a-iv, over the walk `utils/extension-field-suffix.ts`
+      //     takes and the save and install doors' own judge
+      //     (`judgeExtensionFieldSuffix`): a field spelled `__c` only in a
+      //     base's paired `.custom` package, and every
+      //     `objectExtensions[].fields` key of a `.custom` pair suffixed. Before
+      //     this the build emitted such an artifact and the marketplace install
+      //     or a save or publish door refused it later with the same judge; now
+      //     the door that ships refuses it and writes no artifact.
+      //
+      //     Beside the override gate above, ahead of every artifact write, with
+      //     the same two faces: this command's failure envelope under `--json`
+      //     (`errors`, the rows `os validate --json` carries), `os validate`'s
+      //     text otherwise.
+      const suffixRefusals = findExtensionFieldSuffixRefusals(result.data as Record<string, unknown>);
+      if (suffixRefusals.length > 0) {
+        if (flags.json) {
+          await emitJson({ success: false, errors: suffixRefusals, warnings: warningsSoFar(), conversions: conversionNotices }, 0, { compact: true });
+          this.exit(1);
+        }
+        const n = suffixRefusals.length;
+        console.log('');
+        printError(`${n} field${n > 1 ? 's break' : ' breaks'} the \`__c\` extension-field reservation (ADR-0146 D10)`);
+        printBulletList(
+          suffixRefusals.map((r) => `${r.path} [${r.code}] ${r.message}`),
+          { noun: 'extension-field refusal(s)', remedy: JSON_FULL_LIST_REMEDY },
+        );
+        this.exit(1);
       }
 
       // 3b-quater. ADR-0141 D2, author side — every `manifest.dependencies`

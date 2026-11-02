@@ -39,9 +39,10 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { EngineAggregateOptions } from '@objectstack/spec/data';
-// [#28550] The engine's aggregation entry. Each `aggregate_records` entry is
-// built from ITS members, so this door and the REST query door (which parses
-// `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape.
+// [#28550, #28609] The engine's aggregation entry. Each `aggregate_records`
+// entry IS this node, so this door and the REST query door (which parses
+// `FindDataRequestSchema`, whose `aggregations` are this node) judge one shape
+// with one refusal.
 import { AggregationNodeSchema } from '@objectstack/spec/data';
 // [#23529] The catalogue's spelling of `PERMISSION_DENIED`, the code whose
 // `details` `errorResultFromThrown` withholds. Imported, never hand-spelled.
@@ -122,6 +123,25 @@ export interface McpDataBridge {
    */
   listObjectsDiagnosed?(): Promise<DiagnosedObjectListing<McpObjectSummary>>;
   describeObject(name: string): Promise<unknown | null>;
+  /**
+   * [#28715] The fields of `name` that declare options — the fields a
+   * formula's `label(record.<field>)` can answer on — or `null` when no such
+   * object is served. Read from the same object {@link describeObject} reads,
+   * through `@objectstack/formula`'s `declaresOptions`, the predicate the
+   * engine builds `label()`'s map with: both bridges read the protocol's
+   * served object, where a field bound to a shared `picklist` already carries
+   * the list's resolved `options`.
+   *
+   * `validate_expression` hands it to the shared validator as
+   * `ExprSchemaHint.optionFields`, so the tool refuses the `label()` call the
+   * object save door refuses, in the same words. It is a member of its own,
+   * not a key on {@link describeObject}'s answer, so `describe_object` serves
+   * what it served before.
+   *
+   * OPTIONAL, like {@link listObjectsDiagnosed}: a bridge that omits it gets
+   * no `label()` target check, exactly as before (the validator's opt-in).
+   */
+  optionFieldsOf?(name: string): Promise<readonly string[] | null>;
   query(
     object: string,
     opts: {
@@ -579,12 +599,18 @@ function jsonText(value: unknown): string {
  * (`TemplateExpressionInputSchema`). The tool parses with it first, so whatever
  * the gate refuses at the envelope level — today a source that is blank after
  * trimming — the tool refuses too, with the gate's own issue.
+ *
+ * [#28715] `optionLabels`: the site where the gate judges what a `label()`
+ * call names (`ExprSchemaHint.optionFields`). `@objectstack/lint`'s formula
+ * pass hands the validator the object's option-bearing fields on a formula
+ * field's `expression` and nowhere else, so the tool asks the bridge for them
+ * on the `formula` site only and answers every other site as the gate does.
  */
 const VALIDATE_SITE_MAP: Record<
   string,
-  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType }
+  { role: FieldRole; scope: 'record' | 'flattened'; slot: z.ZodType; optionLabels?: true }
 > = {
-  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema },
+  formula: { role: 'value', scope: 'record', slot: EvaluatedExpressionInputSchema, optionLabels: true },
   validation: { role: 'predicate', scope: 'record', slot: EvaluatedExpressionInputSchema },
   flow_condition: { role: 'predicate', scope: 'flattened', slot: EvaluatedExpressionInputSchema },
   template: { role: 'template', scope: 'record', slot: TemplateExpressionInputSchema },
@@ -691,56 +717,6 @@ function strictToolInput<T extends z.ZodRawShape>(
       }),
     })
     .strict();
-}
-
-/**
- * [#28550] One `aggregate_records` aggregation entry: closed, and carrying the
- * per-aggregation `filter`.
- *
- * The entry used to be a plain `z.object({ function, field, alias })`. Zod's
- * default for an object is `.strip`, and {@link strictToolInput} closes only the
- * tool's TOP-LEVEL keys, so an entry's `filter` was deleted before the handler
- * ran: `{ function: 'count', alias: 'n', filter: { status: 'active' } }` answered
- * the unconditional count, beside the REST query door answering the filtered
- * one for the same body. Any other unknown entry key vanished the same way.
- *
- * Both halves of the fix are the entry's shape, nothing else:
- *
- * - **`filter` is declared**, and it is the engine's own member,
- *   `AggregationNodeSchema.shape.filter` (`FilterConditionSchema`), the slot the
- *   REST door parses. The handler forwards `aggregations` to the bridge
- *   unchanged, and every bridge hands them to `engine.aggregate`, which applies
- *   the filter and runs it through the same refusal doors as `where` (shape,
- *   unknown field, and the security middleware's field-read check). ⛔ No filter
- *   is evaluated here: a second evaluator in this package would be a second
- *   answer to the same question.
- * - **The entry is strict**, through {@link strictToolInput}, so an undeclared
- *   entry key is refused by name, as an undeclared top-level key already is.
- *   The aliases are semantic near-misses for `filter` and `alias`; they are
- *   named in the refusal and never parsed.
- *
- * `function`, `field` and `alias` are the engine's members too. Each keeps the
- * description this tool advertised before; `.describe` copies the schema and
- * leaves its parse unchanged.
- */
-function aggregationEntrySchema() {
-  const node = AggregationNodeSchema.shape;
-  return strictToolInput(
-    {
-      surface: 'this aggregate_records aggregation entry',
-      aliases: { where: 'filter', filters: 'filter', conditions: 'filter', as: 'alias' },
-    },
-    {
-      function: node.function.describe('Aggregation function'),
-      field: node.field.describe('Field to aggregate (omit for count(*))'),
-      alias: node.alias.describe('Result column name'),
-      filter: node.filter.describe(
-        'Optional per-aggregation filter, e.g. {"status":"active"}: only rows matching it feed THIS '
-          + 'aggregation, while the other aggregations in the call still read every row. Same operators '
-          + 'as where.',
-      ),
-    },
-  );
 }
 
 /**
@@ -1085,8 +1061,14 @@ export function registerObjectTools(
             fields.push(f.name);
             if (typeof f?.type === 'string') fieldTypes[f.name] = f.type;
           }
-          const { role, scope, slot } = VALIDATE_SITE_MAP[site ?? 'formula'];
-          const hint = { objectName, fields, fieldTypes, scope } as const;
+          const { role, scope, slot, optionLabels } = VALIDATE_SITE_MAP[site ?? 'formula'];
+          // [#28715] The object's option-bearing fields, where the gate reads
+          // them: `label(record.<field>)` on a declared field outside this list
+          // is refused as `label-field-no-options` by the one validator.
+          const optionFields = optionLabels && bridge.optionFieldsOf
+            ? await bridge.optionFieldsOf(objectName)
+            : null;
+          const hint = { objectName, fields, fieldTypes, scope, ...(optionFields ? { optionFields } : {}) } as const;
           // The gate's envelope verdict first: `validateExpression` treats a
           // blank source as "not authored" and answers ok, while the save gate
           // refuses it. Each issue is the spec schema's own (code and message),
@@ -1233,7 +1215,15 @@ export function registerObjectTools(
             {
             objectName: z.string().describe('The object/table name'),
             aggregations: z
-              .array(aggregationEntrySchema())
+              // [#28550 → #28609] One entry is the engine's own node, taken whole:
+              // `AggregationNodeSchema` is closed at the producer, so an
+              // undeclared entry key is refused here in the words the REST
+              // query door prints for the same body (`aliases` and the retired
+              // `distinct`'s tombstone included), and `filter` reaches the
+              // bridge unchanged for `engine.aggregate` to apply. ⛔ No local
+              // copy of the entry: the copy this tool closed by itself (#28550)
+              // was a second key list, which this node now is.
+              .array(AggregationNodeSchema)
               .min(1)
               .describe(
                 'Metrics to compute, e.g. [{"function":"sum","field":"amount","alias":"total"},'

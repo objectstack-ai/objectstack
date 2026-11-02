@@ -31,7 +31,7 @@ import * as React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, cleanup, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 
 vi.mock('@object-ui/auth', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -101,12 +101,13 @@ const OBJECTS = [
   },
 ];
 
-function answerFor(opportunityRead: boolean): MePermissionsResponse {
+function answerFor(opportunityRead: boolean): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u_agent',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['service_agent'],
     systemPermissions: [],
     objects: { [OBJECT_NAME]: { allowRead: opportunityRead, allowEdit: true } },

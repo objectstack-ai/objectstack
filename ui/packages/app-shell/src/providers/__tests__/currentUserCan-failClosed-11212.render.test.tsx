@@ -62,7 +62,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react';
 import { ComponentRegistry } from '@object-ui/core';
 import { ActionProvider, RecordContextProvider } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { ExpressionProvider } from '../ExpressionProvider';
 // Module-scope side-effect imports: the registry renderers must be registered
 // before the first render (AGENTS.md §测试纪律 — import phase, not a hook).
@@ -94,12 +94,13 @@ const nameOf = (leg: string, state: State | 'unbound') => `void_${leg}_${state.r
 const USER = { id: 'u1', name: 'Ada', email: 'ada@example.com', role: 'user', positions: ['everyone'] };
 const RECORD = { id: 'acc_1', name: 'Northwind', status: 'open' };
 
-function payload(allowDelete: boolean): MePermissionsResponse {
+function payload(allowDelete: boolean): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId: 'u1',
     tenantId: null,
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['account_clerk'],
     // `allowEdit` is granted in BOTH loaded states, so a verb mix-up (reading
     // edit for delete) would show the action in the denied state.

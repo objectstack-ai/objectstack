@@ -32,8 +32,9 @@
  * path → `runAtomicBatch` → the loop → the builders) do so through the
  * protocol, exactly as before.
  *
- * The one field the bodies read, `engine`, goes as a GETTER, so each read
- * happens when the body makes it: tests replace it on a constructed protocol.
+ * The two fields the bodies read, `engine` and `getServicesRegistry`, go as
+ * GETTERS, so each read happens when the body makes it: tests replace them on a
+ * constructed protocol.
  *
  * The other module-level declarations the bodies read stay in `protocol.ts`,
  * where code that did not move reads them too, and are imported from there:
@@ -47,7 +48,8 @@
 import type { ObjectStackProtocolImplementation, BatchDataLoopOutcome, BatchDataRowResult } from './protocol.js';
 import { byIdUpdateRecord, rowRequiredIdError, toRowApiError } from './protocol.js';
 import type { BatchUpdateRequest, BatchUpdateResponse, DeleteManyDataRequest, UpdateManyDataRequest } from '@objectstack/spec/api';
-import type { DroppedFieldsEvent } from '@objectstack/spec/data';
+import type { DroppedFieldsEvent, EngineQueryOptionsParsed } from '@objectstack/spec/data';
+import type { ISecurityService } from '@objectstack/spec/contracts';
 import { engineCanRollBack, recordNotFoundError } from '@objectstack/core';
 import { omitInternalFieldsFromWriteResponse } from './write-response-internal-fields.js';
 
@@ -108,6 +110,40 @@ function rowOperationFailureFallback(operation: string): string {
 }
 
 /**
+ * The OBJECT-level half of the question `batchData`'s by-id upsert forks on —
+ * may the CALLER read `object` at all? — asked of the `security` service's
+ * `canReadObject`, the engine middleware's own read gate arm for arm
+ * (`ISecurityService.canReadObject`), with the context the loop's writes run
+ * under. The ROW-level half is the caller's own `findOne` by id, at the fork.
+ *
+ * Asked separately because the middleware answers a caller with no read grant
+ * by REFUSING the `findOne` (`403`), not with `null`: without this half, a
+ * caller who may create but not read would have every by-id upsert row refused
+ * outright, where a create naming the same id is accepted. A `false` here is
+ * "this caller can read no row of the object", so every row takes the insert
+ * arm, which `engine.insert` still judges in full.
+ *
+ * `true` means only "not refused at this layer" and never widens anything: the
+ * `findOne` that follows is still the middleware's, row scope included. So a
+ * context-less in-process call (the read `findOne` makes without a context is
+ * the one its writes make) is not asked about, and neither is a host whose
+ * security service is absent or predates the method — `findOne` still
+ * enforces there, so the absence can only make the answer stricter (a refusal
+ * fails the row), as `searchAll` reasons for the same method. A
+ * `canReadObject` that throws fails the row rather than choosing an arm.
+ */
+async function callerMayReadObject(
+    this: Pick<BatchDataHost, 'getServicesRegistry'>,
+    object: string,
+    context: unknown,
+): Promise<boolean> {
+    if (context === undefined) return true;
+    const security = this.getServicesRegistry?.().get('security') as Partial<ISecurityService> | undefined;
+    if (typeof security?.canReadObject !== 'function') return true;
+    return security.canReadObject(object, context as Parameters<NonNullable<ISecurityService['canReadObject']>>[1]);
+}
+
+/**
  * The `ObjectStackProtocolImplementation` members the functions below read —
  * every one of them, and no other; each function's `this` is the `Pick` of the
  * members IT reads. Each is typed AS the class member (an indexed access on
@@ -123,8 +159,8 @@ export interface BatchDataHost {
     buildRolledBackBatchResponse: ObjectStackProtocolImplementation['buildRolledBackBatchResponse'];
     buildUpdateManyResponse: ObjectStackProtocolImplementation['buildUpdateManyResponse'];
     readonly engine: ObjectStackProtocolImplementation['engine'];
+    readonly getServicesRegistry: ObjectStackProtocolImplementation['getServicesRegistry'];
     locateBatchCause: ObjectStackProtocolImplementation['locateBatchCause'];
-    probeRecord: ObjectStackProtocolImplementation['probeRecord'];
     reconcileStoppedBatch: ObjectStackProtocolImplementation['reconcileStoppedBatch'];
     runAtomicBatch: ObjectStackProtocolImplementation['runAtomicBatch'];
     runAtomicBatchData: ObjectStackProtocolImplementation['runAtomicBatchData'];
@@ -262,7 +298,7 @@ export async function runAtomicBatch(
 
 /** The body of `ObjectStackProtocolImplementation#runBatchDataLoop`; the method's docblock there is its contract. */
 export async function runBatchDataLoop(
-    this: Pick<BatchDataHost, 'assertRecordExists' | 'engine' | 'probeRecord'>,
+    this: Pick<BatchDataHost, 'assertRecordExists' | 'engine' | 'getServicesRegistry'>,
     args: {
     object: string;
     operation: BatchUpdateRequest['operation'];
@@ -286,6 +322,11 @@ export async function runBatchDataLoop(
     // here. A create-shaped arm that passed no listener reported a silent
     // drop — the upsert arms did exactly that until the patch round.
     const ctxOpt = context !== undefined ? { context } : {};
+
+    // The object-level half of the upsert fork's question (see the fork and
+    // `callerMayReadObject`), asked at most once per loop: the object and the
+    // context are the loop's, so every row gets the same answer.
+    let objectReadable: Promise<boolean> | undefined;
 
     // [#4793] `index` is the row's position in the REQUEST array — the
     // correlation a caller needs for failure rows that carry no id.
@@ -328,28 +369,77 @@ export async function runBatchDataLoop(
                 }
                 case 'upsert': {
                     if (record.id) {
-                        // [#5099] The update-or-insert fork asks EXISTENCE,
-                        // not visibility. `findOne` under the CALLER's
-                        // context is the read RLS/sharing narrows (#3455),
-                        // so an existing row outside the caller's scope
-                        // answered null, took the insert arm, and either
-                        // duplicate-keyed — an authorization/update
-                        // scenario reported as a key collision — or, on a
-                        // store without a unique id constraint, wrote a
-                        // second row. The same `probeRecord` the update branch
-                        // above asks after its write (#4620): it asks the
-                        // database a fact, and whether the caller may WRITE
-                        // the row it proves stays #1994's decision inside
-                        // `engine.update`.
+                        // The update-or-insert fork asks what the CALLER can
+                        // read. On the write doors a row the caller cannot
+                        // read is a row that does not exist (ruling
+                        // 5985885287 on #21771, the governing text for the
+                        // write doors), so such a row takes the INSERT arm —
+                        // what a create naming the same id does — and that
+                        // insert meets the deployment-global primary key and
+                        // answers the `409 UNIQUE_VIOLATION` a plain create
+                        // with that id answers. A row the caller CAN read
+                        // keeps the UPDATE arm, where `engine.update` still
+                        // judges whether the caller may write it.
                         //
-                        // The old fallback (update threw → blind insert)
-                        // is gone with the fork's visibility read: with
-                        // existence decided BEFORE the write, a fallback
-                        // insert could only bury a real update failure
-                        // under the duplicate-key error of inserting a row
-                        // just proven to exist — the same masking ADR-0119
-                        // D4 forbade inside the atomic arm.
-                        const existing = await this.probeRecord(object, record.id);
+                        // "Can read" is the read door's question in both its
+                        // halves, under the context the arm's write runs
+                        // with (`ctxOpt`): the object-level admission
+                        // (`callerMayReadObject`, once per loop) and then the
+                        // caller's own `findOne` by id, where RLS, sharing
+                        // and the organization wall all apply. Inside the
+                        // atomic arm that context is the transaction's, so
+                        // the read sees the batch's own uncommitted rows.
+                        //
+                        // ⚠️ This REVERSES #5099 / #5187, by ruling. #5187
+                        // moved this fork FROM the caller's read TO the
+                        // system-context `probeRecord`, because forking on
+                        // visibility reported an authorization/update
+                        // scenario as a key collision. That trade is now
+                        // ruled the other way, for two reasons:
+                        //
+                        //  - forking on existence answered a row the caller
+                        //    cannot read differently from an id that names
+                        //    nothing — the update arm's refusal (`403`, or the
+                        //    by-id pre-image check's `404`) beside a CREATED
+                        //    row — so a caller holding create learned that a
+                        //    row it cannot read exists, which ruling
+                        //    5985885287 closed on the by-id update and delete
+                        //    doors — and that fork could reach the update arm
+                        //    for a principal the caller-read rule now sends
+                        //    to the create arm;
+                        //  - the key collision #5187 called a misdirection is
+                        //    the answer the maintainer ratified on 2026-11-01
+                        //    as the accepted cost of a deployment-global key,
+                        //    extending ruling 5934879010 on #21185 (rule 2),
+                        //    which `SqlDriver.upsert` already follows for a
+                        //    conflict in another organization: it tells the
+                        //    caller exactly what a create with that id tells
+                        //    it, and nothing more.
+                        //
+                        // ⛔ So a hidden collision gets NO answer of its own:
+                        // no new code, field, detail or sentence, and nothing
+                        // that names another organization. The collision is
+                        // `engine.insert`'s own refusal, reported through the
+                        // same row builder `case 'create'` uses.
+                        //
+                        // #5099's second observation stays true, as a fact
+                        // about the store rather than this fork: on a store
+                        // that does not enforce the primary key
+                        // (`driver-memory` declares it out of scope) the
+                        // insert lands a second row with that id, exactly as
+                        // a create naming that id already does there.
+                        //
+                        // #5099's other half is kept unchanged: there is NO
+                        // fallback. The arm is chosen before any write, so an
+                        // update failure surfaces itself and is never buried
+                        // under an insert's error — the masking ADR-0119 D4
+                        // forbade inside the atomic arm.
+                        objectReadable ??= callerMayReadObject.call(this, object, context);
+                        const callerRead: EngineQueryOptionsParsed = { where: { id: record.id } };
+                        if (context !== undefined) callerRead.context = context;
+                        const existing = (await objectReadable)
+                            ? await this.engine.findOne(object, callerRead)
+                            : null;
                         if (existing) {
                             const dropped: DroppedFieldsEvent[] = [];
                             const updated = byIdUpdateRecord(await this.engine.update(object, record.data || {}, { where: { id: record.id }, onFieldsDropped: (e: DroppedFieldsEvent) => { dropped.push(e); }, ...ctxOpt } as any));

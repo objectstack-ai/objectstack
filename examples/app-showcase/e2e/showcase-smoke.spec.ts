@@ -81,6 +81,11 @@ const SURFACES: { name: string; path: string; chart?: boolean }[] = [
   { name: 'CRM Workbench', path: base('page/showcase_crm_workbench') },
   { name: 'Task Desk', path: base('page/showcase_task_desk') },
   { name: 'Renewals Pipeline', path: base('page/showcase_renewals_pipeline') },
+  // [#28653] The 50th leaf: `nav_report_index`, a `report` entry with no
+  // `reportName`, which the console opens as the app's report index at
+  // `…/reports` (#27525). It carries no label, so the name is the console's
+  // own for that page. With it, every served `showcase_app` nav leaf is here.
+  { name: 'All reports', path: base('reports') },
 ];
 
 /**

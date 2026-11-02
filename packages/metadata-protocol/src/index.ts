@@ -34,7 +34,11 @@ export type { MetadataAuthoringChannel } from './protocol.js';
 // [ADR-0146 D2, #28410] The override write gate's one rule, exported for the
 // two gate points outside this package — `os validate` and the marketplace
 // managed install — so all three doors ask one judgement and cannot drift.
-export { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteSubject, type OverrideWriteClosure, type OverrideWriteRule, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+export { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteSubject, type OverrideWriteClosure, type OverrideWriteRule, type OverrideWriteVerdict } from './protocol-packaged-base-refusal.js';
+// [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge,
+// exported for the doors outside this package — `os validate` and the
+// marketplace install — so every door that lets a field in asks one judgement.
+export { judgeExtensionFieldSuffix, extensionFieldSuffixRefusalError, objectBodyExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRefusal, type ExtensionFieldSuffixRule, type ExtensionFieldSuffixSubject } from './protocol-extension-field-suffix.js';
 
 // The probe-first replacement's shared vocabulary: the raw-SQL seam type the
 // exported migrations below take, and the dialect classifier their reports
@@ -238,6 +242,14 @@ export type { PackageWritabilityEngine } from './package-writability.js';
 export { isServedOverrideRowOf } from './served-override.js';
 export type { ServedOverrideRow } from './served-override.js';
 export type { ServedOverrideEntry } from './protocol-served-overrides.js';
+export type { PackagelessOverlayCensus, PackagelessOverlayMigration } from './protocol-packageless-overlay-migration.js';
+
+// [#28412, ADR-0146 D9 item 1] The `package_id` column of the stored row a
+// registry body was hydrated from, recorded by the protocol's hydration and
+// read by the automation boot pull, which judges a flow override on the
+// column (`isServedOverrideRowOf`), ⛔ never on the body's `_packageId`.
+export { bindStoredRow, storedRowBindingOf } from './stored-row-binding.js';
+export { shadowedStoredRowsOf } from './stored-flow-slot.js';
 
 // [ADR-0131 D6] The `unmanaged` install mode's walled-posture refusal — the
 // function `importUnmanagedPackage` raises, exported so the install door

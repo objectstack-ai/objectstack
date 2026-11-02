@@ -179,7 +179,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **types** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'sharing_rule' \| 'queue' \| 'assignment_rule' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
+| **types** | `Enum<'object' \| 'object_extension' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| 'datasource' \| 'external_catalog' \| 'translation' \| 'api' \| 'email_template' \| 'doc' \| 'book' \| 'permission' \| 'position' \| 'capability' \| 'sharing_rule' \| 'queue' \| 'assignment_rule' \| 'agent' \| 'tool' \| 'skill'>[]` | optional | Filter by metadata types |
 | **namespaces** | `string[]` | optional | Filter by namespaces |
 | **packageId** | `string` | optional | Filter by owning package |
 | **search** | `string` | optional | Full-text search query |
@@ -226,6 +226,7 @@ const result = MetadataBulkResultSchema.parse(data);
 ### Allowed Values
 
 * `object`
+* `object_extension`
 * `field`
 * `hook`
 * `seed`
@@ -266,7 +267,7 @@ const result = MetadataBulkResultSchema.parse(data);
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **type** | `Enum<'object' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| 'flow' \| 'job' \| … +16 more>` | ✅ | Metadata type identifier |
+| **type** | `Enum<'object' \| 'object_extension' \| 'field' \| 'hook' \| 'seed' \| 'mapping' \| 'picklist' \| 'view' \| 'page' \| 'dashboard' \| 'app' \| 'action' \| 'report' \| 'dataset' \| … +18 more>` | ✅ | Metadata type identifier |
 | **label** | `string` | ✅ | Display label for the metadata type |
 | **description** | `string` | optional | Description of the metadata type |
 | **filePatterns** | `string[]` | ✅ | Glob patterns to discover files of this type |
@@ -283,6 +284,7 @@ const result = MetadataBulkResultSchema.parse(data);
 ### Allowed Values: `MetadataTypeRegistryEntry.type`
 
 * `object`
+* `object_extension`
 * `field`
 * `hook`
 * `seed`
@@ -332,7 +334,7 @@ const result = MetadataBulkResultSchema.parse(data);
 | **operation** | `Enum<'update'>` | optional | The declarative single-record field write, mirroring a list view's `bulkActionDefs`: `'update'` applies `patch` (merged under the collected `params`) to the current record on the data plane AS THE CALLER — never system-elevated — so the caller's permissions, the object's hooks and its validations fire as for a user edit. `type` stays at its default `'script'` (the platform action route the write is performed on); `target`/`body`/`method`/`bodyExtra` are refused beside it. `'delete'` and `'custom'` have no row-level form. |
 | **patch** | `Record<string, any>` | optional | For `operation: 'update'` — static field values written to the current record, merged UNDER the user-supplied `params` so a fixed value can be declared without exposing it in the dialog. Written on the data plane as the caller: object permissions, hooks and validations fire as for a user edit. Refused on an action without `operation: 'update'` (it would be silently dropped). |
 | **execution** | `Enum<'perRecord' \| 'aggregate'>` | optional | The bulk dispatch contract this action's BODY is written for, in `bulkActionDefs`' own vocabulary: 'perRecord' = one dispatch per selected row carrying that row's `recordId` (the view's `bulkActions: ['<name>']` bare-string form); 'aggregate' = ONE dispatch for the whole selection carrying every id in `params._selectedIds` (a `bulkActionDefs` entry with `execution: 'aggregate'`). Optional with NO default — omit it only when the body genuinely serves both. A list view wiring a declared action under the other contract is refused by `@objectstack/lint` (`action-dispatch-contract-mismatch`). |
-| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). |
+| **params** | `{ name?: string; field?: string; objectOverride?: string; label?: string \| Record<string, string>; … }[]` | optional | Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). A param name (its `name`, or the `field` a field-backed param reads) may repeat only for per-gate variants of ONE input (declarations that differ in `visible` / `requiresFeature`, e.g. one optional and one required); the params check treats the name as `required` only when EVERY declaration of it requires it, and judges its value by the FIRST declaration's shape (`type`, `multiple`, `options`), so keep that shape identical across them. |
 | **submitText** | `string \| Record<string, string>` | optional | Label of the submit button in the action's param dialog, the verb the button performs (e.g. "Send", "Log Call"), in place of the default "Confirm" — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action). Only on an action with a non-empty `params`: without one no param dialog opens, so it is refused. Not `confirmText`, which is the message of a param-less action's confirm dialog. A blank label is refused. |
 | **variant** | `Enum<'primary' \| 'secondary' \| 'danger' \| 'ghost' \| 'link'>` | optional | Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent) |
 | **order** | `number` | optional | Sort order within a location group (lower = higher). Promotes/demotes an action toward the record_header primary button; stable, so actions without `order` keep their registration order. |

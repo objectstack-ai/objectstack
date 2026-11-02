@@ -245,6 +245,15 @@ function readObjectDefinition(
 }
 
 /**
+ * ADR-0048 — the layered read's refusal of a name two packages hold, asked
+ * naming no package: `409 RESOURCE_CONFLICT`, its message naming the holders
+ * and the `?package=` remedy. A read answers that code for nothing else.
+ */
+function isPackagelessLayeredRefusal(err: unknown): boolean {
+  return (err as { status?: unknown } | null)?.status === 409 && errorCodeIs(err, 'RESOURCE_CONFLICT');
+}
+
+/**
  * Is this item backed by a **code-package artifact**? (objectui#4518, #4526)
  *
  * The client-side mirror of the server's `isArtifactBacked`
@@ -749,6 +758,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // could only be refused (400), and there is nobody to list.
   const [searchParams] = useSearchParams();
   const showAssignments = !embedded && isEnvironmentScope(searchParams) && existsOnServer !== false;
+  // ADR-0048 — the package whose stack the layered reads below read: the
+  // door's `packageId`, else the owner the edit URL names (`?package=`, the
+  // metadata list's row link; `all` is that list's every-package scope, not a
+  // package). With neither, the read names no package, and a name two
+  // packages hold is refused with the server's sentence, shown as the load's
+  // error. ⛔ Never a holder picked here.
+  const routePackage = searchParams.get('package');
+  const layeredPackageId = packageId ?? (routePackage && routePackage !== 'all' ? routePackage : undefined);
   // Which gate to NAME when the surface is locked (host > artifact > type).
   // The artifact tier is the DECIDING one only where the type tier would have
   // said yes: with both flags false the honest reason is still "this type has
@@ -916,7 +933,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           ? readDraftForSave<{ item?: PermissionSetDraft } | PermissionSetDraft>(client, type, name, packageId)
           : Promise.resolve(null);
         const draftRead = draftReadForSave.then((read) => read?.answer ?? null);
-        const readLayered = () => client.layered<PermissionSetDraft>(type, name).catch(() => null);
+        const readLayered = () =>
+          client
+            .layered<PermissionSetDraft>(type, name, layeredPackageId ? { packageId: layeredPackageId } : {})
+            .catch((err: unknown) => {
+              // A name two packages hold, read naming neither: the server's
+              // refusal is this load's error, ⛔ never "no set known".
+              if (isPackagelessLayeredRefusal(err)) throw err;
+              return null;
+            });
         // objectui#11799 — a set "+ New" created and nobody published has a
         // draft and no layer, and `GET …/layers` answers 404 for it. Under the
         // package door the layered envelope is used only without a pending
@@ -1041,7 +1066,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     return () => {
       cancelled = true;
     };
-  }, [client, type, name, packageId, publishNonce, resetDraftBaseline, reloadNonce, recordSetRead, forgetSetVersion]);
+  }, [client, type, name, packageId, layeredPackageId, publishNonce, resetDraftBaseline, reloadNonce, recordSetRead, forgetSetVersion]);
 
   /* ── Lazy-load fields when an object is expanded ─────────── */
   async function ensureFields(objectName: string) {
@@ -1450,7 +1475,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         let rereadFailed = false;
         const [fresh, draftRead] = await Promise.all([
           client
-            .layered<PermissionSetDraft>(type, payload.name)
+            .layered<PermissionSetDraft>(type, payload.name, { packageId })
             // Kept on `.catch` so the rejection can never escape as an
             // unhandled one; the refusal is raised below, inside this `try`'s
             // own body, and reaches the author on the same error channel a
@@ -1537,7 +1562,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // write is already done, and refusing anything would be a lie.
         let rereadFailed = false;
         const lay = await client
-          .layered<PermissionSetDraft>(type, payload.name)
+          .layered<PermissionSetDraft>(type, payload.name, layeredPackageId ? { packageId: layeredPackageId } : {})
           .catch(() => {
             rereadFailed = true;
             return null;

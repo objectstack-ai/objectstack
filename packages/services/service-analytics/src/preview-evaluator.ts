@@ -14,8 +14,10 @@
 //     (day/week/month/quarter/year)
 //   • group-by dimensions; count / count_distinct / sum / avg / min / max
 //   • order + limit/offset
-// Anything beyond (joins via `include`, raw SQL) falls back to the caller's
-// normal execution path — the preview simply doesn't claim it.
+// Anything beyond (joins via `include`, raw SQL) is not evaluated here. A
+// member read through a relationship path is refused before this evaluator
+// runs, `INVALID_FIELD` / 400 (#28555, `AnalyticsService`'s
+// `assertPreviewJoinsNothing`): the rows are the base object's alone.
 //
 // [#19810] "Doesn't claim it" is a FALL-BACK only where a fall-back exists. A
 // `where` operator outside the subset above has none: the rows being charted
@@ -45,6 +47,7 @@ import { dateRangeWindowBounds } from './dataset-executor.js';
 import { DATASET_DURATION_UNIT_SECONDS } from '@objectstack/spec/ui';
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { invalidMemberError } from './dataset-refusal.js';
+import { projectedDimensions } from './order-key-door.js';
 import type { DurationMeasureSpec } from './strategies/types.js';
 // [#19810] The `where` door's refusal envelope — `INVALID_FILTER` / 400,
 // EXPORTED by `filter-normalizer` precisely so a sibling in this package cannot
@@ -777,6 +780,14 @@ function undeclaredPreviewMeasureError(member: string, cube: Cube): Error {
  * for the shared lowering; the production caller always passes it. A caller
  * that passes none cannot read declarations, and every column then reads
  * type-blind (ADR-0053 D-D1 item 7).
+ *
+ * `whereColumns` maps a `where` member to the column the live strategies
+ * resolve it to, for each member spelled other than its column
+ * (`OBJECT.region`, a dataset dimension `zone` over `region`). The rows carry
+ * columns, so the match reads each such member from its column, and the
+ * declared type is the column's (#28691). The service builds it with the
+ * member resolution the strategies use; a member it does not list is read as
+ * written.
  */
 export function evaluateAnalyticsQueryOverRows(
   query: AnalyticsQuery,
@@ -784,8 +795,18 @@ export function evaluateAnalyticsQueryOverRows(
   rows: Row[],
   declaredType?: (field: string) => string | undefined,
   durations?: Readonly<Record<string, DurationMeasureSpec>>,
+  whereColumns?: Readonly<Record<string, string>>,
 ): AnalyticsResult {
-  const lowering = declaredPreviewLowering(declaredType);
+  const aliased = Object.entries(whereColumns ?? {});
+  const whereType =
+    declaredType && aliased.length > 0 ? (field: string) => declaredType(whereColumns![field] ?? field) : declaredType;
+  const whereRow = (r: Row): Row => {
+    if (aliased.length === 0) return r;
+    const out: Row = { ...r };
+    for (const [member, column] of aliased) out[member] = r[column];
+    return out;
+  };
+  const lowering = declaredPreviewLowering(whereType);
   // 1. Row-level filters: `where`, then timeDimension dateRanges.
   // [#19810] The operator vocabulary is decided BEFORE the rows are read, so an
   // unevaluable predicate refuses over an empty seed draft too — see
@@ -820,9 +841,12 @@ export function evaluateAnalyticsQueryOverRows(
   assertPreviewCanEvaluate(lowered);
   // [#21505] …then each value comparison in the temporal STORAGE form, the
   // comparand here and the row value at the match (see {@link previewTemporalKind}).
+  const whereKindOf = previewTemporalKind(whereType);
+  const where = previewStorageComparands(lowered, whereKindOf);
+  let filtered = rows.filter((r) => matchesWhere(previewStorageRow(whereRow(r), whereKindOf), where));
+  // The time window below names columns, so it reads the declarations as written.
+  const windowLowering = declaredPreviewLowering(declaredType);
   const kindOf = previewTemporalKind(declaredType);
-  const where = previewStorageComparands(lowered, kindOf);
-  let filtered = rows.filter((r) => matchesWhere(previewStorageRow(r, kindOf), where));
   const timeDims = query.timeDimensions ?? [];
   for (const td of timeDims) {
     const dim = cube.dimensions?.[td.dimension];
@@ -847,12 +871,18 @@ export function evaluateAnalyticsQueryOverRows(
     // days it covers in the reference zone — the pair `dateRangeWindowBounds`
     // spells for the published faces, so the draft counts the published days.
     const bounds = dateRangeWindowBounds({ start, end, endExclusive }, query.timezone, declaredType?.(field) === 'date');
-    const window = previewStorageComparands(lowerFilterCondition({ [field]: bounds }, lowering), kindOf);
+    const window = previewStorageComparands(lowerFilterCondition({ [field]: bounds }, windowLowering), kindOf);
     filtered = filtered.filter((r) => matchesWhere(previewStorageRow(r, kindOf), window));
   }
 
   // 2. Grouping keys: each selected dimension (time dims bucketed).
-  const dimensions = query.dimensions ?? [];
+  // [#28690] The set the live strategies project — every `dimensions` entry,
+  // then every bucketed `timeDimensions` entry not already one of them — from
+  // the one definition they read (`projectedDimensions`). Reading
+  // `query.dimensions` alone dropped a bucketed time dimension the caller did
+  // not also list there: the draft answered one total (or regions without
+  // months) where both live faces answered one group per bucket.
+  const dimensions = projectedDimensions(query);
   const timezone = query.timezone; // ADR-0053 Phase 2: reference tz for bucketing
   const granByDim = new Map(timeDims.filter((t) => t.granularity).map((t) => [t.dimension, t.granularity!]));
   const keyOf = (r: Row): { key: string; values: Row } => {

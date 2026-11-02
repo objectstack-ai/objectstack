@@ -76,7 +76,7 @@ export const en: TranslationData = {
         // each app resolves its own subtree, so the studio copy never answers
         // for this one. Its absence here was #5750's first cause.
         nav_packages: { label: 'Packages' },
-        nav_packaged_automation: { label: 'Packaged Automation' },
+        nav_packaged_actions: { label: 'Packaged Actions' },
         nav_marketplace_browse: { label: 'Browse Marketplace' },
         nav_marketplace_installed: { label: 'Installed Apps' },
         nav_cloud_connection: { label: 'Cloud Connection' },
@@ -161,6 +161,7 @@ export const en: TranslationData = {
         nav_http_deliveries: { label: 'HTTP Deliveries' },
         nav_datasources: { label: 'Datasources' },
         nav_connector_credentials: { label: 'Connector Credentials' },
+        nav_connector_connections: { label: 'Connector Connections' },
 
         // Advanced
         //

@@ -46,7 +46,7 @@ vi.mock('sonner', () => ({
 
 import { AdapterCtx, MetadataCtx, useAdapter } from '@object-ui/react';
 import { I18nProvider, type I18nConfig } from '@object-ui/i18n';
-import { MePermissionsProvider, usePermissions, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, usePermissions, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 import { RecordDetailView } from '@object-ui/app-shell';
 import { APPROVAL_ACTION_OBJECT, APPROVAL_REQUEST_OBJECT, routeApprovalRecordReads } from './approvalRequestsDataSource';
 import { ApprovalRecordReads } from '../AppContent';
@@ -204,11 +204,12 @@ const SERVED_PAGE = {
  * approval object, so `checkField` takes its authenticated unknown-object
  * default (closed) for both.
  */
-const MEMBER_ANSWER: MePermissionsResponse = {
+const MEMBER_ANSWER: MePermissionsAuthenticatedResponse = {
   authenticated: true,
   userId: 'u1',
   tenantId: 'org_1',
-  roles: ['member'],
+  positions: ['member'],
+  hasAnyQueue: false,
   permissionSets: ['member_default'],
   systemPermissions: [],
   objects: {

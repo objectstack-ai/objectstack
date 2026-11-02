@@ -1428,7 +1428,7 @@ const actionObject = () => strictObject({
           + 'Run `os migrate meta --from 16` to list the mechanical edits for the inline `element:button` action case; `--write` applies the ones it can prove, and a registered action keeps its object form until you move it by hand.'
         : undefined
     ),
-  }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
+  }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). A param name (its `name`, or the `field` a field-backed param reads) may repeat only for per-gate variants of ONE input (declarations that differ in `visible` / `requiresFeature`, e.g. one optional and one required); the params check treats the name as `required` only when EVERY declaration of it requires it, and judges its value by the FIRST declaration\'s shape (`type`, `multiple`, `options`), so keep that shape identical across them.'),
 
   /**
    * The submit button label of the dialog `params` opens — the contract is

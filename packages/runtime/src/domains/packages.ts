@@ -32,7 +32,7 @@ import {
 // (`packages-capability-gate.test.ts`, beside this file), so it names
 // `OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES` — same value it read before,
 // no re-ruling of the package cohort as a side effect of #7020.
-import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES } from '@objectstack/metadata-core';
+import { OBJECT_SCHEMA_READ_ONLY_EXEMPT_CAPABILITIES, isCodeArtifactBody } from '@objectstack/metadata-core';
 // [#28411, ADR-0146 D8 item 4] The per-package customization read's three
 // sources, each read from its owner: the pair's id and a pair's base
 // (`@objectstack/spec/kernel`, the one spelling of the suffix), and the
@@ -2527,7 +2527,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
         // GET /packages/:id/customizations → [#28411, ADR-0146 D8 item 4] what
         // this deployment changed on an installed base: its `.custom` pair's
         // served overrides, the members the pair adds to the base's objects,
-        // and the base's items switched off in the activation ledger. See
+        // the base's items switched off in the activation ledger, and the
+        // fields and flows other packages contribute to it (#28722). See
         // {@link readPackageCustomizations}.
         if (parts.length === 2 && parts[1] === 'customizations' && m === 'GET') {
             // The read authority of `GET /packages/:id`, the same gate, asked
@@ -3093,7 +3094,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  */
 /**
  * [#28411, ADR-0146 D8 item 4, D3] The answer of `GET /packages/:id/customizations`
- * for the installed base `baseId`: three lists, each read from the one owner
+ * for the installed base `baseId`: four lists, each read from the one owner
  * of its fact, and their lengths. Served rows and ledger rows only; ⛔ no diff
  * against the base and no `basedOn` verdict (ADR-0146 D2, D6).
  *
@@ -3111,6 +3112,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
  *    ({@link listPackageMetadataActivations}). A composition with no ledger
  *    object has switched nothing off, which is the ledger's own reading of
  *    absence (ADR-0126 §4: no row means active).
+ *  - **contributions** — [#28722, ADR-0029 D7 / ADR-0146 D3] what OTHER packages
+ *    bring to the base's surface, each item stamped with its package: see
+ *    {@link readBaseContributions}.
  *
  * No per-organization axis (ADR-0131 D6): every source is environment-level,
  * so every caller the read gate admits gets the same answer. A base with no
@@ -3168,13 +3172,103 @@ async function readPackageCustomizations(
         .map((row) => ({ type: row.metadataType, name: row.name }))
         .sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name));
 
+    const contributions = readBaseContributions(baseId, pair.ok ? pair.value : undefined, registry);
+
     return {
         packageId: baseId,
         overrides,
         extensions,
         switchedOff,
-        counts: { overrides: overrides.length, extensions: extensions.length, switchedOff: switchedOff.length },
+        contributions,
+        counts: {
+            overrides: overrides.length,
+            extensions: extensions.length,
+            switchedOff: switchedOff.length,
+            contributions: contributions.length,
+        },
     };
+}
+
+/**
+ * [#28722, ADR-0029 D7 as amended by ADR-0146 D3] The `contributions` of
+ * `GET /packages/:id/customizations`: every field and flow a package other than
+ * the base `baseId` and its pair `pairId` contributes to an object the base
+ * OWNS (`getObjectOwner`), each entry naming that package. Read from the two
+ * registries that already record the contributor, never inferred:
+ *
+ *  - **field** — the object registry's `extend` contributors of the object, as
+ *    the customizations' `extensions` reads the pair's: each contributor's
+ *    `definition` is its extension body as declared, so its `fields` keys ARE
+ *    the fields it adds, and its `packageId` is the package that declared it.
+ *    One entry per contributor and field, so two packages adding a field of
+ *    one name are two entries.
+ *  - **flow** — the metadata registry's flows (`listItems('flow')`, which
+ *    already leaves a disabled package's out), whose `start` node's
+ *    `config.objectName` is a base-owned object, attributed to the package
+ *    stamp the registration put on it (its `_packageId`).
+ *
+ * Both kinds ask ONE question of their stamp, {@link codePackageOf}: is it a
+ * code package's ({@link isCodeArtifactBody}: not the package-less
+ * `sys_metadata` sentinel, not a tenant-authored body), and neither the base
+ * nor its pair? Only where the stamp is read differs: the contributor's
+ * `packageId` beside its `definition`, or the flow's own `_packageId`. An item
+ * authored in this environment is the environment's, not a package's, and is
+ * not listed, whichever kind it is.
+ *
+ * Ordered by object, kind, name and package.
+ */
+function readBaseContributions(
+    baseId: string,
+    pairId: string | undefined,
+    registry: any,
+): GetPackageCustomizationsResponse['contributions'] {
+    type Contribution = GetPackageCustomizationsResponse['contributions'][number];
+    const contributions: Contribution[] = [];
+    if (typeof registry?.getAllObjects !== 'function') return contributions;
+    // The one stamp reading both kinds share: the package `packageId` names
+    // when `body` is a code package's item and the package is neither the base
+    // nor its pair; `undefined` otherwise.
+    const codePackageOf = (packageId: unknown, body: unknown): string | undefined => {
+        if (typeof packageId !== 'string' || packageId === baseId || packageId === pairId) return undefined;
+        const stamped = { _packageId: packageId, _provenance: (body as { _provenance?: unknown } | null | undefined)?._provenance };
+        return isCodeArtifactBody(stamped) ? packageId : undefined;
+    };
+
+    const owned = new Set<string>();
+    for (const object of registry.getAllObjects(baseId) as Array<{ name?: unknown }>) {
+        const name = object?.name;
+        if (typeof name === 'string' && registry.getObjectOwner(name)?.packageId === baseId) owned.add(name);
+    }
+
+    for (const name of owned) {
+        for (const contributor of registry.getObjectContributors(name) as Array<{ packageId?: unknown; ownership?: unknown; definition?: any }>) {
+            if (contributor.ownership !== 'extend') continue;
+            const packageId = codePackageOf(contributor.packageId, contributor.definition);
+            if (packageId === undefined) continue;
+            for (const field of Object.keys(contributor.definition?.fields ?? {})) {
+                contributions.push({ kind: 'field', object: name, name: field, packageId });
+            }
+        }
+    }
+
+    if (owned.size > 0 && typeof registry.listItems === 'function') {
+        for (const flow of registry.listItems('flow') as Array<{ name?: unknown; nodes?: unknown; _packageId?: unknown }>) {
+            const packageId = codePackageOf(flow._packageId, flow);
+            if (packageId === undefined || typeof flow.name !== 'string') continue;
+            const start = Array.isArray(flow.nodes)
+                ? flow.nodes.find((node: any) => node?.type === 'start')
+                : undefined;
+            const object = start?.config?.objectName;
+            if (typeof object !== 'string' || !owned.has(object)) continue;
+            contributions.push({ kind: 'flow', object, name: flow.name, packageId });
+        }
+    }
+
+    const kindOrder = { field: 0, flow: 1 } as const;
+    return contributions.sort((a, b) => a.object.localeCompare(b.object)
+        || kindOrder[a.kind] - kindOrder[b.kind]
+        || a.name.localeCompare(b.name)
+        || a.packageId.localeCompare(b.packageId));
 }
 
 async function assemblePackageManifest(
@@ -3211,11 +3305,20 @@ context: HttpProtocolContext,
     const exportPluralKeys = Object.keys(PLURAL_TO_SINGULAR).filter(
         (k) => k !== 'datasources' && k !== 'emailTemplates',
     );
+    // [#28574, ADR-0146 D2 / D10] A package's `object_extension` items travel
+    // as its `objectExtensions`, the collection the install door registers as
+    // `'extend'` contributors (`ObjectQL.registerApp`). `PLURAL_TO_SINGULAR`
+    // carries no such pair — an extension merges into its target rather than
+    // registering under a type of its own — so the pair is stated here, where
+    // the item is read back out as the collection entry it is.
+    const EXTENSIONS_KEY = 'objectExtensions';
+    const singularOf = (plural: string): string =>
+        plural === EXTENSIONS_KEY ? 'object_extension' : PLURAL_TO_SINGULAR[plural];
 
     const manifest: Record<string, any> = {};
     let total = 0;
-    for (const plural of exportPluralKeys) {
-        const singular = PLURAL_TO_SINGULAR[plural];
+    for (const plural of [...exportPluralKeys, EXTENSIONS_KEY]) {
+        const singular = singularOf(plural);
         let items: any[] = [];
         try {
             // getMetaItems applies the packageId filter at the
@@ -3249,6 +3352,20 @@ context: HttpProtocolContext,
             if (viewItems.length > 0) manifest[ASSEMBLED_VIEW_ITEMS_KEY] = viewItems;
             total += views.length + viewItems.length;
             continue;
+        }
+        // [#28574] A package's `objects` are the objects it OWNS. The registry
+        // lists an object under every package that contributes to it — the
+        // one that extends it too — served as its owner's merged object
+        // (`_packageId` the owner's). Exported, that would re-install as an
+        // `'own'` claim on another package's object, refused at install
+        // (`ObjectOwnershipConflictError`), and the extender's own fields
+        // travel as its `objectExtensions` entry instead.
+        if (plural === 'objects') {
+            items = items.filter((it) => {
+                const owner = (it as { _packageId?: unknown } | null)?._packageId;
+                return owner === undefined || owner === null || owner === packageId;
+            });
+            if (items.length === 0) continue;
         }
         manifest[plural] = items.map(clean);
         total += items.length;

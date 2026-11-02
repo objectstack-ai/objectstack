@@ -3,8 +3,10 @@
 /**
  * objectui#12513 — the Studio home loop. Inside a package the header's first
  * button and the package switcher's first row both return to the Studio
- * landing (`/studio`), and the Organization flows empty block's way out to
- * Setup › Packaged automation is a link that says it leaves Studio.
+ * landing (`/studio`). The Organization flows empty block's way out to
+ * Setup › Packaged automation retired with that page's flows half (objectstack
+ * ADR-0146 D11, N-28): the block now says where a packaged flow is changed,
+ * and links nowhere.
  *
  * Rendered through the REAL `StudioDesignSurface` on the REAL route shape, on
  * the server double objectui#11553's file uses: a read-only showcase package
@@ -240,16 +242,18 @@ describe('Studio home loop (objectui#12513)', () => {
     expect(location()).toBe('/studio');
   });
 
-  it('the Organization flows empty block links to Setup › Packaged automation, and creates nothing', async () => {
+  it('the Organization flows empty block says how to change a packaged flow, links nowhere, and creates nothing', async () => {
+    // It linked to Setup › Packaged automation, whose flows half retired into
+    // Studio (objectstack ADR-0146 D11, N-28), so the sentence says where the
+    // flow is changed instead: in its package, with New similar.
     server.active.delete('flow/qa_urgent_alert_clone');
     renderAt('/studio/~org/automations');
 
     const block = await screen.findByTestId('auto-empty', undefined, { timeout: 8000 });
-    expect(block).toHaveTextContent('Setup › Packaged automation');
-    const link = within(block).getByRole('link', { name: 'Open in Setup' });
-    expect(link).toHaveAttribute('data-testid', 'auto-empty-open-setup');
-    expect(link).toHaveAttribute('href', '/apps/setup/component/automation/packaged');
-    expect(link.querySelector('svg.lucide-arrow-up-right')).not.toBeNull();
+    expect(block).toHaveTextContent('open its package and use New similar');
+    expect(block).not.toHaveTextContent('Setup');
+    expect(within(block).queryByTestId('auto-empty-open-setup')).toBeNull();
+    expect(within(block).queryAllByRole('link')).toEqual([]);
     expect(within(block).queryByTestId('auto-empty-new')).toBeNull();
   });
 

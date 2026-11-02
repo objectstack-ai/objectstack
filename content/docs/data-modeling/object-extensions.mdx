@@ -1,7 +1,7 @@
 ---
 title: Object extensions — extend without forking
 navTitle: Object Extensions
-description: Add fields, validations and indexes to an object another package owns, without forking it — declaration, merge order, and what an extension may not contribute.
+description: Add fields, validations and indexes to an object another package owns, or relabel its fields, without forking it — declaration, merge order, and what an extension may not contribute.
 ---
 
 Every object has exactly **one owning package**. That package defines the table, the
@@ -63,6 +63,7 @@ check that spelling first.
 | Key | Merge behaviour |
 |:---|:---|
 | `fields` | **Additive.** Merged into the target's field map. A name the target already has is **replaced**, not merged. |
+| `fieldPatches` | **Applied, field by field.** Changes the *display* of one of the target's own fields — never one an extension adds — without replacing it — [below](#relabelling-a-vendor-field). |
 | `validations` | **Concatenated.** Your rules run alongside the owner's; neither replaces the other. |
 | `indexes` | **Concatenated**, same as validations. |
 | `label` | Replaces the target's label — with one exception, [below](#extensions-and-tenant-customization). |
@@ -76,7 +77,7 @@ Added fields are ordinary fields, so everything on the
 
 ### What an extension may **not** contribute
 
-The merge carries the seven keys above and nothing else. These four are not
+The merge carries the eight keys above and nothing else. These four are not
 "unsupported yet" — there is no slot for them to arrive through, and the schema rejects
 each one by name with the alternative to use instead:
 
@@ -89,6 +90,57 @@ each one by name with the alternative to use instead:
 
 The same holds for any other key: the extension schema is strict, so an unknown key
 fails at authoring time with a prescription rather than being dropped in silence.
+
+---
+
+## Relabelling a vendor field
+
+Replacing a field through `fields` takes it over whole: its type, its options and its
+rules become yours, and the owner's next version no longer reaches it. To change only
+what a person *reads* — "Industry" shown as "Sector", a better help text — patch the
+field instead:
+
+{/* os:check */}
+```typescript
+import { defineObjectExtension } from '@objectstack/spec/data';
+
+export const AccountWordingExtension = defineObjectExtension({
+  extend: 'crm_account',
+  fieldPatches: {
+    industry: {
+      label: 'Sector',
+      inlineHelpText: 'The market the account sells into.',
+      options: { technology: { label: 'Tech' } },   // addressed by the stored value
+    },
+  },
+});
+```
+
+A patch sets `label`, `description`, `inlineHelpText` and `placeholder` on the field, and
+the `label` of an option it addresses by its stored `value` — the display whitelist
+(`BASE_FIELD_DISPLAY_WHITELIST`), and nothing else. The field's type, requiredness,
+default, formula and which options exist stay the owner's, so the owner's upgrades keep
+applying and stored values never change; any other key is refused by name with that
+reason.
+
+- **Every read serves it.** The patch is applied in the same merge as the other keys,
+  after the additive ones, and the list, the by-name read and the layered view agree.
+  Uninstalling the extension serves the owner's text again.
+- **It reaches the owner's own fields only.** A field another extension adds — or one
+  your own extension adds in `fields` — is not a patch target, whatever the
+  priorities: set that field's text where it is declared. The install door and
+  `os validate` refuse such a patch, and at boot it is not applied and is named once.
+  The platform columns the runtime adds to every object (`created_at` and the rest)
+  sit in the owner's stored declaration, so the install door admits a patch of one and
+  every read applies it, while `os validate`, which reads the declaration you wrote,
+  refuses it.
+- **Conflicts resolve like `label`.** Two extensions patching the same key: the higher
+  `priority` wins. A tenant who has edited that text keeps their own, [below](#extensions-and-tenant-customization).
+- **A patch must name something real.** A field the target does not declare, or an option
+  value its field does not have, is refused when the package installs and by
+  `os validate` when the target is in the same stack. A field whose options come from a
+  shared picklist has no option labels of its own to patch. At boot, an unmatched patch
+  is not applied and is named once in the log; the boot carries on.
 
 ---
 
@@ -140,7 +192,8 @@ survive a customized object rather than being dropped by it.
   One deliberate asymmetry, ruled 2026-08-13: an extension's `label`, `pluralLabel` and
   `description` apply only while the base still carries the **packaged owner's** value.
   Once a tenant has renamed the object, the extension's packaged default yields and the
-  tenant's name stands. Fields, validations and indexes are unaffected — they merge
+  tenant's name stands. A `fieldPatches` key yields the same way, one field (and option)
+  at a time: a field label the tenant edited keeps the tenant's text. Fields, validations and indexes are unaffected — they merge
   either way. There is no escape hatch: a package cannot relabel an object a tenant has
   deliberately renamed.
 </Callout>
