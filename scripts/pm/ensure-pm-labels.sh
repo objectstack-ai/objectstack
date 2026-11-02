@@ -568,7 +568,7 @@ gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui l
 # The FEATURE AXIS — `area:*`, one per card, eleven values. It is the PLANNING
 # axis: priority is judged on it, and `domain:*` beside it decides only which
 # seat may claim which files. The eleven values are the North Star definition
-# line (「做出来的是什么」) plus the road it measures, so the axis and the
+# line ("What gets built") plus the road it measures, so the axis and the
 # product definition cannot drift apart without one of them being edited.
 # The eleven were put to the maintainer on the charter card and confirmed there
 # (2026-09-21) with ONE amendment: the API/integration value was shortened to
@@ -592,7 +592,7 @@ gh label create domain:ui -R objectstack-ai/objectui -c bfd4f2 -d "objectui ui l
 #
 # TWO repos, deliberately, and not the five-repo loop above: a feature point
 # spans 协议 → 运行时 → 前端, which is objectstack plus objectui. cloud is
-# parked (北极星「现在不做」), objectos is the docs/site repo, and hotcrm is the
+# parked (North Star "Not now"), objectos is the docs/site repo, and hotcrm is the
 # exemplar APP — its cards are app cards, and a platform gap found there is
 # filed in the platform repo, where it gets its area. Widening the loop is a
 # vocabulary decision, not a maintenance edit.
