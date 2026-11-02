@@ -31,7 +31,9 @@
  *
  * Private to this package: no form's props or schema change.
  */
-import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import { createElement, type Dispatch, type MutableRefObject, type ReactElement, type SetStateAction } from 'react';
+import { Empty, EmptyTitle, EmptyDescription } from '@object-ui/components';
+import { createSafeTranslation } from '@object-ui/i18n';
 
 /** The two reads a record form makes before it can draw. */
 export type LoadSource = 'schema' | 'record';
@@ -96,4 +98,34 @@ export class RecordNotFoundError extends Error {
     super(`Record ${recordId} not found in ${objectName}`);
     this.name = 'RecordNotFoundError';
   }
+}
+
+// The record not-found copy: the console's shared keys, with the values
+// `RecordDetailView` draws. A provider-less host (a standalone embed, this
+// package's own tests) reads this table; `pnpm check:i18n-keys` holds it to the
+// `en` pack.
+const useRecordNotFoundTranslation = createSafeTranslation(
+  {
+    'empty.recordNotFound': 'Record not found',
+    'empty.recordNotFoundDescription': 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
+  },
+  'empty.recordNotFound',
+);
+
+/**
+ * What a record form draws in place of its form for a `RecordNotFoundError`:
+ * the record not-found state, never the "Error loading form" box (nothing
+ * failed to load) and never an empty form. One drawing for every layout that
+ * reads a record (`ModalForm`, `DrawerForm`, `TabbedForm`, `WizardForm`), so
+ * each host shows the same state. The caller draws no footer or submit beside
+ * it: each already keeps those off while a load failure is shown.
+ */
+export function RecordNotFoundState({ testId }: { testId: string }): ReactElement {
+  const { t } = useRecordNotFoundTranslation();
+  return createElement(
+    Empty,
+    { 'data-testid': testId },
+    createElement(EmptyTitle, null, t('empty.recordNotFound')),
+    createElement(EmptyDescription, null, t('empty.recordNotFoundDescription')),
+  );
 }
