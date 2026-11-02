@@ -1789,7 +1789,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                             const result = await dispatcher.dispatch(
                                 verb.toUpperCase(),
                                 `/automation/connectors/${encodeURIComponent(req.params.name)}/connection`,
-                                undefined,
+                                // Only the begin leg reads a body: the OAuth client an
+                                // administrator entered for an instance declaring
+                                // `clientSource: 'installer'` (ADR-0143 D2.1). Read once
+                                // the floor has admitted the caller, never ahead of it.
+                                verb === 'post' ? deferRequestBody(req) : undefined,
                                 req.query,
                                 { request: req },
                             );
