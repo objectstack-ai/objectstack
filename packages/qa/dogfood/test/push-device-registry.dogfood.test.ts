@@ -24,7 +24,8 @@
  *  - `[body]` a body outside `RegisterDeviceRequestSchema`, and a web
  *    registration with no vendor, answer `400 VALIDATION_FAILED`;
  *  - `[data-api]` the generic data API neither lists, reads nor writes
- *    `sys_user_device` for a plain member: the device routes are the only door.
+ *    `sys_user_device` for a plain member (`404 OBJECT_API_DISABLED`, the
+ *    exposure gate's answer): the device routes are the only door.
  *
  * Refusals assert `code` AND `status` (ADR-0112).
  */
@@ -158,7 +159,8 @@ describe('push device registry over HTTP (ADR-0012 §6)', () => {
   });
 
   it('[data-api] the generic data API neither lists, reads nor writes sys_user_device for a member', async () => {
-    const [own] = await rows({ user_id: bobId });
+    await call(bobTok, 'POST', '/notifications/devices', { token: 'bob-data-api-tok', platform: 'ios', deviceId: 'bob-data-api' });
+    const [own] = await rows({ device_id: 'bob-data-api' });
     expect(own, 'bob holds a device row to aim at').toBeTruthy();
     const attempts = [
       await call(bobTok, 'GET', `/data/${OBJ}`),
@@ -167,10 +169,10 @@ describe('push device registry over HTTP (ADR-0012 §6)', () => {
       await call(bobTok, 'PATCH', `/data/${OBJ}/${own.id}`, { token: 'patched' }),
       await call(bobTok, 'DELETE', `/data/${OBJ}/${own.id}`),
     ];
+    // The exposure gate's answer for an object not exposed via the API.
     for (const res of attempts) {
-      expect(res.status, res.text).toBeGreaterThanOrEqual(400);
-      expect(res.status, res.text).toBeLessThan(500);
-      expect(codeOf(res.body), res.text).toBeTruthy();
+      expect(res.status, res.text).toBe(404);
+      expect(codeOf(res.body), res.text).toBe('OBJECT_API_DISABLED');
     }
     expect(await rows({ token: 'via-data-api' })).toHaveLength(0);
     const [still] = await rows({ id: own.id });
