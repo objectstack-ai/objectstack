@@ -294,8 +294,8 @@ describe('SecurityPlugin#explainAccessForCaller: the request is typed as the con
   });
 
   it('a typed caller passes recordIds with no cast and gets the answer the service gives', async () => {
-    const typed: ExplainAccessRequest = { object: LINE, operation: 'update', recordIds: IDS[LINE] };
-    const direct = await plugin.explainAccessForCaller(typed, { ...SELF });
+    // An object literal, so the compiler checks every key against the declared request.
+    const direct = await plugin.explainAccessForCaller({ object: LINE, operation: 'update', recordIds: IDS[LINE] }, { ...SELF });
     const viaService = await security.explain(request(SELF, LINE, 'update', { recordIds: IDS[LINE] }), { ...SELF });
     expect(direct.records?.map((r) => r.recordId)).toEqual(IDS[LINE]);
     expect(direct).toEqual(viaService);
