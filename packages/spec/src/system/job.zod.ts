@@ -314,8 +314,13 @@ export const JobSchema = lazySchema(() => strictObject({
    * `pull` absent: {@link JOB_RUNS_NOTHING}. When both `body` and `handler` are
    * present `body` wins, as for hooks; beside `pull` it is refused
    * ({@link JOB_PULL_EXCLUSIVE}).
+   *
+   * Moving to `body`: time-zone date maths moves with it. The sandbox provides
+   * `Intl.DateTimeFormat` (with `timeZone`, answered by the host's), so a job
+   * that computes a calendar date or period in a named IANA zone can be a
+   * `body`; nothing else of `Intl` is there.
    */
-  handler: z.string().optional().describe('Handler function name (must match a key in `defineStack({ functions })`) — DEPRECATED, prefer `body`. When both are present `body` wins; refused beside `pull`. A job must declare one of `body`, `handler` or `pull`.'),
+  handler: z.string().optional().describe('Handler function name (must match a key in `defineStack({ functions })`) — DEPRECATED, prefer `body`. When both are present `body` wins; refused beside `pull`. A job must declare one of `body`, `handler` or `pull`. Time-zone date maths moves to `body` too: `Intl.DateTimeFormat` with a `timeZone` option is available in the sandbox (nothing else of `Intl` is).'),
   /**
    * Job Body (L2 sandboxed JS) — the hook body shape, reused by reference.
    *
