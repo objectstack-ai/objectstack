@@ -22,7 +22,8 @@
  * package that the deployment lacks is hidden, as the whole registry hides it.
  *
  * CONTROL: a package app whose entries live in `navigation` asks exactly what
- * it asked before; outside an app the gate reads the whole registry.
+ * it asked before. Outside an app (the home feeds) the gate reads the same
+ * union by name, without views (objectstack#29121); it read the whole registry.
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -211,13 +212,16 @@ describe('package-less app: the nav gate reads the union of required objects by 
     expect(answers(failed(), NOTES_APP, APPS).sidebar).toEqual(['nav_note', 'nav_notes_gone']);
   });
 
-  it('CONTROL: outside an app (no app name), the gate reads the whole registry, as before', async () => {
+  it('objectstack#29121 — outside an app (no app name, the home feeds), the gate reads the app list’s union by name, never the whole registry', async () => {
     const calls: string[] = [];
     const read = mount({}, APPS, calls);
-    await waitFor(() => expect(read().ctx.getTypeStatus!('object')).toBe('ready'));
+    await waitFor(() => expect(read().gates.checkCapability('object', 'legacy_gone')).toBe(false));
+    await waitFor(() => expect(read().gates.checkCapability('object', 'notes_gone')).toBe(false));
 
-    expect(objectCalls(calls)).toEqual(['object']);
-    expect(read().gates.checkCapability('object', 'legacy_gone')).toBe(false);
+    expect(read().gates.checkCapability('object', 'crm_account')).toBe(true);
+    expect(objectCalls(calls)).not.toContain('object');
+    expect(calls).not.toContain('view');
+    expect(read().ctx.getTypeStatus!('object')).toBe('idle');
   });
 });
 

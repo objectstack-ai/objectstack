@@ -53,8 +53,50 @@
  * type is still `idle` (`MetadataProvider`'s `readType`). No consumer of this
  * hook adds a request; the point is to remove one.
  */
-import { useMetadata, type MetadataTypeStatus } from '@object-ui/react';
+import { useMetadata, type MetadataContextValue, type MetadataTypeStatus } from '@object-ui/react';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
+
+type ReadObjectScope = NonNullable<MetadataContextValue['readObjectScope']>;
+
+/**
+ * `readObjectScope` with the provider's package-local `views: false` hand-off
+ * (`MetadataProvider`): a reader that asks which objects there are, or what one
+ * is called, composes no views, so it never reads the `/meta/view` list.
+ */
+export type ReadNamesWithoutViews = (scope: Parameters<ReadObjectScope>[0] & { views: false }) => ReturnType<ReadObjectScope>;
+
+const NO_OBJECTS: readonly unknown[] = Object.freeze([]);
+
+/**
+ * The definitions of `names`, without the whole object registry
+ * (objectstack#29121): while nothing has asked for the whole list, each name is
+ * asked by name through the names-only scope (objectui#12980), and the answer
+ * is the names that have landed so far; once the whole list is loaded, or on
+ * its way, it is that list, and nothing more is asked. A provider without
+ * scope reads (a hand-rolled context) answers with its `objects`, as before.
+ *
+ * The definitions come without views, unless `views: true`: a reader of a
+ * list view's label needs the object's `listViews`, so its object is composed
+ * with its views (outside an app that reads the `/meta/view` list, never the
+ * object registry).
+ *
+ * Asking for no name asks for nothing: a names-only scope with no names would
+ * be the whole registry.
+ */
+export function readObjectsByName(
+  metadata: Pick<MetadataContextValue, 'objects' | 'readObjectScope' | 'getTypeStatus'>,
+  names: readonly string[],
+  options: { views?: boolean } = {},
+): readonly unknown[] {
+  const { readObjectScope, getTypeStatus } = metadata;
+  if (readObjectScope && getTypeStatus?.('object') === 'idle') {
+    const asked = names.filter((name) => typeof name === 'string' && name !== '');
+    if (asked.length === 0) return NO_OBJECTS;
+    if (options.views) return readObjectScope({ names: asked }).objects;
+    return (readObjectScope as ReadNamesWithoutViews)({ names: asked, views: false }).objects;
+  }
+  return metadata.objects ?? NO_OBJECTS;
+}
 
 /** What the metadata registry can say about one object name. */
 export type ObjectPresence = 'present' | 'absent' | 'unknown';
@@ -102,18 +144,20 @@ export function useObjectPresence(name: string): ObjectPresenceReading {
   // objectui#12980 — inside an app whose served item names NO package (an app
   // created in the console is stored bound to none), on the same condition,
   // the object is asked for by name through the names-only scope: the one
-  // name this hook is asked about is the whole set it needs. Outside an app
-  // (no app name: the home page) it reads the whole registry, as before.
+  // name this hook is asked about is the whole set it needs.
+  //
+  // objectstack#29121 — outside an app (no app name: the home page, whose
+  // activity feeds ask about `sys_activity`) it is asked by name the same way.
+  // It used to read the whole registry there, which the home page then loaded
+  // on every visit for this one question.
   const { app } = useExpressionContext();
   const packageId = typeof app?._packageId === 'string' && app._packageId ? app._packageId : undefined;
-  const inApp = typeof app?.name === 'string' && app.name !== '';
   //
   // objectstack#28645 — it asks with `views: false` (the provider's hand-off,
   // `MetadataProvider`): whether an object is there reads no views, so this
   // question never reads the `/meta/view` list.
-  if ((packageId || inApp) && readObjectScope && getTypeStatus?.('object') === 'idle') {
-    type ReadScope = NonNullable<typeof readObjectScope>;
-    const readNames = readObjectScope as (scope: Parameters<ReadScope>[0] & { views: false }) => ReturnType<ReadScope>;
+  if (readObjectScope && getTypeStatus?.('object') === 'idle') {
+    const readNames = readObjectScope as ReadNamesWithoutViews;
     const scope = readNames(packageId ? { packageId, names: [name], views: false } : { names: [name], views: false });
     const presence: ObjectPresence = !scope.settled
       ? 'unknown'

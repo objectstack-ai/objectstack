@@ -12,6 +12,7 @@ import { cn,
 import { Search, X, Loader2, AlertCircle, Plus, TableProperties } from 'lucide-react';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { PHONE_TOUCH_HEIGHT, PHONE_TOUCH_SQUARE } from './touchTarget.js';
 import type { DataSource, FormField, QueryParams, LookupColumnDef, LookupFieldMetadata } from '@object-ui/types';
 import { RecordPickerDialog, lookupFiltersToRecord } from './RecordPickerDialog.js';
 import type { RecordPickerFilterColumn } from './RecordPickerDialog.js';
@@ -1604,6 +1605,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         // clip instead (objectui#3466). flex-1/min-w-0 keep handling the
         // flex-parent (form row) case.
         'min-w-0 max-w-full flex-1 justify-start text-left font-normal',
+        PHONE_TOUCH_HEIGHT,
         compact && 'h-8 rounded-none border-0 bg-transparent px-2 shadow-none focus-visible:ring-1 focus-visible:ring-ring/60',
       )}
       type="button"
@@ -1682,7 +1684,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
     <Button
       variant="ghost"
       size="icon"
-      className="shrink-0 text-muted-foreground hover:text-destructive"
+      className={cn('shrink-0 text-muted-foreground hover:text-destructive', PHONE_TOUCH_SQUARE)}
       type="button"
       onClick={() => handleRemove(selectedOptions[0]?.value)}
       aria-label={t('lookup.remove', { label: singleSelectedLabel })}
@@ -1801,7 +1803,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   value={searchQuery}
                   onChange={(e) => handleSearchChange(e.target.value)}
                   onKeyDown={handleSearchKeyDown}
-                  className="w-full pl-9 h-8 text-sm"
+                  className={cn('w-full pl-9 h-8 text-sm', PHONE_TOUCH_HEIGHT)}
                   role="combobox"
                   aria-autocomplete="list"
                   aria-controls={listboxId}
@@ -1855,7 +1857,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="mt-2 gap-1"
+                      className={cn('mt-2 gap-1', PHONE_TOUCH_HEIGHT)}
                       type="button"
                       disabled={creating}
                       onClick={() => handleCreateNew(searchQuery)}
@@ -1932,7 +1934,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   {hasDataSource && totalCount > filteredOptions.length && (
                     <button
                       type="button"
-                      className="w-full text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5"
+                      className={cn('w-full text-center px-3 py-2 rounded-md text-sm font-medium text-primary hover:bg-accent flex items-center justify-center gap-1.5', PHONE_TOUCH_HEIGHT)}
                       onClick={() => {
                         setIsOpen(false);
                         setIsPickerOpen(true);
@@ -1947,7 +1949,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
                   {canCreate && (
                     <button
                       type="button"
-                      className="w-full text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground"
+                      className={cn('w-full text-left px-3 py-2 rounded-md text-sm hover:bg-accent flex items-center gap-1.5 text-muted-foreground', PHONE_TOUCH_HEIGHT)}
                       disabled={creating}
                       onClick={() => handleCreateNew(searchQuery)}
                     >
@@ -1970,7 +1972,7 @@ export function LookupField({ value, onChange, field, readonly, error: fieldErro
         <Button
           variant="outline"
           size="icon"
-          className="shrink-0"
+          className={cn('shrink-0', PHONE_TOUCH_SQUARE)}
           type="button"
           // Gated exactly like the main trigger (#2215) — pre-fix this button
           // opened the full unscoped table while the dependency was missing.
