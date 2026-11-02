@@ -114,6 +114,13 @@ export interface ParamDialogState {
    */
   submitText?: string;
   /**
+   * Label of the dismiss button — the action's declared `cancelText`, already
+   * resolved by the caller the way `submitText` is (the translation bundle's
+   * `_actions.<action>.cancelText` first, then the authored text collapsed to
+   * the active language). Absent, the button says the generic "Cancel".
+   */
+  cancelText?: string;
+  /**
    * Fills the `${...}` holes of each param's `helpText` — the runner's
    * `ParamCollectionHandler` `interpolate` argument, passed through. It runs on
    * the text the user reads (after an inline per-locale map is picked), in the
@@ -948,7 +955,7 @@ export function ActionParamDialog({ state, onOpenChange }: ActionParamDialogProp
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleCancel} disabled={submitting}>{t('actionDialog.cancel')}</Button>
+          <Button variant="outline" onClick={handleCancel} disabled={submitting}>{state.cancelText || t('actionDialog.cancel')}</Button>
           <Button
             onClick={() => { void handleSubmit(); }}
             disabled={submitting || anyUploading || !!unresolvedKey}

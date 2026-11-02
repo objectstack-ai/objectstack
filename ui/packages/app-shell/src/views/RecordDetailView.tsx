@@ -816,7 +816,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   // The tenant default currency (ADR-0053) a `dynamic` currency diff reads,
   // the same `useLocalization().currency` the record page's cells read.
   const { currency: tenantCurrency } = useLocalization();
-  const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionResultDialog, fieldLabel, fieldOptionLabel } = useObjectLabel();
+  const { objectLabel, objectPluralLabel, viewLabel: _vLabel, sectionLabel, actionParamText, actionParamOptionLabel, actionDescription, actionSubmitText, actionCancelText, actionResultDialog, fieldLabel, fieldOptionLabel } = useObjectLabel();
   // label + confirmText + successMessage through ONE call (objectui#4265) —
   // the three keys of an `_actions.<name>` bundle entry can no longer be
   // localized apart from one another on this surface.
@@ -1415,6 +1415,9 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       // resolves it: the bundle entry first, then the authored `I18nLabel`
       // collapsed to the active language; absent, the dialog says "Confirm".
       const submitText = actionSubmitText(objForI18n, action?.name, pickLocalized(action?.submitText, language) || undefined);
+      // The dismiss button's label (`cancelText`), resolved the same way;
+      // absent, the dialog says "Cancel".
+      const cancelText = actionCancelText(objForI18n, action?.name, pickLocalized(action?.cancelText, language) || undefined);
       setParamState({
         open: true,
         params: localized,
@@ -1436,6 +1439,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // the runner's template scope, as `confirmText` is (objectui#12967).
         description: interpolate && declaredDescription ? interpolate(declaredDescription) : declaredDescription,
         submitText,
+        cancelText,
         interpolate,
         resolve,
         // The runner's `run`, as `useConsoleActionRuntime` forwards it: a
@@ -1443,7 +1447,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         run,
       });
     });
-  }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, language]);
+  }, [objectName, objectDef, objects, fieldLabel, fieldOptionLabel, actionParamText, actionParamOptionLabel, actionSubmitText, actionCancelText, language]);
 
   // Global undo/redo (Ctrl+Z), backed by the dataSource — the success toast's
   // "Undo" button (for `undoable` actions) restores the record's prior values.
