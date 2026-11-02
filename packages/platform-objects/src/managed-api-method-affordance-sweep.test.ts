@@ -89,7 +89,12 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { MANAGED_API_METHOD_UNAFFORDABLE, validateManagedApiMethods } from '@objectstack/lint';
+import {
+  MANAGED_API_METHOD_UNAFFORDABLE,
+  TITLE_FORMAT_RETIRED,
+  validateManagedApiMethods,
+  validateTitleFormatRetired,
+} from '@objectstack/lint';
 
 /**
  * Seeded from `__dirname`, not from `fileURLToPath(import.meta.url)` as the
@@ -350,5 +355,57 @@ describe('#7934 — code-shipped managed objects declare only apiMethods their o
     // `create` and dropped `update` would satisfy every assertion above.
     expect(findings[0].message).toContain('create');
     expect(findings[0].message).toContain('update');
+  });
+});
+
+// ── #29007: the retired `titleFormat`, over the same population ─────────────
+//
+// The ruling of record on #29007 (6574393684, letter B) refuses `titleFormat`
+// on an object definition at the metadata save gate and by `os validate`
+// (`validateTitleFormatRetired`, `@objectstack/lint`). This repo's own objects
+// are code, registered at boot, and reach neither door — the gap #7934 names
+// for the rule above, the same walk closes for this one. An object shipped
+// with a template would also be refused the first time a tenant saved it back
+// from Studio, so the sweep holds the population at zero. The verdict is the
+// lint rule's own; this walk holds no second copy of it.
+describe('#29007 — no code-shipped object declares the retired titleFormat', () => {
+  let loaded: LoadedObject[];
+
+  beforeAll(async () => {
+    loaded = await loadObjects();
+  }, 120_000);
+
+  const judgeTitles = (objects: readonly LoadedObject[]) =>
+    objects.flatMap((o) =>
+      validateTitleFormatRetired({ objects: [o.def] }).map((f) => ({ file: o.file, object: o.name, rule: f.rule })),
+    );
+
+  it('finds none across the repo-wide population', () => {
+    // Anti-vacuity: the same floor the sweep above asserts, on the same walk.
+    expect(loaded.length).toBeGreaterThanOrEqual(70);
+    expect(
+      judgeTitles(loaded),
+      'a code-shipped object declares `titleFormat`, which is refused at save and by `os validate`: ' +
+      'set `nameField` to the title field (a composite title is a stored computed field `nameField` ' +
+      'points at) and drop the template',
+    ).toEqual([]);
+  });
+
+  it('goes red on an object that declares one, and stays silent on its control', () => {
+    const declaring: LoadedObject = {
+      file: 'test/fixture/titled.object.ts',
+      exportName: 'TitledFixture',
+      name: 'fixture_titled_object',
+      def: { name: 'fixture_titled_object', titleFormat: '{name} · {code}', fields: { name: { type: 'text' } } },
+    };
+    const control: LoadedObject = {
+      ...declaring,
+      exportName: 'PointedFixture',
+      name: 'fixture_pointed_object',
+      def: { name: 'fixture_pointed_object', nameField: 'name', fields: { name: { type: 'text' } } },
+    };
+    expect(judgeTitles([...loaded, declaring, control])).toEqual([
+      { file: declaring.file, object: declaring.name, rule: TITLE_FORMAT_RETIRED },
+    ]);
   });
 });

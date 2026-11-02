@@ -62,7 +62,6 @@ export const SysWebhook = ObjectSchema.create({
   description: 'An outbound HTTP webhook your organization creates here or through the API. Webhooks that come built into an app are not listed here. Both kinds are sent through the same delivery queue.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{label}',
   highlightFields: ['name', 'object_name', 'url', 'active', 'updated_at'],
 
   listViews: {
