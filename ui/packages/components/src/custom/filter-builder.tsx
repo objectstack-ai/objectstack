@@ -2036,7 +2036,7 @@ function FilterBuilder({
         return (
           <Input
             type={inputType}
-            className={cn("h-9 text-sm", missingBound === index && "border-destructive")}
+            className={cn("h-9 text-sm max-sm:h-11 max-sm:text-base", missingBound === index && "border-destructive")}
             placeholder={boundLabel}
             aria-label={boundLabel}
             aria-invalid={boundInvalid(index)}
@@ -2091,7 +2091,7 @@ function FilterBuilder({
             updateCondition(condition.id, { value })
           }
         >
-          <SelectTrigger className="h-9 text-sm">
+          <SelectTrigger className="h-9 text-sm max-sm:h-11">
             <SelectValue placeholder={t('filterBuilder.selectValue')} />
           </SelectTrigger>
           <SelectContent>
@@ -2130,7 +2130,7 @@ function FilterBuilder({
             updateCondition(condition.id, { value: value === "true" })
           }
         >
-          <SelectTrigger className="h-9 text-sm">
+          <SelectTrigger className="h-9 text-sm max-sm:h-11">
             <SelectValue placeholder={t('filterBuilder.selectValue')} />
           </SelectTrigger>
           <SelectContent>
@@ -2195,7 +2195,8 @@ function FilterBuilder({
     return (
       <Input
         type={inputType}
-        className="h-9 text-sm"
+        // 16 px text below `sm`: a smaller font makes iOS Safari zoom on focus.
+        className="h-9 text-sm max-sm:h-11 max-sm:text-base"
         placeholder={t('filterBuilder.value')}
         value={formatValue()}
         onChange={(e) => handleValueChange(e.target.value)}
@@ -2281,7 +2282,7 @@ function FilterBuilder({
               variant="outline"
               size="sm"
               onClick={toggleLogic}
-              className="h-7 text-xs"
+              className="h-7 text-xs max-sm:h-11"
               disabled={filterGroup.logic === "and" && pairsCurrency}
               title={pairsCurrency ? t('filterBuilder.currencyNeedsAnd') : undefined}
               data-testid="filter-logic-toggle"
@@ -2296,7 +2297,7 @@ function FilterBuilder({
             variant="ghost"
             size="sm"
             onClick={clearAllConditions}
-            className="h-7 text-xs text-muted-foreground hover:text-destructive"
+            className="h-7 text-xs text-muted-foreground hover:text-destructive max-sm:h-11"
           >
             <Trash2 className="h-3 w-3 mr-1" />
             {t('filterBuilder.clearAll')}
@@ -2313,18 +2314,21 @@ function FilterBuilder({
       <div className="space-y-2">
         {visibleConditions.map((condition) => {
           const pairsWith = pairedCurrencyField(condition, fields, needsValueInput)
-          // Four controls on a paired row, three on every other.
-          const span = pairsWith ? "col-span-3" : "col-span-4"
+          // Four controls on a paired row, three on every other. Below `sm` the
+          // field takes the row's whole width, so its label is not cut, and the
+          // other controls share the line under it.
+          const span = pairsWith ? "col-span-3 max-sm:col-span-6" : "col-span-4 max-sm:col-span-6"
+          const fieldSpan = pairsWith ? "col-span-3 max-sm:col-span-12" : "col-span-4 max-sm:col-span-12"
           const code = pairsWith ? currencyCompanionOf(filterGroup, condition.id)?.value : undefined
           return (
           <div key={condition.id} className="flex items-start gap-2">
             <div className="flex-1 grid grid-cols-12 gap-2">
-              <div className={span}>
+              <div className={fieldSpan}>
                 <Select
                   value={condition.field}
                   onValueChange={(value) => changeField(condition.id, value)}
                 >
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-9 text-sm max-sm:h-11">
                     <SelectValue placeholder={t('filterBuilder.selectField')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -2353,7 +2357,7 @@ function FilterBuilder({
                     if (isFilterBuilderOperator(value)) changeOperator(condition.id, value)
                   }}
                 >
-                  <SelectTrigger className="h-9 text-sm">
+                  <SelectTrigger className="h-9 text-sm max-sm:h-11">
                     <SelectValue placeholder={t('filterBuilder.operator')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -2401,7 +2405,7 @@ function FilterBuilder({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-9 w-9 shrink-0"
+              className="h-9 w-9 shrink-0 max-sm:h-11 max-sm:w-11"
               onClick={() => removeCondition(condition.id)}
             >
               <X className="h-4 w-4" />
@@ -2422,7 +2426,7 @@ function FilterBuilder({
         variant="outline"
         size="sm"
         onClick={addCondition}
-        className="h-8"
+        className="h-8 max-sm:h-11"
         disabled={fields.length === 0}
       >
         <Plus className="h-3 w-3" />

@@ -39,7 +39,8 @@ import { Empty, EmptyTitle, EmptyDescription, Input, cn } from '@object-ui/compo
 import { useDisplayLocale, useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import { useLauncherApps } from '../hooks/useLauncherApps.js';
-import { appRouteSegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { resolveKeyedI18nLabel } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
 import { useRecentItems } from '../context/RecentItemsProvider.js';
@@ -196,7 +197,7 @@ export function AppReportIndexView() {
                   {otherApps.map((other) => (
                     <li key={String(other.name)}>
                       <Link
-                        to={`/apps/${appRouteSegment(other) ?? String(other.name)}/reports`}
+                        to={`/apps/${appAddressSegment(metadataApps, other) ?? String(other.name)}/reports`}
                         className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         data-testid={`report-index-other-app-${String(other.name)}`}
                       >
