@@ -2521,7 +2521,14 @@ export async function selfTest() {
       const landed = await readRun([read()], { ...allowed, [A_GET]: served });
       t('⭐ a read is ONE GET of the advisory under the App token after the sender gate, ZERO writes, exit 0 — and its row prints the call with the id LEFT OUT, the status and the counts', [landed.exit, landed.seen.map((s) => s.call), landed.seen.map((s) => s.auth), writes(landed.seen).length, landed.rows.map((x) => [x.op, x.call, x.status]), /^sealed \d+ byte\(s\) of the answer to the seat's one-time key — \d+ character\(s\) in 1 notice part\(s\), which only that seat's process opens$/.test(landed.rows[0]?.result ?? '')], [EXIT_OK, [PERM, A_GET], [`Bearer ${TOKEN}`, `Bearer ${TOKEN}`], 0, [['advisory_read', CALL, 200]], true]);
       const opened = opens(landed);
-      t('⭐ the seat\'s key opens the parts to the GET answer BYTE FOR BYTE — the summary, the description and the vulnerabilities as the platform answered them, CJK, an emoji, a newline, a quote and a backslash among them', [opened === picked(served.json), Buffer.compare(Buffer.from(opened, 'utf8'), Buffer.from(picked(served.json), 'utf8')), ['summary', 'description', 'vulnerabilities'].map((f) => JSON.stringify(JSON.parse(opened)[f]) === JSON.stringify(served.json[f])), Object.keys(JSON.parse(opened))], [true, 0, [true, true, true], [...ADVISORY_READ_FIELDS]]);
+      const openedJson = (() => {
+        try {
+          return JSON.parse(opened);
+        } catch {
+          return null;
+        }
+      })();
+      t('⭐ the seat\'s key opens the parts to the GET answer BYTE FOR BYTE — the summary, the description and the vulnerabilities as the platform answered them, CJK, an emoji, a newline, a quote and a backslash among them', [opened === picked(served.json), Buffer.compare(Buffer.from(opened, 'utf8'), Buffer.from(picked(served.json), 'utf8')), ['summary', 'description', 'vulnerabilities'].map((f) => JSON.stringify(openedJson?.[f]) === JSON.stringify(served.json[f])), Object.keys(openedJson ?? {})], [true, 0, [true, true, true], [...ADVISORY_READ_FIELDS]]);
       const parsedBack = notices(landed).map((l) => parseRelayAdvisoryReadAnnotation(l.slice(l.indexOf('::', 2) + 2)));
       t("the parts are notice commands titled `fleet-write advisory_read`, the reader's own parser reads back exactly what was emitted, and each message is inside the runner's 4,096-character cut", [notices(landed).map((l) => l.slice(0, l.indexOf('::', 2) + 2)), parsedBack, notices(landed).every((l) => l.length - l.indexOf('::', 2) - 2 <= 4096), ADVISORY_READ_OPS], [['::notice title=fleet-write advisory_read::'], landed.annotations, true, ['advisory_read']]);
       const sealedText = sealedOf(landed);
