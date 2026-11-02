@@ -138,7 +138,8 @@ import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { getIcon } from '../utils/getIcon.js';
-import { appAddressSegment, matchAppBySegment } from '../utils/index.js';
+import { matchAppBySegment } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { navigationNames } from '../console/appObjectScope.js';
 
 /** Keep the designer's own data attributes on the wrapper, drop the rest. */

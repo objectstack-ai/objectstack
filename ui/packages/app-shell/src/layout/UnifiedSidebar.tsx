@@ -52,7 +52,8 @@ import { useNavActionDispatch } from '../hooks/useNavActionDispatch.js';
 import { useNavTargetLabel } from '../hooks/useNavTargetLabel.js';
 import { useNavDocTargetCheck } from '../hooks/useNavDocTargetCheck.js';
 import { useNavMemberGates } from '../hooks/useNavMemberGates.js';
-import { matchAppBySegment, appAddressSegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { matchAppBySegment, resolveKeyedI18nLabel } from '../utils/index.js';
+import { appAddressSegment } from '../utils/appRoute.js';
 import { withoutUnreadableObjectEntries } from '../utils/navObjectReadGate.js';
 import { useHomePath } from '../hooks/useHomePath.js';
 // Aliased for symmetry with objectui's own `resolveKeyedI18nLabel` above (the
