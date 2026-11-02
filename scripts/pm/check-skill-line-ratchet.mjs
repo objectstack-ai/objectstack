@@ -1195,7 +1195,11 @@ export const CEILINGS = new Map([
   // quotes the maintainer verbatim — 「可以，按方案改中继，能发这个操作的账号名单我稍后点名。」 and
   // 「你写清楚issue就可以，让车道开发」 — names this file and the one line, and confirms the raise the seat stated in
   // its comment 6572738609. Measured delta +1 (80 → 81 lines); landed count, headroom 0.
-  ['.claude/skills/pm-dispatch/references/rest-channel.md', 81],
+  // 81 → 82 (#29420): one line naming the sealed advisory read, `advisory_read`. The ruling of record is that card's
+  // body, filed under the maintainer's verbatim 「按一次性密钥立卡」 and 「并派发」, which names this file and "one line
+  // naming the op, with the ratchet row raised by the measured delta only". Measured delta +1 (81 → 82 lines); landed
+  // count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/rest-channel.md', 82],
   // Lowered 84 → 77 by the rules-only rewrite of the seven core references
   // (maintainer ruling: provenance narratives, incident post-mortems and rationale
   // tails leave the corpus; one rule per ≤120-byte line, no rule already stated in
@@ -1300,7 +1304,11 @@ export const CEILINGS = new Map([
   // untranslated 「同意方案，选 B，立卡」; the raises below cite it as "#29111".
   // A NEW file, so an added row that funds nothing — set at the landed line
   // count, headroom 0, same convention as above.
-  ['.claude/skills/pm-dispatch/references/security-findings.md', 55],
+  // 55 → 56 (#29420): one line pointing a seat's read of an advisory at the sealed relay read, `advisory_read`, where
+  // §3 had it read under its own account (a cloud seat's account is refused). The ruling of record is that card's
+  // body, filed under the maintainer's verbatim 「按一次性密钥立卡」 and 「并派发」, which names this file "by the
+  // measured delta only". Measured delta +1 (55 → 56 lines); landed count, headroom 0.
+  ['.claude/skills/pm-dispatch/references/security-findings.md', 56],
   ['.claude/skills/pm-dispatch/references/external-contributions.md', 22],
   ['.claude/skills/pm-dispatch/references/reading-discipline.md', 37],
   // Lowered 51 → 47 by #25712 item 4: objectui stopped being a sister repo, so

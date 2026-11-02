@@ -1192,7 +1192,7 @@ export function advisoryReadKeyFailure(value) {
 export const ADVISORY_READ_SEAL_VERSION = 1;
 /** The scheme, named once for a reader: what `sealAdvisoryRead` does and `openAdvisoryRead` undoes. */
 export const ADVISORY_READ_SCHEME = 'X25519 key agreement · HKDF-SHA256 · AES-256-GCM, a fresh ephemeral key and nonce per seal';
-const ADVISORY_READ_INFO = 'objectstack fleet-write advisory_read v1';
+const ADVISORY_READ_INFO = 'fleet-write:advisory_read:v1';
 const ADVISORY_READ_NONCE_BYTES = 12;
 const ADVISORY_READ_TAG_BYTES = 16;
 /** What a seal adds to the plaintext: the version byte, the ephemeral key, the nonce and the tag — 61 bytes. */
