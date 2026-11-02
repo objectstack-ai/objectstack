@@ -53,7 +53,7 @@
  * type is still `idle` (`MetadataProvider`'s `readType`). No consumer of this
  * hook adds a request; the point is to remove one.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useMetadata, type MetadataContextValue, type MetadataTypeStatus } from '@object-ui/react';
 import { useExpressionContext } from '../providers/ExpressionProvider.js';
 
@@ -135,11 +135,14 @@ export function useReadItemsByName(
 ): ReadItemsByName {
   const { getItem, getTypeStatus } = metadata;
   const [answers, setAnswers] = useState(NO_ANSWERS);
-  // One asked-set per provider value (its `getTypeStatus` is rebuilt with it).
-  const asked = useMemo(() => new Set<string>(), [getItem, getTypeStatus]);
+  // What this reader asked of which provider value: a new value (its
+  // `getTypeStatus` is rebuilt with it) starts a new set.
+  const askedRef = useRef<{ of: unknown; keys: Set<string> }>({ of: undefined, keys: new Set() });
   return useCallback<ReadItemsByName>(
     (type, names, list) => {
       if (typeof getItem !== 'function' || getTypeStatus?.(type) !== 'idle') return list() ?? NO_OBJECTS;
+      if (askedRef.current.of !== getTypeStatus) askedRef.current = { of: getTypeStatus, keys: new Set() };
+      const asked = askedRef.current.keys;
       const found: unknown[] = [];
       for (const name of names) {
         if (typeof name !== 'string' || name === '') continue;
@@ -155,7 +158,7 @@ export function useReadItemsByName(
       }
       return found;
     },
-    [getItem, getTypeStatus, asked, answers],
+    [getItem, getTypeStatus, answers],
   );
 }
 
