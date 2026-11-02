@@ -16,8 +16,11 @@
  *
  * What must stay absent is pinned beside what must appear: a column the read
  * did not select, a column outside the declared set, a federated object's
- * unprovisioned injected column, and a `formula` field (computed, never
- * `null`-filled ahead of its formula). Field-level security's refusal is
+ * unprovisioned injected column, a platform timestamp a federated object
+ * neither declares nor has injected (`systemFields: false` /
+ * `systemFields.audit: false`), and a `formula` field (virtual, never
+ * `null`-filled itself; it is computed after the fill, so over an unwritten
+ * input it now evaluates against `null` instead of faulting). Field-level security's refusal is
  * pinned on a real driver with the security plugin composed, in the runtime
  * file named above.
  */
@@ -95,6 +98,12 @@ function makeSparseDriver(name: string) {
 
 const ITEM = 'nk_item';
 const REMOTE = 'nk_remote_customer';
+/** Federated, and opted out of the injected columns: nothing provisions a timestamp. */
+const REMOTE_BARE = 'nk_remote_bare';
+/** Federated, audit family off: no injected timestamp either. */
+const REMOTE_NO_AUDIT = 'nk_remote_no_audit';
+/** Federated, the author maps a remote `updated_at`: a declared column. */
+const REMOTE_MAPPED = 'nk_remote_mapped';
 const PACKAGE_ID = 'com.example.nk';
 
 /** The fields of {@link ITEM}: `note` and `qty` are never written on `itm_1`. */
@@ -123,7 +132,31 @@ async function boot() {
   // never stored. `id` and the two timestamps are stored the way a driver
   // stamps them.
   local.seed(ITEM, { id: 'itm_1', name: 'Ada', created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' });
+  engine.registry.registerObject({
+    name: REMOTE_BARE,
+    datasource: 'nk_external',
+    external: { remoteName: 'bare' },
+    systemFields: false,
+    fields: { name: { type: 'text' }, email: { type: 'text' } },
+  } as never, PACKAGE_ID);
+  engine.registry.registerObject({
+    name: REMOTE_NO_AUDIT,
+    datasource: 'nk_external',
+    external: { remoteName: 'no_audit' },
+    systemFields: { audit: false },
+    fields: { name: { type: 'text' }, email: { type: 'text' } },
+  } as never, PACKAGE_ID);
+  engine.registry.registerObject({
+    name: REMOTE_MAPPED,
+    datasource: 'nk_external',
+    external: { remoteName: 'mapped' },
+    systemFields: false,
+    fields: { name: { type: 'text' }, updated_at: { type: 'datetime' } },
+  } as never, PACKAGE_ID);
   remote.seed(REMOTE, { id: 'cus_1', name: 'Remote Co' });
+  remote.seed(REMOTE_BARE, { id: 'bar_1', name: 'Bare Co' });
+  remote.seed(REMOTE_NO_AUDIT, { id: 'noa_1', name: 'No Audit Co' });
+  remote.seed(REMOTE_MAPPED, { id: 'map_1', name: 'Mapped Co' });
   return { engine, local, protocol: new ObjectStackProtocolImplementation(engine as never) };
 }
 
@@ -172,7 +205,7 @@ describe('[#29408] a selected declared column the driver did not return is answe
     expect(own(rows[0], 'qty')).toBe(false);
   });
 
-  it('a formula field keeps its computed value — its inputs read as null, never the formula itself', async () => {
+  it('a formula field is never null-filled itself: over its unwritten input it evaluates against null', async () => {
     const row = await h.engine.findOne(ITEM, { where: { id: 'itm_1' } });
     expect(row!.doubled).toBe(-1);
     const narrowed = await h.engine.findOne(ITEM, { where: { id: 'itm_1' }, fields: ['name', 'doubled'] });
@@ -200,6 +233,31 @@ describe('[#29408] a selected declared column the driver did not return is answe
     }
   });
 
+  it.each([
+    ['systemFields: false', REMOTE_BARE, 'bar_1'],
+    ['systemFields.audit: false', REMOTE_NO_AUDIT, 'noa_1'],
+  ])('UNPROVISIONED TIMESTAMP stays absent: a federated object with %s is not answered created_at / updated_at', async (_label, object, id) => {
+    const one = await h.engine.findOne(object, { where: { id } });
+    const rows = await h.engine.find(object, {});
+    const named = await h.engine.findOne(object, { where: { id }, fields: ['name', 'created_at', 'updated_at'] });
+    for (const row of [one, rows[0], named]) {
+      expect(own(row, 'created_at')).toBe(false);
+      expect(own(row, 'updated_at')).toBe(false);
+      // The remote's own primary key backs `id`.
+      expect(row!.id).toBe(id);
+    }
+    // The declared remote column the driver did not return is still answered.
+    expect(own(one, 'email')).toBe(true);
+    expect(one!.email).toBeNull();
+  });
+
+  it('a timestamp the federated object DECLARES is a remote column, and is answered null', async () => {
+    const row = await h.engine.findOne(REMOTE_MAPPED, { where: { id: 'map_1' } });
+    expect(own(row, 'updated_at')).toBe(true);
+    expect(row!.updated_at).toBeNull();
+    expect(own(row, 'created_at')).toBe(false);
+  });
+
   it('the doors: GET /data/:object/:id (getData) and the list route (findData) carry the null', async () => {
     const got: any = await h.protocol.getData({ object: ITEM, id: 'itm_1' });
     expect(own(got.record, 'note')).toBe(true);
@@ -222,6 +280,12 @@ describe('[#29408] selectedStoredColumns — the set a row is answered on', () =
   it('no projection selects every stored declared column and the provisioned three, never a formula', () => {
     expect([...selectedStoredColumns(schema, undefined)!].sort()).toEqual(
       ['created_at', 'id', 'name', 'note', 'qty', 'updated_at'],
+    );
+  });
+
+  it('a local object keeps the provisioned three whatever systemFields says: driver-sql builds them on every table', () => {
+    expect([...selectedStoredColumns({ systemFields: false, fields: { name: { type: 'text' } } }, undefined)!].sort()).toEqual(
+      ['created_at', 'id', 'name', 'updated_at'],
     );
   });
 

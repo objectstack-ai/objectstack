@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { unprovisionedInjectedColumns } from '@objectstack/spec/data';
+import { isFederatedObject } from './federated-object.js';
 
 /**
  * [#21571] The columns a read may serve: the object's DECLARED fields plus the
@@ -171,6 +172,14 @@ export function rowsWithDeclaredColumnsOnly<T>(rows: T[], declared: ReadonlySet<
  * - an injected column a federated (ADR-0015 `external`) object does not
  *   provision (`unprovisionedInjectedColumns`) — there is no storage behind
  *   it, so there is no persisted state to answer for;
+ * - on a federated object, a {@link PLATFORM_PROVISIONED_COLUMNS} timestamp
+ *   its field map does not declare (`systemFields: false` or
+ *   `systemFields.audit: false`, so nothing injected it either). The three are
+ *   "provisioned" because driver-sql creates them on every table IT builds,
+ *   and the platform builds no table for a federated object
+ *   (`isFederatedObject`): the remote holds such a timestamp only where the
+ *   author mapped one, which is a declared field. `id` stays — the remote's
+ *   own primary key backs it through the binding;
  * - a column field-level security refuses — this runs inside the verb's
  *   middleware chain, on the rows as the driver returned them, and the
  *   security middleware's field mask deletes a refused key from the result
@@ -187,9 +196,14 @@ export function selectedStoredColumns(
   if (!declared) return undefined;
   const fields = schema!.fields as Record<string, { type?: unknown } | null | undefined>;
   const unprovisioned = new Set(unprovisionedInjectedColumns(schema));
+  const federated = isFederatedObject(schema);
   const stored = new Set<string>();
   for (const name of declared) {
-    if (fields[name]?.type !== 'formula' && !unprovisioned.has(name)) stored.add(name);
+    if (fields[name]?.type === 'formula' || unprovisioned.has(name)) continue;
+    // A platform-provisioned column the object does not declare has storage
+    // only on a table the platform built.
+    if (federated && name !== 'id' && !Object.prototype.hasOwnProperty.call(fields, name)) continue;
+    stored.add(name);
   }
   if (!Array.isArray(projection) || projection.length === 0) return stored;
   const selected = new Set<string>();
