@@ -37,8 +37,10 @@ import { test, expect, type APIRequestContext, type Page, type Response } from '
  * `platform-core.customization-pair-ensure-door` (the read-only base's
  * uninstall refusal).
  *
- * In `test:e2e:live:nightly`, not the required `:ci` allowlist (see the PR
- * that added it for the measured runtime and the reason).
+ * In the required `Live E2E UI` job's `test:e2e:live:ci` allowlist since
+ * objectstack#28579, under the promotion rule (3/3 consecutive green, plus a
+ * 5/5 run of the enlarged allowlist on a fresh backend each) and the job's
+ * two-minute budget for the specs step; the readings are on that card's PR.
  */
 
 const API = process.env.LIVE_API_URL || 'http://localhost:3000';
