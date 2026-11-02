@@ -88,8 +88,11 @@ import {
     reconcileActionRegistrations as reconcileActionRegistrationsPure,
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
+    SummaryRecomputeError,
 } from '@objectstack/objectql';
 import { earnedAnswerOf, staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
+// [#28861] A landed write answers its success to the action handler's code.
+import { answerLandedWritesDespiteStaleSummary, landedWriteAnswer } from './landed-write-answer.js';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
 // @objectstack/objectql (the engine owns the map they describe, and its
@@ -3130,22 +3133,34 @@ export function buildActionExecutionContext(ec: any): Record<string, unknown> {
  * hash keyed) and never the stored row. [#21594] An action BODY's API is built
  * over this one by the sandbox (`buildSandboxApi`), whose body layers refuse a
  * family read or write before it reaches this seam.
+ *
+ * [#28861] A write through it that the engine stored, whose parent roll-up
+ * could not be recomputed after it, answers the write's success to the
+ * handler (`landed-write-answer.ts`), on this context and every one it
+ * derives. That layer sits beneath the reader seam, so the answer is served
+ * like any write's return.
  */
 export function buildActionApi(_deps: ActionExecutionDeps, ql: any, ec: any): any | undefined {
     if (!ql || typeof ql.createContext !== 'function') return undefined;
+    const served = (scoped: unknown) =>
+        serveStoredMetadataReadsThrough(answerLandedWritesDespiteStaleSummary(scoped, ACTION_API_SURFACE), ql);
     try {
-        return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(ec)), ql);
+        return served(ql.createContext(buildActionExecutionContext(ec)));
     } catch {
         // A malformed caller envelope must not sink the action — fall back to
         // the bare elevated context (the same shape hooks default to), marked
         // as the body's elevation like every other (#25653).
         try {
-            return serveStoredMetadataReadsThrough(ql.createContext(buildActionExecutionContext(undefined)), ql);
+            return served(ql.createContext(buildActionExecutionContext(undefined)));
         } catch {
             return undefined;
         }
     }
 }
+
+/** [#28861] The surfaces the stale-column line names, for an action handler's two data handles. */
+const ACTION_API_SURFACE = 'action ctx.api';
+const ACTION_ENGINE_SURFACE = 'action ctx.engine';
 
 /**
  * The sentence a caller still on the WITHDRAWN bare-filter shape must read
@@ -3234,17 +3249,31 @@ function assertActionEngineFindEnvelope(object: string, query: Record<string, un
  * use. Every call carries {@link buildActionExecutionContext} so `ctx.engine`
  * and `ctx.api` write under the SAME identity (#3914); passing `ec` is what
  * separates a trusted write from a context-less one.
+ *
+ * [#28861] A write the engine stored, whose parent roll-up could not be
+ * recomputed after it, answers the write's success here, as on `ctx.api`
+ * ({@link landedWriteAnswer}): the handler's next line runs. Every other
+ * throw, a refusal before the write among them, reaches the handler as is.
  */
 export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?: any): any {
     const context = buildActionExecutionContext(ec);
     return {
         async insert(object: string, data: Record<string, unknown>): Promise<{ id: string }> {
-            const res = await ql.insert(object, data, { context });
+            let res: unknown;
+            try {
+                res = await ql.insert(object, data, { context });
+            } catch (e) {
+                res = landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+            }
             const id = (res && (res as any).id) ?? (data as any).id;
             return { id };
         },
         async update(object: string, id: string, data: Record<string, unknown>): Promise<void> {
-            await ql.update(object, data, { where: { id }, context });
+            try {
+                await ql.update(object, data, { where: { id }, context });
+            } catch (e) {
+                landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+            }
         },
         // Both spellings are DECLARED contract (#15117), not a tolerance: the
         // spec's `ActionEngineFacade.delete` takes `string | string[]`.
@@ -3263,10 +3292,17 @@ export function buildActionEngineFacade(_deps: ActionExecutionDeps, ql: any, ec?
         // it pulls the runtime back onto the contract that is already on the
         // record, here, in the spec member doc, and in the `never a null id`
         // pin at `packages/spec/src/ui/action-params.test.ts`.
+        //
+        // [#28861] Each id's landed delete is answered on its own, so a stale
+        // roll-up after one id's delete does not leave the later ids undeleted.
         async delete(object: string, idOrIds: string | string[]): Promise<void> {
             const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
             for (const id of ids) {
-                await ql.delete(object, { where: { id }, context });
+                try {
+                    await ql.delete(object, { where: { id }, context });
+                } catch (e) {
+                    landedWriteAnswer(e, object, ACTION_ENGINE_SURFACE);
+                }
             }
         },
         // [#15124] The ENVELOPE goes through — this arm no longer builds one.
@@ -4037,13 +4073,37 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     } catch (err) {
         // [#28856] A refusal carrying the action's answer is answered as the
         // success it is by the `run_action` tool, so the row records that.
-        await recordActionInvocation(deps, requestContext, envId, earnedAnswerOf(err)
+        //
+        // [#28861] Read on the declarative-update arm only: that arm composes
+        // the ACTION's answer and attaches it (`dispatchAdmittedBusinessAction`).
+        // Any other arm's refusal can carry only a WRITE's data answer — a
+        // handler that let out a refusal a data door attached its answer to —
+        // and the action that threw has no result. It is answered as the
+        // failure it is, and leaves this door with nothing attached, so the
+        // `run_action` tool, which reads every throw, cannot relay it either.
+        const declarative = isDeclarativeUpdateAction(action);
+        await recordActionInvocation(deps, requestContext, envId, declarative && earnedAnswerOf(err)
             ? { ...invocation, outcome: 'succeeded' }
             : { ...invocation, outcome: 'failed', ...actionInvocationFailure(err) });
-        throw err;
+        throw declarative ? err : withoutWriteAnswer(err);
     }
     await recordActionInvocation(deps, requestContext, envId, { ...invocation, outcome: 'succeeded' });
     return answer;
+}
+
+/**
+ * [#28861] `err` with no write answer attached: a stale-roll-up refusal a data
+ * door attached its answer to comes back as the same refusal — objectql's
+ * class, `failures`, `written`, message and stack — with nothing attached;
+ * every other value is returned as is. For a non-declarative arm's throw,
+ * whose attached answer is a write's, never the action's.
+ */
+function withoutWriteAnswer(err: unknown): unknown {
+    if (earnedAnswerOf(err) === undefined) return err;
+    const stale = err as SummaryRecomputeRefusal;
+    const bare = new SummaryRecomputeError([...(stale.failures ?? [])] as SummaryRecomputeError['failures'], stale.written);
+    if (typeof stale.stack === 'string') bare.stack = stale.stack;
+    return bare;
 }
 
 /**
