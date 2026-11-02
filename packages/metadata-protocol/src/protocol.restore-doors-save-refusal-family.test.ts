@@ -510,8 +510,8 @@ pinBothDoors({
     title: 'a seed restored keyed on a field its object no longer has (seedExternalIdSaveRefusal)',
     type: 'seed',
     name: 'wh_order_seed',
-    code: 'VALIDATION_ERROR',
-    status: 400,
+    code: 'INVALID_METADATA',
+    status: 422,
     async stage(h) {
         const seedOf = (externalId: string, label?: string) => ({
             object: 'wh_order', mode: 'upsert', externalId, records: [{ name: 'O1', code: 'o1' }],
@@ -527,7 +527,7 @@ pinBothDoors({
     },
     expectDetail: (error) => {
         expect(error.issues).toEqual([expect.objectContaining({ path: 'externalId', code: 'custom' })]);
-        expect(error.issues[0].message).toBe("'code' is not a field of object 'wh_order'.");
+        expect(error.issues[0].message.startsWith("Seed 'wh_order_seed' keys on externalId member 'code', which is not a field of object 'wh_order'")).toBe(true);
     },
 });
 

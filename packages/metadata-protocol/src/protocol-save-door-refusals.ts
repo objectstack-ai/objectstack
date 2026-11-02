@@ -694,7 +694,8 @@ export async function seedExternalIdSaveRefusal(
     item: unknown,
     name: string,
     pending?: 'drafts' | ReadonlyArray<unknown>,
-): Promise<(Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] }) | undefined> {
+    writeFace?: MetadataWriteFace,
+): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
     if (singularType !== 'seed') return undefined;
     if (!item || typeof item !== 'object' || Array.isArray(item)) return undefined;
     const seed = item as { object?: unknown; mode?: unknown; externalId?: unknown };
@@ -737,22 +738,22 @@ export async function seedExternalIdSaveRefusal(
         .map((member, index) => ({ member, index }))
         .filter(({ member }) => typeof member === 'string' && !fieldNames.has(member));
     if (missing.length === 0) return undefined;
-    const spelled = missing.map(({ member }) => `'${String(member)}'`).join(', ');
-    const err = new Error(
-        `Correct \`externalId\` on seed '${name}' and send it again. Nothing was written. `
-        + (declared
-            ? `${spelled} ${missing.length === 1 ? 'is not a field' : 'are not fields'} of object '${objectName}', `
-            : `It is not declared, so it defaults to 'name', and object '${objectName}' has no field 'name', `)
-        + `so a load in \`${mode}\` mode could never match a row it wrote before: each publish and each replay would `
-        + (mode === 'update' ? 'skip every record. ' : 'insert every record again. ')
-        + `Name ${composite ? 'only fields' : 'a field'} the object declares, or use \`mode: 'insert'\` for rows with no natural key.`,
-    ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
-    err.code = 'VALIDATION_ERROR';
-    err.status = 400;
-    err.issues = missing.map(({ member, index }) => ({
+    const consequence = `so a load in \`${mode}\` mode could never match a row it wrote before: each publish and each `
+        + `replay would ${mode === 'update' ? 'skip every record' : 'insert every record again'}. Name a field the object `
+        + "declares, or use `mode: 'insert'` for rows with no natural key.";
+    const issues: MetadataIssueEntry[] = missing.map(({ member, index }) => ({
         path: composite ? `externalId.${index}` : 'externalId',
-        message: `'${String(member)}' is not a field of object '${objectName}'.`,
+        message: (declared
+            ? `Seed '${name}' keys on externalId member '${String(member)}', which is not a field of object '${objectName}', `
+            : `Seed '${name}' declares no externalId, so it keys on the default 'name', which is not a field of object '${objectName}', `)
+            + consequence,
         code: 'custom',
     }));
+    const err = new Error(
+        `${singularType}/${name} failed spec validation: ${specValidationFindings(writeFace, issues)}`,
+    ) as Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] };
+    err.code = 'INVALID_METADATA';
+    err.status = 422;
+    err.issues = issues;
     return err;
 }

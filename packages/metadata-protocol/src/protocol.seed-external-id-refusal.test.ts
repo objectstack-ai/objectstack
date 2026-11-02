@@ -13,8 +13,10 @@
  *
  * Pinned here, through `saveMetaItem`, `publishMetaItem`,
  * `publishPackageDrafts` and the restore door:
- *  - the refusal: `400 VALIDATION_ERROR`, one finding per missing member at
- *    `externalId` (`externalId.N` for a composite member), nothing stored
+ *  - the refusal: the save door's envelope for a body it judges (the one
+ *    the unknown-datasource refusal answers), `422 INVALID_METADATA`, one
+ *    finding per missing member at `externalId` (`externalId.N` for a
+ *    composite member), naming the field and the object, nothing stored
  *    (save), nothing promoted and no seed row written (publish of a draft
  *    stored before the rule; the batch aborts);
  *  - an undeclared `externalId` is `SeedSchema`'s default, `name`, and is
@@ -27,7 +29,7 @@
  *    registered nor drafted, and a `migrate-stored` re-save.
  *
  * Each refusal is asserted by its code, its status, its path and its
- * message's first sentence, spelled out here.
+ * finding's first clause, spelled out here.
  *
  * Harness: the stateful `sys_metadata` double of
  * `protocol.unknown-datasource-refusal.test.ts`, kept local, with a registry
@@ -196,15 +198,21 @@ function plantSeedDraft(rows: Map<string, Row>, name: string, body: Record<strin
     rows.set(keyOf(data), { ...data, id: `planted_${name}` });
 }
 
-const firstSentence = (seedName: string) => `Correct \`externalId\` on seed '${seedName}' and send it again. Nothing was written.`;
+/** A declared member's finding, up to its consequence. */
+const memberFinding = (seedName: string, member: string, objectName: string) =>
+    `Seed '${seedName}' keys on externalId member '${member}', which is not a field of object '${objectName}', `;
 
-const expectRefusal = (err: any, seedName: string, findings: Array<{ path: string; member: string; object: string }>) => {
-    expect({ code: err?.code, status: err?.status }, String(err?.message)).toEqual({ code: 'VALIDATION_ERROR', status: 400 });
-    expect(String(err.message).startsWith(firstSentence(seedName)), String(err.message)).toBe(true);
-    expect(String(err.message).length).toBeLessThanOrEqual(500);
-    expect(err.issues).toEqual(findings.map((f) => ({
-        path: f.path, code: 'custom', message: `'${f.member}' is not a field of object '${f.object}'.`,
-    })));
+const expectRefusal = (err: any, seedName: string, findings: Array<{ path: string; member: string; object: string; implicit?: boolean }>) => {
+    expect({ code: err?.code, status: err?.status }, String(err?.message)).toEqual({ code: 'INVALID_METADATA', status: 422 });
+    expect(String(err.message).startsWith(`seed/${seedName} failed spec validation: `), String(err.message)).toBe(true);
+    expect(err.issues.map((i: any) => ({ path: i.path, code: i.code }))).toEqual(findings.map((f) => ({ path: f.path, code: 'custom' })));
+    findings.forEach((f, n) => {
+        const first = f.implicit
+            ? `Seed '${seedName}' declares no externalId, so it keys on the default 'name', which is not a field of object '${f.object}', `
+            : memberFinding(seedName, f.member, f.object);
+        expect(String(err.issues[n].message).startsWith(first), err.issues[n].message).toBe(true);
+        expect(String(err.issues[n].message).length).toBeLessThanOrEqual(500);
+    });
 };
 
 const OBJECTS = { seedkey_other: registered('seedkey_other') };
@@ -214,7 +222,7 @@ describe('[#28952] the seed save door — an `externalId` that names no field of
         ['a draft save into a package', { mode: 'draft', packageId: PKG }],
         ['a draft save naming no package', { mode: 'draft' }],
         ['a publish save', {}],
-    ])('%s is refused 400 at `externalId`, naming the field, and nothing is stored or loaded', async (_label, saveOpts) => {
+    ])('%s is refused 422 at `externalId`, naming the field, and nothing is stored or loaded', async (_label, saveOpts) => {
         const { protocol, rows, dataInserts } = makeSession({ objects: OBJECTS });
 
         const err = await refusalOf(protocol.saveMetaItem({
@@ -222,7 +230,6 @@ describe('[#28952] the seed save door — an `externalId` that names no field of
         }));
 
         expectRefusal(err, 'r_ghost', [{ path: 'externalId', member: 'no_such_field', object: 'seedkey_other' }]);
-        expect(String(err.message)).toContain("'no_such_field' is not a field of object 'seedkey_other'");
         expect(stored(rows, 'seed', 'r_ghost')).toEqual([]);
         expect(dataInserts).toEqual([]);
     });
@@ -253,8 +260,7 @@ describe('[#28952] the seed save door — an `externalId` that names no field of
             type: 'seed', name: 'r_default', item: { object: 'seedkey_coded', records: [{ code: 'g' }] }, mode: 'draft',
         }));
 
-        expectRefusal(err, 'r_default', [{ path: 'externalId', member: 'name', object: 'seedkey_coded' }]);
-        expect(String(err.message)).toContain("It is not declared, so it defaults to 'name'");
+        expectRefusal(err, 'r_default', [{ path: 'externalId', member: 'name', object: 'seedkey_coded', implicit: true }]);
     });
 });
 
@@ -278,8 +284,8 @@ describe('[#28952] the publish doors — a seed draft stored before the rule', (
 
         expect(res).toMatchObject({ outcome: 'refused', success: false, publishedCount: 0, published: [] });
         const causal = res.failed.find((f: any) => f.name === 'r_ghost');
-        expect(causal, JSON.stringify(res.failed)).toMatchObject({ type: 'seed', code: 'VALIDATION_ERROR' });
-        expect(JSON.stringify(causal)).toContain("'no_such_field' is not a field of object 'seedkey_other'");
+        expect(causal, JSON.stringify(res.failed)).toMatchObject({ type: 'seed', code: 'INVALID_METADATA' });
+        expect(JSON.stringify(causal)).toContain("externalId member 'no_such_field', which is not a field of object 'seedkey_other'");
         expect(stored(rows, 'seed', 'r_ghost')).toEqual([`draft|${PKG}|"no_such_field"`]);
         expect(dataInserts).toEqual([]);
     });
@@ -298,8 +304,8 @@ describe('[#28952] the publish doors — a seed draft stored before the rule', (
 
         expect(res).toMatchObject({ outcome: 'refused', success: false, publishedCount: 0 });
         const causal = res.failed.find((f: any) => f.name === 'r_new');
-        expect(causal, JSON.stringify(res.failed)).toMatchObject({ type: 'seed', code: 'VALIDATION_ERROR' });
-        expect(JSON.stringify(causal)).toContain("'no_such_field' is not a field of object 'seedkey_new'");
+        expect(causal, JSON.stringify(res.failed)).toMatchObject({ type: 'seed', code: 'INVALID_METADATA' });
+        expect(JSON.stringify(causal)).toContain("externalId member 'no_such_field', which is not a field of object 'seedkey_new'");
         expect(stored(rows, 'seed', 'r_new')).toEqual([`draft|${PKG}|"no_such_field"`]);
         expect(dataInserts).toEqual([]);
     });

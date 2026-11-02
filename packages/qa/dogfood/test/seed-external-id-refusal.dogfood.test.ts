@@ -16,8 +16,9 @@
 //
 // ## What these cases pin
 //
-// The save door refuses it, `400 VALIDATION_ERROR` with the finding at
-// `externalId` naming the field (`externalId.N` for a composite member), and
+// The save door refuses it with the envelope it gives every body it judges
+// (the unknown-datasource refusal's), `422 INVALID_METADATA` with the finding
+// at `externalId` naming the field (`externalId.N` for a composite member), and
 // nothing is stored, so `publish-drafts` has nothing of it to publish.
 // Controls: the same seed keyed on `name` saves, publishes and converges on
 // replay (`inserted: 1`, then `inserted: 0, updated: 0`, one row served); an
@@ -80,10 +81,10 @@ describe('dogfood: a seed whose externalId names no field of its object is refus
 
   /** The refusal's envelope, wherever the REST door nests it. */
   const expectRefused = (res: { status: number; json: any }, path: string, member: string) => {
-    expect(res.status, JSON.stringify(res.json)).toBe(400);
+    expect(res.status, JSON.stringify(res.json)).toBe(422);
     const wire = JSON.stringify(res.json);
-    expect(wire).toContain('VALIDATION_ERROR');
-    expect(wire).toContain(`'${member}' is not a field of object 'seedkey_other'`);
+    expect(wire).toContain('INVALID_METADATA');
+    expect(wire).toContain(`keys on externalId member '${member}', which is not a field of object 'seedkey_other'`);
     expect(wire).toContain(`"path":"${path}"`);
   };
 

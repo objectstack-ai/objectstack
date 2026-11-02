@@ -20943,8 +20943,10 @@ export class ObjectStackProtocolImplementation implements
      * body, so a seed stored before this refusal or whose object lost the
      * field is refused when it is published and a batch publish aborts on
      * it, and by the restore doors ({@link refuseRestoredBodyTheSaveDoorRefuses}).
-     * Answered `400 VALIDATION_ERROR`, one finding per missing member at
-     * `externalId` (`externalId.N` for a composite member). The boot loader
+     * Answered as the schema gate answers, with the envelope of
+     * {@link unknownDatasourceSaveRefusal}: `422 INVALID_METADATA`, one finding
+     * per missing member at `externalId` (`externalId.N` for a composite
+     * member), naming the field and the object. The boot loader
      * never refuses; it warns once for a keyed dataset whose every record
      * keys empty ({@link SeedLoaderService}).
      */
@@ -20953,13 +20955,14 @@ export class ObjectStackProtocolImplementation implements
         item: unknown,
         name: string,
         pending?: 'drafts' | ReadonlyArray<unknown>,
-    ): Promise<(Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] }) | undefined> {
+        writeFace?: MetadataWriteFace,
+    ): Promise<(Error & { code: 'INVALID_METADATA'; status: 422; issues: MetadataIssueEntry[] }) | undefined> {
         const readEngine = () => this.engine;
         const host: ThisParameterType<typeof seedExternalIdSaveRefusal> = {
             get engine() { return readEngine(); },
             listDrafts: (...a) => this.listDrafts(...a),
         };
-        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending);
+        return seedExternalIdSaveRefusal.call(host, singularType, item, name, pending, writeFace);
     }
 
     /**
@@ -22641,7 +22644,7 @@ export class ObjectStackProtocolImplementation implements
         // existing row and is not judged. See {@link seedExternalIdSaveRefusal}.
         if (writeSource !== 'migrate-stored') {
             const seedKeyRefusal = await this.seedExternalIdSaveRefusal(
-                singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined,
+                singularType, request.item, request.name, mode === 'draft' ? 'drafts' : undefined, request.writeFace,
             );
             if (seedKeyRefusal) throw seedKeyRefusal;
         }
