@@ -25,7 +25,7 @@ describe('normalizeSectionField', () => {
   it('resolves a spec FormFieldSchema object (key `field`, not `name`)', () => {
     // This is the exact shape that crashed the form: react-hook-form received
     // `name === undefined` and threw on `name.split('.')`.
-    const f = normalizeSectionField({ field: 'name', required: true, colSpan: 2 }, ctx);
+    const f = normalizeSectionField({ field: 'name', required: true, colSpan: 2 }, ctx)!;
     expect(f.name).toBe('name');           // ← was undefined before the fix
     expect(f.type).toBe(mapFieldTypeToFormType('text')); // merged from object schema
     expect(f.required).toBe(true);         // spec override
@@ -34,7 +34,7 @@ describe('normalizeSectionField', () => {
   });
 
   it('merges select options + label from the object schema', () => {
-    const f = normalizeSectionField({ field: 'industry' }, ctx);
+    const f = normalizeSectionField({ field: 'industry' }, ctx)!;
     expect(f.name).toBe('industry');
     expect(f.type).toBe(mapFieldTypeToFormType('select'));
     expect((f as any).options).toEqual([{ label: 'Tech', value: 'tech' }]);
@@ -44,7 +44,7 @@ describe('normalizeSectionField', () => {
     const f = normalizeSectionField(
       { field: 'name', helpText: 'Custom hint', readonly: true },
       ctx,
-    );
+    )!;
     expect(f.description).toBe('Custom hint');
     expect((f as any).disabled).toBe(true);
   });
@@ -63,21 +63,35 @@ describe('normalizeSectionField', () => {
   });
 
   it('builds from the object schema for a string shorthand', () => {
-    const f = normalizeSectionField('industry', ctx);
+    const f = normalizeSectionField('industry', ctx)!;
     expect(f.name).toBe('industry');
     expect(f.type).toBe(mapFieldTypeToFormType('select'));
   });
 
   it('passes a runtime FormField object through unchanged (field = metadata object)', () => {
     const runtime = { name: 'custom', type: 'text', label: 'Custom' };
-    const f = normalizeSectionField(runtime as any, ctx);
+    const f = normalizeSectionField(runtime as any, ctx)!;
     expect(f.name).toBe('custom');
     expect(f.type).toBe('text');
   });
 
-  it('still yields a name when the spec field is not in the object schema', () => {
-    const f = normalizeSectionField({ field: 'ghost', required: true }, ctx);
-    expect(f.name).toBe('ghost'); // never undefined → no `.split` crash
+  it('builds NO field when a named field is not in the object schema (objectstack#29021)', () => {
+    // It used to answer an untyped `{ name, label: name, type: 'input' }` stub,
+    // which every pool-less arm drew as a live text box whose value the save
+    // never sent. A name with no definition behind it has no control; the lint
+    // calls the entry FORM_FIELD_UNKNOWN, "never renders on the form".
+    expect(normalizeSectionField({ field: 'ghost', required: true }, ctx)).toBeUndefined();
+    expect(normalizeSectionField({ field: 'ghost', type: 'text', label: 'Ghost' }, ctx)).toBeUndefined();
+    expect(normalizeSectionField('ghost', ctx)).toBeUndefined();
+  });
+
+  it('with NO object schema to judge against, a bare name still builds its untyped stub', () => {
+    // The boundary: a form mounted without a data source (its host
+    // `submitHandler` owns the write, `submitTargetRefusal.test.tsx`) has no
+    // object to say the name is unknown, as the lint judges only a known
+    // object. The stub's value reaches that host, so it is not the defect.
+    const f = normalizeSectionField('ghost', { ...ctx, objectSchema: null })!;
+    expect(f).toMatchObject({ name: 'ghost', label: 'ghost', type: 'input' });
   });
 
   // View-level conditional visibility (#2212): the spec field's predicate may
@@ -210,11 +224,10 @@ describe('normalizeSectionField', () => {
     const shapes: Array<string | Record<string, any>> = [
       'industry', // string shorthand
       { field: 'industry', required: true }, // spec object
-      { field: 'ghost' }, // spec object, unknown to the schema
       { name: 'custom', type: 'text' }, // already-runtime object
     ];
     for (const def of shapes) {
-      const out = normalizeSectionField(def as any, ctx);
+      const out = normalizeSectionField(def as any, ctx)!;
       expect(typeof out.field, `string field leaked for ${JSON.stringify(def)}`).not.toBe('string');
     }
   });
@@ -222,7 +235,7 @@ describe('normalizeSectionField', () => {
   it('warns once when an entry mixes both vocabularies, and the spec key wins', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      const f = normalizeSectionField({ field: 'industry', name: 'legacy_key' }, ctx);
+      const f = normalizeSectionField({ field: 'industry', name: 'legacy_key' }, ctx)!;
       expect(f.name).toBe('industry'); // spec branch derives the name from `field`
       normalizeSectionField({ field: 'industry', name: 'legacy_key' }, ctx); // same site again
       const said = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('mixed'));
@@ -275,6 +288,32 @@ describe('buildSectionFields', () => {
     );
     expect(fields.map((f) => f.name)).toEqual(['industry', 'name']);
     expect(fields.every((f) => typeof f.name === 'string')).toBe(true);
+  });
+
+  // objectstack#29021: a section naming a field the object does not have drew
+  // an editable box labelled with the raw name on every pool-less arm (tabbed,
+  // wizard, drawer, modal), and what the user typed in it was dropped on save.
+  it('drops a name-only entry nothing defines, in both named shapes, keeping the known fields in order', () => {
+    const fields = buildSectionFields(
+      { fields: ['industry', 'no_such_field', { field: 'no_such_field', label: 'Ghost', type: 'text' }, 'name'] },
+      ctx,
+    );
+    expect(fields.map((f) => f.name)).toEqual(['industry', 'name']);
+  });
+
+  it('a section whose every entry is unknown builds no field at all', () => {
+    expect(buildSectionFields({ fields: ['no_such_field', { field: 'other_ghost' }] }, ctx)).toEqual([]);
+  });
+
+  it('still draws an unknown name a `customFields` member defines, and a self-describing inline entry', () => {
+    const member = { name: 'no_such_field', label: 'Member', type: 'text' } as any;
+    const inline = { name: 'inline_only', label: 'Inline', type: 'text' };
+    const fields = buildSectionFields(
+      { fields: ['no_such_field', inline as any, 'name'] },
+      { ...ctx, customFields: [member] },
+    );
+    expect(fields.map((f) => f.name)).toEqual(['no_such_field', 'inline_only', 'name']);
+    expect((fields[0] as any).label, 'the member is the definition').toBe('Member');
   });
 });
 

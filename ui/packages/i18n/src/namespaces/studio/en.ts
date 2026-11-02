@@ -3120,6 +3120,9 @@ const STUDIO_EN: Record<string, string> = {
   // objectstack#27785 — a report's chart held until its axes are picked; `input`
   // is the chart panel's own label for the axis it still needs.
   'engine.studio.held.reportChartNeedsInput': '{input} on the report’s chart needs a value',
+  // objectstack#29022 — a report switched to Joined held until its first block is added;
+  // `list` is the report form's label for the blocks list.
+  'engine.studio.held.reportJoinedNeedsBlock': 'a Joined report needs at least one block in “{list}”',
   // objectstack#27895 — a list view held until a required setting of its type's own block is picked again;
   // `input` is the setting's label in the panel's type settings section.
   'engine.studio.held.listViewTypeNeedsInput': '{input} in the view’s {type} settings needs a value',
