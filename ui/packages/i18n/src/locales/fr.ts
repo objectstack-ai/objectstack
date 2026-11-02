@@ -264,6 +264,11 @@ const fr = {
       show: 'Afficher le code QR',
       hide: 'Masquer le code QR',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Scanner un code',
+      failed: 'Échec du scan',
+    },
     image: {
       upload: "Téléverser une image",
       addMore: "Ajouter d'autres images",
@@ -884,8 +889,6 @@ const fr = {
     pullToRefresh: "Tirer pour actualiser",
     refreshing: "Actualisation…",
     share: "Partager",
-    sharingPersonal: "Vue personnelle",
-    sharingCollaborative: "Vue partagée",
     sharingLockedBy: "Verrouillée par {{user}}",
     print: "Imprimer",
     hideFieldsTitle: "Masquer les champs",

@@ -136,7 +136,7 @@ describe('view item owner/hidden retirement — the tombstones, at every door th
   }
 
   it('CONTROL: the same record without the keys passes every door, live identity keys intact', () => {
-    const withLiveKeys = { ...RECORD, label: 'My hot leads', isDefault: true, order: 2, scope: 'personal' } as const;
+    const withLiveKeys = { ...RECORD, label: 'My hot leads', isDefault: true, order: 2, scope: 'shared' } as const;
     for (const [label, schema] of [
       ['strict', ViewItemSchema],
       ['wire', ViewItemWireSchema],
@@ -151,7 +151,7 @@ describe('view item owner/hidden retirement — the tombstones, at every door th
       expect(data, `${label} grows no \`owner\``).not.toHaveProperty('owner');
       expect(data, `${label} grows no \`hidden\``).not.toHaveProperty('hidden');
       // The live neighbours are untouched by the tombstones.
-      expect(data.scope, `${label} keeps \`scope\``).toBe('personal');
+      expect(data.scope, `${label} keeps \`scope\``).toBe('shared');
       expect(data.isDefault, `${label} keeps \`isDefault\``).toBe(true);
       expect(data.order, `${label} keeps \`order\``).toBe(2);
     }
@@ -190,7 +190,7 @@ describe('view item owner/hidden retirement — the D2 conversion', () => {
   it('a STORED view row carrying the keys replays clean through the rehydration seam', () => {
     // `database-loader.ts` replays the chain over every stored row it loads;
     // the seam wraps a `view` row as `{ views: [row] }`.
-    const stored = { ...RECORD, label: 'My hot leads', scope: 'personal', owner: 'usr_7', hidden: true };
+    const stored = { ...RECORD, label: 'My hot leads', scope: 'shared', owner: 'usr_7', hidden: true };
     const notices: { conversionId?: string; path?: string }[] = [];
     const rehydrated = applyConversionsToStoredItem('view', stored, {
       onNotice: (n) => notices.push(n as { conversionId?: string; path?: string }),
@@ -201,7 +201,7 @@ describe('view item owner/hidden retirement — the D2 conversion', () => {
     expect(rehydrated).not.toHaveProperty('owner');
     expect(rehydrated).not.toHaveProperty('hidden');
     // CONTROL: the live identity keys on the same row survive byte-for-byte.
-    expect(rehydrated.scope).toBe('personal');
+    expect(rehydrated.scope).toBe('shared');
     expect(rehydrated.label).toBe('My hot leads');
     // And the rehydrated row is exactly what the write door accepts now.
     expect(ViewMetadataSchema.safeParse(rehydrated).success).toBe(true);

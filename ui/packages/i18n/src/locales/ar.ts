@@ -276,6 +276,11 @@ const ar = {
       show: 'إظهار رمز QR',
       hide: 'إخفاء رمز QR',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'مسح الرمز',
+      failed: 'تعذّر المسح',
+    },
     image: {
       upload: "رفع صورة",
       addMore: "إضافة المزيد من الصور",
@@ -968,8 +973,6 @@ const ar = {
     pullToRefresh: "اسحب للتحديث",
     refreshing: "جارٍ التحديث…",
     share: "مشاركة",
-    sharingPersonal: "عرض شخصي",
-    sharingCollaborative: "عرض مشترك",
     sharingLockedBy: "مقفل بواسطة {{user}}",
     print: "طباعة",
     hideFieldsTitle: "إخفاء الحقول",

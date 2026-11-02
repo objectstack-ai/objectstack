@@ -36,7 +36,10 @@ const DEAL = {
   label: 'Deal',
   fields: {
     body: { name: 'body', label: 'Body', type: 'text' },
-    say: { name: 'say', label: 'Say', type: 'text' },
+    // `json`, not `text`: the refusal cases below hand the hook a raw number,
+    // and a text-family field stores (and hands its hooks) the string the
+    // validator judges a number by (#29241).
+    say: { name: 'say', label: 'Say', type: 'json' },
     say_after: { name: 'say_after', label: 'Say after', type: 'text' },
   },
 };

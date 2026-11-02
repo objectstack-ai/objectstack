@@ -262,6 +262,11 @@ const ja = {
       show: 'QR コードを表示',
       hide: 'QR コードを非表示',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'コードをスキャン',
+      failed: 'スキャンできませんでした',
+    },
     image: {
       upload: "画像をアップロード",
       addMore: "画像を追加",
@@ -859,8 +864,6 @@ const ja = {
     pullToRefresh: "引っ張って更新",
     refreshing: "更新中…",
     share: "共有",
-    sharingPersonal: "個人ビュー",
-    sharingCollaborative: "共有ビュー",
     sharingLockedBy: "{{user}} がロック中",
     print: "印刷",
     hideFieldsTitle: "フィールドを非表示",

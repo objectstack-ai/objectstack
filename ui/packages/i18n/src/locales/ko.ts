@@ -262,6 +262,11 @@ const ko = {
       show: 'QR 코드 표시',
       hide: 'QR 코드 숨기기',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: '코드 스캔',
+      failed: '스캔하지 못했습니다',
+    },
     image: {
       upload: "이미지 업로드",
       addMore: "이미지 더 추가",
@@ -859,8 +864,6 @@ const ko = {
     pullToRefresh: "당겨서 새로고침",
     refreshing: "새로고침 중…",
     share: "공유",
-    sharingPersonal: "개인 보기",
-    sharingCollaborative: "공유 보기",
     sharingLockedBy: "{{user}} 님이 잠금",
     print: "인쇄",
     hideFieldsTitle: "필드 숨기기",
