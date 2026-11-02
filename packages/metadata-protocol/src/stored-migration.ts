@@ -11,7 +11,9 @@
  * retirement kit ages out one major after it retires (ADR-0087 as amended,
  * ruling 6434038284), so this pass must run on a release that still carries a
  * row's conversions, before the deployment moves to the release that drops
- * them; past that, no seam recognizes the row. What it deliberately
+ * them. Past that, the seams still read and serve the row's legacy bytes, but
+ * no conversion recognizes its shape, so this pass counts it `canonical`: a
+ * false clean, not evidence. What it deliberately
  * did not do is make the rows themselves canonical — a pre-17 row keeps its
  * legacy bytes, the chain re-lowers it on every load, and each affected row
  * emits one conversion notice per process.
