@@ -180,7 +180,7 @@ describe('Studio Data pillar — a landed draft autosave names what it saved (ob
 
     const announced = success.mock.calls.filter(([said]) => said === SAID);
     expect(announced.length, 'two landed saves, two announcements').toBeGreaterThanOrEqual(2);
-    expect(new Set(announced.map(([, opts]) => (opts as { id?: string } | undefined)?.id))).toEqual(new Set([TOAST_ID]));
     expect(savedToasts(), 'one toast, updated in place, not a pile').toHaveLength(1);
+    expect(new Set(announced.map(([, opts]) => (opts as { id?: string } | undefined)?.id))).toEqual(new Set([TOAST_ID]));
   });
 });
