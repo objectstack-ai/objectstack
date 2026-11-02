@@ -819,3 +819,58 @@ steps[0] (`/apps/com.objectstack.setup/metadata/permission/…`) and
 `automation.packaged-flow-subflow-disable-refusal` steps[7] (the retired Setup
 packaged-automation page as the UI half). Those Setup URLs redirect to Studio since #28818,
 so the items still reach a page; their text was not re-measured here.
+
+## 14. Scoped authoring 2026-11-02 — the ADR-0146 promises as items (#28579 slice 2)
+
+**Not a sweep.** One item per promise ADR-0146 shipped, each read from source at `main`
+(`eb123b7ccc`) and citing the card that landed it, plus the carry-overs from §13. Each item's
+`history` row says what it is and why.
+
+- **New:** `studio-authoring.package-customize-restore-display` (N-17: view, dashboard and
+  report, from Customize to Restore package original), `automation.package-flow-override`
+  (N-11/N-18/N-22), `studio-authoring.package-extension-field-c` (N-23c),
+  `platform-core.customization-pair-ensure-door` (N-13/N-14),
+  `cli.packageless-overlay-ceremony-and-close` (N-16a/N-16b),
+  `studio-authoring.package-customization-counts-and-marks` (N-24/N-26b) and
+  `platform-core.setup-metadata-redirects-to-studio` (N-28).
+- **Extended, not twinned:** `studio-authoring.access-permission-set-lifecycle` takes New
+  similar on a packaged set (N-20b) as steps[6] and acceptance[5].
+- **§13a resolved:** `studio-authoring.packaged-display-class-direct-edit` is retired, with
+  `supersededBy` the new display item (its retiredReason maps each clause). The dashboard
+  leg moves from the platform's `system_overview` to the showcase's
+  `showcase_ops_dashboard`. `studio-authoring.org-override-registry-gate`'s open side is now
+  the declared override from `com.example.showcase.custom`, so its transitional knownGap is
+  gone. The two §13b clauses are untouched: their knownGap waits on #29374.
+- **§13c resolved:** the four items there now name Studio's landing URL instead of the
+  retired Setup page. `platform-core.metadata-authoring-roundtrip` acceptance[4] also stops
+  saying a packaged view "accepts" a package-less overlay. Its verify already read the
+  writable-package save, and that verify is unchanged.
+
+### 14a. The live browser journeys are slice 3's
+
+Every new item's `automated.ref` names the unit and integration pins that hold the contract,
+and none of them drives a live deployment. Four items say in `automated.ref` that no e2e spec
+walks the browser journey yet, which #28579 slice 3 owes: customize/restore display, the
+`__c` extension field, counts and marks, and the flow override. The ensure door, the
+ceremony and the redirects are API, CLI and URL contracts, and their live leg is the run's.
+
+### 14b. Measured from source — the pair's uninstall refusal is unreachable for a read-only base
+
+`DELETE /api/v1/packages/:id` runs `requireWritablePackage`
+(`packages/runtime/src/domains/packages.ts`) before `assertPackageUninstallable`
+(`packages/objectql/src/registry.ts`). So a booted or system/cloud base, such as the showcase,
+answers **422 `WRITABLE_PACKAGE_REQUIRED`** and the pair is never asked. The 409
+`RESOURCE_CONFLICT` that names the pair and its export URL is reached only for a writable
+base whose pair is installed. `platform-core.customization-pair-ensure-door` scores both:
+409 on a writable QA base with an exported pair, and 422 on the showcase.
+`packages-uninstall-refuse-before-mutate.test.ts` pins the order. A live spec (slice 3) that
+expects 409 when uninstalling the showcase will fail. Reach: source-read, not measured live.
+
+### 14c. Product finding — reported, not filed here
+
+Studio's landing still describes the D11-closed model. `engine.studio.landing.description`
+and `readonlyHint` (`ui/packages/i18n/src/namespaces/studio/en.ts`, rendered by
+`BuilderLanding.tsx`) tell the user to "customize them with an environment overlay".
+`BuilderLanding.environmentOverlayCopy-12171.test.ts` pins that phrase. The door is now
+Customize, which writes into the base's `.custom` pair. Reach: source-read only. The finding
+is in the slice's report for the seat to card.

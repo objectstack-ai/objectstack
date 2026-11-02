@@ -2516,6 +2516,98 @@
           "ref": "#27392"
         }
       ]
+    },
+    {
+      "id": "cli.packageless-overlay-ceremony-and-close",
+      "title": "`os migrate packageless-overlays` previews, then with --apply --yes moves, each package-less overlay row of a shipped name into <base>.custom as a declared override; after it, a write naming no package — or naming the read-only base — onto that item is refused 403 NOT_OVERRIDABLE naming the pair",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "operator (runs the CLI against the deployment's database, server stopped)",
+        "admin (the REST legs)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a showcase database of the run's own (dogfood §0); the CLI from this tree (`os` / `node packages/cli/bin/run.js`)",
+          "the stock read-only base com.example.showcase (examples/app-showcase/objectstack.config.ts: id com.example.showcase, namespace showcase, version 0.1.0 — a booted code package, so read-only to isWritablePackage) and its customization pair com.example.showcase.custom (namespace showcase_custom, dependency ^0 on the base), created by the ensure door on the first customization",
+          "a packaged showcase list view VIEW (from GET /api/v1/meta/view?object=showcase_task) for the move and the close"
+        ],
+        "knownGaps": [
+          "NO DOOR ON MAIN WRITES THE ROW THIS COMMAND MOVES — that is the close. A run stages one the way the command's own integration test does (packages/cli/src/commands/migrate/packageless-overlays.integration.test.ts: 'the database an older release left'): with the server stopped, insert into sys_metadata a row with package_id NULL, type 'view', name VIEW, state 'active', version 1 and the view's body (with one changed label) as metadata. A database last written by a build before #28850 holds such rows natively. Without either, only acceptance[0]'s empty preview, acceptance[2]'s confirmation refusal and acceptance[4] run"
+        ]
+      },
+      "steps": [
+        "empty preview: on a fresh showcase DB, run `os migrate packageless-overlays --json`; record the exit code, the rows and that nothing was written",
+        "stage the row (fixtures.knownGaps[0]); run the preview again (`--json`): read the row's disposition and target pair",
+        "run `os migrate packageless-overlays --apply --json` without --yes: read the answer and the exit code; confirm nothing moved",
+        "run `os migrate packageless-overlays --apply --yes`; then boot the showcase and read GET /api/v1/meta/view/VIEW (no package), ?package=com.example.showcase.custom and the /layers read; run the preview once more",
+        "the close, with the server up: PUT /api/v1/meta/view/VIEW?mode=draft with a changed label and no package; DELETE /api/v1/meta/view/VIEW with no package; PUT /api/v1/meta/view/VIEW?mode=draft&package=com.example.showcase (the base); then the same body declaring overrides: { package: 'com.example.showcase', basedOn: '0.1.0' } with ?mode=draft&package=com.example.showcase.custom; GET the item after each"
+      ],
+      "acceptance": [
+        {
+          "clause": "the preview is read-only: with nothing to move it lists no row and exits 0, and it never writes",
+          "oracle": "build",
+          "verify": "step 1: exit 0, the JSON's apply false and rows []; the sys_metadata and sys_packages contents are unchanged (no com.example.showcase.custom created)",
+          "evidence": "the JSON output + exit code + the before/after store reads"
+        },
+        {
+          "clause": "a staged package-less row of a shipped name is listed movable into the base's pair",
+          "oracle": "build",
+          "verify": "step 2: the row reads view/VIEW/active movable → com.example.showcase.custom; still nothing is written",
+          "evidence": "the preview JSON"
+        },
+        {
+          "clause": "--apply asks for confirmation: in --json without --yes it refuses and moves nothing",
+          "oracle": "build",
+          "verify": "step 3: the JSON is { error: 'confirmation_required', hint: 'pass --yes' } and the exit code is 1; the stored rows are unchanged",
+          "evidence": "the output + exit code + the store read"
+        },
+        {
+          "clause": "--apply --yes moves the row into the pair as the declared override, the package-less row goes, the reads serve the same content, and a re-run moves nothing",
+          "oracle": "api",
+          "verify": "step 4: the pair holds VIEW with overrides { package: 'com.example.showcase', basedOn: '0.1.0' } (the ensure door made the pair if absent); no package-less row of VIEW remains; the package-less read serves the staged label exactly as before the move; the last preview lists no movable row",
+          "evidence": "the reads after the move + the re-run's JSON"
+        },
+        {
+          "clause": "after the move a write naming no package onto the packaged item is refused 403 NOT_OVERRIDABLE naming the pair, and so is a save naming the read-only base itself; the declared write into the pair is admitted",
+          "oracle": "api",
+          "verify": "step 5: the package-less PUT and DELETE and the base-named PUT each answer 403 NOT_OVERRIDABLE whose message names 'com.example.showcase.custom' (?package=com.example.showcase.custom) and the declaration (packagelessOverlayWriteRefusal; namedBaseOverlayWriteRefusal adds that the read-only base itself takes no customization); the item is unchanged after each; the declared PUT into the pair answers 2xx",
+          "evidence": "the three refusal bodies + the accepted save + the reads"
+        }
+      ],
+      "negative": [
+        "a move that deletes the package-less row before the pair's declared row reads back is the FAIL the ceremony's read-back-first rule exists for: the customization would be lost",
+        "a package-less write onto a packaged view that answers 2xx after the close is the FAIL ADR-0146 D11 closes — a package-less row nobody exports"
+      ],
+      "traps": [
+        "destructive-in-place",
+        "first-boot-cold-start",
+        "silent-coercion"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/src/commands/migrate/packageless-overlays.integration.test.ts (the CLI over a seeded database: the preview, --apply and the confirmation refusal — acceptance[1]–[3]; integration tier) + packages/objectql/src/protocol-packageless-overlay-migration.test.ts (the move and the close at the protocol: acceptance[3]–[4]) + packages/metadata-protocol/src/protocol.named-base-overlay-write.test.ts (the base-named close). No pin drives the REST doors; the live leg is the run's"
+      },
+      "source": [
+        "packages/cli/src/commands/migrate/packageless-overlays.ts#PACKAGELESS_OVERLAYS_ACTOR (the command; --apply, --yes, --json, --database-url)",
+        "packages/metadata-protocol/src/protocol-packageless-overlay-migration.ts#PackagelessOverlayDisposition (movable, multi_shipped, no_pair, foreign_declaration, shadowed)",
+        "packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#packagelessOverlayWriteRefusal + packages/metadata-protocol/src/protocol-packaged-base-refusal.ts#namedBaseOverlayWriteRefusal (403 NOT_OVERRIDABLE, the fix named first)",
+        "docs/adr/0146-studio-designs-setup-administers-one-editor-per-item-paired-customize-package.md D11 (migration, then closure)",
+        "#28413 (N-16a) landed by PR #28689 (and PR #29258 for an email template's locale); #28576 (N-16b) by PR #28850, with PR #29270 for the write naming the base",
+        "cross-ref: studio-authoring.org-override-registry-gate (the open side at the raw PUT); studio-authoring.package-customize-restore-display (the Studio door that replaced the package-less write)"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-11-02",
+          "change": "new item (ADR-0146 N-16a #28413 / PR #28689 and N-16b #28576 / PRs #28850 and #29270): the os migrate packageless-overlays ceremony's preview, confirmation and move, and the closed package-less and base-named writes after it. Read from source at base eb123b7ccc; the staged row follows the command's own integration test (knownGaps[0])",
+          "ref": "#28579"
+        }
+      ]
     }
   ]
 }
