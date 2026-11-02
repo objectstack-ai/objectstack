@@ -8,6 +8,7 @@ fix(metadata): a `packages[]` stack's top-level dataset that no package body dec
 Clause-②: no
 Metadata-protocol: narrowed
 Skills-docs: none — no file under `skills/**` teaches a `packages[]` stack's top level, its residual, or a `_packageId` stamp on a top-level dataset; every taught dataset sits in a single-package stack, which has no residual, so every taught use stays true.
+<!-- adr-0087: not-required (no-migration-prescription) No key of any schema is added, removed, renamed or re-shaped, and no export or type changes. The narrowed face is the existing owner-stamp judge now reaching one more collection of a `packages[]` stack's top level: a residual dataset wearing another package's `_packageId`. No conversion can rewrite it, because which package owns the dataset is the author's decision (drop the stamp, or move the dataset into the `packages[]` entry of its owner), and the stack that carries it used to lose the dataset at boot anyway, so there is no working stored state for a migration to preserve. -->
 
 A stack that carries `packages[]` registers each package body under its own id, and what its top level carries that no body declares (the residual, ADR-0130 D4) under the stack's `manifest.id`. The residual rule did not walk `datasets` (the ADR-0021 analytics datasets a dashboard or report names), so such a dataset was neither registered nor refused: the boot succeeded, `GET /meta/dataset` listed only the bodies' datasets, and a dashboard or report naming the missing one failed at run time, far from the cause.
 
