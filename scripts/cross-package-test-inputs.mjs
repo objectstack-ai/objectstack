@@ -855,6 +855,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // (receiver `service`). A call added to or removed from that file moves
       // the census verdict, so a change to it has to re-run this suite.
       'packages/services/service-analytics/src/__tests__/objectql-echo-bucket-enumeration.test.ts',
+      // [#28841] Declared by name for the same reason: the census LEDGER
+      // carries a NOT_SDK row for service-analytics' dry-run parity pin, which
+      // calls `analytics.query(` three times on the real AnalyticsService
+      // (receiver `service`). A call added to or removed from that file moves
+      // the census verdict, so a change to it has to re-run this suite.
+      'packages/services/service-analytics/src/__tests__/objectql-echo-column-twice.test.ts',
     ],
     heldBy: {
       // `scripts/**` is rostered TODAY through the census's own

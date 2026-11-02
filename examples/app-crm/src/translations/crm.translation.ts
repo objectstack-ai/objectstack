@@ -95,16 +95,35 @@ export const CrmTranslationBundle = defineTranslationBundle({
       // The inline product grid's heading on the opportunity form. The field
       // lives on the line item, so the key is the line item's.
       crm_opportunity_line_item: {
+        label: '产品明细',
+        pluralLabel: '产品明细',
+        description: '商机报价中的一行产品。',
         fields: {
-          opportunity: { inlineTitle: '产品明细' },
+          opportunity: { label: '商机', inlineTitle: '产品明细' },
+          product: { label: '产品' },
+          quantity: { label: '数量' },
+          unit_price: { label: '单价' },
+          amount: { label: '金额' },
         },
       },
+      // A plural label is the plain noun: it names tabs and related panels
+      // ("商机 4"), so a 「列表」 suffix would read 「商机列表 4」.
       crm_account: {
         label: '客户',
-        pluralLabel: '客户列表',
+        pluralLabel: '客户',
+        description: '向其销售产品或提供服务的企业。',
         fields: {
           name: { label: '客户名称' },
-          industry: { label: '行业' },
+          industry: {
+            label: '行业',
+            options: {
+              technology: '科技',
+              finance: '金融',
+              healthcare: '医疗',
+              retail: '零售',
+              other: '其他',
+            },
+          },
           annual_revenue: { label: '年营收' },
           website: { label: '官网' },
           owner_id: { label: '负责人' },
@@ -112,7 +131,8 @@ export const CrmTranslationBundle = defineTranslationBundle({
       },
       crm_contact: {
         label: '联系人',
-        pluralLabel: '联系人列表',
+        pluralLabel: '联系人',
+        description: '与客户相关的联系人。',
         fields: {
           first_name: { label: '名' },
           last_name: { label: '姓' },
@@ -123,14 +143,38 @@ export const CrmTranslationBundle = defineTranslationBundle({
       },
       crm_opportunity: {
         label: '商机',
-        pluralLabel: '商机列表',
+        pluralLabel: '商机',
+        description: '与客户关联的潜在销售机会。',
         fields: {
           name: { label: '商机名称' },
-          stage: { label: '阶段' },
+          account: { label: '客户' },
+          stage: {
+            label: '阶段',
+            options: {
+              prospecting: '初步接洽',
+              qualification: '需求确认',
+              proposal: '方案报价',
+              closed_won: '赢单',
+              closed_lost: '输单',
+            },
+          },
           amount: { label: '金额' },
           close_date: { label: '预计成交日期' },
           probability: { label: '赢单概率 (%)' },
+          expected_revenue: { label: '预期收入' },
+          days_to_close: { label: '距成交天数' },
           discount_percent: { label: '折扣 (%)' },
+          approval_status: {
+            label: '审批状态',
+            options: {
+              pending: '待审批',
+              approved: '已批准',
+              rejected: '已驳回',
+              recalled: '已撤回',
+            },
+          },
+          renewal_of: { label: '续约自' },
+          line_total: { label: '产品合计' },
           owner_id: { label: '负责人' },
         },
         // No `default` key here, deliberately (#5164). This container's default
@@ -151,17 +195,54 @@ export const CrmTranslationBundle = defineTranslationBundle({
         _sections: {
           opportunity: { label: '商机' },
         },
+        // The words a rejected save shows.
+        _validations: {
+          discount_cap: { message: '未经特批，折扣不能超过 40%。' },
+          opp_close_date_not_past: { message: '预计成交日期不能早于今天。' },
+          opp_stage_transitions: { message: '商机不能变更到这个阶段。' },
+        },
       },
       crm_lead: {
         label: '线索',
-        pluralLabel: '线索列表',
+        pluralLabel: '线索',
+        description: '尚未确认为商机的潜在客户。',
         fields: {
           name: { label: '线索名称' },
           email: { label: '邮箱' },
+          phone: { label: '电话' },
           company: { label: '公司' },
-          status: { label: '状态' },
+          title: { label: '职位' },
+          status: {
+            label: '状态',
+            options: {
+              new: '新线索',
+              contacted: '已联系',
+              qualifying: '资格审查中',
+              qualified: '合格',
+              disqualified: '不合格',
+              converted: '已转化',
+            },
+          },
+          source: {
+            label: '来源',
+            options: {
+              web: '官网',
+              referral: '客户推荐',
+              event: '市场活动',
+              social: '社交媒体',
+              cold_outreach: '主动开发',
+              partner: '合作伙伴',
+            },
+          },
           lead_score: { label: '线索评分' },
-          source: { label: '来源' },
+          assigned_to: { label: '分配给' },
+          account: { label: '所属客户' },
+          converted_opportunity: { label: '转化商机' },
+          notes: { label: '备注' },
+          is_closed: { label: '已关闭' },
+        },
+        _actions: {
+          crm_convert_lead: { label: '转化线索' },
         },
         // `list` removed — collapsed into `all`, see crm_opportunity (#5164).
         _views: {
@@ -180,17 +261,43 @@ export const CrmTranslationBundle = defineTranslationBundle({
           conversion: { label: '转化' },
           notes: { label: '备注' },
         },
+        // The words a rejected save shows.
+        _validations: {
+          lead_status_transitions: { message: '线索不能变更到这个状态。' },
+          lead_score_range: { message: '线索评分必须在 0 到 100 之间。' },
+        },
       },
       crm_activity: {
         label: '活动',
-        pluralLabel: '活动列表',
+        pluralLabel: '活动',
+        description: '与客户关系记录相关的一次互动（电话、邮件、会议或任务）。',
         fields: {
           subject: { label: '主题' },
-          type: { label: '活动类型' },
-          status: { label: '状态' },
+          type: {
+            label: '活动类型',
+            options: {
+              call: '电话',
+              email: '邮件',
+              meeting: '会议',
+              task: '任务',
+            },
+          },
+          status: {
+            label: '状态',
+            options: {
+              planned: '计划中',
+              in_progress: '进行中',
+              completed: '已完成',
+              cancelled: '已取消',
+            },
+          },
           due_date: { label: '截止日期' },
           contact: { label: '联系人' },
+          account: { label: '客户' },
           opportunity: { label: '商机' },
+          description: { label: '描述' },
+          outcome: { label: '结果与备注' },
+          duration_minutes: { label: '时长（分钟）' },
         },
         // `list` removed — collapsed into `all`, see crm_opportunity (#5164).
         _views: {
@@ -211,10 +318,74 @@ export const CrmTranslationBundle = defineTranslationBundle({
       crm_app: {
         label: '客户管理',
         description: '客户关系管理系统',
+        // Keyed by navigation id, at any depth: the groups and every entry
+        // under them.
         navigation: {
           group_sales: { label: '销售管理' },
+          nav_leads: { label: '线索' },
+          nav_accounts: { label: '客户' },
+          nav_contacts: { label: '联系人' },
+          nav_opportunities: { label: '商机' },
+          nav_activities: { label: '活动' },
           group_analytics: { label: '数据分析' },
+          nav_pipeline_dashboard: { label: '销售漏斗' },
         },
+      },
+    },
+    dashboards: {
+      pipeline_dashboard: {
+        label: '销售漏斗',
+        description: '销售漏斗一览，并与之前的周期对比。',
+        widgets: {
+          total_pipeline: {
+            title: '在途商机总额',
+            description: '所有未结束商机的金额合计。',
+          },
+          won_this_quarter: {
+            title: '本季度赢单',
+            description: '本季度赢单的金额，与上季度对比。',
+          },
+          avg_deal_size_yoy: {
+            title: '平均成交额（同比）',
+            description: '今年赢单的平均金额，与去年同期对比。',
+          },
+          pipeline_trend_90d: {
+            title: '商机趋势（近 12 个月）',
+            description: '近 12 个月按预计成交月份统计的商机数，与上一年对比。',
+          },
+          opportunities_by_stage: {
+            title: '各阶段商机',
+            description: '本季度预计成交的商机按阶段统计，与上季度对比。',
+          },
+          pipeline_by_industry: {
+            title: '在途商机阶段分布',
+            description: '未结束商机的金额按阶段分布。',
+          },
+        },
+      },
+    },
+    // The names a dashboard draws under its tiles and on its chart axes.
+    datasets: {
+      opportunity_metrics: {
+        label: '商机指标',
+        description: '销售漏斗的商机数与金额。',
+        dimensions: {
+          stage: { label: '阶段' },
+          account: { label: '客户' },
+          close_date: { label: '成交日期' },
+        },
+        measures: {
+          opp_count: { label: '商机数' },
+          total_amount: { label: '总金额' },
+          avg_amount: { label: '平均成交额' },
+        },
+      },
+    },
+    pages: {
+      crm_welcome: {
+        label: '欢迎页',
+        title: '欢迎使用客户管理',
+        subtitle: '管理客户、联系人和商机。',
       },
     },
     // The lead-conversion wizard: the flow's name in the runner header and
