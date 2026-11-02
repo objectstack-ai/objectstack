@@ -767,7 +767,7 @@ describe('[#29392] the census and the move reach a row bound to the read-only ba
         const result = await migrate(protocol);
         expect(result.outcomes.map((o: any) => [o.outcome, o.basedOn])).toEqual([['moved', '1.2.0']]);
         expect(rows(VIEW)).toEqual([[PAIR, 'active']]);
-        expect(rows(ENV_VIEW).slice().sort()).toEqual([[OTHER, 'active'], [WORKSPACE, 'active']]);
+        expect(rows(ENV_VIEW).slice().sort()).toEqual([[WORKSPACE, 'active'], [OTHER, 'active']]);
         expect(rows(SHARED_VIEW)).toEqual([[WORKSPACE, 'active']]);
     });
 });
