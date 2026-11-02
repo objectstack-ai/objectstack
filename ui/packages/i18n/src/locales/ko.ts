@@ -262,6 +262,11 @@ const ko = {
       show: 'QR 코드 표시',
       hide: 'QR 코드 숨기기',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: '코드 스캔',
+      failed: '스캔하지 못했습니다',
+    },
     image: {
       upload: "이미지 업로드",
       addMore: "이미지 더 추가",

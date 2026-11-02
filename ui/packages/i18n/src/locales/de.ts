@@ -262,6 +262,11 @@ const de = {
       show: 'QR-Code anzeigen',
       hide: 'QR-Code verbergen',
     },
+    // The scan button text and lookup fields show inside the mobile shell.
+    scan: {
+      button: 'Code scannen',
+      failed: 'Scannen fehlgeschlagen',
+    },
     image: {
       upload: "Bild hochladen",
       addMore: "Weitere Bilder hinzufügen",
