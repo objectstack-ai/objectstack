@@ -29,6 +29,7 @@ import {
   nativeNavigate,
   nativeOpenExternal,
   nativeResetServer,
+  nativeScan,
   postNativeReady,
   postNativeRouteChanged,
   resetNativeHostEventsForTests,
@@ -42,7 +43,7 @@ import {
   useNativeHostRouting,
 } from '../useNativeHost';
 
-const ALL_METHODS: NativeHostMethod[] = ['getPushToken', 'haptic', 'openExternal', 'navigate', 'resetServer'];
+const ALL_METHODS: NativeHostMethod[] = ['getPushToken', 'haptic', 'openExternal', 'navigate', 'resetServer', 'scan'];
 
 function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackNative & {
   ready: Mock<() => void>;
@@ -60,6 +61,7 @@ function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackN
     openExternal: vi.fn(async () => null),
     navigate: vi.fn(async () => null),
     resetServer: vi.fn(async () => null),
+    scan: vi.fn(async () => 'ASSET-0042'),
     ready: vi.fn<() => void>(),
     routeChanged: vi.fn<(route: string) => void>(),
   };
@@ -189,6 +191,7 @@ describe('typed call wrappers feature-detect and never throw', () => {
     ['openExternal', () => nativeOpenExternal('https://example.com')],
     ['navigate', () => nativeNavigate('/home')],
     ['resetServer', () => nativeResetServer()],
+    ['scan', () => nativeScan()],
   ];
 
   it.each(calls)('%s resolves "unavailable" without a bridge', async (_method, call) => {
@@ -219,6 +222,39 @@ describe('typed call wrappers feature-detect and never throw', () => {
     expect(bridge.openExternal).toHaveBeenCalledWith('mailto:a@example.com');
     await nativeNavigate('/apps/crm');
     expect(bridge.navigate).toHaveBeenCalledWith('/apps/crm');
+  });
+
+  it('scan resolves "ok" with the decoded text, forwards the formats, and keeps the bridge as `this`', async () => {
+    const bridge = fakeBridge();
+    let self: unknown;
+    bridge.scan = vi.fn(async function (this: unknown) {
+      self = this;
+      return 'ASSET-0042';
+    });
+    install(bridge);
+    await expect(nativeScan({ formats: ['qr', 'ean13'] })).resolves.toEqual({ status: 'ok', value: 'ASSET-0042' });
+    expect(bridge.scan).toHaveBeenCalledWith({ formats: ['qr', 'ean13'] });
+    expect(self).toBe(bridge);
+  });
+
+  it('scan resolves "ok" with null when the user closes the scanner', async () => {
+    const bridge = fakeBridge();
+    bridge.scan = vi.fn(async () => null);
+    install(bridge);
+    await expect(nativeScan()).resolves.toEqual({ status: 'ok', value: null });
+  });
+
+  it('scan resolves "failed" with the shell message when the camera is refused', async () => {
+    const bridge = fakeBridge();
+    bridge.scan = vi.fn(async () => {
+      throw Object.assign(new Error('Camera permission denied'), { code: 'failed' });
+    });
+    install(bridge);
+    await expect(nativeScan()).resolves.toEqual({
+      status: 'failed',
+      code: 'failed',
+      message: 'Camera permission denied',
+    });
   });
 
   it('a call the shell rejects resolves "failed" with the shell error code', async () => {
