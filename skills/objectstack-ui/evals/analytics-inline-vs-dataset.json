@@ -55,7 +55,7 @@
     },
     {
       "id": 6,
-      "prompt": "leave_request shows days_requested, a formula (end_date - start_date, returnType 'number'), on its form; keep it. Add a KPI widget totalling days requested this quarter. Emit the metadata.",
+      "prompt": "leave_request shows days_requested, a formula (daysBetween(record.start_date, record.end_date), returnType 'number'), on its form; keep it. Add a KPI widget totalling days requested this quarter. Emit the metadata.",
       "expected_output": "Never sums the formula (virtual, whatever its returnType): adds a stored number a beforeInsert/beforeUpdate hook keeps in step and sums that, or titles the widget as the count it is.",
       "files": [],
       "assertions": {

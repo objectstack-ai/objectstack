@@ -402,7 +402,10 @@ describe('flow delegates to IAutomationService.execute with the trigger route’
 
     it('calls execute(target, buildAutomationContext(body, ctx)) and answers like the trigger route', async () => {
         const execute = vi.fn().mockResolvedValue({ success: true, runId: 'run-1' });
-        const deps = depsWith({ automationService: { execute } });
+        // The caller reads `rec-1`: a flow endpoint loads the record it hands the
+        // run in the caller's own scope, through this seam, before the run exists.
+        const callData = vi.fn().mockResolvedValue({ object: 'showcase_inquiry', id: 'rec-1', record: { id: 'rec-1' } });
+        const deps = depsWith({ automationService: { execute }, callData } as Partial<EndpointExecutorDeps>);
         const ctx = contextFor(FLOW(), {
             method: 'POST',
             body: { recordId: 'rec-1', objectName: 'showcase_inquiry', params: { reason: 'spam' } },

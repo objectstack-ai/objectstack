@@ -31,6 +31,7 @@ import {
   useGlobalDiagnostics,
   type MetadataDiagnosticsEntry,
 } from './useMetadata.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { t, tFormat, translateMetadataType, useMetadataLocale } from './i18n.js';
 import { diagnosticsHeaderTone, type DiagnosticsHeaderTone } from './diagnostics-tone.js';
 
@@ -65,7 +66,16 @@ export function MetadataDiagnosticsPage() {
   const client = useMetadataClient();
   const locale = useMetadataLocale();
   const [severity, setSeverity] = React.useState<Severity>('error');
-  const { loading, error, summary, reload } = useGlobalDiagnostics(client, severity);
+  // objectstack ADR-0146 D1 — inside a package's area the sweep is that
+  // package's, as the directory beside it is: an item of another package has
+  // no row here, and every row's link stays inside its own package's area. The
+  // cross-package leg (`packageId: null`) and Setup (no area) sweep everything.
+  const host = useMetadataAreaHost();
+  const { loading, error, summary, reload } = useGlobalDiagnostics(
+    client,
+    severity,
+    host?.packageId ?? undefined,
+  );
   const { entries: typesEntries } = useMetadataTypes(client);
 
   // Index by type so we can look up the human label per-type without
