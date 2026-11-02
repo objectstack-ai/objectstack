@@ -320,6 +320,10 @@ export {
   // field-permission entry's vote under its row condition (`when`).
   buildEffectiveFieldPermissions,
   fieldPermissionVote,
+  // [ADR-0066 ⑧, ruling of record 6573563853] The one super-user predicate
+  // (row bypass and field vote alike) and the field merge's super-user vote.
+  holdsSuperuserBypass,
+  superuserFieldVote,
   type FieldConditionVerdict,
   type FieldPermissionEntryLike,
   type EffectiveFieldPermissionsInputSet,
