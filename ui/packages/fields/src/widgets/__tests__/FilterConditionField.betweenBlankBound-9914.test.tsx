@@ -127,7 +127,11 @@ describe('the dropdown path: a date range authors nothing until both bounds are 
     // back dropped the widget into the raw-JSON editor with the toggle
     // disabled.
     expect(lastEmitted(onChange)).toBe('');
-    expect(screen.getAllByRole('combobox')).toHaveLength(2);
+    // Field, operator, and the date row's relative-date choice, which a fresh
+    // range opens on `Custom…`: the two bound inputs below are that choice's.
+    const comboboxes = screen.getAllByRole('combobox');
+    expect(comboboxes).toHaveLength(3);
+    expect(comboboxes[2]).toHaveTextContent('Custom…');
     const from = screen.getByLabelText('From');
     const to = screen.getByLabelText('To');
 
