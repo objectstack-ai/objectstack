@@ -440,7 +440,7 @@ function DevAdminRow({ seed }: { seed: DevSeedAdmin }) {
             onClick={signInAsDevAdmin}
             disabled={pending}
             aria-busy={pending}
-            className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-60"
+            className="inline-flex h-7 min-h-[44px] shrink-0 items-center gap-1.5 rounded-lg border sm:min-h-0 border-border bg-background px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:pointer-events-none disabled:opacity-60"
           >
             {pending ? <AuthSpinner /> : <WrenchIcon />}
             {t('auth.login.devAdminHint.signIn', { defaultValue: 'Sign in as dev admin' })}

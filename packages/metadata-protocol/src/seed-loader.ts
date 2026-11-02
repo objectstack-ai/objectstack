@@ -1241,8 +1241,26 @@ export class SeedLoaderService implements ISeedLoaderService {
     // own copy (otherwise upsert would clobber other tenants' rows
     // that share the same natural key — e.g. `name: 'Acme Corp'`).
     let existingRecords: Map<string, any> | undefined;
-    if ((mode === 'upsert' || mode === 'update' || mode === 'ignore') && !config.dryRun) {
+    const keyedMode = mode === 'upsert' || mode === 'update' || mode === 'ignore';
+    if (keyedMode && !config.dryRun) {
       existingRecords = await this.loadExistingRecords(objectName, externalId, config.organizationId);
+    }
+    // [#28952] A keyed dataset whose every record keys EMPTY — its
+    // `externalId` names a field no record carries, most often a field the
+    // object does not have — can never match a row: each record is written as
+    // new (`upsert`, `ignore`) or skipped (`update`) on every load. The save
+    // door and the publish promotion refuse such a seed; this load never
+    // refuses (a boot must not fail on a stored seed), so it says so once per
+    // dataset, at `warn`, and loads exactly as before.
+    if (keyedMode && dataset.records.length > 0
+      && dataset.records.every((record) => this.externalIdKey(record as Record<string, unknown>, externalId) === '')) {
+      this.logger.warn(
+        `[SeedLoader] Seed dataset for '${objectName}' keys every record on externalId ` +
+          `'${this.externalIdLabel(externalId)}', and no record carries a value for it, so this ${mode} load can ` +
+          `match no existing row: ${mode === 'update' ? 'every record is skipped' : 'every record is written as a new row, on every load'}. ` +
+          `Set externalId to a field the object declares and each record carries, or use mode 'insert'.`,
+        { object: objectName, externalId: this.externalIdLabel(externalId), mode, records: dataset.records.length },
+      );
     }
 
     // [#21665] Per-organization row identity. On a per-organization replay,
