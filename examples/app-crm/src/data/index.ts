@@ -59,13 +59,15 @@ const opportunities = defineSeed(Opportunity, {
 const leads = defineSeed(Lead, {
   mode: 'upsert',
   externalId: 'email',
+  // No `assigned_to` on these rows. It is a user field, and no user exists
+  // when the seed runs: people come from sign-up, and the dev admin is
+  // created after the seed. A rep picks up a lead from the record page.
   records: [
     // New / uncontacted
     {
       name: 'Marie Curie', email: 'marie@radium.example', company: 'Radium Labs',
       title: 'Director of Research', phone: '+1-555-0101',
       status: 'new', source: 'web', lead_score: 0,
-      assigned_to: 'ada@acme.example',
       account: 'Acme Corp',
     },
     // In qualification — high-value referral lead
@@ -73,14 +75,12 @@ const leads = defineSeed(Lead, {
       name: 'Alan Turing', email: 'alan@bletchley.example', company: 'Bletchley Systems',
       title: 'VP Engineering', phone: '+44-20-555-0202',
       status: 'qualifying', source: 'referral', lead_score: 75,
-      assigned_to: 'linus@globex.example',
     },
     // Qualified — ready for conversion
     {
       name: 'Rosalind Franklin', email: 'ros@helix.example', company: 'Helix Analytics',
       title: 'CTO', phone: '+1-555-0303',
       status: 'qualified', source: 'event', lead_score: 85,
-      assigned_to: 'grace@initech.example',
       account: 'Initech',
     },
     // Disqualified — poor fit
@@ -95,7 +95,6 @@ const leads = defineSeed(Lead, {
       name: 'Nikola Tesla', email: 'nikola@wardenclyffe.example', company: 'Wardenclyffe Corp',
       title: 'Chief Inventor', phone: '+1-555-0505',
       status: 'converted', source: 'partner', lead_score: 90,
-      assigned_to: 'ada@acme.example',
       converted_opportunity: 'Acme — Q3 Platform Renewal',
     },
   ],
@@ -106,7 +105,7 @@ const activities = defineSeed(Activity, {
   externalId: 'subject',
   records: [
     {
-      subject: 'Discovery Call — Bletchley Systems',
+      subject: 'Discovery Call — Acme Platform Renewal',
       type: 'call', status: 'completed',
       due_date: cel`daysAgo(3)`,
       contact: 'ada@acme.example',
