@@ -276,6 +276,38 @@ export const manifest = generatePWAManifest({
 void registerServiceWorker({ url: '/service-worker.js' });
 ```
 
+`getServiceWorkerSource(options)` writes the worker's source for a build step to
+emit. It has two strategies:
+
+- `'offline-first'` (the default): a cache-first shell, network-first API reads with
+  a cached fallback, and the `REPLAY_QUEUE` broadcast on Background Sync. Version it
+  by `cacheName`.
+- `'app-shell'`: a build-versioned shell that never holds data. Serve the worker from
+  the app's base directory so its scope is the app (`/_console/`, not `/`), and pass
+  the build's identity as `build` (required). Requests under `apiPrefix` and every
+  request outside the scope are network-only (no cache read, no cache write, no
+  stored cookie). Navigations are network-first with the precached HTML entry as the
+  offline fallback, so the next navigation after a deploy runs the new build. Hashed
+  files under `assets/` are cache-first. Activation deletes the scope's caches of
+  every other build. After registering, `cacheLoadedResources(registration.active)`
+  caches the files the page loaded before the worker controlled it.
+
+`notifications: true` adds `push` and `notificationclick` handlers. A push payload is
+JSON `{ title, body?, route?, tag? }`; a click focuses or opens an app window at
+`route`, an in-app path relative to the scope. A route that is not an in-app path, or
+that resolves outside the scope, opens nothing. The worker does not subscribe to push.
+
+```ts
+import { getServiceWorkerSource } from '@object-ui/mobile';
+
+const source = getServiceWorkerSource({
+  strategy: 'app-shell',
+  build: '2026.11.02-4f1c9a2e',
+  precache: ['./assets/index-AbC12345.js', './assets/index-XyZ98765.css'],
+  notifications: true,
+});
+```
+
 ### Native shell mode
 
 The ObjectStack mobile app hosts the web Console in a WebView and injects a bridge,
