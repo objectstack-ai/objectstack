@@ -14665,7 +14665,19 @@ export class ObjectStackProtocolImplementation implements
                 || (def as any).type === 'formula'
                 || (def as any).type === 'summary') {
                 delete data[name];
+                continue;
             }
+            // [#29200] A read-only column the source left EMPTY is not carried
+            // into the insert. Carried, it reached `engine.insert`'s strip as a
+            // present key and was reported in `droppedFields` (and the
+            // `X-ObjectStack-Dropped-Fields` header) although neither the caller
+            // nor the source supplied a value. Leaving it out stores the same
+            // row: the strip would have taken it from a non-system caller, and
+            // the insert's defaults treat an explicit `null` exactly as an
+            // omitted key. A read-only column that HOLDS a value is still
+            // carried, stripped and reported (#15703), and so is one the caller
+            // sets through `overrides`, which are applied below.
+            if ((def as any).readonly && data[name] == null) delete data[name];
         }
         // Caller overrides win (new name, cleared unique field, reset status…).
         if (request.overrides && typeof request.overrides === 'object') {
