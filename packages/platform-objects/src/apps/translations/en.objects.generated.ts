@@ -1403,6 +1403,42 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_personal_view: {
+    label: "Personal View",
+    pluralLabel: "Personal Views",
+    description: "A reader's own named list views (My Views). Visible only to the owner.",
+    fields: {
+      id: {
+        label: "Personal View ID"
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      },
+      user_id: {
+        label: "Owner",
+        help: "The user this view belongs to. Only this user reads or changes it."
+      },
+      object_name: {
+        label: "Object",
+        help: "The object this view lists (its machine name)."
+      },
+      label: {
+        label: "Name",
+        help: "The name the owner gave this view."
+      },
+      config: {
+        label: "View Configuration",
+        help: "The list configuration, in spec's ListView shape. Validated on every save."
+      },
+      is_default: {
+        label: "My Default",
+        help: "The owner's default view for this object. At most one per owner and object."
+      }
+    }
+  },
   sys_oauth_application: {
     label: "OAuth Application",
     pluralLabel: "OAuth Applications",
