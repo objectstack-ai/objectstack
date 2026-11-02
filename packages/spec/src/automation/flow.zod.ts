@@ -1640,7 +1640,11 @@ export const FlowSchema = lazySchema(() => strictObject(
   // stands only in a flow a create or update record trigger starts — anywhere
   // else no write waits on the run. Refused at each such node, at any region
   // depth; the reasons are `save-notice-placement.ts`'s header. [#28806] Also
-  // refused where a node that always suspends the run reaches it.
+  // refused where a node that always suspends the run reaches it. A notice
+  // after a `subflow` / `map` whose child can suspend is not refused here: the
+  // engine's arming gate declines that flow (#28840,
+  // `notice_after_suspending_subflow`), and the run-time refusal by name is the
+  // residue.
   for (const refusal of saveNoticePlacementRefusals(flow, FLOW_PAUSE_CAPABLE_NODE_TYPES)) {
     ctx.addIssue({ code: 'custom', path: [...refusal.path], message: refusal.message });
   }

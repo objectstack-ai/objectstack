@@ -30,6 +30,7 @@
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import {
+    isActionWithheldByDisabledPackage,
     isItemOfDisabledPackage,
     isObjectOfDisabledPackage,
     noPendingDraftError,
@@ -60,8 +61,12 @@ export async function readMetaItemFace(
         throw objectPackageDisabledError(request.name);
     }
     const answer = await this.readMetaItem(request, { face });
+    // [#28877] The served read of an `action` also withholds one that launches
+    // into a disabled package, as the served list does.
+    const withheldAction = request.type === 'action' && face === 'served'
+        && isActionWithheldByDisabledPackage(this.engine?.registry, answer?.item);
     if (request.type === 'object' || request.type === 'package'
-        || !isItemOfDisabledPackage(this.engine?.registry, answer?.item)) {
+        || (!withheldAction && !isItemOfDisabledPackage(this.engine?.registry, answer?.item))) {
         return answer;
     }
     if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);
