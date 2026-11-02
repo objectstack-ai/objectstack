@@ -146,6 +146,7 @@ import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
+import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 
 /**
  * [#25138] The object reads this transport asks of the `protocol` service,
@@ -1058,9 +1059,18 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.create, context);
       enforceApiKeyManagementCredential(object, GATED_ACTIONS.create);
-      const written = (await engine.insert(object, data, { context })) as
-        | Record<string, unknown>
-        | undefined;
+      // [#28782] A record stored under a parent roll-up the engine could not
+      // recompute (`ERR_SUMMARY_RECOMPUTE`, carrying `written`) builds this
+      // bridge's answer and carries it on the refusal (#28781's carrier), so
+      // the `create_record` tool answers the create it is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      let written: Record<string, unknown> | undefined;
+      try {
+        written = (await engine.insert(object, data, { context })) as Record<string, unknown> | undefined;
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+        written = stale.written as Record<string, unknown> | undefined;
+      }
       const record = { ...data, ...(written ?? {}) };
       // [#8497] `written` is the engine's WRITE result, which since #7823 keeps
       // the stored row whole — flagged columns included. This is a generic data
@@ -1072,7 +1082,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // is absent for a package's boot-registered object on an `environmentId`
       // kernel, and with no schema the helper masks and omits nothing.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      return { object, id: record.id, record };
+      const answer = { object, id: record.id, record };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
 
     async update(object, id, data) {
