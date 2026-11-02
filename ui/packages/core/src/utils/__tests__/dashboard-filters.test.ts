@@ -100,8 +100,8 @@ describe('resolveDashboardFilterDefs', () => {
     });
     // The filter it seeds is a real bound, not an empty value.
     expect(buildFilterCondition(defs[0], defs[0].defaultValue)).toEqual({
-      $gte: '{current_month_start}',
-      $lte: '{current_month_end}',
+      $gte: '{month_start}',
+      $lte: '{month_end}',
     });
   });
 
@@ -233,8 +233,8 @@ describe('buildFilterCondition', () => {
       $lte: '{today}',
     });
     expect(buildFilterCondition(dateDef, { preset: 'this_month' })).toEqual({
-      $gte: '{current_month_start}',
-      $lte: '{current_month_end}',
+      $gte: '{month_start}',
+      $lte: '{month_end}',
     });
   });
 
