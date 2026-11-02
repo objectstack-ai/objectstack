@@ -8,10 +8,13 @@
  * is customized by org overlay where the item's metadata type declares
  * `allowEnvironmentOverlay` (ADR-0005). Measured before this card: the read-only card
  * was one button that opened the package for browsing, with no route forward.
+ * The overlay link this card added, into Setup's metadata directory, retired
+ * with that directory (objectstack ADR-0146 D1, N-28): an item is customized in
+ * Studio now.
  *
  * The routes are read off the real `BuilderLanding` under a real router: the
- * overlay link lands on the package's metadata directory, and the marketplace
- * link appears only when the runtime serves a marketplace — read through the
+ * card opens the package for browsing, and the marketplace link appears only
+ * when the runtime serves a marketplace — read through the
  * REAL `initRuntimeConfig()` over a stubbed `GET /api/v1/runtime/config`, the
  * way `HomePage.marketplaceDisabled.test.tsx` drives the same flag.
  */
@@ -71,7 +74,6 @@ function renderLanding() {
       <Routes>
         <Route path="/studio" element={<BuilderLanding />} />
         <Route path="/studio/:packageId/:tab" element={<div data-testid="pillar-builder" />} />
-        <Route path="/apps/setup/metadata" element={<div data-testid="metadata-directory" />} />
         <Route path="/apps/setup/system/marketplace" element={<div data-testid="marketplace" />} />
       </Routes>
     </MemoryRouter>,
@@ -86,22 +88,21 @@ function cardOf(name: string): HTMLElement {
 }
 
 describe('Studio landing: a read-only package points at the routes it has (objectui#11808)', () => {
-  it('links the read-only card to the package’s metadata directory, the org-overlay route', async () => {
+  it('the read-only card carries no link into Setup’s metadata directory (ADR-0146 D1)', async () => {
+    // objectui#11808 linked the card to `/apps/setup/metadata?package=…`, the
+    // overlay route. N-28 retired Setup's metadata directory into Studio's "All
+    // metadata" area, so the card opens the package itself (below) and links
+    // nowhere into Setup's metadata pages.
     await bootRuntime({ marketplace: true });
     packages.list = [READ_ONLY];
     renderLanding();
 
     await screen.findByText('Showcase');
     expect(screen.getByTestId('studio-landing-readonly-hint')).toBeInTheDocument();
-    const overlay = within(cardOf('Showcase')).getByTestId('studio-landing-overlay');
-    expect(overlay).toHaveAttribute('href', '/apps/setup/metadata?package=com.example.showcase');
-    expect(overlay).toHaveAccessibleName(t('engine.studio.landing.overlay', 'en-US'));
-
-    fireEvent.click(overlay);
-    await waitFor(() =>
-      expect(screen.getByTestId('location')).toHaveTextContent('/apps/setup/metadata?package=com.example.showcase'),
-    );
-    expect(screen.getByTestId('metadata-directory')).toBeInTheDocument();
+    expect(within(cardOf('Showcase')).queryByTestId('studio-landing-overlay')).not.toBeInTheDocument();
+    for (const link of within(cardOf('Showcase')).queryAllByRole('link')) {
+      expect(link.getAttribute('href') ?? '').not.toMatch(/^\/apps\/setup\/metadata/);
+    }
   });
 
   it('still opens the read-only package for browsing from the card itself', async () => {
@@ -122,8 +123,6 @@ describe('Studio landing: a read-only package points at the routes it has (objec
     const dupTitle = t('engine.studio.landing.dupTitle', 'en-US');
     expect(within(cardOf('Acme')).getByTitle(dupTitle)).toBeInTheDocument();
     expect(within(cardOf('Showcase')).queryByTitle(dupTitle)).not.toBeInTheDocument();
-    // The overlay route is the read-only card's, not the writable base's.
-    expect(within(cardOf('Acme')).queryByTestId('studio-landing-overlay')).not.toBeInTheDocument();
   });
 
   it('links the marketplace when the runtime serves one', async () => {
@@ -138,14 +137,14 @@ describe('Studio landing: a read-only package points at the routes it has (objec
     expect(screen.getByTestId('marketplace')).toBeInTheDocument();
   });
 
-  it('offers no marketplace link on a runtime without one, and keeps the overlay route', async () => {
+  it('offers no marketplace link on a runtime without one', async () => {
     await bootRuntime({ marketplace: false });
     packages.list = [READ_ONLY];
     renderLanding();
 
     await screen.findByText('Showcase');
     expect(screen.queryByTestId('studio-landing-marketplace')).not.toBeInTheDocument();
-    expect(within(cardOf('Showcase')).getByTestId('studio-landing-overlay')).toBeInTheDocument();
+    expect(screen.getByTestId('studio-landing-readonly-hint')).toBeInTheDocument();
   });
 
   it('renders no read-only section at all when every package is writable', async () => {

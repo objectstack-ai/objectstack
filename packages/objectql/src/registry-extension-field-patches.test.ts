@@ -20,6 +20,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SchemaRegistry } from './registry.js';
 import { ObjectQL } from './engine.js';
+import { fieldPatchTargetRefusals } from '@objectstack/metadata-core';
 
 const OWNER_PKG = 'com.vendor.crm';
 const EXT_PKG = 'com.acme.crm-display';
@@ -240,6 +241,150 @@ describe('ADR-0146 D10 — fieldPatches is applied by mergeObjectDefinitions on 
     const served = reg.getObject(OBJ) as any;
     expect(served.label).toBe('Customer');
     expect(industryOf(served)).toEqual(vendorAccount().fields.industry);
+  });
+});
+
+describe('#28809 — an option patch is judged against the owner\'s declared options, at the fold as at the doors', () => {
+  const TAKEOVER_PKG = 'com.acme.industry-takeover';
+
+  /**
+   * `crm_account.industry` taken over through `fields`: the owner's two
+   * options, the second relabelled, plus `finance`, which the owner does not
+   * declare — or, with `dropRetail`, the owner's `tech` alone.
+   */
+  const takenOverIndustry = ({ dropRetail = false } = {}) => ({
+    ...vendorAccount().fields.industry,
+    options: dropRetail
+      ? [{ value: 'tech', label: 'Tech' }]
+      : [
+        { value: 'tech', label: 'Tech' },
+        { value: 'retail', label: 'Retail stores' },
+        { value: 'finance', label: 'Finance' },
+      ],
+  });
+
+  function takeOver(reg: SchemaRegistry, priority: number, opts: { dropRetail?: boolean } = {}): void {
+    reg.registerObject(
+      { name: OBJ, fields: { industry: takenOverIndustry(opts) } } as any,
+      TAKEOVER_PKG, undefined, 'extend', priority,
+    );
+  }
+
+  /**
+   * What the install door (`getObjectOwner(name).definition`) and `os validate`
+   * (the composed stack's declared object) both ask: the one judge, against the
+   * owner's declaration. The fold must answer the same.
+   */
+  const doorRefusals = (reg: SchemaRegistry, objectExtensions: unknown[]) =>
+    fieldPatchTargetRefusals(objectExtensions, (name) => reg.getObjectOwner(name)?.definition).map((r) => r.path);
+
+  const optionLabel = (body: any, value: string) =>
+    industryOf(body).options.find((o: any) => o.value === value)?.label;
+
+  const patchLines = (warn: { mock: { calls: unknown[][] } }, needle: string): string[] =>
+    warn.mock.calls.map((c) => String(c[0])).filter((l) => l.includes(needle));
+
+  it('another extension adds an option by redeclaring the owner field: a patch of that option is not applied, and is named once — as the door and os validate refuse it', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    takeOver(reg, 100);
+    const patch = { industry: { options: { finance: { label: 'Banking' } } } };
+    extend(reg, patch, EXT_PKG, 200);
+
+    expect(doorRefusals(reg, [{ extend: OBJ, fieldPatches: patch }]))
+      .toEqual(['objectExtensions[0].fieldPatches.industry.options.finance']);
+    const served = reg.getObject(OBJ) as any;
+    // The takeover itself still serves: the option exists, with its own label.
+    expect(optionLabel(served, 'finance')).toBe('Finance');
+    reg.invalidateAll();
+    reg.getObject(OBJ);
+    const lines = patchLines(warn, 'fieldPatches.industry.options.finance');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(EXT_PKG);
+  });
+
+  it('…and the same extension redeclaring the field and patching its added option is not applied either, and is named once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    const entry = {
+      fields: { industry: takenOverIndustry() },
+      fieldPatches: { industry: { options: { finance: { label: 'Banking' } } } },
+    };
+    reg.registerObject({ name: OBJ, ...entry } as any, EXT_PKG, undefined, 'extend', 200);
+
+    expect(doorRefusals(reg, [{ extend: OBJ, ...entry }]))
+      .toEqual(['objectExtensions[0].fieldPatches.industry.options.finance']);
+    expect(optionLabel(reg.getObject(OBJ), 'finance')).toBe('Finance');
+    expect(patchLines(warn, 'fieldPatches.industry.options.finance')).toHaveLength(1);
+  });
+
+  it('control: the patcher folded BEFORE the redeclaring extension (lower priority) — not applied and named, as on main', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    takeOver(reg, 200);
+    extend(reg, { industry: { options: { finance: { label: 'Banking' } } } }, EXT_PKG, 100);
+
+    expect(optionLabel(reg.getObject(OBJ), 'finance')).toBe('Finance');
+    expect(patchLines(warn, 'fieldPatches.industry.options.finance')).toHaveLength(1);
+  });
+
+  it('control: a patch of an option the owner declares still applies onto the redeclared field, and nothing is named', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    takeOver(reg, 100);
+    const patch = { industry: { label: 'Sector', options: { tech: { label: 'Technology' }, retail: { label: 'Shops' } } } };
+    extend(reg, patch, EXT_PKG, 200);
+
+    expect(doorRefusals(reg, [{ extend: OBJ, fieldPatches: patch }])).toEqual([]);
+    const served = reg.getObject(OBJ) as any;
+    expect(industryOf(served).label).toBe('Sector');
+    expect(optionLabel(served, 'tech')).toBe('Technology');
+    expect(optionLabel(served, 'retail')).toBe('Shops');
+    expect(optionLabel(served, 'finance')).toBe('Finance');
+    expect(patchLines(warn, 'fieldPatches')).toEqual([]);
+  });
+
+  it('residual: an owner option an earlier extension\'s redeclaration left out — the judge admits the patch, the fold has no such option to relabel, nothing of it is applied, and it is named once', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    takeOver(reg, 100, { dropRetail: true });
+    const patch = { industry: { label: 'Sector', options: { retail: { label: 'Shops' } } } };
+    extend(reg, patch, EXT_PKG, 200);
+
+    // The door and os validate admit it: `retail` is in the owner's declaration.
+    expect(doorRefusals(reg, [{ extend: OBJ, fieldPatches: patch }])).toEqual([]);
+    const served = reg.getObject(OBJ) as any;
+    // The takeover's options are served as the takeover declares them; the
+    // patch's field key still applies.
+    expect(industryOf(served).options).toEqual([{ value: 'tech', label: 'Tech' }]);
+    expect(industryOf(served).label).toBe('Sector');
+    reg.invalidateAll();
+    reg.getObject(OBJ);
+    // Named once (what the fold skipped), by the same judge asked of the merged field.
+    const lines = patchLines(warn, 'fieldPatches');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('fieldPatches.industry.options.retail');
+    expect(lines[0]).toContain(EXT_PKG);
+  });
+
+  it('residual: a tenant overlay base that leaves an owner option out — admitted, nothing to relabel, named once; an option the tenant adds is not patched', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const reg = withVendor();
+    const patch = { industry: { options: { retail: { label: 'Shops' }, wholesale: { label: 'Bulk' } } } };
+    extend(reg, patch, EXT_PKG, 200);
+    const overlay = vendorAccount();
+    overlay.fields.industry.options = [{ value: 'tech', label: 'Tech' }, { value: 'wholesale', label: 'Wholesale' }];
+    reg.registerObject({ ...overlay, _provenance: 'org' }, 'sys_metadata', undefined, 'overlay');
+
+    // The doors read the owner: `retail` admitted, `wholesale` (the tenant's) refused.
+    expect(doorRefusals(reg, [{ extend: OBJ, fieldPatches: patch }]))
+      .toEqual(['objectExtensions[0].fieldPatches.industry.options.wholesale']);
+    const served = reg.getObject(OBJ) as any;
+    expect(industryOf(served).options).toEqual([{ value: 'tech', label: 'Tech' }, { value: 'wholesale', label: 'Wholesale' }]);
+    reg.invalidateAll();
+    reg.getObject(OBJ);
+    expect(patchLines(warn, 'fieldPatches.industry.options.retail')).toHaveLength(1);
+    expect(patchLines(warn, 'fieldPatches.industry.options.wholesale')).toHaveLength(1);
   });
 });
 

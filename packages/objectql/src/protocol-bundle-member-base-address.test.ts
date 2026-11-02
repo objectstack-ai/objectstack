@@ -345,3 +345,72 @@ describe('[#28802] a bundle member on the base\'s address, at member grain', () 
         expect(await executing(protocol, NAME)).toEqual([['en-US', BASE, 'Override EN'], PAIR_FR]);
     });
 });
+
+/** The layered read: `{ code, overlay, effective }` subjects (or view columns), or `404` when no layer answers. */
+const layersOf = async (protocol: ObjectStackProtocolImplementation, type: string, name: string, member?: string, packageId?: string) => {
+    try {
+        const res: any = await (protocol as any).getMetaItemLayered({
+            type, name, ...(member ? { member } : {}), ...(packageId ? { packageId } : {}),
+        });
+        const pick = (item: any) => (item === null || item === undefined
+            ? null
+            : type === 'view'
+                ? (item?.config?.columns ?? item?.columns ?? []).map((c: any) => c?.field ?? c)
+                : [item.subject, item.locale]);
+        // The protocol answers no layer at all as three nulls; the `/layers` door turns that into 404.
+        if (res.code == null && res.overlay == null && res.effective == null) return 404;
+        return { code: pick(res.code), overlay: pick(res.overlay), effective: pick(res.effective) };
+    } catch (error: any) {
+        if (error?.status === 404) return 404;
+        throw error;
+    }
+};
+
+describe('[#28830] the layered read on the base\'s address, at member grain', () => {
+    it('the pair\'s own added member answers with the pair\'s layer, naming the base and naming no package', async () => {
+        const { protocol } = await boot();
+        await install(protocol, PAIR);
+        await publishInto(protocol, PAIR, NAME, 'fr-FR', 'Pair FR');
+
+        const PAIR_LAYERS = { code: null, overlay: ['Pair FR', 'fr-FR'], effective: ['Pair FR', 'fr-FR'] };
+        expect(await layersOf(protocol, TYPE, NAME, 'fr-FR', BASE)).toEqual(PAIR_LAYERS);
+        expect(await layersOf(protocol, TYPE, NAME, 'fr-FR')).toEqual(PAIR_LAYERS);
+        // Unchanged: the pair's own address, and the base's member.
+        expect(await layersOf(protocol, TYPE, NAME, 'fr-FR', PAIR)).toEqual(PAIR_LAYERS);
+        expect(await layersOf(protocol, TYPE, NAME, 'en-US', BASE))
+            .toEqual({ code: ['Base EN', 'en-US'], overlay: null, effective: ['Base EN', 'en-US'] });
+    });
+
+    it('a dependent\'s added member stays 404 on the base\'s layered read and answers under the dependent', async () => {
+        const { protocol } = await boot();
+        await install(protocol, DEPENDENT);
+        await publishInto(protocol, DEPENDENT, NAME, 'fr-FR', 'Dependent FR');
+
+        expect(await layersOf(protocol, TYPE, NAME, 'fr-FR', BASE)).toBe(404);
+        expect(await layersOf(protocol, TYPE, NAME, 'fr-FR')).toBe(404);
+        expect(await layersOf(protocol, TYPE, NAME, 'fr-FR', DEPENDENT))
+            .toEqual({ code: null, overlay: ['Dependent FR', 'fr-FR'], effective: ['Dependent FR', 'fr-FR'] });
+    });
+
+    it('with a dependent\'s member at the same locale, the base\'s layered read answers the pair\'s', async () => {
+        const { protocol } = await boot();
+        await install(protocol, PAIR);
+        await install(protocol, DEPENDENT);
+        await publishInto(protocol, PAIR, NAME, 'fr-FR', 'Pair FR');
+        await publishInto(protocol, DEPENDENT, NAME, 'fr-FR', 'Dependent FR');
+
+        expect(await layersOf(protocol, TYPE, NAME, 'fr-FR', BASE))
+            .toEqual({ code: null, overlay: ['Pair FR', 'fr-FR'], effective: ['Pair FR', 'fr-FR'] });
+    });
+
+    it('control: a declared override of the base\'s member, and a non-bundle type, answer as before', async () => {
+        const { protocol } = await boot();
+        await install(protocol, PAIR);
+        await publishInto(protocol, PAIR, NAME, 'en-US', 'Override EN', { overrides: { package: BASE, basedOn: '1.0.0' } });
+
+        expect(await layersOf(protocol, TYPE, NAME, 'en-US', BASE))
+            .toEqual({ code: ['Base EN', 'en-US'], overlay: ['Override EN', 'en-US'], effective: ['Override EN', 'en-US'] });
+        expect(await layersOf(protocol, 'view', VIEW, undefined, BASE))
+            .toEqual({ code: BASE_COLUMNS, overlay: null, effective: BASE_COLUMNS });
+    });
+});

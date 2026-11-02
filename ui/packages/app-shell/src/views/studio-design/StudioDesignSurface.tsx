@@ -872,9 +872,9 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
  *
  * objectstack#28576 (ADR-0146 D11) — a plain "Read-only" mark that links
  * nowhere, for every item of a read-only package. It used to link an item of
- * an `allowEnvironmentOverlay` type to its Setup page ("Customize with an
- * overlay"), whose save names no package; the server refuses that write onto
- * a packaged item now, and a customization lives in the base's paired
+ * an `allowEnvironmentOverlay` type to its overlay page (Setup's item page,
+ * later that page in Studio's "All metadata" area), whose save names no
+ * package; the server refuses that write onto a packaged item now, and a customization lives in the base's paired
  * `.custom` package instead (Studio customizes a view, dashboard or report
  * there itself, objectstack#28562). So the mark offers no overlay, whatever
  * the type's registry flag says. `item` stays in the props the pillars pass.

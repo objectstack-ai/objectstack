@@ -134,6 +134,10 @@ function renderConsoleAt(initialUrl: string) {
       <LocationProbe />
       <Routes>
         <Route path="/apps/:appName/*" element={<AppContent />} />
+        {/* The Studio app the host mounts beside `/apps/*`: an app's
+            `metadata` route opens its "All metadata" area (objectstack
+            ADR-0146 D1, N-28). */}
+        <Route path="/studio/*" element={<div data-testid="studio-probe" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -242,9 +246,11 @@ describe('AppContent — an app with empty navigation lands on an empty state (o
     ];
     renderConsoleAt('/apps/studio');
 
-    // `metadata:directory` resolves to the app's `metadata` route.
-    expect(await screen.findByTestId('metadata-directory-page')).toBeInTheDocument();
-    expect(screen.getByTestId('pathname').textContent).toBe('/apps/studio/metadata');
+    // `metadata:directory` resolves to the app's `metadata` route, which since
+    // objectstack ADR-0146 D1 (N-28) opens Studio's "All metadata" area: the
+    // landing reached the entry, not the empty state.
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+    expect(screen.getByTestId('pathname').textContent).toBe('/studio/~all/metadata');
     expect(screen.queryByTestId('app-no-access-empty-state')).not.toBeInTheDocument();
   });
 });

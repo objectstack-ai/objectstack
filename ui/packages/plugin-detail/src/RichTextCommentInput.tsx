@@ -45,6 +45,9 @@ export interface RichTextCommentInputProps {
   /** Focus the editor when it mounts: the 动态 panel opens this composer
    *  from its one-line stand-in, and the reader's press lands in it. */
   autoFocus?: boolean;
+  /** Called when the editor takes focus: the host reads the mention
+   *  suggestions then, not when the record opens (objectstack#28470). */
+  onMentionSuggestionsWanted?: () => void;
 }
 
 /** The look of a picked mention, in the preview and in the composer's chip row. */
@@ -110,6 +113,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
   extraSlot,
   canSubmitEmpty = false,
   autoFocus = false,
+  onMentionSuggestionsWanted,
 }) => {
   const { t } = useDetailTranslation();
   const [isPreview, setIsPreview] = React.useState(false);
@@ -358,6 +362,7 @@ export const RichTextCommentInput: React.FC<RichTextCommentInputProps> = ({
               value={value}
               onChange={handleTextChange}
               onKeyDown={handleKeyDown}
+              onFocus={onMentionSuggestionsWanted}
               disabled={disabled}
             />
 

@@ -4,14 +4,15 @@
  * #27356 row 13 (hotcrm#2320 Studio S2) — the read-only mark in a Studio item
  * header used to offer an environment overlay where the served registry marks
  * a type `allowEnvironmentOverlay`: "Read-only · Customize with an overlay",
- * linking to that item's Setup page.
+ * linking to that item's overlay page (Setup's once, then that page in
+ * Studio's "All metadata" area, ADR-0146 D1).
  *
  * objectstack#28562 (ADR-0146 D2) took a view, a dashboard and a report off
  * that link: Studio customizes those itself, into the base's paired
  * customization package.
  *
- * objectstack#28576 (ADR-0146 D11) — and now no item keeps it: Setup's save
- * names no package, and the server refuses that write onto a packaged item.
+ * objectstack#28576 (ADR-0146 D11) — and now no item keeps it: that page's
+ * save names no package, and the server refuses that write onto a packaged item.
  * Every case gets a plain "Read-only" that links nowhere, an overlay-able
  * type (`email_template`, `translation`) included, whatever the registry says.
  */

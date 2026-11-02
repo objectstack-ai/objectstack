@@ -311,9 +311,11 @@ describe('AppContent — Setup\'s item routes wait on the app\'s access verdict 
   it('CONTROL — an admitted caller gets the page, and nothing is probed', async () => {
     metadataApps = [CRM_APP, SETUP_APP];
 
-    renderConsoleAt('/apps/setup/metadata/permission/crm_sales_user?scope=environment');
+    // A datasource item: since objectstack ADR-0146 D1 (N-28) the datasource's
+    // are the item pages Setup still draws (every other one opens Studio).
+    renderConsoleAt('/apps/setup/metadata/datasource/main');
 
-    expect(await screen.findByTestId('metadata-resource-edit-page')).toHaveTextContent('permission/crm_sales_user');
+    expect(await screen.findByTestId('metadata-resource-edit-page')).toHaveTextContent('datasource/main');
     expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'setup');
     expect(screen.queryByTestId('app-access-denied')).not.toBeInTheDocument();
     expect(metaItemRequests).toEqual([]);
@@ -323,9 +325,9 @@ describe('AppContent — Setup\'s item routes wait on the app\'s access verdict 
     // A 404 is not a refusal; the pseudo-route keeps its default-app fallback.
     byName = {};
 
-    renderConsoleAt('/apps/setup/metadata/permission');
+    renderConsoleAt('/apps/setup/metadata/datasource');
 
-    expect(await screen.findByTestId('metadata-resource-list-page')).toHaveTextContent('permission');
+    expect(await screen.findByTestId('metadata-resource-list-page')).toHaveTextContent('datasource');
     expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
     expect(screen.queryByTestId('app-access-denied')).not.toBeInTheDocument();
   });

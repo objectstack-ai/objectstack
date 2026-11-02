@@ -26,7 +26,10 @@
  * Since objectstack#27627 the page asks all of it in ONE record page payload
  * (`POST /data/OBJ/ID/page`): the record, each related list's count and first
  * rows, and the access verdicts. The pins below read that request's body for
- * the questions the separate reads used to ask.
+ * the questions the separate reads used to ask. Since objectstack#28470 the
+ * payload also carries the feed (comments and activity) when a block that
+ * draws it is on screen at open, and the attachments when the page draws them;
+ * the mention list waits for the composer's focus.
  */
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -215,7 +218,22 @@ const isPageRead = (h: Held) => h.method === 'POST' && h.path === PAGE;
 /** The record read: the page payload carries it (objectstack#27627). */
 const isRecordRead = (h: Held) => isPageRead(h) || (h.method === 'GET' && objectOf(h) === OBJECT);
 interface PageList { object: string; field: string; filter?: unknown; top: number }
-const pageBody = (h: Held) => JSON.parse(h.body || '{}') as { related?: PageList[]; explain?: string[] };
+const pageBody = (h: Held) => JSON.parse(h.body || '{}') as {
+  related?: PageList[];
+  explain?: string[];
+  discussion?: boolean;
+  activity?: { top: number };
+  attachments?: { top: number };
+};
+/** The stream parts the open's page payload asked for (objectstack#28470). */
+const pageStreams = (held: Held[]) => {
+  const body = held.filter(isPageRead).map(pageBody)[0] ?? {};
+  return {
+    discussion: body.discussion === true,
+    activity: body.activity?.top,
+    attachments: body.attachments?.top,
+  };
+};
 /** The related lists the open's page payload asked for. */
 const pageLists = (held: Held[]): PageList[] => held.filter(isPageRead).flatMap((h) => pageBody(h).related ?? []);
 const isChildRead = (h: Held) => h.method === 'GET' && [QUOTE, LINE, TASK].includes(objectOf(h) ?? '');
@@ -236,6 +254,10 @@ function answerFor(h: Held): unknown {
         }),
         explain: Object.fromEntries((body.explain ?? []).map((op) => [op, { allowed: true, record: { recordId: REC, visible: true } }])),
         approvals: { requests: [], lock: null },
+        // objectstack#28470 — the stream parts, the rows the separate reads answer.
+        ...(body.discussion ? { discussion: { comments: FEED_ROWS.sys_comment, reactions: { records: [] } } } : {}),
+        ...(body.activity ? { activity: { total: FEED_ROWS.sys_activity.length, records: FEED_ROWS.sys_activity } } : {}),
+        ...(body.attachments ? { attachments: { total: FEED_ROWS.sys_attachment.length, records: FEED_ROWS.sys_attachment } } : {}),
       },
     };
   }
@@ -501,6 +523,7 @@ const isActivityRead = isPanelRead('sys_activity');
 const isCommentRead = isPanelRead('sys_comment');
 const isUserListRead = (h: Held) => isPanelRead('sys_user')(h) && topOf(h) === 50;
 const isAttachmentListRead = (h: Held) => isPanelRead('sys_attachment')(h) && topOf(h) === 100;
+const isAttachmentRead = isPanelRead('sys_attachment');
 /** The `record:activity` block's node, as `SchemaRenderer` marks it in the DOM. */
 const ACTIVITY_MOUNT = '[data-obj-id="deal_activity"]';
 const FOUR_READS = [isActivityRead, isCommentRead, isUserListRead, isAttachmentListRead];
@@ -562,23 +585,28 @@ describe('the timeline, comments, attachments and user list wait for their panel
     expect(fallback?.textContent ?? '', table).not.toContain('signed-contract.pdf');
   });
 
-  it('opening the Activity tab reads the timeline, the comments and the user list once each, and draws their rows', async () => {
+  // The open's payload did not ask the feed (its block was not on screen), so
+  // the tab's reads are its own, made when it opens — and the mention list
+  // still waits for the composer's focus (objectstack#28470).
+  it('opening the Activity tab reads the timeline and the comments once each, and draws their rows', async () => {
     const { held, state } = await openRecordPage({ page: ACTIVITY_PAGE, object: filesObject, observer: FoldObserver });
+    expect(pageStreams(held), waveTable(held)).toMatchObject({ discussion: false, activity: undefined });
     // Everything the open asked for is answered; the tab's reads come after.
     const openedWith = held.length;
     await openTab('Activity');
     await runWaves(held, state);
     const table = waveTable(held);
-    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
+    for (const isRead of [isActivityRead, isCommentRead]) {
       const reads = held.filter(isRead);
       expect(reads, table).toHaveLength(1);
       expect(reads[0].seq, table).toBeGreaterThanOrEqual(openedWith);
     }
+    expect(held.filter(isUserListRead), table).toEqual([]);
     expect(held.filter(isActivityRead)[0].path, table).toContain('top=200');
     expect(screen.getByText('Stage moved to proposal')).toBeTruthy();
     expect(screen.getByText('Ping the buyer on Friday')).toBeTruthy();
     // The attachments list is not the Activity tab's: still unread.
-    expect(held.filter(isAttachmentListRead), table).toEqual([]);
+    expect(held.filter(isAttachmentRead), table).toEqual([]);
   });
 
   // Drift pin: "not read" holds only because the block is not MOUNTED. A tab
@@ -596,7 +624,7 @@ describe('the timeline, comments, attachments and user list wait for their panel
   // An authored `properties.defaultTab` beats `?tab=` in the renderer (the
   // `properties` hoist runs after `withPageTabsUrlSync` writes `?tab=`), so the
   // view may not judge such a strip by `?tab=`: it reads the feed at open.
-  it('a strip whose properties.defaultTab names the Activity tab still reads the feed when ?tab= names another tab', async () => {
+  it('a strip whose properties.defaultTab names the Activity tab still asks the feed when ?tab= names another tab', async () => {
     const page = {
       ...ACTIVITY_PAGE,
       regions: [
@@ -606,40 +634,49 @@ describe('the timeline, comments, attachments and user list wait for their panel
     };
     const { held } = await openRecordPage({ page, object: filesObject, observer: FoldObserver, search: '?tab=details' });
     const table = waveTable(held);
-    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) expect(held.filter(isRead), table).toHaveLength(1);
+    // The payload carries it (objectstack#28470): no read of its own.
+    expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 200 });
+    for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) expect(held.filter(isRead), table).toEqual([]);
     expect(document.querySelector(ACTIVITY_MOUNT), table).not.toBeNull();
     expect(screen.getByText('Stage moved to proposal')).toBeTruthy();
     expect(screen.getByText('Ping the buyer on Friday')).toBeTruthy();
   });
 
-  it('the foot-of-page Attachments panel reads once it scrolls into view, and draws its rows', async () => {
+  // objectstack#28470 — the payload carries the attachments: the panel takes
+  // them once it scrolls into view, and reads nothing of its own.
+  it('the foot-of-page Attachments panel draws the payload\'s rows once it scrolls into view, and reads nothing', async () => {
     const { held, state } = await openRecordPage({ page: ACTIVITY_PAGE, object: filesObject, observer: FoldObserver });
-    expect(held.filter(isAttachmentListRead), waveTable(held)).toEqual([]);
+    expect(pageStreams(held).attachments, waveTable(held)).toBe(100);
+    expect(held.filter(isAttachmentRead), waveTable(held)).toEqual([]);
     await scrollFallbackIntoView();
     await runWaves(held, state);
     const table = waveTable(held);
-    expect(held.filter(isAttachmentListRead), table).toHaveLength(1);
+    expect(held.filter(isAttachmentRead), table).toEqual([]);
     expect(screen.getByText('signed-contract.pdf')).toBeTruthy();
   });
 
-  it('CONTROL: a record opened on its Activity tab reads all three at open, and draws the same rows', async () => {
+  it('CONTROL: a record opened on its Activity tab asks the feed with its page at open, and draws the same rows', async () => {
     const { held } = await openRecordPage({ page: ACTIVITY_PAGE, object: filesObject, observer: FoldObserver, search: '?tab=activity' });
     const table = waveTable(held);
     // The mount marker the drift pin below reads is real: present when the tab is.
     expect(document.querySelector(ACTIVITY_MOUNT), table).not.toBeNull();
+    expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 200 });
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
-      expect(held.filter(isRead).map((h) => h.wave), table).toEqual([1]);
+      expect(held.filter(isRead), table).toEqual([]);
     }
     expect(screen.getByText('Stage moved to proposal')).toBeTruthy();
     expect(screen.getByText('Ping the buyer on Friday')).toBeTruthy();
   });
 
-  it('CONTROL: a record opened on its Attachments tab reads the list at open; the tab badge probe goes out either way', async () => {
+  // objectstack#28470 — the payload carries the list and its count, so the
+  // tab badge draws the count without a probe and the panel its rows without
+  // a read, whichever tab the record opens on.
+  it('CONTROL: a record opened on its Attachments tab draws the payload\'s rows; the tab badge counts them either way, with no read', async () => {
     const closed = await openRecordPage({ page: FILES_TAB_PAGE, object: filesObject, observer: FoldObserver });
     const closedTable = waveTable(closed.held);
-    expect(closed.held.filter(isAttachmentListRead), closedTable).toEqual([]);
-    const closedProbes = closed.held.filter((h) => isPanelRead('sys_attachment')(h) && topOf(h) === 1);
-    expect(closedProbes.map((h) => h.wave), closedTable).toEqual([1]);
+    expect(pageStreams(closed.held).attachments, closedTable).toBe(100);
+    expect(closed.held.filter(isAttachmentRead), closedTable).toEqual([]);
+    expect(RelatedCountStore.get('sys_attachment', `attachments:${OBJECT}`, REC), closedTable).toBe(FEED_ROWS.sys_attachment.length);
 
     cleanup();
     RelatedCountStore._reset();
@@ -648,8 +685,8 @@ describe('the timeline, comments, attachments and user list wait for their panel
 
     const open = await openRecordPage({ page: FILES_TAB_PAGE, object: filesObject, observer: FoldObserver, search: '?tab=attachments' });
     const openTable = waveTable(open.held);
-    expect(open.held.filter(isAttachmentListRead).map((h) => h.wave), openTable).toEqual([1]);
-    expect(open.held.filter((h) => isPanelRead('sys_attachment')(h) && topOf(h) === 1).map((h) => h.wave), openTable).toEqual([1]);
+    expect(open.held.filter(isAttachmentRead), openTable).toEqual([]);
+    expect(RelatedCountStore.get('sys_attachment', `attachments:${OBJECT}`, REC), openTable).toBe(FEED_ROWS.sys_attachment.length);
     expect(screen.getByText('signed-contract.pdf')).toBeTruthy();
   });
 
@@ -658,21 +695,26 @@ describe('the timeline, comments, attachments and user list wait for their panel
   // panel, the first panel of the right column — on screen at open in every
   // tier, so the feed is read at open, like an authored page opened on its
   // Activity tab. A page with tabs still waits for its tab (above).
-  it('the synthesized page reads the feed and the user list at open: its 动态 panel is on screen', async () => {
+  // objectstack#28470 — asked with the page, not beside it; the mention list
+  // waits for the composer's focus.
+  it('the synthesized page asks the feed with its page at open: its 动态 panel is on screen', async () => {
     const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver });
     const table = waveTable(held);
     expect(screen.queryByRole('tab', { name: /^Timeline/ }), table).toBeNull();
     expect(document.querySelector('[data-record-timeline-panel]'), table).not.toBeNull();
+    expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 200 });
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
-      expect(held.filter(isRead).map((h) => h.wave), table).toEqual([1]);
+      expect(held.filter(isRead), table).toEqual([]);
     }
+    expect(screen.getByText('Ping the buyer on Friday')).toBeTruthy();
   });
 
-  it('CONTROL: the synthesized page opened on its 动态 tab (?related=timeline) reads the feed and the user list at open', async () => {
+  it('CONTROL: the synthesized page opened on its 动态 tab (?related=timeline) asks the feed with its page at open', async () => {
     const { held } = await openRecordPage({ page: { ...RECORD_PAGE, isDefault: false, object: 'os_13010_other' }, observer: FoldObserver, search: '?related=timeline' });
     const table = waveTable(held);
+    expect(pageStreams(held), table).toMatchObject({ discussion: true, activity: 200 });
     for (const isRead of [isActivityRead, isCommentRead, isUserListRead]) {
-      expect(held.filter(isRead).map((h) => h.wave), table).toEqual([1]);
+      expect(held.filter(isRead), table).toEqual([]);
     }
   });
 });
@@ -757,7 +799,9 @@ describe('the 动态 stream reads the audit log when it is shown (objectui#13010
   it('an assigned page of a trackHistory object never reads the audit log', async () => {
     const { held } = await openHistory({ page: ACTIVITY_PAGE, search: '?tab=activity' });
     const table = waveTable(held);
-    expect(held.filter(isActivityRead), table).toHaveLength(1);
+    // Its activity comes with the page (objectstack#28470); the audit log is never read.
+    expect(pageStreams(held).activity, table).toBe(200);
+    expect(held.filter(isActivityRead), table).toEqual([]);
     expect(held.filter(isAuditRead), table).toEqual([]);
     expect(held.filter(isAuditUserLookup), table).toEqual([]);
   });
