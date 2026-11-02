@@ -372,6 +372,7 @@ import {
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
     carryForwardRedactedCredentials,
+    droppedWithheldKeyNotices,
     credentialChannelFor,
     restoredCredentialPathsFor,
     storedBodyForCarryForward,
@@ -9730,8 +9731,10 @@ export class ObjectStackProtocolImplementation implements
         item: any;
         /** [#22877] The bundle member the save addresses (its body's). */
         member?: string;
-    }): Promise<any> {
+    }): Promise<{ item: any; dropped: string[] }> {
         // [#25467 cut 9] The body moved to `protocol-credential-carry-forward.ts` (see `CredentialCarryForwardHost`).
+        // [#28640 ②B] It answers the grafted body and the stored positions the
+        // save drops (the redactor's `notCarriedForwardKeys`), never re-grafted.
         const host: ThisParameterType<typeof carryForwardRedactedCredentials> = {
             storedBodyForCarryForward: (...a) => this.storedBodyForCarryForward(...a),
         };
@@ -23082,7 +23085,13 @@ export class ObjectStackProtocolImplementation implements
         // lands (`restoredCredentialPathsFor`, the same plan over the same
         // stored body), never what it restores — so a rule reads a withheld
         // credential as present without any gate handling it.
-        request.item = await this.carryForwardRedactedCredentials({
+        //
+        // [#28640 ②B] …except the positions the type's redactor marks withheld
+        // AND not carried forward (a connector's undeclared `auth` keys, which
+        // no door accepts and nothing reads): those are never re-grafted, so
+        // this save drops them from the row at rest, and the answer names each
+        // one on `advisories` (`droppedWithheldKeyNotices`) — loud, never silent.
+        const carried = await this.carryForwardRedactedCredentials({
             type: singularTypeForRepo,
             repo,
             ref,
@@ -23091,6 +23100,11 @@ export class ObjectStackProtocolImplementation implements
             item: request.item,
             member: itemDiscriminator(singularTypeForRepo, request.item),
         });
+        request.item = carried.item;
+        const saveNotices = [
+            ...runtimeAdvisories,
+            ...droppedWithheldKeyNotices({ type: singularTypeForRepo, name: request.name, dropped: carried.dropped }),
+        ];
         // [#20790] …and then OUT of the body: a type with a write-only
         // credential channel (`flow`, registered by the automation plugin)
         // stores every explicit credential there and persists the body without
@@ -23211,7 +23225,11 @@ export class ObjectStackProtocolImplementation implements
                 // bypass) and that door does NOT carry this field yet — its own
                 // response contract only just landed as #7294. The asymmetry is
                 // deliberate and stated in the changeset.
-                ...(runtimeAdvisories.length > 0 ? { advisories: runtimeAdvisories } : {}),
+                //
+                // [#28640 ②B] The save's own notices ride the same key: a stored
+                // position the carry-forward dropped is named here, after the
+                // gate's findings, and the key is still omitted when both are empty.
+                ...(saveNotices.length > 0 ? { advisories: saveNotices } : {}),
                 // #5745 — the literal union, not `string`. An object-literal
                 // property widens a two-literal ternary to `string`, which made
                 // this method fail to satisfy `MetadataProtocol.saveMetaItem`
