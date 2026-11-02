@@ -117,6 +117,9 @@ describe('#29244 — a multi-value option field refuses an element that is a pla
 describe('#29244 — what the rule leaves alone', () => {
   it('a scalar on a single-value select is judged as before', () => {
     expect(errorsOf({ free: 'anything', free_radio: 'x', decl: 'a' })).toEqual([]);
+    // Present behaviour, not the contract: the spec's stored element for a
+    // free-form select is a string, and #29562 is meant to move this pin (a
+    // number or boolean on a single-value select).
     expect(errorsOf({ free: 3 })).toEqual([]);
     expect(errorsOf({ decl: 'z' }).map((e) => e.code)).toEqual(['invalid_option']);
   });
