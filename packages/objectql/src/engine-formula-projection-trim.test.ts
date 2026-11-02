@@ -187,7 +187,9 @@ describe.each<Verb>(['find', 'findOne'])('#22300 — %s: a formula in the projec
   it('CONTROL: a read with no projection is unchanged — every declared column, the formula computed', async () => {
     const { engine, projections } = await boot();
     const row = await readOne(engine, verb);
-    expect(row).toStrictEqual({ ...STORED, total_price: 21 });
+    // [#29408] `queue` (registry-injected) is declared but absent from the
+    // stored row: a whole-record read answers it null.
+    expect(row).toStrictEqual({ ...STORED, queue: null, total_price: 21 });
     expect(projections.at(-1)).toBeUndefined();
   });
 
