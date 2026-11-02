@@ -175,16 +175,43 @@ export const RollbackToPackageCommitResponseSchema = lazySchema(() => z.object({
  * (`runtime/src/domains/packages.ts`) builds the key set DYNAMICALLY from the
  * metadata type registry — one plural key per type present
  * (`manifest[plural] = items.map(clean)`), partitioning `views` per #5320 —
- * plus the four fixed keys below. Only the fixed keys are pinnable;
+ * plus the five fixed keys below. Only the fixed keys are pinnable;
  * enumerating the registry here would freeze this contract against future
  * metadata types, so everything else deliberately falls to the open
  * catch-all. Freezes nothing.
+ *
+ * `withheldMaps` (#28640 ruling ③A) names each map position the export
+ * withheld whole. The export reads SERVED items, so the connector redactor
+ * (`CONNECTOR_CREDENTIAL_MAP_PATHS`, `integration/connector-credential-redaction.ts`)
+ * has already dropped each of its four header / env maps, and the item is
+ * written with the map simply absent; this list is how an import tells an
+ * incomplete map from one that was never written. Positions only — never a
+ * header or variable name — so the credential heuristic stays the
+ * redactor's, not a contract of the export. The path vocabulary is the
+ * redactor's own `redactedKeys` spelling of those four positions, and
+ * `package-lifecycle.test.ts` holds the two equal.
  */
 export const PackageExportManifestSchema = lazySchema(() => z.object({
   id: z.string().describe('The exported package\'s id.'),
   name: z.string().describe('The exported package\'s machine name.'),
   version: z.string().describe('The exported package\'s version.'),
   label: z.string().optional().describe('Display label, when the package declares one.'),
+  withheldMaps: z.array(z.object({
+    type: z.literal('connector').describe('Metadata type of the item whose map was withheld.'),
+    name: z.string().describe('Name of the item whose map was withheld.'),
+    path: z.enum([
+      'providerConfig.headers',
+      'providerConfig.defaultHeaders',
+      'providerConfig.transport.headers',
+      'providerConfig.transport.env',
+    ]).describe('Dot path of the withheld map inside the item.'),
+  }).strict()).optional().describe(
+    'Every map the export withheld WHOLE because a served read never carries it: a connector\'s '
+    + 'header and environment-variable maps. The item is written with that map absent, so an import '
+    + 'reads this list to tell an incomplete map from one the package never had, and names each one '
+    + 'for an operator to re-enter. Positions only: no header or variable name is listed. Absent '
+    + 'when the export withheld nothing.',
+  ),
 }).catchall(z.unknown().describe(
   'One key per metadata type present in the package (plural spelling, e.g. '
   + '`objects`, `views`), each an array of cleaned item bodies. The key set '
