@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 import { BASE_FIELD_DISPLAY_WHITELIST, EXTENSION_FIELD_SUFFIX, isExtensionFieldName } from './field-customization';
 import { FieldSchema, SelectOptionSchema } from './field.zod';
-import { ObjectExtensionSchema } from './object.zod';
+import { ObjectExtensionSchema, ObjectSchema } from './object.zod';
 
 /** The object shape behind a (possibly optional) schema. */
 function shapeOf(schema: unknown): Record<string, z.ZodTypeAny> {
@@ -346,6 +346,68 @@ describe('`fieldPatches` — what the slot refuses beyond its keys, and the rena
     const description = shapeOf(ObjectExtensionSchema).fieldPatches!.description ?? '';
     for (const key of [...BASE_FIELD_DISPLAY_WHITELIST.field, ...BASE_FIELD_DISPLAY_WHITELIST.option]) {
       expect(description, key).toContain(`\`${key}\``);
+    }
+  });
+});
+
+/** Parse an extension whose `fieldPatches` is `fieldPatches`; return the issues. */
+function fieldPatchesIssues(fieldPatches: Record<string, unknown>): Issue[] {
+  const r = ObjectExtensionSchema.safeParse({ extend: 'crm_account', fieldPatches });
+  return r.success ? [] : (r.error.issues as unknown as Issue[]);
+}
+
+/** Does `ObjectSchema.fields` admit `key` as a field name? Read off its own parse, so the grammar is not restated. */
+function objectFieldsAdmit(key: string): boolean {
+  const r = ObjectSchema.safeParse({ name: 'crm_account', label: 'Account', fields: { [key]: { type: 'text', label: 'X' } } });
+  const issues = r.success ? [] : (r.error.issues as unknown as Issue[]);
+  return !issues.some((i) => i.code === 'invalid_key' && i.path.join('.') === `fields.${key}`);
+}
+
+describe('`fieldPatches` keys — the field map\'s own key grammar', () => {
+  it.each([['Industry'], ['Annual Revenue'], ['annual-revenue'], ['2nd_phone']])(
+    'refuses `%s`, which no field name can be: one `invalid_key` at its key, naming the grammar and an example',
+    (key) => {
+      const issues = fieldPatchesIssues({ [key]: { label: 'Sector' } });
+      expect(issues).toHaveLength(1);
+      expect(issues[0]!.code).toBe('invalid_key');
+      expect(issues[0]!.path).toEqual(['fieldPatches', key]);
+      expect(issues[0]!.message).toMatch(new RegExp(`^\`${key}\` cannot be a field name`));
+      expect(issues[0]!.message).toContain('lowercase snake_case such as `industry`');
+      expect(issues[0]!.message).not.toMatch(/#\d{3,}/);
+    },
+  );
+
+  it('control: a snake_case key parses, and so does a `__c` key, which stays the `__c` rule\'s to refuse', () => {
+    expect(fieldPatchesIssues({ annual_revenue: { label: 'Revenue' } })).toEqual([]);
+    const issues = fieldPatchesIssues({ region__c: { label: 'Region' } });
+    expect(issues.map((i) => [i.code, i.path.join('.')])).toEqual([['custom', 'fieldPatches.region__c']]);
+  });
+
+  it('control: the authored example of the object-extension guide still parses whole', () => {
+    // `content/docs/data-modeling/object-extensions.mdx`, "Relabelling a vendor field".
+    const parsed = ObjectExtensionSchema.parse({
+      extend: 'crm_account',
+      fieldPatches: {
+        industry: {
+          label: 'Sector',
+          inlineHelpText: 'The market the account sells into.',
+          options: { technology: { label: 'Tech' } },
+        },
+      },
+    });
+    expect(parsed.fieldPatches?.industry?.label).toBe('Sector');
+  });
+
+  it('the key schema IS the one `ObjectSchema.fields` reads: both admit exactly the same keys', () => {
+    const keys = ['industry', 'annual_revenue', '_internal', 'region__c', 'a1', 'Industry', 'Annual Revenue', 'annual-revenue', '2nd_phone', 'industryName', ''];
+    const admitted = keys.filter((key) => objectFieldsAdmit(key));
+    // Guard against a vacuous agreement: the sample holds keys on both sides of the grammar.
+    expect(admitted.length).toBeGreaterThan(0);
+    expect(admitted.length).toBeLessThan(keys.length);
+    for (const key of keys) {
+      const refusedAtKey = fieldPatchesIssues({ [key]: { label: 'L' } })
+        .some((i) => i.code === 'invalid_key' && i.path.join('.') === `fieldPatches.${key}`);
+      expect(refusedAtKey, key).toBe(!admitted.includes(key));
     }
   });
 });
