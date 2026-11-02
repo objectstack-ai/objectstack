@@ -23,14 +23,15 @@
  * asks nothing for the record it opens.
  *
  * objectstack#27524: the 动态 panel leads the page's right column in every
- * tier, so the stream is on screen at open and reads its own sources beside
- * the page request, in the same wave: the record's comment thread, its
- * activity and, once per view, the mention list. None of them is a part of the page the payload answers;
- * they are pinned on their own below, not counted as page requests.
+ * tier, so the stream is on screen at open. objectstack#28470: its sources —
+ * the record's comment thread and its activity — are parts of the payload, and
+ * the mention list waits for the composer's focus, so the open reads none of
+ * them on its own; pinned below as an empty list of stream reads
+ * (`RecordDetailView.recordOpenOneRequest-28470.test.tsx` pins the rest).
  *
  * And once the app's metadata bundle is in (`loadAppBundle`, on app entry), the
  * object definitions the blocks read come from it: a record open in a warm
- * session asks the page and no metadata at all (its 动态 stream's own reads aside), and a cold one adds at most
+ * session asks the page and no metadata at all, and a cold one adds at most
  * the one bundle request.
  */
 import * as React from 'react';
@@ -176,7 +177,7 @@ async function runWaves(held: Held[], state: { wave: number }) {
 
 const isMeta = (h: Held) => h.path.startsWith('/api/v1/meta/');
 const isPage = (h: Held) => h.method === 'POST' && /\/api\/v1\/data\/[^/?]+\/[^/?]+\/page$/.test(h.path);
-/** The 动态 stream's own reads (objectstack#27524): its sources, not the page's parts. */
+/** The 动态 stream's own reads (objectstack#27524), which the payload now answers (objectstack#28470). */
 const STREAM_SOURCES = ['sys_comment', 'sys_activity', 'sys_user'];
 const isStreamRead = (h: Held) => h.method === 'GET' && STREAM_SOURCES.some((o) => h.path.startsWith(`/api/v1/data/${o}?`));
 /** A stream read as `<object> <record>`, or `<object>` for the mention list, which names no record. */
@@ -255,9 +256,10 @@ describe('objectstack#27627 — one request opens a record page', () => {
     // Every badge's total is the payload's.
     for (const c of CHILDREN) expect(RelatedCountStore.get(c, 'contact', 'c1')).toBe(TOTAL[c]);
 
-    // The 动态 panel's own reads go out beside the page request, in its wave.
-    expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1', 'sys_user']);
-    expect(held.filter(isStreamRead).every((h) => h.wave === 1)).toBe(true);
+    // The 动态 panel's sources are the payload's parts (objectstack#28470):
+    // the open reads none of them on its own, nor the mention list.
+    expect(page.body).toMatchObject({ discussion: true, activity: { top: 200 } });
+    expect(streamReads(held)).toEqual([]);
   });
 
   it('a warm open of another record sends one page request too', async () => {
@@ -271,7 +273,7 @@ describe('objectstack#27627 — one request opens a record page', () => {
     await runWaves(held, state);
     expect(dataRequests(held).map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c2/page`]);
     expect(held.filter(isMeta)).toEqual([]);
-    expect(streamReads(held)).toEqual(['sys_activity c2', 'sys_comment c2', 'sys_user']);
+    expect(streamReads(held)).toEqual([]);
   });
 
   it("asks the record a drawer step shows next ahead, so stepping to it sends nothing", async () => {
@@ -292,8 +294,8 @@ describe('objectstack#27627 — one request opens a record page', () => {
     // The step's own page is the prefetched answer; only the next one is asked.
     expect(held.filter(isPage).map((h) => h.path)).toEqual([`/api/v1/data/${OBJECT}/c3/page`]);
     expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
-    // What the step does read is its 动态 stream, the payload's to answer no part of.
-    expect(streamReads(held)).toEqual(['sys_activity c2', 'sys_comment c2', 'sys_user']);
+    // Nor its 动态 stream: the prefetched payload carries it (objectstack#28470).
+    expect(streamReads(held)).toEqual([]);
   });
   // Merge resolution with objectstack#27056 (#27636): in a drawer, that card
   // warms the next record's related counts; the payload's prefetch carries
@@ -339,8 +341,8 @@ describe('objectstack#27627 — one request opens a record page', () => {
       `/api/v1/data/${OBJECT}/c2/page`,
     ]);
     expect(dataRequests(held).filter((h) => !isPage(h))).toEqual([]);
-    // The swapped-in record's 动态 stream; the mention list is the view's, read once.
-    expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1']);
+    // The swapped-in record's 动态 stream comes with its prefetched page (objectstack#28470).
+    expect(streamReads(held)).toEqual([]);
   });
 
   it('a cold session, entering the app as the record opens, adds one bundle request and no by-name metadata read', async () => {
@@ -350,8 +352,9 @@ describe('objectstack#27627 — one request opens a record page', () => {
     await runWaves(held, state);
     expect(held.filter(isMeta).map((h) => `${h.method} ${h.path}`)).toEqual([`GET ${BUNDLE}`]);
     expect(dataRequests(held).map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
-    // Both go out in the first wave, beside the 动态 stream's own reads: nothing waits on the other.
-    expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1', 'sys_user']);
+    // Both go out in the first wave: nothing waits on the other, and the 动态
+    // stream reads nothing of its own (objectstack#28470).
+    expect(streamReads(held)).toEqual([]);
     expect(held.every((h) => h.wave === 1)).toBe(true);
   });
 
@@ -368,8 +371,8 @@ describe('objectstack#27627 — one request opens a record page', () => {
     await runWaves(held, state);
     expect(held.filter(isMeta)).toEqual([]);
     expect(dataRequests(held).map((h) => `${h.method} ${h.path}`)).toEqual([`POST /api/v1/data/${OBJECT}/c1/page`]);
-    // What else goes out is the 动态 stream's own data reads (objectstack#27524), no metadata.
-    expect(streamReads(held)).toEqual(['sys_activity c1', 'sys_comment c1', 'sys_user']);
+    // Nothing else goes out: the 动态 stream is the payload's (objectstack#28470).
+    expect(streamReads(held)).toEqual([]);
   });
 
   it('in a drawer, an adapter without the payload keeps the count warm-up: each of the next record\'s counts is asked once', async () => {

@@ -2596,6 +2596,56 @@ function envelopePackageId(requestedPackageId: string | undefined, served: unkno
 }
 
 /**
+ * [#28831, #22024, ADR-0146 D8] The artifact envelope an item of the
+ * per-package layer ({@link ObjectStackProtocolImplementation.getMetaItemsPerPackage})
+ * wears: the artifact the read looked up at the item's package
+ * ({@link envelopePackageId}) when it is that package's OWN, else none.
+ *
+ * The artifact lookup falls back to the first code package that ships the
+ * name when the item's package ships none (`registry.getArtifactItem`'s
+ * any-composite tier). On the effective read that is how a package-less row
+ * standing in for a base wears the base's envelope. On the per-package layer
+ * every row is seated under its own package, so the fallback stamped a
+ * dependent package's row, or a `.custom` pair's undeclared row, under a base
+ * item's name with the BASE's `_packageId`, `_packageVersion` and
+ * `_provenance`: the export and the anonymous form doors' withdrawal layer
+ * read it as the base's.
+ *
+ * One exception keeps today's stamp: a stored row of the item's package that
+ * is the served override of the artifact's package, judged by
+ * {@link isServedOverrideRowOf} on the row's own `package_id` (never a body
+ * `_packageId`) at the item's own bundle member. It is served as its base's
+ * item, under its base's envelope.
+ *
+ * An item bound to no package (`boundPackageOf` answers `undefined`) keeps
+ * the lookup's answer, as before. ⛔ The lookup itself is not narrowed: its
+ * other callers rely on the fallback.
+ */
+function perPackageLayerEnvelope(
+    type: string,
+    item: unknown,
+    itemPackageId: string | undefined,
+    artifact: unknown,
+    rowsOfName: readonly any[],
+): unknown {
+    if (artifact === undefined || artifact === null || typeof artifact !== 'object') return artifact;
+    const own = boundPackageOf(itemPackageId);
+    if (own === undefined) return artifact;
+    const lender = (artifact as { _packageId?: unknown })._packageId;
+    if (lender === own) return artifact;
+    const member = bundleMemberOf(type, item);
+    const declared = rowsOfName.some((row) => {
+        if (row?.package_id !== own || !isServedOverrideRowOf(row, lender)) return false;
+        try {
+            return bundleMemberOf(type, storedRowDocument(row)) === member;
+        } catch {
+            return false;
+        }
+    });
+    return declared ? artifact : undefined;
+}
+
+/**
  * [#22057] The package a body is bound to, when it is bound to one: a
  * non-empty id that is not the `'sys_metadata'` sentinel a package-less row
  * carries. `undefined` for a package-less body.
@@ -10793,7 +10843,15 @@ export class ObjectStackProtocolImplementation implements
             const itemPackageId = envelopePackageId(packageId, it);
             // [#23074] …and to the item's own bundle member, whose artifact
             // alone may lend it an envelope ({@link mergeArtifactProtection}).
-            const a = this.lookupArtifactItem(request.type, itemName, itemPackageId, bundleMemberOf(request.type, it));
+            let a = this.lookupArtifactItem(request.type, itemName, itemPackageId, bundleMemberOf(request.type, it));
+            // [#28831] …and on the per-package layer, an item bound to a
+            // package wears ITS OWN package's artifact envelope, or none
+            // ({@link perPackageLayerEnvelope}): never another package's, which
+            // the lookup falls back to when the item's package ships no
+            // artifact of the name.
+            if (layer === 'per-package') {
+                a = perPackageLayerEnvelope(request.type, it, itemPackageId, a, lockRowsByName.get(String(itemName)) ?? []);
+            }
             let itemLock: ItemLock | undefined;
             if (typeof itemName === 'string' && (it as any)?._draft !== true) {
                 const address: ItemAddress = {
@@ -11630,12 +11688,7 @@ export class ObjectStackProtocolImplementation implements
             // added member is the address's, served from the pair's row under
             // the pair's binding (a dependent's member never is).
             if (!record && readState === 'active' && wantedMember !== undefined && typeof contentPackageId === 'string') {
-                const pairOfAddition = this.pairOfAddedMember(request.type, request.name, contentPackageId, wantedMember);
-                if (pairOfAddition !== undefined) {
-                    record = (await this.findServedOverlayRow({
-                        type: request.type, name: request.name, state: readState, packageId: pairOfAddition, ...memberOption(member),
-                    }, activeRows))?.row;
-                }
+                record = await this.findPairAddedMemberRow(request.type, request.name, contentPackageId, member, wantedMember, activeRows);
             }
             // [#23715] Two or more packages and no package-unbound draft: the
             // best-effort first match ADR-0048 §3.3 states, as before, served
@@ -12335,7 +12388,7 @@ export class ObjectStackProtocolImplementation implements
             // then the `.custom` item, `code` the base's document and
             // `effective` the override (the base's document stays reachable
             // here, ADR-0146 "Decided here" item 5).
-            const served = await this.findServedOverlayRow({
+            let served: { row: any; overrideOf?: string } | undefined = await this.findServedOverlayRow({
                 type: request.type,
                 name: request.name,
                 state: 'active',
@@ -12343,6 +12396,13 @@ export class ObjectStackProtocolImplementation implements
                 ...memberOption(member),
                 servedOverride: true,
             });
+            // [#28830, #28390 ruling A] The pair's own added member is the
+            // overlay on the base's address, as the by-name read serves it
+            // ({@link findPairAddedMemberRow}); another package's never is.
+            if (!served && wantedMember !== undefined && typeof contentPackageId === 'string') {
+                const row = await this.findPairAddedMemberRow(request.type, request.name, contentPackageId, member, wantedMember);
+                if (row) served = { row };
+            }
             overlayLockLayer = await this.overlayLockLayerAt({
                 type: request.type,
                 name: request.name,
@@ -14733,14 +14793,19 @@ export class ObjectStackProtocolImplementation implements
             onValidationAdvisory: (e: ValidationAdvisoryEvent) => { warnings.push(e); },
         };
         if (ctx !== undefined) opts.context = ctx;
-        const result = await this.engine.insert(request.object, data, opts);
+        // [#28782] A copy the engine stored but whose parent roll-up it could
+        // not recompute carries this method's answer on the refusal, as
+        // `createData` does since #28781 (`withEarnedAnswer`).
+        let stale: SummaryRecomputeRefusal | undefined;
+        const result = await this.engine.insert(request.object, data, opts)
+            .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
         // [#7823] Same ingress strip as `createData` — a clone's 201 body is
         // the same generic-data-path surface. (The SOURCE row was read through
         // the engine's find path, which already omits internal fields, so the
         // copy never carried one in; this guards the INSERT RESULT, which the
         // engine returns whole by design.)
         omitInternalFieldsFromWriteResponse(schema, result);
-        return {
+        const answer = {
             object: request.object,
             id: result.id,
             sourceId: request.id,
@@ -14748,6 +14813,8 @@ export class ObjectStackProtocolImplementation implements
             ...(dropped.length > 0 ? { droppedFields: dropped } : {}),
             ...(warnings.length > 0 ? { warnings } : {}),
         };
+        if (stale) throw withEarnedAnswer(stale, answer);
+        return answer;
     }
 
     async updateData(request: { object: string, id: string, data: any, expectedVersion?: string, context?: any }) {
@@ -17516,6 +17583,24 @@ export class ObjectStackProtocolImplementation implements
         if (shippingPackageIds(this.shippedArtifactsOf(type, name, shipping, member)).has(base)) return undefined;
         const pair = customizationPackageId(base);
         return pair.ok ? pair.value : undefined;
+    }
+
+    /**
+     * [#28802, #28830] The pair's own stored row at the bundle member `member`
+     * (`wantedMember` its discriminator value) of the name `name`, when only
+     * the pair can add that member on `base`'s address
+     * ({@link pairOfAddedMember}); else `undefined`. The one read of it the
+     * by-name read and the layered read share.
+     */
+    private async findPairAddedMemberRow(
+        type: string, name: string, base: string, member: string | undefined, wantedMember: string,
+        activeRows?: readonly StoredOverlayRow[],
+    ): Promise<any> {
+        const pairOfAddition = this.pairOfAddedMember(type, name, base, wantedMember);
+        if (pairOfAddition === undefined) return undefined;
+        return (await this.findServedOverlayRow({
+            type, name, state: 'active', packageId: pairOfAddition, ...memberOption(member),
+        }, activeRows))?.row;
     }
 
     /**

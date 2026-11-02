@@ -52,6 +52,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -63,6 +78,21 @@
     },
     {
       "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
       "verb": "update",
       "pinned": 1
     },

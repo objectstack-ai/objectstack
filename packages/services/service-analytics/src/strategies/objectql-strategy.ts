@@ -7,6 +7,7 @@ import type { AggregationFunction, Cube } from '@objectstack/spec/data';
 import { markFilterSubtreeProvenance } from '@objectstack/spec/data';
 import { StandardErrorCode } from '@objectstack/spec/api';
 import type { AnalyticsStrategy, StrategyContext, DatasetScopedStrategyContext } from './types.js';
+import { assertDatasetGroupColumnsDistinct } from '../dataset-group-column-door.js';
 import {
   declaredDatetimeLowering,
   declaredDateColumn,
@@ -270,8 +271,12 @@ function lookupCubeMember(
   return undefined;
 }
 
-/** The column `member` reads on the base object; `ObjectQLStrategy.resolveFieldName` is this function. */
-function resolveCubeFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
+/**
+ * The column `member` reads on the base object; `ObjectQLStrategy.resolveFieldName` is this function.
+ * Module-level, and not exported from the package root, so the draft preview names the members over a
+ * column with the strategy's own reading (`assertDatasetGroupColumnsDistinct`).
+ */
+export function resolveCubeFieldName(cube: Cube, member: string, kind: 'dimension' | 'measure' | 'any'): string {
   if (kind === 'dimension' || kind === 'any') {
     const dim = lookupCubeMember(cube, member, 'dimension');
     if (dim) return dim.sql.replace(/^\$/, '');
@@ -315,8 +320,8 @@ function granularitiesByDimension(query: AnalyticsQuery): Map<string, string[]> 
  *
  * [#28765] Module-level, and not exported from the package root, so the draft
  * preview, which hands no engine anything, judges the same keys at the same
- * positions and refuses a selection the engine would refuse with the engine's
- * own words (`assertPreviewGroupColumnsDistinct`). It reads only the cube.
+ * positions and refuses a selection the live faces refuse with their words
+ * (`assertDatasetGroupColumnsDistinct`, #28798). It reads only the cube.
  */
 export function aggregateGroupKeys(query: AnalyticsQuery, cube: Cube): AggregateGroupKey[] {
   // Build groupBy from dimensions, honouring `timeDimensions` granularity.
@@ -502,6 +507,12 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
     if (plan) {
       return this.executeCrossObject(cube, query, aggregations, filter, plan, ctx);
     }
+
+    // [#28798] A selection asking one column for two values under one name is
+    // refused here, in the dataset's words, before the engine refuses the same
+    // keys with a prescription (`alias`) no dataset selection can spell. Right
+    // before the call, so every refusal above keeps its precedence.
+    assertDatasetGroupColumnsDistinct(objectName, groupBy, query, (m) => this.resolveFieldName(cube, m, 'dimension'));
 
     // ADR-0021 D-C — the base object's read scope (tenant + RLS) MUST be ANDed
     // in before the query leaves the strategy (#3597). A base-only query has a
@@ -1466,6 +1477,9 @@ export class ObjectQLStrategy implements AnalyticsStrategy {
       for (const gran of grans) pushGroupKey(groupBy, { field, dateGranularity: gran });
       baseDimFields.push(field);
     }
+
+    // [#28798] The dataset refusal for a column asked twice, as on the direct path.
+    assertDatasetGroupColumnsDistinct(baseObject, groupBy, query, (m) => this.resolveFieldName(cube, m, 'dimension'));
 
     // Base aggregate, grouped by the FK, scoped to the base object. Threads the
     // ExecutionContext for the engine-side second belt too (#3602).

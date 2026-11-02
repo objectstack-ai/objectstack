@@ -154,7 +154,7 @@ function Harness({ context }: { context?: WidgetContext }) {
   );
 }
 
-/** The root of a subject spelling — `user` for `user.isAdmin`. */
+/** The root of a subject spelling — `user` for `user.isPlatformAdmin`. */
 const rootOf = (subject: string) => subject.split('.')[0];
 
 /**

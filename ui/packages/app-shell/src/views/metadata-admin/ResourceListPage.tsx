@@ -27,18 +27,6 @@ import {
 } from '@object-ui/components';
 import { Input } from '@object-ui/components';
 import { Badge } from '@object-ui/components';
-import { Switch } from '@object-ui/components';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  buttonVariants,
-} from '@object-ui/components';
 import { toast } from 'sonner';
 import {
   Select,
@@ -87,9 +75,9 @@ import {
   isCatalogItemActive,
   readCatalogActivation,
   writeCatalogActivation,
-  type CatalogActivation,
 } from './catalog-activation.js';
-import { countsCatalogHolders, readCatalogHolderCount, type CatalogHolderCount } from './catalog-holders.js';
+import { countsCatalogHolders, readCatalogHolderCount } from './catalog-holders.js';
+import { CatalogActiveCell, DeactivateConfirmDialog, type CatalogLedger, type PendingDeactivation } from './CatalogActiveSwitch.js';
 import { useCanAuthorMetadata } from '../../hooks/useCanAuthorMetadata.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { resolveAffordance, type SchemaLike } from '@object-ui/core';
@@ -240,11 +228,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // naming how many users lose the access: the holder count, read from the
   // server when the confirm opens (`catalog-holders.ts`). Switching on asks
   // nothing. `holders` is `null` while the count is read.
-  const [pendingOff, setPendingOff] = React.useState<{
-    name: string;
-    label: string;
-    holders: CatalogHolderCount | { error: string } | null;
-  } | null>(null);
+  const [pendingOff, setPendingOff] = React.useState<PendingDeactivation | null>(null);
   const adapter = useAdapter();
   const locale = useMetadataLocale();
   // objectui#12982 — a declaration-only catalog (declared sharing rules): the
@@ -1277,133 +1261,6 @@ const HEAD_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-muted)_30%,
 const INVALID_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-destructive)_4%,transparent)]';
 const WARN_ROW_TINT = '[--os-row-tint:color-mix(in_oklab,var(--color-amber-500)_5%,transparent)]';
 const HOVER_ROW_TINT = 'hover:[--os-row-tint:color-mix(in_oklab,var(--color-accent)_50%,transparent)]';
-
-/**
- * objectui#13338 — the confirm a permission set's or a position's switch asks
- * before it switches the item OFF, naming how many users lose the access. The
- * count is the server's, read when the confirm opens; while it is read the
- * confirm says so and its Deactivate waits. A count that could not be read is
- * said as such (never as "0 users"), and the admin may still go ahead: the
- * confirm informs, it does not gate. Cancel leaves the item on.
- */
-function DeactivateConfirmDialog({
-  pending,
-  locale,
-  onCancel,
-  onConfirm,
-}: {
-  pending: { name: string; label: string; holders: CatalogHolderCount | { error: string } | null } | null;
-  locale: string;
-  onCancel: () => void;
-  onConfirm: (name: string) => void;
-}) {
-  const holders = pending?.holders ?? null;
-  let impact: string;
-  if (holders === null) impact = t('engine.catalog.deactivate.counting', locale);
-  else if ('error' in holders) impact = tFormat('engine.catalog.deactivate.countFailed', locale, { message: holders.error });
-  else if (holders.everyone) impact = t('engine.catalog.deactivate.everyone', locale);
-  else if (holders.truncated) impact = tFormat('engine.catalog.deactivate.holdersAtLeast', locale, { count: holders.count });
-  else if (holders.count === 1) impact = t('engine.catalog.deactivate.holdersOne', locale);
-  else impact = tFormat('engine.catalog.deactivate.holders', locale, { count: holders.count });
-  return (
-    <AlertDialog
-      open={pending !== null}
-      onOpenChange={(open) => {
-        if (!open) onCancel();
-      }}
-    >
-      <AlertDialogContent data-testid="catalog-deactivate-dialog">
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            {tFormat('engine.catalog.deactivate.title', locale, { name: pending?.label ?? '' })}
-          </AlertDialogTitle>
-          <AlertDialogDescription data-testid="catalog-deactivate-impact">{impact}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel data-testid="catalog-deactivate-cancel">{t('engine.cancel', locale)}</AlertDialogCancel>
-          <AlertDialogAction
-            className={buttonVariants({ variant: 'destructive' })}
-            disabled={holders === null}
-            data-testid="catalog-deactivate-confirm"
-            onClick={() => {
-              if (pending) onConfirm(pending.name);
-            }}
-          >
-            {t('engine.catalog.deactivate.confirm', locale)}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
-/** The activation ledger's states for a type, and the names its door refuses. */
-interface CatalogLedger {
-  states: CatalogActivation;
-  anchors: ReadonlySet<string>;
-}
-
-/**
- * objectui#7611 — one item's active switch in the environment scope, showing
- * the activation ledger's state (see `catalog-activation.ts`). Its non-switch
- * states are each said, never rendered as a guessed "on": the state is still
- * loading, or the read failed (said in words, with the server's reason). An audience anchor shows its state on a
- * disabled switch with the reason, because the door refuses to switch it.
- */
-function CatalogActiveCell({
-  itemName,
-  ledger,
-  refusal,
-  canSwitch,
-  busy,
-  locale,
-  onToggle,
-}: {
-  itemName: string;
-  ledger: CatalogLedger | 'error' | null;
-  /** Why the read failed: the server's refusal, as `actionErrorDetail` read it. */
-  refusal: string | null;
-  canSwitch: boolean;
-  busy: boolean;
-  locale: string;
-  onToggle: (itemName: string, enabled: boolean) => void;
-}) {
-  if (ledger === null) return <span className="text-xs text-muted-foreground">…</span>;
-  if (ledger === 'error') {
-    // objectui#13091 — said in plain words, never a bare "?"; the server's
-    // own sentence for why rides in the title.
-    const why = [t('engine.catalog.active.unknown', locale), refusal].filter(Boolean).join(' ');
-    return (
-      <span
-        className="text-xs text-muted-foreground whitespace-nowrap"
-        title={why}
-        data-testid={`catalog-active-unreadable-${itemName}`}
-      >
-        {t('engine.catalog.active.notVisible', locale)}
-      </span>
-    );
-  }
-  const enabled = isCatalogItemActive(ledger.states, itemName);
-  const anchor = ledger.anchors.has(itemName);
-  // A switch the caller cannot use states the state, and offers no click; the
-  // page's read-only reason says why.
-  const label = anchor
-    ? t('engine.catalog.active.anchor', locale)
-    : canSwitch
-      ? t(enabled ? 'engine.catalog.active.on' : 'engine.catalog.active.off', locale)
-      : t(enabled ? 'engine.catalog.status.active' : 'engine.catalog.status.inactive', locale);
-  return (
-    <span className="inline-flex" title={label}>
-      <Switch
-        checked={enabled}
-        disabled={anchor || !canSwitch || busy}
-        onCheckedChange={() => onToggle(itemName, enabled)}
-        aria-label={label}
-        data-testid={`catalog-active-${itemName}`}
-      />
-    </span>
-  );
-}
 
 /**
  * The whole row opens its item (objectstack#25333), the way a record list's

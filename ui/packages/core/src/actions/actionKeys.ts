@@ -242,6 +242,11 @@ export const SPEC_ACTION_KEYS = [
   'body',
   'bodyExtra',
   'bodyShape',
+  // Added to `ActionSchema` by objectstack#28519: the dismiss button label of
+  // the action's confirm or param dialog. Listed for this array's contract
+  // alone, like `description` below: `ActionDef` does not declare it yet, and
+  // the dialogs reading it are the console's own follow-up.
+  'cancelText',
   'component',
   'confirmText',
   // Added to `ActionSchema` in @objectstack/spec 17.0.0-rc.6. Listed here purely
