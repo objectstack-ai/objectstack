@@ -119,7 +119,7 @@ async function exportCsv(): Promise<string[][]> {
   fireEvent.click(await screen.findByRole('button', { name: 'Export' }));
   fireEvent.click(await screen.findByTestId('report-export-csv'));
   await waitFor(() => expect(downloads).toHaveLength(1));
-  return parseCsv((await downloads[0].blob.text()).replace(/^﻿/, ''));
+  return parseCsv((await downloads[0].blob.text()).replace(/^\uFEFF/, ''));
 }
 
 // `region` declares a nullLabel; `kind` declares none.
