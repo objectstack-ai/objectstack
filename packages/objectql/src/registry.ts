@@ -4897,21 +4897,29 @@ export class SchemaRegistry {
     if (body === null || typeof body !== 'object') return body;
     const objectName = (body as { name?: unknown }).name;
     if (typeof objectName !== 'string' || objectName === '') return body;
-    const collection = this.metadata.get('action');
-    if (!collection || collection.size === 0) return body;
     const declared = (body as { actions?: unknown }).actions;
     const base: any[] = Array.isArray(declared) ? declared : [];
+    // [#28877] On the SERVED layer the object's own actions that launch into a
+    // disabled package are withheld too ({@link isActionWithheldByDisabledPackage}),
+    // as an attached one is: the same-stack merge puts a bound action here, not
+    // in the collection below. The code layer is the artifact as shipped and
+    // keeps them. A withheld name still blocks an attached twin of that name,
+    // so nothing stands in for it.
+    const kept = layer === 'served' ? base.filter((action) => !this.isActionWithheldByDisabledPackage(action)) : base;
     const present = new Set<unknown>(base.map((action) => action?.name));
     const fresh: any[] = [];
-    for (const action of layer === 'code' ? this.boundCodeActions() : this.boundServedActions()) {
-      if (standaloneActionOwnerKey(action) !== objectName || present.has(action.name)) continue;
-      present.add(action.name);
-      fresh.push(action);
+    const collection = this.metadata.get('action');
+    if (collection && collection.size > 0) {
+      for (const action of layer === 'code' ? this.boundCodeActions() : this.boundServedActions()) {
+        if (standaloneActionOwnerKey(action) !== objectName || present.has(action.name)) continue;
+        present.add(action.name);
+        fresh.push(action);
+      }
     }
-    if (fresh.length === 0) return body;
+    if (fresh.length === 0 && kept.length === base.length) return body;
     // The object's own actions keep their served order, untouched; the
     // attached ones follow, ordered among themselves by `order`.
-    return { ...body, actions: [...base, ...sortActionsByOrder(fresh)] };
+    return { ...body, actions: [...kept, ...sortActionsByOrder(fresh)] };
   }
 
   /**
@@ -4949,7 +4957,8 @@ export class SchemaRegistry {
       const name: string = (action as any).name;
       if (key !== name && collection.has(name)) continue;
       if (isObjectLessActionKey(standaloneActionOwnerKey(action))) continue;
-      if (this.isPackageDisabled((action as any)._packageId)) continue;
+      // [#28877] …and so is an action that launches into a disabled package.
+      if (this.isActionWithheldByDisabledPackage(action)) continue;
       out.push(action);
     }
     return out;
@@ -5326,10 +5335,14 @@ export class SchemaRegistry {
    * Why this is public API rather than the protocol reaching for the
    * contributor list: `GET /meta/object/:name` reaches an object body through a
    * source this registry never sees — the copy `MetadataPlugin` registers into
-   * the `metadata` SERVICE when a deployment ingests a compiled artifact, where
-   * `objects` and `objectExtensions` are stored as SEPARATE collections. That
-   * body is ONE LAYER, and serving a layer as the resolved schema is what
-   * dropped every `objectExtensions` field from the by-name read (and from both
+   * the `metadata` SERVICE when a deployment ingests a compiled artifact. That
+   * service holds the owner's declaration only: a code package's
+   * `objectExtensions` are never stored there as items, because the ObjectQL
+   * engine's `registerApp` registers each one as an `'extend'` contributor
+   * here, and `MetadataPlugin` files no item from that collection (an
+   * extension carries `extend` and no `name`). That body is ONE LAYER, and
+   * serving a layer as the resolved schema is what dropped every
+   * `objectExtensions` field from the by-name read (and from both
    * layers of `?layers=true`) while `GET /meta/object` — which reads
    * `resolveObject` — kept them. Two folds would re-open exactly that seam one
    * level down, so there is one.
@@ -6953,6 +6966,10 @@ export class SchemaRegistry {
       const target = standaloneActionOwnerKey(item);
       if (!isObjectLessActionKey(target)) this.invalidate(target);
     }
+    // [#28877] A flow can change whether an action launching it is withheld
+    // ({@link isActionWithheldByDisabledPackage}), which only a disable makes
+    // possible.
+    if (type === 'flow' && this.hasDisabledPackage()) this.invalidateAll();
     this.log(`[Registry] Registered ${type}: ${storageKey}`);
   }
 
@@ -6982,7 +6999,8 @@ export class SchemaRegistry {
     // Every resolved object may carry this list's options; the removal below
     // is synchronous, so the next fold re-resolves against the store without it.
     // [#24400] …and an object may carry this bound action ({@link attachBoundActions}).
-    if (type === 'picklist' || type === 'action') this.invalidateAll();
+    // [#28877] …or one that launches this flow while a package is disabled.
+    if (type === 'picklist' || type === 'action' || (type === 'flow' && this.hasDisabledPackage())) this.invalidateAll();
     const collection = this.metadata.get(type);
     if (!collection) {
       console.warn(`[Registry] Attempted to unregister non-existent ${type}: ${name}`);
@@ -7144,7 +7162,8 @@ export class SchemaRegistry {
     // object is re-derived without its lists and its added values.
     const droppedExtensions = this.unregisterPicklistExtensionsByPackage(packageId);
     // [#24400] …and so is every object its bound actions were attached to.
-    if (droppedExtensions || removed.some((r) => r.startsWith('picklist/') || r.startsWith('action/'))) this.invalidateAll();
+    // [#28877] …and every object whose actions a flow of this package withheld.
+    if (droppedExtensions || removed.some((r) => r.startsWith('picklist/') || r.startsWith('action/') || r.startsWith('flow/'))) this.invalidateAll();
     return { removed, orphanedOverlays };
   }
 
@@ -7532,6 +7551,74 @@ export class SchemaRegistry {
   }
 
   /**
+   * [#28877] Whether `name` addresses a flow that ONLY disabled packages ship:
+   * at least one registered flow of that name, and every one of them owned by
+   * a disabled package. Those are the flows a disable takes out of the
+   * automation engine's binding (it binds from the list, which omits a
+   * disabled package's items), so a launch of `name` answers "Flow not found".
+   * A flow some enabled package or an overlay row also serves, and a name the
+   * registry holds no flow of (a runtime-authored flow it never hydrated), are
+   * not disabled.
+   */
+  isFlowOfDisabledPackage(name: string): boolean {
+    const collection = this.metadata.get('flow');
+    if (!collection || typeof name !== 'string' || name === '') return false;
+    let found = false;
+    for (const [key, flow] of collection) {
+      if (key !== name && !key.endsWith(`:${name}`)) continue;
+      if (!this.isPackageDisabled((flow as { _packageId?: string } | undefined)?._packageId)) return false;
+      found = true;
+    }
+    return found;
+  }
+
+  /**
+   * [#24400, #28877] Whether a disable withholds `action` from the served
+   * reads: the action's own package is disabled (#24400: a disabled package's
+   * bound actions are withdrawn), or it LAUNCHES into a disabled package, where
+   * the launch could only fail (#28117 ruling A: disabled = hidden, and refused
+   * on the data plane):
+   *
+   *  - an action bound by `objectName` to an object of a disabled package: the
+   *    object's own read is refused, so the action is not listed beside it;
+   *  - a `type: 'flow'` action whose `target` is a flow only disabled packages
+   *    ship ({@link isFlowOfDisabledPackage}): its launch answers "Flow not
+   *    found";
+   *  - an action with a param whose `objectOverride` names an object of a
+   *    disabled package ({@link isObjectPackageDisabled}): its dialog backs the
+   *    param by a field of an object the data plane refuses.
+   *
+   * The ONE predicate for both faces: the registry's served object fold
+   * ({@link attachBoundActions}) and the protocol's `action` list and by-name
+   * read. An action that merely names such an object anywhere else (a URL, a
+   * label) is not withheld.
+   */
+  isActionWithheldByDisabledPackage(action: unknown): boolean {
+    if (!action || typeof action !== 'object') return false;
+    const a = action as { _packageId?: string; objectName?: unknown; type?: unknown; target?: unknown; params?: unknown };
+    if (this.isPackageDisabled(a._packageId)) return true;
+    if (!this.hasDisabledPackage()) return false;
+    if (typeof a.objectName === 'string' && a.objectName !== '' && this.isObjectPackageDisabled(a.objectName)) return true;
+    if (a.type === 'flow' && typeof a.target === 'string' && this.isFlowOfDisabledPackage(a.target)) return true;
+    if (Array.isArray(a.params)) {
+      for (const param of a.params) {
+        const override = (param as { objectOverride?: unknown } | null | undefined)?.objectOverride;
+        if (typeof override === 'string' && override !== '' && this.isObjectPackageDisabled(override)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** [#28877] Whether any installed package is disabled — the cheap gate before the launch walk. */
+  private hasDisabledPackage(): boolean {
+    for (const pkg of this.metadata.get('package')?.values() ?? []) {
+      const p = pkg as { enabled?: boolean; status?: string } | undefined;
+      if (p?.enabled === false || p?.status === 'disabled') return true;
+    }
+    return false;
+  }
+
+  /**
    * Get all registered metadata types (Kinds)
    */
   getRegisteredTypes(): string[] {
@@ -7904,6 +7991,11 @@ export class SchemaRegistry {
     // downstream of `unregisterObjectsByPackage`, the one step that can REFUSE
     // (ADR-0029), so a refused uninstall still removes nothing at all.
     if (options?.keepBootSeed !== true) this.initialDisabledPackageIds.delete(id);
+
+    // [#28877] A disabled package's objects and flows withheld other packages'
+    // actions ({@link isActionWithheldByDisabledPackage}); with the record gone
+    // nothing is disabled, so every cached fold is re-derived.
+    if (this.isPackageDisabled(id)) this.invalidateAll();
 
     // Remove package record
     const collection = this.metadata.get('package');

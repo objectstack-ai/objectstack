@@ -19,9 +19,12 @@
  * is repeated here rather than exported from `@objectstack/spec`, which keeps
  * no internal entry: the order prefers that to a new public helper.
  *
- * Only top-level `subflow` / `map` nodes are read, the ones
- * {@link AutomationEngine.subflowTargets} answers, so the gate and the
- * re-judge read the same calls.
+ * Only top-level `subflow` / `map` nodes are read, here and in a child: a
+ * call inside a region body cannot suspend the run, because a region cannot
+ * carry a durable pause and the run fails at its boundary instead (#28846).
+ * The re-judge finds its callers through
+ * {@link AutomationEngine.subflowTargets}, which reads every region depth, so
+ * it re-asks a superset of the flows this reading can move.
  */
 
 import { FLOW_PAUSE_CAPABLE_NODE_TYPES, collectFlowGraphs } from '@objectstack/spec/automation';

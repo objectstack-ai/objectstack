@@ -745,6 +745,25 @@ export function isItemOfDisabledPackage(registry: any, item: unknown): boolean {
 }
 
 /**
+ * [#28877] Whether a disable withholds the `action` item `item` from the SERVED
+ * reads: the registry's `isActionWithheldByDisabledPackage`, the ONE predicate
+ * its served object fold (#24400's bound-action attach) asks — its own package
+ * disabled, its `objectName` object in a disabled package, or it launches into
+ * one (a `type: 'flow'` target only disabled packages ship, or a param whose
+ * `objectOverride` object belongs to a disabled package). Asked by the effective served list ({@link
+ * ObjectStackProtocolImplementation.getMetaItems}) and the served by-name read
+ * of an `action`, so `GET /meta/action` and the console's object read withhold
+ * the same actions. The execution face and the per-package layer (the package
+ * export) do not ask it: they keep what each package ships. Optional-called,
+ * as {@link isItemOfDisabledPackage} is: a registry that cannot answer hides
+ * nothing more than that predicate does.
+ */
+export function isActionWithheldByDisabledPackage(registry: any, item: unknown): boolean {
+    return typeof registry?.isActionWithheldByDisabledPackage === 'function'
+        && registry.isActionWithheldByDisabledPackage(item) === true;
+}
+
+/**
  * The strict draft read's `404 NO_DRAFT`: no pending draft at this address
  * (ADR-0005 §draft-lifecycle). [#24210] One constructor for the read that
  * finds no draft row and the read of a disabled package's draft, so the two
@@ -9352,10 +9371,13 @@ export class ObjectStackProtocolImplementation implements
      * object's resolved schema is DEFINED (ADR-0029 D9.2 / D9.6) as a base layer
      * with its `extend` contributors folded on, and the MetadataService copy is
      * only the base layer. A deployment that ingests a compiled artifact
-     * (`artifactSource`, i.e. every sealed/served runtime) registers `objects`
-     * and `objectExtensions` into that service as SEPARATE collections, so the
-     * body this method receives is the owner's declaration with no extender in
-     * it. Serving it unfolded is what made the showcase's three
+     * (`artifactSource`, i.e. every sealed/served runtime) registers its
+     * `objects` into that service, and its `objectExtensions` never reach it as
+     * items: the ObjectQL engine's `registerApp` registers each one as an
+     * `'extend'` contributor of its target object, and the artifact loader files
+     * no item from that collection, because an extension carries `extend` and no
+     * `name`. So the body this method receives is the owner's declaration with
+     * no extender in it. Serving it unfolded is what made the showcase's three
      * `objectExtensions` fields readable through `GET /meta/object`, writable
      * through the data API, and absent from `GET /meta/object/:name` — the read
      * the edit and new forms derive from.
@@ -10729,6 +10751,12 @@ export class ObjectStackProtocolImplementation implements
         // by-name read asks, so the list and the by-name read hide the same items.
         if (request.type !== 'package') {
             items = (items as any[]).filter((it) => !isItemOfDisabledPackage(this.engine.registry, it));
+        }
+        // [#28877] …and, on the effective served list, an action that launches
+        // into a disabled package ({@link isActionWithheldByDisabledPackage}),
+        // as the served object read withholds it from the object's actions.
+        if (request.type === 'action' && audience === 'served' && servedOverride) {
+            items = (items as any[]).filter((it) => !isActionWithheldByDisabledPackage(this.engine.registry, it));
         }
 
         // Canonical-shape exposure (ADR-0017, "Object has-many View"): a

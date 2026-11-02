@@ -119,11 +119,40 @@ export function notConnectedReason(connector: string, organizationId?: string): 
         + 'dispatch uses that connection (ADR-0143 D4)';
 }
 
-/** The dispatch refusal of an organization whose grant the authorization server refused. */
-export function reconnectRequiredReason(connector: string, organizationId: string): string {
-    return `connector instance '${connector}' needs to be reconnected for organization '${organizationId}': its authorization `
-        + 'server refused the grant (revoked, or expired with no usable refresh). Reconnect required: an administrator connects '
-        + 'it again, and the next dispatch uses the new connection (ADR-0143 D4)';
+/**
+ * [#28863] Why a refresh left a connection `reconnect_required`, as
+ * {@link reconnectRequiredReason} words it: the authorization server refused
+ * the grant (`invalid_grant`); it issued no refresh token; or the connection
+ * keeps no client to refresh with. The last two never ask the server. (The
+ * fourth way a connection is marked, the upstream refusing its token at MCP
+ * tool discovery, words its own reason in `plugin.ts`.)
+ */
+export type ReconnectRequiredCause = 'refused' | 'no_refresh_token' | 'no_client';
+
+const RECONNECT_REQUIRED_CAUSES: Readonly<Record<ReconnectRequiredCause, string>> = {
+    refused: 'its authorization server refused the grant (revoked, or expired with no usable refresh)',
+    // Not "expired": a refresh also runs on a cache miss (a fresh replica, a
+    // revision another replica moved) and on a dispatch's 401, while the
+    // access token may still be valid.
+    no_refresh_token: 'its authorization server issued no refresh token, so an access token the connection has to renew '
+        + 'cannot be renewed',
+    no_client: 'its connection keeps no client to refresh with, so an access token it has to renew cannot be renewed',
+};
+
+/**
+ * The dispatch refusal, and the stored `status_reason`, of an organization
+ * whose connection needs to be reconnected. `cause` names what happened on
+ * the path that marked it; with none, the authorization server's refusal, as
+ * before.
+ */
+export function reconnectRequiredReason(
+    connector: string,
+    organizationId: string,
+    cause: ReconnectRequiredCause = 'refused',
+): string {
+    return `connector instance '${connector}' needs to be reconnected for organization '${organizationId}': `
+        + `${RECONNECT_REQUIRED_CAUSES[cause]}. Reconnect required: an administrator connects it again, and the next dispatch `
+        + 'uses the new connection (ADR-0143 D4)';
 }
 
 /** Create the handle of one `oauth2` instance. */
@@ -266,13 +295,11 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
                 + 'read back now; the next dispatch retries');
         }
         if (refreshToken === undefined) {
-            throw await grantRefused(current, reconnectRequiredReason(connector, organizationId)
-                + '. Its authorization server issued no refresh token, so an expired access token cannot be renewed');
+            throw await grantRefused(current, reconnectRequiredReason(connector, organizationId, 'no_refresh_token'));
         }
         const endpoint = await endpointOf(current);
         if (endpoint === undefined) {
-            throw await grantRefused(current, reconnectRequiredReason(connector, organizationId)
-                + '. Its connection keeps no client to refresh it with');
+            throw await grantRefused(current, reconnectRequiredReason(connector, organizationId, 'no_client'));
         }
         const params: Record<string, string> = { grant_type: 'refresh_token', refresh_token: refreshToken };
         if (endpoint.resource) params.resource = endpoint.resource;
@@ -280,7 +307,9 @@ export function createOAuth2GrantHandle(deps: OAuth2GrantHandleDeps): OAuth2Gran
         try {
             token = await tokenRequest(params, endpoint);
         } catch (err) {
-            if (err instanceof OAuth2GrantRefusedError) throw await grantRefused(current, reconnectRequiredReason(connector, organizationId));
+            if (err instanceof OAuth2GrantRefusedError) {
+                throw await grantRefused(current, reconnectRequiredReason(connector, organizationId, 'refused'));
+            }
             throw err;
         }
         const written = await deps.connections.recordRefresh(current, {

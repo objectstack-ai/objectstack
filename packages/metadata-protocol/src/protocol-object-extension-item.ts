@@ -4,11 +4,14 @@
  * [#28574, ADR-0146 D10 / D2 / D3] An object extension is an authorable item
  * of a writable package.
  *
- * `object_extension` is the type the artifact loader already stores a code
- * package's `objectExtensions` under; since #28574 it is also a row a running
- * deployment writes. Studio's add-field on a base object (N-23c) writes
- * exactly this: an extension in the base's paired `.custom`, its fields
- * suffixed `__c`, the base untouched. The row is stored under the writing
+ * A code package's `objectExtensions` are never stored as items of this type:
+ * the ObjectQL engine's `registerApp` registers each one as an `'extend'`
+ * contributor of its target object. The artifact loader maps that collection
+ * to this type name but files no item from it, because an extension carries
+ * `extend` and no `name`. This type's items are the stored rows the
+ * `/api/v1/meta` doors write (#28574). Studio's add-field on a base object
+ * (N-23c) writes exactly this: an extension in the base's paired `.custom`,
+ * its fields suffixed `__c`, the base untouched. The row is stored under the writing
  * package with the TARGET object's name as its row name — one extension per
  * package per target — and its body is `ObjectExtensionSchema` as it stands:
  * it carries `extend` and no `name`.

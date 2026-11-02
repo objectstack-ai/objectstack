@@ -26,11 +26,7 @@
 import { deriveFieldGroupLayout } from '@objectstack/spec/data';
 import type { SelectOptionKind, ServiceObject } from '@objectstack/spec/data';
 import { detectStatusField } from '@object-ui/types';
-// The retirement gate (objectui#4914, ruling B). `@object-ui/fields`
-// re-exports the same function; this module reads it from `@object-ui/core`
-// because that is the dependency this package's synth layer already carries
-// at this depth, and both spellings resolve to one table and one dedupe set.
-import { isRetiredFieldType, reportRetiredFieldType, resolveNameField } from '@object-ui/core';
+import { resolveNameField } from '@object-ui/core';
 import { inferDetailColumns } from '../autoLayout';
 import { relatedListEntryNames } from './relatedListEntry';
 
@@ -447,204 +443,51 @@ export function resolveTitleField(def: ObjectDefLike | undefined): string | null
 }
 
 /**
- * The members of every field group whose ADR-0089 `visibleWhen` the details
- * body evaluates per record (objectui#12720).
- *
- * Read through {@link deriveFieldGroupDetailEntries}, the derivation the
- * body's own group gate (`resolveSectionGroup` in `record-details.tsx`)
- * resolves `{ group }` references against, and with that gate's own test,
- * `entry.visibleWhen != null`. So the members named here are exactly the
- * fields the body hides with their group when the predicate is FALSE, and the
- * strip cannot hold a different idea of which fields are gated.
- *
- * ⛔ The predicate is not evaluated here. The derivation runs from object
- * metadata with no record in hand, so it can only ask WHETHER a member's
- * group is gated, never what the gate answers. The strip therefore declines
- * every such member, on every record: a chip that comes and goes per record
- * is not an at-a-glance fact, and the one evaluator stays the body's
- * (`resolveFieldRuleState`, the form's). Where the group is shown, its members
- * are still drawn once, in the body: a field this derivation declines is not
- * in the strip's list, so it is not in the body's `hideFields` either.
- *
- * Only the DERIVED strip consults this. A declared `highlightFields` entry
- * inside a gated group is left as the author wrote it.
- */
-function membersOfGatedFieldGroups(def: ObjectDefLike): Set<string> {
-  const out = new Set<string>();
-  for (const entry of deriveFieldGroupDetailEntries(def) ?? []) {
-    if (entry.key === undefined || entry.visibleWhen == null) continue;
-    for (const field of entry.section.fields as Array<{ name: string }>) out.add(field.name);
-  }
-  return out;
-}
-
-/**
  * How many highlights the record header shows (objectstack#27055, the v3
  * header: 「要点 6 项等宽」 — the same six Studio's highlight editor offers).
- * A declared `highlightFields` list longer than this is cut here, and so is
- * the derived one.
+ * A declared `highlightFields` list longer than this is cut here.
  */
 export const RECORD_HIGHLIGHTS_MAX = 6;
 
 /**
- * Pick up to N "highlight" fields by name. Skips the status field
- * (already shown in `record:path`) and obvious junk like id / created_at.
- * Members of a group gated by `visibleWhen` are never picked
- * ({@link membersOfGatedFieldGroups}, objectui#12720).
+ * The record's highlight strip: the object's DECLARED `highlightFields`
+ * (ADR-0085) minus the record's title field, at most `max`
+ * (objectstack#27524 item 12: "Highlights are the object's declared
+ * `highlightFields` minus the name field (the title), max 6 … nothing invents
+ * one").
+ *
+ * An object that declares none gets an EMPTY strip, so every field stays in
+ * the details body. Nothing is guessed: the preferred-name walk that used to
+ * pick up to six fields here (owner first, then amount, industry, …) is gone,
+ * by the maintainer's ruling 「没声明就不挑」 (objectstack#28868). It emptied
+ * the body of a small object and took the owner the meta line already names.
+ *
+ * The title field leaves a declared list too: it is already the page H1, and
+ * repeating it as the first chip duplicated the record name, truncated,
+ * directly under the identical heading (#2548 follow-up). ONE resolver decides
+ * which field that is ({@link resolveTitleField}), so "what the strip skips"
+ * and "what the H1 shows" cannot disagree (objectui#7287). Filtering before
+ * the slice means the title never wastes a slot.
+ *
+ * The three readers of the strip — the default page
+ * ({@link buildDefaultHighlights}, and the body's `hideFields` in
+ * {@link buildDefaultTabs}), the phone record header and the record hover
+ * card — all ask this one function.
+ *
+ * `_statusField` is accepted and not read. It is part of the published
+ * signature from when this function guessed and skipped the stage; a declared
+ * list is the author's, and is drawn as written.
  */
 export function deriveHighlightFields(
   def: ObjectDefLike | undefined,
-  statusField: string | null,
+  _statusField: string | null,
   max = RECORD_HIGHLIGHTS_MAX,
 ): string[] {
-  if (!def) return [];
-  // Semantic role first (ADR-0085): top-level `highlightFields`. (The
-  // deprecated `compactLayout` fallback was retired with the alias —
-  // framework#2536.)
-  const declared = Array.isArray(def.highlightFields) && def.highlightFields.length > 0
-    ? def.highlightFields
-    : null;
-  if (declared) {
-    // Drop the title field from a DECLARED list too: it is already the page
-    // H1, and repeating it as the first chip duplicated the record name —
-    // truncated — directly under the identical heading. The heuristic branch
-    // below always skipped it; both branches now agree (#2548 follow-up).
-    // Filtering before the slice means the title never wastes a strip slot.
-    const titleField = resolveTitleField(def);
-    return declared
-      .filter((n): n is string => typeof n === 'string' && n.length > 0 && n !== titleField)
-      .slice(0, max);
-  }
-  // System fields and tenancy metadata never make useful highlights —
-  // they either have no friendly label (organization_id renders as the
-  // workspace name with no field name beside it) or are mostly noise
-  // (audit IDs). Filter them up-front so the fallback walk below doesn't
-  // pick them when a richer field isn't available.
-  const skip = new Set<string>([
-    'id', '_id',
-    'created_at', 'updated_at', 'deleted_at',
-    'created_by', 'updated_by', 'deleted_by',
-    'organization_id', 'workspace_id', 'tenant_id',
-    'org_id',
-  ]);
-  if (statusField) skip.add(statusField);
-  // (The title field joins `skip` below, AFTER the retirement gate is defined
-  // — see the block above the selection loops for why the order matters.)
-  for (const candidate of ['name', 'full_name', 'title', 'subject', 'display_name']) {
-    if (candidate in (def.fields || {})) skip.add(candidate);
-  }
-  const preferred = [
-    'owner', 'owner_id', 'amount', 'rating', 'source',
-    'priority', 'industry', 'phone', 'email',
-    'close_date', 'due_date', 'start_date', 'expected_close_date',
-    'account', 'account_id', 'contact', 'contact_id',
-  ];
-  // Field types that render well as compact highlight pills.
-  // Long-form / structural types (textarea, markdown, json, grid) and
-  // booleans don't carry enough at-a-glance information here — they're
-  // either too wide or visually noisy.
-  //
-  // `owner` left this set with objectui#4914 — a RETIRED spelling, refused by
-  // the gate below before this membership test runs. The deletion is lockstep
-  // hygiene; the gate is the behavioural half. Note the `preferred` list above
-  // still names `owner`: that is a field NAME, and the surviving idiom is
-  // exactly `{ type: 'user', name: 'owner' }`, so it must stay.
-  const HIGHLIGHT_FRIENDLY_TYPES = new Set<string>([
-    'currency', 'number', 'integer', 'decimal', 'percent',
-    'date', 'datetime', 'time',
-    'reference', 'lookup', 'user',
-    'select', 'enum', 'multiselect', 'status',
-    'email', 'phone', 'url',
-    'text', 'string',
-  ]);
-  const out: string[] = [];
-  const fields = def.fields || {};
-  /**
-   * THE GATE (objectui#4914, ruling B), ahead of BOTH selection loops.
-   *
-   * A retired spelling is refused a highlight slot and the author is told once.
-   * Before the ruling `owner` was highlight-friendly, so the synthesized page
-   * put a pill on the strip for a field whose own editor answers with a
-   * tombstone — one page, two verdicts on one field.
-   *
-   * It has to run on the `preferred` pass too, and that pass is why: it selects
-   * by NAME and never looks at the type, and the FIRST name it prefers is
-   * `owner`. Gating only the type-driven loop below would have left the one
-   * shape this whole card is about — a field named `owner` still TYPED `owner`
-   * — sailing into the strip through the other door, with the fix reading as
-   * complete.
-   */
-  const refusedAsRetired = (name: string): boolean => {
-    const ftype = (fields as any)[name]?.type;
-    if (typeof ftype !== 'string' || !isRetiredFieldType(ftype)) return false;
-    reportRetiredFieldType(ftype);
-    return true;
-  };
-  // The record's title field is already shown as the page H1 — surfacing it
-  // again in the highlight strip duplicates content and wastes a slot (e.g.
-  // Task pages would show 主题 twice). ONE resolver decides WHICH field that
-  // is, the same one the DECLARED branch above uses, so "what the strip
-  // skips" and "what the H1 shows" cannot disagree (objectui#7287).
-  //
-  // ⚠️ This REPLACES three separate reads (`primaryField` / `nameField` /
-  // `displayNameField`, each adding whatever it found) and it is a deliberate
-  // BEHAVIOUR CHANGE, not a rewrite of them. `primaryField` is simply gone —
-  // a `DetailViewSchema` key no object payload can carry (see
-  // {@link resolveTitleField}). The other two are rungs of the shared ladder,
-  // but the ladder PICKS one rung where the old set added EVERY declared one,
-  // so old and new disagree on exactly one input: an object declaring
-  // `nameField` AND the deprecated `displayNameField` alias to DIFFERENT
-  // fields. The old set skipped both; this skips only the winner.
-  //
-  // Skipping only the winner is the intended behaviour. The loser is not the
-  // H1 — `getRecordDisplayName` reads this same `declaredNameField` ladder
-  // and renders the WINNER's value — so hiding the loser removed an ordinary
-  // field and spent a strip slot on a field the heading never shows, which is
-  // the class of bug this card is about. It also makes this heuristic branch
-  // agree with the DECLARED branch above, which has only ever filtered a
-  // single `titleField`: the "#2548 follow-up" note up there claims both
-  // branches agree, and until now that was true only for objects declaring
-  // one alias.
-  //
-  // Pinned by "skips only the winner when nameField and displayNameField
-  // disagree" in `resolveTitleField.sharedLadder-7287.test.ts`.
-  //
-  // ⚠️ Ask THE GATE first, then skip. A field skipped as the H1 never reaches
-  // the selection loops, so skipping it silently would take the objectui#4914
-  // report with it — the author of an object whose only retired-typed field
-  // happens to title the record would stop being told, while the strip looked
-  // correct. That is the same "one door left open" the gate's own docstring
-  // above is about. Hence this sits below `refusedAsRetired`, not up in the
-  // skip set.
-  const h1Field = resolveTitleField(def);
-  if (h1Field) {
-    refusedAsRetired(h1Field);
-    skip.add(h1Field);
-  }
-  // Members of a field group the details body gates per record are never
-  // picked (objectui#12720). See {@link membersOfGatedFieldGroups} for why the
-  // strip declines them rather than evaluating the predicate itself. Asked
-  // AFTER THE GATE in both loops, so the objectui#4914 report fires exactly
-  // when it did before this card.
-  const gated = membersOfGatedFieldGroups(def);
-  for (const name of preferred) {
-    if (name in fields && !skip.has(name) && !refusedAsRetired(name) && !gated.has(name)) out.push(name);
-    if (out.length >= max) return out;
-  }
-  for (const name of Object.keys(fields)) {
-    if (out.includes(name) || skip.has(name)) continue;
-    if (refusedAsRetired(name)) continue;
-    if (gated.has(name)) continue;
-    const fieldDef = (fields as any)[name];
-    const ftype = fieldDef?.type;
-    // When a type is declared, require it to be highlight-friendly.
-    // Untyped fields (legacy schemas) fall through to keep prior
-    // behaviour.
-    if (ftype && !HIGHLIGHT_FRIENDLY_TYPES.has(ftype)) continue;
-    out.push(name);
-    if (out.length >= max) break;
-  }
-  return out;
+  if (!def || !Array.isArray(def.highlightFields)) return [];
+  const titleField = resolveTitleField(def);
+  return def.highlightFields
+    .filter((n): n is string => typeof n === 'string' && n.length > 0 && n !== titleField)
+    .slice(0, max);
 }
 
 /**
@@ -709,6 +552,34 @@ export function buildDefaultHighlights(
   if (statusField && stages && stages.length > 0) {
     out.push(componentNode('record:path', { statusField, stages }));
   }
+  return out;
+}
+
+/**
+ * The stage field of the `record:path` among a page's strip nodes, or `null`
+ * when the strip draws no path. A node's props are read the way
+ * {@link bodyTablePlacement} reads a related-list node's: the ADR-0089 D3a
+ * `properties` bag over the node's own keys.
+ */
+function drawnPathField(nodes: readonly any[]): string | null {
+  for (const node of nodes) {
+    if (node?.type !== 'record:path') continue;
+    const props = { ...node, ...(node?.properties ?? {}) };
+    if (typeof props.statusField === 'string' && props.statusField.length > 0) return props.statusField;
+  }
+  return null;
+}
+
+/**
+ * The fields the Details body leaves out because the page's header already
+ * draws them (objectstack#28868): the highlight strip's fields, as many as
+ * the strip shows ({@link RECORD_HIGHLIGHTS_MAX} — a declared entry past the
+ * sixth is drawn by the body, not dropped from both), and the stage field
+ * when the page draws `record:path` for it, so the stage is shown once.
+ */
+function headerDrawnFields(highlightFields: readonly string[], pathField: string | null): string[] {
+  const out = highlightFields.slice(0, RECORD_HIGHLIGHTS_MAX);
+  if (pathField !== null && !out.includes(pathField)) out.push(pathField);
   return out;
 }
 
@@ -1038,9 +909,25 @@ export function buildDefaultTabs(
     timeline?: any[];
   } = {},
 ): any {
-  const statusField = options.statusField ?? detectStatusField(def);
-  const highlightFields =
-    options.highlightFields ?? deriveHighlightFields(def, statusField);
+  // The Details body leaves out what the default strip for these options
+  // draws: its highlights and the stage field of its `record:path`.
+  const highlightFields = options.highlightFields ?? deriveHighlightFields(def, null);
+  const strip = buildDefaultHighlights(def, { highlightFields, statusField: options.statusField });
+  return synthTabs(def, options, headerDrawnFields(highlightFields, drawnPathField(strip)));
+}
+
+type DefaultTabsOptions = NonNullable<Parameters<typeof buildDefaultTabs>[1]>;
+
+/**
+ * {@link buildDefaultTabs}' body, given the fields the Details body leaves
+ * out. `buildDefaultPageSchema` passes the ones the page it builds actually
+ * draws in its header (an authored `highlights` slot included).
+ */
+function synthTabs(
+  def: ObjectDefLike | undefined,
+  options: DefaultTabsOptions,
+  bodyHiddenFields: string[],
+): any {
   // Every tab carries a STABLE, semantic `value` (objectui#2257): the active
   // tab is URL-addressable (`?tab=<value>`, ADR-0054 C3), so values must
   // survive related lists being added/removed — an index-derived value
@@ -1078,7 +965,7 @@ export function buildDefaultTabs(
     {
       label: 'Details',
       value: 'details',
-      children: bodyTablePlacement(def, options.sections, highlightFields, bodies),
+      children: bodyTablePlacement(def, options.sections, bodyHiddenFields, bodies),
     },
   ];
   // objectstack#27055, Target 3 — the tab strip is 详情 / 动态 / 关联 /
@@ -1213,15 +1100,22 @@ export function buildDefaultPageSchema(
   }
 
   // 3) Highlight strip (chips + chevron path).
-  if ('highlights' in slots && slots.highlights !== undefined) {
-    components.push(...toNodeArray(slots.highlights));
-  } else {
-    components.push(...buildDefaultHighlights(def, {
-      highlightFields: options.highlightFields,
-      statusField: options.statusField,
-      stages: options.stages,
-    }));
-  }
+  const strip =
+    'highlights' in slots && slots.highlights !== undefined
+      ? toNodeArray(slots.highlights)
+      : buildDefaultHighlights(def, {
+          highlightFields: options.highlightFields,
+          statusField: options.statusField,
+          stages: options.stages,
+        });
+  components.push(...strip);
+  // What the Details body leaves out (objectstack#28868): the strip's
+  // highlights, and the stage field when THIS page draws `record:path` for it
+  // — the default strip's path, or one an authored `highlights` slot places.
+  const bodyHidden = headerDrawnFields(
+    options.highlightFields ?? deriveHighlightFields(def, null),
+    drawnPathField(strip),
+  );
 
   // The timeline stream's content (objectstack#27055): an authored
   // `discussion` slot replaces it; `hideDiscussion` drops it.
@@ -1237,7 +1131,7 @@ export function buildDefaultPageSchema(
   //    Details tab body; the other tabs stay synthesized.
   if ('details' in slots && slots.details !== undefined) {
     const detailsBody = toNodeArray(slots.details);
-    const tabsNode = buildDefaultTabs(def, {
+    const tabsNode = synthTabs(def, {
       sections: options.sections,
       related: options.related,
       approvals: options.approvals,
@@ -1246,7 +1140,7 @@ export function buildDefaultPageSchema(
       hideAttachments: options.hideAttachments,
       hideDiscussion: options.hideDiscussion,
       timeline,
-    });
+    }, bodyHidden);
     // Replace the first tab's children (Details) with the override. The items
     // live in the node's `properties` bag — the canonical carrier per
     // ADR-0089 D3a (see `componentNode`).
@@ -1256,7 +1150,7 @@ export function buildDefaultPageSchema(
     }
     components.push(tabsNode);
   } else {
-    components.push(buildDefaultTabs(def, {
+    components.push(synthTabs(def, {
       sections: options.sections,
       related: options.related,
       approvals: options.approvals,
@@ -1265,7 +1159,7 @@ export function buildDefaultPageSchema(
       hideAttachments: options.hideAttachments,
       hideDiscussion: options.hideDiscussion,
       timeline,
-    }));
+    }, bodyHidden));
   }
 
   // ADR-0085 (objectstack#27055): the synthesized page has ONE region. The

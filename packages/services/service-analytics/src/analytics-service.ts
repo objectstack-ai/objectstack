@@ -117,6 +117,7 @@ import {
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
 import { assertDatasetGroupColumnsDistinct } from './dataset-group-column-door.js';
+import { assertPreviewDateBucketsTemporal } from './preview-date-bucket-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { scopedMeasureFilter } from './scoped-measure-key.js';
@@ -2901,6 +2902,15 @@ export class AnalyticsService implements IAnalyticsService {
               aggregateGroupKeys(q, cube),
               q,
               (member) => resolveCubeFieldName(cube, member, 'dimension'),
+            );
+            // [#28852] …and a date bucket over a field declared neither a date
+            // nor a datetime, with the refusal the engine gives both live faces
+            // for the same keys (after the column refusal above, as there),
+            // where the evaluator served one `null` (or `1970`) group.
+            assertPreviewDateBucketsTemporal(
+              aggregateObjectOf(cube),
+              aggregateGroupKeys(q, cube),
+              (field) => this.sourceFieldMeta?.(dataset.object, field)?.type,
             );
             return evaluateAnalyticsQueryOverRows(
               q,
