@@ -14,8 +14,9 @@ export const Opportunity = ObjectSchema.create({
   pluralLabel: 'Opportunities',
   icon: 'trending-up',
   description: 'A potential sale tied to an account.',
-  // What the record page shows at a glance, under the title.
-  highlightFields: ['account', 'stage', 'amount', 'close_date', 'probability'],
+  // What the record page shows at a glance, under the title. The stage is
+  // not here: the record page already draws it as the stage path.
+  highlightFields: ['account', 'amount', 'close_date', 'probability'],
 
   fields: {
     name: Field.text({

@@ -14,8 +14,9 @@ export const Lead = ObjectSchema.create({
   pluralLabel: 'Leads',
   icon: 'funnel',
   description: 'An inbound prospect not yet qualified as an opportunity.',
-  // What the record page shows at a glance, under the title.
-  highlightFields: ['company', 'status', 'source', 'lead_score', 'assigned_to'],
+  // What the record page shows at a glance, under the title. The stage is
+  // not here: the record page already draws it as the stage path.
+  highlightFields: ['company', 'source', 'lead_score', 'assigned_to'],
 
   fields: {
     name: Field.text({
