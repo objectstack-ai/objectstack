@@ -7,7 +7,7 @@
  */
 
 import * as React from 'react';
-import { cn, Button } from '@object-ui/components';
+import { cn, Button, RelatedCountStore } from '@object-ui/components';
 import {
   Paperclip,
   Upload,
@@ -25,6 +25,7 @@ import { useObjectTranslation, isPermissionError, classifyLoadError } from '@obj
 import { usePermissions } from '@object-ui/permissions';
 import { resolveAffordance, type ConfirmationHandler } from '@object-ui/core';
 import { ActionConfirmDialog, type ConfirmDialogState } from './ActionConfirmDialog.js';
+import { RECORD_PAGE_ATTACHMENT_ROWS, recordAttachmentsCountField } from './recordPagePayload.js';
 
 /**
  * RecordAttachmentsPanel — generic record Attachments surface (objectstack-ai/objectstack#2727,
@@ -264,11 +265,24 @@ export const RecordAttachmentsPanel: React.FC<RecordAttachmentsPanelProps> = ({
     if (!dataSource || !objectName || !recordId) return;
     setStatus('loading');
     try {
-      const res: any = await dataSource.find('sys_attachment', {
-        $filter: { parent_object: objectName, parent_id: recordId },
-        $orderby: { created_at: 'desc' },
-        $top: 100,
-      });
+      // objectstack#28470 — the record page payload carries this read's
+      // answer on the record's open (`seedRecordPageReaders`, under the key
+      // the Attachments tab badge counts): the first read takes it, once, and
+      // every later one (an upload, a delete, Retry) is the panel's own.
+      const seeded = RelatedCountStore.takeRows(
+        'sys_attachment',
+        recordAttachmentsCountField(objectName),
+        recordId,
+        undefined,
+        RECORD_PAGE_ATTACHMENT_ROWS,
+      );
+      const res: any = seeded
+        ? { data: (await seeded).rows }
+        : await dataSource.find('sys_attachment', {
+            $filter: { parent_object: objectName, parent_id: recordId },
+            $orderby: { created_at: 'desc' },
+            $top: RECORD_PAGE_ATTACHMENT_ROWS,
+          });
       const items: AttachmentRow[] = Array.isArray(res) ? res : res?.data ?? [];
       // objectui#10684 — a superseded answer is dropped on arrival.
       if (!isCurrent()) return;

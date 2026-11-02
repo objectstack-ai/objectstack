@@ -160,8 +160,12 @@ import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useC
 import { environmentScopeSuffix, isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { PositionHoldersSection } from './PositionHoldersSection.js';
 import { PositionPermissionSetsSection } from './PositionPermissionSetsSection.js';
+import { PositionHoldersSetupLink } from './SetupAssignmentsLink.js';
+import { CatalogItemActiveSwitch } from './CatalogActiveSwitch.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
 import { declarationOnlyAuthoredObject } from './sharing-rule-catalog.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
+import { useNavigationWrites } from '../../hooks/useNavigationSync.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
 
 /** What an environment section is handed: the item's name and its definition on screen. */
@@ -181,6 +185,31 @@ interface EnvironmentSectionProps {
  */
 const ENVIRONMENT_SECTIONS: Readonly<Record<string, ReadonlyArray<React.ComponentType<EnvironmentSectionProps>>>> = {
   position: [PositionHoldersSection, PositionPermissionSetsSection],
+};
+
+/** The item's active switch (`CatalogActiveSwitch.tsx`), for a catalog type the area's item page carries it on. */
+function catalogActiveSection(type: string): React.ComponentType<EnvironmentSectionProps> {
+  function CatalogActiveSection({ name, draft }: EnvironmentSectionProps) {
+    const label = typeof draft.label === 'string' ? draft.label : undefined;
+    return <CatalogItemActiveSwitch type={type} name={name} label={label} />;
+  }
+  return CatalogActiveSection;
+}
+
+/**
+ * objectstack ADR-0146 D1/D7 (#28561) — the same sections under Studio's "All
+ * metadata" area, which draws no assignment: who holds a position is Setup's
+ * Position holders page, linked in its place. What each set grants stays, a
+ * read of the definition.
+ *
+ * N-28 (M-1 ruling A) — and the item's active switch, first: Setup's catalog
+ * list, which carried it, retired, and the switch moved with the item into
+ * Studio. A position and a declared sharing rule draw this page; a permission
+ * set draws its own editor, which mounts the same switch.
+ */
+const AREA_ENVIRONMENT_SECTIONS: Readonly<Record<string, ReadonlyArray<React.ComponentType<EnvironmentSectionProps>>>> = {
+  position: [catalogActiveSection('position'), PositionHoldersSetupLink, PositionPermissionSetsSection],
+  sharing_rule: [catalogActiveSection('sharing_rule')],
 };
 
 /**
@@ -540,7 +569,15 @@ function MetadataResourceEditPageImpl({
   // the canonical member and for a type with no members.
   const bundleMember = searchParams.get(BUNDLE_MEMBER_PARAM) || undefined;
   const memberScope = bundleMember ? { member: bundleMember } : {};
+  // ADR-0048 — every layered re-read below asks the stack the load read: at
+  // the owning package, when the URL names it. A layered read naming no
+  // package is refused for a name two packages hold, and the refusal is shown
+  // as the step's error.
+  const layeredScope = { ...(ownerPackageId ? { packageId: ownerPackageId } : {}), ...memberScope };
   const client = useMetadataClient();
+  // objectstack#28680 — a page or dashboard this editor publishes for the
+  // first time, or deletes, writes app navigation here, at the site.
+  const navigationWrites = useNavigationWrites();
   const { entries, loading: typesLoading } = useMetadataTypes(client);
   const entry: RichMetadataTypeEntry | undefined = entries.find((t) => t.type === type);
   const config = resolveResourceConfig(type, entry);
@@ -1699,7 +1736,14 @@ function MetadataResourceEditPageImpl({
   const canAuthor = useCanAuthorMetadata();
   const walled = useWalledCatalogReadOnly(type);
   const walledDeciding = walled && itemWritable;
-  const canWrite = itemWritable && canAuthor && !walled;
+  // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area, a
+  // read-only package withholds every write this page offers: save, source
+  // save, publish, discard, reset, delete and rollback all read `canWrite`.
+  // The overlay save included, which the server would accept on a code
+  // package's item of an overlay-allowed type. Outside the area, no change.
+  const areaHost = useMetadataAreaHost();
+  const hostReadOnly = !!areaHost?.readOnly;
+  const canWrite = itemWritable && canAuthor && !walled && !hostReadOnly;
   // Auto-enable design mode for designer-capable types. We do this once
   // per (type,name) navigation so the user lands in the productive
   // state instead of having to click "Edit". An item this caller cannot
@@ -2138,6 +2182,9 @@ function MetadataResourceEditPageImpl({
       // `409 RESOURCE_CONFLICT`, which the `catch` below shows with the door's
       // own sentence, as every refused write on this page is shown.
       const activePackage = readActivePackageBinding();
+      // The body being deleted, read before the DELETE: its provenance decides
+      // whether the delete writes navigation (objectstack#28680).
+      const deletedBody = layered?.effective;
       await client.reset(type, name, {
         ...(activePackage ? { packageId: activePackage } : {}),
         ...memberScope,
@@ -2145,8 +2192,15 @@ function MetadataResourceEditPageImpl({
       // objectui#11773 — the buffer below is re-read from the layers, with no
       // draft read behind it, so nothing pins its next save.
       forgetDraftVersion();
+      // objectstack#28680 — a real delete (no baseline remains) of a
+      // package-less page or dashboard drops it from app navigation. A reset
+      // leaves the item in place, so it writes nothing. Not awaited: each app
+      // write reports itself (a toast with Undo, or its failure).
+      if (!resetSemantic && !activePackage) {
+        void navigationWrites.deleted(type, name, deletedBody);
+      }
       if (resetSemantic) {
-        const lay = await client.layered<any>(type, name, memberScope);
+        const lay = await client.layered<any>(type, name, layeredScope);
         setLayered(lay);
         const fresh = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
         setDraft(fresh);
@@ -2182,6 +2236,9 @@ function MetadataResourceEditPageImpl({
       // package pins the draft lookup to unbound rows and a packaged draft
       // stops being found (`no_draft`) — see objectstack `9e04c3e35`'s own warning.
       const activePackage = readActivePackageBinding();
+      // objectstack#28680 — whether this publish is the item's first: before
+      // it, the item held no layer at all (its body lived only in the draft).
+      const firstPublish = holdsNoLayer(layered);
       await client.publish<any>(type, name, {
         ...(activePackage ? { packageId: activePackage } : {}),
         ...memberScope,
@@ -2189,11 +2246,18 @@ function MetadataResourceEditPageImpl({
       // objectui#11773 — the draft is re-read at the address the next save
       // writes, so its answer pins that save (see the load effect).
       const [lay, draftRead] = await Promise.all([
-        client.layered<any>(type, name, memberScope),
+        client.layered<any>(type, name, layeredScope),
         readDraftForSave<any>(client, type, name, activePackage, bundleMember),
       ]);
       const draftResp = draftRead.answer;
       setLayered(lay);
+      // objectstack#28680 — a package-less page or dashboard published for the
+      // first time is created: it joins app navigation here. A later publish
+      // of the same item is an update and writes nothing. Not awaited: each
+      // app write reports itself (a toast with Undo, or its failure).
+      if (firstPublish && !activePackage) {
+        void navigationWrites.created(type, name, lay.effective);
+      }
       const draftReal = extractDraftBody(draftResp);
       setHasDraft(!!draftReal);
       setDraftDiagnostics(draftReal ? draftEnvelopeDiagnostics(draftResp) : undefined);
@@ -2254,7 +2318,7 @@ function MetadataResourceEditPageImpl({
       forgetDraftVersion();
       // objectui#11799 — a discard makes no layer: an item this page loaded
       // with no layer still has none, and `/layers` would answer 404.
-      const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name, memberScope);
+      const lay = layered && holdsNoLayer(layered) ? layered : await client.layered<any>(type, name, layeredScope);
       setLayered(lay);
       const fresh = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
       setDraft(fresh);
@@ -2308,7 +2372,8 @@ function MetadataResourceEditPageImpl({
   const readOnly = !canWrite && !createMode;
   const envScope = isEnvironmentScope(searchParams);
   const scopeSuffix = environmentScopeSuffix(searchParams);
-  const environmentSections = envScope && !createMode && !embedded ? ENVIRONMENT_SECTIONS[type] : undefined;
+  const environmentSections =
+    envScope && !createMode && !embedded ? (areaHost ? AREA_ENVIRONMENT_SECTIONS : ENVIRONMENT_SECTIONS)[type] : undefined;
 
   // #2272 — designer deep-link: `?sel=nav:<id>` selects the nav item with
   // that spec `id` (stable across reorders, unlike the positional selection
@@ -2447,7 +2512,8 @@ function MetadataResourceEditPageImpl({
   const showArtifactLockedBanner =
     // objectui#7611 — and only for a caller who could author the new item
     // (objectui#12183: under a wall, the operator).
-    readOnly && isArtifactItem && !!entry?.allowRuntimeCreate && canAuthor && !walled && !declarationOnly;
+    // Never in a read-only package's area: that package takes no new item.
+    readOnly && isArtifactItem && !!entry?.allowRuntimeCreate && canAuthor && !walled && !declarationOnly && !hostReadOnly;
 
   // Preview tab — opt-in via `registerMetadataPreview()`. Hidden in
   // create mode (nothing to preview yet) and inside the embedded
@@ -2934,7 +3000,18 @@ function MetadataResourceEditPageImpl({
                 <span>{t(`engine.catalog.declaredOnly.hint.${type}`, locale)}</span>
               </div>
             )}
-            {readOnly && !isLocked && !canAuthor && !walledDeciding && !declarationOnly && (
+            {/* objectstack ADR-0146 D1 (#28561) — in a read-only package's
+                area the package is the reason, so it is the one named. */}
+            {hostReadOnly && !createMode && (
+              <div
+                data-testid="package-readonly-banner"
+                className="text-xs text-amber-800 border border-amber-300/70 bg-amber-50/70 rounded-md px-3 py-2.5 dark:text-amber-200 dark:border-amber-700/40 dark:bg-amber-950/20 flex items-start gap-2"
+              >
+                <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>{t('engine.studio.pkg.readonlyHint', locale)}</span>
+              </div>
+            )}
+            {readOnly && !hostReadOnly && !isLocked && !canAuthor && !walledDeciding && !declarationOnly && (
               <div
                 data-testid="capability-readonly-banner"
                 className="text-xs text-amber-800 border border-amber-300/70 bg-amber-50/70 rounded-md px-3 py-2.5 dark:text-amber-200 dark:border-amber-700/40 dark:bg-amber-950/20 flex items-start gap-2"
@@ -2943,7 +3020,7 @@ function MetadataResourceEditPageImpl({
                 <span>{t('engine.edit.capabilityReadOnly', locale)}</span>
               </div>
             )}
-            {readOnly && !isLocked && canAuthor && !walledDeciding && !declarationOnly && (
+            {readOnly && !hostReadOnly && !isLocked && canAuthor && !walledDeciding && !declarationOnly && (
               <div data-testid="readonly-banner" className="text-xs text-amber-800 border border-amber-300/70 bg-amber-50/70 rounded-md px-3 py-2.5 dark:text-amber-200 dark:border-amber-700/40 dark:bg-amber-950/20 flex items-start gap-3">
                 <div className="flex-1">
                   {showArtifactLockedBanner ? (

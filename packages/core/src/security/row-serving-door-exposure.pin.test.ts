@@ -109,6 +109,14 @@ const CALLERS: Record<string, Classification> = {
       + 'that only narrows the read the caller addressed, whose own door already admitted it; no row and no field of the '
       + 'parent is served, and a refused parent answers `$in: []`',
   },
+  'packages/metadata-protocol/src/protocol-batch-data.ts': {
+    kind: 'not-a-door',
+    reason:
+      "the by-id upsert fork of `batchData` (`callerMayReadObject`): it asks the admission only to choose between the "
+      + 'update and create arms of a row the caller addressed on the batch data route, whose own door already judged the '
+      + "object's exposure; `true` still reads the row as the caller, through the engine middleware, and it serves no row "
+      + 'of its own',
+  },
   // [#25522 cut 11] File-field hydration's `sys_file` admission, moved out of engine.ts.
   'packages/objectql/src/engine-file-reference-hydration.ts': {
     kind: 'not-a-door',

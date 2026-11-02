@@ -891,6 +891,21 @@ export class ObjectKernel {
         return this.state;
     }
 
+    /**
+     * Whether `bootstrap()` dispatches the boot-phase hooks — `kernel:ready`,
+     * `kernel:bootstrapped` and `kernel:listening` — once every plugin's
+     * `start()` has run: `false` exactly when {@link ObjectKernelConfig.bootPhaseHooks}
+     * is `false`, `true` otherwise.
+     *
+     * Read-only; the option is fixed at construction. It is for a plugin that
+     * leaves part of its start to one of those hooks and must know, during its
+     * own `start()`, that the hook will come; where the answer is `false`, it
+     * keeps that work in `start()`.
+     */
+    dispatchesBootPhaseHooks(): boolean {
+        return this.config.bootPhaseHooks !== false;
+    }
+
     // Private methods
 
     private async initPluginWithTimeout(plugin: PluginMetadata): Promise<void> {

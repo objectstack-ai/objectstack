@@ -51,6 +51,8 @@ import type { HttpProtocolContext } from '../http-dispatcher.js';
 /** A flow a code package ships — registered with a package id, as an artifact loader does. */
 const PACKAGED = 'pkg_alert_flow';
 const PACKAGE_ID = 'com.example.pkg';
+/** [#28149] The base's paired customization package — where a clone lands. */
+const PAIR_PACKAGE_ID = 'com.example.pkg.custom';
 /** The customer's own flow — lives in the engine only (authored through `POST /automation`). */
 const CUSTOMER = 'customer_flow';
 /** A runtime-authored registry item with no package provenance. */
@@ -127,8 +129,17 @@ function boot(
         environmentId,
     );
 
+    // [#28149] The installed packages the clone door's target rule reads: the
+    // code-shipped base (read-only) and its writable pair, which depends on it.
+    const manifests: Record<string, { id: string; scope?: string; dependencies?: Record<string, string> }> = {
+        [PACKAGE_ID]: { id: PACKAGE_ID, scope: 'system' },
+        [PAIR_PACKAGE_ID]: { id: PAIR_PACKAGE_ID, dependencies: { [PACKAGE_ID]: '*' } },
+    };
+    const objectql = { registry: { getPackage: (id: string) => (manifests[id] ? { manifest: manifests[id] } : undefined) } };
+
     const services: Record<string, unknown> = {
         automation: { handlerReady: true, registerFlow, unregisterFlow, toggleFlow, getFlow },
+        objectql,
     };
     if (mode === 'real') services.protocol = protocol;
     const resolve = (name: string): unknown => services[name];
@@ -158,14 +169,23 @@ const errorOf = (response: any): { code?: unknown; message?: unknown } => respon
 
 /**
  * [#20819, ADR-0126 §2] The relayed refusal NAMES Regime C's sanctioned paths —
- * the clone under a new name (§7.1) and the enable/disable switch (§7.2) — and
+ * the clone under a new name (§7.1; [#28412] for a save, the declared override
+ * from the paired `.custom` instead) and the enable/disable switch (§7.2) — and
  * neither the `OS_METADATA_WRITABLE` hatch nor a redeploy. The sentence is the
  * metadata protocol's (`packagedBaseRefusal`, chosen per regime there); this
  * asserts it arrives at these doors, not its wording.
  */
-function expectRegimeCPrescription(response: any): void {
+function expectRegimeCPrescription(response: any, verb: 'save' | 'delete'): void {
     const message = String(errorOf(response).message);
-    expect(message).toContain('POST /api/v1/automation/:name/clone');
+    // [#28412, ADR-0146 D9] A save names the declared override from the
+    // package's paired `.custom` in place of the clone: the clone is a second
+    // flow beside the base, and both run. The removal still names the clone.
+    if (verb === 'save') {
+        expect(message).toContain(`Declare an override from '${PACKAGE_ID}.custom'`);
+        expect(message).not.toContain('POST /api/v1/automation/:name/clone');
+    } else {
+        expect(message).toContain('POST /api/v1/automation/:name/clone');
+    }
     expect(message).toContain('POST /api/v1/automation/:name/toggle');
     expect(message).toContain('docs/adr/0126-packaged-metadata-customization-model.md');
     expect(message).not.toContain('OS_METADATA_WRITABLE');
@@ -190,7 +210,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
 
                 expect(statusOf(response)).toBe(403);
                 expect(errorOf(response).code).toBe('NOT_OVERRIDABLE');
-                expectRegimeCPrescription(response);
+                expectRegimeCPrescription(response, 'save');
                 // Refuse first, mutate never: the engine was not entered, and
                 // the live definition is the one that was there before.
                 expect(h.registerFlow).not.toHaveBeenCalled();
@@ -210,7 +230,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
 
                 expect(statusOf(response)).toBe(403);
                 expect(errorOf(response).code).toBe('NOT_OVERRIDABLE');
-                expectRegimeCPrescription(response);
+                expectRegimeCPrescription(response, 'delete');
                 expect(h.unregisterFlow).not.toHaveBeenCalled();
 
                 const read = await h.dispatcher.handleAutomation(`/${PACKAGED}`, 'GET', undefined, AUTHOR(), undefined);
@@ -261,7 +281,7 @@ describe('a PACKAGED flow — the base is locked at both /automation definition 
         );
         expect(statusOf(overwrite.response)).toBe(403);
         expect(errorOf(overwrite.response).code).toBe('NOT_OVERRIDABLE');
-        expectRegimeCPrescription(overwrite.response);
+        expectRegimeCPrescription(overwrite.response, 'save');
         expect(h.registerFlow).not.toHaveBeenCalled();
         expect(h.held(PACKAGED)).toBe(before);
 
@@ -350,11 +370,20 @@ describe('what the lock leaves open', () => {
         // protocol's own save — pinned in
         // `automation-tenant-authored-write.test.ts`; stood in for here, where
         // the store is not this file's subject.
-        vi.spyOn(h.protocol, 'saveMetaItem').mockResolvedValue({ success: true } as never);
+        const save = vi.spyOn(h.protocol, 'saveMetaItem').mockResolvedValue({ success: true } as never);
+        // [#28149] The copy lands in the source's paired `<base>.custom`,
+        // ensured through N-13's door — stood in for here (its own suite pins
+        // it); the pair's manifest depends on the base, as the ensure door
+        // writes it.
+        vi.spyOn(h.protocol, 'ensureCustomizationPackage').mockResolvedValue(
+            { basePackageId: PACKAGE_ID, packageId: PAIR_PACKAGE_ID } as never,
+        );
         const { response } = await h.dispatcher.handleAutomation(
             `/${PACKAGED}/clone`, 'POST', { name: 'my_alert_copy', label: 'My Alert' }, AUTHOR(), undefined,
         );
         expect(statusOf(response)).toBe(200);
+        expect((response as any)?.body?.data?.packageId).toBe(PAIR_PACKAGE_ID);
+        expect(save).toHaveBeenCalledWith(expect.objectContaining({ packageId: PAIR_PACKAGE_ID }));
         expect(h.registerFlow).toHaveBeenCalledWith('my_alert_copy', expect.objectContaining({ name: 'my_alert_copy' }));
         expect(h.held(PACKAGED)).toEqual(definitionOf(PACKAGED));
     });

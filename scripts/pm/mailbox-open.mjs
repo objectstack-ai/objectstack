@@ -18,11 +18,12 @@
  * nothing. So each SEAT — a lane seat, the triage seat, the director seat —
  * keeps ONE draft PR as its mailbox: labelled `pm:mailbox` and `pinned`, on
  * the branch `mailbox/<login>/<seat-slug>` (`mailbox/os-bill/ui-4` for the
- * seat `domain:ui#4` held by `os-bill`), its body's first line
+ * seat `domain:ui#4` held by `os-bill`; an epic seat opens one like any seat),
+ * its body's first line
  * `Mailbox-of: <seat> · <login>`, opened at seating and subscribed by the
  * seated session, ⛔ never merged, closed at hand-over or account switch (the
  * successor opens its own). A message on it is ONE comment: the line
- * `To: <seat>`, then ONE line opening with one of the seven doorbell keys
+ * `To: <seat>`, then ONE line opening with one of the doorbell keys
  * (`Request:` / `Notify:`), read by `record-recognisers.mjs`. The protocol
  * text — the keys, who sends what to whom — is the pm-dispatch skill's
  * `references/project-forms.md` 〈信箱 PR〉; this file is only the tooling.
@@ -40,15 +41,19 @@
  * was a per-seat one; the board falsified that premise, and nothing here reads
  * a login as a seat any more.
  *
- * A seat is spelled `LANE#N` — `domain:ui#4`, `repo:cloud#1`, `triage` — its
- * lane one of the four a seat post's title names (`domain:<x>`, `repo:<x>`,
- * `triage`, `director`), so a login never reads as a seat, and an absent
- * number read as seat 1 (`seatKey`). It is compared lower-cased and written
- * canonically with its number (`triage#1`). Its SLUG is that key as one ref
- * segment, because a ref cannot carry `:` or `#`: the default `domain:` kind
- * dropped, every other `:` and the `#` turned into `-` (`ui-4`,
- * `repo-cloud-1`, `triage-1`). No `domain:` lane may be named `triage`,
- * `director` or `repo-…` — `seatKey` refuses one — which keeps the slug one-to-one.
+ * A seat is spelled `LANE#N` — `domain:ui#4`, `repo:cloud#1`, `triage`,
+ * `epic:#27293#1` — its lane one of the four a seat post's title names
+ * (`domain:<x>`, `repo:<x>`, `triage`, `director`) or the epic lane
+ * `epic:#<parent>`, the seat signature's spelling for the PM delegated a
+ * `pm:epic` parent card (pm-dispatch `seat-lifecycle.md` 〈Epic 子树车道〉), so a
+ * login never reads as a seat, and an absent number read as seat 1
+ * (`seatKey`). It is compared lower-cased and written canonically with its
+ * number (`triage#1`, `epic:#12#1`). Its SLUG is that key as one ref segment,
+ * because a ref cannot carry `:` or `#`: the default `domain:` kind dropped,
+ * every other `:` (with the epic lane's `#` after it) and the seat's `#` turned
+ * into `-` (`ui-4`, `repo-cloud-1`, `triage-1`, `epic-27293-1`). No `domain:`
+ * lane may be named `triage`, `director`, `repo-…` or `epic-…` — `seatKey`
+ * refuses one — which keeps the slug one-to-one.
  *
  * ## What it does, in order (open)
  *
@@ -158,19 +163,21 @@ const REPO_SHAPE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const LOGIN_SHAPE = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 const BRANCH_SHAPE = /^(?!\/|.*\/\/|.*\.\.|.*[\s~^:?*[\\]|.*\.lock$|.*\/$)[A-Za-z0-9._/-]+$/;
 const SESSION_SHAPE = /^(?:session|cse)_[A-Za-z0-9]+$/;
-// A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, the four a seat post's title names — then `#N`;
-// absent = seat 1. Read lower-cased. The bare lanes are a closed pair, so a login is never read as a seat. The
-// two lists below are the ONE spelling of those lane words: the shape is built from them, and so is the
-// reserved set a `domain:` lane may not be named after (`seatKey`).
+// A seat: its lane — `domain:<x>`, `repo:<x>`, `triage`, `director`, the four a seat post's title names, or the
+// epic lane `epic:#<parent>` — then `#N`; absent = seat 1. Read lower-cased. The bare lanes are a closed pair, so a
+// login is never read as a seat. The lists below are the ONE spelling of those lane words: the shape is built from
+// them, and so is the reserved set a `domain:` lane may not be named after (`seatKey`).
 /** The lane kinds that carry a name after the colon: `domain:<x>`, `repo:<x>`. `domain` is the default kind the slug drops. */
 export const SEAT_LANE_KINDS = Object.freeze(['domain', 'repo']);
 /** The bare lanes, a closed pair: `triage`, `director`. */
 export const SEAT_BARE_LANES = Object.freeze(['triage', 'director']);
-const SEAT_SHAPE = new RegExp(`^((?:${SEAT_LANE_KINDS.join('|')}):[a-z0-9._-]+|${SEAT_BARE_LANES.join('|')})(?:#([1-9][0-9]*))?$`);
+/** The epic lane's kind: `epic:#<parent>` names the `pm:epic` parent card's number, never a word (`epic:#27293#1`). */
+export const SEAT_EPIC_KIND = 'epic';
+const SEAT_SHAPE = new RegExp(`^((?:${SEAT_LANE_KINDS.join('|')}):[a-z0-9._-]+|${SEAT_EPIC_KIND}:#[1-9][0-9]*|${SEAT_BARE_LANES.join('|')})(?:#([1-9][0-9]*))?$`);
 // What a `domain:` lane may NOT be named, so the slug stays one-to-one (header): a bare lane word (`domain:triage`
 // would slug to `triage-1`, the triage seat's), or another kind's name with its colon turned into the hyphen the slug
-// uses (`domain:repo-cloud` would slug to `repo-cloud-1`, `repo:cloud#1`'s).
-const RESERVED_DOMAIN_LANE = new RegExp(`^(?:(?:${SEAT_BARE_LANES.join('|')})$|(?:${SEAT_LANE_KINDS.filter((k) => k !== 'domain').join('|')})-)`);
+// uses (`domain:repo-cloud` would slug to `repo-cloud-1`, `repo:cloud#1`'s; `domain:epic-12` to `epic-12-1`, `epic:#12#1`'s).
+const RESERVED_DOMAIN_LANE = new RegExp(`^(?:(?:${SEAT_BARE_LANES.join('|')})$|(?:${[...SEAT_LANE_KINDS.filter((k) => k !== 'domain'), SEAT_EPIC_KIND].join('|')})-)`);
 /** A per-seat mailbox body's first line, `Mailbox-of: <seat> · <login>`. */
 const MAILBOX_OF_LINE = /^Mailbox-of:[ \t]*(\S+)[ \t]*·[ \t]*(\S+)$/;
 /** The first lines a legacy per-login mailbox opened with: `To: <login>` (this file's), `Mailbox-of: <login>`. */
@@ -188,7 +195,7 @@ export function seatKey(text) {
   if (!m) return null;
   if (m[1].startsWith('domain:') && RESERVED_DOMAIN_LANE.test(m[1].slice('domain:'.length))) return null;
   const n = m[2] ?? '1';
-  return { key: `${m[1]}#${n}`, slug: `${m[1].replace(/^domain:/, '').replace(/:/g, '-')}-${n}` };
+  return { key: `${m[1]}#${n}`, slug: `${m[1].replace(/^domain:/, '').replace(/:#?/g, '-')}-${n}` };
 }
 
 /** `mailbox/<login>/<seat-slug>`; `seat` is a `seatKey` reading. */
@@ -235,7 +242,7 @@ export function parseArgs(argv) {
   } else {
     const seat = opts.seat === null ? null : seatKey(opts.seat);
     if (!opts.seat) opts.errors.push('--seat <seat> is required to open a mailbox — the mailbox is the seat\'s, never the login\'s');
-    else if (!seat) opts.errors.push(`--seat ${JSON.stringify(opts.seat)} is not a seat — spell it LANE#N, e.g. domain:ui#4`);
+    else if (!seat) opts.errors.push(`--seat ${JSON.stringify(opts.seat)} is not a seat — spell it LANE#N, e.g. domain:ui#4 or epic:#27293#1`);
     if (!opts.login) opts.errors.push('--login <login> is required to open a mailbox');
     else if (!LOGIN_SHAPE.test(opts.login)) opts.errors.push(`--login ${JSON.stringify(opts.login)} is not a GitHub login`);
     else if (seat && opts.head === null && !BRANCH_SHAPE.test(mailboxBranch(opts.login, seat))) opts.errors.push(`the seat's branch ${JSON.stringify(mailboxBranch(opts.login, seat))} is not a legal ref`);
@@ -259,7 +266,7 @@ export function mailboxBody({ seat, login, session = null }) {
     `The mailbox of the seat \`${seat}\`, held by \`${login}\` (\`${MAILBOX_LABEL}\`): one per seat, opened at seating, subscribed by the seated session.`,
     '',
     '- ⛔ Never merged, never readied. Closed at hand-over or account switch: `node scripts/pm/mailbox-open.mjs --close N` (N = this number); the successor opens its own.',
-    `- A message is ONE comment: the line \`To: ${seat}\`, then ONE line opening with one of the seven doorbell keys (\`Request:\` / \`Notify:\`; pm-dispatch \`references/project-forms.md\` 〈信箱 PR〉): one event, keys and numbers only. Nothing else is allowed here — no acknowledgements, no re-sends.`,
+    `- A message is ONE comment: the line \`To: ${seat}\`, then ONE line opening with one of the doorbell keys (\`Request:\` / \`Notify:\`; pm-dispatch \`references/project-forms.md\` 〈信箱 PR〉; full spellings: \`node scripts/pm/record-recognisers.mjs --mailbox-keys\`): one event, keys and numbers only. Nothing else is allowed here — no acknowledgements, no re-sends.`,
     `- **CI: owes none.** \`skip-changeset\` exempts Check Changeset; any other check red on this empty diff is RED BY DESIGN — never fix, rerun or report it. \`${STALE_EXEMPT_LABEL}\` keeps the stale sweep off it.`,
     `- Excluded from every landing ledger: queries add \`${LEDGER_EXCLUSION}\`.`,
   ].join('\n') + bodyFooter(session);
@@ -480,15 +487,15 @@ export async function main(argv, { env = process.env } = {}) {
 let selfTestReachedVerdict = false;
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'arguments: the two modes and every refusal': 13,
-  'the seat: canonical key, ref slug, and the per-seat branch': 7,
-  'the open plan: branch, labels, body, and the relay validator': 10,
+  'arguments: the two modes and every refusal': 14,
+  'the seat: canonical key, ref slug, and the per-seat branch': 11,
+  'the open plan: branch, labels, body, and the relay validator': 11,
   'the close plan: comment then close, judged by the validator': 3,
-  'whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither': 7,
-  "finding a seat's open mailbox: by seat, never by login": 9,
+  'whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither': 8,
+  "finding a seat's open mailbox: by seat, never by login": 10,
   'refusing to close what is not an open mailbox': 4,
   'the ledger exclusion and the footer': 4,
-  'the CLI: dry run prints the actions file and sends nothing': 6,
+  'the CLI: dry run prints the actions file and sends nothing': 7,
   'paging: a three-page read through the loop equals the slurped array': 4,
 });
 const SELF_TEST_BATTERY_FLOOR = 10;
@@ -518,7 +525,8 @@ async function selfTest() {
   t('no --repo is refused', parseArgs(['--seat', 'triage', '--login', 'a']).errors.some((e) => e.includes('--repo')), true);
   t('a repo not shaped owner/name is refused', parseArgs(['--repo', 'nope', '--seat', 'triage', '--login', 'a']).errors.some((e) => e.includes('owner/name')), true);
   t('⭐ open without --seat is refused, naming why — the mailbox is the seat\'s, never the login\'s', parseArgs(['--repo', 'o/r', '--login', 'os-bill']).errors.some((e) => e.includes('--seat <seat> is required') && e.includes('never the login')), true);
-  t('a --seat that is not LANE#N is refused, a login among them', ['ui 4', 'domain:ui#0', '#4', 'domain:', 'domain:ui#4#5', 'os-bill', 'marchtian'].every((s) => parseArgs(['--repo', 'o/r', '--seat', s, '--login', 'a']).errors.some((e) => e.includes('is not a seat'))), true);
+  t('a --seat that is not LANE#N is refused, a login and a malformed epic among them', ['ui 4', 'domain:ui#0', '#4', 'domain:', 'domain:ui#4#5', 'os-bill', 'marchtian', 'epic:27293', 'epic:#27293#0'].every((s) => parseArgs(['--repo', 'o/r', '--seat', s, '--login', 'a']).errors.some((e) => e.includes('is not a seat'))), true);
+  t('⭐ an epic seat opens like any seat: --seat epic:#N#K parses, its branch a legal ref', parseArgs(['--repo', 'o/r', '--seat', 'epic:#27293#1', '--login', 'sunhaolin']).errors, []);
   t('open without --login is refused', parseArgs(['--repo', 'o/r', '--seat', 'triage']).errors.some((e) => e.includes('--login')), true);
   t('a login GitHub would refuse is refused', parseArgs(['--repo', 'o/r', '--seat', 'triage', '--login', '-bad--']).errors.some((e) => e.includes('not a GitHub login')), true);
   t('a seat whose branch is no legal ref is refused', parseArgs(['--repo', 'o/r', '--seat', 'repo:a..b#1', '--login', 'a']).errors.some((e) => e.includes('not a legal ref')), true);
@@ -532,12 +540,17 @@ async function selfTest() {
   t('an absent number is seat 1, spelled', [seatKey('triage'), seatKey('domain:skills')], [{ key: 'triage#1', slug: 'triage-1' }, { key: 'domain:skills#1', slug: 'skills-1' }]);
   t('another kind keeps its name, its colon turned into a hyphen', [seatKey('repo:cloud#1').slug, seatKey('repo:www.objectos.ai#2').slug], ['repo-cloud-1', 'repo-www.objectos.ai-2']);
   t('read lower-cased, so one seat has one key', [seatKey('Domain:UI#4').key, seatKey(' domain:ui#4 ').key], ['domain:ui#4', 'domain:ui#4']);
-  t('not a seat ⇒ null — ⛔ a login above all, the confusion a per-login mailbox made', ['', 'ui 4', 'domain:ui#0', '#4', 'domain:', null, 'os-bill', 'marchtian', 'epic:#12'].map(seatKey), [null, null, null, null, null, null, null, null, null]);
+  t('not a seat ⇒ null — ⛔ a login above all, the confusion a per-login mailbox made', ['', 'ui 4', 'domain:ui#0', '#4', 'domain:', null, 'os-bill', 'marchtian'].map(seatKey), [null, null, null, null, null, null, null, null]);
+  t('⭐ an epic seat reads: `epic:#N#K` keeps its spelling, slugs to epic-N-K; `epic:#N` is seat 1; read lower-cased', [seatKey('epic:#27293#1'), seatKey('epic:#12'), seatKey(' Epic:#12#2 ').key], [{ key: 'epic:#27293#1', slug: 'epic-27293-1' }, { key: 'epic:#12#1', slug: 'epic-12-1' }, 'epic:#12#2']);
+  t('⛔ a malformed epic spelling is not a seat — no `#`, no number, a zero or leading zero, a word, a third number', ['epic', 'epic:', 'epic:#', 'epic:12', 'epic#12', 'epic:#0', 'epic:#012', 'epic:#12#0', 'epic:#12#', 'epic:#12#1#2', 'epic:#abc', 'epic:#12-1', 'epic:skills#1'].map(seatKey).filter((k) => k !== null), []);
+  t('⛔ a `domain:` lane named `epic-…` is refused — its slug would be an epic seat\'s — while `domain:epic` and `domain:epics` read', [seatKey('domain:epic-12#1'), seatKey('domain:epic-tools'), seatKey('domain:epic').slug, seatKey('domain:epics').slug], [null, null, 'epic-1', 'epics-1']);
+  t('⭐ the epic slug collides with no lane slug: one key per slug across every lane kind', (() => { const keys = ['epic:#12#1', 'domain:epic#12', 'domain:epic-12#1', 'repo:epic-12#1', 'domain:12#1', 'triage#12', 'epic:#1#21', 'epic:#12#1'].map(seatKey).filter(Boolean); return new Set(keys.map((k) => k.slug)).size === new Set(keys.map((k) => k.key)).size; })(), true);
   t('⛔ a short form is not a seat — `skills#2` names no lane, so it is refused as a login is', ['skills#2', 'ui#4', 'server', 'skills'].map(seatKey), [null, null, null, null]);
   t('⛔ a `domain:` lane named after a reserved lane word is refused — its slug would be another seat\'s', ['domain:triage', 'domain:director#2', 'domain:repo-cloud#1', 'Domain:Triage#1'].map(seatKey), [null, null, null, null]);
   t('…while a `domain:` lane that merely CONTAINS a reserved word, and the reserved words as their own lanes, still read', [seatKey('domain:triage-tools#1').slug, seatKey('domain:directory').slug, seatKey('domain:repository').slug, seatKey('triage#2').slug, seatKey('repo:cloud').slug], ['triage-tools-1', 'directory-1', 'repository-1', 'triage-2', 'repo-cloud-1']);
-  t('the shape and the reserved set are built from the ONE pair of lane-word lists', SEAT_LANE_KINDS.join() === 'domain,repo' && SEAT_BARE_LANES.join() === 'triage,director' && SEAT_BARE_LANES.every((w) => seatKey(w)?.key === `${w}#1` && seatKey(`domain:${w}`) === null), true);
+  t('the shape and the reserved set are built from the ONE set of lane-word lists', SEAT_LANE_KINDS.join() === 'domain,repo' && SEAT_BARE_LANES.join() === 'triage,director' && SEAT_EPIC_KIND === 'epic' && SEAT_BARE_LANES.every((w) => seatKey(w)?.key === `${w}#1` && seatKey(`domain:${w}`) === null) && seatKey(`${SEAT_EPIC_KIND}:#7`)?.key === 'epic:#7#1' && seatKey(`domain:${SEAT_EPIC_KIND}-7`) === null, true);
   t('the branch is mailbox/<login>/<slug> — no `:` and no `#` in a ref', mailboxBranch('os-bill', seatKey('domain:ui#4')), 'mailbox/os-bill/ui-4');
+  t('an epic seat\'s branch is mailbox/<login>/epic-N-K', mailboxBranch('sunhaolin', seatKey('epic:#27293#1')), 'mailbox/sunhaolin/epic-27293-1');
   t('⭐ two seats under ONE login get two branches', [mailboxBranch('os-sales', seatKey('domain:server#1')), mailboxBranch('os-sales', seatKey('domain:ui#1'))], ['mailbox/os-sales/server-1', 'mailbox/os-sales/ui-1']);
 
   battery('the open plan: branch, labels, body, and the relay validator');
@@ -548,11 +561,13 @@ async function selfTest() {
   t('⭐ pinned IS stale.yml\'s exemption, read off the workflow — and pm:mailbox is not one', (() => { const y = readFileSync(join(REPO_ROOT, '.github', 'workflows', 'stale.yml'), 'utf8'); const m = /exempt-pr-labels:\s*'([^']*)'/.exec(y); const names = m ? m[1].split(',').map((s) => s.trim()) : []; return [names.includes(STALE_EXEMPT_LABEL), names.includes(MAILBOX_LABEL)]; })(), [true, false]);
   t('⭐ the body opens with Mailbox-of: <seat> · <login> — the seat is the key, the login only who holds it', p.actions[0].body.split('\n')[0], 'Mailbox-of: domain:ui#4 · os-bill');
   t('the body tells a sender to open with To: <seat>', p.actions[0].body.includes('the line `To: domain:ui#4`, then ONE line'), true);
-  t('the body states the CI posture, the never-merged rule and the closed vocabulary', [/RED BY DESIGN/.test(p.actions[0].body), /Never merged/.test(p.actions[0].body), /seven doorbell keys/.test(p.actions[0].body) && /no acknowledgements/.test(p.actions[0].body)], [true, true, true]);
+  t('the body states the CI posture, the never-merged rule and the closed vocabulary', [/RED BY DESIGN/.test(p.actions[0].body), /Never merged/.test(p.actions[0].body), /one of the doorbell keys/.test(p.actions[0].body) && /--mailbox-keys/.test(p.actions[0].body) && /no acknowledgements/.test(p.actions[0].body)], [true, true, true]);
   t('the relay validator accepts the stroke', p.errors, []);
   const ph = planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/project-thread-x' });
   t('--head names the branch and skips the push; the body still names the seat', [ph.branch, ph.push, ph.actions[0].head, ph.actions[0].body.split('\n')[0]], ['claude/project-thread-x', false, 'claude/project-thread-x', 'Mailbox-of: triage#1 · os-bill']);
   t('no draft key is sent — the relay forces draft itself', 'draft' in p.actions[0], false);
+  const pe = planOpen({ repo: 'objectstack-ai/objectstack', seat: 'Epic:#27293#1', login: 'sunhaolin' });
+  t('⭐ an epic seat\'s plan: its branch, its Mailbox-of line, its To: line, and the validator accepts it', [pe.branch, pe.actions[0].title, pe.actions[0].body.split('\n')[0], pe.actions[0].body.includes('the line `To: epic:#27293#1`'), pe.errors], ['mailbox/sunhaolin/epic-27293-1', 'pm:mailbox — epic:#27293#1 · sunhaolin', 'Mailbox-of: epic:#27293#1 · sunhaolin', true, []]);
 
   battery('the close plan: comment then close, judged by the validator');
   const c = planClose({ repo: 'o/r', pull: 25392 });
@@ -566,6 +581,7 @@ async function selfTest() {
   t('a head mailbox/<login>/<slug> with no body line reads the slug and the login', mailboxOwner(pr({ head: { ref: 'mailbox/os-bill/ui-4' } })), { seat: null, slug: 'ui-4', login: 'os-bill' });
   t('the body outranks the head', mailboxOwner(pr({ head: { ref: 'mailbox/os-bill/ui-4' }, body: 'Mailbox-of: domain:ui#2 · os-bill' })).slug, 'ui-2');
   t('⛔ a legacy per-login mailbox names a login and NO seat — head mailbox/<login>, a To: <login> or a Mailbox-of: <login> first line', [mailboxOwner(pr({ head: { ref: 'mailbox/os-justin' } })), mailboxOwner(pr({ head: { ref: 'claude/x' }, body: 'To: os-sales\n\nThe mailbox' })), mailboxOwner(pr({ body: 'Mailbox-of: os-elon-musk\n' }))], [{ seat: null, slug: null, login: 'os-justin' }, { seat: null, slug: null, login: 'os-sales' }, { seat: null, slug: null, login: 'os-elon-musk' }]);
+  t('⭐ an epic seat\'s body reads back as its seat, and its default head as its slug', [mailboxOwner(pr({ head: { ref: 'claude/x' }, body: pe.actions[0].body })), mailboxOwner(pr({ head: { ref: pe.branch } }))], [{ seat: 'epic:#27293#1', slug: 'epic-27293-1', login: 'sunhaolin' }, { seat: null, slug: 'epic-27293-1', login: 'sunhaolin' }]);
   t('a pm:mailbox pull naming neither is a mailbox of nobody, never a non-mailbox', mailboxOwner(pr({ body: 'hello' })), { seat: null, slug: null, login: null });
   t('a malformed seat or login on the body line names no seat', [mailboxOwner(pr({ body: 'Mailbox-of: ui 4 · os-bill' })).slug, mailboxOwner(pr({ body: 'Mailbox-of: domain:ui#4 · -bad-' })).slug], [null, null]);
   t('without the label it is not a mailbox', mailboxOwner(pr({ labels: [], head: { ref: 'mailbox/os-bill/ui-4' } })), null);
@@ -586,6 +602,7 @@ async function selfTest() {
   t('the seat match is case- and spelling-insensitive (domain:skills ≡ domain:skills#1)', [openMailboxesOf([opened('domain:skills', 'a', 1)], seatKey('Domain:Skills#1')).length, openMailboxesOf([pr({ head: { ref: 'mailbox/a/UI-4' } })], UI4).length], [1, 1]);
   t('⛔ a legacy per-login mailbox blocks no seat of its login', [openMailboxesOf([pr({ head: { ref: 'mailbox/os-bill' } }), pr({ body: 'To: os-bill' })], UI4).length], [0]);
   t('…and is named for its login, case-insensitively, never for another', [legacyMailboxesOf([pr({ number: 5, head: { ref: 'mailbox/OS-Bill' } }), pr({ number: 6, body: 'To: os-bill' }), pr({ number: 8, body: 'To: os-sales' }), opened('domain:ui#4', 'os-bill', 7)], 'os-bill').map((x) => x.number)], [[5, 6]]);
+  t('⭐ an epic seat\'s open mailbox refuses a second for that seat only — never for another epic, nor for a domain:epic lane', (() => { const box = [opened('epic:#27293#1', 'sunhaolin', 11)]; return [openMailboxesOf(box, seatKey('epic:#27293')).map((x) => x.number), openMailboxesOf(box, seatKey('epic:#27293#2')).length, openMailboxesOf(box, seatKey('epic:#2729#31')).length, openMailboxesOf(box, seatKey('domain:epic')).length]; })(), [[11], 0, 0, 0]);
   t('without the label it is not a mailbox', openMailboxesOf([pr({ labels: [], head: { ref: 'mailbox/os-bill/ui-4' } })], UI4).length, 0);
   t('a closed one does not block a new one', openMailboxesOf([pr({ state: 'closed', head: { ref: 'mailbox/os-bill/ui-4' } })], UI4).length, 0);
 
@@ -632,6 +649,7 @@ async function selfTest() {
   t('close dry run exits 0 and prints both actions', [cli(['--repo', 'o/r', '--close', '7', '--dry-run']).status, (cli(['--repo', 'o/r', '--close', '7', '--dry-run']).stdout.match(/"op":/g) ?? []).length], [EXIT_OK, 2]);
   t('a usage error is exit 2 — an open with no --seat among them', [cli(['--repo', 'o/r']).status, cli(['--repo', 'o/r', '--login', 'os-bill', '--dry-run']).status], [EXIT_USAGE, EXIT_USAGE]);
   t('--help is exit 0', cli(['--help']).status, EXIT_OK);
+  t('an epic seat\'s dry run exits 0 and pushes its own branch; a malformed epic is exit 2', (() => { const e = cli(['--repo', 'o/r', '--seat', 'epic:#27293#1', '--login', 'sunhaolin', '--dry-run']); return [e.status, e.stdout.includes('refs/heads/mailbox/sunhaolin/epic-27293-1'), cli(['--repo', 'o/r', '--seat', 'epic:27293', '--login', 'sunhaolin', '--dry-run']).status]; })(), [EXIT_OK, true, EXIT_USAGE]);
 
   const floor = [];
   const declared = Object.keys(SELF_TEST_BATTERIES);

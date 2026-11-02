@@ -251,3 +251,53 @@ describe('[#22646] CONTROL — ordinary fields through a relation and at depth a
         }
     }
 });
+
+/**
+ * The PUBLIC face the MCP data mouths ask (`assertNoInternalFieldEvaluated`):
+ * the MCP stdio transport's `query_records` / `aggregate_records` and the HTTP
+ * bridge's `aggregate_records` hand a caller's query to the engine without
+ * passing through `findData`, so each asks this method of the `protocol`
+ * service first. It must be the door's own verdict, not a second one: for each
+ * canonical query those mouths can send, the face throws exactly what
+ * `findData` throws for the same query (code, status, object, field, param,
+ * message), and an ordinary-field query passes it without a throw.
+ */
+describe('the public internal-field face answers exactly what findData answers', () => {
+    const shapes: Array<[string, Record<string, unknown>]> = [
+        ['filter ($eq)', { where: { [F]: { $eq: 'h1' } } }],
+        ['filter ($startsWith)', { where: { [F]: { $startsWith: 'h' } } }],
+        ['sort (orderBy node)', { orderBy: [{ field: F, order: 'asc' }] }],
+        ['aggregate where', { where: { [F]: 'h1' }, aggregations: [{ function: 'count', alias: 'n' }] }],
+        ['group key', { groupBy: [F], aggregations: [{ function: 'count', alias: 'n' }] }],
+        ['aggregation operand', { aggregations: [{ function: 'max', field: F, alias: 'm' }] }],
+        ["aggregation's own filter", { aggregations: [{ function: 'count', alias: 'n', filter: { [F]: 'h1' } }] }],
+        ['relation condition onto the target', { where: { vault_id: { [F]: 'h1' } } }],
+    ];
+    const envelope = (e: any) => ({ code: e?.code, status: e?.status, object: e?.object, field: e?.field, param: e?.param, message: e?.message });
+
+    for (const [label, query] of shapes) {
+        it(`${label}: the face throws the door's refusal, field for field`, async () => {
+            const object = label.startsWith('relation') ? 'pv_holder' : 'pv_vault';
+            const { p, find, aggregate } = makeProtocol();
+            const door = await refusal(() => p.findData({ object, query: { ...query } }));
+            let thrown: unknown;
+            try { p.assertNoInternalFieldEvaluated(object, { ...query }); } catch (e) { thrown = e; }
+            expect(thrown, 'the face let a position the door refuses through').toBeDefined();
+            expect(envelope(thrown)).toEqual(envelope(door));
+            expect(envelope(thrown)).toMatchObject({ code: 'INVALID_FIELD', status: 400 });
+            expect(find).not.toHaveBeenCalled();
+            expect(aggregate).not.toHaveBeenCalled();
+        });
+    }
+
+    it('CONTROL — ordinary fields in every position pass the face without a throw', () => {
+        const { p } = makeProtocol();
+        expect(() => p.assertNoInternalFieldEvaluated('pv_vault', {
+            where: { name: { $startsWith: 'a' } },
+            orderBy: [{ field: 'name', order: 'asc' }],
+            groupBy: ['name'],
+            aggregations: [{ function: 'max', field: 'rank', alias: 'm', filter: { name: 'alpha' } }],
+        })).not.toThrow();
+        expect(() => p.assertNoInternalFieldEvaluated('pv_holder', { where: { vault_id: { name: 'alpha' } } })).not.toThrow();
+    });
+});

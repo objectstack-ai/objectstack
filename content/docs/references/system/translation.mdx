@@ -131,6 +131,7 @@ Translation data for a single field
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
+| **cancelText** | `string` | optional | Translated label of the dismiss button on the action's confirm or param dialog (the action must declare `confirmText` or `params`; no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -234,6 +235,7 @@ Translation data for a single object
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
+| **cancelText** | `string` | optional | Translated label of the dismiss button on the action's confirm or param dialog (the action must declare `confirmText` or `params`; no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -280,11 +282,12 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
-| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **successMessage** | `string` | optional | Translated completion toast — a `{{ }}` template like the flow's own `successMessage`, picked by the engine in the run's locale and rendered in its place over the run's variables; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — a `{{ }}` template like the flow's own `errorMessage`, picked by the engine in the run's locale and rendered in its place over the variables at the failure point; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 
 ### Nested Shape: `PlatformTranslationData.hooks[string]`
 
@@ -409,6 +412,7 @@ Translation data for a single object
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
+| **cancelText** | `string` | optional | Translated label of the dismiss button on the action's confirm or param dialog (the action must declare `confirmText` or `params`; no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -455,11 +459,12 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
-| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **successMessage** | `string` | optional | Translated completion toast — a `{{ }}` template like the flow's own `successMessage`, picked by the engine in the run's locale and rendered in its place over the run's variables; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — a `{{ }}` template like the flow's own `errorMessage`, picked by the engine in the run's locale and rendered in its place over the variables at the failure point; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 
 ### Nested Shape: `ServedTranslationData.hooks[string]`
 
@@ -646,6 +651,7 @@ Translation data for a single object
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
+| **cancelText** | `string` | optional | Translated label of the dismiss button on the action's confirm or param dialog (the action must declare `confirmText` or `params`; no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -692,11 +698,12 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
-| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **successMessage** | `string` | optional | Translated completion toast — a `{{ }}` template like the flow's own `successMessage`, picked by the engine in the run's locale and rendered in its place over the run's variables; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — a `{{ }}` template like the flow's own `errorMessage`, picked by the engine in the run's locale and rendered in its place over the variables at the failure point; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 
 ### Nested Shape: `TranslationData.hooks[string]`
 
@@ -853,6 +860,7 @@ Translation data for a single object
 | **successMessage** | `string` | optional | Translated success toast/message |
 | **disabledReason** | `string` | optional | Translated reason a greyed action shows (hover title and accessible description) while its `disabled` predicate is TRUE |
 | **submitText** | `string` | optional | Translated label of the submit button in the action's param dialog (the action must declare `params`) |
+| **cancelText** | `string` | optional | Translated label of the dismiss button on the action's confirm or param dialog (the action must declare `confirmText` or `params`; no renderer shows it yet) |
 | **outcomeMessages** | `Record<string, string>` | optional | Translated success copy per handler outcome, keyed by the snake_case outcome name the action's `outcomeMessages` declares |
 | **params** | `Record<string, { label?: string; helpText?: string; placeholder?: string; options?: Record<string, string> }>` | optional | Action parameter translations keyed by parameter name |
 | **resultDialog** | `{ title?: string; description?: string; acknowledge?: string; fields?: Record<string, string> }` | optional | Translations for the action result dialog |
@@ -899,11 +907,12 @@ Translation data for a single object
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **label** | `string` | optional | Translated flow label |
-| **successMessage** | `string` | optional | Translated completion toast — overlays the flow's own `successMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
-| **errorMessage** | `string` | optional | Translated failure toast — overlays the flow's own `errorMessage`, a plain string the engine carries verbatim on the terminal result; only a flow that authors one is translated |
+| **successMessage** | `string` | optional | Translated completion toast — a `{{ }}` template like the flow's own `successMessage`, picked by the engine in the run's locale and rendered in its place over the run's variables; only a flow that authors one is translated |
+| **errorMessage** | `string` | optional | Translated failure toast — a `{{ }}` template like the flow's own `errorMessage`, picked by the engine in the run's locale and rendered in its place over the variables at the failure point; only a flow that authors one is translated |
 | **screens** | `Record<string, { title?: string; description?: string; fields?: Record<string, object> }>` | optional | Screen translations keyed by screen node id (`FlowNode.id`, the client's `ScreenSpec.nodeId`) |
 | **refusals** | `Record<string, { message?: string }>` | optional | Refusal translations keyed by the node id (`FlowNode.id`) of an `end` node declaring `outcome: 'refused'` |
 | **approvals** | `Record<string, { label?: string }>` | optional | Approval-step translations keyed by the node id (`FlowNode.id`) of an `approval` node |
+| **notices** | `Record<string, { message?: string }>` | optional | Save-notice translations keyed by the node id (`FlowNode.id`) of a `save_notice` node |
 
 ### Nested Shape: `TranslationItem.hooks[string]`
 

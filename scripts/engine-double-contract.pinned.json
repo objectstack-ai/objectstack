@@ -52,6 +52,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-create-record-stale-summary.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -63,6 +78,21 @@
     },
     {
       "file": "packages/mcp/src/mcp-stdio-tools.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/mcp/src/mcp-update-delete-record-stale-summary.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -283,6 +313,16 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.active-save-namespace-prefix.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.adopt-orphans-owner-judges.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.adopt-orphans-owner-judges.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -834,6 +874,21 @@
     {
       "file": "packages/metadata-protocol/src/protocol.expand-target-exposure.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.extension-field-suffix.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -1697,6 +1752,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.row-binding-column.test.ts",
+      "verb": "findOne",
+      "pinned": 2
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.runtime-authoring-gate.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1918,6 +1978,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.stored-residue-resave.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.summary-rollup-publish-gate.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.summary-rollup-publish-gate.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.summary-rollup-publish-gate.test.ts",
       "verb": "update",
       "pinned": 1
     },

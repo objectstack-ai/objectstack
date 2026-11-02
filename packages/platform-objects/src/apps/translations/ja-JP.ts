@@ -39,7 +39,7 @@ export const jaJP: TranslationData = {
         // Setup's own `nav_packages` — distinct from the same id under
         // `apps.studio.navigation`, which does not answer for this app (#5750).
         nav_packages: { label: 'パッケージ' },
-        nav_packaged_automation: { label: 'パッケージ自動化' },
+        nav_packaged_actions: { label: 'パッケージアクション' },
         nav_marketplace_browse: { label: 'マーケットプレイスを閲覧' },
         nav_marketplace_installed: { label: 'インストール済みアプリ' },
         nav_cloud_connection: { label: 'クラウド接続' },
@@ -62,11 +62,7 @@ export const jaJP: TranslationData = {
         nav_position_holders: { label: 'ポジション保持者' },
         nav_permission_set_assignment: { label: '権限セットの割り当て' },
 
-        nav_positions: { label: 'ポジション' },
-        nav_capabilities: { label: 'ケイパビリティ' },
-        nav_permission_sets: { label: '権限セット' },
         nav_sharing_rules: { label: '共有ルール' },
-        nav_declared_sharing_rules: { label: '宣言済みの共有ルール' },
         nav_record_shares: { label: 'レコード共有' },
         nav_queues: { label: 'キュー' },
         nav_queue_members: { label: 'キューメンバー' },
@@ -109,6 +105,7 @@ export const jaJP: TranslationData = {
         nav_http_deliveries: { label: 'HTTP 配信' },
         nav_datasources: { label: 'データソース' },
         nav_connector_credentials: { label: 'コネクタ認証情報' },
+        nav_connector_connections: { label: 'コネクタ接続' },
 
         nav_oauth_apps: { label: 'OAuth アプリケーション' },
       },

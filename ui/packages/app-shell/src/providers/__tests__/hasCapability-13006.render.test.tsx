@@ -50,7 +50,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor } from '@testing-library/react';
 import { ComponentRegistry, subjectCapabilitiesOf, subjectPermissionsOf } from '@object-ui/core';
 import { ActionProvider, SchemaRenderer, useAction, usePredicateScope } from '@object-ui/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 // The reporter's dedupe `Set` is module state: reset it so every arm's
 // "nothing reported" is a reading, not a leftover from an earlier arm.
 import { __resetVisibilityPredicateWarnings } from '../../../../react/src/utils/visibilityDiagnostic';
@@ -89,12 +89,13 @@ const PRINCIPALS = {
   },
 } as const;
 
-function payload(userId: string, systemPermissions: string[] | undefined): MePermissionsResponse {
+function payload(userId: string, systemPermissions: string[] | undefined): MePermissionsAuthenticatedResponse {
   return {
     authenticated: true,
     userId,
     tenantId: 'org_1',
-    roles: [],
+    positions: [],
+    hasAnyQueue: false,
     permissionSets: ['member'],
     ...(systemPermissions !== undefined ? { systemPermissions } : {}),
     objects: { account: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: false } },

@@ -79,8 +79,8 @@ const approvalFlow = {
 | `nodes` | `FlowNode[]` | ✅ | Flow nodes |
 | `edges` | `FlowEdge[]` | ✅ | Connections between nodes |
 | `errorHandling` | `object` | optional | Error handling strategy |
-| `successMessage` | `string` | optional | Toast a screen-flow runner shows on terminal success (plain string — `{var}` is **not** interpolated) |
-| `errorMessage` | `string` | optional | Toast a screen-flow runner shows on failure, instead of the raw error |
+| `successMessage` | `string` | optional | Toast a screen-flow runner shows on terminal success — a `{{ }}` template over the run's variables (`'{{ enrolledCount }} contacts enrolled'`), rendered when the run completes |
+| `errorMessage` | `string` | optional | Toast a screen-flow runner shows on failure, instead of the raw error — a `{{ }}` template rendered over the variables at the failure point (`{{ $error.message }}` included) |
 
 ### Flow Types
 

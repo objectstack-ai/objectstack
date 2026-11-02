@@ -255,8 +255,10 @@ describe('#6296 DEFAULT-PATH INVARIANCE — the record-scoped consumers are unto
       'record.id',
       'user.id',
       'user.email',
-      'user.role',
-      'user.isAdmin',
+      'user.isPlatformAdmin',
+      // ⛔ no `user.role` (the legacy better-auth scalar) and no `user.isAdmin`
+      // (a member the bag never carried); the bag half is pinned in
+      // `ConditionBuilder.contextSubjectsBag.test.ts`.
       // ⛔ no `org.id`: objectui#9855 withdrew it — no host binds an `org` root
       // and the engine refuses the spelling. The verdict behind that removal is
       // re-derived from the engine in `ConditionBuilder.contextSubjects.test.tsx`;

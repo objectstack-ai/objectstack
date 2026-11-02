@@ -6002,3 +6002,104 @@ describe('ApprovalService — the act doors answer an unreadable request as a mi
     expect(out.request.status).toBe('rejected');
   });
 });
+
+describe('ApprovalService — one spec names each resolved person once (#28684)', () => {
+  // The #28658 measurement: a lead hands `['ADMIN', 'ADMIN']` to the next
+  // node's expression approver, and that node opened two slots for one person.
+  const NOW = new Date('2026-05-27T10:00:00Z').getTime();
+  let engine: ReturnType<typeof makeFakeEngine>;
+  let svc: ApprovalService;
+
+  beforeEach(() => {
+    engine = makeFakeEngine();
+    let n = 0;
+    svc = new ApprovalService({ engine: engine as any, clock: { now: () => new Date(NOW + (n++) * 1000) } });
+  });
+
+  const exprInput = (picked: unknown, approverExtra: Record<string, any> = {}, configExtra: Record<string, any> = {}) => ({
+    ...openInput([]),
+    variables: { picked },
+    config: {
+      approvers: [{ type: 'expression' as const, value: 'vars.picked', ...approverExtra }],
+      behavior: 'unanimous' as const,
+      lockRecord: false,
+      ...configExtra,
+    },
+  });
+  const snapshotGroups = () =>
+    JSON.parse(engine._tables['sys_approval_request'][0].node_config_json).__approverGroups;
+
+  it('an expression yielding the same id twice opens one slot', async () => {
+    const req = await svc.openNodeRequest(exprInput(['u2', 'u2']) as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u2']);
+    expect(engine._tables['sys_approval_request'][0].pending_approvers).toBe('u2');
+    expect(snapshotGroups()).toEqual({ u2: ['#0'] });
+  });
+
+  it('keeps first-appearance order: `[u3, u2, u3]` opens u3 then u2', async () => {
+    const req = await svc.openNodeRequest(exprInput(['u3', 'u2', 'u3']) as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u3', 'u2']);
+  });
+
+  it('two ids an out-of-office delegation routes to the same delegate open one slot', async () => {
+    engine._tables['sys_approval_delegation'] = ['u2', 'u3'].map((delegator, i) => ({
+      id: `del${i}`, delegator_id: delegator, delegate_id: 'u9', organization_id: 't1',
+      valid_from: '2026-05-26T00:00:00Z', valid_until: '2026-05-30T00:00:00Z', reason: 'leave',
+    }));
+    const req = await svc.openNodeRequest(exprInput(['u2', 'u3']) as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u9']);
+    // Both hops are still recorded: each delegator was routed away.
+    const hops = engine._tables['sys_approval_action'].filter((a: any) => a.action === 'ooo_substitute');
+    expect(hops.map((a: any) => a.comment).sort()).toEqual(['u2 → u9 — leave', 'u3 → u9 — leave']);
+  });
+
+  it('per_group: a repeated id is one signature, not two toward minApprovals', async () => {
+    const req = await svc.openNodeRequest(
+      exprInput(['u2', 'u2', 'u3'], {}, { behavior: 'per_group', minApprovals: 2 }) as any, CTX,
+    ) as any;
+    expect(req.pending_approvers).toEqual(['u2', 'u3']);
+    const first = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u2' }, SYS);
+    expect(first.finalized).toBe(false);
+    expect(first.request.status).toBe('pending');
+    const second = await svc.decideNode(req.id, { decision: 'approve', actorId: 'u3' }, SYS);
+    expect(second.finalized).toBe(true);
+  });
+
+  it('a `field` approver holding the same id twice opens one slot (same seam)', async () => {
+    engine._tables['opportunity'] = [{ id: 'opp1', approvers_dynamic: 'u2,u3,u2' }];
+    const req = await svc.openNodeRequest({
+      ...openInput([]),
+      config: { approvers: [{ type: 'field', value: 'approvers_dynamic' }], behavior: 'unanimous', lockRecord: false },
+    } as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['u2', 'u3']);
+  });
+
+  it('resolveAs department: a repeated department, or one member of two, opens one slot and keeps every group', async () => {
+    engine._tables['sys_business_unit'] = [
+      { id: 'd1', active: true, organization_id: 't1' },
+      { id: 'd2', active: true, organization_id: 't1' },
+    ];
+    engine._tables['sys_business_unit_member'] = [
+      { id: 'm1', business_unit_id: 'd1', user_id: 'u2', organization_id: 't1' },
+      { id: 'm2', business_unit_id: 'd2', user_id: 'u2', organization_id: 't1' },
+      { id: 'm3', business_unit_id: 'd2', user_id: 'u3', organization_id: 't1' },
+    ];
+    const req = await svc.openNodeRequest(
+      exprInput(['d1', 'd2', 'd1'], { resolveAs: 'department' }, { behavior: 'per_group' }) as any, CTX,
+    ) as any;
+    expect(req.pending_approvers).toEqual(['u2', 'u3']);
+    expect(snapshotGroups()).toEqual({ u2: ['#0:d1', '#0:d2'], u3: ['#0:d2'] });
+  });
+
+  it('two specs naming one person are unchanged: once per spec, tagged once per group', async () => {
+    const req = await svc.openNodeRequest({
+      ...openInput([]),
+      config: {
+        approvers: [{ type: 'user', value: 'l1', group: 'legal' }, { type: 'user', value: 'l1', group: 'finance' }],
+        behavior: 'per_group', lockRecord: false,
+      },
+    } as any, CTX) as any;
+    expect(req.pending_approvers).toEqual(['l1', 'l1']);
+    expect(snapshotGroups()).toEqual({ l1: ['legal', 'finance'] });
+  });
+});

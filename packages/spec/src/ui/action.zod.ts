@@ -943,8 +943,9 @@ const actionDisabledReason = () => z.union([
  * `objects.OBJECT._actions.ACTION.submitText`, or an inline locale map), the
  * route `description` — the same dialog's line under its title — takes. The
  * name is the protocol's existing word for a submit button's copy:
- * `object-form`'s `submitText` (`component.zod.ts`), beside its `cancelText`.
- * `submitLabel` is the spelling the platform retired twice in favour of that
+ * `object-form`'s `submitText` (`component.zod.ts`), beside its `cancelText` —
+ * and the action's own dismiss button is {@link actionCancelText}, the same
+ * pair. `submitLabel` is the spelling the platform retired twice in favour of that
  * one (the `element:form` prop and the page component-copy translation key),
  * so it is an alias here, not the key.
  *
@@ -966,6 +967,44 @@ const SUBMIT_TEXT_BLANK =
   + 'key to keep the default.';
 const actionSubmitText = () => z.union([
   z.string().refine(NON_BLANK_STRING, { message: SUBMIT_TEXT_BLANK }),
+  InlineLocaleMapSchema,
+]);
+
+/**
+ * [#28519] `cancelText` — the label of the dismiss button on the dialog an
+ * action opens before it runs, in place of the dialog's default "Cancel". It
+ * matters most where the action's own verb is itself "Cancel …" or "Close …":
+ * a "Cancel Invitation" confirm whose two buttons read "Cancel" and "Cancel
+ * Invitation" leaves the user unable to tell which one keeps the invitation, so
+ * the action names what dismissing keeps ("Keep invitation").
+ *
+ * Two dialogs carry that button, and an action opens at most one of them: the
+ * confirm dialog of a param-LESS action that declares `confirmText`, and the
+ * param dialog of an action with a non-empty `params` (the pair on one
+ * registered action is refused below). So, unlike {@link actionSubmitText},
+ * which only the param dialog has, this key belongs on either — and on neither
+ * dialog-less action: an action that declares no `confirmText` and no
+ * `params` opens no dialog, so the label would parse clean and never show
+ * (ADR-0078), and that is refused below.
+ *
+ * An I18nLabel (a plain string translated at
+ * `objects.OBJECT._actions.ACTION.cancelText`, or an inline locale map), the
+ * route `submitText` takes. The name is the protocol's existing word for a
+ * dismiss button's copy: `object-form`'s `cancelText` (`component.zod.ts`),
+ * beside its `submitText`. `cancelLabel` is the spelling of the same button on
+ * the console's `form` and `alert-dialog` renderers, the `*Label` family
+ * `submitLabel` belongs to, so it is an alias here, not the key.
+ *
+ * A blank string is refused for the reason `submitText`'s is: it would replace
+ * the default label with an empty button. Omitting the key keeps "Cancel". The
+ * rule is {@link NON_BLANK_STRING}, so the published JSON Schema carries it too.
+ */
+const CANCEL_TEXT_BLANK =
+  'a blank `cancelText` would replace the dialog\'s default dismiss button label, "Cancel", with '
+  + 'an empty button. Write what dismissing keeps (e.g. "Keep invitation"), or omit the key to '
+  + 'keep the default.';
+const actionCancelText = () => z.union([
+  z.string().refine(NON_BLANK_STRING, { message: CANCEL_TEXT_BLANK }),
   InlineLocaleMapSchema,
 ]);
 
@@ -1009,6 +1048,10 @@ const actionObject = () => strictObject({
     // spelling of the same button on a view's `bulkActionDefs` dialog. Neither
     // is reachable by distance from `submitText`.
     submitLabel: 'submitText', confirmLabel: 'submitText',
+    // [#28519] The dismiss button's spelling on the console's `form` and
+    // `alert-dialog` renderers, the `*Label` twin of `submitLabel` above. Not
+    // reachable by distance from `cancelText`.
+    cancelLabel: 'cancelText',
     // [#27946] The card's own second spelling (`active`) and the `*When`
     // predicate family's spelling of the pressed-state predicate.
     active: 'pressed', activeWhen: 'pressed', pressedWhen: 'pressed',
@@ -1428,14 +1471,20 @@ const actionObject = () => strictObject({
           + 'Run `os migrate meta --from 16` to list the mechanical edits for the inline `element:button` action case; `--write` applies the ones it can prove, and a registered action keeps its object form until you move it by hand.'
         : undefined
     ),
-  }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`).'),
+  }).optional().describe('Input parameters required from user — an ActionParam[] DEFINITION array, never a payload map (a static request body goes in `bodyExtra`). A param name (its `name`, or the `field` a field-backed param reads) may repeat only for per-gate variants of ONE input (declarations that differ in `visible` / `requiresFeature`, e.g. one optional and one required); the params check treats the name as `required` only when EVERY declaration of it requires it, and judges its value by the FIRST declaration\'s shape (`type`, `multiple`, `options`), so keep that shape identical across them.'),
 
   /**
    * The submit button label of the dialog `params` opens — the contract is
    * on {@link actionSubmitText}.
    */
   submitText: actionSubmitText().optional().describe('Label of the submit button in the action\'s param dialog, the verb the button performs (e.g. "Send", "Log Call"), in place of the default "Confirm" — the default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.submitText` (`globalActions.ACTION.submitText` for an object-less action). Only on an action with a non-empty `params`: without one no param dialog opens, so it is refused. Not `confirmText`, which is the message of a param-less action\'s confirm dialog. A blank label is refused.'),
-  
+
+  /**
+   * The dismiss button label of the dialog `confirmText` or `params` opens —
+   * the contract is on {@link actionCancelText}.
+   */
+  cancelText: actionCancelText().optional().describe('Label of the dismiss button on the dialog the action opens before it runs — the confirm dialog of a param-less action that declares `confirmText`, or the param dialog of an action with a non-empty `params` — in place of the default "Cancel" (declared ahead of its console reader: no renderer shows it yet). Name what dismissing keeps where the action\'s own verb is "Cancel …" or "Close …" (e.g. "Keep invitation" beside "Cancel Invitation"). The default-language string, or an inline locale map; translated at `objects.OBJECT._actions.ACTION.cancelText` (`globalActions.ACTION.cancelText` for an object-less action). Only on an action that opens one of those dialogs: with neither `confirmText` nor a non-empty `params` no dialog opens, so it is refused. The dismiss twin of `submitText`, as on `object-form`. A blank label is refused.'),
+
   /** Visual Style */
   variant: z.enum(['primary', 'secondary', 'danger', 'ghost', 'link']).optional().describe('Button visual variant for styling (primary = highlighted, danger = destructive, ghost = transparent)'),
 
@@ -2280,6 +2329,30 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
     + 'show. Declare the `params` the dialog collects, or drop `submitText`. A param-less action '
     + 'that asks first opens a confirm dialog instead, whose message is `confirmText`.',
   path: ['submitText'],
+}).refine((data) => {
+  // [#28519] The same rule for the dismiss button, whose host is either
+  // dialog: the console's action runner opens the confirm dialog only for a
+  // declared `confirmText` and the param dialog only for a non-empty `params`
+  // array (objectui `ActionRunner.execute`), so `cancelText` on an action with
+  // neither parses clean and is never drawn — the ADR-0078 shape. Scoped by
+  // schema boundary like the two rules above: `InlineActionSchema` does not
+  // pick the key at all.
+  if (
+    data.cancelText != null
+    && data.confirmText == null
+    && !(Array.isArray(data.params) && data.params.length > 0)
+  ) {
+    return false;
+  }
+  return true;
+}, {
+  message:
+    '`cancelText` labels the dismiss button of the dialog an action opens before it runs: the '
+    + 'confirm dialog of an action that declares `confirmText`, or the param dialog of one that '
+    + 'declares `params`. This action declares neither, so it opens no dialog and the label would '
+    + 'never show. Declare the `confirmText` question or the `params` the dialog collects, or drop '
+    + '`cancelText`.',
+  path: ['cancelText'],
 }).superRefine((data, ctx) => {
   // #9566/#9474 — `onSuccess` is scoped to the action types whose success
   // carries a result for `${result.*}` to read: `api` (the `target` call's

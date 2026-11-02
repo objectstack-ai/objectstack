@@ -30,7 +30,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { MePermissionsProvider, type MePermissionsResponse } from '@object-ui/permissions';
+import { MePermissionsProvider, type MePermissionsResponse, type MePermissionsAuthenticatedResponse } from '@object-ui/permissions';
 // The feed reads only the objects an app lists (objectui#12530); `crm_lead` is
 // on the default roster, so the grant is all this file varies.
 import { withRoster } from './activityRoster';
@@ -79,11 +79,12 @@ const { useSharedActivityFeed, __resetSharedUserFeeds, __markFirstPainted } = aw
 
 const settle = () => act(async () => { await vi.advanceTimersByTimeAsync(0); });
 
-const payload = (over: Partial<MePermissionsResponse>): MePermissionsResponse => ({
+const payload = (over: Partial<MePermissionsAuthenticatedResponse>): MePermissionsAuthenticatedResponse => ({
   authenticated: true,
   userId: 'u1',
   tenantId: null,
-  roles: [],
+  positions: [],
+  hasAnyQueue: false,
   permissionSets: [],
   objects: {},
   fields: {},
@@ -160,7 +161,7 @@ describe('every uncertainty still reads — a wrong skip is the expensive mistak
   });
 
   it('the anonymous payload (no resolvable permissions by design) ⇒ reads', async () => {
-    const { result } = await mountFeed(payload({ authenticated: false, userId: null }));
+    const { result } = await mountFeed({ authenticated: false });
     expect(reads).toEqual(['u1']);
     expect(result.current.readable).toBe(true);
   });

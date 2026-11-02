@@ -176,6 +176,9 @@ describe('[#23047] a throw inside the try, after the caller is known, answers th
             fields: {},
             systemPermissions: [],
             tabPermissions: {},
+            // [#28508] On the closed body too, as `false`: no ownership-queue
+            // service is registered here, and a fault vouches for nothing.
+            hasAnyQueue: false,
         });
         // The load-bearing key, stated on its own: present-and-empty is "no
         // capabilities"; absent is "unknown", which the console fails open on.
@@ -226,7 +229,10 @@ describe('[#23047] controls — what the fix must not move', () => {
 
         expect(await res.text()).toBe(
             '{"authenticated":true,"userId":"usr_member","tenantId":"org_active",'
-            + '"positions":["org_member","everyone"],"permissionSets":[],"objects":{},"fields":{}}',
+            + '"positions":["org_member","everyone"],"permissionSets":[],"objects":{},"fields":{},'
+            // [#28508] The degraded branch carries the queue boolean too; no
+            // ownership-queue service is registered in this mount, so `false`.
+            + '"hasAnyQueue":false}',
         );
         expect(failedCalls(warn)).toHaveLength(0);
     });

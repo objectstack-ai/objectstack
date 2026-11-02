@@ -207,6 +207,11 @@ import {
     // [ADR-0131 D3 · D12 items 7–8] The walled refusal's one predicate: the
     // same sentence, the same rung, as every environment-metadata write door.
     walledCatalogWriteVerdict,
+    // [ADR-0146 D10, second rule] The field-patch target check — the judge
+    // `os validate` asks and the registry fold names its misses by.
+    fieldPatchTargetRefusals,
+    fieldPatchTargetRefusalMessage,
+    type FieldPatchTargetRefusal,
 } from '@objectstack/metadata-core';
 import { resolveCloudUrl } from './cloud-url.js';
 import { resolveMarketplacePublicBaseUrl } from './marketplace-public-url.js';
@@ -240,7 +245,9 @@ import type {
 import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
 // [ADR-0146 D2, #28410] The override write gate's one rule and its item walk,
 // asked at the managed install exactly as the publish doors ask them.
-import { judgeOverrideWrite, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
+import { judgeOverrideWrite, overrideWriteIdentityOf, overrideWriteItemsOf, type OverrideWriteItem, type OverrideWriteRule } from '@objectstack/metadata-protocol';
+// [ADR-0146 D10, #28564] The `__c` extension-field reservation's one judge, step 1c''.
+import { judgeExtensionFieldSuffix } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
 // [#25366] The code the registry's security-catalog refusal carries, compared
 // rather than `instanceof`-tested: the engine keeps the class unexported so a
@@ -574,14 +581,20 @@ function listedItems(answer: unknown): Record<string, unknown>[] {
         : [];
 }
 
-/** An item's registry identity — `overrideWriteItemsOf`'s: an action is `<objectName>:<name>`. */
+/**
+ * An item's registry identity — `overrideWriteItemsOf`'s: an action is
+ * `<objectName>:<name>`, and [#28746] a pair-identified type's item carries its
+ * bundle member, through the gate's own `overrideWriteIdentityOf`, so an
+ * installed base's listed `en-US` template and an incoming `fr-FR` one are two
+ * items here as at the publish doors.
+ */
 function listedIdentity(type: string, item: Record<string, unknown>): string | undefined {
     const name = typeof item.name === 'string' && item.name !== '' ? item.name : undefined;
     if (name === undefined) return undefined;
     if (type === 'action' && typeof item.objectName === 'string' && item.objectName !== '' && !name.includes(':')) {
         return `${item.objectName}:${name}`;
     }
-    return name;
+    return overrideWriteIdentityOf(type, name, item);
 }
 
 /** A `{ … }` object — not an array, not null. */
@@ -609,9 +622,18 @@ function declaredPackageManifest(body: Record<string, any>): Record<string, any>
  * is the permission-set collection, its `objects` the definitions — the
  * flatten order `AssembledPackageBodySchema` records). A body already flat is
  * returned as it is.
+ *
+ * [#28604] Also how a LEDGER entry is read wherever a decision reads its
+ * manifest keys — the `kernel:ready` rehydrate's handshake and dependency
+ * order, and the sample-data doors' handshake: an install before #28535
+ * ledgered the body `os package install <file>` sends unflattened (`id` and
+ * `version` lifted beside the nested `manifest`), so its `engines` and
+ * `dependencies` sit one level down. Total: a ledger value is not
+ * shape-checked ({@link LocalManifestSource}), and anything that is not a
+ * plain object is handed back as it is.
  */
 function flattenPackageBody(body: Record<string, any>): Record<string, any> {
-    if (!isPlainObject(body.manifest)) return body;
+    if (!isPlainObject(body) || !isPlainObject(body.manifest)) return body;
     const { manifest: meta, ...sections } = body;
     return { ...meta, ...sections };
 }
@@ -1093,7 +1115,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // `checkProtocolCompat` is the handshake's own judge. Only a
                 // positive incompatibility is acted on: an absent or
                 // unrecognised range rehydrates exactly as it did before.
-                const compat = checkProtocolCompat(entry.manifest);
+                // [#28604] Judged on the entry as the install door reads a body
+                // ({@link flattenPackageBody}), so an entry ledgered in the
+                // CLI's lifted shape before #28535 is judged by the range it
+                // nests, exactly as a flat entry with that range is.
+                const compat = checkProtocolCompat(flattenPackageBody(entry.manifest));
                 if (compat.status === 'incompatible') {
                     // [#21822] Recorded where the GET listing reads it, so the
                     // entry is listed as not loaded rather than as installed.
@@ -1168,9 +1194,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      */
     private inDependencyOrder(ctx: PluginContext, entries: InstalledManifestEntry[]): InstalledManifestEntry[] {
         const { ordered, cycles } = orderHydrationBatch(entries.map((entry) => {
-            const bodies: unknown[] = Array.isArray(entry.manifest?.packages)
-                ? entry.manifest.packages.map((p: { manifest?: unknown } | null) => p?.manifest)
-                : [entry.manifest];
+            // [#28604] Read as the install door reads a body, so a lifted
+            // entry's nested `dependencies` order it as a flat entry's do.
+            const body = flattenPackageBody(entry.manifest);
+            const bodies: unknown[] = Array.isArray(body?.packages)
+                ? body.packages.map((p: { manifest?: unknown } | null) => p?.manifest)
+                : [body];
             return {
                 item: entry,
                 label: entry.manifestId,
@@ -1792,6 +1821,44 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             }
         }
 
+        // 1c''. [ADR-0146 D10, #28564] ⭐ THE `__c` EXTENSION-FIELD RESERVATION,
+        //     at the dependency check's position and for the same reason: before
+        //     the manifest service sees the artifact, so a refused install
+        //     registers, writes and ledgers nothing, on the managed and the
+        //     unmanaged branch alike. Every package this act delivers (each
+        //     `packages[]` entry under its own id, the body itself otherwise) is
+        //     judged by the save door's judge (`judgeExtensionFieldSuffix`): a
+        //     field spelled `__c` only in a base's paired `.custom`, and every
+        //     `objectExtensions[].fields` key of a `.custom` pair suffixed. The
+        //     answer is this door's own body refusal, `VALIDATION_ERROR` / 422
+        //     (the unrunnable-code refusal's code and status), one row per field
+        //     in `details.refusals`. No code is minted.
+        {
+            const bodies: Array<{ id: unknown; body: Record<string, any> }> = Array.isArray(manifest.packages)
+                ? manifest.packages
+                    .filter((entry: unknown) => isPlainObject(entry) && isPlainObject((entry as any).manifest))
+                    .map((entry: any) => ({ id: manifestIdOf(entry.manifest), body: flattenPackageBody(entry.manifest) }))
+                : [{ id: manifestId, body: flattenPackageBody(manifest) }];
+            const refusals = bodies.flatMap(({ id, body }) => judgeExtensionFieldSuffix({
+                packageId: typeof id === 'string' ? id : undefined,
+                objects: body.objects,
+                objectExtensions: body.objectExtensions,
+            }));
+            if (refusals.length > 0) {
+                const n = refusals.length;
+                return c.json({
+                    success: false,
+                    error: {
+                        code: UNRUNNABLE_REFUSAL_CODE,
+                        message: `Package '${manifestId}' cannot be installed: ${refusals[0].message}`
+                            + (n > 1 ? ` (${n - 1} more in \`details.refusals\`.)` : '')
+                            + ' Nothing was installed or written.',
+                        details: { refusals },
+                    },
+                }, UNRUNNABLE_REFUSAL_STATUS);
+            }
+        }
+
         // 1e. [ADR-0131 D6] ⭐ THE INSTALL MODE — after the payload, id, D3
         //     walled-catalog and handshake checks and before every other
         //     judgement of the package and any write, because nothing an
@@ -2062,6 +2129,29 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     details: { refusals: overrideGate.refusals },
                 },
             }, 403);
+        }
+
+        // 2e. [ADR-0146 D10, second rule] ⭐ THE FIELD-PATCH TARGET CHECK,
+        //     beside the override gate and before any write: a patch naming a
+        //     field its target does not have, or an option value its field does
+        //     not have, would change nothing and say nothing. Refused
+        //     `VALIDATION_ERROR` with this door's body-refusal status
+        //     (`UNRUNNABLE_REFUSAL_STATUS`, 422, as 1c'' answers) on both
+        //     branches, every refusal located in `details.refusals`. The target
+        //     is the OWNER's declaration (ADR-0141 D2 admitted the base first)
+        //     or one this artifact delivers: a patch reaches the owner's own
+        //     fields only, so a field another installed extension adds is
+        //     refused here as the fold would skip it.
+        const patchTargetRefusals = this.fieldPatchTargetRefusalsOf(ctx, converted);
+        if (patchTargetRefusals.length > 0) {
+            return c.json({
+                success: false,
+                error: {
+                    code: UNRUNNABLE_REFUSAL_CODE,
+                    message: fieldPatchTargetRefusalMessage(manifestId, patchTargetRefusals),
+                    details: { refusals: patchTargetRefusals },
+                },
+            }, UNRUNNABLE_REFUSAL_STATUS);
         }
 
         // 3. Hot-register FIRST so a malformed inline manifest fails the
@@ -3207,6 +3297,43 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
+     * [ADR-0146 D10, second rule] Step 2e of {@link handleInstall}: every
+     * `objectExtensions[].fieldPatches` entry the converted body carries —
+     * each `packages[]` entry's, or the body's own — judged against its target
+     * by `@objectstack/metadata-core`'s `fieldPatchTargetRefusals`. A target
+     * this artifact delivers is read off its body; any other is the owner's
+     * declaration the registry holds (`getObjectOwner`, keyed by the object
+     * name, which is the registry key), never the resolved object: that one
+     * carries every installed extension's fields, and a patch reaches the
+     * owner's own fields only (ADR-0146 D10). The stored declaration carries
+     * the platform columns the registry injects at registration (`created_at`
+     * and the rest), so a patch of one is admitted here, as the fold applies
+     * it, while `os validate` (the authored declaration) refuses it. A target
+     * neither knows is not judged here: the extension then registers against
+     * an owner that is not loaded, which the registry already reports.
+     */
+    private fieldPatchTargetRefusalsOf = (ctx: PluginContext, converted: Record<string, any>): FieldPatchTargetRefusal[] => {
+        const multi = Array.isArray(converted.packages);
+        const bodies: Array<{ body: Record<string, any>; prefix: string }> = multi
+            ? converted.packages.flatMap((entry: unknown, index: number) =>
+                isPlainObject(entry) && isPlainObject(entry.manifest)
+                    ? [{ body: entry.manifest as Record<string, any>, prefix: `packages[${index}].manifest.` }]
+                    : [])
+            : [{ body: flattenPackageBody(converted), prefix: '' }];
+        if (!bodies.some(({ body }) => Array.isArray(body.objectExtensions))) return [];
+        const delivered = new Map<string, unknown>();
+        for (const { body } of bodies) {
+            const objects = body.objects;
+            const list = Array.isArray(objects) ? objects : isPlainObject(objects) ? Object.entries(objects).map(([name, o]) => (isPlainObject(o) ? { name, ...o } : o)) : [];
+            for (const object of list) if (isPlainObject(object) && typeof object.name === 'string') delivered.set(object.name, object);
+        }
+        let registry: { getObjectOwner?(fqn: string): { definition?: unknown } | undefined } | undefined;
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry as typeof registry; } catch { /* no data engine — only delivered targets are known */ }
+        const getTarget = (name: string): unknown => delivered.get(name) ?? registry?.getObjectOwner?.(name)?.definition;
+        return bodies.flatMap(({ body, prefix }) => fieldPatchTargetRefusals(body.objectExtensions, getTarget, prefix));
+    };
+
+    /**
      * [ADR-0146 D2, ruling A on #28390; #28410] THE OVERRIDE WRITE GATE at the
      * managed install — the door a package's items enter through as code
      * (`manifest.register`), so the publish doors never see them. The rule is
@@ -3833,8 +3960,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * (`protocolIncompatibleAnswer`). Each door asks this right after it has
      * read the entry, before any side effect.
      *
-     * Judged with `checkProtocolCompat` on the entry itself, as the rehydrate
-     * judges it, and NOT read from {@link refusedAtRehydrate}: an entry another
+     * Judged with `checkProtocolCompat` on the entry itself, read through
+     * {@link flattenPackageBody} as the rehydrate judges it (#28604), and NOT
+     * read from {@link refusedAtRehydrate}: an entry another
      * runtime wrote to a shared ledger after this boot was never rehydrated
      * here, and the doors refuse it all the same. Only a positive
      * incompatibility is refused. An absent or unrecognised range is admitted,
@@ -3843,7 +3971,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * operator gets out of the refused state.
      */
     private refuseProtocolIncompatibleEntry = (c: any, entry: InstalledEntry): Response | undefined => {
-        const compat = checkProtocolCompat(entry.manifest);
+        const compat = checkProtocolCompat(flattenPackageBody(entry.manifest));
         if (compat.status !== 'incompatible') return undefined;
         const refusal = protocolIncompatibleAnswer(new ProtocolIncompatibleError(compat.diagnostic));
         return c.json({

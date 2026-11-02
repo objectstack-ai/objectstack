@@ -39,6 +39,10 @@ import {
 } from './i18n.js';
 import { buildPackageScopeOptions } from './package-scope.js';
 import { diagnosticsHeaderTone, type DiagnosticsHeaderTone } from './diagnostics-tone.js';
+import { ENVIRONMENT_AREA_TYPES, SETUP_DATASOURCES_PATH, useMetadataAreaHost } from './metadataAreaHost.js';
+import { ENVIRONMENT_SCOPE_QUERY } from './catalog-scope.js';
+import { usePackageCustomizations } from '../studio-design/CustomizationMark.js';
+import { customizationCountsByType, customizationTotal } from '../studio-design/customizationMarks.js';
 
 /**
  * The "View all issues" link's look per sweep tone (objectui#12768). The
@@ -99,6 +103,10 @@ export function MetadataDirectoryPage() {
   const [domainFilter, setDomainFilter] = React.useState<string>('all');
   const [writableOnly, setWritableOnly] = React.useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
+  // objectstack ADR-0146 D1 (#28561) — under Studio's "All metadata" area the
+  // package is the area's, not one this page picks and repairs; the
+  // cross-package leg (`packageId: null`) lists the environment catalog.
+  const host = useMetadataAreaHost();
 
   // Studio is scoped to a single *project* package at a time (the sidebar
   // `active_package` selector owns the scope via `?package=`). Load the
@@ -128,15 +136,18 @@ export function MetadataDirectoryPage() {
   // package set. `null` while packages are still loading (fail closed).
   const urlPackage = searchParams.get('package');
   const activePackage = React.useMemo(() => {
+    if (host) return host.packageId;
     if (!projectPackages) return null;
     if (urlPackage && projectPackages.some((p) => p.id === urlPackage)) return urlPackage;
     return projectPackages[0]?.id ?? null;
-  }, [projectPackages, urlPackage]);
+  }, [host, projectPackages, urlPackage]);
 
   // Repair `?package=` so the sidebar selector and deep-links agree on the
   // active scope. Runs once packages resolve and the URL holds no valid
   // project package.
   React.useEffect(() => {
+    // The area's package is its route's: nothing to repair.
+    if (host) return;
     if (!projectPackages || projectPackages.length === 0) return;
     if (urlPackage && projectPackages.some((p) => p.id === urlPackage)) return;
     const next = new URLSearchParams(searchParams);
@@ -160,6 +171,15 @@ export function MetadataDirectoryPage() {
   } = useGlobalDiagnostics(client, 'warning', activePackage ?? undefined);
   const diagTone = diagnosticsHeaderTone(diagSummary.entries);
 
+  // objectstack ADR-0146 D3 (#28568) — under the area, a base's directory
+  // counts its customizations: each tile the type's, the header the base's
+  // total, all from the server's customization read. Setup reads nothing.
+  const customizations = usePackageCustomizations(host?.packageId ?? null);
+  const customizedByType = React.useMemo(
+    () => (customizations.status === 'read' ? customizationCountsByType(customizations.read) : null),
+    [customizations],
+  );
+
   // Base set: visible (non-hidden) metadata types contributed by the active
   // project package. Fail closed — show nothing until a concrete project
   // package is active, so system-only types never surface.
@@ -167,10 +187,12 @@ export function MetadataDirectoryPage() {
     () =>
       entries.filter((e) => {
         if (HIDDEN_TYPES.has(e.type)) return false;
+        // The area's cross-package leg: the environment catalog, every package's.
+        if (host && host.packageId === null) return ENVIRONMENT_AREA_TYPES.includes(e.type);
         if (!activePackage) return false;
         return (packagesByType[e.type] ?? []).includes(activePackage);
       }),
-    [entries, activePackage, packagesByType],
+    [host, entries, activePackage, packagesByType],
   );
 
   // Counts per domain for the filter chip bar.
@@ -213,7 +235,8 @@ export function MetadataDirectoryPage() {
     });
   }, [filtered]);
 
-  if (loading || projectPackages === null || (activePackage && diagLoading)) {
+  // The area never waits on the project packages: its package is given.
+  if (loading || (!host && projectPackages === null) || ((host || activePackage) && diagLoading)) {
     return <div className="p-6 text-sm text-muted-foreground">{t('engine.directory.loading', locale)}</div>;
   }
   if (error) {
@@ -236,6 +259,19 @@ export function MetadataDirectoryPage() {
             }),
           }}
         />
+        {customizations.status === 'read' && customizationTotal(customizations.read) > 0 && (
+          <p className="text-sm text-muted-foreground mt-1" data-testid="directory-customizations-total">
+            {tFormat('engine.directory.customizations.total', locale, {
+              customized: customizationTotal(customizations.read),
+              baseName: customizations.baseName,
+            })}
+          </p>
+        )}
+        {customizations.status === 'failed' && (
+          <p className="text-xs text-muted-foreground mt-1" data-testid="directory-customizations-failed">
+            {tFormat('engine.customizationMark.readFailed', locale, { message: customizations.message })}
+          </p>
+        )}
 
         {/* Filter row */}
         <div className="flex items-center gap-3 mt-4 flex-wrap">
@@ -297,7 +333,7 @@ export function MetadataDirectoryPage() {
 
       {/* Body */}
       <div className="flex-1 overflow-auto p-6 space-y-6">
-        {projectPackages.length === 0 && (
+        {!host && projectPackages?.length === 0 && (
           <Empty>
             <EmptyTitle>No project packages installed</EmptyTitle>
             <EmptyDescription>
@@ -306,7 +342,7 @@ export function MetadataDirectoryPage() {
             </EmptyDescription>
           </Empty>
         )}
-        {projectPackages.length > 0 && filtered.length === 0 && (
+        {(host || (projectPackages?.length ?? 0) > 0) && filtered.length === 0 && (
           <Empty>
             <EmptyTitle>{t('engine.directory.noMatches', locale)}</EmptyTitle>
             <EmptyDescription>
@@ -336,7 +372,12 @@ export function MetadataDirectoryPage() {
                       warnCount={warnByType[e.type] ?? 0}
                       lockedCount={lockedByType[e.type] ?? 0}
                       itemCount={totalCount}
+                      customizedCount={customizedByType?.[e.type]}
                       packageFilter={activePackage ?? undefined}
+                      environmentScope={!!host && host.packageId === null}
+                      // ADR-0146 D1 — under the area, the datasource tile
+                      // opens Setup's Datasources page.
+                      href={host && e.type === 'datasource' ? SETUP_DATASOURCES_PATH : undefined}
                     />
                   );
                 })}
@@ -391,6 +432,9 @@ function TypeTile({
   itemCount = 0,
   lockedCount = 0,
   packageFilter,
+  environmentScope = false,
+  href: hrefOverride,
+  customizedCount,
 }: {
   entry: RichMetadataTypeEntry;
   locale?: string;
@@ -401,12 +445,21 @@ function TypeTile({
   lockedCount?: number;
   /** When set, navigate into the list page pre-filtered to this package. */
   packageFilter?: string;
+  /** Open the list in the environment scope (the Studio area's cross-package leg). */
+  environmentScope?: boolean;
+  /** Where the tile leads instead of the type's list (the Studio area's datasource tile). */
+  href?: string;
+  /** The type's served customization count (ADR-0146 D3); absent while unread, failed, or none. */
+  customizedCount?: number;
 }) {
   // Prefer the locale-table translation; fall back to server's `label` (typically English).
   const label = translateMetadataType(entry.type, locale, entry.label);
-  const href = packageFilter
-    ? `./${encodeURIComponent(entry.type)}?package=${encodeURIComponent(packageFilter)}`
-    : `./${encodeURIComponent(entry.type)}`;
+  const href = hrefOverride
+    ?? (environmentScope
+      ? `./${encodeURIComponent(entry.type)}?${ENVIRONMENT_SCOPE_QUERY}`
+      : packageFilter
+        ? `./${encodeURIComponent(entry.type)}?package=${encodeURIComponent(packageFilter)}`
+        : `./${encodeURIComponent(entry.type)}`);
   return (
     <Link
       to={href}
@@ -442,6 +495,16 @@ function TypeTile({
           >
             {itemCount}
           </Badge>
+          {customizedCount !== undefined && customizedCount > 0 && (
+            <Badge
+              variant="outline"
+              className="text-[10px] tabular-nums border-violet-500/40 text-violet-700 dark:text-violet-300 bg-violet-500/[0.06]"
+              title={tFormat('engine.directory.customizations.tileTitle', locale ?? 'en', { customized: customizedCount })}
+              data-testid={`directory-tile-customized-${entry.type}`}
+            >
+              {tFormat('engine.directory.customizations.tile', locale ?? 'en', { customized: customizedCount })}
+            </Badge>
+          )}
           {invalidCount > 0 && (
             <Badge
               variant="outline"

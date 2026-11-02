@@ -113,6 +113,7 @@ import { validateReferenceIntegrity } from './reference-integrity-suite.js';
 import { validateComponentProps } from './validate-component-props.js';
 import { validateComponentTypes } from './validate-component-types.js';
 import { validatePrintPageBlocks } from './validate-print-page-blocks.js';
+import { validatePageVariables } from './validate-page-variables.js';
 import { validatePagePredicateBounds } from './validate-page-predicate-bounds.js';
 import { validateResponsiveStyles } from './validate-responsive-styles.js';
 import { validateJsxPages } from './validate-jsx-pages.js';
@@ -155,10 +156,12 @@ import { lintViewRefs } from './lint-view-refs.js';
 import { validateRetiredPermissionResidue } from './validate-retired-permission-residue.js';
 import { validateEmailTemplateHolePlacements } from './validate-email-template-hole-placements.js';
 import { validateEmailTemplateHoleGrammar } from './validate-email-template-hole-grammar.js';
+import { validateCustomizationNamespace } from './validate-customization-namespace.js';
 import {
   lintUniqueDeclarations,
   lintUnscopedDeclaredIndexes,
   lintLegacyOrganizationComposites,
+  lintSummaryRollups,
 } from './data-model-rules.js';
 
 import type { IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -1355,6 +1358,26 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['page'],
     run: (stack) => validatePrintPageBlocks(stack),
   },
+  // #28663 — a page's `variables` declarations: each named once, by a
+  // non-empty name, with a `defaultValue` of its declared `type`. The schema
+  // types each entry alone and nothing judged the list, so a duplicate name
+  // (the console keeps the last), an empty name (unreachable as `page.NAME`)
+  // and a `number` seeded with `"abc"` all published `valid: true`. Gating on
+  // every door from birth: page-local, so a `page` write's per-write snapshot
+  // (`pages: [item]`) is the whole input. Measured at birth: the shipped
+  // corpus declares 5 variables on 2 showcase pages, 0 findings. Stored pages
+  // keep loading and serving; only the next save of one with a finding is
+  // refused, with the fix.
+  {
+    name: 'validatePageVariables',
+    tier: 'gating',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-page-variables.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
+    run: (stack) => validatePageVariables(stack),
+  },
   // ADR-0065 — a styled node's responsiveStyles must be scopable (needs an
   // `id`), name real CSS properties + design tokens, and carry a `large` base.
   {
@@ -1782,6 +1805,23 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `visibleWhen` only, the one key the family reads — on a page component as
   // on a view form (the page-side `visibility` retired with the view-side
   // `visibleOn`).
+  //
+  // ─── …and on `app` writes (#28663) ───
+  //
+  // An app navigation entry's `visible` is a predicate the console evaluates
+  // as CEL (#27457), and its gate falls CLOSED: a `visible` that does not parse
+  // hides the entry from every viewer. Before this, `"'org_owner' in"` there
+  // saved, read `valid: true` as a draft, published and passed `os validate`,
+  // while the same fault in a page `visibleWhen` was refused. The rule now
+  // walks `apps[].navigation` / `areas[].navigation` (and `children`) for the
+  // SYNTAX verdict alone — the rule's module note says why the root-binding
+  // verdicts stay off a nav entry. `app` maps to `apps`, and an app snapshot
+  // holds the item as `apps: [item]` with no `views` or `pages`, so the view
+  // and page halves contribute nothing on an app write, as the app half
+  // contributes nothing on a view or page write. `validatePredicatePathRefs`
+  // declares `app` with it for the one-wall reason above and judges nothing
+  // there. Stored apps keep loading and serving; only the next save of an app
+  // with such a predicate is refused, with the fix.
   {
     name: 'validateVisibilityPredicates',
     tier: 'gating',
@@ -1789,7 +1829,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-visibility-predicates.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['view', 'page'],
+    runtimeTypes: ['view', 'page', 'app'],
     run: (stack) => validateVisibilityPredicates(stack),
   },
   // #7010 — the same predicate surface, one question further in. The three
@@ -1828,9 +1868,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // was reverted; it is wired now because its siblings are. It declares
     // `page` with its sibling (#24491, ruling B on #23388) and judges nothing
     // there: it walks `stack.views` only, so a page write draws no finding from
-    // it at either door.
+    // it at either door. `app` likewise (#28663): declared with its sibling,
+    // judging nothing on an app write.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['view', 'page'],
+    runtimeTypes: ['view', 'page', 'app'],
     run: (stack) => validatePredicatePathRefs(stack),
   },
   // #24953 — the CEL slots INSIDE a page component's `properties` bag (a
@@ -2096,6 +2137,44 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_REFUSED_BY_THE_DOOR_PARSE,
     run: (stack) =>
       lintUnscopedDeclaredIndexes(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      })),
+  },
+  // R13 — a roll-up's aggregand and child object (`lintSummaryRollups`). A
+  // `sum` / `avg` over a child field the aggregate × field-type table refuses
+  // (a `text`, `select`, `formula` or `percent` field, …) published clean, and
+  // from then on every create, update and delete of the child answered 500
+  // although each write had landed: the recompute's `engine.aggregate` refuses
+  // the pair after the commit, every time. A `min` / `max` whose answer is not
+  // a number computes a value the summary column cannot store. `os lint` alone judged the `min` / `max` arm; no door refused any of it,
+  // and the runtime write door — the only one a Studio, REST or MCP author
+  // has — judged none of it.
+  //
+  // GATING on all three commands, so `lintDataModel` stopped calling it in the
+  // same change and `os lint` reports it here, once. On the runtime publish
+  // gate's `object` writes, where the snapshot carries the child objects
+  // (`stack.objects`, the collection every per-write snapshot holds), so the
+  // aggregand arms have no missing-collection false-positive channel: a child
+  // the snapshot does not hold is not judged — nor is a child object nothing
+  // holds, which an unmanaged install legitimately writes after its parent
+  // (see the rule's docblock). The gate's
+  // differential charges a STORED parent's finding to this write only when the
+  // write creates it (a child write that turns a summed field into text).
+  {
+    name: 'lintSummaryRollups',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object'],
+    run: (stack) =>
+      lintSummaryRollups(Array.isArray(stack.objects) ? (stack.objects as unknown[]) : []).map((f) => ({
         severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
         rule: f.rule,
         where: f.where,
@@ -2539,6 +2618,27 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['email_template'],
     run: (stack) => validateEmailTemplateHoleGrammar(stack),
+  },
+  // [#28473] ADR-0146 D3: a package whose `manifest.namespace` is too long to
+  // have a paired customization namespace (`customizationNamespace` answers
+  // `base_namespace_too_long`), so the ensure door will refuse to create its
+  // `.custom` pair and its installers can never customize it. Advisory: the
+  // package builds, installs and runs, and only its customization is refused.
+  // `normalized` because it reads one string off each delivered manifest and
+  // needs no parsed stack, so `os lint` judges it too.
+  {
+    name: 'validateCustomizationNamespace',
+    tier: 'advisory',
+    input: 'normalized',
+    commands: ALL,
+    source: 'packages/lint/src/validate-customization-namespace.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason:
+      'Not a metadata write: the runtime publish gate judges metadata items, and a package manifest is not '
+      + 'one (no metadata type carries it). A package reaches the runtime through the install doors, where '
+      + 'the ensure door that creates a pair already refuses a base whose namespace has none (409) with its '
+      + 'own sentence; this rule exists to give the author that answer before the package ships.',
+    run: (stack) => validateCustomizationNamespace(stack),
   },
 ];
 

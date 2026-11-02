@@ -318,9 +318,12 @@ const UNDECLARED_ENVELOPE_UNREGISTERED = new Set<string>([]);
  * alone: the #4001 closure campaign and its count (the `describe` below),
  * `metadata-create-seeds`, `MetadataTypeSchema` membership,
  * `DEFAULT_METADATA_TYPE_REGISTRY` descriptors. In particular there is
- * deliberately NO unknown-key/posture case here — `sharing_rule` is strict and
- * `connector` is not, and choosing between them is #2657's decision to make, not
- * this suite's.
+ * deliberately NO unknown-key/posture case here — `sharing_rule` was strict and
+ * `connector` was not when this fence was drawn, and choosing between them was
+ * #2657's decision to make, not this suite's. (The connector entry has since
+ * closed on its own evidence — its pins live in
+ * `integration/connector-entry-undeclared-keys.test.ts` — and the fence still
+ * holds: this block asserts the envelope and nothing else.)
  */
 describe('the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS', () => {
   const bound = listUnregisteredKindSchemaTypes();
@@ -372,8 +375,9 @@ describe('the envelope invariant also covers UNREGISTERED_KIND_SCHEMAS', () => {
   it.each(bound.filter((t) => !UNDECLARED_ENVELOPE_UNREGISTERED.has(t)))(
     '%s DECLARES the protection envelope',
     (type) => {
-      // `connector`'s class: non-strict + undeclared ⇒ a SILENT strip, no 422,
-      // nothing in any log. The quieter half, and the one that survived #6245.
+      // `connector`'s class when this was written: non-strict + undeclared ⇒ a
+      // SILENT strip, no 422, nothing in any log. The quieter half, and the one
+      // that survived #6245.
       const shapes = objectShapes(getMetadataTypeSchema(type));
       expect(
         shapes.some((shape) => '_packageId' in shape),

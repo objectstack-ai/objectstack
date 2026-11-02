@@ -30,7 +30,7 @@
 // ⛔ No column value appears in a title, an assertion message or a log line:
 // every comparison is reported as a count or a boolean.
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -38,10 +38,13 @@ import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { readFixtureAsOf } from './upgrade-harness/fixture-as-of.js';
 import { loadSqlIntoSqlite } from './upgrade-harness/sqlite-text-dump.js';
 
 const FIXTURE = new URL('./upgrade-harness/fixture-18.0/', import.meta.url);
-const fixtureSql = readFileSync(new URL('database.sql', FIXTURE), 'utf8');
+// Its rotation shards re-dated to the day before this run (`fixture-as-of.ts`):
+// the command's boot drops a shard older than the retention window.
+const { sql: fixtureSql } = readFixtureAsOf(FIXTURE);
 const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
 const CLI_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/cli/package.json'));
 const CLI_BIN = join(CLI_ROOT, 'bin', 'run.js');

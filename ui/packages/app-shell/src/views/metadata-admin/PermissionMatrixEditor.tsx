@@ -120,6 +120,9 @@ import { CelPredicateField } from './CelPredicateField.js';
 import type { CelLintIssue } from './celAuthoring.js';
 import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { AssignedUsersSection } from './AssignedUsersSection.js';
+import { SetupAssignmentsLink } from './SetupAssignmentsLink.js';
+import { useMetadataAreaHost } from './metadataAreaHost.js';
+import { CatalogItemActiveSwitch } from './CatalogActiveSwitch.js';
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { errorCodeIs } from '@object-ui/types';
@@ -240,6 +243,15 @@ function readObjectDefinition(
   objectName: string,
 ): Promise<unknown> {
   return (packageId ? client.withPreviewDrafts(true) : client).get<any>('object', objectName);
+}
+
+/**
+ * ADR-0048 — the layered read's refusal of a name two packages hold, asked
+ * naming no package: `409 RESOURCE_CONFLICT`, its message naming the holders
+ * and the `?package=` remedy. A read answers that code for nothing else.
+ */
+function isPackagelessLayeredRefusal(err: unknown): boolean {
+  return (err as { status?: unknown } | null)?.status === 409 && errorCodeIs(err, 'RESOURCE_CONFLICT');
 }
 
 /**
@@ -574,7 +586,13 @@ export interface PermissionMatrixEditPageProps {
 /* Component                                                          */
 /* ────────────────────────────────────────────────────────────────── */
 
-export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly = false, embedded = false, studio }: PermissionMatrixEditPageProps) {
+export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, publishNonce, onOpenOwd, onDirtyChange, readOnly: readOnlyProp = false, embedded = false, studio }: PermissionMatrixEditPageProps) {
+  // objectstack ADR-0146 D1 (#28561) — Studio's "All metadata" area mounts this
+  // editor through the routed item page, which hands it no `readOnly`: a
+  // read-only package's area is the host gate here, as a pillar's prop is.
+  // Outside the area there is no host and nothing changes.
+  const areaHost = useMetadataAreaHost();
+  const readOnly = readOnlyProp || !!areaHost?.readOnly;
   const navigate = useNavigate();
   const client = useMetadataClient();
   // The editor reads no record: the capability picker lists the capability
@@ -741,6 +759,14 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
   // could only be refused (400), and there is nobody to list.
   const [searchParams] = useSearchParams();
   const showAssignments = !embedded && isEnvironmentScope(searchParams) && existsOnServer !== false;
+  // ADR-0048 — the package whose stack the layered reads below read: the
+  // door's `packageId`, else the owner the edit URL names (`?package=`, the
+  // metadata list's row link; `all` is that list's every-package scope, not a
+  // package). With neither, the read names no package, and a name two
+  // packages hold is refused with the server's sentence, shown as the load's
+  // error. ⛔ Never a holder picked here.
+  const routePackage = searchParams.get('package');
+  const layeredPackageId = packageId ?? (routePackage && routePackage !== 'all' ? routePackage : undefined);
   // Which gate to NAME when the surface is locked (host > artifact > type).
   // The artifact tier is the DECIDING one only where the type tier would have
   // said yes: with both flags false the honest reason is still "this type has
@@ -908,7 +934,15 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
           ? readDraftForSave<{ item?: PermissionSetDraft } | PermissionSetDraft>(client, type, name, packageId)
           : Promise.resolve(null);
         const draftRead = draftReadForSave.then((read) => read?.answer ?? null);
-        const readLayered = () => client.layered<PermissionSetDraft>(type, name).catch(() => null);
+        const readLayered = () =>
+          client
+            .layered<PermissionSetDraft>(type, name, layeredPackageId ? { packageId: layeredPackageId } : {})
+            .catch((err: unknown) => {
+              // A name two packages hold, read naming neither: the server's
+              // refusal is this load's error, ⛔ never "no set known".
+              if (isPackagelessLayeredRefusal(err)) throw err;
+              return null;
+            });
         // objectui#11799 — a set "+ New" created and nobody published has a
         // draft and no layer, and `GET …/layers` answers 404 for it. Under the
         // package door the layered envelope is used only without a pending
@@ -1033,7 +1067,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
     return () => {
       cancelled = true;
     };
-  }, [client, type, name, packageId, publishNonce, resetDraftBaseline, reloadNonce, recordSetRead, forgetSetVersion]);
+  }, [client, type, name, packageId, layeredPackageId, publishNonce, resetDraftBaseline, reloadNonce, recordSetRead, forgetSetVersion]);
 
   /* ── Lazy-load fields when an object is expanded ─────────── */
   async function ensureFields(objectName: string) {
@@ -1442,7 +1476,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         let rereadFailed = false;
         const [fresh, draftRead] = await Promise.all([
           client
-            .layered<PermissionSetDraft>(type, payload.name)
+            .layered<PermissionSetDraft>(type, payload.name, { packageId })
             // Kept on `.catch` so the rejection can never escape as an
             // unhandled one; the refusal is raised below, inside this `try`'s
             // own body, and reaches the author on the same error channel a
@@ -1529,7 +1563,7 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
         // write is already done, and refusing anything would be a lie.
         let rereadFailed = false;
         const lay = await client
-          .layered<PermissionSetDraft>(type, payload.name)
+          .layered<PermissionSetDraft>(type, payload.name, layeredPackageId ? { packageId: layeredPackageId } : {})
           .catch(() => {
             rereadFailed = true;
             return null;
@@ -2464,7 +2498,18 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               objectstack#26885 — in the matrix's own scroll, after the grid: a
               strip pinned beneath it took up to 35vh off the grid's height, so
               a laptop showed about five object rows and a phone none. */}
-          {showAssignments && (
+          {/* objectstack ADR-0146 D1/D7 (#28561) — Studio's "All metadata"
+              area draws no assignment: it links Setup's Permission set
+              assignment page, opened on this set. */}
+          {showAssignments && areaHost && (
+            <div className="mx-4">
+              {/* N-28 (M-1 ruling A) — the set's active switch moved with
+                  the item from Setup's catalog list into Studio. */}
+              <CatalogItemActiveSwitch type="permission" name={name} />
+              <SetupAssignmentsLink kind="permission" name={name} />
+            </div>
+          )}
+          {showAssignments && !areaHost && (
             <div className="mx-4 my-4 rounded-md border" data-testid="perm-assignments">
               <AssignedUsersSection permissionSetName={name} onHoldersRead={onHoldersRead} />
             </div>

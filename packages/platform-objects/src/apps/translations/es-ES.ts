@@ -39,7 +39,7 @@ export const esES: TranslationData = {
         // Setup's own `nav_packages` — distinct from the same id under
         // `apps.studio.navigation`, which does not answer for this app (#5750).
         nav_packages: { label: 'Paquetes' },
-        nav_packaged_automation: { label: 'Automatización empaquetada' },
+        nav_packaged_actions: { label: 'Acciones empaquetadas' },
         nav_marketplace_browse: { label: 'Explorar Marketplace' },
         nav_marketplace_installed: { label: 'Aplicaciones instaladas' },
         nav_cloud_connection: { label: 'Conexión a la nube' },
@@ -62,11 +62,7 @@ export const esES: TranslationData = {
         nav_position_holders: { label: 'Titulares de posiciones' },
         nav_permission_set_assignment: { label: 'Asignación de conjuntos de permisos' },
 
-        nav_positions: { label: 'Posiciones' },
-        nav_capabilities: { label: 'Capacidades' },
-        nav_permission_sets: { label: 'Conjuntos de Permisos' },
         nav_sharing_rules: { label: 'Reglas de Compartición' },
-        nav_declared_sharing_rules: { label: 'Reglas de Compartición Declaradas' },
         nav_record_shares: { label: 'Registros Compartidos' },
         nav_queues: { label: 'Colas' },
         nav_queue_members: { label: 'Miembros de Colas' },
@@ -109,6 +105,7 @@ export const esES: TranslationData = {
         nav_http_deliveries: { label: 'Entregas HTTP' },
         nav_datasources: { label: 'Fuentes de datos' },
         nav_connector_credentials: { label: 'Credenciales de conectores' },
+        nav_connector_connections: { label: 'Conexiones de conectores' },
 
         nav_oauth_apps: { label: 'Aplicaciones OAuth' },
       },

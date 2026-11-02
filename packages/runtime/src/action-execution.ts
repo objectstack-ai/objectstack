@@ -89,6 +89,7 @@ import {
     resolveActionHandlerKeys,
     standaloneActionOwnerKey,
 } from '@objectstack/objectql';
+import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 
 // [ADR-0110] The addressing vocabulary and the D5 reconciliation moved to
 // @objectstack/objectql (the engine owns the map they describe, and its
@@ -596,7 +597,15 @@ export async function callData(deps: ActionExecutionDeps,
             return await protocol.createData({ object: params.object, data: params.data, ...(scopeId ? { environmentId: scopeId } : {}), context: executionContext });
         }
         if (ql && typeof ql.insert === 'function') {
-            const res = await ql.insert(params.object, params.data, qlOpts);
+            // [#28782] A row stored under a parent roll-up the engine could
+            // not recompute (`ERR_SUMMARY_RECOMPUTE`, "the triggering records
+            // WERE written") builds this arm's answer from the refusal's
+            // `written` and carries it on the refusal, as the protocol's
+            // `createData` does since #28781 (`withEarnedAnswer`), so a door
+            // reading `earnedAnswerOf` answers the write's success here too.
+            let stale: SummaryRecomputeRefusal | undefined;
+            const res = await ql.insert(params.object, params.data, qlOpts)
+                .catch((e: unknown) => (stale = staleSummaryRefusalOrThrow(e)).written as any);
             const record = { ...params.data, ...res };
             // The engine's write result keeps the stored row whole, so this
             // fallback mouth owes the same write-response rules the protocol
@@ -604,9 +613,15 @@ export async function callData(deps: ActionExecutionDeps,
             // Fail closed: with no schema to judge the fields by, no record
             // is echoed at all — only the receipt.
             const schema = await writeResponseSchema();
-            if (!schema) return { object: params.object, id: record.id };
+            if (!schema) {
+                const receipt = { object: params.object, id: record.id };
+                if (stale) throw withEarnedAnswer(stale, receipt);
+                return receipt;
+            }
             omitInternalFieldsFromWriteResponse(schema, record);
-            return { object: params.object, id: record.id, record };
+            const answer = { object: params.object, id: record.id, record };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -676,15 +691,24 @@ export async function callData(deps: ActionExecutionDeps,
             // reported as an internal fault and taken to the error reporter
             // with it.
             if (!existing) throw recordNotFoundError(params.object, params.id);
-            await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }));
+            // [#28782] The create arm's carrier, for an update that landed.
+            let stale: SummaryRecomputeRefusal | undefined;
+            await ql.update(params.object, params.data, findOpts({ where: { id: params.id } }))
+                .catch((e: unknown) => { stale = staleSummaryRefusalOrThrow(e); });
             const record = { ...existing, ...params.data };
             // The echo carries the caller's own patch: a credential-class value
             // in it is masked like a read of the stored row would be. Fail
             // closed, as on create: no schema ⇒ the receipt only.
             const schema = await writeResponseSchema();
-            if (!schema) return { object: params.object, id: params.id };
+            if (!schema) {
+                const receipt = { object: params.object, id: params.id };
+                if (stale) throw withEarnedAnswer(stale, receipt);
+                return receipt;
+            }
             omitInternalFieldsFromWriteResponse(schema, record);
-            return { object: params.object, id: params.id, record };
+            const answer = { object: params.object, id: params.id, record };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -743,7 +767,10 @@ export async function callData(deps: ActionExecutionDeps,
             if (!all) all = [];
             const existing = (all as any[]).find((i: any) => i.id === params.id);
             if (!existing) throw recordNotFoundError(params.object, params.id);
-            await ql.delete(params.object, findOpts({ where: { id: params.id } }));
+            // [#28782] The create arm's carrier, for a delete that landed.
+            let stale: SummaryRecomputeRefusal | undefined;
+            await ql.delete(params.object, findOpts({ where: { id: params.id } }))
+                .catch((e: unknown) => { stale = staleSummaryRefusalOrThrow(e); });
             // [#5581] `success`, not `deleted`. The success body was the other
             // half of the same "one `callData`, two answers" defect #5138 fixed
             // on the not-found side: the protocol path returns the SPEC's shape
@@ -762,7 +789,9 @@ export async function callData(deps: ActionExecutionDeps,
             // Teaching consumers to read `success ?? deleted` would have been
             // the contract-first-forbidden shape — two spellings of one fact,
             // kept alive by every reader.
-            return { object: params.object, id: params.id, success: true };
+            const answer = { object: params.object, id: params.id, success: true };
+            if (stale) throw withEarnedAnswer(stale, answer);
+            return answer;
         }
         throw { statusCode: 503, message: 'Data service not available' };
     }
@@ -843,13 +872,29 @@ export async function callData(deps: ActionExecutionDeps,
         const engine = (await deps.getObjectQL(requestContext, scopeId))
             ?? await deps.resolveService(requestContext, 'objectql', scopeId).catch(() => null);
         if (engine && typeof engine.aggregate === 'function') {
-            // [#22823] This arm takes no protocol, so it is the engine's door on
+            // [#22823] This arm runs on no protocol data method, so it is the engine's door on
             // every assembly: each nested-relation condition's TARGET in `where`
             // is asked before the engine aggregates, as the query fallback asks
             // it (the engine lowers relation conditions in `where` only, never
             // in an aggregation's own `filter`).
             if (exposureGated) {
                 await refuseUnservedRelationTargets(deps, requestContext, engine, params.object, params.where, scopeId);
+            }
+            // The data door's evaluate refusal for a field declared
+            // `internal: true` — a filter (`where`, an aggregation's own
+            // `filter`), a group key or an aggregation operand on it. The query
+            // arm meets it inside `findData`; this arm never reaches `findData`,
+            // so it asks the protocol's ONE gate itself, before the engine, and
+            // throws the door's `400 INVALID_FIELD` word for word. ⛔ Never a
+            // copy of the gate here (route-ownership rule 1). Every caller, as
+            // at the door; a host with no protocol has no door to agree with
+            // and is served as before.
+            if (protocol && typeof protocol.assertNoInternalFieldEvaluated === 'function') {
+                protocol.assertNoInternalFieldEvaluated(params.object, {
+                    where: params.where,
+                    groupBy: params.groupBy,
+                    aggregations: params.aggregations,
+                });
             }
             const rows = await engine.aggregate(
                 params.object,
@@ -1980,8 +2025,15 @@ export function apiActionRefusalMembers(answer: ApiActionForwardAnswer): Record<
  */
 export function apiActionForwardRefusal(action: any, answer: ApiActionForwardAnswer): Error {
     const body = answer.body;
+    // [#28657] Three places a target writes its sentence: the ADR-0112
+    // envelope's `error.message`, a bare `message` (better-auth), and a bare
+    // STRING `error` beside a top-level `code` — the approvals decision routes'
+    // `{ code, error }`, whose prescription (which decision outputs are
+    // required to approve, why this actor may not decide) was replaced by the
+    // fallback below before this read it.
     const message: string =
         (body && typeof body === 'object' && typeof body.error?.message === 'string' && body.error.message) ||
+        (body && typeof body === 'object' && typeof body.error === 'string' && body.error) ||
         (body && typeof body === 'object' && typeof body.message === 'string' && body.message) ||
         `Action '${action?.name ?? 'unknown'}' — its target answered HTTP ${answer.status}`;
     const code: string =
@@ -3357,6 +3409,102 @@ export function refuseDeniedSubjectLoad(
 }
 
 /**
+ * Contract point 3 as the two action doors' dispatch reads it, for every
+ * branch: {@link refuseDeniedSubjectLoad}, except for a same-origin
+ * `type: 'api'` forward that needs nothing from the row.
+ *
+ * ## Why the api forward is different
+ *
+ * The 404 exists so that nothing TRUSTED is built for a caller who has not
+ * shown read access to the subject row: the RLS/FLS-bypassing `ctx.engine` /
+ * `ctx.api` of a script body, a persisted flow run, a declarative write. An
+ * api forward builds none of those. It hands its declared `target` the
+ * caller's OWN credentials, and the target authorizes the caller itself
+ * (ADR-0066 D4) — a request the caller could send to that target directly.
+ * Refusing it here put the generic data door's verdict in front of a door
+ * that answers the question itself, and wrongly: approval decisions are
+ * authorized by the approvals routes (a pending approver may decide), while a
+ * member has no data-door read on `sys_approval_request` by design. So a
+ * denied load no longer answers its own 404 ahead of the forward; the door
+ * forwards and relays what the target answers. A load that names nothing and
+ * a load that was filtered are the same answer to the target too, so this
+ * opens no existence oracle the target does not already answer.
+ *
+ * ## ⛔ No row data the caller could not read reaches the request
+ *
+ * On a denied load the request is built from the `recordId`, the params and
+ * the caller only ({@link apiForwardSubjectRecord}). A declaration whose
+ * request needs a field OF the row ({@link apiActionRequestReadsSubjectRow})
+ * cannot be built from those, so it keeps today's 404 `RECORD_NOT_FOUND`.
+ *
+ * Every other branch — the declarative update, the flow dispatch, the
+ * script/body dispatch — keeps the refusal unchanged. Both doors call this
+ * ONE function at the same point (the REST `/actions` door and the MCP
+ * `run_action` bridge), so the rule cannot hold at one and not the other.
+ */
+export function refuseDeniedSubjectLoadBeforeDispatch(
+    action: any,
+    objectName: string,
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): void {
+    if (subject.recordLoadDenied && forwardsOnDeniedSubjectLoad(action)) return;
+    refuseDeniedSubjectLoad(objectName, recordId, subject);
+}
+
+/**
+ * Does a denied subject load still forward this action? Exactly a same-origin
+ * `type: 'api'` action (the doors refuse an off-origin one earlier) whose
+ * request can be built without the row. A declarative update is never one,
+ * whatever its `type` says: `operation` before `type`.
+ */
+export function forwardsOnDeniedSubjectLoad(action: any): boolean {
+    return !isDeclarativeUpdateAction(action)
+        && action?.type === 'api'
+        && isSameOriginApiTarget(action?.target)
+        && !apiActionRequestReadsSubjectRow(action);
+}
+
+/**
+ * Does this api action's request need a field OF the subject row — beyond the
+ * `id` the caller already named? Two places in the declaration read the row
+ * ({@link buildApiActionRequest}): a `{field}` path token in `target`, and a
+ * `recordIdParam` seeded from a `recordIdField`. `{id}` and a `recordIdField`
+ * of `id` (the default) are the routed `recordId` itself, so they do not.
+ *
+ * Read off the declaration, before any substitution: a token that only looks
+ * like a field (a `${name}` with no scope the substitution leaves in place)
+ * counts as one, which errs toward the 404, never toward a forward.
+ */
+export function apiActionRequestReadsSubjectRow(action: any): boolean {
+    const target: string = typeof action?.target === 'string' ? action.target : '';
+    for (const match of target.matchAll(/\{([a-z_][a-z0-9_]*)\}/gi)) {
+        if (match[1] !== 'id') return true;
+    }
+    const recordIdParam = typeof action?.recordIdParam === 'string' && action.recordIdParam ? action.recordIdParam : undefined;
+    if (recordIdParam) {
+        const field: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
+        if (field !== 'id') return true;
+    }
+    return false;
+}
+
+/**
+ * The subject row an api forward's request is built from. A row the caller's
+ * own scope delivered, as it was; on a denied load, `{ id: recordId }` and
+ * nothing else — built from the id the caller named, ⛔ never from whatever
+ * the load left behind, so no field of a row the caller could not read can
+ * reach the request.
+ */
+export function apiForwardSubjectRecord(
+    recordId: string | undefined,
+    subject: ActionSubjectRecordLoad,
+): Record<string, unknown> {
+    if (!subject.recordLoadDenied) return subject.record;
+    return recordId ? { id: recordId } : {};
+}
+
+/**
  * [#15079] The prior/next value pair a successful declarative update hands back
  * when the action declares `undoable: true` — the anchor that key never had.
  *
@@ -3867,7 +4015,11 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
     //    persisted automation run exists and no trusted body has been entered
     //    when the refusal lands. `ok: true` on a row the caller cannot read is
     //    the defect; refusing after the run was created would only describe it.
-    refuseDeniedSubjectLoad(objectName, recordId, subject);
+    //
+    // [#28657] Except ahead of an api forward that needs nothing from the row
+    // (`refuseDeniedSubjectLoadBeforeDispatch`): the target authorizes the
+    // caller itself. The REST `/actions` door calls the same function.
+    refuseDeniedSubjectLoadBeforeDispatch(action, objectName, recordId, subject);
 
     // ── api forward (#27506) ── a same-origin `type: 'api'` action is
     // forwarded in-process to its declared `target` with the caller's own
@@ -3889,7 +4041,7 @@ async function dispatchAdmittedBusinessAction(deps: ActionExecutionDeps,
                 code: standardErrorCodeForHttpStatus(503), status: 503,
             });
         }
-        const built = buildApiActionRequest(action, { recordId, record, params, ec });
+        const built = buildApiActionRequest(action, { recordId, record: apiForwardSubjectRecord(recordId, subject), params, ec });
         if ('message' in built) {
             throw Object.assign(new Error(built.message), { code: standardErrorCodeForHttpStatus(built.status), status: built.status });
         }

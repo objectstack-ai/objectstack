@@ -116,6 +116,10 @@
  * are each an orphan, with its own diagnosis. The message's `{{ }}` holes are
  * the schema's to judge (`TranslationDataSchema`, the one text-slot judge).
  *
+ * `flows.<name>.notices.<node_id>.message` (#28251) is judged the same way:
+ * the node id must name a `save_notice` node, at any depth. A node of another
+ * type and an id the flow does not declare are each an orphan.
+ *
  * `flows.<name>.approvals.<node_id>.label` is judged the same way: the node id
  * must name an `approval` node (`APPROVAL_NODE_TYPE`), at any depth. A node of
  * another type and an id the flow does not declare are each an orphan, with
@@ -278,6 +282,13 @@ const SCREEN_NODE_TYPE = 'screen';
  * `'refused'` a member of the schema's `outcome` enum, neither exported by name.
  */
 const END_NODE_TYPE = 'end';
+
+/**
+ * [#28251] The node a `flows.<name>.notices.*` key addresses: a `save_notice`
+ * node (`SaveNoticeConfigSchema`). A local const for {@link SCREEN_NODE_TYPE}'s
+ * reason.
+ */
+const SAVE_NOTICE_NODE_TYPE = 'save_notice';
 
 /**
  * The component a misplaced `components.<id>.items` key most often sits on: a
@@ -485,6 +496,11 @@ interface FlowFacts {
    * renders no message, so a key over one is an orphan.
    */
   refusals: Set<string>;
+  /**
+   * [#28251] The ids of the `save_notice` nodes — the nodes a
+   * `flows.<name>.notices.<node_id>` key addresses, at any depth.
+   */
+  notices: Set<string>;
   /**
    * The ids of the `approval` nodes — the nodes a
    * `flows.<name>.approvals.<node_id>` key addresses, at any depth.
@@ -1628,6 +1644,7 @@ function buildUniverse(stack: AnyRec): Universe {
     if (!ownDeclaration && flows.has(flowName)) return;
     const screens = new Map<string, ScreenFacts>();
     const refusals = new Set<string>();
+    const notices = new Set<string>();
     const approvals = new Set<string>();
     const otherNodes = new Map<string, string>();
     const messages = new Set<string>(FLOW_TERMINAL_MESSAGE_KEYS.filter((key) => typeof flow[key] === 'string'));
@@ -1643,6 +1660,7 @@ function buildUniverse(stack: AnyRec): Universe {
           refusals.add(nodeId);
         }
         if (nodeType === APPROVAL_NODE_TYPE) approvals.add(nodeId);
+        if (nodeType === SAVE_NOTICE_NODE_TYPE) notices.add(nodeId);
         continue;
       }
       const config = isRec(node.config) ? node.config : undefined;
@@ -1662,7 +1680,7 @@ function buildUniverse(stack: AnyRec): Universe {
         hasDescription: typeof config?.description === 'string' && config.description.length > 0,
       });
     }
-    flows.set(flowName, { screens, refusals, approvals, messages, otherNodes });
+    flows.set(flowName, { screens, refusals, notices, approvals, messages, otherNodes });
   };
   for (const flow of recordsOf(stack.flows)) collectFlowRecord(flow, { ownDeclaration: true });
   for (const flow of artifactProvidedRecords(stack, 'flows')) {
@@ -2455,6 +2473,23 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
               `\`outcome: 'refused'\`.`,
           );
         }
+        // ── flows.<name>.notices.<node_id> (#28251) ───────────────────────
+        for (const nodeId of Object.keys(asRecord(rawFlow.notices))) {
+          if (flow.notices.has(nodeId)) continue;
+          const nodeType = flow.screens.has(nodeId) ? SCREEN_NODE_TYPE : flow.otherNodes.get(nodeId);
+          orphan(
+            `${inLocale} · flow "${flowName}" · save notice "${nodeId}"`,
+            `${flowPath}.notices.${nodeId}`,
+            nodeType
+              ? `Translations are keyed to save notice "${nodeId}", which flow "${flowName}" declares as ` +
+                `${/^[aeiou]/.test(nodeType) ? 'an' : 'a'} \`${nodeType}\` node, not a \`save_notice\`, so ` +
+                `nothing resolves this key.`
+              : `Translations are keyed to save notice "${nodeId}", a node id flow "${flowName}" does not ` +
+                `declare, so the notice keeps its source-locale message.` +
+                suggest(nodeId, flow.notices),
+            `Save-notice translations are keyed by the \`id\` of a \`save_notice\` node.`,
+          );
+        }
         // ── flows.<name>.approvals.<node_id> ──────────────────────────────
         for (const nodeId of Object.keys(asRecord(rawFlow.approvals))) {
           if (flow.approvals.has(nodeId)) continue;
@@ -2625,6 +2660,7 @@ interface ActionEntryContext {
  *   | `resultDialog.fields.<path>`        | `resultDialog.fields[].path`         | `resolveActionResultDialog`     |
  *   | `resultDialog.title` / `.description` / `.acknowledge` | the action's `resultDialog`, present at all | `resolveActionResultDialog` |
  *   | `submitText`                        | a non-empty `params` (the param dialog) | `translateAction`            |
+ *   | `cancelText`                        | `confirmText` or a non-empty `params` (either dialog) | `translateAction` |
  *
  * A dialog leaf under a DECLARED dialog is read whether or not the dialog
  * authors that leaf itself — the resolver overlays a translated `title` onto a
@@ -2632,7 +2668,10 @@ interface ActionEntryContext {
  *
  * `submitText` is the param dialog's button, the one leaf with a host of its
  * own: the dialog opens only for a non-empty `params`, and `translateAction`
- * overlays the key only then (#27944). The leaf keys beside them (`label`,
+ * overlays the key only then (#27944). `cancelText` is the dismiss button both
+ * pre-run dialogs carry, so its host is either one: a declared `confirmText`
+ * (the confirm dialog) or a non-empty `params` (the param dialog) (#28519).
+ * The leaf keys beside them (`label`,
  * `description`, `confirmText`, `successMessage`, `disabledReason`) are prose
  * on a node that resolved, read whenever the action is, as on the object
  * branch.
@@ -2649,6 +2688,7 @@ function checkActionEntry(findings: TranslationRefFinding[], ctx: ActionEntryCon
   checkActionResultDialogLeaves(findings, ctx);
   checkActionResultDialogFields(findings, ctx);
   checkActionSubmitText(findings, ctx);
+  checkActionCancelText(findings, ctx);
 }
 
 /**
@@ -2673,6 +2713,32 @@ function checkActionSubmitText(findings: TranslationRefFinding[], ctx: ActionEnt
     hint:
       `Move the \`submitText\` translation under the action that collects the params, declare ` +
       `\`params\` on this action first if it should open a dialog, or drop it.`,
+  });
+}
+
+/**
+ * [#28519] `cancelText` — the label of the dismiss button on the dialog an
+ * action opens before it runs. Two dialogs carry that button: the confirm
+ * dialog of a declared `confirmText` and the param dialog of a non-empty
+ * `params`; `translateAction` overlays the key only for an action that opens
+ * one of them, so under any other action the translation is read by nothing —
+ * {@link checkActionSubmitText}'s rule, with either declaration as the host.
+ */
+function checkActionCancelText(findings: TranslationRefFinding[], ctx: ActionEntryContext): void {
+  if (!isRec(ctx.rawAction) || ctx.rawAction.cancelText === undefined) return;
+  if (ctx.action.confirmText != null) return;
+  if (Array.isArray(ctx.action.params) && ctx.action.params.length > 0) return;
+  findings.push({
+    severity: TRANSLATION_TARGET_UNKNOWN_SEVERITY,
+    rule: TRANSLATION_TARGET_UNKNOWN,
+    where: `${ctx.where} · dismiss button`,
+    path: `${ctx.path}.cancelText`,
+    message:
+      `Translations carry a dialog \`cancelText\`, but ${ctx.subject} declares neither ` +
+      `\`confirmText\` nor \`params\`, so it opens no confirm or param dialog and nothing reads this label.`,
+    hint:
+      `Move the \`cancelText\` translation under the action whose dialog it dismisses, declare the ` +
+      `\`confirmText\` or \`params\` that opens the dialog on this action first, or drop it.`,
   });
 }
 

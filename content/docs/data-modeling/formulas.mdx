@@ -298,7 +298,10 @@ then a shared picklist's `picklists.<picklist>.options.<value>`), exactly as
 `Accept-Language`, so the write response the save toast reads, the record
 page title, related lists and lookups all follow it.
 
-- `label()` takes exactly `record.<field>`, a field that declares `options`.
+- `label()` takes exactly `record.<field>`, a field that declares `options`
+  or names a `picklist`. Any other field is refused when the object is saved
+  (`os validate`, `os build`, the object save door), with the field named,
+  because it has no label to read and the formula would read null on every row.
   An empty value reads `''`; a stored value no option declares reads as itself.
   A multi-value select is refused.
 - A read with no locale (a script, a scheduled job) reads the declared labels.

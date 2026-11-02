@@ -31,6 +31,7 @@ import {
   PublishPackageDraftsResponse,
   LoginRequest,
   SessionResponse,
+  MePermissionsResponse,
   GetPresignedUrlRequest,
   PresignedUrlResponse,
   CompleteUploadRequest,
@@ -130,6 +131,8 @@ import {
   ReassignOrphanedMetadataResponse,
   DuplicatePackageResponse,
   EnsureCustomizationPackageResponse,
+  CloneFlowRequest,
+  CloneFlowResponse,
   ValidateDataIssue,
 } from '@objectstack/spec/api';
 // [#17536] The element the two `/packages` READ doors are declared to serve.
@@ -4990,6 +4993,26 @@ export class ObjectStackClient {
     },
 
     /**
+     * [#28709] The caller's effective permissions: `GET /auth/me/permissions`,
+     * the body the console reads once per session for its whole permission
+     * layer, declared strictly by `MePermissionsResponseSchema`
+     * (`@objectstack/spec/api`). Served by plugin-hono-server, not better-auth.
+     *
+     * Discriminate on `authenticated`: an anonymous caller RESOLVES
+     * `{ authenticated: false }` (the route answers it at 200, so a client can
+     * tell "signed out" from a fault), unlike {@link me}, which rejects. The
+     * authenticated answer carries `hasAnyQueue` among the rest;
+     * `systemPermissions` / `tabPermissions` are absent only on a server
+     * without SecurityPlugin, where absent means unknown and an empty array
+     * means none.
+     */
+    mePermissions: async (): Promise<MePermissionsResponse> => {
+        const route = this.getRoute('auth');
+        const res = await this.fetch(`${this.baseUrl}${route}/me/permissions`);
+        return (await res.json()) as MePermissionsResponse;
+    },
+
+    /**
      * Register a new user account
      * Uses better-auth endpoint: POST /sign-up/email
      *
@@ -5887,6 +5910,40 @@ export class ObjectStackClient {
               body: JSON.stringify({ enabled }),
           });
           return this.unwrapResponse(res);
+      },
+
+      /**
+       * [#28149, ADR-0146 D4] "New similar": copy the flow `name` under a NEW
+       * machine name, into a package, switched off.
+       *
+       * `POST /automation/:name/clone` copies the whole definition, renames
+       * and relabels it, and writes it with `status: 'obsolete'`, so the copy
+       * never runs beside its original; switch it on by saving its
+       * definition with `status: 'active'` into its package and publishing.
+       * Its references are not re-pointed, and nothing records what it was
+       * copied from (ADR-0126 §9).
+       *
+       * `body.package` names the package the copy lands in: an installed,
+       * writable package whose dependency closure holds the source's
+       * package. Omitted, the copy lands in the source's paired
+       * customization package `<base>.custom`, created on first use through
+       * the ensure door (`packages.ensureCustomization`). The answer names the
+       * package in `packageId`.
+       *
+       * Refused, with nothing written: an unknown source (404); a taken name
+       * (409 `RESOURCE_CONFLICT`); a source holding a credential (409); an
+       * unknown or read-only `package` (422 `WRITABLE_PACKAGE_REQUIRED`), or
+       * one whose closure lacks the source's package (409
+       * `RESOURCE_CONFLICT`); `package` omitted for a source no package ships,
+       * which has no pair (400). Requires `manage_metadata`.
+       */
+      clone: async (name: string, body: CloneFlowRequest): Promise<CloneFlowResponse['data']> => {
+          const route = this.getRoute('automation');
+          const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(name)}/clone`, {
+              method: 'POST',
+              body: JSON.stringify(body),
+          });
+          return this.unwrapResponse<CloneFlowResponse['data']>(res);
       },
 
       /**

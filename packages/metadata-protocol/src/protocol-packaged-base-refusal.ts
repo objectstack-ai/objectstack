@@ -36,8 +36,9 @@
  */
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
-import { isOriginGatedType, managedItemSealedSentence } from './packaged-base-regime.js';
+import { isOriginGatedType, managedItemSealedSentence, regimeCDeclaredSaveSentence } from './packaged-base-regime.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
+import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 import {
     customizationBasePackageId,
     customizationPackageId,
@@ -47,6 +48,7 @@ import {
 } from '@objectstack/spec/kernel';
 import { PLURAL_TO_SINGULAR } from '@objectstack/spec/shared';
 import { expandViewContainer, isAggregatedViewContainer } from '@objectstack/spec';
+import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
 
 /**
  * The `ObjectStackProtocolImplementation` members the functions below read —
@@ -144,9 +146,14 @@ export function refusePackagedBaseOverride(
         // of the bare seal: the override write gate ({@link judgeOverrideWrite})
         // admits exactly the pair's declaration, so the seal is no longer the
         // whole story.
+        // [#28412] A Regime C type the declared override opens (`flow`) names
+        // the declaration in place of its clone path, keeping its switch.
+        const owner = this.packagedArtifactOwner(request);
+        const declare = sealedDeclareOrRenameClause(request.type, owner, request.packageId);
         const err = new Error(
-            managedItemSealedSentence(request.type, request.name, 'save')
-            + sealedDeclareOrRenameTail(request.type, this.packagedArtifactOwner(request), request.packageId),
+            (declare === undefined ? undefined : regimeCDeclaredSaveSentence(request.type, request.name, declare))
+            ?? managedItemSealedSentence(request.type, request.name, 'save')
+                + sealedDeclareOrRenameTail(request.type, owner, request.packageId),
         );
         (err as any).code = 'NOT_OVERRIDABLE';
         (err as any).status = 403;
@@ -164,9 +171,10 @@ export function refusePackagedBaseOverride(
  *   (ruling A on #28390), so a dependent's one fix is a new name, and the
  *   declare advice would send it to a refusal (`declared_outside_pair`).
  *
- * Empty for a type with no open channel — `flow` and `action` wait for
- * ADR-0146 D9's conditions (their regime rows keep their own routes), and an
- * excluded type has none — and when the shipping package has no pair id.
+ * Empty for a type with no open channel — `action` waits for ADR-0146 D9's
+ * conditions (its regime row keeps its own routes), and an excluded type has
+ * none — and when the shipping package has no pair id. [#28412] `flow` is
+ * open: its sealed sentence names the declaration too.
  */
 function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerPackageId: unknown): string {
     const singular = PLURAL_TO_SINGULAR[type] ?? type;
@@ -181,21 +189,117 @@ function sealedDeclareOrRenameTail(type: string, basePackageId: unknown, writerP
         + `(overrides: { package: '${basePackageId}', basedOn }), or rename the item.`;
 }
 
+/**
+ * [#28412, ADR-0146 D2] {@link sealedDeclareOrRenameTail}'s choice, as the
+ * clause a Regime C sentence carries in place of its clone path
+ * (`regimeCDeclaredSaveSentence`): the pair (or a write naming no package)
+ * may declare from the pair or rename; any other named package may only
+ * rename. `undefined` exactly where the tail is empty.
+ */
+function sealedDeclareOrRenameClause(type: string, basePackageId: unknown, writerPackageId: unknown): string | undefined {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    if (!isOpenOverrideType(singular) || typeof basePackageId !== 'string') return undefined;
+    const pair = customizationPackageId(basePackageId);
+    if (!pair.ok) return undefined;
+    const writer = typeof writerPackageId === 'string' && writerPackageId.length > 0 ? writerPackageId : undefined;
+    if (writer !== undefined && writer !== pair.value) {
+        return `Rename it to customize it (only '${pair.value}' may declare an override of '${basePackageId}')`;
+    }
+    return `Declare an override from '${pair.value}' or rename it to customize it`;
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // ADR-0146 D2 — the override write gate (ruling A on decision card #28390)
 // ─────────────────────────────────────────────────────────────────────────
 
 /**
+ * [#28412, ADR-0146 D9] The behavioural types whose D9 conditions this runtime
+ * delivers, so the gate admits their declared override:
+ *
+ *  - `flow` — all four. Served over the code package and rebound in one reload
+ *    (`@objectstack/service-automation`'s flow precedence and the flow view of
+ *    this package, which admit exactly the `.custom` row
+ *    `isServedOverrideRowOf` names); ledger identity inherited (the
+ *    override keeps the base's name, so `packagedFlowOwner`, the toggle door,
+ *    the §7.3 subflow guard and the `FLOW_DISABLED` consult key it as the
+ *    base); version pinning (#28405: a suspended run finishes on the body it
+ *    started on).
+ *
+ * ⛔ Not `action`: its override door is not cut (D9's `action` paragraph), so
+ * its declaration keeps the "not yet available" refusal. A type joins this set
+ * in the change that delivers its conditions, never ahead of it.
+ */
+const CONDITIONS_DELIVERED: ReadonlySet<string> = new Set(['flow']);
+
+/**
  * Whether a declared override of `type` is admitted today: the closed list's
  * disposition is `overridable` AND the type waits for no ADR-0146 D9
- * condition. `flow` (D9 conditions, opened by its own card in this same gate)
- * and `action` (its ledger switch first; refused for the whole epic) carry
- * `conditions`, so they are classified overridable and still refused here.
- * Read from `OVERRIDE_TYPE_CLASSIFICATION`, never re-derived.
+ * condition this runtime has not delivered ({@link CONDITIONS_DELIVERED}).
+ * `flow` carries `conditions` and is delivered; `action` (its door is not cut)
+ * carries them and is not, so it is classified overridable and still refused
+ * here. The disposition and the conditions are read from
+ * `OVERRIDE_TYPE_CLASSIFICATION`, never re-derived.
  */
 function isOpenOverrideType(singular: string): boolean {
     const row = getOverrideTypeClassification(singular);
-    return row?.disposition === 'overridable' && (row.conditions?.length ?? 0) === 0;
+    if (row?.disposition !== 'overridable') return false;
+    return (row.conditions?.length ?? 0) === 0 || CONDITIONS_DELIVERED.has(singular);
+}
+
+/**
+ * [#28412, ADR-0146 D9 item 1] Whether a removal addressed to `packageId`
+ * removes the shipping package's PAIR row of a type whose D9 conditions are
+ * delivered ({@link CONDITIONS_DELIVERED}: `flow` today) — the row the pair's
+ * declared override is stored in. Such a removal is admitted past the
+ * sealed-removal refusal: it removes no managed definition, and the code
+ * package's flow is what every read serves and what the automation engine
+ * arms once the row is gone — the narrowing direction the #6960 ruling names.
+ * ⛔ Only the pair, named: a removal naming no package, or any other package,
+ * keeps the sealed refusal it had. ⛔ Only a delivered type: every other open
+ * type (`view`, `mapping`, …) keeps main's delete verdict — its own removal
+ * carve-out or its sealed refusal — untouched by this card.
+ */
+export function isPairRowRemoval(type: string, basePackageId: unknown, packageId: unknown): boolean {
+    const singular = PLURAL_TO_SINGULAR[type] ?? type;
+    if (!CONDITIONS_DELIVERED.has(singular) || !isOpenOverrideType(singular)) return false;
+    if (typeof basePackageId !== 'string') return false;
+    if (typeof packageId !== 'string' || packageId.length === 0) return false;
+    const pair = customizationPackageId(basePackageId);
+    return pair.ok && pair.value === packageId;
+}
+
+/**
+ * [#28746, ADR-0146 D2] The bundle member an item IS, for a type whose
+ * identity is a pair (`ITEM_KEY_DISCRIMINATORS`: an `email_template` is one
+ * item per `(name, locale)`), the canonical member when the body declares
+ * none; `undefined` for every other type, whose identity is its name alone.
+ *
+ * Read off the identity table the registry keys its bundles on and the read
+ * side serves a member by (`findServedOverlayRow`, the layered read), never a
+ * type literal. The save is BODY-addressed, so the member is the body's own.
+ */
+export function overrideWriteMemberOf(type: string, item: unknown): string | undefined {
+    return itemDiscriminator(PLURAL_TO_SINGULAR[type] ?? type, item);
+}
+
+/**
+ * [#28746, ADR-0146 D2] The identity two packages' items collide on under the
+ * override write gate: `identity` (an item's name; an `action`'s
+ * `<objectName>:<name>`) joined with its bundle member
+ * ({@link overrideWriteMemberOf}) for a pair-identified type, and `identity`
+ * unchanged for every other type.
+ *
+ * The ONE spelling every door that hands the gate its `shippers` compares on:
+ * {@link overrideWriteItemsOf} (so `os validate` and the install door's
+ * incoming items), the install door's listing of an installed package, and
+ * {@link overrideWriteVerdict}'s registry lookup at the same member. A base
+ * that ships a template in `en-US` alone therefore ships no `fr-FR` member: a
+ * declared `fr-FR` override is refused (`declared_package_ships_no_such_item`),
+ * and an undeclared `fr-FR` beside it collides with nothing.
+ */
+export function overrideWriteIdentityOf(type: string, identity: string, item: unknown): string {
+    const member = overrideWriteMemberOf(type, item);
+    return member === undefined ? identity : `${identity}\u0000${member}`;
 }
 
 /** One item written into one package — what the override write gate judges. */
@@ -219,9 +323,16 @@ export interface OverrideWriteClosure {
      * admitting needs the base to be proven inside the closure.
      */
     readonly dependencies: readonly string[] | undefined;
-    /** The packages of {@link dependencies} that ship an item of this type and name. */
+    /**
+     * The packages of {@link dependencies} that ship an item of this type and
+     * name — for a pair-identified type, of this bundle member
+     * ({@link overrideWriteIdentityOf}).
+     */
     readonly shippers: readonly string[];
 }
+
+/** [#28834] The item door an `object_extension` is saved through (#28574), as the refusals name it. */
+const OBJECT_EXTENSION_ITEM_DOOR = '`/api/v1/meta/object_extension`';
 
 /** Which named refusal of ADR-0146 D2 / D6 / D9 / D10 a write meets. */
 export type OverrideWriteRule =
@@ -282,7 +393,8 @@ function declarationOf(item: unknown): { present: boolean; base: string | undefi
  * Order: a declaration is judged on its type first (D10 `object`, D6 and the
  * other excluded types, then D9's `flow` and `action`), then on who declares
  * (the pair alone), then on what it names (inside the closure, and shipping
- * that item). An undeclared item is judged only when a package of its closure
+ * that item — for a pair-identified type, that bundle member: the caller's
+ * `shippers` are counted at {@link overrideWriteIdentityOf}). An undeclared item is judged only when a package of its closure
  * ships the same name, on a type a declared override applies to; outside the
  * closure two packages keep ADR-0048 §3.3/§3.4's coexistence on a bare name.
  */
@@ -303,18 +415,30 @@ export function judgeOverrideWrite(
     if (declaration.present) {
         const row = getOverrideTypeClassification(type);
         if (row?.disposition === 'extend_only') {
+            // [#28834] Both doors an extension is written through: the item
+            // door (#28574) and the manifest's collection.
             return refuse('declared_object',
                 `${item} carries \`overrides\`, but an object is extended, never replaced (ADR-0146 D10). `
-                + 'Remove `overrides` and add the change as an `objectExtensions` entry of the base\'s paired .custom package.');
+                + 'Remove `overrides` and add the change as an object extension in the base\'s paired .custom package: '
+                + `an \`object_extension\` item saved through ${OBJECT_EXTENSION_ITEM_DOOR}, or an \`objectExtensions\` entry of its manifest.`);
+        }
+        if (type === OBJECT_EXTENSION_TYPE) {
+            // [#28834, ADR-0146 D10] An extension takes no override and gets
+            // no new name: its name is the object it extends, so the D6
+            // "new similar" remedy below would name a write that cannot exist.
+            return refuse('declared_type_not_overridable',
+                `${item} carries \`overrides\`, but an object extension takes no override (ADR-0146 D10): it adds to the `
+                + `object it extends and is stored under that object's name. Remove \`overrides\` and edit the object_extension '${name}' itself.`);
         }
         if (row?.disposition !== 'overridable') {
             return refuse('declared_type_not_overridable',
                 `${item} carries \`overrides\`, but a ${type} takes no override (ADR-0146 D6). `
                 + `Remove \`overrides\` and create your own ${type} under a new name ("new similar").`);
         }
-        // `flow` and `action` are classified overridable and wait for D9's
-        // conditions (`isOpenOverrideType`): "flow customization is not yet
-        // available", and the same sentence for an action.
+        // `action` is classified overridable and waits for D9's conditions
+        // (`isOpenOverrideType`): "action customization is not yet available".
+        // [#28412] `flow`'s conditions are delivered, so it is judged below
+        // like every open type.
         if (!isOpenOverrideType(type)) {
             return refuse('declared_type_not_yet_available',
                 `${item} carries \`overrides\`: ${type} customization is not yet available, so a declared ${type} `
@@ -337,8 +461,11 @@ export function judgeOverrideWrite(
                 + `Declare a dependency on '${base}' in the \`dependencies\` of '${packageId}''s manifest, or remove \`overrides\` (ADR-0146 D2).`);
         }
         if (!closure.shippers.includes(base)) {
+            // [#28746] A pair-identified type names the member it addressed.
+            const member = overrideWriteMemberOf(type, subject.item);
+            const ofMember = member === undefined ? '' : ` with ${ITEM_KEY_DISCRIMINATORS[type]?.field} '${member}'`;
             return refuse('declared_package_ships_no_such_item',
-                `${item} declares an override of '${base}', which ships no ${type} named '${name}'. `
+                `${item} declares an override of '${base}', which ships no ${type} named '${name}'${ofMember}. `
                 + `Remove \`overrides\` to keep it as '${packageId}''s own item, or correct the name (ADR-0146 D2).`);
         }
         return { verdict: 'admit', base };
@@ -369,7 +496,9 @@ export interface OverrideWriteItem {
     readonly name: string;
     /**
      * The registry identity two packages collide on: an `action` is
-     * `<objectName>:<name>` (the registry's key), every other item its name.
+     * `<objectName>:<name>` (the registry's key), every other item its name,
+     * and [#28746] a pair-identified type's item that joined with its bundle
+     * member ({@link overrideWriteIdentityOf}).
      */
     readonly identity: string;
     /** The item body the declaration is read from. */
@@ -411,7 +540,7 @@ export function overrideWriteItemsOf(body: Record<string, unknown>, at = ''): Ov
             const identity = type === 'action' && typeof item.objectName === 'string' && item.objectName !== ''
                 ? `${item.objectName}:${declaredName}`
                 : declaredName;
-            out.push({ type, name: declaredName, identity, item, path });
+            out.push({ type, name: declaredName, identity: overrideWriteIdentityOf(type, identity, item), item, path });
         }
     }
     return out;
@@ -436,6 +565,11 @@ export function overrideWriteRefusalError(
  * registry (`resolveWritePackageScope`, the save door's own) and the shipping
  * packages from the artifact lookup (`shippedArtifactsOf`, the read's own),
  * then asks {@link judgeOverrideWrite}.
+ *
+ * [#28746] For a pair-identified type the lookup is at the body's bundle
+ * member ({@link overrideWriteMemberOf}), and an artifact of another member is
+ * no shipper: a registry that ignores `member` can answer one, as
+ * `mergeArtifactProtection` guards on the read side.
  */
 export function overrideWriteVerdict(
     this: Pick<PackagedBaseRefusalHost, 'isWritablePackage' | 'resolveWritePackageScope' | 'shippedArtifactsOf'>,
@@ -453,10 +587,12 @@ export function overrideWriteVerdict(
     // fact about the package, not about the item.
     if (packageId !== undefined && scope === undefined) return NOT_CONCERNED;
     const dependencies = scope?.dependencies.filter((id) => id !== packageId);
+    const member = overrideWriteMemberOf(request.type, request.item);
     const shippers = dependencies === undefined || dependencies.length === 0
         ? []
         : Array.from(new Set(
-            this.shippedArtifactsOf(request.type, request.name)
+            this.shippedArtifactsOf(request.type, request.name, undefined, member)
+                .filter((a) => overrideWriteMemberOf(request.type, a) === member)
                 .map((a) => (a as { _packageId?: unknown } | null | undefined)?._packageId)
                 // An override replaces an item of an INSTALLED, read-only base
                 // (ADR-0146 D1): a writable package's item is edited in place

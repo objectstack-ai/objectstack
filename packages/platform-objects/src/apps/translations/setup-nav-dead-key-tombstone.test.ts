@@ -21,7 +21,7 @@
 // deliberately NOT built (#6659's triage): it is a separate maintainer-facing
 // call, not a prerequisite for labelling the ids it cannot see.
 //
-// This file makes no general claim. It pins exactly eight ids that were checked
+// This file makes no general claim. It pins exactly the ids below, each checked
 // ONE BY ONE against a repo-wide grep — `id: '<key>'` returned zero hits for
 // each of the first five on `61282f906` (`nav_jwks` on `68a1edb`), against a
 // control probe (`nav_webhooks`) that returned five — and each of which has a
@@ -57,6 +57,23 @@
 //                           entry id (example apps, docs, test fixtures) — so
 //                           for that one the grep is no evidence, and the
 //                           assertions below are the whole claim.
+//   nav_positions           the Setup metadata catalog (ADR-0146 D1, M-1
+//   nav_capabilities        ruling A): Setup carries no metadata catalog.
+//   nav_permission_sets     The four entries opened the registry types'
+//   nav_declared_sharing_   environment-scope lists, which Studio's "All
+//     rules                 metadata" area serves now, with the on/off switch
+//                           on each item's page; Setup's URLs redirect there.
+//                           The first three were plugin-security's, the last
+//                           plugin-sharing's; both depend on this package, so
+//                           the declaring side is pinned in their own tests.
+//                           Measured differently: the grep answers zero for
+//                           `nav_capabilities` and `nav_declared_sharing_rules`
+//                           but not for the other two, which fixtures and an
+//                           ADR still spell, so for those the assertions below
+//                           are the whole claim.
+//   nav_packaged_automation Setup › Packaged automation (ADR-0146 D11): its
+//                           flows half moved into Studio (D4), and its actions
+//                           half is its own entry, `nav_packaged_actions`.
 //   nav_audit_log_browser   the console's audit browser (`audit:log`), which
 //                           `@objectstack/plugin-audit` now contributes under
 //                           `nav_audit_logs` ("Audit Log"), the id its
@@ -73,7 +90,7 @@
 // ---------------------------------------------------------------------------
 // What to do when this test goes red
 // ---------------------------------------------------------------------------
-// It goes red on exactly one event: one of the eight ids comes back. That is not
+// It goes red on exactly one event: one of the listed ids comes back. That is not
 // automatically wrong — re-adding `nav_verifications`, `nav_device_codes` or
 // `nav_jwks` is a deliberate security decision (each requires enabling the read
 // on the object first — for `sys_jwks`, opening a data-API read path onto
@@ -97,9 +114,14 @@ const DEAD_SETUP_NAV_IDS = [
   'nav_accounts',
   'nav_approval_processes',
   'nav_audit_log_browser',
+  'nav_capabilities',
+  'nav_declared_sharing_rules',
   'nav_device_codes',
   'nav_jwks',
   'nav_metadata',
+  'nav_packaged_automation',
+  'nav_permission_sets',
+  'nav_positions',
   'nav_user_preferences',
   'nav_verifications',
 ] as const;

@@ -74,7 +74,7 @@ export default defineStack({
 | View titles, descriptions, empty states | `objects.<name>._views.<view>` |
 | A form view's thank-you panel (shown after a submit) | `objects.<name>._views.<view>.submitBehavior.title` / `.message` — only when the form's `submitBehavior` is `kind: 'thank-you'`, and only copy the form authors: a key cannot add a `message` the form leaves to the default wording |
 | Bulk-action copy on a list view (button, confirm prompt, dialog fields) | `objects.<name>._views.<view>.bulkActions.<def>.label` / `.confirmText` / `.confirmLabel` / `.params.<param>.label` / `.help` / `.placeholder` — a bulk param's hint is `help`, not `helpText` |
-| Action labels, confirm text, success messages, disabled reasons, param dialog submit labels | `objects.<name>._actions.<action>` |
+| Action labels, confirm text, success messages, disabled reasons, param dialog submit labels, confirm and param dialog dismiss labels | `objects.<name>._actions.<action>` |
 | Action result dialogs (title / description / acknowledge / field labels) | `objects.<name>._actions.<action>.resultDialog` |
 | Form sections | `objects.<name>._sections.<section>` |
 | Custom validation-rule messages | `objects.<name>._validations.<rule>.message` |
@@ -422,12 +422,14 @@ Honest limits worth knowing before you plan around them:
   is deliberately small.** The keys are addressed the way the runner resolves
   them — flow name, screen node id, screen field name — and every part renders
   in the active locale:
-  - a screen's `title` and `description` are `{{ }}` templates the server
-    renders for each run, so the server translates them: it picks the
-    translated template in the locale of the person who started the run, then
-    fills its holes, and the console draws the screen as served. A translation
-    keeps the holes of the text it translates (`'任务“{{ subject }}”创建成功！'`),
-    and `description` is translated only where the screen authors one;
+  - a screen's `title` and `description`, and the flow's own `successMessage`
+    and `errorMessage`, are `{{ }}` templates the server renders for each run,
+    so the server translates them: it picks the translated template in the
+    locale of the person who started the run, then fills its holes, and the
+    console draws the screen and the toast as served. A translation keeps the
+    holes of the text it translates (`'任务“{{ subject }}”创建成功！'`), and
+    `description`, `successMessage` and `errorMessage` are translated only
+    where the flow authors them;
   - each field's `label`, `placeholder` and `inlineHelpText` is applied by the
     console's screen-flow runner;
   - the flow's own `label` names the flow in the runner's header, above the
@@ -435,11 +437,10 @@ Honest limits worth knowing before you plan around them:
     cover shows the label authored on the flow, and a backend that serves no
     label shows the flow's API name.
 
-  Two strings stay outside the group. A `successMessage` authored on the flow
-  replaces the completion sentence and renders as authored, so the translated
-  label appears in the toast only when the flow declares none. The runner's own
-  chrome — the Cancel and Submit buttons — belongs to the console's message
-  catalog rather than your app's bundle.
+  A `successMessage` authored on the flow replaces the completion sentence, so
+  the translated label appears in the toast only when the flow declares none.
+  The runner's own chrome — the Cancel and Submit buttons — belongs to the
+  console's message catalog rather than your app's bundle.
 
   **The tooling asks for these keys like any other group's.** `os lint` reports
   a missing `flows.*` key against `supportedLocales`, and `os i18n extract`

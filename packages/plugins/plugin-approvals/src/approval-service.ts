@@ -2374,10 +2374,27 @@ export class ApprovalService implements IApprovalService {
     if (!step || !Array.isArray(step.approvers)) return [];
     const now = opts?.now ?? this.clock.now().getTime();
     const out: string[] = [];
+    // A person is a member of a per_group group once (#28684): the tally sizes
+    // each group and counts each approval by these tags, so a repeated tag let
+    // one signature count twice toward `minApprovals`.
+    const tag = (id: string, group: string): void => {
+      if (!opts?.groups) return;
+      const tags = (opts.groups[id] ??= []);
+      if (!tags.includes(group)) tags.push(group);
+    };
     const specs: any[] = step.approvers;
     for (let idx = 0; idx < specs.length; idx++) {
       const a = specs[idx];
       if (!a) continue;
+      // #28684: the slate ONE spec builds names each resolved person once, in
+      // first-appearance order, and only AFTER resolution, so out-of-office
+      // delegation is included: an expression yielding `['u2', 'u2']`, a field
+      // holding `'u2,u2'`, two ids delegated to the same delegate, or one
+      // member of two departments a `resolveAs` expression returned, each
+      // opens one slot. Every group the person resolved into is still tagged.
+      // Across specs the slate is unchanged: a person two specs name stands
+      // once per spec, as `pending_approvers` always recorded.
+      const named = new Set<string>();
       // Approvers without an explicit `group` each form their own group keyed
       // by position (#3266), so a plain per-approver list behaves predictably.
       const groupKey = a.group != null && String(a.group) !== '' ? String(a.group) : `#${idx}`;
@@ -2393,10 +2410,10 @@ export class ApprovalService implements IApprovalService {
         if (opts?.resolvedFrom) opts.resolvedFrom[`expression#${idx}`] = resolved.raw;
         for (const entry of resolved.slots) {
           if (!entry.id) continue;
+          tag(entry.id, entry.subGroup ? `${groupKey}:${entry.subGroup}` : groupKey);
+          if (named.has(entry.id)) continue;
+          named.add(entry.id);
           out.push(entry.id);
-          if (opts?.groups) {
-            (opts.groups[entry.id] ??= []).push(entry.subGroup ? `${groupKey}:${entry.subGroup}` : groupKey);
-          }
         }
         continue;
       }
@@ -2408,8 +2425,10 @@ export class ApprovalService implements IApprovalService {
       // per_group (#3266): tag each resolved id with this spec's group.
       for (const u of ids) {
         if (!u) continue;
+        tag(u, groupKey);
+        if (named.has(u)) continue;
+        named.add(u);
         out.push(u);
-        if (opts?.groups) (opts.groups[u] ??= []).push(groupKey);
       }
     }
     return out.filter(Boolean);

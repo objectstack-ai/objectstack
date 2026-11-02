@@ -48,6 +48,7 @@
 
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { permissionSetOwnerBindingRefusal, runtimeHookWithoutBodyRefusal } from './protocol.js';
+import { objectBodyExtensionFieldSuffixRefusal } from './protocol-extension-field-suffix.js';
 import { datasourceCredentialsRefSaveRefusal } from './protocol-datasource-credentials-ref.js';
 import { evaluateRuntimeAuthoringGate } from './runtime-authoring-gate.js';
 import type { PackagedRuleCopyRefusal, RuntimeAuthoringIssue, RuntimeAuthoringVerdict, RuntimePendingDeclarations } from './runtime-authoring-gate.js';
@@ -78,6 +79,7 @@ export interface AuthoringGateHost {
     objectNamespacePrefixViolation: ObjectStackProtocolImplementation['objectNamespacePrefixViolation'];
     hierarchyResolverMounted: ObjectStackProtocolImplementation['hierarchyResolverMounted'];
     isArtifactBacked: ObjectStackProtocolImplementation['isArtifactBacked'];
+    objectExtensionItemRefusal: ObjectStackProtocolImplementation['objectExtensionItemRefusal'];
     orgWallEnforced: ObjectStackProtocolImplementation['orgWallEnforced'];
     permissionSetNameCollisionRefusal: ObjectStackProtocolImplementation['permissionSetNameCollisionRefusal'];
     refuseRestoredBodyTheSaveDoorRefuses: ObjectStackProtocolImplementation['refuseRestoredBodyTheSaveDoorRefuses'];
@@ -100,7 +102,7 @@ export function restoredBodyDerivation(
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyWriter`; the method's docblock there is its contract. */
 export function restoredBodyWriter(
-    this: Pick<AuthoringGateHost, 'refuseRestoredBodyTheSaveDoorRefuses' | 'restoredBodyDerivation'>,
+    this: Pick<AuthoringGateHost, 'objectExtensionItemRefusal' | 'refuseRestoredBodyTheSaveDoorRefuses' | 'restoredBodyDerivation'>,
     type: string, name: string, binding: string | null, source: string): (historyBody: unknown) => Promise<unknown> {
     const derive = this.restoredBodyDerivation(type);
     return async (historyBody) => {
@@ -108,6 +110,12 @@ export function restoredBodyWriter(
         if (nameRefusal) throw nameRefusal;
         const ownerRefusal = permissionSetOwnerBindingRefusal(type, historyBody, name, binding, 'restore');
         if (ownerRefusal) throw ownerRefusal;
+        // [ADR-0146 D10, #28564] The `__c` reservation, on the same binding.
+        const suffixRefusal = objectBodyExtensionFieldSuffixRefusal(type, historyBody, name, binding);
+        if (suffixRefusal) throw suffixRefusal;
+        // [#28574] An `object_extension` version against its address, on the same binding.
+        const extensionRefusal = this.objectExtensionItemRefusal(type, historyBody, name, binding);
+        if (extensionRefusal) throw extensionRefusal;
         await this.refuseRestoredBodyTheSaveDoorRefuses(type, name, historyBody, binding, source);
         return derive ? derive(historyBody) : historyBody;
     };

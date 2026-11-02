@@ -52,6 +52,16 @@ export interface DatasourceDraft {
   external?: Record<string, unknown>;
   pool?: Record<string, unknown>;
   active?: boolean;
+  /**
+   * TLS block (`DatasourceSchema.ssl`): `enabled`, `rejectUnauthorized`, `ca`,
+   * `cert`. Stored and probed as sent (#28633); a client private key
+   * (`ssl.key`) is refused, since it would be stored in cleartext.
+   */
+  ssl?: Record<string, unknown>;
+  /** Force a live connection at boot even when managed + unrouted (ADR-0062 D2(c)). */
+  autoConnect?: boolean;
+  /** Internal description. */
+  description?: string;
 }
 
 /** Result of probing a connection (live driver connect + cheap round-trip). */

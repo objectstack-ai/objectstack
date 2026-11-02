@@ -42,7 +42,7 @@ export const zhCN: TranslationData = {
         // literal in an otherwise Chinese menu (#5750). Both entries are
         // legitimate; keep them both.
         nav_packages: { label: '软件包' },
-        nav_packaged_automation: { label: '打包自动化' },
+        nav_packaged_actions: { label: '打包动作' },
         nav_marketplace_browse: { label: '浏览应用市场' },
         nav_marketplace_installed: { label: '已安装应用' },
         nav_cloud_connection: { label: '云连接' },
@@ -65,11 +65,7 @@ export const zhCN: TranslationData = {
         nav_position_holders: { label: '岗位持有人' },
         nav_permission_set_assignment: { label: '权限集分配' },
 
-        nav_positions: { label: '岗位' },
-        nav_capabilities: { label: '能力' },
-        nav_permission_sets: { label: '权限集' },
         nav_sharing_rules: { label: '共享规则' },
-        nav_declared_sharing_rules: { label: '已声明的共享规则' },
         nav_record_shares: { label: '记录共享' },
         nav_queues: { label: '队列' },
         nav_queue_members: { label: '队列成员' },
@@ -119,6 +115,7 @@ export const zhCN: TranslationData = {
         nav_http_deliveries: { label: 'HTTP 投递' },
         nav_datasources: { label: '数据源' },
         nav_connector_credentials: { label: '连接器凭据' },
+        nav_connector_connections: { label: '连接器连接' },
 
         nav_oauth_apps: { label: 'OAuth 应用' },
       },

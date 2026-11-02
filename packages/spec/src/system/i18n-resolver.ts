@@ -17,6 +17,7 @@
  *   objects.<object>._actions.<action_name>.successMessage
  *   objects.<object>._actions.<action_name>.disabledReason
  *   objects.<object>._actions.<action_name>.submitText
+ *   objects.<object>._actions.<action_name>.cancelText
  *   objects.<object>._actions.<action_name>.outcomeMessages.<outcome>
  *   objects.<object>._actions.<action_name>.params.<param_name>.label
  *   objects.<object>._actions.<action_name>.params.<param_name>.helpText
@@ -48,7 +49,7 @@
  * object-less action (no `objectName`) reads only:
  *
  *   globalActions.<action_name>.label / .description / .confirmText /
- *     .successMessage / .disabledReason / .submitText /
+ *     .successMessage / .disabledReason / .submitText / .cancelText /
  *     .outcomeMessages.<outcome> / .params.<param_name>.* / .resultDialog.*
  *
  * That is the declaration `TranslationDataSchema.globalActions` makes: global
@@ -235,6 +236,12 @@ export interface ActionLike {
    * label. Narrowed to `string` for the same reason `label` is.
    */
   submitText?: string;
+  /**
+   * `ActionSchema.cancelText` (#28519) — the dismiss button label of the
+   * action's confirm or param dialog. Narrowed to `string` for the same reason
+   * `label` is.
+   */
+  cancelText?: string;
   /**
    * `ActionSchema.outcomeMessages` — success copy per handler `outcome`, each
    * entry a `template` slot like `successMessage` (#27948).
@@ -667,7 +674,7 @@ function actionTranslationNode(
 function lookupActionField(
   bundle: TranslationBundle | undefined,
   action: ActionLike,
-  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason' | 'submitText',
+  field: 'label' | 'description' | 'confirmText' | 'successMessage' | 'disabledReason' | 'submitText' | 'cancelText',
   opts?: ResolveOptions,
 ): string | undefined {
   if (!bundle) return undefined;
@@ -1545,7 +1552,8 @@ export function translateView<T extends ViewLike>(
 /**
  * Apply the active locale to an action metadata document by overwriting
  * `label`, `description`, `confirmText`, `successMessage`, `disabledReason`,
- * `submitText` (for an action that declares `params`), each declared
+ * `submitText` (for an action that declares `params`), `cancelText` (for an
+ * action that declares `confirmText` or `params`), each declared
  * `outcomeMessages` entry, the `params[]` copy and the `resultDialog` copy
  * with translated values when available. The
  * original document is not mutated; a shallow copy is returned.
@@ -1587,6 +1595,15 @@ export function translateAction<T extends ActionLike>(
   const submitText = Array.isArray(action.params) && action.params.length > 0
     ? lookupActionField(bundle, action, 'submitText', opts) ?? action.submitText
     : action.submitText;
+  // [#28519] The dismiss button, overlaid the same way, for an action that
+  // opens either dialog that carries it: the confirm dialog of a declared
+  // `confirmText`, or the param dialog of a non-empty `params`. Judged on the
+  // AUTHORED `confirmText`, the declaration `ActionSchema` judges the key
+  // against, so a bundle cannot give a button to a dialog that never opens.
+  const opensDialog = action.confirmText != null || (Array.isArray(action.params) && action.params.length > 0);
+  const cancelText = opensDialog
+    ? lookupActionField(bundle, action, 'cancelText', opts) ?? action.cancelText
+    : action.cancelText;
   const outcomeMessages = resolveActionOutcomeMessages(bundle, action, opts);
   const resultDialog = resolveActionResultDialog(bundle, action, opts);
   const params = translateActionParams(action, bundle, opts);
@@ -1598,6 +1615,7 @@ export function translateAction<T extends ActionLike>(
     ...(successMessage !== undefined ? { successMessage } : {}),
     ...(disabledReason !== undefined ? { disabledReason } : {}),
     ...(submitText !== undefined ? { submitText } : {}),
+    ...(cancelText !== undefined ? { cancelText } : {}),
     ...(outcomeMessages !== action.outcomeMessages ? { outcomeMessages } : {}),
     ...(resultDialog !== undefined ? { resultDialog } : {}),
     ...(params !== action.params ? { params } : {}),
@@ -3848,6 +3866,23 @@ export function flowRefusalMessageKey(flowName: string, nodeId: string): string 
 }
 
 /**
+ * Dot-notation i18n key for a `save_notice` node's message —
+ * `flows.<flow>.notices.<node_id>.message` (#28251).
+ *
+ * The sibling of {@link flowRefusalMessageKey}, for the same reason and with
+ * the same reader: the automation engine picks the translated TEMPLATE before
+ * it renders the `{{ }}` holes, here in the triggering writer's locale (the
+ * record-change trigger hands it with the notice channel), because the
+ * create/update answer carries the notice already rendered.
+ *
+ * `flowName` is `Flow.name` and `nodeId` the `save_notice` node's
+ * `FlowNode.id`.
+ */
+export function flowNoticeMessageKey(flowName: string, nodeId: string): string {
+  return `flows.${flowName}.notices.${nodeId}.message`;
+}
+
+/**
  * Dot-notation i18n key for a hook's declared refusal message —
  * `hooks.<hook>.refusals.<CODE>.message` (#26170, maintainer ruling 6431311681
  * letter A).
@@ -3885,6 +3920,25 @@ export function hookRefusalMessageKey(hookName: string, code: string): string {
  */
 export function flowScreenCopyKey(flowName: string, nodeId: string, key: FlowScreenCopyKey): string {
   return `flows.${flowName}.screens.${nodeId}.${key}`;
+}
+
+/**
+ * Dot-notation i18n key for a flow's terminal text —
+ * `flows.<flow>.successMessage` / `flows.<flow>.errorMessage` (#28054).
+ *
+ * The sibling of {@link flowScreenCopyKey}, for the same reason and with the
+ * same reader. Both are `{{ }}` templates the engine renders at the run's
+ * terminal exit (`FLOW_TEXT_SLOTS` in `automation/flow-text-slot-template.ts`),
+ * so it picks the translated TEMPLATE in the run's locale through the `i18n`
+ * service and only then fills the holes — the rule of the maintainer's ruling
+ * on #22507: a user-read flow string the server renders per run is translated
+ * where it is rendered, and a client overlay never touches a server-rendered
+ * slot.
+ *
+ * `flowName` is `Flow.name` and `key` one of {@link FLOW_TERMINAL_MESSAGE_KEYS}.
+ */
+export function flowTerminalMessageKey(flowName: string, key: FlowTerminalMessageKey): string {
+  return `flows.${flowName}.${key}`;
 }
 
 export function resolveObjectFieldLabels(
@@ -5245,9 +5299,9 @@ export interface FlowLike {
   /** `Flow.name` — the machine name the `flows` group is keyed by. */
   name: string;
   label?: string;
-  /** The completion toast (`Flow.successMessage`, served verbatim as `AutomationResult.successMessage`). */
+  /** The completion toast (`Flow.successMessage`, a `{{ }}` template the engine renders into `AutomationResult.successMessage`, #28054). */
   successMessage?: string;
-  /** The failure toast (`Flow.errorMessage`, served verbatim as `AutomationResult.errorMessage`). */
+  /** The failure toast (`Flow.errorMessage`, a `{{ }}` template the engine renders into `AutomationResult.errorMessage`, #28054). */
   errorMessage?: string;
   nodes?: FlowNodeLike[];
   [key: string]: any;
@@ -5340,12 +5394,17 @@ export type FlowScreenFieldCopyKey = typeof FLOW_SCREEN_FIELD_COPY_KEYS[number];
  * `flows.<flow>.successMessage` and `flows.<flow>.errorMessage`, each spelled
  * as `FlowSchema` spells the string it overlays.
  *
- * The engine carries both VERBATIM on the terminal `AutomationResult` (plain
- * strings, never interpolated), so a runner translates the served string by
- * handing it to {@link translateFlow} under its own key, the way it already
- * resolves the served `flowLabel`. Exported for the same one-list-both-sides
- * reason as {@link FLOW_SCREEN_COPY_KEYS}: the CLI's skeleton writer offers
- * exactly these keys, and `translation.test.ts` pins the schema to them.
+ * Since #28054 both are `{{ }}` templates the engine renders at the run's
+ * terminal exit, so the ENGINE picks each translation, in the run's locale,
+ * before it fills the holes ({@link flowTerminalMessageKey}), and the served
+ * `AutomationResult.successMessage` / `.errorMessage` arrive translated and
+ * filled: a runner draws them as served and overlays neither (maintainer
+ * ruling A on #22507, which moved a screen's heading and body text the same
+ * way). Until then the engine carried both verbatim and the runner handed the
+ * served string to {@link translateFlow}, which still applies these keys to a
+ * flow DOCUMENT. Exported for the same one-list-both-sides reason as
+ * {@link FLOW_SCREEN_COPY_KEYS}: the CLI's skeleton writer offers exactly these
+ * keys, and `translation.test.ts` pins the schema to them.
  */
 export const FLOW_TERMINAL_MESSAGE_KEYS = ['successMessage', 'errorMessage'] as const;
 
@@ -5605,16 +5664,16 @@ export function resolveFlowScreenTitle(
  * label the engine serves on every run result as `AutomationResult.flowLabel`,
  * and draws the answer (the API name when no label was served) in its header
  * and its completion toast. Both `flows` rows in the ledger are `live`, and
- * cite these reads. The terminal toasts and the option
- * labels (#22507) take the same client side — the runner hands the served
- * `successMessage` / `errorMessage` to this function as it does the label,
- * and overlays each served field's options through
- * {@link resolveFlowScreenFieldOptions} — in a downstream objectui change;
- * their ledger rows are `planned` until it lands. A screen's heading and body
- * text do NOT take the client side any more (maintainer ruling A on #22507):
- * the server renders both per run, so the engine picks their translated
- * templates in the run's locale ({@link flowScreenCopyKey}), and the runner
- * stops overlaying the served heading.
+ * cite these reads. The option labels (#22507) take the same client side —
+ * the runner overlays each served field's options through
+ * {@link resolveFlowScreenFieldOptions}. A screen's heading and body text do
+ * NOT take the client side any more (maintainer ruling A on #22507): the
+ * server renders both per run, so the engine picks their translated templates
+ * in the run's locale ({@link flowScreenCopyKey}), and the runner stops
+ * overlaying the served heading. The terminal toasts followed them (#28054):
+ * the engine renders `successMessage` / `errorMessage` as `{{ }}` templates,
+ * so it picks their translations ({@link flowTerminalMessageKey}) and the
+ * runner draws the served strings as they arrive.
  */
 export function translateFlow<T extends FlowLike>(
   flow: T,

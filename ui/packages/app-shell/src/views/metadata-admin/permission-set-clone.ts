@@ -11,9 +11,17 @@
  * (objectstack#22881, ADR-0126 §7.1). The server reads the source set from the
  * security catalog, copies its WHOLE definition under the new name, drops the
  * keys it declares (the provenance envelope, `packageId`, `managedBy`,
- * `protection`, `adminScope`, `isDefault`), and saves the copy as an ordinary
- * permission set authored in this environment. It answers `{ permissionSet,
- * notice }`: the saved copy, and a sentence naming what was not copied.
+ * `protection`, `adminScope`, `isDefault`), and saves the copy in the package
+ * it decides (ADR-0146 D6, "new similar"): a set a read-only package X ships
+ * lands in X's paired `<X>.custom`, a set in a writable package in that
+ * package, an environment-authored set in no package. It answers
+ * `{ permissionSet, package, notice }`: the saved copy, the package it landed
+ * in (`null` for environment-wide), and a sentence saying where it went and
+ * what was not copied.
+ *
+ * ⛔ The client never names the package. The body's optional `package` key is
+ * the server's to default, and where the copy lands is read back off the
+ * answer, never derived here from the source's package.
  *
  * So this module sends a name and a label and nothing else (the seat's ruling
  * on objectui#7611, 6097763840: "objectui calling it with a name and a label").
@@ -44,13 +52,21 @@ import { envelopeData, envelopeRefused } from '../setup/packagedFlows.js';
 export interface PermissionSetCloned {
   /** The copy's machine name, as the server saved it. */
   name: string;
+  /**
+   * The package the server saved the copy in: its id, `null` when the answer
+   * says environment-wide, and `undefined` when the answer carries no
+   * `package` at all (a server older than the "new similar" door). Read as
+   * sent; a caller that opens the copy opens it only where this names.
+   */
+  package?: string | null;
   /** The server's sentence on what was not copied; empty when it sent none. */
   notice: string;
 }
 
 /**
  * Clone `source` through the door. Resolves to the saved copy's name (empty
- * when the answer names none) and the server's notice. A refusal rejects with
+ * when the answer names none), the package it landed in, and the server's
+ * notice. A refusal rejects with
  * the server's own message; `fallback` words one only when the answer has none.
  */
 export async function clonePermissionSet(
@@ -70,8 +86,10 @@ export async function clonePermissionSet(
   if (!res.ok || envelopeRefused(json)) throw new Error(actionErrorDetail(json, fallback(res.status)));
   const data = envelopeData(json);
   const created = (data.permissionSet as { name?: unknown } | null | undefined)?.name;
+  const landed = data.package;
   return {
     name: typeof created === 'string' ? created : '',
+    package: typeof landed === 'string' && landed !== '' ? landed : landed === null ? null : undefined,
     notice: typeof data.notice === 'string' ? data.notice : '',
   };
 }
