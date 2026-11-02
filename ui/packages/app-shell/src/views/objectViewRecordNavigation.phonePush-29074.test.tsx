@@ -221,7 +221,7 @@ describe('the record page a phone list pushes (objectstack#29074)', () => {
   it('「‹ Leads」 goes back to the list entry, and Back then leaves the list for home', async () => {
     mountHistory(['/home', `/apps/${APP}/${LEAD}?view=all`]);
     fireEvent.click(screen.getByTestId('row'));
-    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`));
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`), { timeout: 5000 });
     await waitFor(() => expect(backLink()).toBeTruthy(), { timeout: 5000 });
     expect(backLink()!.tagName).toBe('BUTTON');
     expect(backLink()!.textContent).toBe('Leads');
@@ -231,18 +231,23 @@ describe('the record page a phone list pushes (objectstack#29074)', () => {
     await waitFor(() => expect(where()).toBe('/home'));
   });
 
-  it('control, the push unmarked (a desktop list): 「‹」 is a link forward, and Back then opens the record again', async () => {
+  it('control, the push unmarked (a desktop list): 「‹」 is a link that replaces the record (#29210), so the list sits twice and Back stays on it', async () => {
     mountHistory(['/home', `/apps/${APP}/${LEAD}?view=all`], false);
     fireEvent.click(screen.getByTestId('row'));
+    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`), { timeout: 5000 });
     await waitFor(() => expect(backLink()).toBeTruthy(), { timeout: 5000 });
     expect(backLink()!.tagName).toBe('A');
     expect(backLink()!.textContent).toBe('Leads');
     fireEvent.click(backLink()!);
     await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}?view=all`));
-    // MemoryRouter commits a location change in a transition, so the record
-    // page coming back is awaited, as every other step here is.
+    // The record's entry was replaced by a second copy of the list: Back
+    // lands on the first copy, and only a second Back reaches home. The
+    // marked push above reaches home in one.
     fireEvent.click(screen.getByTestId('browser-back'));
-    await waitFor(() => expect(where()).toBe(`/apps/${APP}/${LEAD}/record/r-1`));
+    await waitFor(() => expect(screen.getByTestId('row')).toBeTruthy());
+    expect(where()).toBe(`/apps/${APP}/${LEAD}?view=all`);
+    fireEvent.click(screen.getByTestId('browser-back'));
+    await waitFor(() => expect(where()).toBe('/home'));
   });
 
   it('a lead pushed from another lead\'s page still reads that record, not the plural', async () => {
