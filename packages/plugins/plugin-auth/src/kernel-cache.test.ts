@@ -10,15 +10,20 @@
  * plugin, and a test against it passes while production counts elsewhere.
  *
  * - `resolveKernelCache` against an `ObjectKernel` context (factory, value,
- *   none, not a store) and a `LiteKernel` context (value).
+ *   none, not a store, the kernel's own `degraded` stand-in) and a
+ *   `LiteKernel` context (value).
  * - The composed stack — SQL driver, ObjectQL, `AuthPlugin`, a `cache`
  *   registered by FACTORY — writes the rate-limit counter into that cache,
  *   admits exactly `max` of a concurrent burst against one key while counting
  *   there, and hands the OTP budget and the invitation preview the same store.
+ * - The composed stack with NO cache plugin: the kernel injects its own
+ *   in-memory stand-in, and the counters keep the package's bounded
+ *   per-process store instead of counting in it.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { LiteKernel, ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import { createMemoryCache, LiteKernel, ObjectKernel, type Plugin, type PluginContext } from '@objectstack/core';
+import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { ObjectQLPlugin } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 
@@ -46,7 +51,9 @@ function cachePlugin(mode: 'factory' | 'value' | 'none', cache: unknown): Plugin
 }
 
 async function objectKernelContext(mode: 'factory' | 'value' | 'none', cache: unknown): Promise<PluginContext> {
-  const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+  // No data plane here, so the system-requirement pass (which also injects the
+  // kernel's own `cache` stand-in) is skipped: "none" really is none.
+  const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false, skipSystemValidation: true });
   const plugin = cachePlugin(mode, cache);
   await kernel.use(plugin);
   await kernel.bootstrap();
@@ -70,6 +77,13 @@ describe('resolveKernelCache — through the accessors a plugin context really c
 
   it('ObjectKernel, no `cache` registered: answers undefined (the per-process fallback is right)', async () => {
     const ctx = await objectKernelContext('none', undefined);
+    await expect(resolveKernelCache(ctx)).resolves.toBeUndefined();
+  });
+
+  it("the kernel's own in-memory stand-in (self-described `degraded`): answers undefined", async () => {
+    const standIn = createMemoryCache();
+    expect(readServiceSelfInfo(standIn)?.status).toBe('degraded');
+    const ctx = await objectKernelContext('value', standIn);
     await expect(resolveKernelCache(ctx)).resolves.toBeUndefined();
   });
 
@@ -102,21 +116,33 @@ function sqliteDriverPlugin(): Plugin {
   };
 }
 
+type ConsumeStorage = { consume: (key: string, rule: { window: number; max: number }) => Promise<{ allowed: boolean }> };
+type CounterConfig = { rateLimitStorage: ConsumeStorage; sharedCounterStore: () => Promise<CounterStore> };
+
+/** Boot SQL driver + ObjectQL (+ the given cache plugin) + AuthPlugin, with the kernel's system pass ON. */
+async function bootStack(extra: Plugin[]): Promise<{ kernel: ObjectKernel; auth: AuthPlugin; config: CounterConfig }> {
+  const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+  await kernel.use(sqliteDriverPlugin());
+  await kernel.use(new ObjectQLPlugin());
+  for (const p of extra) await kernel.use(p);
+  const auth = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long-29053', baseUrl: 'http://localhost:3000' });
+  await kernel.use(auth);
+  await kernel.bootstrap();
+  const manager = kernel.getService<AuthManager>('auth');
+  return { kernel, auth, config: (manager as unknown as { config: CounterConfig }).config };
+}
+
+const previewCounters = (auth: AuthPlugin): (() => Promise<CounterStore>) =>
+  (auth as unknown as { invitationPreviewCounters: () => Promise<CounterStore> }).invitationPreviewCounters;
+
 describe('on the composed stack, the auth counters count in a cache registered by factory', () => {
   let kernel: ObjectKernel;
   let auth: AuthPlugin;
-  let manager: AuthManager;
+  let config: CounterConfig;
   const cache = makeCache();
 
   beforeAll(async () => {
-    kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
-    await kernel.use(sqliteDriverPlugin());
-    await kernel.use(new ObjectQLPlugin());
-    await kernel.use(cachePlugin('factory', cache));
-    auth = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long-29053', baseUrl: 'http://localhost:3000' });
-    await kernel.use(auth);
-    await kernel.bootstrap();
-    manager = kernel.getService<AuthManager>('auth');
+    ({ kernel, auth, config } = await bootStack([cachePlugin('factory', cache)]));
   });
 
   afterAll(async () => {
@@ -124,24 +150,51 @@ describe('on the composed stack, the auth counters count in a cache registered b
   });
 
   it('the rate limiter writes its counter into the registered cache', async () => {
-    const storage = (manager as unknown as { config: { rateLimitStorage: { consume: (k: string, r: { window: number; max: number }) => Promise<{ allowed: boolean }> } } }).config.rateLimitStorage;
-    await expect(storage.consume('wiring:first', { window: 10, max: 3 })).resolves.toMatchObject({ allowed: true });
+    await expect(config.rateLimitStorage.consume('wiring:first', { window: 10, max: 3 })).resolves.toMatchObject({ allowed: true });
     expect(await cache.get('wiring:first')).toBeDefined();
   });
 
   it('a concurrent burst against one key admits exactly `max` while counting in that cache', async () => {
-    const storage = (manager as unknown as { config: { rateLimitStorage: { consume: (k: string, r: { window: number; max: number }) => Promise<{ allowed: boolean }> } } }).config.rateLimitStorage;
     const decisions = await Promise.all(
-      Array.from({ length: 20 }, () => storage.consume('wiring:burst', { window: 10, max: 3 })),
+      Array.from({ length: 20 }, () => config.rateLimitStorage.consume('wiring:burst', { window: 10, max: 3 })),
     );
     expect(decisions.filter((d) => d.allowed)).toHaveLength(3);
     expect(JSON.parse((await cache.get<string>('wiring:burst'))!)).toMatchObject({ n: 20 });
   });
 
   it('the OTP send budget and the invitation preview resolve the same cache', async () => {
-    const config = (manager as unknown as { config: { sharedCounterStore: () => Promise<CounterStore> } }).config;
     await expect(config.sharedCounterStore()).resolves.toBe(cache);
-    const preview = (auth as unknown as { invitationPreviewCounters: () => Promise<CounterStore> }).invitationPreviewCounters;
-    await expect(preview()).resolves.toBe(cache);
+    await expect(previewCounters(auth)()).resolves.toBe(cache);
+  });
+});
+
+describe("on the composed stack with no cache plugin, the counters keep the bounded per-process store", () => {
+  let kernel: ObjectKernel;
+  let auth: AuthPlugin;
+  let config: CounterConfig;
+
+  beforeAll(async () => {
+    ({ kernel, auth, config } = await bootStack([]));
+  });
+
+  afterAll(async () => {
+    await kernel?.shutdown().catch(() => undefined);
+  });
+
+  it("the kernel's own `degraded` stand-in is there, and the counters do not count in it", async () => {
+    // Control: the kernel really did inject a `cache` — this case is not vacuous.
+    const standIn = await kernel.getServiceAsync<unknown>('cache');
+    expect(readServiceSelfInfo(standIn)?.status).toBe('degraded');
+
+    const store = await config.sharedCounterStore();
+    expect(store).toBeInstanceOf(InProcessCounterStore);
+    expect(store).not.toBe(standIn);
+    await expect(previewCounters(auth)()).resolves.toBeInstanceOf(InProcessCounterStore);
+
+    const decisions = await Promise.all(
+      Array.from({ length: 20 }, () => config.rateLimitStorage.consume('fallback:burst', { window: 10, max: 3 })),
+    );
+    expect(decisions.filter((d) => d.allowed)).toHaveLength(3);
+    expect(await (standIn as CounterStore).get('fallback:burst')).toBeUndefined();
   });
 });
