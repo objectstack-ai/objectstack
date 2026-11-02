@@ -1163,7 +1163,6 @@ const fr = {
     undo: "Annuler",
     redo: "Rétablir",
     canvasMinimap: "Mini-carte du canevas",
-    versionHistory: "Historique des versions",
   },
   detail: {
     editInlineHint: "Double-cliquez pour modifier",
