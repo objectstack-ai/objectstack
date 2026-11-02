@@ -41,14 +41,14 @@ interface AuthState {
 const h = vi.hoisted(() => {
   const listeners = new Set<() => void>();
   return {
-      /** Every URL the console's authenticated fetcher was asked for, in order. */
-      calls: [] as string[],
-      auth: null as unknown as AuthState,
-      listeners,
-      set(next: Partial<AuthState>) {
-        h.auth = { ...h.auth, ...next };
-        for (const l of Array.from(listeners)) l();
-      },
+    /** Every URL the console's authenticated fetcher was asked for, in order. */
+    calls: [] as string[],
+    auth: null as unknown as AuthState,
+    listeners,
+    set(next: Partial<AuthState>) {
+      h.auth = { ...h.auth, ...next };
+      for (const l of Array.from(listeners)) l();
+    },
   };
 });
 
@@ -108,20 +108,20 @@ vi.mock('@object-ui/app-shell', async (importOriginal) => {
     getItem: async () => null, getItemsByType: () => [], getTypeStatus: () => 'ready',
   } as never;
   return {
-  ...(await importOriginal<Record<string, unknown>>()),
-  ConsoleShell: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  ConnectedShell: ({ children }: { children?: ReactNode }) => (
-    <MetadataCtx.Provider value={metadata}>{children}</MetadataCtx.Provider>
-  ),
-  ConsoleToaster: () => null,
-  LoadingScreen: () => <div data-testid="loading-screen" />,
-  DefaultHomeLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  DefaultHomePage: () => <div data-testid="home-page" />,
-  DefaultAppContent: () => <div data-testid="app-content" />,
-  DefaultOrganizationsLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
-  DefaultOrganizationsPage: () => <div data-testid="organizations-page" />,
-  getProductName: () => 'ObjectOS',
-  getFaviconUrl: () => '',
+    ...(await importOriginal<Record<string, unknown>>()),
+    ConsoleShell: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    ConnectedShell: ({ children }: { children?: ReactNode }) => (
+      <MetadataCtx.Provider value={metadata}>{children}</MetadataCtx.Provider>
+    ),
+    ConsoleToaster: () => null,
+    LoadingScreen: () => <div data-testid="loading-screen" />,
+    DefaultHomeLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    DefaultHomePage: () => <div data-testid="home-page" />,
+    DefaultAppContent: () => <div data-testid="app-content" />,
+    DefaultOrganizationsLayout: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    DefaultOrganizationsPage: () => <div data-testid="organizations-page" />,
+    getProductName: () => 'ObjectOS',
+    getFaviconUrl: () => '',
   };
 });
 
