@@ -141,7 +141,7 @@ describe('only the request-schema parse is mapped', () => {
         }),
         { parsedBody: body },
       );
-      const frame = await res.json();
+      const frame = (await res.json()) as { error: { code: number } };
       expect(frame.error.code).toBe(INTERNAL_ERROR);
     } finally {
       await server.close();
