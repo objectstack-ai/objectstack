@@ -94,14 +94,16 @@ export function MetadataResourceHistoryPage({
   // read-only package offers no rollback, and "Back to item" names the area's
   // item page with the query it came with (its `?package=` and scope).
   const areaHost = useMetadataAreaHost();
-  const { search } = useLocation();
-  // Anywhere else the item page is this URL minus its `history` segment,
-  // with the same query, under whatever route nesting mounted the page: a
-  // `..` resolved against the URL path, never against the matched route.
+  const { pathname, search } = useLocation();
+  // Anywhere else the item page is this URL minus its last (`history`)
+  // segment, with the same query, under whatever route nesting mounted the
+  // page. Cut from the URL as it is spelled, never resolved against the
+  // matched route: that drops the whole route, and a relative `..` hands back
+  // the item name decoded.
   const goBackToItem = () =>
     areaHost
       ? navigate(`${areaHost.basePath}/${encodeURIComponent(type)}/${encodeURIComponent(name)}${search}`)
-      : navigate({ pathname: '..', search }, { relative: 'path' });
+      : navigate({ pathname: pathname.replace(/\/[^/]+\/?$/, ''), search });
 
   return (
     <PageShell
