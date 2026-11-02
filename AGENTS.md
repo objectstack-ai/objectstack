@@ -250,9 +250,9 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     "be liberal in what you accept" does **not** apply. Change the **spec** only when the spec itself is genuinely
     wrong, and then deliberately (edit the Zod schema + migrate). When an alias must be tolerated at all, declare it
     as an **ADR-0087 conversion-layer entry** (never a bare `??`, no executor shims) so it is declared, loud, tested,
-    and *removable on a schedule*. Stored `sys_metadata` rows are covered from the other side: every rehydration seam
-    replays the **full** conversion chain — retired entries included — via `applyConversionsToStoredItem` (ADR-0087
-    addendum), so a consumer never needs its own accommodation for a legacy stored shape either. Strengthens #5.
+    and *removable on a schedule*. Stored rows: rehydration replays the chain the installed release carries, retired
+    entries included; a kit ages out one major after it retires (ADR-0087 as amended, ruling 6434038284), so run
+    `os migrate meta --stored --apply` on a release that still converts the row, before leaving it. Strengthens #5.
 13. **An accepted ADR binds until a superseding ADR says otherwise.** Reversing a recorded decision is itself a
     decision: it needs a **new ADR** (or an amended status line on the old one), not a changeset that quietly does the
     opposite. Before changing behaviour in `docs/adr/`-governed territory, **grep the ADRs for the surface you are
