@@ -260,6 +260,10 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: "names the object an expand entry the caller wrote is judged against, by its declared fields; it reads no row",
   },
+  'internal-field-evaluation-guard.ts#judgeExpand :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: "names the object an expand entry the caller wrote is judged against, by its declared fields; it reads no row",
+  },
   'record-title.ts#resolveRelatedTitleTarget :: referenceTargetOf()': {
     disposition: 'target-by-id',
     why: "resolves which object a related record's title is read from",

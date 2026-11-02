@@ -77,6 +77,12 @@
  *   that declares none is never read, so every such action keeps the
  *   surface's default reason ("Not available for this record"). It is display
  *   copy only: nothing here, nor the runner, reads it as a condition.
+ * - **`cancelText` follows the same declared-only rule** (objectstack#28879):
+ *   the dismiss label of the action's confirm dialog resolves
+ *   `_actions.<name>.cancelText` only when the action declares one, after its
+ *   `I18nLabel` map is collapsed like `label`, so the runner hands the confirm
+ *   dialog one string. A bundle entry for an action that declares none is never
+ *   read, and every such dialog keeps its default "Cancel".
  * - **The success copy stays a template.** A `${result.*}` token, in a bundle
  *   entry or in the authored text, passes through this hook untouched: the
  *   action has not run yet, so there is no result to read. The runner fills
@@ -107,8 +113,8 @@ export interface ActionTextLocalizerOptions {
 
 /**
  * Returns a copy of `action` with `label` — plus `confirmText`,
- * `successMessage`, `errorMessage`, `outcomeMessages` and `disabledReason`
- * when the action declares them —
+ * `successMessage`, `errorMessage`, `outcomeMessages`, `disabledReason` and
+ * `cancelText` when the action declares them —
  * resolved from the active locale's bundle, falling back to the authored
  * literals. `objectName` is the host object the action is drawn on; the
  * action's own declared `objectName` wins over it when present.
@@ -149,7 +155,7 @@ function resolveCopy(
 }
 
 export function useActionTextLocalizer(): ActionTextLocalizer {
-  const { actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason } = useObjectLabel();
+  const { actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason, actionCancelText } = useObjectLabel();
   const { language } = useObjectTranslation();
 
   return useMemo<ActionTextLocalizer>(() => {
@@ -188,6 +194,15 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
         if (collapsed.disabledReason !== declaredReason) changed = true;
       }
 
+      // The confirm dialog's dismiss label is an `I18nLabel` too, collapsed
+      // the same way; unlike the reason it reaches the runner, which has no
+      // language to collapse a map with.
+      const declaredCancel: unknown = (action as any).cancelText;
+      if (declaredCancel !== undefined) {
+        collapsed.cancelText = pickLocalized(declaredCancel, language);
+        if (collapsed.cancelText !== declaredCancel) changed = true;
+      }
+
       // No name, no translation key: the literals are the answer. They are
       // still normalized (map to string, last-resort placeholder applied) so
       // every caller reads one shape.
@@ -215,6 +230,9 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
       if (declaredReason !== undefined) {
         out.disabledReason = actionDisabledReason(keyObject, name, collapsed.disabledReason);
       }
+      if (declaredCancel !== undefined) {
+        out.cancelText = actionCancelText(keyObject, name, collapsed.cancelText || undefined);
+      }
       // The map is an authored bag (outcome → copy), so the one "is this a
       // real bag?" predicate in this package answers whether to read it.
       const authoredOutcomes: unknown = action.outcomeMessages;
@@ -234,5 +252,5 @@ export function useActionTextLocalizer(): ActionTextLocalizer {
       }
       return out as T;
     }) as ActionTextLocalizer;
-  }, [actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason, language]);
+  }, [actionLabel, actionConfirm, actionSuccess, actionOutcome, actionDisabledReason, actionCancelText, language]);
 }

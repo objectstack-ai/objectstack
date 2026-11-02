@@ -844,7 +844,8 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       cancel_invitation: {
         label: "Cancelar invitación",
         confirmText: "¿Cancelar esta invitación? El destinatario ya no podrá aceptarla.",
-        successMessage: "Invitación cancelada"
+        successMessage: "Invitación cancelada",
+        cancelText: "Conservar invitación"
       },
       resend_invitation: {
         label: "Reenviar invitación",

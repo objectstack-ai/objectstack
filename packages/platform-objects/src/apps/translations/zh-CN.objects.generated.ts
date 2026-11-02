@@ -844,7 +844,8 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       cancel_invitation: {
         label: "取消邀请",
         confirmText: "要取消该邀请吗？接收人将无法再接受该邀请。",
-        successMessage: "邀请已取消"
+        successMessage: "邀请已取消",
+        cancelText: "保留邀请"
       },
       resend_invitation: {
         label: "重新发送邀请",

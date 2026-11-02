@@ -257,8 +257,10 @@ describe('objectstack#27627 — one request opens a record page', () => {
     for (const c of CHILDREN) expect(RelatedCountStore.get(c, 'contact', 'c1')).toBe(TOTAL[c]);
 
     // The 动态 panel's sources are the payload's parts (objectstack#28470):
-    // the open reads none of them on its own, nor the mention list.
-    expect(page.body).toMatchObject({ discussion: true, activity: { top: 200 } });
+    // the open reads none of them on its own, nor the mention list. The
+    // activity part asks the panel's rows; the count is the payload's
+    // `timeline` part (objectstack#28737).
+    expect(page.body).toMatchObject({ discussion: true, activity: { top: 5 }, timeline: { discussion: true, activity: true } });
     expect(streamReads(held)).toEqual([]);
   });
 

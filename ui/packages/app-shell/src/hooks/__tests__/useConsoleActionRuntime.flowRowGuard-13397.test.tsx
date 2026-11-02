@@ -55,6 +55,7 @@ vi.mock('@object-ui/i18n', async (importOriginal) => {
       actionParamOptionLabel: (_o: unknown, _a: unknown, _p: unknown, _v: unknown, fallback: string) => fallback,
       actionDescription: (_o: unknown, _a: unknown, fallback: string) => fallback,
       actionSubmitText: (_o: unknown, _a: unknown, fallback: string) => fallback,
+      actionCancelText: (_o: unknown, _a: unknown, fallback: string) => fallback,
     }),
     useObjectTranslation: () => ({ t: zhT, language: 'zh' }),
   };

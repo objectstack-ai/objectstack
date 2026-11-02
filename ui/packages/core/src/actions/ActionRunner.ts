@@ -161,6 +161,17 @@ export interface ActionDef {
    */
   submitText?: SpecActionInput['submitText'];
   /**
+   * Label of the dismiss button on the dialog the action opens before it runs
+   * — its confirm dialog (a declared `confirmText`) or its param dialog (a
+   * non-empty `params`) — in place of the dialog's default "Cancel". Derived
+   * from the spec field: an `I18nLabel`, a string or an inline per-locale map.
+   * Display copy only: the runner hands the confirm dialog the string the
+   * dispatching surface resolved (`useActionTextLocalizer`, the translation
+   * bundle's `_actions.ACTION.cancelText` first), and the console's
+   * param-collection handlers resolve it for the param dialog the same way.
+   */
+  cancelText?: SpecActionInput['cancelText'];
+  /**
    * Confirmation text — shows a confirm dialog before executing. The ONE
    * confirm spelling: `@objectstack/spec`'s action surface and the
    * TranslationBundle key (`{ns}.objects.{obj}._actions.{name}.confirmText`)
@@ -2049,15 +2060,22 @@ export class ActionRunner {
    * resolved against the locale's bundle by the surface that dispatches it,
    * `useActionTextLocalizer`) becomes the dialog's title and its confirm
    * button, and the spec's `variant: 'danger'` makes that button destructive,
-   * the style the record Delete asks with. The cancel button keeps the host's
-   * own copy.
+   * the style the record Delete asks with. The action's `cancelText` labels
+   * the dismiss button; without it the button keeps the host's own copy.
+   *
+   * `cancelText` reaches the runner as the string the dispatching surface
+   * resolved (`useActionTextLocalizer` collapses the authored `I18nLabel` to the
+   * active language and reads the bundle first), so only a non-empty string is
+   * handed on: the runner has no language to collapse a locale map with.
    */
   private confirmOptions(action: ActionDef): Parameters<ConfirmationHandler>[1] {
     const label = action.label || undefined;
     const destructive = action.variant === 'danger';
-    if (label === undefined && !destructive) return undefined;
+    const cancelText = typeof action.cancelText === 'string' && action.cancelText ? action.cancelText : undefined;
+    if (label === undefined && !destructive && cancelText === undefined) return undefined;
     return {
       ...(label !== undefined ? { title: label, confirmText: label } : {}),
+      ...(cancelText !== undefined ? { cancelText } : {}),
       ...(destructive ? { destructive } : {}),
     };
   }

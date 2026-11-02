@@ -120,9 +120,13 @@ const CONTEXT = { target: 'contextWins', extraFromHost: 'present' };
  * `submitText` (objectstack#28158) is the next, beside `description`: the
  * param dialog reads both, the line under its title and its submit button.
  * Same reading.
+ *
+ * `cancelText` (objectstack#28879) is the next, beside `submitText`: the
+ * dismiss button of the same param dialog, and of the confirm dialog. Same
+ * reading.
  */
 const BUTTON_ORDER = [
-  'type', 'name', 'label', 'description', 'submitText', 'target', 'openIn', 'endpoint', 'method',
+  'type', 'name', 'label', 'description', 'submitText', 'cancelText', 'target', 'openIn', 'endpoint', 'method',
   'params',
   'bodyExtra', 'bodyShape', 'operation', 'confirmText', 'variant', 'successMessage', 'outcomeMessages', 'errorMessage',
   'refreshAfter', 'undoable', 'recordIdField', 'locations', 'toast', 'resultDialog', 'onSuccess', 'objectName',
@@ -134,7 +138,7 @@ const BUTTON_ORDER = [
  * `params` key used to, so the order is unchanged.
  */
 const ICON_ORDER = [
-  'type', 'name', 'label', 'description', 'submitText', 'target', 'openIn', 'endpoint', 'method',
+  'type', 'name', 'label', 'description', 'submitText', 'cancelText', 'target', 'openIn', 'endpoint', 'method',
   'params',
   'bodyExtra', 'bodyShape', 'operation', 'confirmText', 'variant', 'successMessage', 'outcomeMessages', 'errorMessage',
   'refreshAfter', 'locations', 'toast', 'resultDialog', 'onSuccess', 'objectName',
