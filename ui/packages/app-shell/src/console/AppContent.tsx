@@ -69,6 +69,7 @@ import { resolveSetupAppPath } from './ConsoleShell.js';
 import { APP_ROUTE_METADATA_READS, collectRoutePaths, metadataReadsForAppRoute, type LazyMetadataType } from './appRouteMetadataReads.js';
 import { enterAppBundle, readAppObjectScope } from './appObjectScope.js';
 import { preferLocal } from '../utils/preferLocal.js';
+import { packagedAutomationStudioPath, setupMetadataRest, setupMetadataStudioPath } from '../views/studio-design/setupMetadataRedirect.js';
 import { SkeletonDashboard, SkeletonDetail, SkeletonGrid } from '../skeletons/index.js';
 
 // Route-based code splitting — lazy-load less-frequently-used routes.
@@ -135,14 +136,13 @@ const RecordFormPage = routeChunk.lazy(() => import('../views/RecordFormPage.js'
 const ComponentNavView = routeChunk.lazy(() => import('../views/ComponentNavView.js').then(m => m.ComponentNavView));
 const ObjectDataPage = routeChunk.lazy(() => import('../views/ObjectDataPage.js').then(m => m.ObjectDataPage));
 
-// Metadata admin — mounted under /apps/:app/metadata. Lives at the top
-// level so URLs read like a normal nested resource (RFC-style) instead of
-// piggy-backing on the legacy ComponentRegistry fan-out.
-const MetadataDirectoryPage = routeChunk.lazy(() => import('../views/metadata-admin/index.js').then(m => m.MetadataDirectoryPage));
+// Metadata admin — mounted under /apps/:app/metadata for the datasource
+// alone (objectstack ADR-0146 D1): every other type's URL there opens Studio's
+// "All metadata" area (`SetupMetadataRoute`), so these rows are not preloaded
+// in `APP_ROUTE_CHUNKS`: most arrivals render a redirect, not the page.
 const MetadataResourceListPage = routeChunk.lazy(() => import('../views/metadata-admin/index.js').then(m => m.MetadataResourceListPage));
 const MetadataResourceEditPage = routeChunk.lazy(() => import('../views/metadata-admin/index.js').then(m => m.MetadataResourceEditPage));
 const MetadataResourceHistoryPage = routeChunk.lazy(() => import('../views/metadata-admin/index.js').then(m => m.MetadataResourceHistoryPage));
-const MetadataDiagnosticsPage = routeChunk.lazy(() => import('../views/metadata-admin/index.js').then(m => m.MetadataDiagnosticsPage));
 
 // App authoring + dashboard editor pages — sourced from
 // @object-ui/plugin-designer so third-party hosts can opt out by not
@@ -162,12 +162,6 @@ const MarketplacePackagePage = routeChunk.lazy(() => import('./marketplace/Marke
  * them). A path not listed renders an eagerly bundled element.
  */
 const APP_ROUTE_CHUNKS: ReadonlyArray<{ path: string; chunk: { preload: () => Promise<unknown> } }> = [
-  { path: 'metadata', chunk: MetadataDirectoryPage },
-  { path: 'metadata/_diagnostics', chunk: MetadataDiagnosticsPage },
-  { path: 'metadata/:type', chunk: MetadataResourceListPage },
-  { path: 'metadata/:type/new', chunk: MetadataResourceEditPage },
-  { path: 'metadata/:type/:name', chunk: MetadataResourceEditPage },
-  { path: 'metadata/:type/:name/history', chunk: MetadataResourceHistoryPage },
   { path: ':objectName/new', chunk: RecordFormPage },
   { path: ':objectName/data', chunk: ObjectDataPage },
   { path: ':objectName/record/:recordId', chunk: RecordDetailView },
@@ -225,9 +219,10 @@ interface AppContentProps {
 /**
  * Bridges the global chat's "Review N change(s)" affordance (ADR-0033 Phase B)
  * to the metadata designer. The chat publishes a review target on `assistantBus`;
- * this navigator — which lives inside the app router and knows the app base —
- * routes to `/apps/:appName/metadata/:type/:name?review=1`, where the designer
- * reloads the pending draft and opens its review/diff.
+ * this navigator routes to the item's page in Studio's "All metadata" area with
+ * `?review=1` (objectstack ADR-0146 D1: Setup carries no metadata editor),
+ * where the designer reloads the pending draft and opens its review/diff. A
+ * datasource, which stays in Setup, opens Setup's page the same way.
  */
 function DraftReviewNavigator({ appName }: { appName: string | undefined }) {
   const { reviewSeq, reviewTarget } = useAssistant();
@@ -237,9 +232,8 @@ function DraftReviewNavigator({ appName }: { appName: string | undefined }) {
     if (reviewSeq === lastSeq.current || !reviewTarget || !appName) return;
     lastSeq.current = reviewSeq;
     const { type, name } = reviewTarget;
-    navigate(
-      `/apps/${appName}/metadata/${encodeURIComponent(type)}/${encodeURIComponent(name)}?review=1`,
-    );
+    const item = `${encodeURIComponent(type)}/${encodeURIComponent(name)}`;
+    navigate(setupMetadataStudioPath(item, 'review=1') ?? `/apps/${appName}/metadata/${item}?review=1`);
   }, [reviewSeq, reviewTarget, appName, navigate]);
   return null;
 }
@@ -1396,12 +1390,15 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
           <Route path="system/marketplace/:packageId" element={<MarketplacePackagePage />} />
           {/* Studio / metadata designer — reachable with no active app so a
               fresh env can review + publish its first (AI-authored) drafts. */}
-          <Route path="metadata" element={<MetadataDirectoryPage />} />
-          <Route path="metadata/_diagnostics" element={<MetadataDiagnosticsPage />} />
-          <Route path="metadata/:type" element={<MetadataResourceListPage />} />
-          <Route path="metadata/:type/new" element={<MetadataResourceEditPage createMode />} />
-          <Route path="metadata/:type/:name" element={<MetadataResourceEditPage />} />
-          <Route path="metadata/:type/:name/history" element={<MetadataResourceHistoryPage />} />
+          {/* objectstack ADR-0146 D1 — Setup carries no metadata catalog:
+              every route but the datasource's opens Studio's area
+              (`SetupMetadataRoute`). */}
+          <Route path="metadata" element={<SetupMetadataRoute />} />
+          <Route path="metadata/_diagnostics" element={<SetupMetadataRoute />} />
+          <Route path="metadata/:type" element={<SetupMetadataRoute><MetadataResourceListPage /></SetupMetadataRoute>} />
+          <Route path="metadata/:type/new" element={<SetupMetadataRoute><MetadataResourceEditPage createMode /></SetupMetadataRoute>} />
+          <Route path="metadata/:type/:name" element={<SetupMetadataRoute><MetadataResourceEditPage /></SetupMetadataRoute>} />
+          <Route path="metadata/:type/:name/history" element={<SetupMetadataRoute><MetadataResourceHistoryPage /></SetupMetadataRoute>} />
           {/* #3610 — the legacy metadata aliases, mirrored from the with-app
               branch below. They are NOT a second copy of the page: both render
               `LegacyMetadataRedirect`, which forwards onto the canonical
@@ -1509,13 +1506,16 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                   path="metadata/package/*"
                   element={<Navigate to={`/apps/${appSegment}/component/developer/packages`} replace />}
                 />
+                {/* objectstack ADR-0146 D1 — Setup carries no metadata
+                    catalog: every route but the datasource's opens Studio's
+                    area (`SetupMetadataRoute`). */}
                 <Route path="metadata">
-                  <Route index element={<MetadataDirectoryPage />} />
-                  <Route path="_diagnostics" element={<MetadataDiagnosticsPage />} />
-                  <Route path=":type" element={<MetadataResourceListPage />} />
-                  <Route path=":type/new" element={<MetadataResourceEditPage createMode />} />
-                  <Route path=":type/:name" element={<MetadataResourceEditPage />} />
-                  <Route path=":type/:name/history" element={<MetadataResourceHistoryPage />} />
+                  <Route index element={<SetupMetadataRoute />} />
+                  <Route path="_diagnostics" element={<SetupMetadataRoute />} />
+                  <Route path=":type" element={<SetupMetadataRoute><MetadataResourceListPage /></SetupMetadataRoute>} />
+                  <Route path=":type/new" element={<SetupMetadataRoute><MetadataResourceEditPage createMode /></SetupMetadataRoute>} />
+                  <Route path=":type/:name" element={<SetupMetadataRoute><MetadataResourceEditPage /></SetupMetadataRoute>} />
+                  <Route path=":type/:name/history" element={<SetupMetadataRoute><MetadataResourceHistoryPage /></SetupMetadataRoute>} />
                 </Route>
                 <Route path=":objectName" element={
                   <ObjectView dataSource={dataSource} objects={allObjects} onEdit={handleEdit} externalRefreshKey={refreshKey} />
@@ -1547,6 +1547,11 @@ export function AppContent({ extraRoutes, extraRoutesNoApp }: AppContentProps = 
                 {/* objectui#13020: the app's report index, linked from the sidebar. */}
                 <Route path="reports" element={<AppReportIndexView />} />
                 <Route path="page/:pageName" element={<PageView />} />
+                {/* objectstack ADR-0146 D11 — the retired Setup › Packaged
+                    automation page (`automation:packaged`): a bookmark opens
+                    Studio's Automations pillar. The static path outranks the
+                    `:ns/:name` route below it. */}
+                <Route path="component/automation/packaged" element={<PackagedAutomationRedirect />} />
                 <Route path="component/:ns/:name/*" element={<ComponentNavView />} />
                 {/* Legacy: old metadata routes built before the REST-style nesting
                     landed. Redirect to the new /metadata/:type/... shape. */}
@@ -1924,24 +1929,52 @@ function looksLikeRecordId(segment: string | undefined): boolean {
 }
 
 /**
+ * objectstack ADR-0146 D1 (N-28) — a Setup metadata route. Setup carries no
+ * metadata editor and no metadata catalog, so every route but the datasource's
+ * opens Studio's "All metadata" area on the same page, query kept
+ * (`setupMetadataStudioPath`). The datasource stays in Setup (D1): its URLs
+ * render `children`, the metadata-admin page they always rendered.
+ */
+function SetupMetadataRoute({ children }: { children?: ReactNode }) {
+  const location = useLocation();
+  const rest = setupMetadataRest(location.pathname) ?? '';
+  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  if (target === null) return <>{children ?? <RouteNotFound />}</>;
+  return <Navigate to={target} replace />;
+}
+
+/**
+ * A bookmark of the retired Setup › Packaged automation page (objectstack
+ * ADR-0146 D11) opens Studio's Automations pillar, where a packaged flow's
+ * switch and New similar are, the query kept (`packagedAutomationStudioPath`).
+ */
+function PackagedAutomationRedirect() {
+  const location = useLocation();
+  return <Navigate to={packagedAutomationStudioPath(location.search, location.hash)} replace />;
+}
+
+/**
  * Translates pre-refactor metadata admin URLs
  * (`/apps/:app/component/metadata/resource/:name?type=:type`,
- *  `/apps/:app/component/metadata/directory`) into the new REST-style
- * shape (`/apps/:app/metadata/:type/:name`). Keeps bookmarks and any
- * still-unmigrated link producers working.
+ *  `/apps/:app/component/metadata/directory`). A datasource URL lands on the
+ * REST-style shape Setup still serves (`/apps/:app/metadata/datasource/:name`);
+ * every other one opens Studio's "All metadata" area in one hop, the query it
+ * carried kept (objectstack ADR-0146 D1, `setupMetadataStudioPath`).
  */
 function LegacyMetadataRedirect({ mode }: { mode: 'directory' | 'resource' }) {
   const location = useLocation();
   const appBase = location.pathname.replace(/\/component\/metadata\/.*$/, '');
-  if (mode === 'directory') {
-    return <Navigate to={`${appBase}/metadata${location.search}${location.hash}`} replace />;
-  }
   const sp = new URLSearchParams(location.search);
-  const type = sp.get('type') ?? '';
-  const tail = location.pathname.match(/\/component\/metadata\/resource(\/.*)?$/)?.[1] ?? '';
-  const target = type
-    ? `${appBase}/metadata/${encodeURIComponent(type)}${tail}${location.hash}`
-    : `${appBase}/metadata${location.hash}`;
+  const type = mode === 'resource' ? (sp.get('type') ?? '') : '';
+  sp.delete('type');
+  const tail = mode === 'resource'
+    ? (location.pathname.match(/\/component\/metadata\/resource(\/.*)?$/)?.[1] ?? '').replace(/^\/+/, '')
+    : '';
+  const rest = type ? [encodeURIComponent(type), tail].filter(Boolean).join('/') : '';
+  const target = setupMetadataStudioPath(rest, mode === 'directory' ? location.search : sp.toString(), location.hash);
+  if (target === null) {
+    return <Navigate to={`${appBase}/metadata/${rest}${location.hash}`} replace />;
+  }
   return <Navigate to={target} replace />;
 }
 

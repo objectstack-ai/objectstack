@@ -1629,32 +1629,21 @@ export class SecurityPlugin implements Plugin {
       // can resolve them by name when SecurityPlugin middleware queries
       // `metadata.list('permissions')`.
       permissions: this.bootstrapPermissionSets,
-      // ADR-0029 D7 — contribute the RBAC entries into the Setup app's
-      // `group_access_control` slot. This plugin owns the security catalog, so
-      // it ships its menu too; when the plugin is absent the entries don't
-      // appear. [ADR-0131 D3/D7] Each entry opens Setup's list of the registry
-      // type in its environment scope — the catalog has no object behind it.
+      // [ADR-0146 D1] No catalog entries: Setup carries no metadata catalog.
+      // Positions, capabilities and permission sets are listed in Studio's
+      // "All metadata" area (`/studio/~all/metadata`), where a position or a
+      // permission set is switched on and off on its own page (a capability
+      // has no switch), and an old Setup link to them redirects there. Setup
+      // keeps the people pages below (D7).
       navigationContributions: [
-        {
-          app: 'setup',
-          group: 'group_access_control',
-          priority: 100,
-          items: [
-            { id: 'nav_positions', type: 'url', label: 'Positions', url: '/apps/setup/metadata/position?scope=environment', icon: 'shield-check' },
-            { id: 'nav_capabilities', type: 'url', label: 'Capabilities', url: '/apps/setup/metadata/capability?scope=environment', icon: 'badge-check' },
-            { id: 'nav_permission_sets', type: 'url', label: 'Permission Sets', url: '/apps/setup/metadata/permission?scope=environment', icon: 'lock' },
-          ],
-        },
         {
           // [ADR-0146 D7] The two ASSIGNMENT pages — who holds a position, and
           // which users carry a permission set. They sit with the people they
-          // assign (People & Organization), not with the catalog above. The
-          // console binds each `componentRef` to its page (app-shell
-          // `builtinComponents`), and the pages read and write this plugin's
-          // assignment rows, so the entries live and die with this plugin like
-          // the catalog entries. Gate: none of their own, exactly like
-          // Positions / Permission Sets — the Setup app's `setup.access` and the
-          // ungated group anchor decide who sees them (ADR-0146 D7: the scope of
+          // assign (People & Organization). The console binds each
+          // `componentRef` to its page (app-shell `builtinComponents`), and the
+          // pages read and write this plugin's assignment rows, so the entries
+          // live and die with this plugin. Gate: none of their own — the Setup
+          // app's `setup.access` and the ungated group anchor decide who sees them (ADR-0146 D7: the scope of
           // `setup.access` and the delegated-administrator gate), and the writes
           // the pages make keep their own server-side gates (the ADR-0090 D12
           // delegated-admin gate among them). Priority 200 keeps them after

@@ -38,6 +38,7 @@
 import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { isOriginGatedType, managedItemSealedSentence, regimeCDeclaredSaveSentence } from './packaged-base-regime.js';
 import { SysMetadataRepository } from './sys-metadata-repository.js';
+import { OBJECT_EXTENSION_TYPE } from './protocol-object-extension-item.js';
 import {
     customizationBasePackageId,
     customizationPackageId,
@@ -330,6 +331,9 @@ export interface OverrideWriteClosure {
     readonly shippers: readonly string[];
 }
 
+/** [#28834] The item door an `object_extension` is saved through (#28574), as the refusals name it. */
+const OBJECT_EXTENSION_ITEM_DOOR = '`/api/v1/meta/object_extension`';
+
 /** Which named refusal of ADR-0146 D2 / D6 / D9 / D10 a write meets. */
 export type OverrideWriteRule =
     | 'undeclared_same_name'
@@ -411,9 +415,20 @@ export function judgeOverrideWrite(
     if (declaration.present) {
         const row = getOverrideTypeClassification(type);
         if (row?.disposition === 'extend_only') {
+            // [#28834] Both doors an extension is written through: the item
+            // door (#28574) and the manifest's collection.
             return refuse('declared_object',
                 `${item} carries \`overrides\`, but an object is extended, never replaced (ADR-0146 D10). `
-                + 'Remove `overrides` and add the change as an `objectExtensions` entry of the base\'s paired .custom package.');
+                + 'Remove `overrides` and add the change as an object extension in the base\'s paired .custom package: '
+                + `an \`object_extension\` item saved through ${OBJECT_EXTENSION_ITEM_DOOR}, or an \`objectExtensions\` entry of its manifest.`);
+        }
+        if (type === OBJECT_EXTENSION_TYPE) {
+            // [#28834, ADR-0146 D10] An extension takes no override and gets
+            // no new name: its name is the object it extends, so the D6
+            // "new similar" remedy below would name a write that cannot exist.
+            return refuse('declared_type_not_overridable',
+                `${item} carries \`overrides\`, but an object extension takes no override (ADR-0146 D10): it adds to the `
+                + `object it extends and is stored under that object's name. Remove \`overrides\` and edit the object_extension '${name}' itself.`);
         }
         if (row?.disposition !== 'overridable') {
             return refuse('declared_type_not_overridable',

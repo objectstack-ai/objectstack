@@ -57,6 +57,20 @@
 //                           entry id (example apps, docs, test fixtures) — so
 //                           for that one the grep is no evidence, and the
 //                           assertions below are the whole claim.
+//   nav_positions           the Setup metadata catalog (ADR-0146 D1, M-1
+//   nav_capabilities        ruling A): Setup carries no metadata catalog.
+//   nav_permission_sets     The four entries opened the registry types'
+//   nav_declared_sharing_   environment-scope lists, which Studio's "All
+//     rules                 metadata" area serves now, with the on/off switch
+//                           on each item's page; Setup's URLs redirect there.
+//                           The first three were plugin-security's, the last
+//                           plugin-sharing's; both depend on this package, so
+//                           the declaring side is pinned in their own tests.
+//                           Measured differently: the grep answers zero for
+//                           `nav_capabilities` and `nav_declared_sharing_rules`
+//                           but not for the other two, which fixtures and an
+//                           ADR still spell, so for those the assertions below
+//                           are the whole claim.
 //   nav_packaged_automation Setup › Packaged automation (ADR-0146 D11): its
 //                           flows half moved into Studio (D4), and its actions
 //                           half is its own entry, `nav_packaged_actions`.
@@ -100,10 +114,14 @@ const DEAD_SETUP_NAV_IDS = [
   'nav_accounts',
   'nav_approval_processes',
   'nav_audit_log_browser',
+  'nav_capabilities',
+  'nav_declared_sharing_rules',
   'nav_device_codes',
   'nav_jwks',
   'nav_metadata',
   'nav_packaged_automation',
+  'nav_permission_sets',
+  'nav_positions',
   'nav_user_preferences',
   'nav_verifications',
 ] as const;

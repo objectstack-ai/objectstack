@@ -62,11 +62,7 @@ export const esES: TranslationData = {
         nav_position_holders: { label: 'Titulares de posiciones' },
         nav_permission_set_assignment: { label: 'Asignación de conjuntos de permisos' },
 
-        nav_positions: { label: 'Posiciones' },
-        nav_capabilities: { label: 'Capacidades' },
-        nav_permission_sets: { label: 'Conjuntos de Permisos' },
         nav_sharing_rules: { label: 'Reglas de Compartición' },
-        nav_declared_sharing_rules: { label: 'Reglas de Compartición Declaradas' },
         nav_record_shares: { label: 'Registros Compartidos' },
         nav_queues: { label: 'Colas' },
         nav_queue_members: { label: 'Miembros de Colas' },

@@ -122,6 +122,7 @@ import { useRegisterUnsavedEdits } from '../../chrome/unsavedEdits.js';
 import { AssignedUsersSection } from './AssignedUsersSection.js';
 import { SetupAssignmentsLink } from './SetupAssignmentsLink.js';
 import { useMetadataAreaHost } from './metadataAreaHost.js';
+import { CatalogItemActiveSwitch } from './CatalogActiveSwitch.js';
 import { isEnvironmentScope, useWalledCatalogReadOnly } from './catalog-scope.js';
 import { useCanAuthorMetadata, useCanReadAuthoringTrail } from '../../hooks/useCanAuthorMetadata.js';
 import { errorCodeIs } from '@object-ui/types';
@@ -2502,6 +2503,9 @@ export function PermissionMatrixEditPage({ type, name, packageId, onDraftSaved, 
               assignment page, opened on this set. */}
           {showAssignments && areaHost && (
             <div className="mx-4">
+              {/* N-28 (M-1 ruling A) — the set's active switch moved with
+                  the item from Setup's catalog list into Studio. */}
+              <CatalogItemActiveSwitch type="permission" name={name} />
               <SetupAssignmentsLink kind="permission" name={name} />
             </div>
           )}

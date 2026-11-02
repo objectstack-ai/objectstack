@@ -405,7 +405,7 @@ callers first, or don't), and preserves "packaged code calls what it names".
 
 - **Leaning D2 — a Setup page for packaged automation** (final call rides this ADR's merge):
   packaged flows with their activation state and the enable/disable and clone actions,
-  contributed the way `nav_permission_sets` is (`packages/plugins/plugin-security/src/security-plugin.ts#nav_permission_sets`). The maintainer
+  contributed the way "nav_permission_sets" is (`packages/plugins/plugin-security/src/security-plugin.ts`; 2026-11-02 note: that entry is retired under N-28, #28578, and §7.4's surface moved per ADR-0146 D4). The maintainer
   corrected the record here: automation UI is **Studio-only today** (`packages/platform-objects/src/apps/studio.app.ts`),
   so this page is new work, and the Setup permission-set page is the precedent shape. Studio
   keeps the editing; Setup gets the operational state. Minimum honest content per packaged flow:

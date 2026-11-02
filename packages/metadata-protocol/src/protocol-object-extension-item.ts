@@ -138,7 +138,11 @@ export interface ObjectExtensionItemSubject {
  *     would refuse the key with the generic unknown-key sentence, so the
  *     author reads the reason a sync would otherwise throw at registration.
  *  3. The row name is the target: `extend` equals the name it is filed under.
- *  4. The target object is registered.
+ *  4. The target object is registered, under the very key `extend` spells
+ *     (#28834): `getObject` also folds a short name to a legacy
+ *     `<ns>__<name>` key, while the registry files an extension under the
+ *     name it is written with, so a folded spelling would open a second,
+ *     phantom object beside the one it meant.
  *  5. The target lies inside the written package's dependency closure — the
  *     package's own objects, its declared dependencies' and platform objects
  *     (`narrowObjectsToPackageClosure`, the one predicate), refused with the
@@ -192,6 +196,14 @@ export function objectExtensionItemRefusal(
             return refusal(
                 `Object extension '${name}': no object named '${target}' is registered, so there is nothing to `
                 + 'extend. Name an installed object in `extend`.',
+                'extend',
+            );
+        }
+        if (typeof object.name === 'string' && object.name !== target) {
+            return refusal(
+                `Object extension '${name}' extends '${target}', but that object is registered as '${object.name}': `
+                + `an extension is filed under the name it is written with, so '${target}' would open a second object `
+                + `beside '${object.name}'. Save it as '${object.name}', with \`extend\` set to '${object.name}'.`,
                 'extend',
             );
         }

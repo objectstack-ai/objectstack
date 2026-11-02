@@ -254,6 +254,7 @@ vi.mock('../../providers/MetadataProvider', async (importOriginal) => ({
 }));
 
 import { AppContent } from '../AppContent';
+import { setupMetadataStudioPath } from '../../views/studio-design/setupMetadataRedirect';
 
 /**
  * Reports the live URL so a redirect chain is visible as a URL, not just a
@@ -272,8 +273,9 @@ function LocationProbe({ sink }: { sink: string[] }) {
 /**
  * VERBATIM transcription of `apps/console/src/AppContent.tsx`'s
  * `MetadataRedirect` — the `system/metadata/*` legs of `systemRoutes` — as it
- * stands after objectui#3658 landed in `7883c0250`. Keep the regex and the
- * target construction identical to the original.
+ * stands after objectstack ADR-0146 D1 (N-28) sent it straight to Studio's
+ * "All metadata" area, a datasource excepted. Keep the regex and the target
+ * construction identical to the original.
  *
  * "Identical to the original" is a claim this file has to keep earning, and
  * between `7883c0250` and objectui#3669 it was false. The host was re-pointed
@@ -300,13 +302,13 @@ function MetadataRedirectStub() {
   const { metadataType, itemName } = useParams<{ metadataType?: string; itemName?: string }>();
   const location = useLocation();
   const prefix = location.pathname.replace(/\/(system\/)?metadata(\/.*)?$/, '');
-  const base = `${prefix}/metadata`;
-  const target = !metadataType
-    ? base
+  const rest = !metadataType
+    ? ''
     : itemName
-      ? `${base}/${encodeURIComponent(metadataType)}/${itemName}`
-      : `${base}/${encodeURIComponent(metadataType)}`;
-  return <Navigate to={target} replace />;
+      ? `${encodeURIComponent(metadataType)}/${itemName}`
+      : encodeURIComponent(metadataType);
+  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  return <Navigate to={target ?? `${prefix}/metadata/${rest}`} replace />;
 }
 
 /**
@@ -345,6 +347,9 @@ function renderConsoleAt(initialUrl: string) {
           path="/apps/:appName/*"
           element={<AppContent extraRoutes={systemRoutesStub} extraRoutesNoApp={systemRoutesStub} />}
         />
+        {/* The Studio app the host mounts beside `/apps/*`: Setup's retired
+            metadata URLs land here (objectstack ADR-0146 D1, N-28). */}
+        <Route path="/studio/*" element={<div data-testid="studio-probe">studio</div>} />
         <Route path="/" element={<div data-testid="root-landing">landing</div>} />
         <Route path="/home" element={<div data-testid="home-launcher">home</div>} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -374,9 +379,11 @@ describe('AppContent pseudo-routes — live input surface stays special (objectu
     ['/apps/ghost/system', 'system-hub-page', '/apps/ghost/system'],
     ['/apps/ghost/system/settings', 'system-settings-page', '/apps/ghost/system/settings'],
     ['/apps/ghost/system/audit-log', 'system-audit-log-page', '/apps/ghost/system/audit-log'],
-    ['/apps/ghost/metadata', 'metadata-directory-page', '/apps/ghost/metadata'],
-    ['/apps/ghost/metadata/_diagnostics', 'metadata-diagnostics-page', '/apps/ghost/metadata/_diagnostics'],
-    ['/apps/ghost/metadata/object/sys_user', 'metadata-resource-edit-page', '/apps/ghost/metadata/object/sys_user'],
+    // Since objectstack ADR-0146 D1 (N-28) every other metadata route opens
+    // Studio (the `it.each` below), so the datasource's — the routes that
+    // stay — carry this branch's coverage.
+    ['/apps/ghost/metadata/datasource', 'metadata-resource-list-page', '/apps/ghost/metadata/datasource'],
+    ['/apps/ghost/metadata/datasource/main', 'metadata-resource-edit-page', '/apps/ghost/metadata/datasource/main'],
     // The legacy aliases redirect onto the canonical `metadata/:type` route
     // (declared in this same branch) — the pathname pins the hop's direction.
     // These two ENTER the alias directly, so they are unaffected by the host
@@ -384,7 +391,6 @@ describe('AppContent pseudo-routes — live input surface stays special (objectu
     // branch's `component/metadata/*` declarations covered now that nothing
     // passes through them on the way somewhere else.
     ['/apps/ghost/component/metadata/resource?type=datasource', 'metadata-resource-list-page', '/apps/ghost/metadata/datasource'],
-    ['/apps/ghost/component/metadata/directory', 'metadata-directory-page', '/apps/ghost/metadata'],
     // The host rewrite (`system/metadata/:type`) is its own `it` below — it is
     // the one URL here whose hop COUNT is part of the claim, and a shared
     // `it.each` body can only pin the endpoint.
@@ -401,7 +407,23 @@ describe('AppContent pseudo-routes — live input surface stays special (objectu
     expect(screen.queryByTestId('app-not-available-retry')).not.toBeInTheDocument();
   });
 
-  it('unresolved app segment: the host rewrite reaches canonical metadata/:type in ONE hop', async () => {
+  it.each([
+    ['/apps/ghost/metadata', '/studio/~all/metadata'],
+    ['/apps/ghost/metadata/_diagnostics', '/studio/~all/metadata/_diagnostics'],
+    ['/apps/ghost/metadata/object/sys_user', '/studio/~all/metadata/object/sys_user'],
+    ['/apps/ghost/component/metadata/directory', '/studio/~all/metadata'],
+  ])('unresolved app segment: the retired Setup metadata URL %s still takes the metadata branch, into Studio', async (url, studio) => {
+    // The metadata flag must still fire for these (the branch that redirects
+    // them is the pseudo-route's), so they reach Studio and never "App not
+    // available" (objectstack ADR-0146 D1, N-28).
+    const chain = renderConsoleAt(url);
+
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+    expect(chain).toEqual([url, studio]);
+    expect(screen.queryByTestId('app-not-available-retry')).not.toBeInTheDocument();
+  });
+
+  it('unresolved app segment: the host rewrite reaches Studio in ONE hop', async () => {
     // Lifted out of the table above so the hop COUNT can be asserted, not just
     // the endpoint. The host's `MetadataRedirect` rewrites this URL onto the
     // canonical `metadata/:type` that the shell declares itself: two route
@@ -412,17 +434,18 @@ describe('AppContent pseudo-routes — live input surface stays special (objectu
     // the middle stop, and this case went on measuring it anyway, because the
     // stub above had not been re-synced and the endpoint is byte-identical
     // either way. objectui#3669 is what that cost to notice.
+    //
+    // objectstack ADR-0146 D1 (N-28) moved the endpoint: the host now sends
+    // the URL straight to Studio's "All metadata" area, still one hop — no
+    // stop on the shell's own `metadata/:type`, which would redirect again.
     const chain = renderConsoleAt('/apps/ghost/system/metadata/object');
 
-    expect(await screen.findByTestId('metadata-resource-list-page')).toBeInTheDocument();
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
     // Two entries, i.e. a single `<Navigate>`. The alias is not merely absent
     // from the end of the chain — it is absent from the chain.
-    expect(chain).toEqual(['/apps/ghost/system/metadata/object', '/apps/ghost/metadata/object']);
+    expect(chain).toEqual(['/apps/ghost/system/metadata/object', '/studio/~all/metadata/object']);
     expect(chain.some((entry) => entry.includes('component/metadata'))).toBe(false);
-    expect(pathname()).toBe('/apps/ghost/metadata/object');
-    // Same two guarantees the table's body makes: the DEFAULT app's shell, and
-    // no "App not available".
-    expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
+    expect(pathname()).toBe('/studio/~all/metadata/object');
     expect(screen.queryByTestId('app-not-available-retry')).not.toBeInTheDocument();
   });
 
@@ -442,23 +465,22 @@ describe('AppContent pseudo-routes — live input surface stays special (objectu
     expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
   });
 
-  it('the /apps/setup family is unaffected: the host rewrite still lands in ONE hop', async () => {
+  it('the /apps/setup family is unaffected: the host rewrite still lands in ONE hop (in Studio)', async () => {
     // The `setup` twin of the case above, lifted out of the table for the same
     // reason. `isSetupRoute` decides this URL rather than `isMetadataRoute`,
     // but the chain through the host stub is the same one, and it was stale in
     // the same way.
     const chain = renderConsoleAt('/apps/setup/system/metadata/object');
 
-    expect(await screen.findByTestId('metadata-resource-list-page')).toBeInTheDocument();
-    expect(chain).toEqual(['/apps/setup/system/metadata/object', '/apps/setup/metadata/object']);
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+    expect(chain).toEqual(['/apps/setup/system/metadata/object', '/studio/~all/metadata/object']);
     expect(chain.some((entry) => entry.includes('component/metadata'))).toBe(false);
-    expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'crm');
   });
 
   /** A matched app resolves on its own — the flags change nothing here. */
   it.each([
     ['/apps/crm/system/marketplace', 'marketplace-page'],
-    ['/apps/crm/metadata/object', 'metadata-resource-list-page'],
+    ['/apps/crm/metadata/datasource', 'metadata-resource-list-page'],
     ['/apps/sales/system/settings', 'system-settings-page'],
   ])('a matched app segment renders its own shell: %s', async (url, testid) => {
     renderConsoleAt(url);
@@ -479,8 +501,11 @@ describe('AppContent pseudo-routes — zero-app deployment (objectui#3638)', () 
   it.each([
     ['/apps/setup/system', 'system-hub-page'],
     ['/apps/setup/system/marketplace', 'marketplace-page'],
-    ['/apps/setup/metadata', 'metadata-directory-page'],
-    ['/apps/setup/metadata/object', 'metadata-resource-list-page'],
+    // Retired into Studio (objectstack ADR-0146 D1, N-28): still the
+    // pseudo-route branch, which is what redirects them.
+    ['/apps/setup/metadata', 'studio-probe'],
+    ['/apps/setup/metadata/object', 'studio-probe'],
+    ['/apps/setup/metadata/datasource', 'metadata-resource-list-page'],
     ['/apps/setup/component/metadata/resource?type=datasource', 'metadata-resource-list-page'],
     ['/apps/setup/create-app', 'create-app-page'],
   ])('with zero apps %s still reaches the pseudo-route branch', async (url, testid) => {

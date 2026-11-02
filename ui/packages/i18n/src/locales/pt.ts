@@ -1834,7 +1834,7 @@ const pt = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Conjuntos de permissões.",
+      accessRequired: "Você precisa de acesso ao Studio para abrir o Studio. Um administrador pode concedê-lo com um conjunto de permissões em Configuração → Atribuição de conjuntos de permissões.",
     },
     saveAdvisoryTitle: "Salvo — a verificação de criação gerou {{count}} recomendação(ões)",
     saveAdvisoryTitle_one: "Salvo — a verificação de criação gerou {{count}} recomendação",

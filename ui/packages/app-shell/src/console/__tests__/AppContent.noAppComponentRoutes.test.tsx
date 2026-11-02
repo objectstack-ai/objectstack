@@ -192,6 +192,7 @@ vi.mock('@object-ui/react', async (importOriginal) => ({
 }));
 
 import { AppContent } from '../AppContent';
+import { setupMetadataStudioPath } from '../../views/studio-design/setupMetadataRedirect';
 
 /**
  * Reports the live URL so a redirect chain is visible as a URL, not just a
@@ -210,7 +211,8 @@ function LocationProbe({ sink }: { sink: string[] }) {
 /**
  * VERBATIM transcription of `apps/console/src/AppContent.tsx`'s
  * `MetadataRedirect` (the `system/metadata/*` legs of its `systemRoutes`
- * fragment), as it stands after objectui#3658 landed in `7883c0250`. Keep the
+ * fragment), as it stands after objectstack ADR-0146 D1 (N-28) sent it
+ * straight to Studio's "All metadata" area, a datasource excepted. Keep the
  * regex and the target construction identical to the original — this stub is
  * what makes the `sys-objects` hop measurable from inside app-shell.
  *
@@ -233,13 +235,13 @@ function MetadataRedirectStub() {
   const { metadataType, itemName } = useParams<{ metadataType?: string; itemName?: string }>();
   const location = useLocation();
   const prefix = location.pathname.replace(/\/(system\/)?metadata(\/.*)?$/, '');
-  const base = `${prefix}/metadata`;
-  const target = !metadataType
-    ? base
+  const rest = !metadataType
+    ? ''
     : itemName
-      ? `${base}/${encodeURIComponent(metadataType)}/${itemName}`
-      : `${base}/${encodeURIComponent(metadataType)}`;
-  return <Navigate to={target} replace />;
+      ? `${encodeURIComponent(metadataType)}/${itemName}`
+      : encodeURIComponent(metadataType);
+  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  return <Navigate to={target ?? `${prefix}/metadata/${rest}`} replace />;
 }
 
 /**
@@ -273,6 +275,9 @@ function renderConsoleAt(initialUrl: string) {
       <LocationProbe sink={chain} />
       <Routes>
         <Route path="/apps/:appName/*" element={<AppContent extraRoutesNoApp={systemRoutesStub} />} />
+        {/* The Studio app the host mounts beside `/apps/*`: Setup's retired
+            metadata URLs land here (objectstack ADR-0146 D1, N-28). */}
+        <Route path="/studio/*" element={<div data-testid="studio-probe">studio</div>} />
         <Route path="/" element={<div data-testid="root-landing">landing</div>} />
         <Route path="/home" element={<div data-testid="home-launcher">home</div>} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -335,16 +340,17 @@ describe('AppContent — zero-app component/metadata destinations (objectui#3610
     // "Manage Objects" card name the canonical route — so what is pinned here
     // is the arrival path the host still declares for bookmarks and external
     // links.
+    //
+    // objectstack ADR-0146 D1 (N-28) moved the endpoint into Studio's "All
+    // metadata" area, and the host now aims there directly: still one hop.
     const chain = renderConsoleAt('/apps/setup/system/metadata/object');
 
-    const page = await screen.findByTestId('metadata-resource-list-page');
-    expect(page).toBeInTheDocument();
-    expect(page).toHaveTextContent('object');
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
     // Two entries, i.e. a single `<Navigate>`. The alias is not merely absent
     // from the end of the chain — it is absent from the chain.
-    expect(chain).toEqual(['/apps/setup/system/metadata/object', '/apps/setup/metadata/object']);
+    expect(chain).toEqual(['/apps/setup/system/metadata/object', '/studio/~all/metadata/object']);
     expect(chain.some((entry) => entry.includes('component/metadata'))).toBe(false);
-    expect(pathname()).toBe('/apps/setup/metadata/object');
+    expect(pathname()).toBe('/studio/~all/metadata/object');
     expect(screen.queryByTestId('root-landing')).not.toBeInTheDocument();
   });
 
@@ -353,12 +359,13 @@ describe('AppContent — zero-app component/metadata destinations (objectui#3610
     // arm. That arm used to aim at `component/metadata/directory` — the second
     // alias, and the second blank screen without it — and since objectui#3658
     // aims at the canonical directory route directly.
+    // Since objectstack ADR-0146 D1 (N-28) the directory is Studio's.
     const chain = renderConsoleAt('/apps/setup/system/metadata');
 
-    expect(await screen.findByTestId('metadata-directory-page')).toBeInTheDocument();
-    expect(chain).toEqual(['/apps/setup/system/metadata', '/apps/setup/metadata']);
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+    expect(chain).toEqual(['/apps/setup/system/metadata', '/studio/~all/metadata']);
     expect(chain.some((entry) => entry.includes('component/metadata'))).toBe(false);
-    expect(pathname()).toBe('/apps/setup/metadata');
+    expect(pathname()).toBe('/studio/~all/metadata');
   });
 
   it('the legacy directory alias still resolves when entered directly', async () => {
@@ -375,11 +382,14 @@ describe('AppContent — zero-app component/metadata destinations (objectui#3610
     // it until #3660 re-pointed the card, and objectui#3743 retired the card
     // wall), so the alias is live input, not a museum piece — entered directly
     // here, exactly as `sys-datasources` above enters the resource alias.
+    //
+    // Since objectstack ADR-0146 D1 (N-28) it lands in Studio's "All metadata"
+    // area, still in one hop: this branch's alias aims there directly.
     const chain = renderConsoleAt('/apps/setup/component/metadata/directory');
 
-    expect(await screen.findByTestId('metadata-directory-page')).toBeInTheDocument();
-    expect(chain).toEqual(['/apps/setup/component/metadata/directory', '/apps/setup/metadata']);
-    expect(pathname()).toBe('/apps/setup/metadata');
+    expect(await screen.findByTestId('studio-probe')).toBeInTheDocument();
+    expect(chain).toEqual(['/apps/setup/component/metadata/directory', '/studio/~all/metadata']);
+    expect(pathname()).toBe('/studio/~all/metadata');
     expect(screen.queryByTestId('create-first-app-btn')).not.toBeInTheDocument();
     expect(screen.queryByTestId('root-landing')).not.toBeInTheDocument();
   });

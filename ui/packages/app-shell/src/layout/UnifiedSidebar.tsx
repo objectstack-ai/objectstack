@@ -377,20 +377,15 @@ export function UnifiedSidebar({ activeAppName, railOverlay = false }: UnifiedSi
       // active app, `extraRoutes` once one exists), so an app-bearing deployment
       // now reaches the hub here instead of whatever app `/apps/setup` fell back
       // to. Every sibling below already spelled `/apps/setup/system/...` — the
-      // two metadata-admin entries excepted, and only since: they name the
-      // engine's canonical `/apps/setup/metadata/:type` routes (#3660, #3739),
-      // because for THOSE two the `system/...` spelling is a redirect rather
-      // than a page.
+      // datasource entry excepted: it names the engine's canonical
+      // `/apps/setup/metadata/datasource` route (#3660), because for it the
+      // `system/...` spelling is a redirect rather than a page. There is no
+      // Object Manager entry: objects are Studio's (objectstack ADR-0146 D1),
+      // and Setup keeps the datasource alone of the metadata types.
       const adminItems: NavigationItem[] = [
         { id: 'sys-settings', label: t('layout.systemNav.systemSettings', { defaultValue: 'System Settings' }), type: 'url' as const, url: '/apps/setup/system', icon: 'settings' },
         { id: 'sys-apps', label: t('layout.systemNav.applications', { defaultValue: 'Applications' }), type: 'url' as const, url: '/apps/setup/system/apps', icon: 'layout-grid' },
         { id: 'sys-marketplace', label: t('layout.systemNav.appMarketplace', { defaultValue: 'App Marketplace' }), type: 'url' as const, url: '/apps/setup/system/marketplace', icon: 'store' },
-        // #3739 — canonical `…/metadata/object`, not the legacy
-        // `…/system/metadata/object` alias. The alias is served by
-        // `apps/console`'s `MetadataRedirect`, a bare `<Navigate>` onto this
-        // very URL, so pointing here removes a hop without moving the landing
-        // page. The alias routes themselves are untouched.
-        { id: 'sys-objects', label: t('layout.systemNav.objectManager', { defaultValue: 'Object Manager' }), type: 'url' as const, url: '/apps/setup/metadata/object', icon: 'database' },
         // #3660 — canonical `…/metadata/datasource`, not the legacy
         // `…/component/metadata/resource?type=datasource` alias. The alias
         // renders `LegacyMetadataRedirect`, a bare `<Navigate>` onto this very

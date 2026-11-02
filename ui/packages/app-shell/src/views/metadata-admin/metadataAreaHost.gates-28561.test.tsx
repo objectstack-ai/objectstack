@@ -77,6 +77,16 @@ vi.mock('../../hooks/useCanAuthorMetadata', async (importOriginal) => ({
   useCanAuthorMetadata: () => true,
   useCanReadAuthoringTrail: () => true,
 }));
+// N-28 — the area's permission-set page mounts the catalog Active switch,
+// which reads the activation ledger; its behaviour is
+// `CatalogActiveSwitch.itemPage-28578.test.tsx`'s subject, so a marker stands
+// in for it here and no read leaves the file.
+vi.mock('./CatalogActiveSwitch', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  CatalogItemActiveSwitch: ({ type, name }: { type: string; name: string }) => (
+    <div data-testid="catalog-item-active-stub">{`${type}/${name}`}</div>
+  ),
+}));
 vi.mock('./AssignedUsersSection', () => ({
   AssignedUsersSection: () => <div data-testid="assigned-users-stub" />,
 }));
@@ -178,6 +188,7 @@ describe('the permission-set editor under the area', () => {
     await openSet(null, '?scope=environment');
     expect(screen.getByTestId('perm-assignments')).toBeInTheDocument();
     expect(screen.queryByTestId('setup-assignments-link-permission')).toBeNull();
+    expect(screen.queryByTestId('catalog-item-active-stub')).toBeNull();
   });
 
   it('the cross-package leg links Setup\'s assignment page, opened on the set, and draws no holders', async () => {
@@ -186,6 +197,8 @@ describe('the permission-set editor under the area', () => {
     expect(screen.queryByTestId('assigned-users-stub')).toBeNull();
     const link = screen.getByTestId('setup-assignments-link-permission').querySelector('a');
     expect(link).toHaveAttribute('href', '/apps/setup/component/security/permission-set-assignment?set=sales_rep');
+    // N-28 — and the set's Active switch, which left Setup's catalog list.
+    expect(screen.getByTestId('catalog-item-active-stub')).toHaveTextContent('permission/sales_rep');
   });
 
   it('a read-only package: no Save', async () => {

@@ -1992,7 +1992,7 @@ const ar = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "تحتاج إلى صلاحية الوصول إلى Studio لفتح Studio. يمكن للمسؤول منحها بمجموعة أذونات في الإعداد → مجموعات الأذونات.",
+      accessRequired: "تحتاج إلى صلاحية الوصول إلى Studio لفتح Studio. يمكن للمسؤول منحها بمجموعة أذونات في الإعداد → إسناد مجموعات الأذونات.",
     },
     saveAdvisoryTitle: "تم الحفظ — أنتج فحص التأليف {{count}} ملاحظة إرشادية",
     saveAdvisoryTitle_zero: "تم الحفظ — أنتج فحص التأليف {{count}} ملاحظة إرشادية",
