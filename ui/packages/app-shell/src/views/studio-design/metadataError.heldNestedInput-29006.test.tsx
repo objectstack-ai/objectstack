@@ -117,7 +117,7 @@ describe('a list item held for an input left unset inside one it has begun to fi
     });
   });
 
-  it('a nested input cleared to blank is unset too: held', () => {
+  it('Options From missing only its Label Field: held; a Label Field cleared to blank is one the spec takes', () => {
     const body = dash({ globalFilters: [{ ...PARTLY, optionsFrom: { object: 'r3_ticket', valueField: 'id', labelField: '' } }] });
     // The spec takes a blank text, so only an absent nested input is refused: the blank one is not this case's.
     const absent = dash({ globalFilters: [{ ...PARTLY, optionsFrom: { object: 'r3_ticket', valueField: 'id' } }] });
