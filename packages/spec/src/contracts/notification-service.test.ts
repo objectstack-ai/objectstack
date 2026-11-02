@@ -207,4 +207,48 @@ describe('Notification Service Contract', () => {
       expect((await service.listInbox!('u-1', { read: false })).notifications).toHaveLength(0);
     });
   });
+
+  describe('push device members (ADR-0012 §6)', () => {
+    it('are optional: a send-only provider is still a complete implementation', () => {
+      const service: INotificationService = { send: async () => ({ success: true }) };
+      expect(service.registerDevice).toBeUndefined();
+      expect(service.unregisterDevice).toBeUndefined();
+      expect(service.invalidateDeviceToken).toBeUndefined();
+    });
+
+    it('type the registry an implementation provides: register, unregister, invalidate', async () => {
+      // A toy registry written to the documented semantics, so the member
+      // signatures are exercised by a real implementation, not just named.
+      const rows = new Map<string, { userId: string; token: string; enabled: boolean; invalidatedAt?: string }>();
+      let minted = 0;
+      const service: INotificationService = {
+        send: async () => ({ success: true }),
+        registerDevice: async (userId, request) => {
+          const deviceId = request.deviceId ?? `dev-${++minted}`;
+          for (const [id, row] of rows) if (row.token === request.token && id !== deviceId) rows.delete(id);
+          rows.set(deviceId, { userId, token: request.token, enabled: true });
+          return { deviceId, success: true };
+        },
+        unregisterDevice: async (userId, deviceId) => {
+          if (rows.get(deviceId)?.userId !== userId) throw Object.assign(new Error('Device not found'), { code: 'NOT_FOUND' });
+          rows.delete(deviceId);
+          return { success: true };
+        },
+        invalidateDeviceToken: async (token) => {
+          for (const row of rows.values()) {
+            if (row.token === token) Object.assign(row, { enabled: false, invalidatedAt: '2026-01-01T00:00:00.000Z' });
+          }
+        },
+      };
+
+      const minted1 = await service.registerDevice!('u-1', { token: 'tok', platform: 'ios', vendor: 'apns' });
+      expect(minted1).toEqual({ deviceId: 'dev-1', success: true });
+      // A second user registering the same token takes it over.
+      await service.registerDevice!('u-2', { token: 'tok', platform: 'ios', deviceId: 'install-2' });
+      expect([...rows.keys()]).toEqual(['install-2']);
+      await expect(service.unregisterDevice!('u-1', 'install-2')).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      await service.invalidateDeviceToken!('tok');
+      expect(rows.get('install-2')).toMatchObject({ enabled: false, invalidatedAt: '2026-01-01T00:00:00.000Z' });
+    });
+  });
 });

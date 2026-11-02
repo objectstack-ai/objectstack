@@ -29,6 +29,7 @@ import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
 import { ServedTranslationDataSchema } from '../system/translation.zod';
+import { PushVendorSchema } from '../system/push-config.zod';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
 // value this spec cannot name is a value the resolver would have dropped.
@@ -3506,11 +3507,32 @@ export const GetPresenceResponseSchema = lazySchema(() => z.object({
 // Notification Operations
 // ==========================================
 
+/**
+ * Register or refresh a push device for the signed-in user (ADR-0012 §6).
+ *
+ * One request does both: registering a `deviceId` the user already has
+ * refreshes that device (its token, vendor, app and locale) instead of adding
+ * a second one. A request without `deviceId` gets one minted by the server
+ * and answered in {@link RegisterDeviceResponseSchema}; the client keeps it
+ * and sends it on every later registration and on unregister.
+ *
+ * The members after `name` (`vendor`, `appId`, `locale`) were added for the
+ * push channel, all optional, so the body a client sent before still parses
+ * unchanged. The device's owner is the session's user, never a body member.
+ */
 export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
   token: z.string().describe('Device push notification token'),
   platform: z.enum(['ios', 'android', 'web']).describe('Device platform'),
-  deviceId: z.string().optional().describe('Unique device identifier'),
+  deviceId: z.string().optional().describe(
+    'Client-held device id, stable per app install. Re-registering the same deviceId refreshes that device; '
+    + 'absent, the server mints one and answers it, and the client keeps it for later registrations and unregister',
+  ),
   name: z.string().optional().describe('Device friendly name'),
+  vendor: PushVendorSchema.optional().describe(
+    'Push vendor the token belongs to: apns or fcm. Absent, the server derives it from platform: ios means apns, android means fcm (web has no core vendor)',
+  ),
+  appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
+  locale: z.string().optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
 }));
 
 export const RegisterDeviceResponseSchema = lazySchema(() => z.object({
