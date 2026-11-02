@@ -40,9 +40,18 @@ function fakeDb() {
     }
     return out;
   };
+  // Equality on plain keys only — the reads below filter by `id` alone. A
+  // combinator or any other operator is REFUSED, never read as a field name.
   const matches = (doc: Doc, filter: Doc | undefined): boolean =>
-    Object.entries(filter ?? {}).every(([k, v]) =>
-      v !== null && typeof v === 'object' && '$eq' in (v as Doc) ? doc[k] === (v as Doc).$eq : doc[k] === v);
+    Object.entries(filter ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fake Db: filter operator ${k} is not implemented`);
+      if (v !== null && typeof v === 'object') {
+        const ops = Object.keys(v as Doc);
+        if (ops.length !== 1 || ops[0] !== '$eq') throw new Error(`fake Db: operator ${ops.join(',')} is not implemented`);
+        return doc[k] === (v as Doc).$eq;
+      }
+      return doc[k] === v;
+    });
   const collection = {
     insertOne: async (doc: Doc) => { docs.push({ _id: `oid_${docs.length}`, ...doc }); return { insertedId: `oid_${docs.length}` }; },
     findOne: async (filter: Doc, options: { projection?: Record<string, number> }) => {
