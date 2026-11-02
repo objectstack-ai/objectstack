@@ -73,7 +73,7 @@ fills it (`:249`) — there is no `header` prop. This example used to pass one
 floor: copied verbatim, the snippet rendered an empty top bar and said nothing.
 
 Like `SidebarNav` below, `AppShell` is composed in JSX and is **not** on the
-`ComponentRegistry`: four of its seven props are `React.ReactNode` slots that no
+`ComponentRegistry`: four of its eight props are `React.ReactNode` slots that no
 JSON document can fill, so the `app-shell` key was retired in objectui#4841 and
 `{ "type": "app-shell" }` now reports `Unknown component type`. When the whole
 shell has to come from metadata, the key for that is `app-schema-renderer`.
