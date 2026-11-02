@@ -22,7 +22,9 @@
  *
  * The alias-spelled list routes (`OBJECT`, `OBJECT/view/ID`, `OBJECT/data`)
  * wait on the verdict for the app the URL names and draw `app-access-denied`
- * on `denied`, nothing of the list mounted. An admitted caller and a server
+ * on `denied`, nothing of the list mounted. So does the create form beside
+ * them, `OBJECT/new` (objectstack#29102), in both spellings; an admitted
+ * caller still gets the form. An admitted caller and a server
  * without the app render as before. The record routes the approvals inbox
  * links to stay reachable (objectui#12706 leaves them open), as does the inbox
  * itself; `AppContent.setupItemRoutesVerdict-12706.test.tsx` pins both too.
@@ -34,7 +36,7 @@
  * real probe reading the real envelope.
  *
  * NOTE ON SCOPE: this file measures WHICH SURFACE renders. `ConsoleLayout` and
- * the list, data and record pages are stubbed; each stub counts its mounts, so
+ * the list, data, record and create-form pages are stubbed; each stub counts its mounts, so
  * "nothing of the list mounted" is a count.
  */
 
@@ -68,6 +70,12 @@ vi.mock('../../views/ObjectDataPage', () => ({
   ObjectDataPage: () => {
     const { objectName } = useParams<{ objectName?: string }>();
     return counted('object-data-page', objectName);
+  },
+}));
+vi.mock('../../views/RecordFormPage', () => ({
+  RecordFormPage: ({ mode }: { mode?: string }) => {
+    const { objectName } = useParams<{ objectName?: string }>();
+    return counted('record-form-page', `${objectName}/${mode ?? ''}`);
   },
 }));
 vi.mock('../../views/RecordDetailView', () => ({
@@ -246,7 +254,7 @@ function renderConsoleAt(initialUrl: string) {
 const pathname = () => screen.getByTestId('pathname').textContent;
 
 /** Every page stub this file counts; a refused caller mounts none of them. */
-const PAGE_STUBS = ['object-view', 'object-data-page', 'record-detail-view', 'approvals-inbox-page'];
+const PAGE_STUBS = ['object-view', 'object-data-page', 'record-form-page', 'record-detail-view', 'approvals-inbox-page'];
 const pagesMounted = () => PAGE_STUBS.filter((id) => (mounts[id] ?? 0) > 0);
 
 describe('AppContent — alias-spelled Setup object lists wait on the app\'s access verdict (objectstack#28988)', () => {
@@ -296,6 +304,34 @@ describe('AppContent — alias-spelled Setup object lists wait on the app\'s acc
     expect(await screen.findByTestId('app-access-denied')).toBeInTheDocument();
     expect(pagesMounted()).toEqual([]);
     expect(metaItemRequests[0]).toContain('/api/v1/meta/app/com.objectstack.setup');
+  });
+
+  // objectstack#29102 — the create form names no record, so no inbox link
+  // lands on it; it waits on the verdict like the lists beside it.
+  it.each([
+    ['the alias', '/apps/setup/sys_user/new', 'setup'],
+    ['an app object under the alias', '/apps/setup/showcase_task/new', 'setup'],
+    ['the package id', '/apps/com.objectstack.setup/sys_user/new', 'com.objectstack.setup'],
+  ])('a refused caller gets app-access-denied on the create form spelled with %s, never the form', async (_label, url, app) => {
+    renderConsoleAt(url);
+
+    expect(await screen.findByTestId('app-access-denied')).toBeInTheDocument();
+    expect(screen.queryByTestId('console-layout')).not.toBeInTheDocument();
+    expect(pagesMounted()).toEqual([]);
+    expect(metaItemRequests).toHaveLength(1);
+    expect(metaItemRequests[0]).toContain(`/api/v1/meta/app/${app}`);
+    expect(pathname()).toBe(url);
+  });
+
+  it('CONTROL — an admitted caller gets the create form under Setup, and nothing is probed', async () => {
+    metadataApps = [SHOWCASE_APP, SETUP_APP];
+
+    renderConsoleAt('/apps/setup/sys_user/new');
+
+    expect(await screen.findByTestId('record-form-page')).toHaveTextContent('sys_user/create');
+    expect(screen.getByTestId('console-layout')).toHaveAttribute('data-active-app', 'setup');
+    expect(screen.queryByTestId('app-access-denied')).not.toBeInTheDocument();
+    expect(metaItemRequests).toEqual([]);
   });
 
   it('CONTROL — an admitted caller gets the list under Setup, and nothing is probed', async () => {

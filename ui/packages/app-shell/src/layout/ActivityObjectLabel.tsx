@@ -13,6 +13,7 @@
 import { useObjectLabel, useObjectTranslation } from '@object-ui/i18n';
 import { findByName, metadataText } from '../hooks/useNavTargetLabel.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
+import { readObjectsByName } from '../hooks/useObjectPresence.js';
 
 /** `''` from a bundle lookup that found nothing and had no metadata to fall back to. */
 function nonEmpty(text: string | undefined): string | undefined {
@@ -29,8 +30,13 @@ function nonEmpty(text: string | undefined): string | undefined {
  * the server wrote it. The label is read the way `useNavTargetLabel` reads an
  * object's: the definition's `label` from `useMetadata().objects` (an inline
  * locale map read in the active language), passed through `useObjectLabel`'s
- * bundle lookup (`{ns}.objects.<name>.label`). `objects` is the shell's cached
- * `object` list, loaded once for the whole type, never once per row.
+ * bundle lookup (`{ns}.objects.<name>.label`).
+ *
+ * objectstack#29121 — the definition is read by name (`readObjectsByName`)
+ * while nothing has loaded the whole `object` list, so a few rows on Home ask
+ * for their few objects, never the registry; once the list is loaded (inside
+ * an app, say) the row reads it and asks nothing. The row's name is asked
+ * once, whichever rows name it: the names-only scope keeps every answer.
  *
  * The API name is the fallback, and only that: an object the list does not
  * hold (not loaded yet, or since removed) and no bundle names is shown by its
@@ -38,15 +44,15 @@ function nonEmpty(text: string | undefined): string | undefined {
  *
  * A component of its own so that the list is read only while a row is on
  * screen. The rows are built on every render of the bell, open or closed, and
- * reading `objects` is what loads the type.
+ * reading a definition is what asks for it.
  *
  * Home's activity card renders the same component for the same row
  * (objectui#12238), so the bell and Home name an object one way.
  */
 export function ActivityObjectLabel({ objectName }: { objectName: string }) {
-  const { objects } = useMetadata();
+  const metadata = useMetadata();
   const { objectLabel } = useObjectLabel();
   const { language } = useObjectTranslation();
-  const text = metadataText(findByName(objects, objectName)?.label, language);
+  const text = metadataText(findByName(readObjectsByName(metadata, [objectName]), objectName)?.label, language);
   return <>{nonEmpty(objectLabel({ name: objectName, label: text ?? '' })) ?? objectName}</>;
 }

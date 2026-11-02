@@ -703,6 +703,13 @@ const navIcon = (type?: string): LucideIcon => KIND_ICON[type ?? ''] ?? Compass;
  * "Details" disclosure. A failure with nothing rewritten (`plainRefusal`) has
  * no detail and renders as the single line it always was.
  *
+ * objectstack#29139 — the sentence is announced: it is a `role="alert"`, the
+ * sentence alone. A refusal stops what the author just did, and the strip
+ * mounts with its sentence already in it; an alert is announced on insertion,
+ * where a polite live region inserted already filled may not be. "Show me" and
+ * Details stay outside it, so the announcement is the sentence verbatim and
+ * opening Details does not announce it again.
+ *
  * Exported for its pins; `index.ts` does not re-export it.
  */
 export function StudioRefusalStrip({
@@ -729,7 +736,7 @@ export function StudioRefusalStrip({
       className={cn('rounded-md border border-destructive/40 bg-destructive/10 text-destructive', className)}
     >
       <div className="flex items-start gap-2">
-        <p data-testid="studio-refusal-message" className="min-w-0 flex-1 whitespace-pre-line">
+        <p data-testid="studio-refusal-message" role="alert" className="min-w-0 flex-1 whitespace-pre-line">
           {message}
         </p>
         {target !== undefined && onShow && (

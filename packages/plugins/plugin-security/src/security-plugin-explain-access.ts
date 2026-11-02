@@ -79,6 +79,7 @@ import {
   buildContextForUser,
   delegatedOrganizationRefusal,
   explainAccessForAsker,
+  explainRecordsForAsker,
   intersectDelegatedScope,
   readSysUserRow,
   resolveDelegatorContext,
@@ -124,13 +125,24 @@ type RlsFilterOptions = NonNullable<Parameters<SecurityPlugin['computeLayeredRls
 /** The body of `SecurityPlugin#explainAccessForCaller`; the method's docblock there is its contract. */
 export async function explainAccessForCaller(
   this: Pick<ExplainAccessHost, 'baselinePermissionSets' | 'checkControlledByParentWrite' | 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'computeReadPartialMaskRules' | 'computeRlsFilter' | 'delegatedAdminGate' | 'foldFieldRequiredPermissions' | 'getObjectSecurityMeta' | 'permissionEvaluator' | 'ql' | 'readRowById' | 'resolveKernelService' | 'resolvePermissionSetsForContext' | 'resolvePreImageFloorDrop' | 'resolveSharingReadFilter' | 'resolveSharingWriteVerdict' | 'resolveWriteScopeForSharing' | 'tenancyPosture'>,
-  request: { object: string; operation: string; userId?: string; recordId?: string },
+  request: { object: string; operation: string; userId?: string; recordId?: string; recordIds?: readonly string[] },
   callerContext?: any,
 ): Promise<ExplainDecision> {
   const operation = String(request?.operation ?? 'read') as ExplainOperation;
   const object = String(request?.object ?? '');
   if (!object) throw new Error('[Security] explain: request.object is required');
   const recordId = request?.recordId != null && request.recordId !== '' ? String(request.recordId) : undefined;
+  // [#29112] The batch form's ids (`ExplainRequest.recordIds`, #8326): the
+  // object-level answer plus `records[i]`, the singular verdict of
+  // `recordIds[i]`. The caller's admission and the explained context below are
+  // settled once for the whole batch, and the explain engine runs its
+  // object-level pass once ({@link explainRecordsForAsker}). The wire schema
+  // owns the cap and the mutual exclusion; a caller reaching this service past
+  // it is refused the same mixed request here.
+  const recordIds = Array.isArray(request?.recordIds) ? request.recordIds.map((id) => String(id)) : undefined;
+  if (recordIds && recordId !== undefined) {
+    throw new Error('[Security] explain: recordId and recordIds are mutually exclusive — send one record as recordId, or the batch as recordIds, never both.');
+  }
 
   let targetContext = callerContext ?? {};
   // [#27442] Any `userId` that is not omitted, the empty string included, goes
@@ -233,12 +245,16 @@ export async function explainAccessForCaller(
   // [C2 / ADR-0095] The optional `sharing` service backs the record-grained
   // sharing attribution. Resolved lazily; absent (no plugin-sharing) → the
   // record path still works, the sharing layer simply reports not_evaluated.
-  const sharing = recordId ? (this.resolveKernelService?.('sharing') as any) : undefined;
-  // [ADR-0142 D3] The ownership-queue service, for the record's queue story.
-  const queueSvc = recordId
-    ? (this.resolveKernelService?.(OWNERSHIP_QUEUE_SERVICE) as Pick<IOwnershipQueueService, 'isMember'> | undefined)
-    : undefined;
-  const ownershipQueues = queueSvc && typeof queueSvc.isMember === 'function' ? queueSvc : undefined;
+  // [#29112] Resolved per record the deps are built for ({@link depsFor}).
+  const recordServices = (rid: string | undefined) => {
+    const sharing = rid ? (this.resolveKernelService?.('sharing') as any) : undefined;
+    // [ADR-0142 D3] The ownership-queue service, for the record's queue story.
+    const queueSvc = rid
+      ? (this.resolveKernelService?.(OWNERSHIP_QUEUE_SERVICE) as Pick<IOwnershipQueueService, 'isMember'> | undefined)
+      : undefined;
+    const ownershipQueues = queueSvc && typeof queueSvc.isMember === 'function' ? queueSvc : undefined;
+    return { sharing, ownershipQueues };
+  };
 
   // [#19963] A record-grained WRITE verdict is computed from the by-id write
   // path's own inputs, so `record.visible` for `update` / `delete` is the
@@ -276,6 +292,7 @@ export async function explainAccessForCaller(
   // path: the read filter is asked with the delegated context as it stands.
   const actsOnBehalfOf = (c: any): boolean => !!c?.onBehalfOf?.userId;
   const recordWriteFloorOptions = async (
+    recordId: string | undefined,
     sets: PermissionSet[],
     o: string,
     engineOp: string,
@@ -360,8 +377,15 @@ export async function explainAccessForCaller(
   const readFilterWithReadScope = (o: string, c: any): Promise<unknown | null> =>
     this.resolveSharingReadFilter(o, { ...c, __readScope: undefined });
 
-  return explainAccessForAsker(
-    {
+  /**
+   * [#29112] The engine's deps for one explanation: of the record `rid`, or
+   * object-level when `rid` is `undefined`. Only the record-grained members
+   * read `rid`; the object-level pass reads none of them, so every bag answers
+   * it the same.
+   */
+  const depsFor = (rid: string | undefined): Parameters<typeof explainAccessForAsker>[0] => {
+    const { sharing, ownershipQueues } = recordServices(rid);
+    return {
       ql: this.ql,
       resolveSets: (c: any) => this.resolvePermissionSetsForContext(c),
       evaluator: this.permissionEvaluator,
@@ -400,7 +424,7 @@ export async function explainAccessForCaller(
       // ── record-grained deps (only consulted when recordId is present) ──
       computeLayeredRlsFilter: async (sets, o, engineOp, c) =>
         this.computeLayeredRlsFilter(
-          sets as any, o, engineOp, c, await recordWriteFloorOptions(sets as any, o, engineOp, c),
+          sets as any, o, engineOp, c, await recordWriteFloorOptions(rid, sets as any, o, engineOp, c),
         ),
       fetchRecord: async (o: string, rid: string) => {
         try {
@@ -487,16 +511,20 @@ export async function explainAccessForCaller(
       // the ownership gate's claim admission reads.
       ...(ownershipQueues ? { queueMember: (u: string, q: string, org: string | null) => ownershipQueues.isMember(u, q, org) } : {}),
       claimVerdict: (o: string, rid: string, c: any) => this.resolveSharingWriteVerdict('update', o, rid, c),
-    },
-    { object, operation, context: targetContext, recordId },
-    // The asker: the caller, whose read of the record decides whether this
-    // explanation discloses that the record exists. On a self-explanation it
-    // is the explained context itself, and the engine asks it the write
-    // path's question; explaining another user, the engine asks `cannotRead`,
-    // the same read with a refusal counted as "cannot read" (ruling C).
-    {
-      context: callerContext,
-      cannotRead: (o: string, rid: string) => unreadableUnderCallerRead(() => this.readRowById(o, rid, callerContext)),
-    },
-  );
+    };
+  };
+
+  // The asker: the caller, whose read of the record decides whether this
+  // explanation discloses that the record exists. On a self-explanation it
+  // is the explained context itself, and the engine asks it the write
+  // path's question; explaining another user, the engine asks `cannotRead`,
+  // the same read with a refusal counted as "cannot read" (ruling C).
+  const asker = {
+    context: callerContext,
+    cannotRead: (o: string, rid: string) => unreadableUnderCallerRead(() => this.readRowById(o, rid, callerContext)),
+  };
+  if (recordIds) {
+    return explainRecordsForAsker(depsFor(undefined), (rid) => depsFor(rid), { object, operation, context: targetContext }, recordIds, asker);
+  }
+  return explainAccessForAsker(depsFor(recordId), { object, operation, context: targetContext, recordId }, asker);
 }
