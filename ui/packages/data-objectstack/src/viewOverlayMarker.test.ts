@@ -49,6 +49,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackAdapter } from './index';
+import { answerObjectViewRead } from './objectViewRoute.test-support';
 
 /** A stub metadata store keyed the way `sys_metadata` is: `type` + `name`. */
 function makeMetaStore() {
@@ -80,15 +81,17 @@ function makeMetaStore() {
 function makeDS(meta: any) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    // objectstack#29550: the one-object view read answers from the same rows.
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta };
+  ds.client = { meta, getLocale: () => undefined };
   return ds;
 }
 
@@ -116,7 +119,11 @@ describe('end-to-end: a system-view overlay at rest never masquerades as saved (
     // The row the exact user action the issue reports left behind: a density
     // toggle on a code-defined view, stored the way the retired
     // `updateViewConfig` stored it (the body, `object`, `name`, the marker).
+    // objectstack#29550: with the `viewKind` the platform inherits for it from
+    // the registry entry it shadows (#7741/#2555); the one-object read serves
+    // only rows that carry it.
     rows.set('view::crm_lead.default', {
+      viewKind: 'list',
       type: 'grid',
       data: { provider: 'object', object: 'crm_lead' },
       columns: ['name', 'status'],
@@ -143,6 +150,9 @@ describe('end-to-end: a system-view overlay at rest never masquerades as saved (
 
     await ds.createView('crm_lead', {
       name: 'crm_lead.my_pipeline',
+      // objectstack#29550: the write door refuses a new view without one
+      // (#7741), and the one-object read serves only rows that carry it.
+      viewKind: 'list',
       label: 'My Pipeline',
       type: 'kanban',
     });

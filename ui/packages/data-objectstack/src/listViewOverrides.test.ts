@@ -33,6 +33,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackAdapter } from './index';
+import { answerObjectViewRead } from './objectViewRoute.test-support';
 
 /** A stub metadata store keyed the way `sys_metadata` is: `type` + `name`. */
 function makeMetaStore() {
@@ -68,15 +69,17 @@ function makeMetaStore() {
 function makeDS(meta: any) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    // objectstack#29550: the one-object view read answers from the same rows.
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta };
+  ds.client = { meta, getLocale: () => undefined };
   return ds;
 }
 
@@ -87,8 +90,13 @@ function makeDS(meta: any) {
  * heals the same identity fields onto rows that lack them — objectstack#2555).
  * Written below through `createView`, the adapter's surviving write into the
  * same key space.
+ *
+ * objectstack#29550: it carries `viewKind`, as such a row does at rest. The
+ * platform inherits it from the registry entry the overlay shadows
+ * (#7741/#2555), and the one-object read serves only rows that carry it.
  */
 const PERSONALIZATION = {
+  viewKind: 'list',
   type: 'grid',
   data: { provider: 'object', object: 'crm_lead' },
   columns: ['name', 'status'],
@@ -143,7 +151,7 @@ describe('ObjectStackAdapter.listViewOverrides — read/write key space (#3774)'
     // stamped is the only association, and it must be enough. At rest, since
     // that write is gone (objectui#12504).
     rows.set('view::crm_lead.pipeline', {
-      type: 'kanban', density: 'comfortable', object: 'crm_lead', name: 'crm_lead.pipeline',
+      viewKind: 'list', type: 'kanban', density: 'comfortable', object: 'crm_lead', name: 'crm_lead.pipeline',
     });
     const map = await ds.listViewOverrides('crm_lead');
 
@@ -156,7 +164,7 @@ describe('ObjectStackAdapter.listViewOverrides — read/write key space (#3774)'
 
     await ds.createView('crm_lead', { ...PERSONALIZATION, name: 'crm_lead.all' });
     await ds.createView('crm_account', {
-      name: 'crm_account.all', type: 'grid', data: { provider: 'object', object: 'crm_account' }, density: 'compact',
+      name: 'crm_account.all', viewKind: 'list', type: 'grid', data: { provider: 'object', object: 'crm_account' }, density: 'compact',
     });
 
     expect(Object.keys(await ds.listViewOverrides('crm_lead'))).toEqual(['crm_lead.all']);
@@ -166,7 +174,7 @@ describe('ObjectStackAdapter.listViewOverrides — read/write key space (#3774)'
   it('skips rows the enumeration returns without a name (nothing can address them)', async () => {
     const { meta, rows } = makeMetaStore();
     const ds = makeDS(meta);
-    rows.set('view::anon', { object: 'crm_lead', density: 'compact' });
+    rows.set('view::anon', { object: 'crm_lead', viewKind: 'list', density: 'compact' });
 
     expect(await ds.listViewOverrides('crm_lead')).toEqual({});
   });

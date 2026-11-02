@@ -6049,8 +6049,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * Returns view spec objects with their canonical `name` as identifier.
    * Reads only this object's rows, in the contract's order
    * ({@link readObjectViewRows}: `GET /api/v1/meta/view?object=OBJECT`, or
-   * the stored list narrowed the same way; objectstack#29550), and still
-   * narrows through {@link viewItemObjectName}. {@link listViewOverrides}
+   * the stored list narrowed the same way; objectstack#29550). The
+   * draft-overlaid list is narrowed by the same rule
+   * ({@link ObjectStackAdapter.objectBoundViewRows}). Each row is still
+   * matched through {@link viewItemObjectName}. {@link listViewOverrides}
    * reads the same rows through the same accessor.
    *
    * ## Every failure still degrades to an empty list — and now says which kind
@@ -6107,7 +6109,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
         const draftItems = await this.metadataClient()
           .withPreviewDrafts(true)
           .list<any>('view');
-        items = Array.isArray(draftItems) ? draftItems : [];
+        // objectstack#29550: one rule on both reads. The overlaid list is
+        // narrowed and ordered by the contract's one-object rule too, so a row
+        // the published read does not serve is not a tab in the preview either.
+        items = ObjectStackAdapter.objectBoundViewRows(draftItems, objectName);
       } else {
         // objectstack#29550: this object's rows, not every object's
         // ({@link readObjectViewRows}).
@@ -6289,8 +6294,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
    * bare array) that the contract binds to `objectName`, in its order: set
    * `viewKind`, `object` naming the object, sorted by `order` and then `name`.
    * The same rule as `GET /meta/view?object=` (see
-   * {@link readObjectViewRows}), so the stored list and the one-object read
-   * answer the same rows in the same order.
+   * {@link readObjectViewRows}), so the stored list, the one-object read and
+   * {@link listViews}' draft-overlaid list answer by one rule: a row without
+   * `viewKind` or `object` (stored before the write door refused such rows,
+   * #7741) is a tab on none of them.
    */
   private static objectBoundViewRows(answer: any, objectName: string): any[] {
     const items: any[] = Array.isArray(answer?.items)

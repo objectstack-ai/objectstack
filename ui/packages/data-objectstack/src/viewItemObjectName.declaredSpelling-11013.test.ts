@@ -32,6 +32,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ViewMetadataSchema } from '@objectstack/spec/ui';
 import { ObjectStackAdapter, viewItemObjectName } from './index';
+import { answerObjectViewRead } from './objectViewRoute.test-support';
 
 const OBJECT = 'crm_task';
 
@@ -54,14 +55,16 @@ function makeDS(seed: any[] = []) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
     // `updateView` asks the draft home first; nothing is pending here.
+    // objectstack#29550: the one-object view read answers from the same rows.
     fetch: vi.fn(async (input: RequestInfo | URL) =>
-      String(input).includes('state=draft')
+      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+      ?? (String(input).includes('state=draft')
         ? json({ error: 'not found' }, 404)
-        : json({ success: true, data: { capabilities: {}, routes: {} } })),
+        : json({ success: true, data: { capabilities: {}, routes: {} } }))),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta };
+  ds.client = { meta, getLocale: () => undefined };
   return { ds, meta, rows };
 }
 
@@ -113,8 +116,10 @@ describe('objectui#11013 — the answer: `object` and `data.object` bind, `objec
   });
 
   it('listViews and listViewOverrides narrow by the same answer', async () => {
-    const declared = { name: `${OBJECT}.declared`, object: OBJECT, label: 'Declared', type: 'grid' };
-    const undeclared = { name: `${OBJECT}.undeclared`, objectName: OBJECT, label: 'Undeclared', type: 'grid' };
+    // objectstack#29550: both carry `viewKind`, so the binding's spelling is
+    // the only difference between them.
+    const declared = { name: `${OBJECT}.declared`, object: OBJECT, viewKind: 'list', label: 'Declared', type: 'grid' };
+    const undeclared = { name: `${OBJECT}.undeclared`, objectName: OBJECT, viewKind: 'list', label: 'Undeclared', type: 'grid' };
     const { ds } = makeDS([declared, undeclared]);
 
     const listed = (await ds.listViews(OBJECT)).map((v: any) => v.name);

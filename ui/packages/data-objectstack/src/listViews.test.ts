@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackAdapter } from './index';
+import { answerObjectViewRead } from './objectViewRoute.test-support';
 
 /**
  * `listViews(object)` feeds the list-view switcher (ObjectView → ViewTabBar),
@@ -18,15 +19,17 @@ import { ObjectStackAdapter } from './index';
 function makeDS(items: any[]) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    // objectstack#29550: the one-object read answers from the same rows.
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta: { getItems: vi.fn(async () => ({ items })) } };
+  ds.client = { meta: { getItems: vi.fn(async () => ({ items })) }, getLocale: () => undefined };
   return ds;
 }
 
@@ -53,7 +56,7 @@ function makeDraftDS(overlaid: any[]) {
   const ds: any = new ObjectStackAdapter({ baseUrl: 'http://test.local', fetch: fetchImpl });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta: { getItems: vi.fn(async () => ({ items: [] })) } };
+  ds.client = { meta: { getItems: vi.fn(async () => ({ items: [] })) }, getLocale: () => undefined };
   return { ds, fetchImpl };
 }
 
@@ -95,12 +98,20 @@ describe('ObjectStackDataSource.listViews', () => {
     expect(views.map((v: any) => v.name)).toEqual(['crm_activity.all']);
   });
 
-  it('keeps legacy bare specs without a viewKind (saved/list views)', async () => {
+  // objectstack#29550 rewrote this case. It pinned that a legacy row with no
+  // `viewKind` (a bare spec, or a `{ list }` wrapper) was a tab. The published
+  // read is now the contract's one-object read, which serves only rows
+  // carrying `viewKind` and `object` (ADR-0017 section 3.5; the write door has
+  // refused unbound rows since #7741), and the stored list and the
+  // draft-overlaid list are narrowed by the same rule, so such a row is a tab
+  // on none of them. Re-saving the view from the Console binds it again.
+  it('a legacy row without a viewKind is not a tab, published or in the draft preview', async () => {
     const legacy = { name: 'saved_grid', object: 'crm_activity', type: 'grid' };
     const wrapped = { list: { name: 'wrapped_grid', object: 'crm_activity', type: 'grid' } };
     const ds = makeDS([legacy, wrapped]);
-    const views = await ds.listViews('crm_activity');
-    expect(views.map((v: any) => v.name).sort()).toEqual(['saved_grid', 'wrapped_grid']);
+    expect(await ds.listViews('crm_activity')).toEqual([]);
+    const { ds: draft } = makeDraftDS([legacy, wrapped]);
+    expect(await draft.listViews('crm_activity', { previewDrafts: true })).toEqual([]);
   });
 
   // ── objectui#4227 — a personalization override must never read back as a
@@ -119,8 +130,12 @@ describe('ObjectStackDataSource.listViews', () => {
       // objectui#12504; the rows are still at rest): the marker plus a full
       // copy of the system view's body (`persistViewPatch` USED TO spread the
       // whole active tab into the write).
+      //
+      // objectstack#29550: the row carries the `viewKind` the platform
+      // inherits for it from the registry entry it shadows (#7741/#2555), so
+      // the marker, not the contract's object+viewKind rule, is what drops it.
       const override = {
-        name: 'crm_lead.default', object: 'crm_lead', type: 'grid',
+        name: 'crm_lead.default', object: 'crm_lead', viewKind: 'list', type: 'grid',
         data: { provider: 'object', object: 'crm_lead' }, columns: ['name'],
         rowHeight: 40, _isOverride: true,
       };
@@ -148,10 +163,15 @@ describe('ObjectStackDataSource.listViews', () => {
       expect(views).toEqual([unmarkedFlatRow]);
     });
 
-    it('a marked row is excluded even without the legacy viewKind signal', async () => {
-      const minimal = { name: 'crm_lead.default', object: 'crm_lead', rowHeight: 40, _isOverride: true };
+    it('a marked row is excluded by the marker alone', async () => {
+      // objectstack#29550: the fixture carries `viewKind` (every row a read
+      // serves does), so the marker alone is what excludes it.
+      const minimal = { name: 'crm_lead.default', object: 'crm_lead', viewKind: 'list', rowHeight: 40, _isOverride: true };
       const ds = makeDS([minimal]);
       expect(await ds.listViews('crm_lead')).toEqual([]);
+      // Control: the same row unmarked is listed, so the marker is the cause.
+      const { _isOverride: _marker, ...unmarked } = minimal;
+      expect((await makeDS([unmarked]).listViews('crm_lead')).map((v: any) => v.name)).toEqual(['crm_lead.default']);
     });
 
     it('does NOT exclude a genuine ViewItem-record saved view, even one named like a system view', async () => {
@@ -167,14 +187,17 @@ describe('ObjectStackDataSource.listViews', () => {
       expect(views.map((v: any) => v.name)).toEqual(['crm_lead.default']);
     });
 
-    it('does NOT exclude a flat legacy saved view with no viewKind at all', async () => {
-      // Same fixture family as "keeps legacy bare specs without a viewKind"
-      // above, restated here to pin the boundary this predicate must respect:
-      // no `viewKind` ⇒ never treated as an override, regardless of flatness.
+    it('a flat legacy saved view with no viewKind at all is not listed by either read (objectstack#29550)', async () => {
+      // Same fixture family as the legacy-row case above. This case pinned
+      // that the overlay predicate never excluded such a row (no `viewKind` ⇒
+      // never an override, regardless of flatness). objectstack#29550: no read
+      // lists a row without `viewKind` any more, so the row is not a tab before
+      // the predicate is asked; the predicate's own marker rule is pinned by
+      // the cases around this one.
       const flatSaved = { name: 'crm_lead.my_view', object: 'crm_lead', type: 'grid', columns: ['name'] };
-      const ds = makeDS([flatSaved]);
-      const views = await ds.listViews('crm_lead');
-      expect(views.map((v: any) => v.name)).toEqual(['crm_lead.my_view']);
+      expect(await makeDS([flatSaved]).listViews('crm_lead')).toEqual([]);
+      const { ds } = makeDraftDS([flatSaved]);
+      expect(await ds.listViews('crm_lead', { previewDrafts: true })).toEqual([]);
     });
   });
 
@@ -232,17 +255,17 @@ describe('ObjectStackDataSource.listViews', () => {
       expect(views.find((v: any) => v.name === 'crm_activity.calendar')?._draft).toBeUndefined();
     });
 
-    it('non-preview mode uses the published getItems path (no draft fetch)', async () => {
-      const { ds, fetchImpl } = makeDraftDS([]);
-      ds.client.meta.getItems = vi.fn(async () => ({
-        items: [{
-          name: 'crm_activity.all', object: 'crm_activity', viewKind: 'list',
-          config: { type: 'grid', data: { object: 'crm_activity' } },
-        }],
-      }));
+    it('non-preview mode reads the published one-object route (no draft fetch)', async () => {
+      // objectstack#29550: the published read is `?object=`, not the whole
+      // list, and it never carries the preview flag.
+      const { ds, fetchImpl } = makeDraftDS([{
+        name: 'crm_activity.all', object: 'crm_activity', viewKind: 'list',
+        config: { type: 'grid', data: { object: 'crm_activity' } },
+      }]);
       const views = await ds.listViews('crm_activity');
-      expect(ds.client.meta.getItems).toHaveBeenCalledTimes(1);
-      expect(fetchImpl.mock.calls.filter(([u]: any[]) => String(u).includes('/meta/view'))).toHaveLength(0);
+      expect(ds.client.meta.getItems).not.toHaveBeenCalled();
+      const metaCalls = fetchImpl.mock.calls.filter(([u]: any[]) => String(u).includes('/meta/view'));
+      expect(metaCalls.map(([u]: any[]) => String(u))).toEqual(['http://test.local/api/v1/meta/view?object=crm_activity']);
       expect(views.map((v: any) => v.name)).toEqual(['crm_activity.all']);
       expect(views[0]._draft).toBeUndefined();
     });

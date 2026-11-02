@@ -41,6 +41,7 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectStackAdapter, narrowPersonalizationOverlay } from './index';
+import { answerObjectViewRead } from './objectViewRoute.test-support';
 
 const OBJECT_NAME = 'crm_lead';
 const VIEW_ID = 'crm_lead.all';
@@ -127,15 +128,17 @@ function makePlatformStore() {
 function makeAdapter(meta: any) {
   const ds: any = new ObjectStackAdapter({
     baseUrl: 'http://test.local',
-    fetch: vi.fn(async () =>
-      new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
+    // objectstack#29550: the one-object view read answers from the same rows.
+    fetch: vi.fn(async (input: RequestInfo | URL) =>
+      (await answerObjectViewRead(input, () => ds.client.meta.getItems('view')))
+      ?? new Response(JSON.stringify({ success: true, data: { capabilities: {}, routes: {} } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })),
   });
   ds.connected = true;
   ds.connectionState = 'connected';
-  ds.client = { meta };
+  ds.client = { meta, getLocale: () => undefined };
   return ds;
 }
 
