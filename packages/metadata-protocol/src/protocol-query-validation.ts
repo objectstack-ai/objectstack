@@ -49,7 +49,7 @@ import type { ObjectStackProtocolImplementation } from './protocol.js';
 import { FILTER_LOGICAL_KEYS, ODATA_SPELLING, QUERY_PARAM_NEAR_MISS, invalidSortError, isObjectOfDisabledPackage, isPlainRecord, nearMissKey, objectPackageDisabledError, quotedQueryValue, suggestFieldName } from './protocol.js';
 import { objectNotFoundError, relationConditionSites } from '@objectstack/core';
 import { collectInternalWriteResponseFields } from './write-response-internal-fields.js';
-import { AggregationFunction, DateGranularity, REFERENCE_VALUE_TYPES, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS, apiExposureDenialReason, canServeApiOperation, classifyDottedFilterHead, effectiveOperationsArray, isCredentialFieldType, isFilterAST, isVirtualSearchField, parseFilterAST, referenceTargetOf, resolveEffectiveApiMethods, resolveSearchFieldResolution } from '@objectstack/spec/data';
+import { AggregationFunction, DateGranularity, REFERENCE_VALUE_TYPES, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES, SEARCH_AUTO_EXCLUDED_FIELDS, SEARCH_FLAG_EXCLUDED_TYPES, apiExposureDenialReason, canServeApiOperation, classifyDottedFilterHead, effectiveOperationsArray, isCredentialFieldType, isFilterAST, isVirtualSearchField, parseFilterAST, referenceTargetOf, resolveEffectiveApiMethods, resolveSearchFieldResolution } from '@objectstack/spec/data';
 
 /**
  * [#20802] The nested-relation spelling of a dotted relation path, as the
@@ -1026,17 +1026,31 @@ export function assertSearchFieldsAreSearchable(
             + "'search' scans — a field outside it cannot be a search target until it is added there.";
     } else {
         const meta = gate.fields[first];
+        // The field's own `searchable: true` admits it whatever its name,
+        // `hidden` or type, except the hard exclusions — the resolution above
+        // asks it before the default's own exclusions (ruling record
+        // 6573569376). So the reason names the opt-in the field lacks, and the
+        // remedy offers it wherever it would work.
+        const hardExcluded = !!meta && typeof meta.type === 'string' && SEARCH_FLAG_EXCLUDED_TYPES.has(meta.type);
         const why = !meta || SEARCH_AUTO_EXCLUDED_FIELDS.has(first)
             ? 'a system/audit column, which the default never includes'
             : meta.hidden
                 ? 'hidden'
-                : `type '${meta.type}'`;
+                : hardExcluded
+                    ? `type '${meta.type}', which 'search' never scans even when marked 'searchable: true'`
+                    : `type '${meta.type}'`;
+        const flaggable = !!meta && typeof meta.type === 'string' && !hardExcluded;
         detail = `Field '${first}' on object '${object}' is not searchable`
             + (offenders.length > 1 ? ` (also: ${offenders.slice(1).join(', ')})` : '')
             + `. With no 'searchableFields' declared, 'search' scans the text-like columns `
-            + `(${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}), and '${first}' is `
+            + `(${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')}) and every field `
+            + `marked 'searchable: true', and '${first}' is `
             + why
-            + ". Declare 'searchableFields' on the object to choose the searchable set explicitly.";
+            + (flaggable ? ", not marked 'searchable: true'" : '')
+            + (flaggable
+                ? ". Mark the field 'searchable: true', or declare 'searchableFields' on the object to "
+                  + 'choose the searchable set explicitly.'
+                : ". Declare 'searchableFields' on the object to choose the searchable set explicitly.");
     }
     const err: any = new Error(detail);
     err.code = 'INVALID_FIELD';

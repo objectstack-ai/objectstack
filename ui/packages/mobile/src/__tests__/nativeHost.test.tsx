@@ -20,6 +20,7 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest';
 import { render, cleanup, act } from '@testing-library/react';
 import {
+  NATIVE_BRIDGE_VERSION,
   NATIVE_HOST_GLOBAL,
   NATIVE_NAVIGATE_EVENT,
   getNativeHost,
@@ -29,6 +30,7 @@ import {
   nativeNavigate,
   nativeOpenExternal,
   nativeResetServer,
+  nativeScan,
   postNativeReady,
   postNativeRouteChanged,
   resetNativeHostEventsForTests,
@@ -42,7 +44,7 @@ import {
   useNativeHostRouting,
 } from '../useNativeHost';
 
-const ALL_METHODS: NativeHostMethod[] = ['getPushToken', 'haptic', 'openExternal', 'navigate', 'resetServer'];
+const ALL_METHODS: NativeHostMethod[] = ['getPushToken', 'haptic', 'openExternal', 'navigate', 'resetServer', 'scan'];
 
 function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackNative & {
   ready: Mock<() => void>;
@@ -60,6 +62,7 @@ function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackN
     openExternal: vi.fn(async () => null),
     navigate: vi.fn(async () => null),
     resetServer: vi.fn(async () => null),
+    scan: vi.fn(async () => 'ASSET-0042'),
     ready: vi.fn<() => void>(),
     routeChanged: vi.fn<(route: string) => void>(),
   };
@@ -117,6 +120,40 @@ describe('detection', () => {
     install(bridge);
     render(<Probe />);
     expect(seen.at(-1)).toBe(bridge);
+  });
+});
+
+describe('an open platform set and the bridge protocol version', () => {
+  it('a platform other than ios or android is a bridge like any other', () => {
+    const bridge = { ...fakeBridge(['haptic']), platform: 'desktop' };
+    install(bridge);
+    expect(getNativeHost()).toBe(bridge);
+    expect(getNativeHost()?.platform).toBe('desktop');
+  });
+
+  it('this package speaks protocol version 1', () => {
+    expect(NATIVE_BRIDGE_VERSION).toBe(1);
+  });
+
+  it.each([
+    ['a newer version', NATIVE_BRIDGE_VERSION + 1],
+    ['a string version', '1'],
+    ['NaN', Number.NaN],
+    ['no version', undefined],
+  ])('%s reads as no bridge: getNativeHost is null and every call is unavailable', async (_label, version) => {
+    const bridge = { ...fakeBridge(), version };
+    install(bridge);
+    expect(getNativeHost()).toBeNull();
+    await expect(nativeHaptic('light')).resolves.toEqual({ status: 'unavailable' });
+    expect(bridge.haptic).not.toHaveBeenCalled();
+  });
+
+  it('control: the version this package speaks, and an older one, are the bridge', () => {
+    for (const version of [NATIVE_BRIDGE_VERSION, 0]) {
+      const bridge = { ...fakeBridge(), version };
+      install(bridge);
+      expect(getNativeHost()).toBe(bridge);
+    }
   });
 });
 
@@ -189,6 +226,7 @@ describe('typed call wrappers feature-detect and never throw', () => {
     ['openExternal', () => nativeOpenExternal('https://example.com')],
     ['navigate', () => nativeNavigate('/home')],
     ['resetServer', () => nativeResetServer()],
+    ['scan', () => nativeScan()],
   ];
 
   it.each(calls)('%s resolves "unavailable" without a bridge', async (_method, call) => {
@@ -219,6 +257,36 @@ describe('typed call wrappers feature-detect and never throw', () => {
     expect(bridge.openExternal).toHaveBeenCalledWith('mailto:a@example.com');
     await nativeNavigate('/apps/crm');
     expect(bridge.navigate).toHaveBeenCalledWith('/apps/crm');
+  });
+
+  it('scan resolves "ok" with the decoded text, forwards the formats, and keeps the bridge as `this`', async () => {
+    const bridge = fakeBridge();
+    const scan = vi.fn(async () => 'ASSET-0042');
+    bridge.scan = scan;
+    install(bridge);
+    await expect(nativeScan({ formats: ['qr', 'ean13'] })).resolves.toEqual({ status: 'ok', value: 'ASSET-0042' });
+    expect(scan).toHaveBeenCalledWith({ formats: ['qr', 'ean13'] });
+    expect(scan.mock.contexts[0]).toBe(bridge);
+  });
+
+  it('scan resolves "ok" with null when the user closes the scanner', async () => {
+    const bridge = fakeBridge();
+    bridge.scan = vi.fn(async () => null);
+    install(bridge);
+    await expect(nativeScan()).resolves.toEqual({ status: 'ok', value: null });
+  });
+
+  it('scan resolves "failed" with the shell message when the camera is refused', async () => {
+    const bridge = fakeBridge();
+    bridge.scan = vi.fn(async () => {
+      throw Object.assign(new Error('Camera permission denied'), { code: 'failed' });
+    });
+    install(bridge);
+    await expect(nativeScan()).resolves.toEqual({
+      status: 'failed',
+      code: 'failed',
+      message: 'Camera permission denied',
+    });
   });
 
   it('a call the shell rejects resolves "failed" with the shell error code', async () => {
@@ -335,6 +403,17 @@ describe('useNativeHostRouting', () => {
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('a bridge speaking a newer protocol gets no ready, no route and no navigate listener', () => {
+    const bridge = { ...fakeBridge(), version: NATIVE_BRIDGE_VERSION + 1 };
+    install(bridge);
+    const add = vi.spyOn(window, 'addEventListener');
+    const navigate = vi.fn();
+    render(<Router route="/home" navigate={navigate} />);
+    expect(bridge.ready).not.toHaveBeenCalled();
+    expect(bridge.routeChanged).not.toHaveBeenCalled();
+    expect(add.mock.calls.some(([type]) => type === NATIVE_NAVIGATE_EVENT)).toBe(false);
   });
 
   it('control: outside shell mode no navigate listener is installed and nothing is posted', () => {
