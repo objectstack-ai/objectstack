@@ -7,8 +7,8 @@
  */
 
 /**
- * objectstack#27545 — the list beside an open record marks the row the pane
- * shows. The open row follows every row click and `↑` / `↓` step, scrolls
+ * objectstack#27545 — the list under an open record marks the row the drawer
+ * shows (the split pane beside it retired, objectstack#28915). The open row follows every row click and `↑` / `↓` step, scrolls
  * into view, and a change re-renders the row it leaves and the row it
  * reaches — never the list around them (`record-list-face.tsx`).
  */
@@ -20,8 +20,6 @@ import {
   ActiveListRecordProvider,
   ActiveListRow,
   listRecordIdOf,
-  recordListFaceFor,
-  RECORD_LIST_CARD_FACE_BELOW_PX,
 } from '../custom/record-list-face';
 import { ComponentRegistry } from '@object-ui/core';
 // Registers the renderers at module scope (objectui#3010).
@@ -98,11 +96,6 @@ describe('the open row', () => {
     expect(listRecordIdOf({ _id: 'x' })).toBe('x');
     expect(listRecordIdOf({ id: '' })).toBeNull();
     expect(listRecordIdOf(null)).toBeNull();
-  });
-
-  it('the narrowed face turns to cards below 440 px', () => {
-    expect(recordListFaceFor(RECORD_LIST_CARD_FACE_BELOW_PX)).toBe('columns');
-    expect(recordListFaceFor(RECORD_LIST_CARD_FACE_BELOW_PX - 1)).toBe('cards');
   });
 });
 
