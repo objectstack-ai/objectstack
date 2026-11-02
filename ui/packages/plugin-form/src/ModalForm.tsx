@@ -33,6 +33,9 @@ import {
   AlertDialogDescription,
   AlertDialogAction,
   AlertDialogCancel,
+  Empty,
+  EmptyTitle,
+  EmptyDescription,
   toast,
 } from '@object-ui/components';
 import { Loader2 } from 'lucide-react';
@@ -73,6 +76,7 @@ import { usePermissions } from '@object-ui/permissions';
 import { useOccSave } from './occSave';
 import {
   NO_LOAD_FAILURES,
+  RecordNotFoundError,
   beginLoadRun,
   shownLoadFailure,
   type LoadFailures,
@@ -109,6 +113,10 @@ const useDiscardTranslation = createSafeTranslation(
     // The footer's declared Reset button (objectstack#27247).
     'common.reset': 'Reset',
     'form.errorLoading': 'Error loading form',
+    // The record not-found state, the console's shared copy (the same keys and
+    // values `RecordDetailView` draws), for an edit read that finds no record.
+    'empty.recordNotFound': 'Record not found',
+    'empty.recordNotFoundDescription': 'The record you are looking for does not exist, may have been deleted, or you may not have access to it.',
   },
   'form.discardTitle',
 );
@@ -611,6 +619,12 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
       try {
         const data = await dataSource.findOne(schema.objectName, schema.recordId);
         if (cancelled) return;
+        // `findOne` answers `null` for a record that does not exist: there is
+        // nothing to edit, so the read failed, and the form is not seeded.
+        if (data == null) {
+          run.fail(new RecordNotFoundError(schema.objectName, schema.recordId));
+          return;
+        }
         loadedRecordIdRef.current = schema.recordId;
         loadedRecordRef.current = snapshotLoadedRecord(schema, data);
         setFormData(data || {});
@@ -904,6 +918,14 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
   };
 
   const renderContent = () => {
+    if (error instanceof RecordNotFoundError) {
+      return (
+        <Empty data-testid="modal-form-record-not-found">
+          <EmptyTitle>{t('empty.recordNotFound')}</EmptyTitle>
+          <EmptyDescription>{t('empty.recordNotFoundDescription')}</EmptyDescription>
+        </Empty>
+      );
+    }
     if (error) {
       return (
         <div className="p-4 border border-red-300 bg-red-50 rounded-md">

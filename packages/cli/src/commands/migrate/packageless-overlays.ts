@@ -93,8 +93,11 @@ function jsonRow(row: CensusRow, outcome?: Outcome): Record<string, unknown> {
     ...(row.base !== undefined ? { base: row.base } : {}),
     ...(row.pair !== undefined ? { pair: row.pair } : {}),
     ...(row.shadowDeclares !== undefined ? { shadowDeclares: row.shadowDeclares } : {}),
+    ...(row.addedMember !== undefined ? { addedMember: row.addedMember } : {}),
     outcome: outcome?.outcome ?? (row.disposition === 'movable' ? 'listed' : 'left'),
-    ...(outcome && outcome.outcome !== 'failed' ? { packageId: outcome.packageId, basedOn: outcome.basedOn } : {}),
+    ...(outcome && outcome.outcome !== 'failed'
+      ? { packageId: outcome.packageId, ...(outcome.basedOn !== undefined ? { basedOn: outcome.basedOn } : {}) }
+      : {}),
     ...(outcome?.outcome === 'failed' ? { error: outcome.error } : {}),
   };
 }
@@ -376,7 +379,12 @@ export default class MigratePackagelessOverlays extends Command {
     if (!apply) {
       if (movable.length > 0) {
         console.log(chalk.bold(`${movable.length} row(s) to move:`));
-        for (const row of movable) console.log(`  • ${itemOf(row)} → ${row.pair} (overrides ${row.base})`);
+        for (const row of movable) {
+          // [#28904] A member the base does not ship moves in as the pair's own, declaring nothing.
+          console.log(`  • ${itemOf(row)} → ${row.pair} ${row.addedMember !== undefined
+            ? `(its own member; ${row.base} ships none at ${row.addedMember})`
+            : `(overrides ${row.base})`}`);
+        }
       }
       if (result.incompleteDeclarations.length > 0) {
         console.log(chalk.bold(`${result.incompleteDeclarations.length} declared override(s) missing basedOn:`));
@@ -395,7 +403,8 @@ export default class MigratePackagelessOverlays extends Command {
         console.log(`  ${chalk.red('✗')} ${itemOf(row)} — ${outcome.error}`);
       } else {
         const verb = outcome.outcome === 'moved' ? 'moved into' : 'basedOn recorded in';
-        console.log(`  ${chalk.green('✓')} ${itemOf(row)} ${verb} ${outcome.packageId} ${chalk.dim(`(basedOn ${outcome.basedOn})`)}`);
+        const detail = outcome.addedMember !== undefined ? `as its own member ${outcome.addedMember}` : `basedOn ${outcome.basedOn}`;
+        console.log(`  ${chalk.green('✓')} ${itemOf(row)} ${verb} ${outcome.packageId} ${chalk.dim(`(${detail})`)}`);
       }
     }
     console.log('');
