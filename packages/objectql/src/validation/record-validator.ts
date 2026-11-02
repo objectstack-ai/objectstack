@@ -54,7 +54,9 @@
  *  - format         email / url / phone   (lightweight RFC-aware regex)
  *  - select / multiselect: value must appear in `options`, or be one the write
  *                   names for the field in `keptOptionValues` (an import's kept
- *                   cell, #22183)
+ *                   cell, #22183); a single value that is a plain object or an
+ *                   array, or an array element that is one, is `invalid_type`
+ *                   whether or not `options` are declared (#29244)
  *  - boolean / toggle: must coerce to boolean
  *  - date / datetime: must be ISO-parsable, naming a year from 0001 to 9999
  *                   for a `date` and from 1000 to 9999 for a `datetime` (#20280);
@@ -682,8 +684,8 @@ export function normalizeMultiValueFields(
  * the declared type at all", with the same wire code and the same sentence a
  * non-readonly field gets: a `date` / `datetime` / `time` the platform reads,
  * a number for a number-typed field, a boolean, an array for a multi-value
- * field, no plain object or array on a string-typed field, no filter-operator
- * object, and the ADR-0104 reference / media / structured-JSON shape under
+ * field, no plain object or array on a string-typed field or as a select's
+ * value or option element, no filter-operator object, and the ADR-0104 reference / media / structured-JSON shape under
  * the object's own posture (warn-first until the deployment's evidence says
  * otherwise). It is never REQUIRED.
  *
@@ -1687,8 +1689,26 @@ function validateOne(
   // question from two authorities that happen to agree today, which is the
   // drift the one-definition ruling (#17469) closes.
   if ((t === 'select' || t === 'radio') && !isMultiValueField(def)) {
-    // Option membership is the whole arm, and it is a constraint: ⛔ never on
-    // a readonly value (the open-vocabulary ruling, see ReadonlyValueScope).
+    // [#29244] A single-value select stores ONE option code (the spec's
+    // `valueSchemaFor`: a declared code, or a string when no `options` are
+    // declared). A plain object or an array is refused as a shape, never
+    // judged by its string reading: with no `options` the arm returned before
+    // looking at the value, so `{ a: 1 }` and `['x']` reached the driver as
+    // sent; with `options`, `['a']` passed membership as `String(['a'])` and
+    // the driver stored the array. Neither the list nor the filter door (which
+    // refuses an object or array comparand on this field) can read either.
+    // Same posture and sentence as the string arm's #29133 rule. A SHAPE test,
+    // so it runs ahead of `shapeOnly` and of option membership; a filter
+    // operator object was already refused above, with its own sentence.
+    if (isPlainObjectValue(value) || Array.isArray(value)) {
+      return fail(
+        'invalid_type',
+        { type: t, detail: `expected one option value, received ${Array.isArray(value) ? 'an array' : 'an object'}` },
+        'invalid_value_shape',
+      );
+    }
+    // Option membership is the rest of the arm, and it is a constraint: ⛔ never
+    // on a readonly value (the open-vocabulary ruling, see ReadonlyValueScope).
     if (shapeOnly) return null;
     const allowed = optionValues(def.options);
     if (picklist !== undefined && allowed.length === 0) return picklistUnresolved();
@@ -1728,6 +1748,20 @@ function validateOne(
     // including a system write. Whether a referenced id EXISTS is still
     // `assertReferencesResolve`'s question, with its own `isSystem` latitude.
     if (!isValueShapeJudgedType(t)) {
+      // [#29244] Each element is one option code, as for a single value. An
+      // element that is a plain object or an array is refused as a shape: with
+      // no `options` this branch admitted any array, and with `options` a
+      // nested `['a']` passed membership as `String(['a'])`. A shape test, so
+      // ahead of `shapeOnly`; an array of scalars is judged as before.
+      const nested = value.find((v) => isPlainObjectValue(v) || Array.isArray(v));
+      if (nested !== undefined) {
+        const received = Array.isArray(nested) ? 'an array' : 'an object';
+        return fail(
+          'invalid_type',
+          { type: t, detail: `expected an array of option values, received an element that is ${received}` },
+          'invalid_value_shape',
+        );
+      }
       if (shapeOnly) return null;
       const allowed = optionValues(def.options);
       if (allowed.length === 0) {
