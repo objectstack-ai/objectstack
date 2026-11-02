@@ -82,7 +82,7 @@ schema sits in its domain folder (`data/object.zod.ts`, `ui/view.zod.ts`, …).
 2. **Cross-references** — views/actions/flows reference defined objects
 3. **Seed data** — dataset objects exist in the definition
 
-To disable (advanced — e.g., objects provided by another plugin):
+To disable (e.g., objects provided by another plugin):
 
 ```typescript
 export default defineStack(config, { strict: false });
@@ -129,14 +129,14 @@ to a new protocol major — never to silence a mismatch.
 
 **`manifest.namespace` (ADR-0048):** Optional, but **enforced once set**. When a package declares `manifest.namespace: 'crm'`, every `object.name` must start with `crm_` or `defineStack` errors (`validateNamespacePrefix` in `@objectstack/spec`); the legacy `<ns>__<short>` double-underscore form is rejected, and `sys_`-prefixed names are platform-reserved and exempt. The namespace is also a package-ownership key — installing two packages that both claim `crm` fails with `NamespaceConflictError` (downgrade to a warning with `OS_METADATA_COLLISION=warn`). `os lint` additionally emits a non-fatal `naming/namespace-prefix` warning for bare-named UI/automation items (app, page, dashboard, flow, action, report, dataset) when a namespace is set.
 
-**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow (the rest of `OVERRIDABLE_METADATA_TYPES` wait for their doors), never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. The base's address serves that added locale too (both lists, the execution list, a send in that locale); a locale a dependent adds under the base's name is served only under its own `?package=`, never by a base-named or package-less read. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a package-unbound Setup row still wins over the base's until D11. An undeclared pair row or a dependent's row is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`; the base's is unchanged.
+**Customizing an installed package (ADR-0146):** Customize an installed base `hotcrm` in its paired writable package `hotcrm.custom`, which depends on it: a same-named item there with `overrides: { package: 'hotcrm', basedOn: '3.2.0' }` (its `manifest.id`/`manifest.version`) replaces the base's document whole. The read honours it only from the pair (the row's `package_id`), today only for a view, dashboard, report, email_template, translation or flow (the rest of `OVERRIDABLE_METADATA_TYPES` wait for their doors), never judges `basedOn` and ignores any other package's declaration. An email template is one item per (name, locale): an override names a locale the base ships; a locale the base does not ship is added without `overrides`. Then no `?package`, `?package=hotcrm`, the layered read and both lists serve it; the env-wide list holds one item per name one code package ships (a dependent's stays under its own `?package=`); a package-unbound Setup row still wins over the base's until D11. The base's address serves the pair's added locale too (both lists, the layered read with `code` null and `effective` the pair's, the execution list, a send in that locale); a locale a dependent adds under the base's name is served only under its own `?package=`, never by a base-named or package-less read. An undeclared pair row at a locale the base ships, or a dependent's row, is an orphan in the layered read's `overlay`, `effective` = the base's. An override may narrow a public form's anonymous intake, never re-open one any honoured body withdrew. `GET /packages/hotcrm.custom/export` carries it with `overrides`; the base's is unchanged.
 
 ---
 
 ## The App / Platform Boundary
 
 An ObjectStack app is a **simplified implementation of business features**:
-author metadata under the platform's spec, guided by these skills, and check it
+author metadata under the platform's spec and check it
 with the `os` commands ([Verify your work](./references/operations.md#verify-your-work)). Never rebuild
 what the platform owns.
 
@@ -259,8 +259,7 @@ Two packages exist:
 | `@objectstack/hono` | `createHonoApp({ kernel, prefix })` | You own the server: embed ObjectStack routes in your own Hono app / deploy target. |
 | `@objectstack/plugin-hono-server` | `HonoServerPlugin` | ObjectStack owns the server: a kernel plugin that hosts the Hono app and opens the listening socket (this is what `os dev` / `os serve` register). |
 
-There are **no** `@objectstack/adapter-*` packages (no adapter-express /
--fastify / -nextjs / -nuxt / -nestjs / -sveltekit). To integrate another
+There are **no** `@objectstack/adapter-*` packages. To integrate another
 framework, mount the Hono app (a web-standard `fetch` handler) or call the
 dispatcher yourself.
 
