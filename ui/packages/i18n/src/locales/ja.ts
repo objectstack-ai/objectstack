@@ -1322,6 +1322,9 @@ const ja = {
     noActivity: "アクティビティの記録なし",
     activityAccessDenied: "このレコードのアクティビティを表示する権限がありません。",
     commentsAccessDenied: "このレコードのコメントを表示する権限がありません。",
+    activityLoadFailed: "このレコードのアクティビティを読み込めませんでした。",
+    commentsLoadFailed: "このレコードのコメントを読み込めませんでした。",
+    retryLoadFeed: "再試行",
     // objectui#7149 — the rest of `ActivityTimeline`. The four chip labels the
     // `detail.*` pack did not already name, and the `formatFieldChange`
     // sentences, which are assembled in code and so need interpolation holes.
