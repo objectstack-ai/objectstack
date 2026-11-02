@@ -288,8 +288,12 @@ export const ConnectorOAuth2GrantSchema = z.enum(['authorization_code', 'client_
   .describe('OAuth2 grant (RFC 6749): `authorization_code` (an administrator connects once; PKCE S256 always) or `client_credentials` (no user step).');
 export type ConnectorOAuth2Grant = z.input<typeof ConnectorOAuth2GrantSchema>;
 
-/** The `oauth2` instance keys both grants share (ADR-0143 D2.1). */
-function oauth2SharedShape() {
+/**
+ * The `oauth2` instance keys both grants share (ADR-0143 D2.1). `clientIdNote`
+ * is the grant's own sentence on where else a client may come from, so each
+ * grant's reference row says only what holds for it.
+ */
+function oauth2SharedShape(clientIdNote: string) {
   return {
     type: z.literal('oauth2'),
     tokenUrl: z.string().url().optional().describe(
@@ -299,11 +303,7 @@ function oauth2SharedShape() {
     resource: z.string().url().optional().describe(
       'Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience).',
     ),
-    clientId: z.string().min(1).optional().describe(
-      'OAuth2 client id of a pre-registered client (not a secret). Required, except where the client comes from elsewhere: '
-        + "`provider: 'mcp'` over http may register one dynamically, and an `authorization_code` instance that declares "
-        + "`clientSource: 'installer'` takes it from the connection and must not name one here.",
-    ),
+    clientId: z.string().min(1).optional().describe(`OAuth2 client id of a pre-registered client (not a secret). ${clientIdNote}`),
   };
 }
 
@@ -357,7 +357,10 @@ export const ConnectorInstanceOAuth2AuthorizationCodeAuthSchema = lazySchema(() 
   // A different word for the same intent, out of reach of edit distance.
   aliases: { audience: 'resource' },
 }, {
-  ...oauth2SharedShape(),
+  ...oauth2SharedShape(
+    "Required, except where the client comes from elsewhere: `provider: 'mcp'` over http may register one dynamically, "
+      + "and with `clientSource: 'installer'` the administrator enters it on the connection, so it is not named here.",
+  ),
   grant: z.literal('authorization_code').describe('An administrator connects once; the platform refreshes the grant per dispatch.'),
   authorizationUrl: z.string().url().optional().describe(
     'Authorization endpoint. Required (except `provider: \'mcp\'` over http, which discovers it).',
@@ -401,7 +404,9 @@ export const ConnectorInstanceOAuth2ClientCredentialsAuthSchema = lazySchema(() 
   },
   aliases: { audience: 'resource' },
 }, {
-  ...oauth2SharedShape(),
+  ...oauth2SharedShape(
+    "Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically).",
+  ),
   grant: z.literal('client_credentials').describe('No user step: the client exchanges its own credentials for a token.'),
   credentialRef: z.string().min(1).optional().describe(
     'Secrets-layer reference resolved to the client secret; declared together with `clientId` (a `client_credentials` client is confidential). Never an inline secret.',

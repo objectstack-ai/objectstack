@@ -267,9 +267,10 @@ const result = ConnectorSchema.parse(data);
 | **tokenUrl** | `string` | optional | Token endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
 | **scopes** | `string[]` | optional | Scopes to request; sent space-separated. |
 | **resource** | `string` | optional | Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience). |
-| **clientId** | `string` | optional | OAuth2 client id (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
+| **clientId** | `string` | optional | OAuth2 client id of a pre-registered client (not a secret). Required, except where the client comes from elsewhere: `provider: 'mcp'` over http may register one dynamically, and with `clientSource: 'installer'` the administrator enters it on the connection, so it is not named here. |
 | **grant** | `'authorization_code'` | ✅ | An administrator connects once; the platform refreshes the grant per dispatch. |
 | **authorizationUrl** | `string` | optional | Authorization endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
+| **clientSource** | `Enum<'installer'>` | optional | Where the OAuth client comes from. `'installer'`: the administrator of each deployment registers their own client with the vendor, against that deployment's callback, and enters its id and secret on the instance's connection, so the definition names no `clientId` and no `credentialRef`. Omit it to name a pre-registered `clientId` here, or to let `provider: 'mcp'` over http register a client. |
 | **credentialRef** | `string` | optional | Secrets-layer reference resolved to the client secret of a pre-registered client (requires `clientId`). Omit for a public client. Never an inline secret. |
 
 ### Nested Shape: `Connector.auth[option 5][grant='client_credentials']`
@@ -280,7 +281,7 @@ const result = ConnectorSchema.parse(data);
 | **tokenUrl** | `string` | optional | Token endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
 | **scopes** | `string[]` | optional | Scopes to request; sent space-separated. |
 | **resource** | `string` | optional | Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience). |
-| **clientId** | `string` | optional | OAuth2 client id (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
+| **clientId** | `string` | optional | OAuth2 client id of a pre-registered client (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
 | **grant** | `'client_credentials'` | ✅ | No user step: the client exchanges its own credentials for a token. |
 | **credentialRef** | `string` | optional | Secrets-layer reference resolved to the client secret; declared together with `clientId` (a `client_credentials` client is confidential). Never an inline secret. |
 
@@ -561,9 +562,10 @@ This schema accepts one of the following structures:
 | **tokenUrl** | `string` | optional | Token endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
 | **scopes** | `string[]` | optional | Scopes to request; sent space-separated. |
 | **resource** | `string` | optional | Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience). |
-| **clientId** | `string` | optional | OAuth2 client id (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
+| **clientId** | `string` | optional | OAuth2 client id of a pre-registered client (not a secret). Required, except where the client comes from elsewhere: `provider: 'mcp'` over http may register one dynamically, and with `clientSource: 'installer'` the administrator enters it on the connection, so it is not named here. |
 | **grant** | `'authorization_code'` | ✅ | An administrator connects once; the platform refreshes the grant per dispatch. |
 | **authorizationUrl** | `string` | optional | Authorization endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
+| **clientSource** | `Enum<'installer'>` | optional | Where the OAuth client comes from. `'installer'`: the administrator of each deployment registers their own client with the vendor, against that deployment's callback, and enters its id and secret on the instance's connection, so the definition names no `clientId` and no `credentialRef`. Omit it to name a pre-registered `clientId` here, or to let `provider: 'mcp'` over http register a client. |
 | **credentialRef** | `string` | optional | Secrets-layer reference resolved to the client secret of a pre-registered client (requires `clientId`). Omit for a public client. Never an inline secret. |
 
 ---
@@ -580,7 +582,7 @@ This schema accepts one of the following structures:
 | **tokenUrl** | `string` | optional | Token endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
 | **scopes** | `string[]` | optional | Scopes to request; sent space-separated. |
 | **resource** | `string` | optional | Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience). |
-| **clientId** | `string` | optional | OAuth2 client id (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
+| **clientId** | `string` | optional | OAuth2 client id of a pre-registered client (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
 | **grant** | `'client_credentials'` | ✅ | No user step: the client exchanges its own credentials for a token. |
 | **credentialRef** | `string` | optional | Secrets-layer reference resolved to the client secret; declared together with `clientId` (a `client_credentials` client is confidential). Never an inline secret. |
 
@@ -599,9 +601,10 @@ This schema accepts one of the following structures:
 | **tokenUrl** | `string` | optional | Token endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
 | **scopes** | `string[]` | optional | Scopes to request; sent space-separated. |
 | **resource** | `string` | optional | Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience). |
-| **clientId** | `string` | optional | OAuth2 client id (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
+| **clientId** | `string` | optional | OAuth2 client id of a pre-registered client (not a secret). Required, except where the client comes from elsewhere: `provider: 'mcp'` over http may register one dynamically, and with `clientSource: 'installer'` the administrator enters it on the connection, so it is not named here. |
 | **grant** | `'authorization_code'` | ✅ | An administrator connects once; the platform refreshes the grant per dispatch. |
 | **authorizationUrl** | `string` | optional | Authorization endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
+| **clientSource** | `Enum<'installer'>` | optional | Where the OAuth client comes from. `'installer'`: the administrator of each deployment registers their own client with the vendor, against that deployment's callback, and enters its id and secret on the instance's connection, so the definition names no `clientId` and no `credentialRef`. Omit it to name a pre-registered `clientId` here, or to let `provider: 'mcp'` over http register a client. |
 | **credentialRef** | `string` | optional | Secrets-layer reference resolved to the client secret of a pre-registered client (requires `clientId`). Omit for a public client. Never an inline secret. |
 
 
@@ -617,7 +620,7 @@ This schema accepts one of the following structures:
 | **tokenUrl** | `string` | optional | Token endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
 | **scopes** | `string[]` | optional | Scopes to request; sent space-separated. |
 | **resource** | `string` | optional | Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience). |
-| **clientId** | `string` | optional | OAuth2 client id (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
+| **clientId** | `string` | optional | OAuth2 client id of a pre-registered client (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
 | **grant** | `'client_credentials'` | ✅ | No user step: the client exchanges its own credentials for a token. |
 | **credentialRef** | `string` | optional | Secrets-layer reference resolved to the client secret; declared together with `clientId` (a `client_credentials` client is confidential). Never an inline secret. |
 
@@ -870,9 +873,10 @@ Connector type
 | **tokenUrl** | `string` | optional | Token endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
 | **scopes** | `string[]` | optional | Scopes to request; sent space-separated. |
 | **resource** | `string` | optional | Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience). |
-| **clientId** | `string` | optional | OAuth2 client id (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
+| **clientId** | `string` | optional | OAuth2 client id of a pre-registered client (not a secret). Required, except where the client comes from elsewhere: `provider: 'mcp'` over http may register one dynamically, and with `clientSource: 'installer'` the administrator enters it on the connection, so it is not named here. |
 | **grant** | `'authorization_code'` | ✅ | An administrator connects once; the platform refreshes the grant per dispatch. |
 | **authorizationUrl** | `string` | optional | Authorization endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
+| **clientSource** | `Enum<'installer'>` | optional | Where the OAuth client comes from. `'installer'`: the administrator of each deployment registers their own client with the vendor, against that deployment's callback, and enters its id and secret on the instance's connection, so the definition names no `clientId` and no `credentialRef`. Omit it to name a pre-registered `clientId` here, or to let `provider: 'mcp'` over http register a client. |
 | **credentialRef** | `string` | optional | Secrets-layer reference resolved to the client secret of a pre-registered client (requires `clientId`). Omit for a public client. Never an inline secret. |
 
 ### Nested Shape: `DeclarativeConnectorEntry.auth[option 5][grant='client_credentials']`
@@ -883,7 +887,7 @@ Connector type
 | **tokenUrl** | `string` | optional | Token endpoint. Required (except `provider: 'mcp'` over http, which discovers it). |
 | **scopes** | `string[]` | optional | Scopes to request; sent space-separated. |
 | **resource** | `string` | optional | Resource indicator (RFC 8707) — the API the token is for, where the authorization server asks for one (some call it the audience). |
-| **clientId** | `string` | optional | OAuth2 client id (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
+| **clientId** | `string` | optional | OAuth2 client id of a pre-registered client (not a secret). Required (except `provider: 'mcp'` over http, where the provider may register a client dynamically). |
 | **grant** | `'client_credentials'` | ✅ | No user step: the client exchanges its own credentials for a token. |
 | **credentialRef** | `string` | optional | Secrets-layer reference resolved to the client secret; declared together with `clientId` (a `client_credentials` client is confidential). Never an inline secret. |
 
