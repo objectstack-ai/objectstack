@@ -17,7 +17,8 @@
 // by this: a region body cannot carry a durable pause, so a region-nested call
 // whose child suspends fails the run at the region boundary before anything
 // after the container runs. That walk keeps reading top-level calls only, and
-// two pins below hold it there.
+// two pins below hold it there. Such a call is the gate's region half instead
+// (#28897, `subflow-region-suspension.test.ts`).
 
 import { describe, it, expect, vi } from 'vitest';
 import { AutomationEngine } from './engine.js';
@@ -198,6 +199,22 @@ describe('the subflow guards read a call inside a region body (#28846)', () => {
         expect(thrown.message).toContain("Flow 'shared_step' cannot be disabled");
     });
 
+    it('enable: re-enabling a switched-off caller whose loop body calls a switched-off packaged child is refused with RESOURCE_CONFLICT / 409, naming the child (#28897)', async () => {
+        const { engine, isBound } = engineWithLedger();
+        engine.registerFlow('shared_step', child('shared_step'));
+        await engine.toggleFlow('shared_step', false);
+        engine.registerFlow('vendor_process', regionCaller('vendor_process', 'shared_step', 'loop', 'map'));
+        await engine.toggleFlow('vendor_process', false);
+
+        const thrown: any = await engine.toggleFlow('vendor_process', true).then(() => undefined, (e: unknown) => e);
+        expect(thrown, 're-enabling the caller was accepted').toBeDefined();
+        expect(thrown.code).toBe('RESOURCE_CONFLICT');
+        expect(thrown.status).toBe(409);
+        expect(thrown.message).toContain("Flow 'vendor_process' cannot be enabled");
+        expect(thrown.message).toContain("'shared_step'");
+        expect(isBound('vendor_process')).toBe(false);
+    });
+
     it('CONTROL: a caller whose loop body calls an ACTIVE packaged child is armed, with no warning', () => {
         const { engine, logger, isBound } = engineWithLedger();
         engine.registerFlow('shared_step', child('shared_step'));
@@ -220,12 +237,14 @@ describe('the save-notice half of the arming gate keeps reading top-level calls 
     const WAIT: Node = { id: 'hold', type: 'wait', label: 'Hold', waitEventConfig: { eventType: 'timer', timerDuration: 'PT1H' } };
     const NOTICE: Node = { id: 'tell', type: 'save_notice', label: 'Tell the saver', config: { message: 'Saved' } };
 
-    it('a save_notice after a region whose body calls a suspending child is not declined on that call: the region cannot carry the pause, so the run fails at the region, before the notice', () => {
+    it('a save_notice after a region whose body calls a suspending child is not declined on the notice: the region cannot carry the pause, so the run fails at the region, before the notice, and the gate declines it on the region call instead (#28897)', () => {
         const { engine, isBound } = engineWithLedger();
         engine.registerFlow('deal_review', chain('deal_review', [start(false), WAIT, END]));
         engine.registerFlow('deal_submit', chain('deal_submit', [start(true), region('loop', call('deal_review')), NOTICE, END]));
-        expect(isBound('deal_submit')).toBe(true);
-        expect(stateOf(engine, 'deal_submit')?.unboundCause).toBeUndefined();
+        expect(isBound('deal_submit')).toBe(false);
+        const row = stateOf(engine, 'deal_submit');
+        expect(row?.unboundCause).toBe('suspending_subflow_in_region');
+        expect(row?.reason).not.toContain('save_notice');
     });
 
     it('a child whose only call to a suspending flow sits in a region body does not count as suspending', () => {

@@ -74,6 +74,7 @@ import { syncObjectStackDeps } from './pkg-utils.js';
 import { copyDir } from './template-copy.js';
 import {
   deriveManifestId,
+  sanitizeNamespace,
   readTemplateNamespace,
   rewriteObjectNamePrefix,
   findStaleNamespacePrefixes,
@@ -105,23 +106,6 @@ const BUNDLED_TEMPLATES_DIR = path.resolve(__dirname, 'templates');
 
 function toTitleCase(str: string): string {
   return str.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-/**
- * Convert an npm package name into a valid ObjectStack namespace identifier
- * (regex `^[a-z][a-z0-9_]{1,19}$`, reserved: base/system/sys). Mirrors the
- * implementation in `@objectstack/cli` so both scaffolders agree.
- */
-export function sanitizeNamespace(name: string): string {
-  let s = name.replace(/^@[^/]+\//, '');
-  s = s.toLowerCase().replace(/[^a-z0-9]+/g, '_');
-  s = s.replace(/^_+|_+$/g, '');
-  if (!s) s = 'app';
-  if (/^[0-9]/.test(s)) s = 'a' + s;
-  if (s.length < 2) s = (s + '_app').slice(0, 20);
-  if (s.length > 20) s = s.slice(0, 20).replace(/_+$/, '');
-  if (['base', 'system', 'sys'].includes(s)) s = (s + '_app').slice(0, 20);
-  return s;
 }
 
 function readCliVersion(): string {
