@@ -100,7 +100,20 @@ export class HttpTestAdapter implements TestExecutionAdapter {
   /** The data mount derived from that probe, memoised so its fallback warns once. */
   private mountPromise?: Promise<ResolvedDataMount>;
 
-  constructor(private baseUrl: string, private authToken?: string) {}
+  /**
+   * The target origin (plus any path prefix) with its trailing slashes
+   * stripped, normalised ONCE here so every URL this adapter builds — the
+   * discovery probe, the record collection URLs, `api_call`'s relative target
+   * and the provenance clauses that name them — reads the same base. Each
+   * builder appends a path that starts with `/`, so `--url http://host:PORT/`
+   * kept verbatim addressed `//api/v1/...`, which the server answers 404.
+   * Nothing else is validated: a malformed `--url` behaves as it did.
+   */
+  private readonly baseUrl: string;
+
+  constructor(baseUrl: string, private authToken?: string) {
+    this.baseUrl = baseUrl.replace(/\/+$/, '');
+  }
 
   /** The run's discovery read; probes at most once per adapter. */
   private discovery(): Promise<DiscoveryRead> {
@@ -370,15 +383,17 @@ export class HttpTestAdapter implements TestExecutionAdapter {
           headers,
           body
       });
-      return this.handleResponse(response);
+      // The URL it addressed, never a mount: `api_call` consulted none.
+      return this.handleResponse(response, `api_call addressed ${method} ${url}`);
   }
 
-  private async handleResponse(response: Response, mountNote?: string) {
+  private async handleResponse(response: Response, addressNote?: string) {
     if (!response.ok) {
         const text = await response.text();
         // The `HTTP Error <status>: <body>` prefix is unchanged — a suite author
         // (and every transcript predating #7983) reads the same first clause;
-        // the mount provenance is APPENDED, never substituted.
+        // the mount provenance (or, for `api_call`, the URL it addressed) is
+        // APPENDED, never substituted.
         //
         // Appended on 404/405 only: those are the statuses a wrong mount
         // produces (nothing registered at the path / registered under another
@@ -388,7 +403,7 @@ export class HttpTestAdapter implements TestExecutionAdapter {
         // under a URL the author has no reason to doubt.
         const wrongUrlShaped = response.status === 404 || response.status === 405;
         throw new Error(
-          `HTTP Error ${response.status}: ${text}${wrongUrlShaped && mountNote ? ` — ${mountNote}` : ''}`,
+          `HTTP Error ${response.status}: ${text}${wrongUrlShaped && addressNote ? ` — ${addressNote}` : ''}`,
         );
     }
     const contentType = response.headers.get('content-type');
