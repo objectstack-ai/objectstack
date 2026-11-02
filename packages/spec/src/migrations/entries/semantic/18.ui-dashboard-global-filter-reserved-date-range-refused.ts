@@ -35,7 +35,8 @@ export const entry: SemanticMigration = {
     + '`filterBindings` key names the filter it meant, and that `os validate` reports no '
     + '`dashboard-filter-binding-unknown` finding. A stored `sys_metadata` dashboard that still carries '
     + 'the pair still loads, with `_diagnostics` reading `valid: false` and carrying this refusal, and its '
-    + 'next save (draft or publish) is refused; nothing rewrites it. Measured before the change: no '
-    + 'authored dashboard in this repository\'s examples, apps, packages or ui tree keys a global filter '
-    + '`dateRange`.',
+    + 'next save (draft or publish) is refused; nothing rewrites it. `os migrate meta --stored` lists each '
+    + 'such stored dashboard under this entry\'s id, at the entry\'s `name` (or `field`). Measured before the '
+    + 'change: no authored dashboard in this repository\'s examples, apps, packages or ui tree keys a '
+    + 'global filter `dateRange`.',
 };

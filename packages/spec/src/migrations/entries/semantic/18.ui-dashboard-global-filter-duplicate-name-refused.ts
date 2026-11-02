@@ -34,6 +34,7 @@ export const entry: SemanticMigration = {
     + 'filter it meant, and that `os validate` reports no `dashboard-filter-binding-unknown` finding. A '
     + 'stored `sys_metadata` dashboard that still repeats a key still loads, with `_diagnostics` reading '
     + '`valid: false` and carrying this refusal, and its next save (draft or publish) is refused; nothing '
-    + 'rewrites it. Measured before the change: no authored dashboard in this repository\'s examples, '
-    + 'platform objects, docs or skills repeats a filter key.',
+    + 'rewrites it. `os migrate meta --stored` lists each such stored dashboard under this entry\'s id, at '
+    + 'the second declaration\'s `name` (or `field`). Measured before the change: no authored dashboard in '
+    + 'this repository\'s examples, platform objects, docs or skills repeats a filter key.',
 };
