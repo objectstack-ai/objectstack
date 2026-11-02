@@ -34,13 +34,6 @@ import { useDetailTranslation } from './useDetailTranslation';
 import { hasCellValue } from './emptiness';
 import { useDefaultRecordPage } from './defaultRecordPage';
 
-/**
- * The edit face's widest column count on the default record page's grid.
- * Four keeps a lookup picker's chosen name whole beside its buttons in the
- * maximized pane; the read face's six do not.
- */
-const EDIT_GRID_COLUMNS = '@3xl:grid-cols-4';
-
 export interface HeaderHighlightProps {
   fields: HighlightField[];
   data?: any;
@@ -131,14 +124,14 @@ export const HeaderHighlight: React.FC<HeaderHighlightProps> = ({
       >
         <div
           data-highlights-face={gridFace ? 'grid' : undefined}
-          // The edit face caps at four columns (`EDIT_GRID_COLUMNS`): an editor
-          // needs the room a value does not, a lookup's picker drawing the
-          // chosen name beside its own buttons, so six cells in one row leave
-          // it a letter of the name. The fields wrap to a second row instead.
-          // The read face keeps all six in one row.
+          // The edit face stops at three columns: an editor needs the room a
+          // value does not, a lookup's picker drawing the chosen name beside
+          // its clear and browse buttons, and six cells in one row leave it a
+          // letter of the name. Six fields wrap to two rows of three instead.
+          // Only the read face widens to six in one row.
           className={gridFace ? cn(
             'grid grid-cols-2 gap-x-4 gap-y-3 @lg:grid-cols-3',
-            editing ? EDIT_GRID_COLUMNS : '@3xl:grid-cols-6',
+            !editing && '@3xl:grid-cols-6',
           ) : cn(
             'flex flex-wrap gap-y-4',
             // A chip's left border separates it from the chip BEFORE it on its
