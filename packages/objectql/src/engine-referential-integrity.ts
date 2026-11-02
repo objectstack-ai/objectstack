@@ -15,7 +15,8 @@
  * read door and the same warning when that read fails. Each method's
  * docblock stays on the method in `engine.ts`, which is still the contract.
  * `isEmptyReferenceValue` moves with its docblock, byte for byte, and is not
- * exported.
+ * exported. [#28881] Since the move, the system-caller exit keeps the check for
+ * a flow run's elevated write (the method's docblock, Scope).
  *
  * What stays in the class: `referenceExists`, `resolveMasterDetailParent` and
  * `resolveMasterDetailParents`, which read the private static
@@ -46,6 +47,7 @@
 
 import { referenceTargetOf, type EngineQueryOptions } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { keepsFlowWriteReferenceCheck } from '@objectstack/core';
 import { ValidationError, buildFieldError } from './validation/record-validator.js';
 import type { ObjectQL } from './engine.js';
 
@@ -86,7 +88,10 @@ export async function assertReferencesResolve(
   context: any,
   msgCtx?: { locale?: string; translate?: any; objectName?: string },
 ): Promise<void> {
-  if (context?.isSystem) return;
+  // [#28881] A system caller is exempt, except a flow run's elevated write:
+  // its elevation is for authorization, and it keeps this check (see
+  // `keepsFlowWriteReferenceCheck`, @objectstack/core).
+  if (context?.isSystem && !keepsFlowWriteReferenceCheck(context)) return;
   const fields = schema?.fields;
   if (!fields || !data) return;
 
