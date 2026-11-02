@@ -28,7 +28,7 @@ import { ElementButtonPropsSchema } from './component.zod';
 /** The fields an inline action admits, in the order they are picked. */
 const INLINE_FIELDS = [
   'type', 'name', 'label', 'target', 'openIn', 'method', 'params', 'bodyExtra',
-  'confirmText', 'successMessage', 'errorMessage', 'refreshAfter', 'opensInNewTab',
+  'description', 'confirmText', 'successMessage', 'errorMessage', 'refreshAfter', 'opensInNewTab',
 ] as const;
 
 /** Reach the inner object through the preprocess → object → refine chain. */
@@ -63,6 +63,7 @@ describe('InlineActionSchema is derived from ActionSchema, not restated', () => 
       method: 'POST' as const,
       params: [],
       bodyExtra: { resend: true },
+      description: 'Sends the invitation again.',
       confirmText: 'Sure?',
       successMessage: 'Done',
       errorMessage: 'Failed',
@@ -202,6 +203,88 @@ describe('InlineActionSchema — `bodyExtra` is the payload key, `params` is not
     expect(shape).not.toHaveProperty('body');
     const r = InlineActionSchema.safeParse({ type: 'api', target: '/x', body: { a: 1 } });
     expect(r.success).toBe(false);
+  });
+});
+
+/**
+ * The param dialog's explanatory line (cloud#3281, ruling A). `element:button`'s
+ * forward list already hands `description` to the runner and the console's
+ * param-collection handler draws it under the dialog title, so the pick follows
+ * the renderer here rather than leading it. The field is `ActionSchema`'s own —
+ * the same `template` slot with the inline locale-map arm — not a restatement.
+ */
+describe('InlineActionSchema — `description` says what the action does', () => {
+  /** The cloud invitation dialog's shape: an inline `api` action that collects params. */
+  const invite = {
+    type: 'api' as const,
+    target: '/api/v1/auth/organization/invite-member',
+    params: [{ name: 'email', label: 'Email', type: 'email' as const, required: true }],
+  };
+
+  it('accepts a plain string and keeps it, as the `template` envelope it is shorthand for', () => {
+    const r = InlineActionSchema.safeParse({
+      ...invite,
+      description: 'Your colleague gets an e-mail and joins with the chosen role after accepting.',
+    });
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    expect(r.data?.description).toEqual({
+      dialect: 'template',
+      source: 'Your colleague gets an e-mail and joins with the chosen role after accepting.',
+    });
+  });
+
+  it('accepts an inline locale map and keeps it verbatim', () => {
+    const localized = {
+      en: 'Your colleague gets an e-mail and joins after accepting.',
+      'zh-CN': '对方会收到邀请邮件，接受后以所选角色加入。',
+    };
+    const r = InlineActionSchema.safeParse({ ...invite, description: localized });
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    expect(r.data?.description).toEqual(localized);
+  });
+
+  it('still parses without one, and adds none', () => {
+    const r = InlineActionSchema.safeParse(invite);
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    expect(r.data).not.toHaveProperty('description');
+  });
+
+  it('takes the field ActionSchema declares, so both doors refuse a bad value alike', () => {
+    // Shared field factory, not a restated key: a value the registered door
+    // refuses by shape is refused inline too, at the same path, same code.
+    const codeAt = (r: { success: boolean; error?: z.ZodError }) =>
+      r.error?.issues.find(i => i.path.join('.') === 'description')?.code;
+    const inline = InlineActionSchema.safeParse({ ...invite, description: 42 });
+    const registered = ActionSchema.safeParse({ name: 'invite', label: 'Invite', ...invite, description: 42 });
+    expect(inline.success).toBe(false);
+    expect(registered.success).toBe(false);
+    expect(codeAt(inline)).toBeDefined();
+    expect(codeAt(inline)).toBe(codeAt(registered));
+  });
+
+  it('reaches parse output through element:button, the surface that forwards it', () => {
+    const r = ElementButtonPropsSchema.safeParse({
+      label: { en: 'Invite member', 'zh-CN': '邀请成员' },
+      action: { ...invite, description: { en: 'Sends an invitation e-mail.', 'zh-CN': '发送邀请邮件。' } },
+    });
+    expect(r.success, JSON.stringify((r as { error?: unknown }).error)).toBe(true);
+    expect((r.data as { action: { description: unknown } }).action.description)
+      .toEqual({ en: 'Sends an invitation e-mail.', 'zh-CN': '发送邀请邮件。' });
+  });
+
+  it.each([
+    ['icon', { icon: 'mail' }],
+    ['variant', { variant: 'primary' }],
+    ['body', { body: 'return 1' }],
+    ['cancelText', { cancelText: 'Back' }],
+    ['submitText', { submitText: 'Send' }],
+  ])('CONTROL: the widening is `description` alone — `%s` is still an unknown key inline', (key, extra) => {
+    const r = InlineActionSchema.safeParse({ ...invite, ...extra });
+    expect(r.success).toBe(false);
+    const issues = (r as { error: z.ZodError }).error.issues;
+    const unknown = issues.find(i => i.code === 'unrecognized_keys') as { keys?: string[] } | undefined;
+    expect(unknown, JSON.stringify(issues)).toBeDefined();
+    expect(unknown!.keys).toEqual([key]);
   });
 });
 
