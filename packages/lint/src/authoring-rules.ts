@@ -1981,11 +1981,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'parsed',
     commands: ALL,
     source: 'packages/lint/src/validate-flow-region-shape.ts',
-    surfaces: CLI_ONLY,
-    surfaceReason:
-      'Not yet on the runtime publish gate: whether a flow write whose region the engine refuses is refused at '
-      + 'publish is the server lane\'s open question for the metadata write path, decided there; this entry '
-      + 'brings the three authoring commands to the engine\'s registration verdict.',
+    // [#29233] Runtime publish gate (#4463): a flow whose region the engine
+    // refuses to register can only ever publish as a flow that never runs, so
+    // the draft read and every publish door refuse it here, through this one
+    // row, rather than through a gate-local copy of the same judgement.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['flow'],
     run: (stack) => validateFlowRegionShape(stack),
   },
   // The same predicate over a declarative connector's four header/env maps

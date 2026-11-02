@@ -460,7 +460,56 @@ const CASES: Array<{ rule: string; type: string; item: { name: string } & Record
             ],
         },
     },
+    {
+        // [#29233] A loop whose body closes on itself (body a → b → a, the
+        // card's reproduction). It saved, read valid:true and PUBLISHED, and
+        // the engine's region check then refused to register it.
+        rule: 'flow-region-shape-invalid',
+        type: 'flow',
+        item: regionFlow('region_loop', {
+            id: 'lp',
+            type: 'loop',
+            label: 'Loop',
+            config: {
+                collection: [1, 2],
+                iteratorVariable: 'row',
+                body: {
+                    nodes: [
+                        { id: 'step_a', type: 'assignment', label: 'A' },
+                        { id: 'step_b', type: 'assignment', label: 'B' },
+                    ],
+                    edges: [
+                        { id: 'b1', source: 'step_a', target: 'step_b' },
+                        { id: 'b2', source: 'step_b', target: 'step_a' },
+                    ],
+                },
+            },
+        }),
+    },
 ];
+
+/** [#29233] start → CONTAINER → end, the container's region carrying the case. */
+function regionFlow(name: string, container: Record<string, unknown>) {
+    return {
+        name,
+        label: name,
+        type: 'autolaunched',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            container,
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: container.id as string },
+            { id: 'e2', source: container.id as string, target: 'end' },
+        ],
+    };
+}
+
+/** [#29233] One straight body of a single step, the well-formed region shape. */
+function oneStep(id: string) {
+    return { nodes: [{ id, type: 'assignment', label: id }], edges: [] };
+}
 
 /** Stage one env-wide, package-bound draft (Studio's autosave shape). */
 async function stageDraft(protocol: ObjectStackProtocolImplementation, type: string, item: { name: string }) {
@@ -539,6 +588,58 @@ describe('a draft reads the verdict its publish gives (#26707)', () => {
         expect(await draftDiagnostics(protocol, 'flow', flow.name)).toEqual({ valid: true });
         const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
         expect(published).toMatchObject({ success: true, failedCount: 0 });
+    });
+
+    it('[#29233] a well-formed loop, parallel and try_catch region each still read valid:true and publish', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const flows = [
+            regionFlow('ok_loop', {
+                id: 'lp', type: 'loop', label: 'Loop',
+                config: { collection: [1, 2], iteratorVariable: 'row', body: oneStep('loop_step') },
+            }),
+            regionFlow('ok_parallel', {
+                id: 'fan', type: 'parallel', label: 'Fan',
+                config: { branches: [oneStep('left_step'), oneStep('right_step')] },
+            }),
+            regionFlow('ok_try', {
+                id: 'guard', type: 'try_catch', label: 'Guard',
+                config: { try: oneStep('try_step'), catch: oneStep('catch_step') },
+            }),
+        ];
+        for (const flow of flows) await stageDraft(protocol, 'flow', flow);
+
+        for (const flow of flows) expect(await draftDiagnostics(protocol, 'flow', flow.name)).toEqual({ valid: true });
+        const published: any = await protocol.publishPackageDrafts({ packageId: PKG });
+        expect(published).toMatchObject({ success: true, publishedCount: 3, failedCount: 0 });
+    });
+
+    it('[#29233] the region verdict on the draft read is the registry rule\'s: the engine\'s sentence, at the item root', async () => {
+        const { engine } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        // A one-branch parallel block nested in a try region. The registry rule
+        // judges the flow as one unit (as the engine does) and anchors the
+        // flow itself, so the item-relative path is the item root; the
+        // sentence names the region.
+        const flow = regionFlow('nested_region', {
+            id: 'guard', type: 'try_catch', label: 'Guard',
+            config: {
+                try: {
+                    nodes: [{ id: 'fan', type: 'parallel', label: 'Fan', config: { branches: [oneStep('only_step')] } }],
+                    edges: [],
+                },
+                catch: oneStep('catch_step'),
+            },
+        });
+        await stageDraft(protocol, 'flow', flow);
+
+        const diagnostics = await draftDiagnostics(protocol, 'flow', flow.name);
+        expect(diagnostics.valid).toBe(false);
+        expect((diagnostics.errors ?? []).filter((e) => e.code === 'flow-region-shape-invalid')).toEqual([{
+            path: '',
+            message: "Flow 'nested_region' would be refused at registration: parallel 'fan': a parallel block needs at least 2 branches",
+            code: 'flow-region-shape-invalid',
+        }]);
     });
 
     it('[#29025] the same loop with its closing edge typed back still reads valid:true and publishes', async () => {
