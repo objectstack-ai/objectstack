@@ -124,6 +124,8 @@ vi.mock('../AppContent', async () => {
     AppContent: AppProbe,
     // objectui#12700: the permissions scope `App` mounts over /home and /apps, a pass-through here.
     ConsolePermissionsScope: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    // objectstack#29114: the early permissions request beside the route, nothing here.
+    ConsolePermissionsRequest: () => null,
   };
 });
 

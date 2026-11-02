@@ -40,6 +40,7 @@ import { createLazyCounterStore, type CounterStore } from '@objectstack/plugin-a
 import { resolveClientAddress } from '@objectstack/plugin-auth/client-address';
 
 import { buildApiError } from '../error-envelope.js';
+import { serializePerKey } from './per-key-serial.js';
 import {
     applyTokenBucket,
     bucketIdleTtlSeconds,
@@ -201,11 +202,16 @@ function parseBucket(raw: unknown): BucketState | undefined {
  * The store is resolved at CONSUME time, never at plugin init, because a cache
  * plugin can register after this one (that exact ordering bug is #4772).
  *
- * Like plugin-auth's fixed-window counter this stays read-modify-write in the
- * absence of an atomic primitive, so two nodes can both admit a request at the
- * boundary and the limit can over-admit slightly under concurrency. That is
- * strictly better than counting per node, and the day `ICacheService` grows an
- * atomic increment this is where it plugs in.
+ * Inside one process a bucket admits no more than its budget however many
+ * requests for one key arrive at once: the read → refill → spend → write of one
+ * key runs through `serializePerKey` (`./per-key-serial.ts`), the same per-key
+ * ordering plugin-auth's fixed-window counter uses, so each update reads the
+ * state the previous one wrote. Different keys run concurrently.
+ *
+ * Across nodes it stays read-modify-write in the absence of an atomic
+ * primitive, so two nodes sharing one cache can both admit a request at the
+ * boundary. That is strictly better than counting per node, and the day
+ * `ICacheService` grows an atomic increment this is where it plugs in.
  */
 export class SharedTokenBucketLimiter {
     constructor(
@@ -214,7 +220,12 @@ export class SharedTokenBucketLimiter {
         private readonly now: () => number = Date.now,
     ) {}
 
-    async consume(key: string, cost = this.config.defaultCost ?? 1): Promise<RateLimitDecision> {
+    consume(key: string, cost = this.config.defaultCost ?? 1): Promise<RateLimitDecision> {
+        return serializePerKey(key, () => this.consumeOnce(key, cost));
+    }
+
+    /** One read → decide → write of `key`. Only ever run through {@link consume}'s per-key order. */
+    private async consumeOnce(key: string, cost: number): Promise<RateLimitDecision> {
         const store = await this.resolveStore();
         const now = this.now();
         const current = parseBucket(await store.get<unknown>(key));

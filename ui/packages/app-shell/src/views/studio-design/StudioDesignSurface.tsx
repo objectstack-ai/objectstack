@@ -93,6 +93,7 @@ import {
   navigationObjectOrder,
   type FlowTriggerGlyph,
 } from './flowGrouping.js';
+import { StudioRefusalStrip } from './StudioRefusalStrip.js';
 import {
   GridFieldAuthoringProvider,
   cn,
@@ -696,68 +697,8 @@ const KIND_ICON: Record<string, LucideIcon> = {
 const navIcon = (type?: string): LucideIcon => KIND_ICON[type ?? ''] ?? Compass;
 
 
-/**
- * objectui#11785 — the strip a pillar shows for a failed save or load. It
- * shows the refusal's sentence, a "Show me" button that opens the input the
- * sentence names, and the raw text (field paths, codes) inside a closed
- * "Details" disclosure. A failure with nothing rewritten (`plainRefusal`) has
- * no detail and renders as the single line it always was.
- *
- * objectstack#29139 — the sentence is announced: it is a `role="alert"`, the
- * sentence alone. A refusal stops what the author just did, and the strip
- * mounts with its sentence already in it; an alert is announced on insertion,
- * where a polite live region inserted already filled may not be. "Show me" and
- * Details stay outside it, so the announcement is the sentence verbatim and
- * opening Details does not announce it again.
- *
- * Exported for its pins; `index.ts` does not re-export it.
- */
-export function StudioRefusalStrip({
-  refusal,
-  locale,
-  onShow,
-  className,
-}: {
-  refusal: StudioRefusal;
-  locale: string;
-  /**
-   * Opens the target's input in the pillar that raised the refusal, and
-   * (objectstack#26730) puts the focus on it: `input` is the inspector's
-   * label of that input, when the refusal names one.
-   */
-  onShow?: (target: MetadataSelection | null, input?: string) => void;
-  /** Spacing and type size, which differ by pillar. */
-  className?: string;
-}): React.ReactElement {
-  const { message, target, input, detail } = refusal;
-  return (
-    <div
-      data-testid="studio-refusal"
-      className={cn('rounded-md border border-destructive/40 bg-destructive/10 text-destructive', className)}
-    >
-      <div className="flex items-start gap-2">
-        <p data-testid="studio-refusal-message" role="alert" className="min-w-0 flex-1 whitespace-pre-line">
-          {message}
-        </p>
-        {target !== undefined && onShow && (
-          <button
-            type="button"
-            onClick={() => onShow(target, input)}
-            className="shrink-0 rounded border border-destructive/40 px-1.5 py-0.5 font-medium hover:bg-destructive/10"
-          >
-            {t('engine.studio.refusal.show', locale)}
-          </button>
-        )}
-      </div>
-      {detail && (
-        <details data-testid="studio-refusal-detail" className="mt-1">
-          <summary className="cursor-pointer select-none opacity-80">{t('engine.studio.refusal.details', locale)}</summary>
-          <pre className="mt-1 whitespace-pre-wrap break-words font-mono opacity-90">{detail}</pre>
-        </details>
-      )}
-    </div>
-  );
-}
+// objectstack#29148 — the strip moved to its own module; re-exported for its pins.
+export { StudioRefusalStrip };
 
 // ---------------------------------------------------------------------------
 // objectstack#26730 — "Show me" ends ON the input a refusal names.
@@ -864,6 +805,32 @@ const NO_PUBLISH_REFUSALS: ReadonlyMap<string, StudioRefusal> = new Map();
 interface StudioSavedDraft {
   type: string;
   name: string;
+}
+
+/**
+ * objectstack#28984 — a landed draft AUTOSAVE says what it saved, by the
+ * item's label, as Studio's other writes do (publish names what went live,
+ * discard says "Draft discarded: LABEL"). The top bar's "Saved HH:MM" stays,
+ * but it names nothing, and only feedback that names the item counts as write
+ * feedback (ruling 6545938831 ② on #28345).
+ *
+ * The autosave lands after every editing pause, so the toast carries one
+ * sonner id per item: a later save of the same item UPDATES the toast already
+ * on screen instead of stacking another (the `PACKAGE_LIST_TOAST_ID` pattern
+ * above). Typing a label is one live toast, not one per pause; another item
+ * saved meanwhile gets its own. Called only once the save has landed: a
+ * refused save keeps its refusal strip and says nothing about saving, and a
+ * conflict the author settled by reloading saved nothing.
+ */
+function announceDraftSaved(saved: StudioSavedDraft, label: string, locale: string): void {
+  toast.success(tFormat('engine.studio.draftSaved', locale, { item: label || saved.name }), {
+    id: draftSavedToastId(saved),
+  });
+}
+
+/** The one sonner id a draft save of this item announces under. */
+function draftSavedToastId(saved: StudioSavedDraft): string {
+  return `studio-draft-saved:${saved.type}:${saved.name}`;
 }
 
 /** Top-bar package switcher: list app packages (writable base vs read-only
@@ -4890,6 +4857,25 @@ export function InterfacesPillar({
           readDraftForSave<Record<string, unknown>>(client, 'app', name, packageId),
         ]);
         if (cancelled) return;
+        // objectstack#29148 — an app draft the server refused to read (`403`:
+        // its audience gate names a capability this author does not hold) is
+        // no absence. No nav buffer is installed over it, so the nav is not
+        // shown to edit and its autosave has nothing to send: a buffer seeded
+        // from the published layer would be saved over the draft, dropping its
+        // entries and its gate. The pillar reads it as a failed load.
+        if ('refused' in appDraftRead) {
+          setAppDraft({});
+          setAppDraftFor('');
+          setNavDirty(false);
+          setEditNav(false);
+          setNavHasDraft(true);
+          setError({
+            message: t('engine.studio.refusal.draftUnreadable', locale),
+            detail: formatMetadataError(appDraftRead.refused),
+          });
+          setAppStatus('missing');
+          return;
+        }
         const appDraftResp = appDraftRead.answer;
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> } | null;
         const eff = (lay?.effective ?? lay?.code ?? {}) as Record<string, unknown>;
@@ -5349,6 +5335,8 @@ export function InterfacesPillar({
       setLeafRefusedFor(null);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setIfDirty(false);
+      // objectstack#28984 — named as the rail names the leaf.
+      announceDraftSaved({ type: current.type, name: current.name }, current.label, locale);
       onDraftSaved?.({ type: current.type, name: current.name });
     } catch (e) {
       // objectui#11785 — a page's issue paths (its blocks) name no input this
@@ -5610,6 +5598,8 @@ export function InterfacesPillar({
       // and a clean buffer would let the re-read this save signals install the
       // served draft over it. Binding it is the edit that sends it.
       if (sent.unmoved() && !leftOut) setNavDirty(false);
+      // objectstack#28984 — the navigation is the app's: named by its label.
+      announceDraftSaved({ type: 'app', name: appName }, navItemLabelText(appLabel, locale), locale);
       onDraftSaved?.({ type: 'app', name: appName });
     } catch (e) {
       setNavError(
@@ -5622,7 +5612,7 @@ export function InterfacesPillar({
     } finally {
       setNavSaving(false);
     }
-  }, [saveNavDraft, appName, appDraft, onDraftSaved, packageId, publishNonce, locale]);
+  }, [saveNavDraft, appName, appDraft, appLabel, onDraftSaved, packageId, publishNonce, locale]);
   // objectui#5813 — nav edits auto-save while edit mode is open.
   const { flush: flushNavSave, sending: navSending } = useDraftAutoSave({
     // objectui#11232 — the app `doNavSave` addresses. The package is this
@@ -7937,11 +7927,22 @@ export function DataPillar({
         if (publishedNames && !publishedNames.has(current.name)) {
           draftRead = await readDraft();
           if (cancelled) return;
-          layRaw = extractDraftBody(draftRead.answer) ? {} : await readLayers();
+          layRaw = extractDraftBody(draftRead.answer) || 'refused' in draftRead ? {} : await readLayers();
         } else {
           [layRaw, draftRead] = await Promise.all([readLayers(), readDraft()]);
         }
         if (cancelled) return;
+        // objectstack#29148 — an object draft the server refused to read is no
+        // absence: no buffer is installed over it (see InterfacesPillar's leaf
+        // load), so nothing is shown to edit and the autosave has nothing to send.
+        if ('refused' in draftRead) {
+          setObjDraftFor('');
+          setError({
+            message: t('engine.studio.refusal.draftUnreadable', locale),
+            detail: formatMetadataError(draftRead.refused),
+          });
+          return;
+        }
         const lay = layRaw as { effective?: Record<string, unknown>; code?: Record<string, unknown> };
         const baseline = (lay.effective ?? lay.code ?? {}) as Record<string, unknown>;
         const draftBody = extractDraftBody(draftRead.answer);
@@ -8020,6 +8021,16 @@ export function DataPillar({
             client.get<Record<string, unknown>>(OBJECT_EXTENSION_TYPE, name, { packageId: pair }),
           ]);
           if (cancelled) return;
+          // objectstack#29148 — an extension draft the server refused to read
+          // installs no extension buffer: one seeded from the published row
+          // would be saved over the draft it never read.
+          if ('refused' in draftRead) {
+            setError({
+              message: t('engine.studio.refusal.draftUnreadable', locale),
+              detail: formatMetadataError(draftRead.refused),
+            });
+            return;
+          }
           draft = objectExtensionBodyOf(extractDraftBody(draftRead.answer), name);
           published = objectExtensionBodyOf(publishedRow, name);
           recordExtRead(OBJECT_EXTENSION_TYPE, name, pair, draftRead.pin);
@@ -8269,8 +8280,13 @@ export function DataPillar({
         setObjVerdict(draftEnvelopeDiagnostics(read.answer));
         setObjVerdictBody(extractDraftBody(read.answer) ?? undefined);
       });
-      // No success toast: with auto-save (objectui#5813) it would fire after
-      // every editing pause — the quiet last-saved hint is the affordance.
+      // objectstack#28984 — named by the label this save stored; one toast per
+      // object however many editing pauses save it (`announceDraftSaved`).
+      announceDraftSaved(
+        { type: 'object', name: current.name },
+        typeof body.label === 'string' && body.label ? body.label : current.label,
+        locale,
+      );
       onDraftSaved?.({ type: 'object', name: current.name });
     } catch (e) {
       setError(objectSaveRefusal(e, body, locale));
@@ -8335,6 +8351,9 @@ export function DataPillar({
         setExtHasDraft(true);
         if (sent.unmoved()) setExtDirty(false);
         setSavedAt(new Date());
+        // objectstack#28984 — the extension customizes the open object, so it
+        // is named by that object's label.
+        announceDraftSaved({ type: OBJECT_EXTENSION_TYPE, name }, current?.label ?? '', locale);
         onDraftSaved?.({ type: OBJECT_EXTENSION_TYPE, name });
       } catch (e) {
         setError(plainRefusal(e));
@@ -8342,7 +8361,7 @@ export function DataPillar({
         setSaving(false);
       }
     },
-    [extOpen, customization, extPairFor, saveExtDraft, onDraftSaved],
+    [extOpen, customization, extPairFor, saveExtDraft, onDraftSaved, current, locale],
   );
   const { flush: flushExtSave } = useDraftAutoSave({
     target: `${OBJECT_EXTENSION_TYPE}:${current?.name ?? ''}`,
@@ -10313,6 +10332,17 @@ export function AutomationsPillar({
         const readAt = pair ?? draftPackageId;
         const draftRead = await readDraftForSave<Record<string, unknown>>(client, 'flow', current.name, readAt);
         if (cancelled) return;
+        // objectstack#29148 — a flow draft the server refused to read is no
+        // absence: no buffer is installed over it (see InterfacesPillar's leaf
+        // load), so nothing is shown to edit and the autosave has nothing to send.
+        if ('refused' in draftRead) {
+          setDraftFor('');
+          setError({
+            message: t('engine.studio.refusal.draftUnreadable', locale),
+            detail: formatMetadataError(draftRead.refused),
+          });
+          return;
+        }
         const draftBody = extractDraftBody(draftRead.answer);
         // objectui#11799 — the baseline is read only for a flow with no
         // pending draft, the one case it is used. An unsaved flow always has
@@ -10422,6 +10452,8 @@ export function AutomationsPillar({
       rereadFlowVerdict(current.name, target.packageId);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setAutoDirty(false);
+      // objectstack#28984 — named as the rail names the flow.
+      announceDraftSaved({ type: 'flow', name: current.name }, current.label, locale);
       onDraftSaved?.({ type: 'flow', name: current.name });
     } catch (e) {
       // objectui#11785 — read against `draft`, the body this save sent.

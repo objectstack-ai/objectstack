@@ -153,16 +153,22 @@ export function SortBuilder({
         {items.map((item, index) => {
           const direction = directionLabels(item.field);
           return (
-          <div key={item.id} className="flex items-center gap-2">
-             <span className="text-sm font-medium w-16 text-muted-foreground">
+          // Below `sm` a level takes three lines so no select cuts its label:
+          // the words, then the field beside Remove, then the direction.
+          <div
+            key={item.id}
+            className="flex items-center gap-2 max-sm:grid max-sm:grid-cols-[minmax(0,1fr)_auto]"
+            data-testid="sort-builder-row"
+          >
+             <span className="text-sm font-medium w-16 text-muted-foreground max-sm:col-span-2 max-sm:w-auto">
                {index === 0 ? t('sortBuilder.sortBy') : t('sortBuilder.thenBy')}
              </span>
-             <div className="flex-1">
+             <div className="flex-1 min-w-0 max-sm:col-start-1 max-sm:row-start-2">
                 <Select
                   value={item.field}
                   onValueChange={(val) => updateItem(item.id, { field: val })}
                 >
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger className="h-9 max-sm:h-11" data-testid="sort-builder-field">
                     <SelectValue placeholder={t('sortBuilder.selectField')} />
                   </SelectTrigger>
                   <SelectContent>
@@ -178,12 +184,12 @@ export function SortBuilder({
                   </SelectContent>
                 </Select>
              </div>
-             <div className="w-36">
+             <div className="w-36 max-sm:col-span-2 max-sm:row-start-3 max-sm:w-auto">
                 <Select
                   value={item.order}
                   onValueChange={(val) => updateItem(item.id, { order: val as 'asc' | 'desc' })}
                 >
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger className="h-9 max-sm:h-11" data-testid="sort-builder-direction">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -195,7 +201,7 @@ export function SortBuilder({
              <Button
                variant="ghost"
                size="icon"
-               className="h-9 w-9 shrink-0"
+               className="h-9 w-9 shrink-0 max-sm:col-start-2 max-sm:row-start-2 max-sm:h-11 max-sm:w-11"
                onClick={() => removeItem(item.id)}
                aria-label={t('sortBuilder.removeSort')}
              >
@@ -209,7 +215,7 @@ export function SortBuilder({
         variant="outline"
         size="sm"
         onClick={addItem}
-        className="h-8"
+        className="h-8 max-sm:h-11"
         disabled={!firstChoosable}
       >
         <Plus className="h-3 w-3 mr-2" />

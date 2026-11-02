@@ -369,6 +369,10 @@ jobs:
               - 'ui/scripts/check-dist-completeness.mjs'
               - 'ui/scripts/invoked-as.mjs'
               - 'ui/scripts/vitest-invocation-guard.mjs'
+              # The Console's vite config emits its Service Worker from this
+              # generator's source (#29155), so it is a build and test input of
+              # every `@object-ui/*` package in turbo.json.
+              - 'ui/packages/mobile/src/serviceWorkerSource.ts'
               # TEST INPUTS outside every package (#27961): each `$TURBO_ROOT$/…`
               # input of turbo.json's generic `test` task. That task runs for
               # every package Test Core tests, so a diff confined to one moves

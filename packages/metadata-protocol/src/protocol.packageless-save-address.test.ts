@@ -37,7 +37,8 @@
  *    stored-metadata migration passes `packageId: null`) still writes it;
  *  - [#28576, ADR-0146 D11] an item a code package ships: the package-less save
  *    is refused naming the base's pair and the migration ceremony, with no
- *    stored row or with an overlay row bound to the code package, and writes
+ *    stored row or with an overlay row bound to the code package (stored
+ *    before [#28905] closed the save naming the package too), and writes
  *    nothing;
  *  - the draft path: a package-less draft save still inherits the package
  *    (its own suite, `sys-metadata-repository.draft-package-inherit.test.ts`,
@@ -451,12 +452,20 @@ describe('an item a CODE package ships: the package-less write is closed (ADR-01
         const name = 'showcase_task_grid';
         // [#26708] The code package ships the object its view binds: a save
         // naming the (installed) package is judged against its closure.
-        const { protocol, rows } = makeProtocol([
+        const { protocol, rows, seedRow } = makeProtocol([
             packagedView(name),
             { type: 'object', item: { name: 'task', _packageId: CODE_PACKAGE, fields: { name: { type: 'text' } } } },
         ]);
-        // A save naming the package names a package: not the write D11 closes.
-        await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Named'), packageId: CODE_PACKAGE });
+        // [#28905, ADR-0146 D1] A save naming the read-only code package is
+        // closed too now, naming the same pair
+        // (`protocol.named-base-overlay-write.test.ts` holds that close), so
+        // the row bound to the package is one stored before it, as an older
+        // build left it.
+        const named = await refusalOf(() => protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Named'), packageId: CODE_PACKAGE }));
+        expect(resolveThrownHttpError(named)).toMatchObject({ status: 403, code: 'NOT_OVERRIDABLE' });
+        expect(String(named.message)).toContain(`'${PAIR}'`);
+        expect(rows('view', name)).toEqual([]);
+        seedRow({ type: 'view', name, package_id: CODE_PACKAGE, metadata: JSON.stringify(viewBody(name, 'Named')), checksum: 'sha-named' });
 
         const refused = await protocol.saveMetaItem({ type: 'view', name, item: viewBody(name, 'Unnamed') }).then(() => undefined, (e: unknown) => e);
 
