@@ -24,6 +24,17 @@ import { resolveDisplayField } from '@objectstack/spec/data';
 import { HttpDelivery } from './http-delivery.object.js';
 import { installDefaultOrganization } from '../default-organization.testkit.js';
 
+/**
+ * The `titleFormat` template each object declared before the ruling of record
+ * on #29007 (6574393684, letter B) retired it: an object definition that
+ * declares one is refused at the metadata save gate and by `os validate`, so
+ * the object no longer carries it. Kept here as the reference text the title
+ * has to reproduce — the text the template drew — not as a title resolver.
+ */
+const RETIRED_TITLE_TEMPLATES: Readonly<Record<string, string>> = {
+  sys_http_delivery: '{label} → {url}',
+};
+
 const SYS = { context: { isSystem: true } } as any;
 
 /**
@@ -99,7 +110,7 @@ describe('[#20015] sys_http_delivery resolves a real record title under ADR-0079
 
     expect(h1Of(row!)).toBe('order.created → https://hooks.example.com/in');
     expect(h1Of(row!)).not.toBe(row!.id);
-    expect(h1Of(row!)).toBe(renderTitleFormat(HttpDelivery.titleFormat, row!));
+    expect(h1Of(row!)).toBe(renderTitleFormat(RETIRED_TITLE_TEMPLATES[HttpDelivery.name], row!));
     expect(resolveRecordTitle(HttpDelivery, storedOnly(row!))).toBe('order.created → https://hooks.example.com/in');
   });
 

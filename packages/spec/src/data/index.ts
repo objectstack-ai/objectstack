@@ -21,6 +21,11 @@ export * from './filter-comparand-type';
 // `assertListComparandShapes` now delegates here and `parseFilterAST` enforces
 // it for every direct driver caller too.
 export * from './filter-comparand-shape';
+// Which field operators declare a LIST comparand (`$in`, `$nin`, `$between`),
+// as a predicate over the split both faces above read, for a consumer that
+// judges a comparand by its operator without running a face. The two sets
+// themselves stay module-private (the module says why).
+export { isListComparandOperator } from './filter-comparand-operators';
 // Canonical conformance cases for the filter logical combinators — the shared
 // standard the five independent FilterCondition backends are each checked
 // against, so they cannot drift apart again (#3774; the fifth — MongoDB's

@@ -131,7 +131,6 @@ const es = {
   actions: {
     decisionOutput: {
       help: 'Se transfiere al flujo como salida de la decisión.',
-      helpMultiValue: 'Se transfiere al flujo como salida de la decisión. Separe varios valores con comas.',
     },
     resultDialog: {
       // objectui#13461 — the secret block's reveal toggle, an icon-only button.

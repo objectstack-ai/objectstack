@@ -64,7 +64,6 @@ export const SysMigration = ObjectSchema.create({
   requiredPermissions: ['manage_platform_settings'],
   description: 'Deployment-level data-migration flags: which gated data migrations ran here and whether their self-check passed.',
   nameField: 'id', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{id}',
   highlightFields: ['id', 'blocking', 'verified_at', 'last_run_at'],
 
   fields: {

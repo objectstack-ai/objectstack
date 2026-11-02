@@ -1099,13 +1099,17 @@ describe('validateFlowTriggerReadiness', () => {
       config: Record<string, unknown>,
       overrides: Record<string, unknown> = {},
     ): Record<string, unknown> {
+      // [#29233] A label on the flow and its nodes: the runtime publish gate
+      // the cases below cross now runs the region-shape rule, which refuses a
+      // body the flow schema refuses.
       return {
         name: 'inbound_order',
+        label: 'Inbound order',
         type: 'api',
         status: 'active',
         nodes: [
-          { id: 'start', type: 'start', config },
-          { id: 'end', type: 'end' },
+          { id: 'start', type: 'start', label: 'Start', config },
+          { id: 'end', type: 'end', label: 'End' },
         ],
         edges: [{ id: 'e1', source: 'start', target: 'end' }],
         ...overrides,
@@ -1298,8 +1302,8 @@ describe('validateFlowTriggerReadiness', () => {
         // it `flows[0].nodes[1].config.secret`, the rule's own finding path.
         const startSecond = apiFlow({ hookId: 'intake' }, {
           nodes: [
-            { id: 'end', type: 'end' },
-            { id: 'start', type: 'start', config: { hookId: 'intake' } },
+            { id: 'end', type: 'end', label: 'End' },
+            { id: 'start', type: 'start', label: 'Start', config: { hookId: 'intake' } },
           ],
         });
         const at = (paths: string[]) =>
