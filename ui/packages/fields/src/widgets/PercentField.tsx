@@ -4,6 +4,7 @@ import { Input, Slider, EmptyValue, cn } from '@object-ui/components';
 import { useDisplayLocale } from '@object-ui/i18n';
 import { FieldWidgetComponentProps } from './types.js';
 import { toDomProps } from './toDomProps.js';
+import { PHONE_TOUCH_HEIGHT } from './touchTarget.js';
 import { useBadInputRefusal, BadInputMessage, BAD_INPUT_BORDER } from './numberBadInput.js';
 import { formatPercentPoints } from './number-format.js';
 import { useFieldTranslation } from './useFieldTranslation.js';
@@ -276,7 +277,7 @@ export function PercentField({ value, onChange, field, readonly, error, classNam
           // empty, and a `0` stand-in beside the `%` reads as a filled-in 0%.
           placeholder={percentField?.placeholder}
           disabled={readonly || props.disabled}
-          className={cn('pr-8', refusal ? BAD_INPUT_BORDER : '', className)}
+          className={cn(PHONE_TOUCH_HEIGHT, 'pr-8', refusal ? BAD_INPUT_BORDER : '', className)}
           step={Math.pow(10, -scale).toFixed(scale)}
           // `refusal` is this widget's OWN reading, which no host can produce;
           // `error` keeps its single author (objectui#3222 / objectui#6716).

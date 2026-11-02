@@ -1284,7 +1284,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
                   variant="outline"
                   onClick={handleCancel}
                   disabled={isSubmitting}
-                  className="w-full sm:w-auto"
+                  className="w-full sm:w-auto min-h-[44px] sm:min-h-0"
                 >
                   {cancelLabel}
                 </Button>
@@ -1298,7 +1298,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
                   form={formId}
                   variant="outline"
                   disabled={isSubmitting}
-                  className="w-full sm:w-auto"
+                  className="w-full sm:w-auto min-h-[44px] sm:min-h-0"
                 >
                   {t('common.reset')}
                 </Button>
@@ -1308,7 +1308,7 @@ const ModalFormBody: React.FC<ModalFormProps> = ({
                   type="submit"
                   form={formId}
                   disabled={isSubmitting || uploadGate.uploading}
-                  className="w-full sm:w-auto"
+                  className="w-full sm:w-auto min-h-[44px] sm:min-h-0"
                 >
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {uploadGate.uploading ? uploadGate.busyLabel : submitLabel}
