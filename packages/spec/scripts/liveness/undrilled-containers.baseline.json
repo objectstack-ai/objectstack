@@ -93,7 +93,6 @@
     "flow/nodes.inputSchema",
     "flow/nodes.position",
     "flow/nodes.waitEventConfig",
-    "flow/variables",
     "hook/retryPolicy",
     "job/retryPolicy",
     "manifest/contributes.kinds",

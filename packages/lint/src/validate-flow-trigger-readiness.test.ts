@@ -182,6 +182,17 @@ describe('validateFlowTriggerReadiness', () => {
       expect(findings[0].message).toContain("declares input 'invoiceId' a record of object 'billing_invoice'");
       expect(findings[0].hint).toContain("set the input's objectName to an object inside that closure");
     });
+
+    it('routes the hedge and the closure split to `os explain`, keeping the fix one line', () => {
+      expect(explanationOf(FLOW_INPUT_UNKNOWN_OBJECT)).toMatch(/another installed package/);
+      expect(explanationOf(FLOW_INPUT_UNKNOWN_OBJECT)).toMatch(/closure/);
+      const [finding] = validateFlowTriggerReadiness({
+        objects: [candidateObject],
+        flows: [inputFlow([{ name: 'invoiceId', type: 'text', isInput: true, objectName: 'billing_invoice' }])],
+      });
+      expect(finding.hint).not.toContain('\n');
+      expect(finding.hint.length).toBeLessThanOrEqual(200);
+    });
   });
 
   it('warns when an auto-triggered flow has no explicit status (defaults to draft)', () => {

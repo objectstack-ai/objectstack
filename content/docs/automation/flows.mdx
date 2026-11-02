@@ -2029,7 +2029,7 @@ variables: [
 | `isInput` | `boolean` | Available as input parameter |
 | `isOutput` | `boolean` | Available as output parameter |
 | `defaultValue` | `unknown` | Bound at run start when no parameter supplies one — this is what makes the declaration a guarantee. Optional |
-| `objectName` | `string` | On an input only: the input is the id of a record of this object. See [a start input that is a record id](#a-start-input-that-is-a-record-id). Optional |
+| `objectName` | `string` | **Planned.** On an input only (refused at parse on any other variable): the input is the id of a record of this object. No start door reads it yet. See [a start input that is a record id](#a-start-input-that-is-a-record-id). Optional |
 
 ### `defaultValue` — declaring a variable is not the same as binding it
 
@@ -2123,8 +2123,17 @@ export const CloseAccount = defineFlow({
 });
 ```
 
-The rule: every door that starts the flow by name (the trigger route, an action
-of `type: 'flow'` over REST and MCP `run_action`, a declared endpoint of
+<Callout type="warn">
+**Planned — no door applies this yet.** The declaration parses, is refused on a
+variable that is not an input, and is linted, but no start door loads a
+declared input today: a start that hands it an id the caller cannot read still
+runs. `os validate` warns on every flow that writes it
+(`liveness-planned-property`). The contract below is what the start doors will
+enforce.
+</Callout>
+
+The contract: every door that starts the flow by name (the trigger route, an
+action of `type: 'flow'` over REST and MCP `run_action`, a declared endpoint of
 `type: 'flow'`) loads a declared input from the named object in the caller's
 own scope before the run exists. An id the caller cannot read there is refused
 `404` `RECORD_NOT_FOUND`; a value that is not an id is refused `400`
