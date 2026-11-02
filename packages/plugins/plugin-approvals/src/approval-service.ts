@@ -1318,6 +1318,24 @@ function isBlankDecisionOutput(value: unknown): boolean {
   return false;
 }
 
+/** The organization a `sys_team` row names, or `''` when it carries none (or there is no row). */
+function teamOrganizationOf(row: any): string {
+  return row?.organization_id ? String(row.organization_id) : '';
+}
+
+/**
+ * What one value of each picker kind of decision output is (#28658): the
+ * thing the picker commits, and the thing an `expression` approver with the
+ * matching `resolveAs` reads downstream. `text` is absent: free text is not
+ * judged.
+ */
+const DECISION_OUTPUT_VALUE_NOUN: Readonly<Record<string, string>> = {
+  user: 'user id',
+  department: 'department id',
+  team: 'team id',
+  position: 'position machine name',
+};
+
 function rowFromRequest(row: any): ApprovalRequestRow {
   // Display labels by the ONE chain (`display-labels.ts`, #23889) the open
   // write and the boot backfill use: the row's column, else the node-config
@@ -2920,20 +2938,11 @@ export class ApprovalService implements IApprovalService {
     // No organization on the request ⇒ nothing to screen against, and no read.
     // The ordinary single-organization / embedded stack costs nothing here.
     if (!requestOrg) return false;
-    let rows: any[] = [];
+    let row: any;
     try {
-      // No `as any` on this options bag — #4918's ratchet grandfathers this
-      // file for its EXISTING erasures only, and a NEW one must carry the
-      // declared type. `ApprovalEngine.find` already accepts it as written.
-      rows = await this.engine.find('sys_team', {
-        where: { id: teamId },
-        fields: ['id', 'organization_id'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      });
+      row = await this.readTeamRow(teamId);
     } catch { return false; } // team unreadable — see the fail-open note above
-    const row: any = Array.isArray(rows) ? rows[0] : null;
-    const teamOrg = row?.organization_id ? String(row.organization_id) : '';
+    const teamOrg = teamOrganizationOf(row);
     if (!teamOrg) return false;                  // no tenancy fact on this team
     if (teamOrg === requestOrg) return false;    // it is this org's team — route as before
     this.logger?.warn?.(
@@ -2945,6 +2954,25 @@ export class ApprovalService implements IApprovalService {
       { teamId, teamOrganizationId: teamOrg, requestOrganizationId: requestOrg },
     );
     return true;
+  }
+
+  /**
+   * The `sys_team` row `teamId` names, or `null` when none does. The one read
+   * behind {@link teamIsProvablyOutsideOrg} and the check a `team` decision
+   * output's value passes (#28658). A failed read throws: each caller decides
+   * what an unreadable directory means.
+   */
+  private async readTeamRow(teamId: string): Promise<any | null> {
+    // No `as any` on this options bag — #4918's ratchet grandfathers this
+    // file for its EXISTING erasures only, and a NEW one must carry the
+    // declared type. `ApprovalEngine.find` already accepts it as written.
+    const rows = await this.engine.find('sys_team', {
+      where: { id: teamId },
+      fields: ['id', 'organization_id'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    return Array.isArray(rows) && rows[0] ? rows[0] : null;
   }
 
   /**
@@ -3137,14 +3165,7 @@ export class ApprovalService implements IApprovalService {
     if (!businessUnitId) return [];
     // Seed sanity check: skip if dept doesn't exist or is inactive within tenant.
     try {
-      const seed = await this.engine.find('sys_business_unit', {
-        where: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
-        fields: ['id', 'active'],
-        limit: 1,
-        context: SYSTEM_CTX,
-      } as any);
-      const seedRow: any = Array.isArray(seed) ? seed[0] : null;
-      if (!seedRow || seedRow.active === false) return [];
+      if (!(await this.businessUnitIsLive(businessUnitId, organizationId))) return [];
     } catch { return []; }
 
     const seen = new Set<string>([businessUnitId]);
@@ -3178,6 +3199,23 @@ export class ApprovalService implements IApprovalService {
       } as any);
     } catch { rows = []; }
     return Array.from(new Set((rows ?? []).map((r: any) => String(r.user_id ?? '')).filter(Boolean)));
+  }
+
+  /**
+   * Does `businessUnitId` name an active department of `organizationId`'s
+   * directory? The seed check of {@link expandBusinessUnitUsers}, and the
+   * check a `department` decision output's value passes (#28658). A failed
+   * read throws: each caller decides what an unreadable directory means.
+   */
+  private async businessUnitIsLive(businessUnitId: string, organizationId?: string | null): Promise<boolean> {
+    const seed = await this.engine.find('sys_business_unit', {
+      where: this.businessUnitOrgScope({ id: businessUnitId }, organizationId),
+      fields: ['id', 'active'],
+      limit: 1,
+      context: SYSTEM_CTX,
+    });
+    const seedRow: any = Array.isArray(seed) ? seed[0] : null;
+    return !!seedRow && seedRow.active !== false;
   }
 
   /**
@@ -4448,6 +4486,117 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
+   * [#28658, ruling 6566731522 letter A] Judge each admitted decision output
+   * against its declaration, and throw ONE `VALIDATION_FAILED` naming every
+   * `outputs.KEY` that does not match. Called before any write.
+   *
+   *  - `text` (the default, and every bare-key declaration) is free text and is
+   *    not judged, as before.
+   *  - A blank value is `required`'s question, not this one's: an omitted
+   *    optional output stays omitted.
+   *  - `multiple: true` takes a list and only a list, with no entry twice;
+   *    `multiple` absent or false takes one value.
+   *  - Each value must resolve, through the lookup the matching `expression`
+   *    approver's `resolveAs` expands it with
+   *    ({@link decisionOutputValueRefusal}).
+   */
+  private async assertDecisionOutputsMatchDeclarations(
+    outputs: Record<string, unknown>,
+    defs: ReturnType<typeof normalizeDecisionOutputs>,
+    organizationId: string | null,
+  ): Promise<void> {
+    const problems: string[] = [];
+    for (const def of defs) {
+      const kind = def.type ?? 'text';
+      const noun = DECISION_OUTPUT_VALUE_NOUN[kind];
+      if (!noun || !Object.prototype.hasOwnProperty.call(outputs, def.key)) continue;
+      const value = outputs[def.key];
+      if (isBlankDecisionOutput(value)) continue;
+      const path = `\`outputs.${def.key}\``;
+      if (def.multiple === true && !Array.isArray(value)) {
+        problems.push(`${path} takes a list of ${noun}s (it is declared \`multiple: true\`), not a single value`);
+        continue;
+      }
+      if (def.multiple !== true && Array.isArray(value)) {
+        problems.push(`${path} takes one ${noun} (it is not declared \`multiple: true\`), not a list`);
+        continue;
+      }
+      const values: unknown[] = Array.isArray(value) ? value : [value];
+      if (values.some(v => typeof v !== 'string' || v.trim() === '')) {
+        problems.push(`${path} must hold ${def.multiple === true ? `${noun}s` : `a ${noun}`} as text`);
+        continue;
+      }
+      const seen = new Set<string>();
+      const repeated = new Set<string>();
+      for (const v of values as string[]) (seen.has(v) ? repeated : seen).add(v);
+      if (repeated.size) {
+        problems.push(`${path} lists ${[...repeated].map(v => `'${v}'`).join(', ')} more than once`);
+        continue;
+      }
+      for (const v of seen) {
+        const why = await this.decisionOutputValueRefusal(kind, v, organizationId);
+        if (why) problems.push(`${path}: '${v}' ${why}`);
+      }
+    }
+    if (!problems.length) return;
+    throw new Error(
+      `VALIDATION_FAILED: ${problems.join('; ')}. Nothing was recorded and the request is still pending — `
+      + `decide again with values the step declares.`,
+    );
+  }
+
+  /**
+   * Why one value of a picker decision output resolves to nothing — the clause
+   * a refusal carries — or `undefined` when it resolves. Each kind asks the
+   * lookup an `expression` approver with the same `resolveAs` asks, in the
+   * request's organization:
+   *
+   *  - `user`: a record id an account carries — {@link reassignTargetRefusal}
+   *    asked with no organization, as a `user` approver asks it. A slot
+   *    address (`kind:value`) or an email is not a record id.
+   *  - `department`: an active department of the organization —
+   *    {@link businessUnitIsLive}, the seed check of the department expansion.
+   *  - `team`: a `sys_team` row ({@link readTeamRow}) not owned by another
+   *    organization.
+   *  - `position`: a machine name someone in the organization holds —
+   *    {@link expandPositionUsers}, which matches `sys_user_position.position`
+   *    by name. A `sys_position` id names no holder there, so it is refused.
+   *
+   * A failed read proves nothing, so it answers `undefined`, as every
+   * resolution in this file reads one.
+   */
+  private async decisionOutputValueRefusal(
+    kind: string,
+    value: string,
+    organizationId: string | null,
+  ): Promise<string | undefined> {
+    try {
+      if (kind === 'user') {
+        if (value.includes(':') || value.includes('@')) return 'is not a user id';
+        return (await this.reassignTargetRefusal(value, null)) === undefined ? undefined : 'names no user';
+      }
+      if (kind === 'department') {
+        return (await this.businessUnitIsLive(value, organizationId))
+          ? undefined : 'names no active department in this request\'s organization';
+      }
+      if (kind === 'team') {
+        const row = await this.readTeamRow(value);
+        if (!row) return 'names no team';
+        const teamOrg = teamOrganizationOf(row);
+        return organizationId && teamOrg && teamOrg !== String(organizationId)
+          ? 'is a team of another organization' : undefined;
+      }
+      if (kind === 'position') {
+        return (await this.expandPositionUsers(value, organizationId)).length
+          ? undefined : 'is not a position anyone holds in this request\'s organization (a position is named by its machine name)';
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  /**
    * Record a decision on a node-driven request. Honours the node's `behavior`
    * (#3266): `first_response` finalizes on the first approval; `unanimous`,
    * `quorum`, and `per_group` hold the request open until their tally is met
@@ -4553,8 +4702,8 @@ export class ApprovalService implements IApprovalService {
       acceptedOutputs = { ...input.outputs };
     }
 
-    // objectui#2955: `required` outputs. Unlike `type`/`multiple` — which only
-    // shape the input widget — this one is a runtime contract: the flow must
+    // objectui#2955: `required` outputs. A runtime contract, like `type` and
+    // `multiple` below: the flow must
     // never resume past this node with a required key missing, because that is
     // precisely what a downstream `expression` approver reads. Before this,
     // an author's only backstop was `onEmptyApprovers` (the next node opens,
@@ -4580,6 +4729,15 @@ export class ApprovalService implements IApprovalService {
           + `request — open the approval and fill them in before approving.`,
         );
       }
+    }
+
+    // [#28658, ruling 6566731522 letter A] Each admitted output is judged
+    // against its declaration's `type` and `multiple`, before any write, so a
+    // value the next step cannot use is refused here and not at the step that
+    // reads it. On a reject too: the outputs ride the reject's resume and the
+    // `__decisionOutputs` snapshot just as they ride an approve's.
+    if (acceptedOutputs) {
+      await this.assertDecisionOutputsMatchDeclarations(acceptedOutputs, declaredDefs, org);
     }
 
     // The run behind this request must still be resumable before ANY of it is
