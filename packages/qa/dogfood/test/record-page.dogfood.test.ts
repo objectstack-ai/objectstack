@@ -147,6 +147,20 @@ describe('[#27627] the record page payload, as a non-admin member', () => {
     expect(data.approvals).toMatchObject({ requests: requests.body?.data ?? [] });
   }, 120_000);
 
+  it('[#28470] a related list\'s expand is its read\'s own $expand: the rows carry the resolved references', async () => {
+    const page = await send(`/data/rp_account/${accountId}/page`, 'POST', {
+      related: [{ object: 'rp_note', field: 'account', top: 3, expand: ['account'] }],
+    });
+    expect(page.status, JSON.stringify(page.body)).toBe(200);
+    const data = RecordPageResponseSchema.parse(page.body.data);
+    const notes = await send(
+      `/data/rp_note?$filter=${encodeURIComponent(JSON.stringify({ account: accountId }))}&$top=3&$count=true&$expand=account`,
+    );
+    expect(notes.status).toBe(200);
+    expect(data.related[0]).toEqual({ object: 'rp_note', field: 'account', total: totalOf(notes.body), records: rowsOf(notes.body) });
+    for (const row of rowsOf(notes.body)) expect(row.account).toMatchObject({ id: accountId, name: 'Acme' });
+  }, 60_000);
+
   it('a record the member cannot read refuses the whole request exactly as the record read does', async () => {
     for (const id of [privateId, 'rp_no_such_row']) {
       const read = await send(`/data/rp_private/${id}`);

@@ -85,7 +85,7 @@ import { assertCubeMeasureFieldTypesAccepted, type MeasureColumn } from './cube-
 import { AMOUNT_AGGREGATES, assertRecordCurrencyAggregatesGrouped } from './cube-record-currency-door.js';
 import type { AnalyticsStrategy, AnalyticsDriverCapabilities, StrategyContext, DatasetScopedStrategyContext, DatasetScope, DurationMeasureSpec, ReadScopeFilterJudge } from './strategies/types.js';
 import { NativeSQLStrategy } from './strategies/native-sql-strategy.js';
-import { ObjectQLStrategy } from './strategies/objectql-strategy.js';
+import { ObjectQLStrategy, aggregateGroupKeys, aggregateObjectOf, resolveCubeFieldName } from './strategies/objectql-strategy.js';
 // [#5669] The `where` source-field gate reads the filter tree through the SAME
 // pair the strategies compile it with, so "the field the gate saw" and "the
 // column that reached SQL" cannot be two different things.
@@ -116,7 +116,7 @@ import {
   type DimensionLabelDeps,
 } from './dimension-labels.js';
 import { evaluateAnalyticsQueryOverRows } from './preview-evaluator.js';
-import { assertPreviewGroupColumnsDistinct } from './preview-group-column-door.js';
+import { assertDatasetGroupColumnsDistinct } from './dataset-group-column-door.js';
 // [#25778] The one lookup of a dataset duration measure by name.
 import { durationMeasureIn } from './duration-measure-sql.js';
 import { scopedMeasureFilter } from './scoped-measure-key.js';
@@ -2891,11 +2891,17 @@ export class AnalyticsService implements IAnalyticsService {
             // under one `null` key (and a filter on one matched no row) where
             // the live strategies join it. See {@link assertPreviewJoinsNothing}.
             this.assertPreviewJoinsNothing(q, cube);
-            // [#28765] …and a selection asking one column for two values
-            // under one name (raw beside its own bucket, or two buckets of
-            // it), with the refusal the engine gives both live faces for the
-            // same keys, where the evaluator served both columns.
-            assertPreviewGroupColumnsDistinct(q, cube);
+            // [#28765, #28798] …and a selection asking one column for two
+            // values under one name (raw beside its own bucket, or two buckets
+            // of it), with the refusal the ObjectQL strategy gives both live
+            // faces for the keys its direct path builds, where the evaluator
+            // served both columns.
+            assertDatasetGroupColumnsDistinct(
+              aggregateObjectOf(cube),
+              aggregateGroupKeys(q, cube),
+              q,
+              (member) => resolveCubeFieldName(cube, member, 'dimension'),
+            );
             return evaluateAnalyticsQueryOverRows(
               q,
               previewEvaluationCube(q, cube),

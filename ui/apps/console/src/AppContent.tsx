@@ -11,7 +11,7 @@
 
 import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
 import { MePermissionsProvider, ServerReadScope } from '@object-ui/permissions';
 import { createAuthenticatedFetch } from '@object-ui/auth';
@@ -46,9 +46,9 @@ const DocsLayout = lazy(() => import('./pages/DocsLayout'));
 
 /**
  * Forwards legacy `system/objects[/:objectName]` URLs to the metadata-admin
- * engine, preserving the active-app prefix. The engine routes are the
- * REST-style `…/metadata/object/:name` (edit) and `…/metadata/object` (list),
- * declared by `DefaultAppContent` in `@object-ui/app-shell`.
+ * engine: the REST-style `object/:name` (edit) and `object` (list) pages, which
+ * Studio's "All metadata" area serves since Setup carries no metadata editor
+ * (objectstack ADR-0146 D1), so the active-app prefix is not kept.
  *
  * NOT `…/component/metadata/resource/:name?type=object` (objectui#3639).
  * That spelling pre-dates the REST-style nesting and is no longer a page at
@@ -62,17 +62,18 @@ const DocsLayout = lazy(() => import('./pages/DocsLayout'));
 function ObjectRedirect() {
   const { objectName } = useParams<{ objectName?: string }>();
   const location = useLocation();
-  const prefix = location.pathname.replace(/\/(system\/)?objects(\/.*)?$/, '');
-  const target = objectName
-    ? `${prefix}/metadata/object/${objectName}`
-    : `${prefix}/metadata/object`;
-  return <Navigate to={target} replace />;
+  // objectstack ADR-0146 D1 — straight to Studio's "All metadata" area, the
+  // page Setup's `…/metadata/object` route opens there.
+  const target = setupMetadataStudioPath(objectName ? `object/${objectName}` : 'object', location.search, location.hash);
+  return <Navigate to={target ?? '/studio'} replace />;
 }
 
 /**
  * Forwards legacy `system/metadata[/:metadataType[/:itemName]]` URLs to the
- * metadata-admin engine's own REST-style routes: `…/metadata` (directory),
- * `…/metadata/:type` (one type's list), `…/metadata/:type/:name` (one item).
+ * metadata-admin engine's own REST-style routes: the directory, `:type` (one
+ * type's list), `:type/:name` (one item). Since objectstack ADR-0146 D1 they
+ * open Studio's "All metadata" area in one hop; a datasource keeps Setup's
+ * `…/metadata/datasource…` route, which D1 leaves in Setup.
  * The legacy page-based editor was removed once the server's `/api/v1/meta`
  * endpoint started emitting JSON Schema per type, letting the engine render
  * every type generically.
@@ -92,13 +93,15 @@ function MetadataRedirect() {
   // `…/system/metadata/:type`, and the engine routes live at the app root
   // (`…/metadata/…`), not under `system/`.
   const prefix = location.pathname.replace(/\/(system\/)?metadata(\/.*)?$/, '');
-  const base = `${prefix}/metadata`;
-  const target = !metadataType
-    ? base
+  const rest = !metadataType
+    ? ''
     : itemName
-      ? `${base}/${encodeURIComponent(metadataType)}/${itemName}`
-      : `${base}/${encodeURIComponent(metadataType)}`;
-  return <Navigate to={target} replace />;
+      ? `${encodeURIComponent(metadataType)}/${itemName}`
+      : encodeURIComponent(metadataType);
+  // objectstack ADR-0146 D1 — straight to Studio's "All metadata" area, query
+  // kept; a datasource stays on Setup's own route.
+  const target = setupMetadataStudioPath(rest, location.search, location.hash);
+  return <Navigate to={target ?? `${prefix}/metadata/${rest}`} replace />;
 }
 
 /**
@@ -154,9 +157,10 @@ function SystemObjectRedirect({ objectName }: { objectName: string }) {
 
 /**
  * Forwards the retired `system/{roles,positions,permissions}` console pages
- * onto the Setup CATALOG (objectui#7611): the metadata-admin list of the
- * registry type, in its environment scope (`…/metadata/<type>?scope=environment`,
- * `catalog-scope.ts` in `@object-ui/app-shell`).
+ * onto the CATALOG (objectui#7611): the metadata-admin list of the registry
+ * type, in its environment scope (`<type>?scope=environment`, `catalog-scope.ts`
+ * in `@object-ui/app-shell`), which Studio's "All metadata" area serves since
+ * Setup carries no metadata catalog (objectstack ADR-0146 D1).
  *
  * ADR-0131 D3 gives positions and permission sets one home, the environment
  * registry, and D7 says Setup lists that registry; the ruling that unblocked
@@ -164,13 +168,14 @@ function SystemObjectRedirect({ objectName }: { objectName: string }) {
  * re-routed. The words map as they always did — `roles` was ADR-0090 D3's old
  * name for positions, and objectui#3655 decision A bound `permissions` to the
  * permission-set surface (layer 2), not the capability definitions (layer 1).
- * Same prefix handling, and the same treatment of `location.search` /
- * `location.hash`, as {@link SystemObjectRedirect}.
+ * The app prefix is not kept: the area is outside every app. As with
+ * {@link SystemObjectRedirect}, `location.search` / `location.hash` are not
+ * forwarded.
  */
 function SystemCatalogRedirect({ type }: { type: 'position' | 'permission' }) {
-  const location = useLocation();
-  const prefix = location.pathname.replace(/\/system\/[^/]+\/?$/, '');
-  return <Navigate to={`${prefix}/metadata/${type}?${ENVIRONMENT_SCOPE_QUERY}`} replace />;
+  // objectstack ADR-0146 D1 — the catalog is Studio's, in the "All metadata"
+  // area's cross-package leg.
+  return <Navigate to={setupMetadataStudioPath(type, ENVIRONMENT_SCOPE_QUERY) ?? '/studio'} replace />;
 }
 
 /**

@@ -35,6 +35,13 @@
  *   with that refusal. Before, all three faces kept the last granularity and
  *   dropped the other entry silently (beside the raw dimension, the live faces
  *   answered one `1970-01` bucket holding the whole total).
+ * - #28798. All three faces answer those selections with one dataset refusal,
+ *   the ObjectQL strategy's, before the engine is asked: the engine's `code`,
+ *   status, `param`, `path`, `object` and `fields`, and a prescription naming
+ *   the selection's members over the column and a repair a selection can make
+ *   (drop the raw dimension or its bucket's granularity; ask one granularity).
+ *   Before, every face prescribed the engine's "own 'alias'", which no dataset
+ *   selection can spell. A direct `engine.aggregate` caller keeps that one.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -350,10 +357,10 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
       );
     });
 
-    it("still hands the engine a column raw beside its bucket, which it refuses (two values under one name)", async () => {
+    it("still refuses a column raw beside its bucket (two values under one name)", async () => {
       // `closed_at` raw and `OBJECT.closed_at` bucketed by month are different
-      // keys over one column: nothing is merged, and the engine's
-      // duplicate-column refusal stands on both live faces.
+      // keys over one column: nothing is merged, and the duplicate-column
+      // refusal (the dataset's since #28798) stands on both live faces.
       for (const face of LIVE) {
         await expect(
           ask(face, UNBACKED, {
@@ -377,31 +384,58 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
       });
     });
   });
-  describe('#28765 — the draft preview refuses one column asked twice under one name, as the live faces do', () => {
-    /** Every face refuses `selection`, and the preview's refusal is the ObjectQL face's, field for field. */
-    const refusedAsLive = async (selection: Selection, path: string) => {
+  describe('#28765 / #28798 — every face refuses one column asked twice under one name, in the dataset\'s words', () => {
+    /** The refusal, with the prescription `remedy` between the engine's head and tail. */
+    const askedTwice = (path: string, first: string, column: string, remedy: string) =>
+      `aggregate('${OBJECT}'): ${path} names the column '${column}', which ${first} already names — one row cannot `
+      + `carry two values under one column. The query was NOT run. ${remedy} A repeated column name kept only the `
+      + 'last value written under it: a count overwritten by a sum, or the group keys replaced by the numbers, '
+      + 'while the answer looked served.';
+    const rawAndBucketed = (dimensions: string, timeDimensions: string) =>
+      `The selection asks for 'closed_at' both raw and bucketed (\`dimensions\` ${dimensions}; \`timeDimensions\` `
+      + `${timeDimensions}). Drop the raw dimension from \`dimensions\`, or drop the granularity from the `
+      + '`timeDimensions` entry.';
+    const twoGranularities = (timeDimensions: string) =>
+      `The selection asks for 'closed_at' at two granularities (\`timeDimensions\` ${timeDimensions}). Ask one `
+      + 'granularity of it in `timeDimensions`.';
+
+    /** Every face in `faces` refuses `selection` with `message`, and with one refusal, field for field. */
+    const refusedAsLive = async (
+      selection: Selection,
+      path: string,
+      message: string,
+      { dataset = UNBACKED, faces = FACES }: { dataset?: typeof UNBACKED; faces?: readonly Face[] } = {},
+    ) => {
       const refusals: Array<Record<string, unknown>> = [];
-      for (const face of FACES) {
-        const err = (await ask(face, UNBACKED, selection).then(
+      for (const face of faces) {
+        const err = (await ask(face, dataset, selection).then(
           () => { throw new Error(`${face}: expected a refusal, but the query resolved`); },
           (e: unknown) => e,
         )) as Error & Record<string, unknown>;
         expect(err.code, `${face}: ${err.message}`).toBe('INVALID_QUERY');
         expect(err.status, face).toBe(400);
         expect(err.path, face).toBe(path);
+        expect(err.message, face).toBe(message);
         refusals.push({
           message: err.message, code: err.code, status: err.status, httpStatus: err.httpStatus,
           object: err.object, param: err.param, path: err.path, fields: err.fields,
         });
       }
-      expect(refusals[2], 'preview vs ObjectQL').toEqual(refusals[1]);
-      expect(refusals[2], 'preview vs native').toEqual(refusals[0]);
+      for (const [i, refusal] of refusals.entries()) expect(refusal, `${faces[i]} vs ${faces[0]}`).toEqual(refusals[0]);
+      expect(refusals[0]).toMatchObject({ httpStatus: 400, object: OBJECT, param: 'groupBy', fields: ['closed_at'] });
     };
 
     it('refuses a column raw beside its own month bucket, where the preview served both', async () => {
       await refusedAsLive(
         { dimensions: ['closed_at'], measures: ['total'], timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }] },
         'groupBy.1.field',
+        // Spelled out once in full; the cases below build the same sentence.
+        "aggregate('os28690_deal'): groupBy.1.field names the column 'closed_at', which groupBy.0 already names — "
+        + 'one row cannot carry two values under one column. The query was NOT run. The selection asks for '
+        + "'closed_at' both raw and bucketed (`dimensions` 'closed_at'; `timeDimensions` 'os28690_deal.closed_at' "
+        + 'by month). Drop the raw dimension from `dimensions`, or drop the granularity from the `timeDimensions` '
+        + 'entry. A repeated column name kept only the last value written under it: a count overwritten by a sum, '
+        + 'or the group keys replaced by the numbers, while the answer looked served.',
       );
     });
 
@@ -409,6 +443,17 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
       await refusedAsLive(
         { dimensions: ['region', 'closed_at'], measures: ['total'], timeDimensions: [{ dimension: `${OBJECT}.closed_at`, granularity: 'month' }] },
         'groupBy.2.field',
+        askedTwice('groupBy.2.field', 'groupBy.1', 'closed_at', rawAndBucketed("'closed_at'", `'${OBJECT}.closed_at' by month`)),
+      );
+    });
+
+    it('[#28798] names only the raw member when the bucketed dimension is listed too', async () => {
+      // `closed_at` is bucketed by its own entry, so its key is the bucket;
+      // `OBJECT.closed_at` reads the same column raw.
+      await refusedAsLive(
+        { dimensions: ['closed_at', `${OBJECT}.closed_at`], measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }] },
+        'groupBy.1',
+        askedTwice('groupBy.1', 'groupBy.0.field', 'closed_at', rawAndBucketed(`'${OBJECT}.closed_at'`, "'closed_at' by month")),
       );
     });
 
@@ -422,6 +467,7 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
           ],
         },
         'groupBy.1.field',
+        askedTwice('groupBy.1.field', 'groupBy.0.field', 'closed_at', twoGranularities(`'closed_at' by month, '${OBJECT}.closed_at' by year`)),
       );
     });
 
@@ -432,6 +478,7 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
       await refusedAsLive(
         { measures: ['total'], timeDimensions: [{ dimension: 'closed_at', granularity: g1 }, { dimension: 'closed_at', granularity: g2 }] },
         'groupBy.1.field',
+        askedTwice('groupBy.1.field', 'groupBy.0.field', 'closed_at', twoGranularities(`'closed_at' by ${g1}, 'closed_at' by ${g2}`)),
       );
     });
 
@@ -445,10 +492,13 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
           ],
         },
         'groupBy.1.field',
+        askedTwice('groupBy.1.field', 'groupBy.0.field', 'closed_at', twoGranularities(`'${OBJECT}.closed_at' by month, '${OBJECT}.closed_at' by year`)),
       );
     });
 
     it('[#28799] refuses the pair beside the raw dimension, where the live faces answered one 1970-01 bucket', async () => {
+      // The dimension is bucketed by its own entries, so nothing is raw: the
+      // repair is one granularity.
       await refusedAsLive(
         {
           dimensions: ['closed_at'],
@@ -456,6 +506,7 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
           timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'year' }],
         },
         'groupBy.1.field',
+        askedTwice('groupBy.1.field', 'groupBy.0.field', 'closed_at', twoGranularities("'closed_at' by month, 'closed_at' by year")),
       );
     });
 
@@ -467,25 +518,56 @@ describe('[#28690–#28692] time-dimension buckets, column-spelled filter member
           timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'year' }],
         },
         'groupBy.2.field',
+        askedTwice('groupBy.2.field', 'groupBy.1.field', 'closed_at', twoGranularities("'closed_at' by month, 'closed_at' by year")),
       );
     });
 
     it("[#28799] refuses the pair beside a cross-object 'account.name' dimension on both live faces", async () => {
-      const refusals: Array<Record<string, unknown>> = [];
-      for (const face of LIVE) {
-        const err = (await ask(face, BACKED, {
+      // `executeCrossObject` calls the door on its own keys (the FK column first).
+      await refusedAsLive(
+        {
           dimensions: ['account.name'],
           measures: ['total'],
           timeDimensions: [{ dimension: 'closed_at', granularity: 'month' }, { dimension: 'closed_at', granularity: 'year' }],
+        },
+        'groupBy.2.field',
+        askedTwice('groupBy.2.field', 'groupBy.1.field', 'closed_at', twoGranularities("'closed_at' by month, 'closed_at' by year")),
+        { dataset: BACKED, faces: LIVE },
+      );
+    });
+
+    it('[#28798] answers it on every face before the engine judges a bucket over a text column', async () => {
+      // `zone` is declared over the text column `region`. The engine refuses
+      // its month bucket (`INVALID_FIELD`) before its own duplicate-column
+      // door, and both live faces answered that; the preview answered the
+      // column refusal. The strategy's door runs before the engine now, so all
+      // three answer the column refusal (still 400; fixing it meets the other).
+      for (const face of FACES) {
+        const err = (await ask(face, UNBACKED, {
+          dimensions: ['region'],
+          measures: ['total'],
+          timeDimensions: [{ dimension: 'zone', granularity: 'month' }],
         }).then(
           () => { throw new Error(`${face}: expected a refusal, but the query resolved`); },
           (e: unknown) => e,
         )) as Error & Record<string, unknown>;
-        expect(err.code, `${face}: ${err.message}`).toBe('INVALID_QUERY');
-        expect(err.status, face).toBe(400);
-        refusals.push({ message: err.message, path: err.path, fields: err.fields });
+        expect(err, face).toMatchObject({ code: 'INVALID_QUERY', status: 400, path: 'groupBy.1.field', fields: ['region'] });
+        expect(err.message, face).toBe(askedTwice('groupBy.1.field', 'groupBy.0', 'region',
+          "The selection asks for 'region' both raw and bucketed (`dimensions` 'region'; `timeDimensions` 'zone' by month). "
+          + 'Drop the raw dimension from `dimensions`, or drop the granularity from the `timeDimensions` entry.'));
       }
-      expect(refusals[1]).toEqual(refusals[0]);
+    });
+
+    it("[#28798] leaves a direct engine.aggregate caller the engine's own 'alias' prescription", async () => {
+      const err = (await engine.aggregate(OBJECT, {
+        groupBy: ['closed_at', { field: 'closed_at', dateGranularity: 'month' }],
+        aggregations: [{ field: 'amount', method: 'sum', alias: 'total' }],
+      } as never).then(
+        () => { throw new Error('expected a refusal, but the aggregate resolved'); },
+        (e: unknown) => e,
+      )) as Error & Record<string, unknown>;
+      expect(err).toMatchObject({ code: 'INVALID_QUERY', status: 400, path: 'groupBy.1.field', fields: ['closed_at'] });
+      expect(err.message).toBe(askedTwice('groupBy.1.field', 'groupBy.0', 'closed_at', "Give one of the group entries its own 'alias'."));
     });
 
     it('[#28799] still serves one dimension asked twice at the same granularity, as one bucket', async () => {

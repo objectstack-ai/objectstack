@@ -61,7 +61,7 @@
  * `AppSidebar` test this file carried then gained the matching assertion at the
  * same time; that test left with the component (objectui#5817).
  *
- * ## The `Object Manager` entry (objectui#3739)
+ * ## The `Object Manager` entry (objectui#3739; removed by objectstack ADR-0146 D1)
  *
  * #3660 re-pointed `sys-datasources` and stopped there; `sys-objects`, the entry
  * declared on the line immediately ABOVE it in both sidebars, kept spelling
@@ -199,25 +199,19 @@ const SYSTEM_HUB = '/apps/setup/system';
 const DATASOURCES_TARGET = '/apps/setup/metadata/datasource';
 
 /**
- * `Object Manager` names the same engine's canonical route (objectui#3739). This
- * entry used to read `${SYSTEM_HUB}/metadata/object` — an alias served by
- * `apps/console`'s `MetadataRedirect`, a bare `<Navigate>` onto the URL below.
- * Replaced here rather than kept alongside, for the reason spelled out in this
- * file's header: the repo pins the fix, not both the bug and the fix.
- */
-const OBJECTS_TARGET = '/apps/setup/metadata/object';
-
-/**
  * Every entry of the `/home` Administration cluster, in declaration order.
  * Asserted whole rather than by sample: the defect was that the group's
  * children were never visited at all, so "some of them render" is not the
- * property worth pinning — "all nine, at the URLs they declare" is.
+ * property worth pinning — "all of them, at the URLs they declare" is.
+ *
+ * Eight since objectstack ADR-0146 D1 (N-28): `Object Manager` named Setup's
+ * object catalog route (objectui#3739), which now redirects into Studio's "All
+ * metadata" area, so the entry left the cluster. Its absence is pinned below.
  */
 const ADMINISTRATION_ENTRIES: ReadonlyArray<readonly [string, string]> = [
   ['System Settings', SYSTEM_HUB],
   ['Applications', `${SYSTEM_HUB}/apps`],
   ['App Marketplace', `${SYSTEM_HUB}/marketplace`],
-  ['Object Manager', OBJECTS_TARGET],
   ['Datasources', DATASOURCES_TARGET],
   ['Users', `${SYSTEM_HUB}/users`],
   ['Organizations', `${SYSTEM_HUB}/organizations`],
@@ -241,7 +235,7 @@ beforeEach(() => {
 });
 
 describe('sidebar system-settings target (objectui#3590)', () => {
-  it('UnifiedSidebar: /home renders the Administration cluster as a GROUP, with all nine entries reachable (objectui#3609)', () => {
+  it('UnifiedSidebar: /home renders the Administration cluster as a GROUP, with all eight entries reachable (objectui#3609)', () => {
     // Replaces the #3590 MEASUREMENT pin. Its two halves invert exactly:
     //   before → `Administration` IS a link, href `/home`; children absent.
     //   after  → `Administration` is a disclosure, not a link; children present.
@@ -262,6 +256,8 @@ describe('sidebar system-settings target (objectui#3590)', () => {
     for (const [label, href] of ADMINISTRATION_ENTRIES) {
       expect(screen.getByRole('link', { name: label })).toHaveAttribute('href', href);
     }
+    // ADR-0146 D1 (N-28) — the object catalog entry is gone.
+    expect(screen.queryByRole('link', { name: 'Object Manager' })).not.toBeInTheDocument();
 
     // The head entry, called out because #3590 is what corrected it: it must
     // not have regressed to the bare setup URL that re-renders the empty state.

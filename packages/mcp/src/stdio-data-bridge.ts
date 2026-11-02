@@ -146,6 +146,7 @@ import {
   diagnoseObjectListRead,
   type DiagnosedObjectListing,
 } from './metadata-completeness.js';
+import { staleSummaryRefusalOrThrow, withEarnedAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 
 /**
  * [#25138] The object reads this transport asks of the `protocol` service,
@@ -1058,9 +1059,18 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const context = await resolvePrincipal();
       await enforceApiExposure(reads, object, GATED_ACTIONS.create, context);
       enforceApiKeyManagementCredential(object, GATED_ACTIONS.create);
-      const written = (await engine.insert(object, data, { context })) as
-        | Record<string, unknown>
-        | undefined;
+      // [#28782] A record stored under a parent roll-up the engine could not
+      // recompute (`ERR_SUMMARY_RECOMPUTE`, carrying `written`) builds this
+      // bridge's answer and carries it on the refusal (#28781's carrier), so
+      // the `create_record` tool answers the create it is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      let written: Record<string, unknown> | undefined;
+      try {
+        written = (await engine.insert(object, data, { context })) as Record<string, unknown> | undefined;
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+        written = stale.written as Record<string, unknown> | undefined;
+      }
       const record = { ...data, ...(written ?? {}) };
       // [#8497] `written` is the engine's WRITE result, which since #7823 keeps
       // the stored row whole — flagged columns included. This is a generic data
@@ -1072,7 +1082,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // is absent for a package's boot-registered object on an `environmentId`
       // kernel, and with no schema the helper masks and omits nothing.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      return { object, id: record.id, record };
+      const answer = { object, id: record.id, record };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
 
     async update(object, id, data) {
@@ -1093,7 +1105,16 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // `Error`, so a stdio caller sees the same `RECORD_NOT_FOUND` / 404 the
       // HTTP bridge's `callData` path throws for the identical miss.
       if (!existing) throw recordNotFoundError(object, id);
-      await engine.update(object, data, { where: { id }, context });
+      // [#28844] An update the engine applied but whose parent roll-up it could
+      // not recompute (`ERR_SUMMARY_RECOMPUTE`) answers the update it is,
+      // attached to the refusal by #28781's carrier as `create` does; every
+      // other throw, a refusal before the write among them, propagates as is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      try {
+        await engine.update(object, data, { where: { id }, context });
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+      }
       const record = { ...(existing as Record<string, unknown>), ...data };
       // [#8497] The engine's update RESULT is deliberately discarded here (this
       // arm echoes the read-path row plus the caller's own patch), so no STORED
@@ -1105,7 +1126,9 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       // property literally true on every verb of this bridge rather than true-
       // by-argument on one.
       omitInternalFieldsFromWriteResponse(await readObjectDeclaration(reads, object), record);
-      return { object, id, record };
+      const answer = { object, id, record };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
 
     async remove(object, id) {
@@ -1116,9 +1139,18 @@ export function createStdioDataBridge(deps: StdioDataBridgeDeps): McpDataBridge 
       const existing = await findById(engine, object, id, context);
       // Same shared envelope as `update`, above.
       if (!existing) throw recordNotFoundError(object, id);
-      await engine.delete(object, { where: { id }, context });
+      // [#28844] As `update`, above: a delete applied under a failing roll-up
+      // answers the delete it is.
+      let stale: SummaryRecomputeRefusal | undefined;
+      try {
+        await engine.delete(object, { where: { id }, context });
+      } catch (e) {
+        stale = staleSummaryRefusalOrThrow(e);
+      }
       // `success`, not `deleted` — the spec's `DeleteDataResponse` key (#5581).
-      return { object, id, success: true };
+      const answer = { object, id, success: true };
+      if (stale) throw withEarnedAnswer(stale, answer);
+      return answer;
     },
   };
 

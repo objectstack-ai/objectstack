@@ -16,7 +16,9 @@ import { test, expect, type Locator } from '@playwright/test';
  * The unit pins for the same page are in
  * `ResourceListPage.declaredSharingRules-12982.test.tsx`.
  */
-const LIST = '/apps/setup/metadata/sharing_rule?scope=environment';
+// Studio's "All metadata" area, cross-package leg: the catalog's home since
+// Setup carries none (objectstack ADR-0146 D1).
+const LIST = '/studio/~all/metadata/sharing_rule?scope=environment';
 
 async function boxOf(locator: Locator) {
   const box = await locator.boundingBox();

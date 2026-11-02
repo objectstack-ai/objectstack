@@ -84,10 +84,11 @@ function optionValuesOf(field: Record<string, unknown>): string[] {
  * matched.
  *
  * `target` is the extended object's OWN declaration as the reader sees it —
- * a patch reaches the owner's own fields only, never one an extension adds:
- * the registry's owner declaration at the install door, the owner's fields as
- * the fold has merged them in the fold, the composed stack's declaration at
- * `os validate`.
+ * a patch reaches the owner's own fields only, never one an extension adds,
+ * and an option the owner's field declares, never one an extension adds by
+ * redeclaring the field through `fields` (#28809): the registry's owner
+ * declaration at the install door and in the fold, the composed stack's
+ * declaration at `os validate`.
  */
 export function fieldPatchTargetMisses(object: string, fieldPatches: unknown, target: unknown): FieldPatchTargetMiss[] {
   if (!isRecord(fieldPatches)) return [];

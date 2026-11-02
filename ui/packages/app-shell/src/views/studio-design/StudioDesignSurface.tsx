@@ -283,7 +283,7 @@ import {
   isStudioOrgScope,
   studioOrgScopePath,
 } from './studioScope.js';
-import { STUDIO_METADATA_AREA, studioMetadataAreaPath, studioPillarItemPath } from './metadataArea.js';
+import { STUDIO_ALL_PACKAGES_SEGMENT, STUDIO_METADATA_AREA, studioMetadataAreaPath, studioPillarItemPath } from './metadataArea.js';
 import { PermissionSetCloneDialog } from '../metadata-admin/PermissionSetCloneDialog.js';
 import type { PermissionSetCloned } from '../metadata-admin/permission-set-clone.js';
 import { useWalledCatalogReadOnly } from '../metadata-admin/catalog-scope.js';
@@ -883,9 +883,11 @@ const PACKAGE_LIST_TOAST_ID = 'studio-package-list';
  *
  * It offers an environment overlay only where one exists: when the open
  * item's metadata type declares `allowEnvironmentOverlay` in the served
- * registry (ADR-0005), it is a link to that item's Setup page, where the
- * overlay is edited. Any other item, no open item, or a registry not yet
- * read draws a plain "Read-only" mark that links nowhere.
+ * registry (ADR-0005), it is a link to that item's page in Studio's "All
+ * metadata" area, where the overlay is edited: the page Setup's item route
+ * drew, which ADR-0146 D1 moved into Studio, on its cross-package leg. Any
+ * other item, no open item, or a registry not yet read draws a plain
+ * "Read-only" mark that links nowhere.
  *
  * objectstack#28562 (ADR-0146 D2) — nor does a view, dashboard or report
  * (`isStudioCustomizeType`): Studio customizes those itself, into the base's
@@ -933,7 +935,7 @@ export function StudioReadOnlyLink({
   return overlayable && item ? (
     <Link
       ref={ref as React.Ref<HTMLAnchorElement>}
-      to={`/apps/setup/metadata/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`}
+      to={`${studioMetadataAreaPath(STUDIO_ALL_PACKAGES_SEGMENT)}/${encodeURIComponent(item.type)}/${encodeURIComponent(item.name)}`}
       title={title}
       data-testid="studio-readonly-link"
       data-folded={folded || undefined}

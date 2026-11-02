@@ -50,7 +50,7 @@ import { StandardErrorCode } from '@objectstack/spec/api';
 // [#23701] The one key every door that translates the engine's unique-violation
 // envelope asks (the registered code AND the class name, never message text),
 // and the one classification whose arm states the wire code for it.
-import { isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from '@objectstack/types';
+import { earnedAnswerOf, isEngineDuplicateRecordEnvelope, staleSummaryAnswerLines, structuredCodeAnswer, type SummaryRecomputeRefusal } from '@objectstack/types';
 import {
   MCP_OAUTH_SCOPE_DATA_READ,
   MCP_OAUTH_SCOPE_DATA_WRITE,
@@ -479,6 +479,22 @@ function errorResultFromThrown(err: unknown) {
 function errorResultWithCode(err: unknown) {
   const envelope = thrownRefusalEnvelope(err);
   return envelope ? codedErrorResult({ ...envelope }) : errorResult(messageOf(err));
+}
+
+/**
+ * [#28782, #28844] A write tool's answer to a throw: a write the engine stored
+ * but whose parent roll-up it could not recompute (`ERR_SUMMARY_RECOMPUTE`,
+ * "the triggering records WERE written") answers the write it is, read off
+ * #28781's carrier the bridge attached, with the stale column logged once at
+ * `error`. An agent that read an error would apply the write again. Any other
+ * throw, including every refusal raised before the write, renders through
+ * {@link errorResultWithCode} exactly as before.
+ */
+function landedWriteResultOrError(err: unknown, objectName: string) {
+  const earned = earnedAnswerOf(err);
+  if (earned === undefined) return errorResultWithCode(err);
+  for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) console.error(`[MCP] ${line}`);
+  return textResult(earned);
 }
 
 function codedErrorResult(error: ThrownRefusalEnvelope & { details?: unknown }) {
@@ -1332,7 +1348,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.create(objectName, data));
         } catch (err) {
-          return errorResultWithCode(err);
+          return landedWriteResultOrError(err, objectName);
         }
       },
     );
@@ -1366,7 +1382,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.update(objectName, recordId, data));
         } catch (err) {
-          return errorResultWithCode(err);
+          return landedWriteResultOrError(err, objectName);
         }
       },
     );
@@ -1390,7 +1406,7 @@ export function registerObjectTools(
         try {
           return textResult(await bridge.remove(objectName, recordId));
         } catch (err) {
-          return errorResultWithCode(err);
+          return landedWriteResultOrError(err, objectName);
         }
       },
     );

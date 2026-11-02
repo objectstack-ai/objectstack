@@ -1785,7 +1785,7 @@ const ko = {
   console: {
     studio: {
       title: "Studio",
-      accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다. 관리자가 '설정 → 권한 세트'에서 권한 세트로 부여할 수 있습니다.",
+      accessRequired: "Studio를 열려면 Studio 접근 권한이 필요합니다. 관리자가 '설정 → 권한 집합 할당'에서 권한 세트로 부여할 수 있습니다.",
     },
     saveAdvisoryTitle: "저장되었습니다 — 작성 검사에서 {{count}}건의 권장 사항이 발견되었습니다",
     saveAdvisoryTitle_one: "저장되었습니다 — 작성 검사에서 {{count}}건의 권장 사항이 발견되었습니다",
