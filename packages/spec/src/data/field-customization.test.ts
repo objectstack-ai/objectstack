@@ -34,6 +34,7 @@ const STRUCTURAL_FIELD_KEYS = [
   'minLength', 'min', 'max', 'requiredWhen', 'accept', 'maxSize',
   // permission
   'requiredPermissions', 'readonly', 'readonlyWhen', 'maskingRule', 'hidden', 'internal', 'system',
+  'referenceNameVisible',
 ] as const;
 const STRUCTURAL_OPTION_KEYS = ['value'] as const;
 
