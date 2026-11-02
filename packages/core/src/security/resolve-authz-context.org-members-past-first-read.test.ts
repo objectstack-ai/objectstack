@@ -160,6 +160,15 @@ describe('[#29281] org_user_ids holds the whole active organization', () => {
     expect((err as { object?: string }).object).toBe('sys_member');
   });
 
+  it('a full page whose rows carry no id fails loudly — there is no cursor to resume after', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const tables = tablesOf(PAGE_ROWS + 5);
+    for (const m of tables.sys_member) delete (m as { id?: string }).id;
+    const err = await resolveUserAuthzGrants(makeQl(tables), ME, { tenantId: ORG }).catch((e) => e);
+    expect(isAuthzStoreUnavailableError(err)).toBe(true);
+    expect((err as { object?: string }).object).toBe('sys_member');
+  });
+
   it('a page that does not advance past its cursor fails loudly — never loops, never truncates', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const tables = tablesOf(PAGE_ROWS + 5);

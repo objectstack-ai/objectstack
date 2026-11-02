@@ -1027,7 +1027,10 @@ function warnOrganizationMembersOutgrewFirstRead(ql: unknown, organizationId: st
  * Loud, never short: a page that fails throws `tryFind`'s
  * {@link AuthzStoreUnavailableError}, and a page that repeats a row an earlier
  * page returned — a driver that did not honour the cursor — throws the same
- * error rather than loop or answer a list it cannot vouch for.
+ * error rather than loop or answer a list it cannot vouch for. The id is
+ * required where it is used: every row of a FULL page carries one, because the
+ * next page must not repeat it and the last one is the cursor; a short page is
+ * the membership's tail, and nothing is read after it.
  */
 async function readOrganizationMembersToCompletion(ql: any, organizationId: string): Promise<any[]> {
   const members: any[] = [];
@@ -1040,19 +1043,21 @@ async function readOrganizationMembersToCompletion(ql: any, organizationId: stri
       : { organization_id: organizationId, id: { $gt: after } };
     const page = await tryFind(ql, 'sys_member', where, ORG_MEMBERS_PAGE_ROWS, undefined, ORG_MEMBER_PAGE_COLUMNS, ORG_MEMBER_PAGE_ORDER);
     reads += 1;
+    const full = page.length >= ORG_MEMBERS_PAGE_ROWS;
     for (const row of page) {
       const id = row?.id;
-      if (id === undefined || id === null || id === '' || seen.has(id)) {
+      const hasId = id !== undefined && id !== null && id !== '';
+      if ((hasId && seen.has(id)) || (!hasId && full)) {
         throw new AuthzStoreUnavailableError('sys_member', new Error(
-          `The organization ${organizationId} membership read by id did not advance past its cursor `
-          + `(page ${reads} returned ${id === undefined || id === null || id === '' ? 'a row with no id' : `the row ${String(id)} again`}), `
-          + 'so the membership cannot be read to completion.',
+          `The organization ${organizationId} membership read by id cannot continue past page ${reads}: `
+          + `${hasId ? `it returned the row ${String(id)} again, so the driver did not honour the cursor` : 'a row of a full page carries no id to resume after'}. `
+          + 'The membership cannot be read to completion.',
         ));
       }
-      seen.add(id);
+      if (hasId) seen.add(id);
       members.push(row);
     }
-    if (page.length < ORG_MEMBERS_PAGE_ROWS) break;
+    if (!full) break;
     after = page[page.length - 1].id;
   }
   warnOrganizationMembersOutgrewFirstRead(ql, organizationId, members.length, reads);
