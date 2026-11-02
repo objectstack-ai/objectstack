@@ -101,7 +101,10 @@ describe('[#28099] the trigger door forwards the caller\'s posture rung', () => 
     ]) {
         it(`${route.label} hands the engine the rung`, async () => {
             const automation = makeAutomation();
-            const resolve = (n: string) => (n === 'automation' ? automation : undefined);
+            // The caller reads the launched row: a door that starts a flow on a record
+            // loads that record in the caller's own scope first, and refuses it unread.
+            const protocol = { getData: async ({ object, id }: any) => ({ object, id, record: { id } }) };
+            const resolve = (n: string) => (n === 'automation' ? automation : n === 'protocol' ? protocol : undefined);
             const kernel: any = { getService: resolve, getServiceAsync: async (n: string) => resolve(n), context: { getService: resolve } };
             await new HttpDispatcher(kernel).handleAutomation(
                 route.path, 'POST',

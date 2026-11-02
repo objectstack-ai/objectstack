@@ -7,8 +7,18 @@
       "expected_output": "Emits `ObjectSchema.create({...})` with a snake_case `name`, an authored `sharingModel` (a publish with none is refused), `label` / `pluralLabel` / `icon`, `nameField`, and fields with snake_case keys and camelCase config properties: `text` (required), `email`, a `select` whose `options` carry lowercase `value`s (`active`, `inactive`), and BOTH credentials as `type: 'secret'` (encrypted at rest) — never `type: 'password'`, which is plaintext at rest on a generic object. No `namespace` or `tableName` key.",
       "files": [],
       "assertions": {
-        "must_contain": ["ObjectSchema.create", "sharingModel", "type: 'secret'", "options", "nameField"],
-        "must_not_contain": ["type: 'password'", "namespace:", "vendorName"]
+        "must_contain": [
+          "ObjectSchema.create",
+          "sharingModel",
+          "type: 'secret'",
+          "options",
+          "nameField"
+        ],
+        "must_not_contain": [
+          "type: 'password'",
+          "namespace:",
+          "vendorName"
+        ]
       }
     },
     {
@@ -17,8 +27,20 @@
       "expected_output": "Line items: `invoice_line` with a `master_detail` field to `invoice`, `required: true`, `deleteBehavior: 'cascade'` (or `'restrict'` — `set_null` is refused on master_detail), `inlineEdit` on that relationship, and a `summary` roll-up field on the parent. Tagging carries attributes, so it is a junction object (`invoice_tag`) with two `lookup` fields plus `added_by` / `added_at` — not a `multiple: true` lookup (an array of ids) and not a `many_to_many` type, which does not exist. The line object is `sharingModel: 'controlled_by_parent'` with `sharing: { controlledByParent: { ownerMayEdit: true } }` (by-id update only; every other write still needs master edit). `added_by` is `type: 'user'` — never a `lookup` to a `user` object, which does not exist.",
       "files": [],
       "assertions": {
-        "must_contain": ["master_detail", "deleteBehavior", "inlineEdit", "summary", "lookup", "ownerMayEdit", "type: 'user'"],
-        "must_not_contain": ["many_to_many", "deleteBehavior: 'set_null'", "reference: 'user'"]
+        "must_contain": [
+          "master_detail",
+          "deleteBehavior",
+          "inlineEdit",
+          "summary",
+          "lookup",
+          "ownerMayEdit",
+          "type: 'user'"
+        ],
+        "must_not_contain": [
+          "many_to_many",
+          "deleteBehavior: 'set_null'",
+          "reference: 'user'"
+        ]
       }
     },
     {
@@ -27,8 +49,16 @@
       "expected_output": "Uniqueness is an index, not a validation type: `indexes: [{ fields: ['email'], unique: 'organization' }]` (the scope is stated; `type` / `partial` are retired). The lifecycle is one `state_machine` validation with `field: 'status'`, `transitions: { draft: ['active'], active: ['terminated'], terminated: [] }` and a `message`. The date rule is a `script` validation (inverted: fails when the expression is true) or `cross_field`, written as bare CEL over `record.` with explicit `!= null` guards.",
       "files": [],
       "assertions": {
-        "must_contain": ["unique: 'organization'", "state_machine", "transitions", "record."],
-        "must_not_contain": ["type: 'unique'", "partial:"]
+        "must_contain": [
+          "unique: 'organization'",
+          "state_machine",
+          "transitions",
+          "record."
+        ],
+        "must_not_contain": [
+          "type: 'unique'",
+          "partial:"
+        ]
       }
     },
     {
@@ -37,8 +67,34 @@
       "expected_output": "Declares the rules on the FIELD definitions (they belong to the data model, so every form and API write honours them): `visibleWhen: P`record.status == 'paid'``, `requiredWhen: P`record.status == 'paid'`` on `paid_at`, and `readonlyWhen: P`record.status == 'paid'`` on `total`. Bare CEL with `record.` — never brace-wrapped, never Salesforce syntax, never the removed `conditionalRequired` alias, and not in a form view.",
       "files": [],
       "assertions": {
-        "must_contain": ["visibleWhen", "requiredWhen", "readonlyWhen", "record.status"],
-        "must_not_contain": ["conditionalRequired:", "{record."]
+        "must_contain": [
+          "visibleWhen",
+          "requiredWhen",
+          "readonlyWhen",
+          "record.status"
+        ],
+        "must_not_contain": [
+          "conditionalRequired:",
+          "{record."
+        ]
+      }
+    },
+    {
+      "id": 5,
+      "prompt": "We installed HotCRM (`hotcrm`, namespace `crm`). Add a `region` field to its `crm_account` object for our own use, without touching HotCRM's source.",
+      "expected_output": "An object extension authored in HotCRM's paired customization package `hotcrm.custom` (never a replacement of the object, never an edit of HotCRM itself): `defineObjectExtension({ extend: 'crm_account', fields: { region__c: Field.text({ label: 'Region' }) } })` registered in that stack's `objectExtensions`. The field name ends in `__c` because the suffix is reserved to the pair; an unsuffixed field in a `.custom` extension is refused at save, publish, install, `os validate` and `os build`. A change to one of HotCRM's own fields goes through `fieldPatches` (display properties only), and the object takes no `overrides` declaration.",
+      "files": [],
+      "assertions": {
+        "must_contain": [
+          "hotcrm.custom",
+          "defineObjectExtension",
+          "extend: 'crm_account'",
+          "region__c"
+        ],
+        "must_not_contain": [
+          "overrides:",
+          "name: 'crm_account'"
+        ]
       }
     }
   ]

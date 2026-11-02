@@ -14,6 +14,7 @@
  */
 
 import { getCloudBase } from '../../runtime-config.js';
+import { forgetPackageListReads } from '../../views/studio-design/packages-io.js';
 import { TokenStorage } from '@object-ui/auth';
 
 const SERVER_URL = (import.meta.env.VITE_SERVER_URL || '').replace(/\/$/, '');
@@ -334,6 +335,8 @@ export async function installPackage(input: {
   // by hostname on the server. See
   // docs/design/cloud-account-binding-marketplace-install.md (cloud repo).
   if (cloudBase) {
+    // objectstack#29119 — the install lands in THIS environment, so its
+    // package list reads from before it are forgotten however it ends.
     const res = await fetch(`/api/v1/cloud-connection/install`, {
       method: 'POST',
       credentials: 'include',
@@ -342,7 +345,7 @@ export async function installPackage(input: {
         package_id: input.packageId,
         seed_sample_data: !!input.seedSampleData,
       }),
-    });
+    }).finally(forgetPackageListReads);
     let payload: any = null;
     try { payload = await res.json(); } catch { /* empty */ }
     if (!res.ok || payload?.success === false) {
@@ -871,6 +874,7 @@ export async function installLocal(input: {
   versionId?: string;
   installMode?: LocalInstallMode;
 }): Promise<LocalInstallResult> {
+  // objectstack#29119 — an install changes this environment's package list.
   const res = await fetch(`${API_BASE}/install-local`, {
     method: 'POST',
     credentials: 'include',
@@ -880,7 +884,7 @@ export async function installLocal(input: {
       ...(input.versionId ? { versionId: input.versionId } : {}),
       ...(input.installMode ? { installMode: input.installMode } : {}),
     }),
-  });
+  }).finally(forgetPackageListReads);
   let payload: any = null;
   try { payload = await res.json(); } catch { /* empty */ }
   if (!res.ok) {
@@ -1000,11 +1004,12 @@ export async function readMarketplaceInstalls(): Promise<{ source: 'cloud' | 'lo
 }
 
 export async function uninstallLocal(manifestId: string): Promise<void> {
+  // objectstack#29119 — an uninstall changes this environment's package list.
   const res = await fetch(`${API_BASE}/install-local/${encodeURIComponent(manifestId)}`, {
     method: 'DELETE',
     credentials: 'include',
     headers: { 'Accept': 'application/json' },
-  });
+  }).finally(forgetPackageListReads);
   if (!res.ok) {
     const payload: any = await res.json().catch(() => ({}));
     throw new Error(readApiError(payload, res).message);

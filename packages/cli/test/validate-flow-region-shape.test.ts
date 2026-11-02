@@ -94,6 +94,26 @@ const stackWith = (flows: unknown[]) => ({
   flows,
 });
 
+/**
+ * [#29059] An assembled artifact (ADR-0130 D4): two `packages[]` entries, the
+ * malformed flow in the SECOND, so the row's `path` has to carry the entry's
+ * own index (`packages[1].manifest.flows[0]`) and a walk that read only
+ * `packages[0]`, or the stack's empty top level, would pass it.
+ */
+const assembledWith = (good: unknown, bad: unknown) => ({
+  manifest: { id: 'com.example.rgn', namespace: 'rgn', version: '1.0.0', name: 'Rgn', type: 'app', engines: { protocol: '^18' } },
+  packages: [
+    {
+      manifest: {
+        id: 'com.example.rgn', namespace: 'rgn', version: '1.0.0', name: 'Rgn', type: 'app',
+        objects: [{ name: OBJECT, label: 'Visa', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
+        flows: [good],
+      },
+    },
+    { manifest: { id: 'com.example.rgn.ops', namespace: 'rgn', version: '1.0.0', name: 'Ops', type: 'module', flows: [bad] } },
+  ],
+});
+
 const CASES: Record<string, { stack: Record<string, unknown>; refusal?: string }> = {
   duly: {
     stack: stackWith([flow('rgn_lead_time', guard(fanOut(false)))]),
@@ -115,6 +135,10 @@ const CASES: Record<string, { stack: Record<string, unknown>; refusal?: string }
     refusal: "parallel 'fan': a parallel block needs at least 2 branches",
   },
   joined: { stack: stackWith([flow('rgn_lead_time', guard(fanOut(true)))]) },
+  assembled: {
+    stack: assembledWith(flow('rgn_ok', guard(fanOut(true))), flow('rgn_ops_lead_time', guard(fanOut(false)))),
+    refusal: "try_catch 'guard' catch: region must be single-exit but has 3: x, y, z",
+  },
 };
 
 let root = '';
@@ -159,6 +183,25 @@ describe('[#28893] validate and build refuse a flow region the engine refuses, w
       expect(existsSync(fixtures[label].dist)).toBe(false);
     }, 60_000);
   }
+
+  it('[#29059] an assembled artifact: the refused flow is located in its own packages[] entry, and build writes nothing', async () => {
+    const { refusal } = CASES.assembled;
+    const expected = { path: 'packages[1].manifest.flows[0]', code: 'VALIDATION_ERROR', flow: 'rgn_ops_lead_time' };
+
+    const validated = await validate('assembled', '--json');
+    expect(validated.code, validated.stdout).toBe(1);
+    const errors = json(validated, 'validate assembled').errors as Array<Record<string, unknown>>;
+    const rows = errors.filter((r) => String(r.message).includes(refusal!));
+    expect(rows.map(({ path, code, flow }) => ({ path, code, flow })), JSON.stringify(errors, null, 2)).toEqual([expected]);
+
+    const built = await build('assembled', '--json');
+    expect(built.code, built.stdout).toBe(1);
+    const payload = json(built, 'build assembled');
+    expect(payload.success).toBe(false);
+    const builtRows = (payload.errors as Array<Record<string, unknown>>).filter((r) => String(r.message).includes(refusal!));
+    expect(builtRows.map(({ path, code, flow }) => ({ path, code, flow }))).toEqual([expected]);
+    expect(existsSync(fixtures.assembled.dist)).toBe(false);
+  }, 60_000);
 
   it('CONTROL: the same flow with the join restored validates and builds', async () => {
     const validated = await validate('joined', '--json');
