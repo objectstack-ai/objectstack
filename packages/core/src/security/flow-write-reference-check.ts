@@ -30,8 +30,21 @@
  * checking for a marked context. It narrows and grants nothing: the context
  * keeps `isSystem` and every authorization exemption that comes with it.
  *
- * ⛔ Never on `sudo()`, a seeder's, an importer's, a restore's or any other
- * platform writer's system context: they keep the exemption unchanged.
+ * ⛔ Never set on `sudo()`, a seeder's, an importer's, a restore's or any
+ * other platform writer's system context: they keep the exemption unchanged.
+ *
+ * ## Writes a flow write sets off carry it too
+ *
+ * The mark rides every context derived from the run's by a spread, as
+ * `APP_AUTOMATION_ELEVATION` does, so a write set off under a flow-run write is
+ * checked as the flow's own: a hook's `ctx.api` (the engine wraps the raw
+ * operation context, with no parse), its `runAs: 'system'` or `ctx.api.sudo()`
+ * elevation, and the engine's cascade legs (the `set_null` member-removal
+ * write on a multi-value field spreads the deleting context). That is the
+ * user path's answer for the same writes, and deliberate: stripping the mark
+ * there would reopen the bypass one hop down. A cascade leg writes no new
+ * link, so only a caller-supplied value it carries is judged — for the
+ * member-removal leg, the members a multi-value field keeps.
  *
  * ## Why a symbol, and why it is not an `ExecutionContext` field
  *
@@ -42,7 +55,7 @@
  * ships an ESM and a CJS build and a process may load both: the mark must be
  * the same key in each. Being undeclared, it does not survive
  * `ExecutionContextSchema.parse`, which keeps declared keys only, so a write
- * made through a parsed context (a hook's `ctx.api`) is judged as that
+ * made through a parsed context (`ObjectQL#createContext`) is judged as that
  * context's own write.
  */
 

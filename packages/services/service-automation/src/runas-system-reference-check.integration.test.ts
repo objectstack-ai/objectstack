@@ -13,7 +13,8 @@
  *
  *  1. `create_record` naming a deleted `sys_user` is refused with the user
  *     path's own answer (code and sentence), and no row is written.
- *  2. The same for `update_record`: the row keeps its assignee.
+ *  2. The same for `update_record`: the row keeps its assignee. And the
+ *     master_detail arm: a deleted header is refused, a live one written.
  *  3. Elevation control: the same system run still updates a row its trigger
  *     user may not write (another member's row, `owner_only_writes`).
  *  4. Controls: a seed write (`SEED_WRITE_EXECUTION_CONTEXT`) and an import's
@@ -49,10 +50,26 @@ const crmTask = {
   },
 };
 
+/** A master and its detail: the master_detail arm of the check (#28881 S2). */
+const crmOrder = {
+  name: 'crm_order',
+  label: 'Order',
+  fields: { title: { name: 'title', label: 'Title', type: 'text' } },
+};
+const crmOrderLine = {
+  name: 'crm_order_line',
+  label: 'Order line',
+  fields: {
+    title: { name: 'title', label: 'Title', type: 'text' },
+    order: { name: 'order', label: 'Order', type: 'master_detail', reference: 'crm_order' },
+  },
+};
+
+const RW = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
 const taskWriteSet = PermissionSetSchema.parse({
   name: 'task_write',
   label: 'Reference check — task write',
-  objects: { crm_task: { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true } },
+  objects: { crm_task: RW, crm_order: RW, crm_order_line: RW },
 });
 
 const MEMBER = 'usr_member';
@@ -109,6 +126,8 @@ describe("a runAs:'system' flow's record writes keep the reference check (#28881
     ql = kernel.getService<ObjectQL>('objectql');
     automation = kernel.getService<AutomationEngine>('automation');
     ql.registry.registerObject(crmTask as any, 'refcheck-test', 'refcheck-test');
+    ql.registry.registerObject(crmOrder as any, 'refcheck-test', 'refcheck-test');
+    ql.registry.registerObject(crmOrderLine as any, 'refcheck-test', 'refcheck-test');
     await ql.syncSchemas();
 
     const orgs = await ql.find('sys_organization', { context: SYS });
@@ -162,6 +181,33 @@ describe("a runAs:'system' flow's record writes keep the reference check (#28881
     expect(res.success).toBe(false);
     expect(res.innerRefusal).toEqual({ code: 'VALIDATION_FAILED', message: userPath.message });
     expect(await tasks()).toEqual([{ title: 'reassign me', assignee: OTHER }]);
+  });
+
+  // The master_detail arm asks `masterDetailHeaderExists`, which only a flow
+  // run's write (or one it sets off) reaches as a system caller.
+  it('create_record naming a deleted master_detail header is refused with the user path\'s answer; a live header is written', async () => {
+    await boot();
+    const live: any = await ql.insert('crm_order', { title: 'live' }, { context: SYS });
+    const gone: any = await ql.insert('crm_order', { title: 'gone' }, { context: SYS });
+    await ql.delete('crm_order', { where: { id: gone.id }, context: SYS });
+    const userPath: any = await ql.insert('crm_order_line', { title: 'user path', order: gone.id }, { context: { ...memberCtx } })
+      .then(() => undefined, (err) => err);
+    expect(userPath?.fields?.map((f: any) => [f.field, f.code])).toEqual([['order', 'reference_not_found']]);
+    automation.registerFlow('line_gone', systemFlow('line_gone', {
+      type: 'create_record', config: { objectName: 'crm_order_line', fields: { title: 'on gone', order: gone.id } },
+    }) as any);
+    automation.registerFlow('line_live', systemFlow('line_live', {
+      type: 'create_record', config: { objectName: 'crm_order_line', fields: { title: 'on live', order: live.id } },
+    }) as any);
+
+    const refused: any = await automation.execute('line_gone', { ...memberCtx });
+    const written: any = await automation.execute('line_live', { ...memberCtx });
+
+    expect(refused.success).toBe(false);
+    expect(refused.innerRefusal).toEqual({ code: 'VALIDATION_FAILED', message: userPath.message });
+    expect(written.success, `run failed: ${JSON.stringify(written)}`).toBe(true);
+    const lines = ((await ql.find('crm_order_line', { context: SYS })) as any[]).map((r) => [r.title, r.order]);
+    expect(lines).toEqual([['on live', live.id]]);
   });
 
   it('elevation control: the same system run still writes a row its trigger user may not write', async () => {
