@@ -14,7 +14,10 @@
  * by predicate. (The `validate()` dry run calls the same function at the same
  * point; its answer carries no values, so the arm's verdict there is unchanged.)
  *
- * Nothing is refused and nothing is newly admitted. Untouched, and pinned
+ * A single write is admitted or refused exactly as before. The unique-key
+ * answer does move (Clause-② yes, narrowing): `42` after `"42"` on a `unique`
+ * text field now collides, pinned below at the driver door and against SQLite
+ * in `rest-data-text-scalar-value.test.ts`. Untouched, and pinned
  * here: a string, `null`, a missing key, a plain object or an array (refused,
  * #29133), a `json` field, a number field, a boolean field, and a declared
  * field the validator never judges.

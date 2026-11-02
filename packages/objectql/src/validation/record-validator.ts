@@ -956,8 +956,13 @@ function isPlainObjectValue(value: unknown): boolean {
  * while a TEXT column hands back a string: one write, two stored shapes, and
  * an equality filter or a sort that differs by driver. This writes the string
  * the arm judged, on the same fields the numeric half reads (the validator's
- * walk, `readonly` included). Nothing is refused or newly admitted: only the
- * stored form of a value the arm already admits changes.
+ * walk, `readonly` included). A single write is admitted or refused exactly as
+ * before; what changes is the stored form, and with it every answer that reads
+ * the stored value. A `unique` text field's key now compares the string, so
+ * `42` after `"42"` is refused as a duplicate (and on SQLite, which stored
+ * `true` and `1` both as `'1.0'`, those two no longer collide), and a filter
+ * comparing the field to the number `42` no longer matches a row written as
+ * `42`.
  *
  * ⛔ Not touched: a string (judged and written as itself), `null` and a missing
  * key, a plain object or an array (the arm refuses them, #29133), every other
