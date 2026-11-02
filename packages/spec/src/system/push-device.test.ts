@@ -49,6 +49,13 @@ describe('UserDeviceSchema', () => {
     expect(parsed.error?.issues[0]?.path).toEqual(['vendor']);
   });
 
+  it.each(['zh_CN', 'Chinese', 'zh-CN '])('refuses locale %j (not a BCP-47 language tag)', (locale) => {
+    const parsed = UserDeviceSchema.safeParse({ ...DEVICE, locale });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(['locale']);
+    expect(parsed.error?.issues[0]?.code).toBe('invalid_format');
+  });
+
   it('refuses an invalidation time that is not an ISO-8601 instant', () => {
     const parsed = UserDeviceSchema.safeParse({ ...DEVICE, enabled: false, invalidatedAt: 'yesterday' });
     expect(parsed.success).toBe(false);

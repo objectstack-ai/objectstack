@@ -28,7 +28,7 @@ import {
 import { RealtimePresenceSchema, TransportProtocol } from './realtime.zod';
 import { ObjectPermissionSchema, EffectiveObjectPermissionSchema, FieldPermissionSchema } from '../security/permission.zod';
 import { ActionDescriptorSchema } from '../automation/node-executor.zod';
-import { ServedTranslationDataSchema } from '../system/translation.zod';
+import { ServedTranslationDataSchema, LocaleSchema } from '../system/translation.zod';
 import { PushVendorSchema } from '../system/push-config.zod';
 // #5950 / #5882 — the ADR-0010 read-side protection envelope both metadata-item
 // responses publish. Same three vocabularies the resolver filters against, so a
@@ -3545,7 +3545,7 @@ export const RegisterDeviceRequestSchema = lazySchema(() => z.object({
     + 'android means fcm; web has no core vendor, so a web registration names fcm or is refused',
   ),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
-  locale: z.string().optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
 }).describe(
   '[PLANNED — not yet served] Register or refresh a push device for the signed-in user. No route serves it yet; '
   + 'the device routes land together with their handlers',

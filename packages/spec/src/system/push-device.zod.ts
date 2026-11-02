@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { PushVendorSchema } from './push-config.zod';
+import { LocaleSchema } from './translation.zod';
 
 /**
  * Push Device Protocol — the stored device shape of the push device registry
@@ -52,7 +53,7 @@ export const UserDeviceSchema = lazySchema(() => z.object({
   token: z.string().min(1).describe('Vendor push token. Held by one live device at a time: a second user\'s registration moves it'),
   platform: z.enum(['ios', 'android', 'web']).describe('Device platform, as the registration named it'),
   appId: z.string().optional().describe('App the token was issued to: the iOS bundle ID or the Android application ID'),
-  locale: z.string().optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
+  locale: LocaleSchema.optional().describe('Device locale (BCP 47, for example zh-CN) that pushes to this device are rendered in'),
   name: z.string().optional().describe('Device friendly name, as the registration named it'),
   enabled: z.boolean().describe('False once the vendor reported the token dead; nothing is delivered to a disabled device'),
   invalidatedAt: z.string().datetime().optional().describe('When the vendor reported the token dead; absent while the device is enabled'),

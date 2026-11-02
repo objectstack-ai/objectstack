@@ -59,6 +59,19 @@ describe('RegisterDeviceRequestSchema (push device registry)', () => {
     expect(parsed.error?.issues[0]?.code).toBe('invalid_value');
   });
 
+  // The locale a push is rendered in must be a tag a translation bundle can
+  // answer: the house LocaleSchema, the shape every other locale key takes.
+  it.each(['zh_CN', 'Chinese', 'zh-CN ', ''])('refuses locale %j (not a BCP-47 language tag)', (locale) => {
+    const parsed = RegisterDeviceRequestSchema.safeParse({ token: 't', platform: 'ios', locale });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(['locale']);
+    expect(parsed.error?.issues[0]?.code).toBe('invalid_format');
+  });
+
+  it.each(['en', 'zh-CN', 'zh-Hans-CN', 'es-419'])('accepts locale %j', (locale) => {
+    expect(RegisterDeviceRequestSchema.safeParse({ token: 't', platform: 'ios', locale }).success).toBe(true);
+  });
+
   it('keeps the response and unregister shapes as they were', () => {
     expect(RegisterDeviceResponseSchema.parse({ deviceId: 'install-1', success: true }))
       .toEqual({ deviceId: 'install-1', success: true });
