@@ -860,6 +860,18 @@ export async function runRegion(
                 try {
                     const chain = await this.resolveSuspensionChain(childRunId);
                     const reason = `the run that started it failed at a region boundary: ${refusal.message}`;
+                    if (chain.length === 0) {
+                        // [#29166] The chain is read through the DEGRADING
+                        // loader, so a store it cannot read reads as "nothing
+                        // suspended" and walking it cancelled nothing, with
+                        // only that loader's `warn` said, while the child run
+                        // stayed parked. The child id is known here, so it is
+                        // cancelled once anyway: `cancelRun` reads through the
+                        // STRICT loader and owns the `error` record when the
+                        // store is still unreadable, and it is a no-op when
+                        // there really is no suspension under that id.
+                        await this.cancelRun(childRunId, reason);
+                    }
                     for (const run of [...chain].reverse()) await this.cancelRun(run.runId, reason);
                 } catch (cancelErr) {
                     // #4632 verdict: DURABILITY, `error`, as `cancelRun`'s own
