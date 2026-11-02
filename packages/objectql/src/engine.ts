@@ -201,7 +201,7 @@ import {
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
-import { SummaryRecomputeError, type SummaryRecomputeFailure } from './summary-errors.js';
+import { SummaryRecomputeError, cascadeStoppedRefusal, rolledBackRefusal, type SummaryRecomputeFailure } from './summary-errors.js';
 import { TransactionUnsupportedError } from './transaction-errors.js';
 import {
   aggregateSummaryValue,
@@ -20968,8 +20968,13 @@ export class ObjectQL implements IObjectQLEngine {
               // wrapping its cascade. `buildDriverOptions` only fills keys that
               // are still `undefined`, so re-running it adds the handle and
               // changes nothing else.
+              //
+              // A dependent's stale-roll-up refusal stops the walk before this
+              // row is removed, so it is not this delete's answer:
+              // `cascadeStoppedRefusal` says what it is instead.
               const runByIdDelete = async (writeContext?: ExecutionContext) => {
-                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext);
+                await this.cascadeDeleteRelations(object, [hookContext.input.id as string | number], writeContext)
+                  .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                 return await driver.delete(
                   object,
                   hookContext.input.id as string,
@@ -21061,8 +21066,11 @@ export class ObjectQL implements IObjectQLEngine {
                    const matchedIds = matched.map((row) => row?.id).filter((v): v is string | number => v != null);
                    if (summaryKeyColumns.length > 0) summaryPriorRows = withoutDeletedSelfParents(object, matched, matchedIds, this.getSummaryDescriptors(object));
                    deletedSecrets = deletedSecretSlots(deleteSchema, matched);
-                   // [#27004] One walk, rooted at the whole matched set.
-                   await this.cascadeDeleteRelations(object, matchedIds, writeContext);
+                   // [#27004] One walk, rooted at the whole matched set. A
+                   // dependent's stale-roll-up refusal is not this delete's
+                   // answer, as in the by-id branch.
+                   await this.cascadeDeleteRelations(object, matchedIds, writeContext)
+                     .catch((e: unknown) => { throw cascadeStoppedRefusal(e, object); });
                    // The id set rides an `$in`; batched so one statement never
                    // outgrows a driver's bind-parameter limit.
                    const batchSize = ObjectQL.REFERENCE_PROBE_BATCH;
@@ -21915,8 +21923,9 @@ export class ObjectQL implements IObjectQLEngine {
       // [#21274] A boundary outside the middleware seam: a commit failure, or
       // a callback that reached the driver through the transaction handle.
       // An error that already crossed an engine boundary inside the callback
-      // comes back as the same reference.
-      throw redactPropagatedDriverFault(err);
+      // comes back as the same reference. A stale-roll-up refusal ("stored")
+      // is no longer true once this rollback has run: `rolledBackRefusal`.
+      throw redactPropagatedDriverFault(rolledBackRefusal(err));
     }
   }
 
@@ -22906,8 +22915,9 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
     } catch (error) {
       if (driver.rollback) await driver.rollback(trx);
       else if (driver.rollbackTransaction) await driver.rollbackTransaction(trx);
-      // [#21274] The engine surface's twin (`ObjectQL.transaction`).
-      throw redactPropagatedDriverFault(error);
+      // [#21274] The engine surface's twin (`ObjectQL.transaction`), the
+      // stale-roll-up conversion included.
+      throw redactPropagatedDriverFault(rolledBackRefusal(error));
     }
   }
 
