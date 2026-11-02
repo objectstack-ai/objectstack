@@ -115,6 +115,54 @@ const VITEST_CONFIG_NAMES = [
   'vitest.config.cjs',
 ];
 
+// The population this gate reads, declared for `scripts/pm/dispatch-gates.mjs`
+// (the ROOT_DIR_WATCH_HINTS idiom), so a card that edits a package-root
+// manifest or vitest config is told about this gate before CI is. `scan()`
+// below opens exactly two files per workspace package: its `package.json` and
+// its package-root vitest config. Nothing else under a package moves the
+// verdict, so a new test file under an existing package derives nothing.
+//
+// One pair per glob `workspaceGlobs()` reads, in that order. A `<dir>/*` glob
+// is spelled `<dir>/*/package.json` and `<dir>/*/vitest.config.*` — the glob in
+// a non-final segment makes the derivation judge it as a pattern, one path
+// segment per `*`. A literal member `<dir>` would be spelled `<dir>/package.json`
+// and `<dir>/vitest.config` (`watchHintsForGlob`): with no glob ahead of it a
+// trailing `.*` is collapsed to `<dir>/vitest.config.`, which names nothing,
+// while the bare stem reaches every one of VITEST_CONFIG_NAMES through the
+// derivation's module-extension equality. None is read today: the parse stops
+// at the first comment line in the `packages:` list, so the `ui` members below
+// it are not in this gate's population, and are not declared here either.
+//
+// ⛔ Hand-kept, and `scan()` holds it to the workspace file: a glob in
+// `pnpm-workspace.yaml` with no pair here, or a pair here for a glob that file
+// no longer lists, is a finding (`watchHintDrift`). Not readable from the
+// repo-root files themselves — `pnpm-workspace.yaml` and `vitest.preset.mts`
+// carry no separator, so no spelling of them is a hint the derivation admits.
+export const ROOT_DIR_WATCH_HINTS = Object.freeze([
+  'packages/*/package.json',
+  'packages/*/vitest.config.*',
+  'packages/apps/*/package.json',
+  'packages/apps/*/vitest.config.*',
+  'packages/drivers/*/package.json',
+  'packages/drivers/*/vitest.config.*',
+  'packages/plugins/*/package.json',
+  'packages/plugins/*/vitest.config.*',
+  'packages/qa/*/package.json',
+  'packages/qa/*/vitest.config.*',
+  'packages/triggers/*/package.json',
+  'packages/triggers/*/vitest.config.*',
+  'packages/services/*/package.json',
+  'packages/services/*/vitest.config.*',
+  'packages/adapters/*/package.json',
+  'packages/adapters/*/vitest.config.*',
+  'packages/connectors/*/package.json',
+  'packages/connectors/*/vitest.config.*',
+  'apps/*/package.json',
+  'apps/*/vitest.config.*',
+  'examples/*/package.json',
+  'examples/*/vitest.config.*',
+]);
+
 const DISARM_RE = /\bdisableConsoleIntercept\s*:\s*true\b/;
 const REARM_RE = /\bdisableConsoleIntercept\s*:\s*false\b/;
 const PROJECTS_RE = /\bprojects\s*:\s*\[/;
@@ -207,6 +255,31 @@ const REMEDY = `    // Late console writes must not redden a green suite (#10374
  * instead of silently emptying its population.
  */
 export function workspacePackageDirs(root) {
+  const dirs = [];
+  for (const glob of workspaceGlobs(root)) {
+    if (glob.endsWith('/*')) {
+      const base = join(root, glob.slice(0, -2));
+      if (!existsSync(base)) continue;
+      for (const entry of readdirSync(base, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const dir = join(base, entry.name);
+        if (existsSync(join(dir, 'package.json'))) dirs.push(dir);
+      }
+    } else if (!glob.includes('*')) {
+      const dir = join(root, glob);
+      if (existsSync(join(dir, 'package.json'))) dirs.push(dir);
+    } else {
+      throw new Error(
+        `pnpm-workspace.yaml glob '${glob}' is wider than '<dir>/*' — teach ` +
+          `workspacePackageDirs() the new shape before trusting this gate again`,
+      );
+    }
+  }
+  return dirs;
+}
+
+/** `pnpm-workspace.yaml`'s `packages:` globs, in file order. Throws when none parse. */
+export function workspaceGlobs(root) {
   const raw = readFileSync(join(root, 'pnpm-workspace.yaml'), 'utf8');
   const globs = [];
   let inPackages = false;
@@ -227,27 +300,51 @@ export function workspacePackageDirs(root) {
   if (globs.length === 0) {
     throw new Error(`no package globs parsed from ${join(root, 'pnpm-workspace.yaml')}`);
   }
-  const dirs = [];
-  for (const glob of globs) {
-    if (glob.endsWith('/*')) {
-      const base = join(root, glob.slice(0, -2));
-      if (!existsSync(base)) continue;
-      for (const entry of readdirSync(base, { withFileTypes: true })) {
-        if (!entry.isDirectory()) continue;
-        const dir = join(base, entry.name);
-        if (existsSync(join(dir, 'package.json'))) dirs.push(dir);
-      }
-    } else if (!glob.includes('*')) {
-      const dir = join(root, glob);
-      if (existsSync(join(dir, 'package.json'))) dirs.push(dir);
-    } else {
-      throw new Error(
-        `pnpm-workspace.yaml glob '${glob}' is wider than '<dir>/*' — teach ` +
-          `workspacePackageDirs() the new shape before trusting this gate again`,
-      );
-    }
+  return globs;
+}
+
+/**
+ * The watch-hint pair one workspace glob owes `ROOT_DIR_WATCH_HINTS`, spelled
+ * the way that declaration's comment explains. A glob wider than `<dir>/*` owes
+ * nothing here: `workspacePackageDirs()` already refuses it, loudly.
+ */
+export function watchHintsForGlob(glob) {
+  if (glob.endsWith('/*')) return [`${glob}/package.json`, `${glob}/vitest.config.*`];
+  if (!glob.includes('*')) return [`${glob}/package.json`, `${glob}/vitest.config`];
+  return [];
+}
+
+/**
+ * Where `ROOT_DIR_WATCH_HINTS` and the workspace globs disagree: `missing` are
+ * pairs a listed glob owes and the declaration lacks (a package there edits its
+ * config and no dispatch derivation names this gate); `stale` are declared
+ * hints no listed glob owes (a lead for a population this gate no longer reads).
+ */
+export function watchHintDrift(globs, hints = ROOT_DIR_WATCH_HINTS) {
+  const owed = globs.flatMap(watchHintsForGlob);
+  return {
+    missing: owed.filter((h) => !hints.includes(h)),
+    stale: hints.filter((h) => !owed.includes(h)),
+  };
+}
+
+function watchHintDriftFindings(root) {
+  const { missing, stale } = watchHintDrift(workspaceGlobs(root));
+  const findings = [];
+  if (missing.length > 0) {
+    findings.push(
+      `ROOT_DIR_WATCH_HINTS lacks ${missing.join(', ')} — pnpm-workspace.yaml lists the glob, so a ` +
+        `card editing a package-root manifest or vitest config there is not told about this gate ` +
+        `until CI. Add the pair to the declaration in scripts/check-console-intercept-disarm.mjs.`,
+    );
   }
-  return dirs;
+  if (stale.length > 0) {
+    findings.push(
+      `ROOT_DIR_WATCH_HINTS declares ${stale.join(', ')}, which no pnpm-workspace.yaml glob owes — ` +
+        `remove it from the declaration in scripts/check-console-intercept-disarm.mjs.`,
+    );
+  }
+  return findings;
 }
 
 /** @returns {{findings: string[], vitestPackages: number}} */
@@ -325,11 +422,12 @@ function main() {
   let result;
   try {
     result = scan(REPO_ROOT);
+    result.driftFindings = watchHintDriftFindings(REPO_ROOT);
   } catch (error) {
     console.error(`check-console-intercept-disarm: MEASUREMENT FAILED — ${error.message}`);
     process.exit(2);
   }
-  const { findings, vitestPackages } = result;
+  const { findings, vitestPackages, driftFindings } = result;
   if (vitestPackages === 0) {
     console.error(
       'check-console-intercept-disarm: MEASUREMENT FAILED — the scan found ZERO ' +
@@ -343,8 +441,14 @@ function main() {
       `check-console-intercept-disarm: ${findings.length} package(s) exposed to the ` +
         `vitest late-console teardown race (#10374):\n\n${findings.join('\n\n')}\n`,
     );
-    process.exit(1);
   }
+  if (driftFindings.length > 0) {
+    console.error(
+      `check-console-intercept-disarm: the declared watch population has drifted from ` +
+        `pnpm-workspace.yaml:\n\n${driftFindings.join('\n\n')}\n`,
+    );
+  }
+  if (findings.length > 0 || driftFindings.length > 0) process.exit(1);
   console.log(
     `OK: ${vitestPackages} vitest-running package(s), every one disarms console ` +
       `interception at the package root.`,
@@ -644,6 +748,54 @@ check(() => {
     }
 });
 
+  // The declared watch population (ROOT_DIR_WATCH_HINTS) against the REAL
+  // workspace file, and the drift reading in both directions. Fixture globs are
+  // assembled from segments so no fixture string reads as a path literal of
+  // this gate's own.
+  const realDrift = watchHintDrift(workspaceGlobs(REPO_ROOT));
+check(() => {
+    if (realDrift.missing.length > 0 || realDrift.stale.length > 0) {
+      failures += 1;
+      console.error(
+        `self-test FAIL: ROOT_DIR_WATCH_HINTS has drifted from pnpm-workspace.yaml — ` +
+          `missing: ${realDrift.missing.join(', ') || 'none'}; stale: ${realDrift.stale.join(', ') || 'none'}.`,
+      );
+    }
+});
+  const extraGlob = ['fixture-root', '*'].join('/');
+  const addedGlob = watchHintDrift([...workspaceGlobs(REPO_ROOT), extraGlob]);
+check(() => {
+    const want = watchHintsForGlob(extraGlob);
+    if (want.length !== 2 || addedGlob.missing.join('|') !== want.join('|') || addedGlob.stale.length !== 0) {
+      failures += 1;
+      console.error(`self-test FAIL: a workspace glob the declaration lacks is not read as missing: ${JSON.stringify(addedGlob)}`);
+    }
+});
+  const droppedGlob = watchHintDrift(workspaceGlobs(REPO_ROOT).filter((g) => g !== workspaceGlobs(REPO_ROOT)[0]));
+check(() => {
+    const want = watchHintsForGlob(workspaceGlobs(REPO_ROOT)[0]);
+    if (droppedGlob.stale.join('|') !== want.join('|') || droppedGlob.missing.length !== 0) {
+      failures += 1;
+      console.error(`self-test FAIL: a declared pair no workspace glob owes is not read as stale: ${JSON.stringify(droppedGlob)}`);
+    }
+});
+check(() => {
+    // A literal member is spelled with the bare config STEM, never a trailing
+    // `.*` (which the derivation collapses to a name no file has); a `<dir>/*`
+    // member keeps the `.*`, and a wider glob owes nothing.
+    const literal = watchHintsForGlob('fixture-root');
+    const starred = watchHintsForGlob(extraGlob);
+    const wide = watchHintsForGlob(['fixture-root', '**'].join('/'));
+    if (
+      literal[1] !== ['fixture-root', 'vitest.config'].join('/') ||
+      starred[1] !== [extraGlob, 'vitest.config.*'].join('/') ||
+      wide.length !== 0
+    ) {
+      failures += 1;
+      console.error(`self-test FAIL: watchHintsForGlob spelling — ${JSON.stringify({ literal, starred, wide })}`);
+    }
+});
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ────
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -692,7 +844,7 @@ check(() => {
   }
 
   if (failures > 0) process.exit(1);
-  console.log(`self-test OK: ${cases.length} cases + real-tree population floor.`);
+  console.log(`self-test OK: ${cases.length} cases + real-tree population floor + watch-hint declaration.`);
 
   return SELF_TEST_VERDICT;
 }
