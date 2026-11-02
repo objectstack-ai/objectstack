@@ -39,6 +39,13 @@ export interface AppShellProps {
    * this is purely additive.
    */
   rightRail?: React.ReactNode;
+  /**
+   * Whether the shell draws its top bar, the header element around `navbar`.
+   * Defaults to `true`; `false` draws no header element at all, for a page
+   * that draws its own top bar (the console's record page on a phone,
+   * objectstack#28483). Omitting `navbar` alone still draws the bar.
+   */
+  showHeader?: boolean;
 }
 
 /**
@@ -292,6 +299,7 @@ export function AppShell({
   defaultOpen = true,
   branding,
   rightRail,
+  showHeader = true,
 }: AppShellProps) {
   // Apply branding CSS custom properties
   useAppShellBranding(branding, branding?.title);
@@ -302,10 +310,12 @@ export function AppShell({
           every console frame's bar (objectui#12639): the class is the one
           `@object-ui/app-shell` spells as `CONSOLE_TOP_BAR`, and that
           package's `consoleTopBar.height-12639` test holds this copy equal
-          to it. */}
-      <header className="sticky top-0 z-30 flex h-12 w-full shrink-0 items-center gap-2 border-b bg-background px-2 sm:px-4">
-        {navbar}
-      </header>
+          to it. `showHeader={false}` draws no header element. */}
+      {showHeader && (
+        <header className="sticky top-0 z-30 flex h-12 w-full shrink-0 items-center gap-2 border-b bg-background px-2 sm:px-4">
+          {navbar}
+        </header>
+      )}
 
       {/* 2. Lower section: sidebar + main content (+ optional right rail) */}
       <div className="flex flex-1 min-h-0 w-full">

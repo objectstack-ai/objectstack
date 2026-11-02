@@ -105,6 +105,9 @@ const STUDIO_ZH: Record<string, string> = {
   'perm.rls.remove': '移除策略',
   'perm.rls.nameNeeded': '为策略填写名称后即可保存。',
   'perm.rls.nameRefused': '未保存。第 {row} 行的策略名称：{problem}',
+  'perm.rls.policyRefused': '未保存。第 {row} 行的策略：{problem}',
+  'perm.rls.checkNotApplicable': '不适用于此策略的操作：只有写入才会被检查。',
+  'perm.rls.clauseHeld': '未保存：请先处理 USING 或 CHECK 下方提示的策略问题。',
   // 行级安全 CEL 编写安全 (objectui#2413)。
   'perm.cel.valid': 'CEL 有效',
   'perm.cel.suggestions': '字段与作用域建议',

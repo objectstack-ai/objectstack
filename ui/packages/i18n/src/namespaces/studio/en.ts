@@ -115,6 +115,9 @@ const STUDIO_EN: Record<string, string> = {
   'perm.rls.remove': 'Remove policy',
   'perm.rls.nameNeeded': 'Give the policy a name to save it.',
   'perm.rls.nameRefused': 'Not saved. Policy name, on row {row}: {problem}',
+  'perm.rls.policyRefused': 'Not saved. Policy on row {row}: {problem}',
+  'perm.rls.checkNotApplicable': 'Does not apply to this policy\'s operation: only a write is checked.',
+  'perm.rls.clauseHeld': 'Not saved: fix the policy finding shown under USING or CHECK.',
   // CEL authoring safety for RLS predicates (objectui#2413).
   'perm.cel.valid': 'Valid CEL',
   'perm.cel.suggestions': 'Field and scope suggestions',

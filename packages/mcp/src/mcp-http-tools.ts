@@ -482,17 +482,23 @@ function errorResultWithCode(err: unknown) {
 }
 
 /**
- * [#28782, #28844] A write tool's answer to a throw: a write the engine stored
- * but whose parent roll-up it could not recompute (`ERR_SUMMARY_RECOMPUTE`,
+ * [#28782, #28844, #28856] A write tool's answer to a throw: a write the engine
+ * stored but whose parent roll-up it could not recompute (`ERR_SUMMARY_RECOMPUTE`,
  * "the triggering records WERE written") answers the write it is, read off
  * #28781's carrier the bridge attached, with the stale column logged once at
  * `error`. An agent that read an error would apply the write again. Any other
  * throw, including every refusal raised before the write, renders through
- * {@link errorResultWithCode} exactly as before.
+ * `otherwise` exactly as before: {@link errorResultWithCode} for the data tools,
+ * {@link errorResultFromThrown} for `run_action`, whose answer the runtime
+ * composed and attached.
  */
-function landedWriteResultOrError(err: unknown, objectName: string) {
+function landedWriteResultOrError(
+  err: unknown,
+  objectName: string | undefined,
+  otherwise: (err: unknown) => ReturnType<typeof errorResultWithCode> = errorResultWithCode,
+) {
   const earned = earnedAnswerOf(err);
-  if (earned === undefined) return errorResultWithCode(err);
+  if (earned === undefined) return otherwise(err);
   for (const line of staleSummaryAnswerLines(err as SummaryRecomputeRefusal, objectName)) console.error(`[MCP] ${line}`);
   return textResult(earned);
 }
@@ -1590,7 +1596,7 @@ export function registerActionTools(
         });
         return textResult(result);
       } catch (err) {
-        return errorResultFromThrown(err);
+        return landedWriteResultOrError(err, objectName, errorResultFromThrown);
       }
     },
   );
