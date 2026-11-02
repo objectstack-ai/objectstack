@@ -3195,6 +3195,7 @@ const en = {
       // the same with or without the pack.
       ssoButton: 'Sign in with SSO',
       ssoOnlyDescription: "Sign in with your organization's single sign-on",
+      noSignInMethodText: 'No sign-in method is available. Contact your administrator.',
       usePasswordText: 'Use a password instead',
       backToSsoText: 'Back to single sign-on',
       // objectui#12600 — the console login card's own header, the password

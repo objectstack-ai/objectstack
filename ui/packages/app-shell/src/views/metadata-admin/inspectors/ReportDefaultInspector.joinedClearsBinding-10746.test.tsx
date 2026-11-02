@@ -78,7 +78,12 @@ const baseProps = {
   datasetCatalogOverride: catalog,
 };
 
-/** The six keys the type switch clears, in the order the inspector names them. */
+/**
+ * The six keys `boundDraft` carries that the type switch clears, in the order the
+ * inspector names them. The switch also clears `dateRange` and `exportOptions`
+ * (objectstack#29195); `ReportDefaultInspector.joinedClearsRefused-29195.test.tsx`
+ * holds the whole list against `ReportSchema`.
+ */
 const CLEARED = ['dataset', 'values', 'rows', 'columns', 'chart', 'order'] as const;
 /** The four the spec's joined arm refuses on the container (objectstack PR #20160). */
 const SPEC_REFUSED_SELECTION = ['dataset', 'rows', 'columns', 'values'] as const;
