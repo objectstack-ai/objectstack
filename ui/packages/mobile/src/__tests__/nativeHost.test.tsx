@@ -21,6 +21,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 import { render, cleanup, act } from '@testing-library/react';
 import {
   NATIVE_BRIDGE_VERSION,
+  NATIVE_CONNECTION_REMOVED_EVENT,
   NATIVE_HOST_GLOBAL,
   NATIVE_NAVIGATE_EVENT,
   getNativeHost,
@@ -29,8 +30,10 @@ import {
   nativeHaptic,
   nativeNavigate,
   nativeOpenExternal,
+  nativeHostCan,
   nativeResetServer,
   nativeScan,
+  nativeShowConnectionSwitcher,
   postNativeReady,
   postNativeRouteChanged,
   resetNativeHostEventsForTests,
@@ -44,7 +47,15 @@ import {
   useNativeHostRouting,
 } from '../useNativeHost';
 
-const ALL_METHODS: NativeHostMethod[] = ['getPushToken', 'haptic', 'openExternal', 'navigate', 'resetServer', 'scan'];
+const ALL_METHODS: NativeHostMethod[] = [
+  'getPushToken',
+  'haptic',
+  'openExternal',
+  'navigate',
+  'resetServer',
+  'scan',
+  'showConnectionSwitcher',
+];
 
 function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackNative & {
   ready: Mock<() => void>;
@@ -63,6 +74,7 @@ function fakeBridge(capabilities: readonly string[] = ALL_METHODS): ObjectStackN
     navigate: vi.fn(async () => null),
     resetServer: vi.fn(async () => null),
     scan: vi.fn(async () => 'ASSET-0042'),
+    showConnectionSwitcher: vi.fn(async () => null),
     ready: vi.fn<() => void>(),
     routeChanged: vi.fn<(route: string) => void>(),
   };
@@ -227,6 +239,7 @@ describe('typed call wrappers feature-detect and never throw', () => {
     ['navigate', () => nativeNavigate('/home')],
     ['resetServer', () => nativeResetServer()],
     ['scan', () => nativeScan()],
+    ['showConnectionSwitcher', () => nativeShowConnectionSwitcher()],
   ];
 
   it.each(calls)('%s resolves "unavailable" without a bridge', async (_method, call) => {
@@ -257,6 +270,17 @@ describe('typed call wrappers feature-detect and never throw', () => {
     expect(bridge.openExternal).toHaveBeenCalledWith('mailto:a@example.com');
     await nativeNavigate('/apps/crm');
     expect(bridge.navigate).toHaveBeenCalledWith('/apps/crm');
+    await expect(nativeShowConnectionSwitcher()).resolves.toEqual({ status: 'ok', value: null });
+    expect(bridge.showConnectionSwitcher).toHaveBeenCalledTimes(1);
+  });
+
+  it('nativeHostCan answers what a wrapper would: announced and carried, nothing else', () => {
+    expect(nativeHostCan(null, 'showConnectionSwitcher')).toBe(false);
+    expect(nativeHostCan(fakeBridge(), 'showConnectionSwitcher')).toBe(true);
+    expect(nativeHostCan(fakeBridge(ALL_METHODS.filter((m) => m !== 'showConnectionSwitcher')), 'showConnectionSwitcher')).toBe(false);
+    const missing = fakeBridge() as unknown as Record<string, unknown>;
+    delete missing.showConnectionSwitcher;
+    expect(nativeHostCan(missing as unknown as ObjectStackNative, 'showConnectionSwitcher')).toBe(false);
   });
 
   it('scan resolves "ok" with the decoded text, forwards the formats, and keeps the bridge as `this`', async () => {
@@ -436,6 +460,95 @@ describe('useNativeHostRouting', () => {
     window.dispatchEvent(event);
     expect(event.defaultPrevented).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('connectionRemoved', () => {
+  function Router({ onConnectionRemoved }: { onConnectionRemoved?: () => Promise<unknown> }) {
+    useNativeHostRouting({ route: '/home', navigate: () => {}, onConnectionRemoved });
+    return null;
+  }
+
+  /** The shell's event: a window Event carrying `waitUntil`, which records the promise. */
+  function removedEvent(): { event: Event; held: Promise<unknown>[] } {
+    const held: Promise<unknown>[] = [];
+    const event = Object.assign(new Event(NATIVE_CONNECTION_REMOVED_EVENT), {
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        held.push(promise);
+      }),
+    });
+    return { event, held };
+  }
+
+  it('with no unregister step, the shell is held by a promise that resolves at once', async () => {
+    install(fakeBridge());
+    render(<Router />);
+    const { event, held } = removedEvent();
+    window.dispatchEvent(event);
+    expect(held).toHaveLength(1);
+    await expect(held[0]).resolves.toBeUndefined();
+  });
+
+  it('with an unregister step, the shell is held until it settles, and the step runs once', async () => {
+    install(fakeBridge());
+    let finish!: () => void;
+    const unregister = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+    render(<Router onConnectionRemoved={unregister} />);
+    const { event, held } = removedEvent();
+    window.dispatchEvent(event);
+    expect(held).toHaveLength(1);
+
+    let settled = false;
+    void held[0].then(() => (settled = true));
+    await act(async () => {});
+    expect(unregister).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+
+    finish();
+    await held[0];
+    expect(settled).toBe(true);
+  });
+
+  it('the latest handler runs, without re-installing the listener per render', () => {
+    install(fakeBridge());
+    const add = vi.spyOn(window, 'addEventListener');
+    const first = vi.fn(async () => {});
+    const second = vi.fn(async () => {});
+    const { rerender } = render(<Router onConnectionRemoved={first} />);
+    rerender(<Router onConnectionRemoved={second} />);
+    expect(add.mock.calls.filter(([type]) => type === NATIVE_CONNECTION_REMOVED_EVENT)).toHaveLength(1);
+    const { event, held } = removedEvent();
+    window.dispatchEvent(event);
+    return held[0].then(() => {
+      expect(second).toHaveBeenCalledTimes(1);
+      expect(first).not.toHaveBeenCalled();
+    });
+  });
+
+  it('an event without waitUntil is left alone', () => {
+    install(fakeBridge());
+    const unregister = vi.fn(async () => {});
+    render(<Router onConnectionRemoved={unregister} />);
+    window.dispatchEvent(new Event(NATIVE_CONNECTION_REMOVED_EVENT));
+    expect(unregister).not.toHaveBeenCalled();
+  });
+
+  it('control: outside shell mode no connectionRemoved listener is installed', () => {
+    const add = vi.spyOn(window, 'addEventListener');
+    render(<Router />);
+    expect(add.mock.calls.some(([type]) => type === NATIVE_CONNECTION_REMOVED_EVENT)).toBe(false);
+    const { event, held } = removedEvent();
+    window.dispatchEvent(event);
+    expect(held).toHaveLength(0);
+  });
+
+  it('removes its listener on unmount', () => {
+    install(fakeBridge());
+    const { unmount } = render(<Router />);
+    unmount();
+    const { event, held } = removedEvent();
+    window.dispatchEvent(event);
+    expect(held).toHaveLength(0);
   });
 });
 
