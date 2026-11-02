@@ -4353,7 +4353,9 @@ export function InterfacesPillar({
   /** objectui#2600 — mirrors the unsaved-nav-edit state (`navDirty`) up to the
    * Studio header, whose pillar/Home/package navigation unmounts this whole
    * pillar (SPA nav, so no beforeunload). Reports `false` on unmount so a
-   * confirmed discard clears the surface's guard. */
+   * confirmed discard clears the surface's guard. objectstack#29113 — and an
+   * open leaf's edit whose last save was refused (`refusedUnsent`): nothing
+   * sends it again until the author edits, so it is unsaved work too. */
   onDirtyChange?: (dirty: boolean) => void;
   /** objectui#8219 — reports the open leaf's display label (tagged with the
    * leaf's type and name) up to the surface that mounts the copilot dock, for
@@ -4473,7 +4475,8 @@ export function InterfacesPillar({
       setNavSel({ kind: 'nav', id: hit.selectionId });
     },
   });
-  // Mirror `navDirty` up to the surface (see the onDirtyChange prop doc).
+  // Mirror `navDirty` up to the surface (see the onDirtyChange prop doc); the
+  // report itself sits below `refusedUnsent`, which it also reads.
   // Ref-stabilized like PermissionMatrixEditPage's report, so a non-memoized
   // callback prop doesn't refire the effect; the unmount cleanup reports
   // `false` so a deliberately-discarded pillar clears the host's guard state.
@@ -4481,9 +4484,6 @@ export function InterfacesPillar({
   React.useEffect(() => {
     onDirtyChangeRef.current = onDirtyChange;
   });
-  React.useEffect(() => {
-    onDirtyChangeRef.current?.(navDirty);
-  }, [navDirty]);
   // objectui#11189 — `navDirty` as last committed, for the app load, which
   // installs what it read after an await. The same state, read late; only this
   // effect writes it. (A nav save completing reads the autosave's claim on the
@@ -5130,6 +5130,7 @@ export function InterfacesPillar({
       leafReadAtRef.current = null;
       setHasDraft(false);
       setIfDirty(false);
+      setLeafRefusedFor(null);
       return;
     }
     let cancelled = false;
@@ -5198,6 +5199,7 @@ export function InterfacesPillar({
         leafReadAtRef.current = { key: leafKeyOf(current), at: readAt };
         setHasDraft(!!body);
         setIfDirty(false);
+        setLeafRefusedFor(null);
       } catch (e) {
         if (!cancelled) setError(plainRefusal(e));
       } finally {
@@ -5270,6 +5272,11 @@ export function InterfacesPillar({
   // stamped with the leaf it saved, so it reads for that leaf only and expires
   // by construction when another leaf opens. A source page's editor says it.
   const [leafSavedAt, setLeafSavedAt] = React.useState<{ key: string; at: Date } | null>(null);
+  // objectstack#29113 — the leaf whose last save was refused (`leafKeyOf`), so
+  // its edit, still in the buffer and sent again only after another edit
+  // (`useDraftAutoSave`), counts as unsaved work: a save that lands, or a
+  // buffer a load installs, clears it.
+  const [leafRefusedFor, setLeafRefusedFor] = React.useState<string | null>(null);
   const onPatch = React.useCallback(
     (patch: Record<string, unknown>) => {
       setDraft((d) => ({ ...d, ...patch }));
@@ -5300,11 +5307,13 @@ export function InterfacesPillar({
           pair = await pairFor(custom, current.type, current.name);
         } catch (e) {
           setError(plainRefusal(e));
+          setLeafRefusedFor(leafKeyOf(current));
           return;
         }
         const declared = overrideDraftBody(body, custom.base, custom.basedOn);
         if (declared === null) {
           setError({ message: tFormat('engine.studio.customize.noVersion', locale, { package: custom.baseLabel }) });
+          setLeafRefusedFor(leafKeyOf(current));
           return;
         }
         // The buffer was read at another package (the base, before its pair
@@ -5330,6 +5339,7 @@ export function InterfacesPillar({
       if (entering) setServedNonce((n) => n + 1);
       setHasDraft(true);
       setLeafSavedAt({ key: leafKeyOf(current), at: new Date() });
+      setLeafRefusedFor(null);
       // objectui#11204 — clean only if nothing was edited while it was in flight.
       if (sent.unmoved()) setIfDirty(false);
       onDraftSaved?.({ type: current.type, name: current.name });
@@ -5339,6 +5349,7 @@ export function InterfacesPillar({
       // Details keep every path. objectstack#26730 — a dashboard's widget and
       // a report's own properties are placed (`leafIssueLocator`).
       setError(issueRefusal(e, locale, leafIssueLocator(current.type, body, locale)));
+      setLeafRefusedFor(leafKeyOf(current));
     } finally {
       setSaving(false);
     }
@@ -5457,6 +5468,15 @@ export function InterfacesPillar({
   });
   useHeldEditReport(onHeldEditChange, leafHeld?.clause ?? listViewHeld?.clause ?? navRenameClause);
   const heldUnsent = leafHeld !== null || listViewHeld !== null;
+  // objectstack#29113 — an edit of the open leaf whose last save was refused:
+  // the leaf buffer's, or an object leaf's list view's. Not held (a held edit
+  // is never sent, and the publish refuses over one), but unsent all the same.
+  const listViewRefused = listView.dirty && listView.failure?.during === 'save';
+  const refusedUnsent = (ifDirty && draftLoaded && leafRefusedFor === leafKey) || listViewRefused;
+  const leafUnsent = heldUnsent || refusedUnsent;
+  React.useEffect(() => {
+    onDirtyChangeRef.current?.(navDirty || refusedUnsent);
+  }, [navDirty, refusedUnsent]);
   // objectstack#27896 — the panel's view picker (and its "Back to …") opens
   // another view of the object in the one list-view buffer, whose load
   // replaces the open view's edits, and the autosave sends nothing once the
@@ -5648,13 +5668,13 @@ export function InterfacesPillar({
       // objectstack#26845 — the created item opens at once, and its load
       // replaces the buffer a held widget lives in: asked before the dialog
       // opens, so Cancel costs nothing and the create itself asks nothing.
-      if (!confirmDropUnsavedWork(heldUnsent, locale)) return;
+      if (!confirmDropUnsavedWork(leafUnsent, locale)) return;
       setCreateError(null);
       setReportBinding(NO_REPORT_BINDING);
       setPageKind(DEFAULT_PAGE_SOURCE_KIND);
       setCreateKind(kind);
     },
-    [heldUnsent, locale],
+    [leafUnsent, locale],
   );
   // objectui#12455 — the "+" kind picker's other kinds: the entry is added
   // where "Add nav item" adds one (the end of the top level, an id minted the
@@ -6740,8 +6760,9 @@ export function InterfacesPillar({
   // A rail row opens its item: a tree entry or a row of the sections under it.
   const pickSurface = (s: Surface) => {
     // objectstack#26705 — another leaf's load replaces the buffer the held
-    // widget lives in; an entry for the open leaf keeps it.
-    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(heldUnsent, locale)) return;
+    // widget lives in; an entry for the open leaf keeps it. objectstack#29113
+    // — so it does an edit whose save was refused.
+    if (leafKeyOf(s) !== leafKey && !confirmDropUnsavedWork(leafUnsent, locale)) return;
     setCurrent(s);
     if (isMobile) setRailOpen(false);
   };
