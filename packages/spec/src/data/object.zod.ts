@@ -2774,6 +2774,18 @@ function refuseDuplicateActionNames(objectName: unknown, actions: unknown, ctx: 
   }
 }
 
+/**
+ * The key grammar of an object's field map: a field name is lowercase
+ * snake_case. ONE schema, read by every record keyed by a field name of an
+ * object — `ObjectSchema.fields` and `ObjectExtensionSchema.fieldPatches`
+ * (#29366) — so a key the field map can never hold is refused where it is
+ * written, never accepted as a patch that no field can match. Declared above
+ * `ObjectSchemaBase` for the order reason the block below gives.
+ */
+const FieldNameKeySchema = z.string().regex(/^[a-z_][a-z0-9_]*$/, {
+  message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
+});
+
 // ⚠️ ORDER IS LOAD-BEARING (#5593). This map used to live ~700 lines BELOW
 // `ObjectSchemaBase`, and the error map that reads it was built lazily
 // (`objectUnknownKeyErrorImpl ??= …`) purely to step around the temporal dead
@@ -3195,13 +3207,7 @@ const ObjectSchemaBase = strictObject(
           message: 'Field names must not be "constructor" or "prototype" (reserved JavaScript prototype property names).',
           path: [reserved],
         }),
-      z.record(
-        z.string()
-          .regex(/^[a-z_][a-z0-9_]*$/, {
-            message: 'Field names must be lowercase snake_case (e.g., "first_name", "company", "annual_revenue")',
-          }),
-        FieldSchema,
-      ),
+      z.record(FieldNameKeySchema, FieldSchema),
     ),
     'fields',
   ).describe('Field definitions map. Keys must be snake_case identifiers; "__proto__", "constructor" and "prototype" are refused.'),
@@ -4939,7 +4945,8 @@ function refuseFieldPatchOfReplacedField(fields: unknown, fieldPatches: unknown,
 /** [ADR-0146 D10] The `fieldPatches` description, its member list read from {@link BASE_FIELD_DISPLAY_WHITELIST}. */
 function fieldPatchesDescription(): string {
   return (
-    'Display patches of the target object\'s own fields, keyed by field name: change a vendor field\'s ' +
+    'Display patches of the target object\'s own fields, keyed by field name (lowercase snake_case, the ' +
+    'key grammar of an object\'s `fields`): change a vendor field\'s ' +
     `display properties (BASE_FIELD_DISPLAY_WHITELIST: ${backtickList(BASE_FIELD_DISPLAY_WHITELIST.field)} ` +
     `on the field, ${backtickList(BASE_FIELD_DISPLAY_WHITELIST.option)} on an option under \`options\`, ` +
     'keyed by its stored value) without taking the field over, so its type, values and rules stay the ' +
@@ -5036,7 +5043,9 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
 
   /**
    * [ADR-0146 D10, second rule] Per-field display patch of the target's own
-   * fields. Keys are DERIVED from `BASE_FIELD_DISPLAY_WHITELIST`; structural
+   * fields. Each record key is a field name, judged by the field map's own
+   * key grammar ({@link FieldNameKeySchema}, as `ObjectSchema.fields`). A
+   * patch's keys are DERIVED from `BASE_FIELD_DISPLAY_WHITELIST`; structural
    * keys are refused by name with the D6 prescription; an `__c` key, and a
    * field the same extension replaces in `fields`, are refused by the root
    * refinement below; `__proto__` is refused on the raw input. Pure shape: whether the target has the field
@@ -5045,7 +5054,19 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
    * `os validate`, named in the boot log — and the merge that applies the patch
    * is `@objectstack/objectql`'s `mergeObjectDefinitions`.
    */
-  fieldPatches: refuseRecordProtoKey(z.record(z.string(), FieldDisplayPatchSchema), 'fieldPatches')
+  fieldPatches: refuseRecordProtoKey(z.record(FieldNameKeySchema, FieldDisplayPatchSchema, {
+    // [#29366] Keyed by the field map's own key grammar: a key no field name
+    // can be (`Industry`, `Annual Revenue`) is refused here, where it is
+    // written, instead of parsing and reaching only the target judge.
+    error: (issue) => {
+      if (issue.code === 'invalid_key') {
+        return `\`${String(issue.input)}\` cannot be a field name, so no field sits under it: \`fieldPatches\` is ` +
+          'keyed by the name of a field the extended object declares, lowercase snake_case such as ' +
+          '`industry` or `annual_revenue` (the key of its `fields` entry), never by its label.';
+      }
+      return undefined;
+    },
+  }), 'fieldPatches')
     .optional()
     .describe(fieldPatchesDescription()),
 
