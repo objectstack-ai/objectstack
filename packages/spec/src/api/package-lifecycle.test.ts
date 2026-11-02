@@ -553,3 +553,39 @@ describe('the `nav` kind of `contributions` is declared ahead of its producer (A
     expect(GetPackageCustomizationsResponseSchema.shape.contributions.element.safeParse(noName).success).toBe(false);
   });
 });
+
+describe('PackageExportManifestSchema declares the install-manifest keys an install of the export decides by', () => {
+  const identity = { id: 'com.example.crm.custom', name: 'example-crm-custom', version: '0.1.0' };
+  /** A `.custom` pair's export, as `assemblePackageManifest` writes it from the pair's registry row. */
+  const pairExport = {
+    ...identity,
+    namespace: 'crm_custom',
+    dependencies: { 'com.example.crm': '^1' },
+    dashboards: [{ name: 'crm_board', label: 'Board', overrides: { package: 'com.example.crm', basedOn: '2.1.0' } }],
+  };
+
+  it('parses a pair\'s export and PRESERVES its namespace and its base edge', () => {
+    const result = PackageExportManifestSchema.safeParse(pairExport);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toEqual(pairExport);
+  });
+
+  it('both are optional: an export of a package whose row declares neither still parses', () => {
+    expect(PackageExportManifestSchema.safeParse(identity).success).toBe(true);
+  });
+
+  it('each is the install manifest\'s own declaration, refusing what an install would refuse', () => {
+    expect(PackageExportManifestSchema.safeParse({ ...identity, namespace: '1crm' }).success).toBe(false);
+    expect(PackageExportManifestSchema.safeParse({ ...identity, namespace: 'Crm' }).success).toBe(false);
+    expect(PackageExportManifestSchema.safeParse({ ...identity, dependencies: { 'com.example.crm': 1 } }).success).toBe(false);
+    expect(PackageExportManifestSchema.safeParse({ ...identity, dependencies: ['com.example.crm'] }).success).toBe(false);
+  });
+
+  it('each describe says where the value comes from and why an install needs it, citing no tracker id', () => {
+    const { namespace, dependencies } = PackageExportManifestSchema.shape;
+    expect(namespace.description).toContain('registry row');
+    expect(dependencies.description).toContain('ADR-0141 D5');
+    expect(dependencies.description).toContain('ADR-0146 D2');
+    for (const d of [namespace.description, dependencies.description]) expect(d).not.toMatch(/#\d{3,}/);
+  });
+});
