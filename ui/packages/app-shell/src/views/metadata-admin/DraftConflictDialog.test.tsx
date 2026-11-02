@@ -29,6 +29,7 @@ import {
   DraftVersionGuard,
   draftPinOf,
   isDraftVersionConflict,
+  isDraftReadRefused,
   readDraftForSave,
   type DraftConflictChoice,
 } from './DraftConflictDialog';
@@ -226,6 +227,22 @@ describe('DraftVersionGuard — the first save after a load is pinned to the rea
     guard.recordRead('object', 'acme_task', PKG, read.pin);
     await guard.save('object', 'acme_task', { label: 'A' }, DRAFT);
     expect(door.puts.map((p) => [p.ifMatch, p.ifNoneMatch])).toEqual([[null, null]]);
+  });
+
+  it('a read refused 403 is no absence: it carries the refusal, pins nothing, and serves no answer (objectstack#29015)', async () => {
+    const refusal = Object.assign(new Error("You do not have permission to open the 'acme_board' dashboard."), {
+      status: 403,
+      code: 'PERMISSION_DENIED',
+    });
+    const gated = { getDraft: vi.fn(async () => Promise.reject(refusal)) };
+    const read = await readDraftForSave(gated, 'dashboard', 'acme_board', PKG);
+    expect(read).toEqual({ answer: null, pin: null, refused: refusal });
+    expect(isDraftReadRefused(read.refused)).toBe(true);
+    // Any other failure says nothing about the row, and carries no refusal.
+    const failing = { getDraft: vi.fn(async () => Promise.reject(new Error('network down'))) };
+    expect('refused' in (await readDraftForSave(failing, 'dashboard', 'acme_board', PKG))).toBe(false);
+    expect(isDraftReadRefused(Object.assign(new Error('boom'), { status: 500 }))).toBe(false);
+    expect(isDraftReadRefused(null)).toBe(false);
   });
 
   it('a pin belongs to its address: a read recorded for another package pins nothing here', async () => {
