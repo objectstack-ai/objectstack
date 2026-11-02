@@ -182,11 +182,39 @@ export function isInvocationError(error: unknown): boolean {
   return typeof stack === 'string' && OCLIF_PARSER_FRAME.test(stack);
 }
 
-/** The first line of a message, with oclif's `See more help with --help` tail dropped. */
+/** oclif's closing line on every parse error, which says nothing about this one. */
+const HELP_TAIL = 'See more help with --help';
+
+/** SGR colour codes: oclif dims the reasons it lists under a header when stderr is a terminal. */
+const ANSI_SGR = /\u001b\[[0-9;]*m/g;
+
+/** Longest reason the banner echoes, so a long argument list cannot push the line into a wrap. */
+const REASON_MAX = 200;
+
+/**
+ * oclif's message as ONE line, with its `See more help with --help` tail and
+ * colour codes dropped.
+ *
+ * Several parse errors put a generic header on line one and the reason under
+ * it: `The following error occurred:` over `Missing required flag out`,
+ * `Parsing --eval-min` over `Expected an integer but received: abc`, `Missing
+ * 1 required arg:` over the arg list. Keeping line one alone left a banner that
+ * named no reason, so every line is kept, whitespace runs collapsed: a line
+ * after a header ending in `:` follows it after a space, any other after `; `.
+ */
 function reasonOf(error: unknown): string {
   const message = (error as { message?: unknown } | null)?.message;
-  const first = String(typeof message === 'string' ? message : '').split('\n')[0]?.trim() ?? '';
-  return first || 'invalid arguments';
+  const lines = String(typeof message === 'string' ? message : '')
+    .replace(ANSI_SGR, '')
+    .split('\n')
+    .map((line) => line.replace(/\s+/g, ' ').trim())
+    .filter((line) => line !== '' && line !== HELP_TAIL);
+  let reason = '';
+  for (const line of lines) {
+    reason = reason === '' ? line : `${reason}${reason.endsWith(':') ? ' ' : '; '}${line}`;
+  }
+  if (reason === '') return 'invalid arguments';
+  return reason.length > REASON_MAX ? `${reason.slice(0, REASON_MAX - 3)}...` : reason;
 }
 
 /** The invocation as typed, capped so one long argument cannot push the line into a wrap. */

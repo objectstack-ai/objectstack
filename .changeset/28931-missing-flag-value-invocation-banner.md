@@ -12,3 +12,5 @@ Metadata-protocol: none
 The same line now also leads three other parse failures that oclif raises the same way: a flag with an option list given without its value (`os dev --log-level`), a single-valued flag given twice (`os dev -p 1 -p 2`), and a value a flag's own parser refused (`os lint --eval-min abc`).
 
 Nothing else changes: the same inputs are accepted and refused, the exit code is still 2, and oclif's own lines follow unchanged. A command that parsed and then failed while running gets no banner.
+
+The banner's reason now carries oclif's whole message on one line instead of only its first line, so `os plugin keygen` reads `The following error occurred: Missing required flag out` and `os lint --eval-min abc` reads `Parsing --eval-min; Expected an integer but received: abc` where both used to name only the header.

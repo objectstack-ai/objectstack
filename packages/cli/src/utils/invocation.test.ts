@@ -296,6 +296,40 @@ describe('[#10111] invocationFailureLine', () => {
     expect(line).toContain(`Invoked as: ${INVOCATION_PREFIX} dev -d`);
   });
 
+  // oclif spreads these reasons over several lines under a generic header; the
+  // banner used to keep only the header ("The following error occurred:.",
+  // "Parsing --eval-min.") and so named no reason at all.
+  it('names the missing required flag, not only oclif’s header (`os plugin keygen`)', async () => {
+    const error = await realParseFailure([], { flags: { out: Flags.string({ char: 'o', required: true }) } });
+    expect(String((error as Error).message).split('\n')[0]).toBe('The following error occurred:');
+    const line = invocationFailureLine(error, ['plugin', 'keygen']);
+    expect(line).toContain('INVOCATION ERROR — The following error occurred: Missing required flag out. The command never ran');
+  });
+
+  it('names the value a flag’s parser refused, not only `Parsing --X` (`os lint --eval-min abc`)', async () => {
+    const error = await realParseFailure(['--eval-min', 'abc'], { flags: { 'eval-min': Flags.integer() } });
+    const line = invocationFailureLine(error, ['lint', '--eval-min', 'abc']);
+    expect(line).toContain('INVOCATION ERROR — Parsing --eval-min; Expected an integer but received: abc. The command never ran');
+  });
+
+  it('keeps a joined reason on one line, free of colour codes and of the help tail', async () => {
+    const error = await realParseFailure([], { args: { id: Args.string({ description: 'The installed plugin id', required: true }) } });
+    const line = invocationFailureLine(error, ['plugin', 'uninstall']);
+    expect(line).toContain('INVOCATION ERROR — Missing 1 required arg: id The installed plugin id. The command never ran');
+    expect(line).not.toContain('\n');
+    expect(line).not.toContain('See more help');
+    const dimmed = Object.assign(new Error('The following error occurred:\n  \u001b[2mMissing required flag out\u001b[22m'), { parse: {}, showHelp: false });
+    expect(invocationFailureLine(dimmed, ['plugin', 'keygen'])).toContain('occurred: Missing required flag out. The command');
+    expect(invocationFailureLine(dimmed, ['plugin', 'keygen'])).not.toContain('\u001b');
+  });
+
+  it('caps a long joined reason so the line cannot run on', () => {
+    const long = Object.assign(new Error(`Missing 9 required args:\n${'an argument with a long description\n'.repeat(20)}`), { parse: {}, showHelp: true });
+    const line = invocationFailureLine(long, ['plugin', 'uninstall']);
+    expect(line).toContain('.... The command never ran');
+    expect(line!.length).toBeLessThan(450);
+  });
+
   it('returns undefined for a command that parsed and then failed', async () => {
     expect(invocationFailureLine(await realRuntimeCommandError(), ['dev', '-d', 'file.db'])).toBeUndefined();
   });
