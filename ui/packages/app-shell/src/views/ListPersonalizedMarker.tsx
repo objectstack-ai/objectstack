@@ -23,7 +23,7 @@ import { RotateCcw, UserPen } from 'lucide-react';
 export type ListPersonalizationPart = Parameters<NonNullable<ListViewProps['onPersonalizationChange']>>[0][number];
 
 /** The order the marker names the parts in: the toolbar's, then the Display panel's. */
-export const LIST_PERSONALIZATION_PART_ORDER: readonly ListPersonalizationPart[] = [
+const LIST_PERSONALIZATION_PART_ORDER: readonly ListPersonalizationPart[] = [
   'filters',
   'search',
   'sort',

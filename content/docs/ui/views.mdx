@@ -551,7 +551,14 @@ metadata is read-only. What you author (`sort`, filters, columns, `rowHeight`,
 
 - A link carrying list state (`uf_*` parameters) wins over the stored state.
 - A user's hidden fields only subtract from the columns the view shows, never add one.
-- **Reset view** in the page header's ⋯ menu drops the active view's stored state.
+- While a user's list differs from the view, a **Personalized** marker sits beside the list
+  title (an icon alone on a phone). Opening it names what differs: filters, search, sort,
+  grouping, column layout, hidden fields, density, and the Display panel's layout, row
+  color, row numbers and inline editing. Its **Reset to view** is the one way back: it
+  drops the active view's stored state and cached search, and removes the list's `uf_*`
+  parameters from the address bar, so the list is the view's own again after a reload too.
+  Pinned views, favorites, how records open and a "View all" link's `filter[...]` scope are
+  not list state and stay. Nothing about the marker is configurable.
 
 ### A view the user may not open
 

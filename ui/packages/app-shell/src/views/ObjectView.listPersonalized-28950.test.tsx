@@ -161,7 +161,10 @@ function AttachFamily({ family }: { family: any }) {
 /** The address bar, as the page last wrote it. */
 let currentSearch = '';
 function LocationProbe() {
-  currentSearch = useLocation().search;
+  const { search } = useLocation();
+  React.useEffect(() => {
+    currentSearch = search;
+  }, [search]);
   return null;
 }
 
