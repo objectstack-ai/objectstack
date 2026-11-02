@@ -1,0 +1,65 @@
+---
+title: Push Delivery schema — API Protocol reference
+navTitle: Push Delivery
+description: "Push delivery data — what a push carries to the shell. Reference for PushDeliveryData, PushRoute: every property with its type and default."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+Push delivery data — what a push carries to the shell (ADR-0012 §8: the
+`data` member of the push channel's rendered body).
+
+The shell reads it when the user taps the push: `notificationId` names the
+notification (the same id the inbox lists and `markRead` takes), and
+`route` is the Console path the shell opens.
+
+**Where `route` comes from — derived, never authored.** There is no
+`notify` key for it. It is the notification's existing `actionUrl`, the
+value the inbox already serves: an explicit `url` / `actionUrl` in the
+notification's payload, else `/OBJECT/ID` built from the notification's
+source record, else none. When that value passes `PushRouteSchema`
+the push carries it as `route`; when it does not (an absolute URL to
+another site, say) or there is none, the push carries no `route` and the
+tap opens the shell's default screen. The delivery is never failed for it.
+
+Not to be confused with the `PushNotificationSchema` that `system/` once
+declared and then removed (ADR-0049): that was an authoring template shape;
+this is the wire data of a delivery, produced by the platform.
+
+<Callout type="info">
+**Source:** `packages/spec/src/api/push-delivery.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { PushDeliveryDataSchema, PushRouteSchema } from '@objectstack/spec/api';
+import type { PushDeliveryData, PushRoute } from '@objectstack/spec/api';
+
+// Validate data
+const result = PushDeliveryDataSchema.parse(data);
+```
+
+---
+
+## PushDeliveryData
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **notificationId** | `string` | ✅ | Notification id — the one the inbox lists and markRead takes |
+| **route** | `string` | optional | Console route opened on tap: the notification actionUrl when it is a same-server relative path, absent otherwise |
+
+
+---
+
+## PushRoute
+
+Same-server relative path the shell opens on tap (for example /apps/crm/opportunity/123); never an absolute or off-server URL
+
+**Type:** `string`
+
+
+---
+

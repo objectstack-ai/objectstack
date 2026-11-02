@@ -288,7 +288,7 @@ import type * as M196 from './system/push-config.zod.js';
 import type * as M197 from './api/push-delivery.zod.js';
 
 // ---------------------------------------------------------------------------
-// 816 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 817 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -657,6 +657,7 @@ export type Iso_api_protocol__ValidateDataResponseSchema = Assert<Eq< z.input< t
 
 // api/push-delivery.zod.ts
 export type Iso_api_pushDelivery__PushDeliveryDataSchema = Assert<Eq< z.input< typeof M197.PushDeliveryDataSchema >, z.infer< typeof M197.PushDeliveryDataSchema > >>;
+export type Iso_api_pushDelivery__PushRouteSchema = Assert<Eq< z.input< typeof M197.PushRouteSchema >, z.infer< typeof M197.PushRouteSchema > >>;
 
 // api/query-adapter.zod.ts
 export type Iso_api_queryAdapter__OperatorMappingSchema = Assert<Eq< z.input< typeof M29.OperatorMappingSchema >, z.infer< typeof M29.OperatorMappingSchema > >>;
@@ -1757,7 +1758,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 816 isomorphic pins', () => {
+  it('still declares all 817 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2735,14 +2736,14 @@ describe('ADR-0122 type-alias convention', () => {
     // (`api/auth.zod.ts`), strict objects with no default and no transform —
     // the anonymous branch, the authenticated branch and their discriminated
     // union (Iso_api_auth__MePermissions*ResponseSchema). +3 added.
-    // 811 -> 816 is the push channel's spec face (ADR-0012 §6): the push
+    // 811 -> 817 is the push channel's spec face (ADR-0012 §6): the push
     // transport configuration (`system/push-config.zod.ts`: the vendor enum,
     // the APNs and FCM blocks and the block holding them) and the push
-    // delivery data (`api/push-delivery.zod.ts`), strict or plain objects of
+    // delivery data and its route (`api/push-delivery.zod.ts`), strict or plain objects of
     // required and optional strings, enums and regex refinements, no default
     // and no transform (Iso_system_pushConfig__*, Iso_api_pushDelivery__*).
-    // +5 added.
-    expect(pins).toHaveLength(816);
+    // +6 added.
+    expect(pins).toHaveLength(817);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

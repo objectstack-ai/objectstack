@@ -38,6 +38,7 @@ export const PushRouteSchema = z.string()
       + 'backslash, whitespace or control character.',
   })
   .describe('Same-server relative path the shell opens on tap (for example /apps/crm/opportunity/123); never an absolute or off-server URL');
+export type PushRoute = z.input<typeof PushRouteSchema>;
 
 /** The data a push delivery carries to the shell. */
 export const PushDeliveryDataSchema = lazySchema(() => z.object({
