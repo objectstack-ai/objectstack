@@ -205,15 +205,14 @@ export function FlowEdgeInspector({
   })();
 
   const edgeType = (typeof edge.type === 'string' && edge.type) || 'default';
-  // Read off the edge itself, each end by its node's name (objectui#13143):
-  // a selection's label is written once, by whoever selected, and goes stale
-  // when an end node is renamed.
-  const edgeName = flowEdgeDisplayName(edge, nodes, locale);
 
   const shell = (
     <InspectorShell
       kindLabel={t('engine.inspector.flowEdge.kind', locale)}
-      title={edgeName}
+      // Read off the edge itself, each end by its node's name (objectui#13143):
+      // a selection's label is written once, by whoever selected, and goes
+      // stale when an end node is renamed.
+      title={flowEdgeDisplayName(edge, nodes, locale)}
       onClose={onClearSelection}
       closeLabel={t('engine.inspector.flowEdge.close', locale)}
       footer={
@@ -383,7 +382,12 @@ export function FlowEdgeInspector({
   // Read-only with a reason from the host: every control above is disabled for
   // that one reason, so the panel carries it, as the node inspector's does.
   return (
-    <InspectorReadOnlyReason readOnly={readOnly} reason={readOnlyReason} label={edgeName} testId="flow-edge-readonly-reason">
+    <InspectorReadOnlyReason
+      readOnly={readOnly}
+      reason={readOnlyReason}
+      label={flowEdgeDisplayName(edge, nodes, locale)}
+      testId="flow-edge-readonly-reason"
+    >
       {shell}
     </InspectorReadOnlyReason>
   );
