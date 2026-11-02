@@ -160,6 +160,14 @@ subordinate_user_ids   -> users below me on the sys_user.manager_id chain (manag
 - Sourced by `BusinessUnitGraphService` (D2) and the existing `managerOf` chain
   (`packages/plugins/plugin-sharing/src/team-graph.ts#managerOf`). Bounded (hard cap + cache, mirroring the
   `org_user_ids` cap) and **org-scoped**.
+
+  > **Amendment note (2026-11-02, [ADR-0147](./0147-membership-scoped-rls-lowers-to-an-engine-internal-org-member-semi-join-leaf.md) — #29360).**
+  > The precedent this bullet cites no longer exists as a cap. Since PR #29356 (`f72bc9e5`, #29281) `org_user_ids`
+  > holds every member of the active organization plus the caller: the first `sys_member` read is completed by keyset
+  > pages (`packages/core/src/security/resolve-authz-context.ts#readOrganizationMembersToCompletion`). What bounds it
+  > now is the backend's bind-parameter ceiling, which ADR-0147 (Proposed) proposes to retire on the SQL family with an
+  > engine-internal semi-join leaf. This D3's own requirement, that the rollup sets are bounded (hard cap + cache) and
+  > org-scoped, is unchanged by this note. It stands on its own reason, not on the precedent.
 - Rollup is **additive only** (widens, never restricts) and respects tenant isolation. It powers both
   D1's `unit*` scopes and sharing-rule recipients (D6). Because it is pure pre-resolution, the choice
   of *which* tree drives visibility is an authoring/modelling decision, not a runtime-mechanism one.
