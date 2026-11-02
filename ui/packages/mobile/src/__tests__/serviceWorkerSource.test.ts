@@ -16,7 +16,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { getServiceWorkerSource, SERVICE_WORKER_CACHE_URLS_MESSAGE } from '../serviceWorkerSource';
 
 const ORIGIN = 'https://app.test';
-const SCOPE = `${ORIGIN}/_console/`;
+const CONSOLE_SCOPE = `${ORIGIN}/_console/`;
+let SCOPE = CONSOLE_SCOPE;
 
 type Listener = (event: any) => void;
 type NetworkAnswer = (url: string) => Response | Promise<Response>;
@@ -237,6 +238,20 @@ describe("'app-shell' worker — the API bypass rule", () => {
     expect((await sw.fetch(`${ORIGIN}/forms/abc`, { mode: 'navigate' })).answered).toBe(false);
     expect(sw.fetchImpl).not.toHaveBeenCalled();
     expect(sw.store.size).toBe(0);
+  });
+
+  it('bypasses the API prefix on its own, at a root mount where /api/ is inside the scope', async () => {
+    SCOPE = `${ORIGIN}/`;
+    try {
+      const sw = bootWorker(appShell('b1'));
+      for (const mode of ['cors', 'navigate']) {
+        expect((await sw.fetch(`${ORIGIN}/api/v1/data/account`, { mode })).answered, `mode ${mode}`).toBe(false);
+      }
+      // The control: a file under the same root mount is answered.
+      expect((await sw.fetch(`${ORIGIN}/favicon.svg`)).answered).toBe(true);
+    } finally {
+      SCOPE = CONSOLE_SCOPE;
+    }
   });
 
   it('honours a custom API prefix', async () => {
