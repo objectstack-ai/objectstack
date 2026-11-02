@@ -11,10 +11,10 @@
 
 import { lazy, Suspense, useMemo, type ReactNode } from 'react';
 import { Route, useParams, useLocation, Navigate } from 'react-router-dom';
-import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
+import { DefaultAppContent, ENVIRONMENT_SCOPE_QUERY, LauncherAppsProvider, LoadingScreen, RequireOrganization, setupMetadataStudioPath, useAdapter } from '@object-ui/app-shell';
 import { AdapterCtx } from '@object-ui/react';
 import { MePermissionsProvider, ServerReadScope } from '@object-ui/permissions';
-import { createAuthenticatedFetch } from '@object-ui/auth';
+import { createAuthenticatedFetch, useAuth } from '@object-ui/auth';
 import type { DataSource } from '@object-ui/types';
 import { LocalizationFetchProvider } from './LocalizationFetchProvider';
 import { InAppFormRoute } from './components/InternalFormRoute';
@@ -389,6 +389,25 @@ const APPROVAL_READ_OBJECTS = [APPROVAL_REQUEST_OBJECT, APPROVAL_ACTION_OBJECT] 
  * The loading and error posture is the one `/apps` always had: nothing below
  * renders until the answer arrives, and a failure shows the console's error
  * splash with its Retry.
+ *
+ * It also owns this layout's organization gate (`App.tsx` mounts it under a
+ * `ProtectedRoute` with `requireOrganization={false}`), because WHERE that gate
+ * sits decides when the permissions request leaves (objectstack#29114). Under
+ * the gate, the request waited for the whole `organization/list` round trip,
+ * and everything Home and an app read after it waited one wave longer. The
+ * server answers `/auth/me/permissions` for the session's active organization
+ * (`resolveAuthzContext` reads `session.activeOrganizationId`, never a
+ * header), so when the `get-session` answer already names that organization,
+ * the request is asked now, in the same wave as `organization/list`, and the
+ * gate sits below the provider. Everything that needs the chosen organization
+ * (the `/me/apps` read and every page) still renders only after the gate
+ * passes. A session that names no organization keeps the gate first: the
+ * organization pipeline may still activate one (the single-membership repair)
+ * or redirect to `/organizations`, and either way an answer asked now could be
+ * for no organization or never read.
+ *
+ * The provider is keyed on that id, so the answer is always the one asked for
+ * the organization the session names.
  */
 export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
   const serverUrl = import.meta.env.VITE_SERVER_URL || '';
@@ -398,8 +417,11 @@ export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
   // default fetch, a token-only session resolved as anonymous and FLS
   // rendering fell open (restricted fields rendered editable).
   const authFetch = useMemo(() => createAuthenticatedFetch(), []);
-  return (
+  const sessionOrganizationId = useAuth().session?.activeOrganizationId;
+  const sessionNamesOrganization = typeof sessionOrganizationId === 'string' && sessionOrganizationId !== '';
+  const permissions = (inner: ReactNode) => (
     <MePermissionsProvider
+      key={sessionNamesOrganization ? sessionOrganizationId : undefined}
       endpoint={endpoint}
       fetcher={authFetch}
       loadingFallback={<LoadingScreen />}
@@ -411,15 +433,22 @@ export function ConsolePermissionsScope({ children }: { children: ReactNode }) {
       // error + retry affordance all along.
       errorFallback={(err, retry) => <LoadingScreen error={err.message} onRetry={retry} />}
     >
-      {/* objectstack#26838 — the apps a launcher offers (Home's tiles, the app
-          switcher, the `app:launcher` block) are the `/me/apps` answer, which
-          drops an app the user's permission sets hide. One read for Home and
-          every app, so this common ancestor holds it, beside the answer above. */}
-      <LauncherAppsProvider endpoint={`${serverUrl}/api/v1/me/apps`} fetcher={authFetch}>
-        {children}
-      </LauncherAppsProvider>
+      {inner}
     </MePermissionsProvider>
   );
+  /* objectstack#26838 — the apps a launcher offers (Home's tiles, the app
+     switcher, the `app:launcher` block) are the `/me/apps` answer, which drops
+     an app the user's permission sets hide. One read for Home and every app,
+     so this common ancestor holds it, beside the answer above. */
+  const launcher = (
+    <LauncherAppsProvider endpoint={`${serverUrl}/api/v1/me/apps`} fetcher={authFetch}>
+      {children}
+    </LauncherAppsProvider>
+  );
+  if (sessionNamesOrganization) {
+    return permissions(<RequireOrganization>{launcher}</RequireOrganization>);
+  }
+  return <RequireOrganization>{permissions(launcher)}</RequireOrganization>;
 }
 
 /**

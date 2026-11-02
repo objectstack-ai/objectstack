@@ -320,9 +320,12 @@ export function App() {
               * `/apps/…`, so the answer is fetched once per session load and
               * Home's navigation gates (the bell's and the activity card's
               * roster) answer `current_user.can(...)` from it.
-              * ⛔ `/studio/*` stays outside it (`components/studioEntry.ts`). */}
+              * ⛔ `/studio/*` stays outside it (`components/studioEntry.ts`).
+              * `requireOrganization={false}`: `ConsolePermissionsScope` owns
+              * the organization gate, so the permissions request can leave in
+              * the `organization/list` wave (objectstack#29114). */}
             <Route element={
-              <ProtectedRoute>
+              <ProtectedRoute requireOrganization={false}>
                 <ConsolePermissionsScope>
                   <Outlet />
                 </ConsolePermissionsScope>
