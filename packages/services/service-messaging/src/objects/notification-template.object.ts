@@ -131,13 +131,18 @@ export const NotificationTemplate = ObjectSchema.create({
             defaultValue: 'en',
             // [commit e4902d2b9] Sibling-declaration bound (route A, ruling 2026-08-24): the same
             // BCP-47 tag family `sys_email_template.locale` stores, bounded 16
-            // there. The BOUND is shared; the RESOLUTION is not, and neither
-            // side picks a "best-matching" locale. This object is loaded by
-            // `NotificationTemplateStore` on `(topic, channel, locale)` and
-            // walks a fixed candidate list — the named tag, then its primary
-            // subtag (`zh-CN` -> `zh`), then `DEFAULT_LOCALE` ('en').
-            // `sys_email_template` matches `(name, locale)` EXACTLY, folds no
-            // subtag at all, and retries the single literal rung `en-US`.
+            // there. The BOUND is shared, and so is the declared-fallback rung
+            // (#28919, aligning with #28880); the FOLD is not. This object is
+            // loaded by `NotificationTemplateStore` on `(topic, channel,
+            // locale)` and walks a fixed candidate list — the named tag, then
+            // its primary subtag (`zh-CN` -> `zh`), then the stack's declared
+            // fallback (`i18n.fallbackLocale`, else `defaultLocale`, via the
+            // i18n service's `getFallbackLocale`) and its primary subtag, then
+            // `DEFAULT_LOCALE` ('en'). The store holds no locale list, so it
+            // tries exact rows. `sys_email_template`, over the built-in
+            // loader, folds a named locale with `resolveBundleLocale` against
+            // the bundle's locale list, then folds the declared fallback the
+            // same way, then retries the literal rung `en-US`.
             maxLength: 16,
             description: "BCP-47 locale, e.g. 'en' / 'en-US' / 'zh-CN'.",
         }),

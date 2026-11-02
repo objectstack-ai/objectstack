@@ -19,17 +19,17 @@ import {
  * object opens its records in the drawer — a READER's own preference, not
  * metadata (objectstack#26677).
  *
- * The maintainer's record-page model (ruling 2026-10-27): an object opens its
- * records one way — the drawer, which expands to the full page, by default,
- * or the full page where the object declares `navigation.mode: 'page'` — and
- * the side-by-side pane is each reader's own choice. So `split` left
- * `NavigationModeSchema` (an author can no longer fix it for every reader) and
- * lives here instead: `split` draws the record page beside the list, `drawer`
- * draws it in the drawer over the list, `page` opens the full page.
+ * The maintainer's record-page model: an object opens its records one way —
+ * the drawer, which expands to the full page, by default, or the full page
+ * where the object declares `navigation.mode: 'page'`. A reader of a drawer
+ * object chooses between two: `drawer` draws the record in the drawer over
+ * the list, which keeps its full width, and `page` opens the full page.
  *
- * Since objectstack#27545 (maintainer rulings of 2026-10-29) the pane beside
- * the list is the default, and `page` is the third choice, for a reader who
- * wants a row click to open the record page itself.
+ * The drawer is the default (objectstack#28915, maintainer ruling
+ * 2026-11-02: 「默认改抽屉，分屏彻底退役，只留抽屉和整页」). The pane beside
+ * the list that objectstack#27545 made the default is retired: a stored
+ * `split` is an unknown value like any other and reads as the default, with
+ * no compatibility read.
  *
  * Both sides live here: {@link readRecordOpenPreference} and
  * {@link writeRecordOpenPreference}, and {@link useRecordOpenPreference}, the
@@ -48,17 +48,17 @@ import {
  * A thin alias over the console's one preference store,
  * `workspacePreference.ts` (objectstack#27052): the preference is
  * {@link RECORD_OPEN_PREFERENCE} there, in the `user` scope, and it keeps the
- * spelling it was first stored with — a bare `split` / `drawer` / `page` under
+ * spelling it was first stored with — a bare `drawer` / `page` under
  * {@link RECORD_OPEN_PREFERENCE_KEY} — so a reader's earlier choice reads
  * back unchanged.
  */
-export type RecordOpenPreference = 'split' | 'drawer' | 'page';
+export type RecordOpenPreference = 'drawer' | 'page';
 
 /** The `localStorage` key the preference is kept under. */
 export const RECORD_OPEN_PREFERENCE_KEY = 'os:record-open-mode';
 
-/** What a reader who never chose gets: the pane beside the list. */
-export const DEFAULT_RECORD_OPEN_PREFERENCE: RecordOpenPreference = 'split';
+/** What a reader who never chose gets: the drawer over the list. */
+export const DEFAULT_RECORD_OPEN_PREFERENCE: RecordOpenPreference = 'drawer';
 
 /** The storage surface this module reads — `localStorage`, or a test double. */
 export type RecordOpenPreferenceStorage = Pick<Storage, 'getItem'>;
@@ -75,16 +75,16 @@ export const RECORD_OPEN_PREFERENCE = defineWorkspacePreference<RecordOpenPrefer
   name: 'record.open-mode',
   storageKey: () => RECORD_OPEN_PREFERENCE_KEY,
   codec: {
-    decode: (stored) => (stored === 'split' || stored === 'drawer' || stored === 'page' ? stored : undefined),
+    decode: (stored) => (stored === 'drawer' || stored === 'page' ? stored : undefined),
     encode: (value) => value,
   },
 });
 
 /**
  * The reader's record-open preference, or {@link DEFAULT_RECORD_OPEN_PREFERENCE}
- * when none is stored, the stored value is not one of the three, or there is no
- * readable storage. `storage` defaults to the browser's `localStorage`; `null`
- * says there is none.
+ * when none is stored, the stored value is not one of the two (a retired
+ * `split` included), or there is no readable storage. `storage` defaults to
+ * the browser's `localStorage`; `null` says there is none.
  */
 export function readRecordOpenPreference(
   storage: RecordOpenPreferenceStorage | null = workspacePreferenceStorage(),
@@ -114,7 +114,7 @@ export function writeRecordOpenPreference(
  * The reader's record-open preference as live state, and the setter the
  * Display menu writes it with (objectstack#26681). A write here, in another
  * component of this page, or in another tab re-renders every caller, so the
- * object page decides its split face from the value the reader just chose.
+ * object page opens the next record the way the reader just chose.
  */
 export function useRecordOpenPreference(): [RecordOpenPreference, (next: RecordOpenPreference) => void] {
   return useWorkspacePreference(RECORD_OPEN_PREFERENCE, 'user', DEFAULT_RECORD_OPEN_PREFERENCE);
