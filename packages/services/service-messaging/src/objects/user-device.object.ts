@@ -46,7 +46,6 @@ export const UserDevice = ObjectSchema.create({
     tenancy: { enabled: false },
     description: "A user's push device: one row per app install, holding its vendor push token.",
     nameField: 'name', // [ADR-0079] canonical primary-title pointer
-    titleFormat: '{name}',
     highlightFields: ['user_id', 'platform', 'vendor', 'enabled', 'last_seen_at'],
 
     fields: {
