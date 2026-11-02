@@ -158,9 +158,12 @@ it does not walk `objectExtensions`, and it could not — the target's name belo
 its owner, not to you.
 
 Nothing therefore stops two packages from contributing the same field name to the same
-object, and nothing warns when they do: the merge is last-writer-wins by `priority`, so
-one of the two silently disappears. Name defensively — prefix added fields with
-something specific to your package when the name is at all generic.
+object: the merge is last-writer-wins by `priority`, so one of the two definitions is
+not served. The same goes for an extension whose `fields` redeclares a field the owner
+declares. Neither is refused; at boot the registry names each such field once in the log,
+with every package that declares it and the one whose definition is served. Name
+defensively — prefix added fields with something specific to your package when the
+name is at all generic.
 
 ---
 
@@ -172,7 +175,7 @@ something specific to your package when the name is at all generic.
    last-writer-wins, validations and indexes accumulate.
 
 So a **higher `priority` is applied later and wins** a conflict. Two extensions with the
-same priority are folded in registration order, which is not a guarantee to build on —
+same priority are folded in registration order (the one registered last wins), which is not a guarantee to build on —
 give competing extensions distinct priorities.
 
 Merging is idempotent: re-registering a package (a metadata rebuild, a dev-server
