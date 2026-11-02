@@ -150,7 +150,7 @@ function BuilderChip({
       onClick={disabled ? undefined : onClick}
       data-testid={testId}
       className={cn(
-        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors',
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg px-3 text-[13px] font-medium transition-colors max-sm:h-11',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         'disabled:pointer-events-none disabled:opacity-60',
         tone === 'outline'
@@ -222,8 +222,9 @@ function HomeAiActions({
     layout === 'stack'
       ? 'mt-6 flex flex-col sm:flex-row items-center gap-3'
       : 'flex shrink-0 items-center gap-2';
-  // In the greeting row the buttons take the builder chips' 32 px height.
-  const buttonClass = layout === 'stack' ? undefined : 'h-8 px-3 text-[13px]';
+  // In the greeting row the buttons take the builder chips' 32 px height;
+  // below `sm` both layouts take the 44 px touch target.
+  const buttonClass = layout === 'stack' ? 'max-sm:h-11' : 'h-8 px-3 text-[13px] max-sm:h-11';
   return (
     <div className={container}>
       {showBuild && (
