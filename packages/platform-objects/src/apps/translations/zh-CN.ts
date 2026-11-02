@@ -36,12 +36,6 @@ export const zhCN: TranslationData = {
       navigation: {
         group_overview: { label: '总览' },
         group_apps: { label: '应用' },
-        // The Setup app's own `nav_packages`. A translation for this id already
-        // existed under `apps.studio.navigation` and did NOT answer here — the
-        // lookup is per app — so Setup fell back to the author's 'Packages'
-        // literal in an otherwise Chinese menu (#5750). Both entries are
-        // legitimate; keep them both.
-        nav_packages: { label: '软件包' },
         nav_packaged_actions: { label: '打包动作' },
         nav_marketplace_browse: { label: '浏览应用市场' },
         nav_marketplace_installed: { label: '已安装应用' },

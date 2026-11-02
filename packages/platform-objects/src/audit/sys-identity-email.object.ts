@@ -48,7 +48,6 @@ export const SysIdentityEmail = ObjectSchema.create({
   description: 'Outbound identity mail log — verification, password reset and sign-in mail about a person, not an organization',
   displayNameField: 'subject',
   nameField: 'subject', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{subject}',
   highlightFields: ['subject', 'to_addresses', 'status', 'sent_at'],
 
   // `sys_email`'s fields, written out: the source scans that judge an

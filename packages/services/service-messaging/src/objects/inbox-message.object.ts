@@ -30,7 +30,6 @@ export const InboxMessage = ObjectSchema.create({
     },
     description: 'User-facing in-app notification rows materialized by the inbox messaging channel.',
     nameField: 'title', // [ADR-0079] canonical primary-title pointer (single-field titleFormat)
-    titleFormat: '{title}',
     highlightFields: ['title', 'user_id', 'severity', 'created_at'],
 
     listViews: {
