@@ -49,6 +49,7 @@
 
 import * as React from 'react';
 import {
+  BASE_FIELD_DISPLAY_WHITELIST,
   FieldSchema,
   isAggregateCompatibleWithFieldType,
   isBodyTableRelationship,
@@ -131,6 +132,7 @@ import { FilterConditionField } from './FilterConditionField.js';
 import type { FilterCondition } from './datasetFilterCondition.js';
 import { usePickerLoad, type LoadState } from '../loadState.js';
 import { fieldNameTakenRefusal } from '../../studio-design/AddFieldPopover.js';
+import { BaseFieldDisplayPatchContext } from '../../studio-design/StudioCustomizeControls.js';
 
 
 /**
@@ -689,6 +691,25 @@ function writePredicate(orig: unknown, next: string): unknown {
 
 /* ─────────────── Inspector ─────────────── */
 
+/** The inspector label of each whitelisted field key; a key with none is named as it is spelled. */
+const DISPLAY_PATCH_KEY_LABEL: Readonly<Record<string, string>> = {
+  label: 'designer.field.label',
+  description: 'designer.field.description',
+  inlineHelpText: 'designer.field.helpText',
+  placeholder: 'designer.field.placeholder',
+};
+
+/** The sentence a base field's inspector reads under: the whitelist, as the inspector names its inputs. */
+function displayPatchSentence(locale: SupportedLocale): string {
+  const names: string[] = BASE_FIELD_DISPLAY_WHITELIST.field.map((key) =>
+    DISPLAY_PATCH_KEY_LABEL[key] ? t(DISPLAY_PATCH_KEY_LABEL[key], locale) : key,
+  );
+  if (BASE_FIELD_DISPLAY_WHITELIST.option.length > 0) names.push(t('designer.field.basePatchOnly.optionLabels', locale));
+  return tFormat('designer.field.basePatchOnly', locale, {
+    properties: names.join(t('designer.field.basePatchOnly.separator', locale)),
+  });
+}
+
 /**
  * The CEL editors this inspector mounts, as aggregation keys. Errors are
  * counted PER SITE rather than into one running total: the four editors lint
@@ -799,7 +820,15 @@ export function ObjectFieldInspector({
   // field says where it comes from. A hook, so above the `!entry` return.
   const external = readExternalBinding(draft);
   const externalWriteState = useExternalWriteState(external);
-  const ddlLocked = readOnly || !!external;
+  // objectstack#28575 (ADR-0146 D10) — a read-only base's own field, edited
+  // through its pair: only the spec's display-property whitelist
+  // (BASE_FIELD_DISPLAY_WHITELIST, read here, never copied) stays editable
+  // (`displayLocked`), every other control is `locked`, under one sentence.
+  const displayPatchOnly = React.useContext(BaseFieldDisplayPatchContext);
+  const locked = readOnly || displayPatchOnly;
+  const ddlLocked = locked || !!external;
+  const whitelisted = (key: string) => (BASE_FIELD_DISPLAY_WHITELIST.field as readonly string[]).includes(key);
+  const displayLocked = (key: string) => readOnly || (displayPatchOnly && !whitelisted(key));
 
   /* ─── Blocking CEL verdicts → the host's Save gate (objectui#4306) ─────
    *
@@ -1209,7 +1238,7 @@ export function ObjectFieldInspector({
         index={idx}
         total={view.entries.length}
         onMove={moveTo}
-        disabled={readOnly}
+        disabled={locked}
       />
     </div>
   );
@@ -1220,13 +1249,13 @@ export function ObjectFieldInspector({
         label: typeof def.label === 'string' ? def.label : entry.name,
       })}
       onClick={removeField}
-      disabled={readOnly}
+      disabled={locked}
     />
   );
 
   const typeMetaLabel = typeMeta ? t(`engine.fieldType.${typeMeta.id}`, locale) : undefined;
   // objectui#11786 — read off the field as it stands, for the hints below.
-  const heldNeed = readOnly ? null : guardHeldNeed(entry.name, def);
+  const heldNeed = locked ? null : guardHeldNeed(entry.name, def);
 
   return (
     <InspectorShell
@@ -1239,6 +1268,11 @@ export function ObjectFieldInspector({
     >
       {/* Basic */}
       <Section title={tr('designer.field.section.basic')}>
+        {displayPatchOnly && (
+          <p data-testid="field-base-patch-only" className="text-[11px] leading-snug text-muted-foreground">
+            {displayPatchSentence(locale)}
+          </p>
+        )}
         {external && (
           <div>
             <ExternalFieldBadge binding={external} state={externalWriteState} locale={locale} />
@@ -1276,7 +1310,7 @@ export function ObjectFieldInspector({
               onSelectionChange?.({ kind: 'field', id: derivedName, label: v });
             }
           }}
-          disabled={readOnly}
+          disabled={displayLocked('label')}
           testId="field-label-input"
         />
         <LabelTranslationHint
@@ -1301,13 +1335,13 @@ export function ObjectFieldInspector({
             onCommit={(v) => patchDef({ required: v || undefined })}
             // Locked once it is on: the box can still be ticked on a stored
             // master that lacks it, never cleared (objectui#12326).
-            disabled={readOnly || (cbpMasterDetail && def.required === true)}
+            disabled={locked || (cbpMasterDetail && def.required === true)}
           />
           <InspectorCheckboxField
             label={tr('designer.field.unique')}
             value={!!def.unique}
             onCommit={(v) => patchDef({ unique: v || undefined })}
-            disabled={readOnly}
+            disabled={locked}
           />
         </div>
         {cbpMasterDetail && (
@@ -1319,7 +1353,7 @@ export function ObjectFieldInspector({
           label={tr('designer.field.description')}
           value={typeof def.description === 'string' ? (def.description as string) : ''}
           onCommit={(v) => patchDef({ description: v || undefined })}
-          disabled={readOnly}
+          disabled={displayLocked('description')}
           rows={2}
         />
         {defaultValueKind(type) && (
@@ -1328,7 +1362,7 @@ export function ObjectFieldInspector({
             value={def.defaultValue}
             options={offeredOptions}
             onCommit={(v) => patchDef({ defaultValue: v })}
-            disabled={readOnly}
+            disabled={locked}
             locale={locale}
           />
         )}
@@ -1336,7 +1370,7 @@ export function ObjectFieldInspector({
           label={tr('designer.field.helpText')}
           value={typeof def.inlineHelpText === 'string' ? (def.inlineHelpText as string) : ''}
           onCommit={(v) => patchDef({ inlineHelpText: v || undefined })}
-          disabled={readOnly}
+          disabled={displayLocked('inlineHelpText')}
           rows={2}
           placeholder={tr('designer.field.helpTextPlaceholder')}
         />
@@ -1350,7 +1384,7 @@ export function ObjectFieldInspector({
               boundPicklist={typeof def.picklist === 'string' ? def.picklist : undefined}
               roster={picklistRoster}
               onCommit={bindPicklist}
-              disabled={readOnly}
+              disabled={locked}
               locale={locale}
             />
           )}
@@ -1369,7 +1403,8 @@ export function ObjectFieldInspector({
               onChange={patchOptions}
               kindAllowed={kindAllowed}
               drivesPath={drivesPath}
-              disabled={readOnly}
+              disabled={locked}
+              labelsEditable={!readOnly && displayPatchOnly && BASE_FIELD_DISPLAY_WHITELIST.option.some((k) => k === 'label')}
               locale={locale}
             />
           )}
@@ -1383,7 +1418,7 @@ export function ObjectFieldInspector({
                 label={tr('designer.field.relatedObject')}
                 value={typeof def.reference === 'string' ? (def.reference as string) : ''}
                 onCommit={(v) => patchDef({ reference: v || undefined })}
-                disabled={readOnly}
+                disabled={locked}
                 placeholder={tr('designer.field.objectNamePlaceholder')}
                 locale={locale}
               />
@@ -1392,7 +1427,7 @@ export function ObjectFieldInspector({
                 def={def}
                 patchDef={patchDef}
                 hostFieldNames={view.entries.map((e) => e.name).filter((n) => n !== entry.name)}
-                readOnly={readOnly}
+                readOnly={locked}
                 locale={locale}
               />
               {(type === 'lookup' || type === 'master_detail') && (
@@ -1401,7 +1436,7 @@ export function ObjectFieldInspector({
                   patchDef={patchDef}
                   unsetDefKey={unsetDefKey}
                   ownFields={view.entries}
-                  readOnly={readOnly}
+                  readOnly={locked}
                   locale={locale}
                 />
               )}
@@ -1434,7 +1469,7 @@ export function ObjectFieldInspector({
                 settleFormulaType({ errors: issues.filter((i) => i.severity === 'error').length });
               }}
               onInferredTypeChange={(inferred) => settleFormulaType({ typed: true, inferred })}
-              disabled={readOnly}
+              disabled={locked}
               placeholder="record.amount * 0.2"
               objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
               // A formula may reference every sibling, not itself (circular).
@@ -1456,7 +1491,7 @@ export function ObjectFieldInspector({
             <SummaryConfigFields
               def={def}
               patchDef={patchDef}
-              readOnly={readOnly}
+              readOnly={locked}
               locale={locale}
             />
           )}
@@ -1466,27 +1501,27 @@ export function ObjectFieldInspector({
                 label={tr('designer.field.precision')}
                 value={typeof def.precision === 'number' ? (def.precision as number) : undefined}
                 onCommit={(v) => patchDef({ precision: v })}
-                disabled={readOnly}
+                disabled={locked}
               />
               {offersScale(type) && (
                 <InspectorNumberField
                   label={tr('designer.field.scale')}
                   value={typeof def.scale === 'number' ? (def.scale as number) : undefined}
                   onCommit={(v) => patchDef({ scale: v })}
-                  disabled={readOnly}
+                  disabled={locked}
                 />
               )}
               <InspectorNumberField
                 label={tr('designer.field.min')}
                 value={typeof def.min === 'number' ? (def.min as number) : undefined}
                 onCommit={(v) => patchDef({ min: v })}
-                disabled={readOnly}
+                disabled={locked}
               />
               <InspectorNumberField
                 label={tr('designer.field.max')}
                 value={typeof def.max === 'number' ? (def.max as number) : undefined}
                 onCommit={(v) => patchDef({ max: v })}
-                disabled={readOnly}
+                disabled={locked}
               />
             </div>
           )}
@@ -1496,7 +1531,7 @@ export function ObjectFieldInspector({
               candidates={currencyCodeFieldCandidates(view.entries, name)}
               onCommit={(next) => patchDef({ currencyConfig: next })}
               onCreateCodeField={createCurrencyCodeField}
-              disabled={readOnly}
+              disabled={locked}
               tr={tr}
             />
           )}
@@ -1506,14 +1541,14 @@ export function ObjectFieldInspector({
                 label={tr('designer.field.minLength')}
                 value={typeof def.minLength === 'number' ? (def.minLength as number) : undefined}
                 onCommit={(v) => patchDef({ minLength: v })}
-                disabled={readOnly}
+                disabled={locked}
                 placeholder="0"
               />
               <InspectorNumberField
                 label={tr('designer.field.maxLength')}
                 value={typeof def.maxLength === 'number' ? (def.maxLength as number) : undefined}
                 onCommit={(v) => patchDef({ maxLength: v })}
-                disabled={readOnly}
+                disabled={locked}
                 placeholder="255"
               />
             </div>
@@ -1531,7 +1566,7 @@ export function ObjectFieldInspector({
               // a declaration the write path enforces — "no domain" is the
               // key's absence, never a value of it (objectui#7597).
               onCommit={(v) => (v ? patchDef({ valueDomain: v }) : unsetDefKey('valueDomain'))}
-              disabled={readOnly}
+              disabled={locked}
             />
           )}
         </Section>
@@ -1544,26 +1579,26 @@ export function ObjectFieldInspector({
             label={tr('designer.field.readonly')}
             value={!!def.readonly}
             onCommit={(v) => patchDef({ readonly: v || undefined })}
-            disabled={readOnly}
+            disabled={locked}
           />
           <InspectorCheckboxField
             label={tr('designer.field.hidden')}
             value={!!def.hidden}
             onCommit={(v) => patchDef({ hidden: v || undefined })}
-            disabled={readOnly}
+            disabled={locked}
           />
           <InspectorCheckboxField
             label={tr('designer.field.trackHistory')}
             value={!!def.trackHistory}
             onCommit={(v) => patchDef({ trackHistory: v || undefined })}
-            disabled={readOnly}
+            disabled={locked}
           />
         </div>
         <InspectorTextField
           label={tr('designer.field.placeholder')}
           value={typeof def.placeholder === 'string' ? (def.placeholder as string) : ''}
           onCommit={(v) => patchDef({ placeholder: v || undefined })}
-          disabled={readOnly}
+          disabled={displayLocked('placeholder')}
         />
         {/* Conditional rules (ADR-0036 B2) — CEL editors with live lint +
             field autocomplete against THIS object's fields (objectui#1582). */}
@@ -1577,7 +1612,7 @@ export function ObjectFieldInspector({
             value={readPredicate(def.visibleWhen)}
             onChange={(v) => patchDef({ visibleWhen: writePredicate(def.visibleWhen, v) })}
             onLintChange={(issues) => reportCel('visibleWhen', issues)}
-            disabled={readOnly}
+            disabled={locked}
             placeholder="record.status != 'draft'"
             objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
             fieldNames={view.entries.map((e) => e.name)}
@@ -1597,7 +1632,7 @@ export function ObjectFieldInspector({
             value={readPredicate(def.readonlyWhen)}
             onChange={(v) => patchDef({ readonlyWhen: writePredicate(def.readonlyWhen, v) })}
             onLintChange={(issues) => reportCel('readonlyWhen', issues)}
-            disabled={readOnly}
+            disabled={locked}
             placeholder="record.status == 'closed'"
             objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
             fieldNames={view.entries.map((e) => e.name)}
@@ -1617,7 +1652,7 @@ export function ObjectFieldInspector({
             value={readPredicate(def.requiredWhen)}
             onChange={(v) => patchDef({ requiredWhen: writePredicate(def.requiredWhen, v) })}
             onLintChange={(issues) => reportCel('requiredWhen', issues)}
-            disabled={readOnly}
+            disabled={locked}
             placeholder="record.amount > 10000"
             objectName={typeof (draft as any).name === 'string' ? ((draft as any).name as string) : undefined}
             fieldNames={view.entries.map((e) => e.name)}
@@ -1646,7 +1681,7 @@ export function ObjectFieldInspector({
                 .map((g) => ({ value: g.key as string, label: String(g.label ?? g.key) })),
             ]}
             onCommit={(v) => patchDef({ group: v || undefined })}
-            disabled={readOnly}
+            disabled={locked}
           />
         )}
       </Section>
@@ -1869,6 +1904,7 @@ function OptionsEditor({
   kindAllowed,
   drivesPath,
   disabled,
+  labelsEditable = false,
   locale,
 }: {
   rows: OptionRow[];
@@ -1878,6 +1914,8 @@ function OptionsEditor({
   /** The record path follows this field, so its options' kinds steer it. */
   drivesPath: boolean;
   disabled?: boolean;
+  /** objectstack#28575 — under `disabled`, each option's label stays editable (a base field's display patch). */
+  labelsEditable?: boolean;
   locale?: string;
 }) {
   // Local editing buffer. We keep a blank trailing row visible for input but
@@ -2027,7 +2065,7 @@ function OptionsEditor({
                     onChange={(e) => updateLabel(i, e.target.value)}
                     placeholder={t('designer.field.optLabel', locale)}
                     aria-label={t('designer.field.optLabel', locale)}
-                    disabled={disabled}
+                    disabled={disabled && !labelsEditable}
                     data-testid="option-label"
                     className="h-7 min-w-0 flex-1 text-xs"
                   />
