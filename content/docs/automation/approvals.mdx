@@ -339,12 +339,30 @@ multiple: true }` — which renders a multi-select user picker in the decision
 dialog instead of free text (`department` / `team` render the matching
 system-object picker and commit record ids; `position` renders a picker over
 the position registry and commits position machine names; `multiple` collects
-an array of them). The type shapes only the input widget; the whitelist
-still works by `key`, so bare strings and typed declarations mix freely.
+an array of them). The whitelist still works by `key`, so bare strings and
+typed declarations mix freely.
+
+The runtime enforces a typed declaration at the decision, on an approve and a
+reject alike, before anything is written:
+
+- A picker output is judged by what the matching `expression` approver reads
+  downstream: `user`, `department` and `team` by record id, `position` by
+  machine name (a `sys_position` record id is refused — it would route to
+  nobody). Each value is looked up the way that approver's `resolveAs` expands
+  it, in the request's organization.
+- `multiple: true` takes a list, and only a list, with no entry twice. An
+  absent or `false` `multiple` takes one value.
+- A mismatch is refused with `400 VALIDATION_FAILED` naming every
+  `outputs.<key>` that does not match. No decision is recorded and the request
+  stays pending, so the approver can decide again.
+
+A `text` output (the default, and every bare-string entry) is free text and is
+not judged. A blank value is left to `required`, below.
 
 Add **`required: true`** when the next step cannot run without it — the very
 case above, where node B has nobody to route to if the lead skipped the field.
-Unlike `type` / `multiple`, this one is enforced by the runtime: an **approve**
+Where `type` / `multiple` judge the shape of a value the approver supplies,
+`required` judges whether one is there: an **approve**
 carrying no value (or a blank one — `''`, `[]`) for a required key is rejected
 before any write, so the run can never resume past the node with the key
 missing. A **reject** never requires it: the run leaves down the `reject` edge,

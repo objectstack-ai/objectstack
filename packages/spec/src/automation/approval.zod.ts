@@ -656,8 +656,16 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
    * A TYPED decision-output declaration (#3447 P2 follow-up). The bare-string
    * form of a `decisionOutputs` entry renders as free text; this form tells the
    * decision UI which picker to render and whether to collect one value or many.
-   * The runtime treats `key` as the whitelist entry either way — `type` and
-   * `multiple` only shape the INPUT WIDGET, never the accepted value.
+   * The runtime treats `key` as the whitelist entry either way, and it ENFORCES
+   * `type` and `multiple` at the decision (ADR-0104 as amended 2026-10-30;
+   * #28658 ruling A): a picker output is judged by record id (`user`,
+   * `department`, `team`) or by machine name (`position`), through the lookup
+   * the `expression` approver with the matching `resolveAs` expands it with.
+   * `multiple: true` takes a list, with no entry twice; `multiple` absent or
+   * false takes one value. A decision whose output does not match is refused
+   * with `400 VALIDATION_FAILED` naming `outputs.<key>`, before any write — no
+   * decision is recorded and the request stays pending. `text` (the default,
+   * and every bare-string entry) is free text and is not judged.
    */
   {
     surface: 'this decision-output declaration',
@@ -696,8 +704,8 @@ export const DecisionOutputDefSchema = lazySchema(() => strictObject(
   /**
    * The approver must supply this output to APPROVE (objectui#2955).
    *
-   * Unlike `type`/`multiple` — which only shape the input widget — this one
-   * IS enforced by the runtime: an approve carrying no value for a required
+   * `type`/`multiple` judge the SHAPE of a value the approver supplies; this
+   * one judges PRESENCE: an approve carrying no value for a required
    * key is rejected before any write, so a downstream `expression` approver
    * reading `vars.<nodeId>.<key>` can never face a missing key. Without it an
    * author's only backstop was `onEmptyApprovers` — the run reaches the next
@@ -1208,9 +1216,12 @@ export const ApprovalNodeConfigSchema = lazySchema(() => strictObject(
    * `department` / `team` → a record picker committing ids, `position` → the
    * position registry, committing machine names. `multiple: true` collects an
    * ARRAY of them (the natural fan-out shape for an `expression` approver
-   * downstream). The type describes the INPUT WIDGET only — the runtime accepts
-   * whatever value shape arrives (a single value, an array, CSV) and hands it
-   * to the flow verbatim.
+   * downstream). The runtime enforces the declaration at the decision: a
+   * picker value must name a record id (`user` / `department` / `team`) or a
+   * position machine name (`position`), `multiple: true` takes a list with no
+   * entry twice and an absent or false `multiple` takes one value, and a
+   * mismatch is refused with `400 VALIDATION_FAILED` naming `outputs.<key>`
+   * before any write. Only `text` outputs reach the flow as whatever arrived.
    */
   decisionOutputs: z.array(z.union([
     z.string(),
