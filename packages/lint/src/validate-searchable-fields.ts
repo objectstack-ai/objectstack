@@ -148,6 +148,7 @@ import {
   isCredentialFieldType,
   isVirtualSearchField,
   SEARCH_AUTO_EXCLUDED_FIELDS,
+  SEARCH_FLAG_EXCLUDED_TYPES,
   type SearchFieldMeta,
 } from '@objectstack/spec/data';
 import { recordsOf, suggestName } from './object-graph.js';
@@ -258,6 +259,10 @@ function declaredFieldTarget(obj: AnyRec): ObjectSearchTarget | null {
     metas[n] = {
       type: typeof f.type === 'string' ? f.type : undefined,
       hidden: f.hidden === true,
+      // The field's own opt-in: with no `searchableFields` declared, the
+      // runtime resolution admits a field marked `searchable: true` (ruling
+      // record 6573569376), so a narrowing naming it is accepted there.
+      searchable: f.searchable === true,
     };
   }
   if (names.size === 0) return null;
@@ -515,10 +520,19 @@ export function checkSearchableFieldList(
     } else if (meta?.hidden) {
       why = 'hidden';
     } else if (typeof meta?.type === 'string') {
-      why = `of type '${meta.type}', which 'search' cannot scan`;
+      // The runtime admits a field of any type its author marks
+      // `searchable: true`, except the hard exclusions — so "cannot scan" is
+      // said only of those, and every other type names the opt-in it lacks.
+      why = SEARCH_FLAG_EXCLUDED_TYPES.has(meta.type)
+        ? `of type '${meta.type}', never scanned even with \`searchable: true\``
+        : `of type '${meta.type}' and not marked \`searchable: true\``;
     } else {
       continue; // no readable type — unresolvable, not wrong (ADR-0072 D1)
     }
+    // Whether the field's own opt-in would admit it — every arm above, a
+    // system name and `hidden` included, since the flag is asked before the
+    // auto-default's exclusions (`@objectstack/spec/data` `search-fields.ts`).
+    const flaggable = typeof meta?.type === 'string' && !SEARCH_FLAG_EXCLUDED_TYPES.has(meta.type);
     findings.push({
       severity: 'error',
       rule: SEARCHABLE_FIELD_UNSEARCHABLE,
@@ -535,7 +549,10 @@ export function checkSearchableFieldList(
       hint: isReference
         ? `Drop "${name}" from this view; to search by the related record's title, mirror it onto ` +
           `a stored text field here and declare that instead`
-        : `Drop "${name}" from this view, or target a text-like field instead`,
+        : flaggable
+          ? `Mark "${name}" \`searchable: true\` on "${objectName}", drop it from this view, or target ` +
+            `a text-like field instead`
+          : `Drop "${name}" from this view, or target a text-like field instead`,
     });
   }
   return findings;

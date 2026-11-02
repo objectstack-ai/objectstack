@@ -243,6 +243,41 @@ describe('[#23214] /meta — the four arity doors, over the list both transports
             expect(answer.body?.error?.message).toMatch(/^Query parameter 'object\[\]' names no object/);
         });
     });
+
+    // The same class on `_drafts`' own filters: `?packageId[]=` / `?type[]=`
+    // reached `listDrafts` as no package and no type, so the answer was every
+    // draft. Refused at the door's arity step, with `RestServer`'s code and
+    // sentence, before `listDrafts`.
+    describe('a BRACKETED `packageId` or `type` key on `_drafts`', () => {
+        const sentence = (key: string, param: string): string => (param === 'packageId'
+            ? `Query parameter '${key}' names no package; the 'packageId' filter takes exactly one package id, `
+                + `spelled ?packageId=ID. The list was not served: a bracketed 'packageId' key is not a filter. `
+                + `Name one package, or leave the parameter out to list the drafts of every package.`
+            : `Query parameter '${key}' names no metadata type; the 'type' filter takes exactly one metadata type, `
+                + `spelled ?type=TYPE. The list was not served: a bracketed 'type' key is not a filter. `
+                + `Name one metadata type, or leave the parameter out to list the drafts of every type.`);
+
+        it.each([
+            ['packageId[]', 'packageId'], ['packageId[0]', 'packageId'],
+            ['type[]', 'type'], ['type[0]', 'type'],
+        ])('GET /meta/_drafts?%s=… is refused before `listDrafts`', async (key, param) => {
+            const { dispatcher, protocol } = boot();
+            const answer = await get(dispatcher, '/meta/_drafts', { [key]: 'x' });
+            expect(answer.status, JSON.stringify(answer)).toBe(400);
+            expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+            expect(answer.body?.error?.message).toBe(sentence(key, param));
+            expect(protocol.listDrafts).not.toHaveBeenCalled();
+        });
+
+        it('beside the plain key it is refused too, and the plain spellings still narrow (control)', async () => {
+            const { dispatcher, protocol } = boot();
+            expect((await get(dispatcher, '/meta/_drafts', { packageId: 'com.acme', 'packageId[]': 'com.other' })).status)
+                .toBe(400);
+            expect(protocol.listDrafts).not.toHaveBeenCalled();
+            expect((await get(dispatcher, '/meta/_drafts', { packageId: 'com.acme', type: 'view' })).status).toBe(200);
+            expect(protocol.listDrafts).toHaveBeenCalledWith({ packageId: 'com.acme', type: 'view' });
+        });
+    });
 });
 
 describe('[#23214] GET /ui/view/:object — `?type=` is one view type, read only when the path names none', () => {

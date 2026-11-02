@@ -86,7 +86,7 @@
         "dashboards.global-filters-rescope",
         "dashboards.chart-first-paint",
         "dashboards.empty-null-bucket-boundaries",
-        "studio-authoring.packaged-display-class-direct-edit",
+        "studio-authoring.package-customize-restore-display",
         "search.command-palette-navigation",
         "studio-authoring.dashboard-widget-and-filter-types",
         "studio-authoring.uninstalled-package-refused"
@@ -167,7 +167,8 @@
         "studio-authoring.flow-edge-type-authoring",
         "studio-authoring.org-scope-flows",
         "studio-authoring.flow-status-matches-runtime",
-        "studio-authoring.uninstalled-package-refused"
+        "studio-authoring.uninstalled-package-refused",
+        "automation.package-flow-override"
       ]
     },
     "hook": {
@@ -189,7 +190,8 @@
         "platform-core.manifest-install-contract",
         "cli.plugin-manifest-build-contract",
         "api-backend.package-rest-lifecycle",
-        "platform-core.marketplace-install-local-lifecycle"
+        "platform-core.marketplace-install-local-lifecycle",
+        "platform-core.customization-pair-ensure-door"
       ]
     },
     "mapping": {
@@ -227,7 +229,8 @@
         "studio-authoring.no-entry-property-matrix",
         "studio-authoring.api-written-keys-survive-studio-save",
         "studio-authoring.removed-key-save-door-refusal",
-        "studio-authoring.uninstalled-package-refused"
+        "studio-authoring.uninstalled-package-refused",
+        "studio-authoring.package-extension-field-c"
       ]
     },
     "page": {
@@ -300,7 +303,8 @@
         "dashboards.drill-through-range",
         "search.command-palette-navigation",
         "studio-authoring.interfaces-create-dialogs",
-        "studio-authoring.report-authoring-options"
+        "studio-authoring.report-authoring-options",
+        "studio-authoring.package-customize-restore-display"
       ]
     },
     "rest_api": {
@@ -364,7 +368,7 @@
         "studio-authoring.view-authoring-live",
         "records-forms.gantt-interactions",
         "records-forms.saved-view-management",
-        "studio-authoring.packaged-display-class-direct-edit",
+        "studio-authoring.package-customize-restore-display",
         "records-forms.field-history-tracking",
         "studio-authoring.no-entry-property-matrix",
         "studio-authoring.removed-key-save-door-refusal"
