@@ -1493,8 +1493,16 @@ export function buildApiActionRequest(
     // left out. Without a row (a record-less dispatch) only `id` can be seeded,
     // from the routed `recordId`; anything else has no source and the request
     // goes without it, exactly as a console click from a record-less location.
+    //
+    // [#29173] "Record-less" has ONE meaning here, the one the path half above
+    // uses: the dispatch names no record (`routedRecordId` is empty). The
+    // subject load hands a record-less dispatch an EMPTY object as its
+    // `ctx.record`, and that `{}` is not a row: read as one, every
+    // `execution: 'aggregate'` api action declaring `recordIdParam` was refused
+    // for lacking `id`, and its target never ran. A dispatch that names a record
+    // keeps both #8018 refusals for a row that lacks the field or holds null.
     const recordIdParam: string | undefined = typeof action?.recordIdParam === 'string' && action.recordIdParam ? action.recordIdParam : undefined;
-    if (recordIdParam) {
+    if (recordIdParam && routedRecordId) {
         const field: string = typeof action?.recordIdField === 'string' && action.recordIdField ? action.recordIdField : 'id';
         const row: Record<string, unknown> | undefined =
             input.record && typeof input.record === 'object' ? input.record
