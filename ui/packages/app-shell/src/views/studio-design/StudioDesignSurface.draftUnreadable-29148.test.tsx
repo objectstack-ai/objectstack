@@ -27,6 +27,7 @@ import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, act } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { t } from '../metadata-admin/i18n';
 
@@ -194,6 +195,12 @@ function renderData() {
   );
 }
 
+/** The Data pillar's Settings panel lives under "Advanced". */
+async function openSettings() {
+  await userEvent.click(await screen.findByTestId('data-tabs-advanced', undefined, { timeout: 8000 }));
+  await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Settings' }));
+}
+
 function renderAutomations() {
   render(
     <MemoryRouter initialEntries={[`/studio/${PKG}/automations`]}>
@@ -241,8 +248,10 @@ describe('StudioDesignSurface — a draft the server refuses to read is not "no 
       { timeout: 8000 },
     );
     await expectRefusalStrip();
-    // The published object is not opened to edit: no designer view of it.
-    expect(screen.queryByTestId('data-tabs-advanced')).toBeNull();
+    // The published object is not opened to edit: its Settings panel draws no
+    // dial (the published `private` model is not offered to change).
+    await openSettings();
+    expect(screen.queryByTestId('owd-internal-select')).toBeNull();
 
     await pastTheAutosave();
     expect(server.saves).toEqual([]);
@@ -253,7 +262,10 @@ describe('StudioDesignSurface — a draft the server refuses to read is not "no 
     server.active.set(key('object', 'crm_contact'), wire(PUBLISHED_OBJECT));
     renderData();
 
-    expect(await screen.findByTestId('data-tabs-advanced', undefined, { timeout: 8000 })).toBeInTheDocument();
+    await openSettings();
+    expect(await screen.findByTestId('owd-internal-select', undefined, { timeout: 8000 })).toHaveTextContent(
+      t('engine.studio.settings.sharingPrivate', 'en-US'),
+    );
     expect(screen.queryByText(t('engine.studio.refusal.draftUnreadable', 'en-US'))).toBeNull();
   });
 
