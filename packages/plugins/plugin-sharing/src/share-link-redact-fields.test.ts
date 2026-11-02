@@ -60,7 +60,10 @@ function makeEngine() {
     getSchema: (name: string) => SCHEMAS[name],
     async find(object: string, options?: any) {
       const where = options?.where ?? {};
-      const rows = (tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => r[k] === v));
+      const rows = (tables[object] ?? []).filter((r) => Object.entries(where).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake engine: unsupported operator ${k}`);
+        return r[k] === v;
+      }));
       return typeof options?.limit === 'number' ? rows.slice(0, options.limit) : rows;
     },
     async insert(object: string, data: any) { (tables[object] ??= []).push({ ...data }); return data; },
