@@ -679,7 +679,8 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
-        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs"
+        "$TURBO_ROOT$/scripts/check-durability-degradation-log-level.mjs",
+        "$TURBO_ROOT$/scripts/js-comment-mask.mjs"
       ]
     },
     "@objectstack/downstream-contract#test": {
