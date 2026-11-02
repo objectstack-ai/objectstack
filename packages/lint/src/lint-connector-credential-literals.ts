@@ -2,7 +2,8 @@
 
 /**
  * `connector-credential-literal` — a credential typed into a declarative
- * connector's header or environment map as a LITERAL.
+ * connector's header or environment map as a LITERAL, and the two ways a
+ * stdio MCP server's credential route goes wrong around it.
  *
  * ## What it reports
  *
@@ -21,6 +22,20 @@
  * READ; it does not move the value out of metadata. A literal in one of these
  * maps is still stored in `sys_metadata`, carried by every build artifact and
  * every source checkout of the stack, and rotated only by editing metadata.
+ *
+ * Two more findings, each about the route the literal is steered to:
+ *
+ *  - **a stdio credential that reaches nothing.** An `mcp` entry over a stdio
+ *    transport that declares a static `auth` (`bearer`, `api-key`, `basic`)
+ *    and names no `transport.credentialEnv`. The reference is resolved (and a
+ *    missing one degrades the instance), but the `mcp` provider applies `auth`
+ *    to a stdio server only through that key, so the resolved credential is
+ *    dropped and nothing says so. A grant-bearing kind on stdio is refused at
+ *    boot by the provider, loudly, so it is not this rule's.
+ *  - **a credential typed into `transport.credentialEnv`.** That key holds a
+ *    variable NAME and is served on every metadata read, so a value that reads
+ *    as a credential ({@link isCredentialShapedName}) is a secret in a served
+ *    slot. Judged on every entry that carries the key, whatever its transport.
  *
  * ## Why an advisory, and why it names the connector route
  *
@@ -53,7 +68,7 @@
  * places while telling the author to take it out of one.
  */
 
-import { isCredentialShapedLiteral } from './credential-literal.js';
+import { isCredentialShapedLiteral, isCredentialShapedName } from './credential-literal.js';
 import { recordsOf } from './object-graph.js';
 
 type AnyRec = Record<string, unknown>;
@@ -93,6 +108,23 @@ const HEADER_ROUTE =
 const ENV_ROUTE =
   "Give the entry `auth: { type: 'bearer', credentialRef }`, name the variable in `transport.credentialEnv` " +
   'and drop the env entry: the provider passes the resolved credential to the stdio server itself';
+
+/**
+ * The static `auth` kinds the `mcp` provider places in a stdio server's
+ * environment through `transport.credentialEnv` (the token, the key, the
+ * password), and drops without it.
+ */
+const STDIO_PLACED_AUTH_KINDS: ReadonlySet<string> = new Set(['bearer', 'api-key', 'basic']);
+
+const STDIO_AUTH_UNPLACED_ROUTE =
+  "Add `credentialEnv: 'VARIABLE_NAME'` to `providerConfig.transport`, naming the variable the server reads its " +
+  'credential from: the provider passes the resolved credential to the stdio server there. If the server takes ' +
+  "no credential, drop `auth`: an unresolved reference degrades the instance even though nothing uses it";
+
+const CREDENTIAL_ENV_ROUTE =
+  '`transport.credentialEnv` takes the NAME of the environment variable the stdio server reads, never the ' +
+  "credential: set the secret where `auth: { type: 'bearer', credentialRef }` resolves (an environment variable " +
+  'or Setup → Connector credentials) and write the variable name here';
 
 /** One judged map: where it sits under the entry, what an entry of it is called, and its route. */
 interface JudgedMap {
@@ -135,8 +167,10 @@ function mapAt(entry: AnyRec, path: readonly string[]): AnyRec | undefined {
 
 /**
  * Every credential-shaped literal a connector entry carries in one of its four
- * header/env maps, one advisory each. Pure; never throws on a malformed stack
- * (a non-record connector or map is skipped, not dereferenced).
+ * header/env maps, one advisory each, then the entry's `transport.credentialEnv`
+ * when it reads as a credential, then a stdio `mcp` entry's static `auth` when
+ * no `credentialEnv` places it. Pure; never throws on a malformed stack (a
+ * non-record connector or map is skipped, not dereferenced).
  */
 export function lintConnectorCredentialLiterals(stack: AnyRec): ConnectorCredentialLiteralFinding[] {
   const findings: ConnectorCredentialLiteralFinding[] = [];
@@ -162,6 +196,45 @@ export function lintConnectorCredentialLiterals(stack: AnyRec): ConnectorCredent
           hint: judged.entry === 'env' ? ENV_ROUTE : HEADER_ROUTE,
         });
       }
+    }
+
+    const transport = mapAt(connector, ['providerConfig', 'transport']);
+    if (!transport) return;
+
+    // A credential typed where the variable NAME belongs. The value is never
+    // echoed: the finding reports where it sits, as the map findings do.
+    if (isCredentialShapedName(transport.credentialEnv)) {
+      findings.push({
+        severity: 'warning',
+        rule: CONNECTOR_CREDENTIAL_LITERAL,
+        where: `connector '${name}'`,
+        path: `connectors[${index}].providerConfig.transport.credentialEnv`,
+        message:
+          'providerConfig.transport.credentialEnv reads as a credential, not a variable name, and is served on ' +
+          'every metadata read; put the secret behind `auth.credentialRef` and name its variable here',
+        hint: CREDENTIAL_ENV_ROUTE,
+      });
+    }
+
+    // A static credential a stdio server is never handed.
+    const auth = isRec(connector.auth) ? connector.auth : undefined;
+    if (
+      connector.provider === 'mcp' &&
+      transport.kind === 'stdio' &&
+      transport.credentialEnv === undefined &&
+      typeof auth?.type === 'string' &&
+      STDIO_PLACED_AUTH_KINDS.has(auth.type)
+    ) {
+      findings.push({
+        severity: 'warning',
+        rule: CONNECTOR_CREDENTIAL_LITERAL,
+        where: `connector '${name}'`,
+        path: `connectors[${index}].auth`,
+        message:
+          `auth '${auth.type}' reaches nothing: a stdio transport passes the resolved credential to the server only ` +
+          'in the variable `transport.credentialEnv` names, and this entry names none',
+        hint: STDIO_AUTH_UNPLACED_ROUTE,
+      });
     }
   });
 

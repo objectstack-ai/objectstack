@@ -215,6 +215,112 @@ describe('connector-credential-literal — what draws nothing', () => {
   });
 });
 
+/** A stdio `mcp` entry routed through `auth.credentialRef`, with the transport keys it is given. */
+const stdioAuthEntry = (auth: Record<string, unknown>, transport: Record<string, unknown> = {}) => ({
+  name: 'repo_tools',
+  label: 'Repo Tools',
+  type: 'api',
+  provider: 'mcp',
+  providerConfig: { transport: { kind: 'stdio', command: 'repo-mcp-server', env: { LOG_LEVEL: 'info' }, ...transport } },
+  auth,
+});
+
+/** A probe sentinel shaped like a generated token, never a credential. */
+const TOKEN_SHAPED = 'probe7sentinel3value9token5x';
+
+describe('connector-credential-literal — a stdio credential that reaches nothing', () => {
+  it.each([
+    ['bearer', { type: 'bearer', credentialRef: 'REPO_MCP_TOKEN' }],
+    ['api-key', { type: 'api-key', headerName: 'X-Api-Key', credentialRef: 'REPO_MCP_KEY' }],
+    ['basic', { type: 'basic', username: 'service-user', credentialRef: 'REPO_MCP_PASSWORD' }],
+  ] as const)('a %s auth on a stdio transport with no credentialEnv draws one warning at `auth`', (kind, auth) => {
+    const findings = lintConnectorCredentialLiterals({ connectors: [stdioAuthEntry(auth)] });
+    expect(findings.map((f) => [f.path, f.severity, f.rule, f.where])).toEqual([
+      ['connectors[0].auth', 'warning', CONNECTOR_CREDENTIAL_LITERAL, "connector 'repo_tools'"],
+    ]);
+    expect(findings[0]!.message).toBe(
+      `auth '${kind}' reaches nothing: a stdio transport passes the resolved credential to the server only in the `
+        + 'variable `transport.credentialEnv` names, and this entry names none',
+    );
+    expect(findings[0]!.hint).toContain("credentialEnv: 'VARIABLE_NAME'");
+    expect(findings[0]!.hint).toContain('drop `auth`');
+  });
+
+  it('draws nothing once credentialEnv places it, for a kind the provider refuses loudly, off stdio, or off mcp', () => {
+    const quiet = [
+      stdioAuthEntry({ type: 'bearer', credentialRef: 'REPO_MCP_TOKEN' }, { credentialEnv: 'REPO_MCP_TOKEN' }),
+      stdioAuthEntry({ type: 'none' }),
+      stdioAuthEntry({ type: 'oauth2', grant: 'client_credentials', tokenUrl: 'https://x.invalid/token', clientId: 'c', credentialRef: 'R' }),
+      stdioAuthEntry({ type: 'app-credential', credentialRef: 'R' }),
+      { ...stdioAuthEntry({ type: 'bearer', credentialRef: 'R' }), auth: undefined },
+      {
+        ...stdioAuthEntry({ type: 'bearer', credentialRef: 'R' }),
+        providerConfig: { transport: { kind: 'http', url: 'https://mcp.vendor.invalid/mcp' } },
+      },
+      { ...stdioAuthEntry({ type: 'bearer', credentialRef: 'R' }), provider: 'custom_stdio' },
+    ];
+    for (const [i, entry] of quiet.entries()) {
+      expect(lintConnectorCredentialLiterals({ connectors: [entry] }), `case ${i}`).toEqual([]);
+    }
+  });
+
+  it('beside an env literal, each finding is drawn once at its own path', () => {
+    const entry = stdioAuthEntry({ type: 'bearer', credentialRef: 'REPO_MCP_TOKEN' }, { env: { GITHUB_TOKEN: S.env } });
+    expect(lintConnectorCredentialLiterals({ connectors: [entry] }).map((f) => f.path)).toEqual([
+      'connectors[0].providerConfig.transport.env.GITHUB_TOKEN',
+      'connectors[0].auth',
+    ]);
+  });
+});
+
+describe('connector-credential-literal — a credential typed into transport.credentialEnv', () => {
+  it.each([TOKEN_SHAPED, 'Bearer probe-sentinel'])('a credentialEnv that reads as a credential (%j) draws one warning at that key', (value) => {
+    const entry = stdioAuthEntry({ type: 'bearer', credentialRef: 'REPO_MCP_TOKEN' }, { credentialEnv: value });
+    const findings = lintConnectorCredentialLiterals({ connectors: [entry] });
+    expect(findings.map((f) => [f.path, f.severity])).toEqual([
+      ['connectors[0].providerConfig.transport.credentialEnv', 'warning'],
+    ]);
+    expect(findings[0]!.message).toBe(
+      'providerConfig.transport.credentialEnv reads as a credential, not a variable name, and is served on every '
+        + 'metadata read; put the secret behind `auth.credentialRef` and name its variable here',
+    );
+    expect(findings[0]!.hint).toContain("auth: { type: 'bearer', credentialRef }");
+    expect(JSON.stringify(findings).includes(value)).toBe(false);
+  });
+
+  it('is judged whatever the transport, since the key is stored and served either way', () => {
+    const entry = {
+      ...stdioAuthEntry({ type: 'bearer', credentialRef: 'R' }),
+      providerConfig: { transport: { kind: 'http', url: 'https://mcp.vendor.invalid/mcp', credentialEnv: TOKEN_SHAPED } },
+    };
+    expect(lintConnectorCredentialLiterals({ connectors: [entry] }).map((f) => f.path)).toEqual([
+      'connectors[0].providerConfig.transport.credentialEnv',
+    ]);
+  });
+
+  it.each(['REPO_MCP_TOKEN', 'ABCDEFGHIJKLMNOPQRSTUVWXY', 'SERVICE_ACCOUNT_ACCESS_TOKEN_FOR_PRODUCTION_USE', 'PROD2024REPOSITORYTOKEN'])(
+    'a correct variable name %s never draws',
+    (name) => {
+      const entry = stdioAuthEntry({ type: 'bearer', credentialRef: 'REPO_MCP_TOKEN' }, { credentialEnv: name });
+      expect(lintConnectorCredentialLiterals({ connectors: [entry] })).toEqual([]);
+    },
+  );
+
+  it('both route findings read as one sentence each', () => {
+    const findings = lintConnectorCredentialLiterals({
+      connectors: [
+        stdioAuthEntry({ type: 'basic', username: 'u', credentialRef: 'R' }),
+        stdioAuthEntry({ type: 'bearer', credentialRef: 'R' }, { credentialEnv: TOKEN_SHAPED }),
+      ],
+    });
+    expect(findings).toHaveLength(2);
+    for (const f of findings) {
+      expect(f.message.includes('\n'), f.path).toBe(false);
+      expect(f.message.length, f.path).toBeLessThanOrEqual(210);
+    }
+  });
+});
+
 describe('connector-credential-literal — the four maps are the redactor\'s', () => {
   it('judges exactly the maps the connector read path withholds whole', () => {
     // The spec does not export its map list, so it is read through the
@@ -274,6 +380,14 @@ describe('connector-credential-literal — registered once, at every door, as an
     ]);
   });
 
+  it('reaches the runtime publish gate for a stdio connector whose auth reaches nothing', () => {
+    const result = runRuntimeAuthoringRules({ type: 'connector', item: stdioAuthEntry({ type: 'bearer', credentialRef: 'REPO_MCP_TOKEN' }) });
+    expect(result.errors.filter((f) => f.rule === CONNECTOR_CREDENTIAL_LITERAL)).toEqual([]);
+    expect(result.advisories.filter((f) => f.rule === CONNECTOR_CREDENTIAL_LITERAL).map((f) => f.path)).toEqual([
+      'connectors[0].auth',
+    ]);
+  });
+
   it('a routed connector write draws none at the runtime gate', () => {
     const result = runRuntimeAuthoringRules({ type: 'connector', item: routedStack().connectors[0] });
     expect(result.advisories.filter((f) => f.rule === CONNECTOR_CREDENTIAL_LITERAL)).toEqual([]);
@@ -300,6 +414,9 @@ describe('connector-credential-literal — `os explain`', () => {
       'a heuristic',
       'A `{variable}` template is not a literal',
       'never the value itself',
+      'the credential reaches nothing',
+      'served on every metadata read',
+      'A conventional name such as `REPO_MCP_TOKEN` never draws',
     ]) {
       expect(text, `explanation names ${fact}`).toContain(fact);
     }

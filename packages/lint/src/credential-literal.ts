@@ -59,7 +59,9 @@
  * The name lists below are module-private and read by
  * {@link isCredentialShapedLiteral} alone. ⛔ Never copy them into a rule, a
  * test helper, the CLI or a runtime: a second list is a second rule, and the
- * two drift. A caller that needs the verdict asks this function.
+ * two drift. A caller that needs the verdict asks this function. Its sibling
+ * {@link isCredentialShapedName} judges a value written where a variable NAME
+ * belongs, reads no name list, and shares the R2 and template patterns.
  *
  * ## A heuristic — so its callers ADVISE, never refuse
  *
@@ -141,4 +143,54 @@ export function isCredentialShapedLiteral(name: string, value: unknown): boolean
   if (typeof value !== 'string' || value.trim() === '') return false;
   if (PLATFORM_TEMPLATE.test(value)) return false;
   return isCredentialName(name) || AUTH_SCHEME_VALUE.test(value);
+}
+
+/**
+ * A run of letters and digits long enough to be a generated token. Shorter
+ * runs are the words of an ordinary name (`REPO_MCP_TOKEN`).
+ */
+const TOKEN_RUN = /[A-Za-z0-9]{16,}/g;
+
+/**
+ * How often a token run must switch between a letter and a digit. A generated
+ * token interleaves the two; a name made of words does not, however long it
+ * is (`SERVICEACCOUNTTOKEN2` switches once).
+ */
+const MIN_TOKEN_ALTERNATIONS = 4;
+
+/** How many times `run` switches between a digit and a letter. */
+function alternations(run: string): number {
+  let count = 0;
+  for (let i = 1; i < run.length; i++) {
+    if (/\d/.test(run[i]!) !== /\d/.test(run[i - 1]!)) count++;
+  }
+  return count;
+}
+
+/**
+ * `true` when a value written where a NAME belongs — the name of an
+ * environment variable, such as an `mcp` stdio transport's `credentialEnv` —
+ * reads as a credential instead: it opens with an auth scheme and a credential
+ * (R2), or it carries a run of 16 or more letters and digits that switches
+ * between the two at least four times, as a generated token does.
+ *
+ * {@link isCredentialShapedLiteral} cannot answer this: its R1 judges the KEY
+ * a value sits under, and a key that holds a variable name reads as a
+ * credential by design (`credentialEnv`, `GITHUB_TOKEN`). This judges the value
+ * alone. A conventional name never draws: its words are separated by `_`, and a
+ * word run of capitals, however long, has no digits to switch to. A token
+ * written in letters only does not draw either, which is the price of never
+ * warning on a correct name.
+ *
+ * @example
+ * isCredentialShapedName('REPO_MCP_TOKEN')                  // false (a name)
+ * isCredentialShapedName('ABCDEFGHIJKLMNOPQRSTUVWXY')       // false (no digits)
+ * isCredentialShapedName('probe7sentinel3value9token5x')    // true  (a token run)
+ * isCredentialShapedName('Bearer abc')                      // true  (R2)
+ */
+export function isCredentialShapedName(value: unknown): boolean {
+  if (typeof value !== 'string' || value.trim() === '') return false;
+  if (PLATFORM_TEMPLATE.test(value)) return false;
+  if (AUTH_SCHEME_VALUE.test(value)) return true;
+  return (value.match(TOKEN_RUN) ?? []).some((run) => alternations(run) >= MIN_TOKEN_ALTERNATIONS);
 }
