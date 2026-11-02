@@ -37,7 +37,6 @@ export const SysMailMessage = ObjectSchema.create({
   description: 'Inbound mail message mirrored from a mailbox',
   displayNameField: 'subject',
   nameField: 'subject', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
-  titleFormat: '{subject}',
   highlightFields: ['subject', 'from_address', 'received_at', 'association_state'],
 
   fields: {

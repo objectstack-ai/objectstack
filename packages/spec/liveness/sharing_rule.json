@@ -7,13 +7,13 @@
       "verifiedAt": "2026-09-17",
       "evidence": "packages/plugins/plugin-sharing/src/sharing-rule-service.ts#defineRule — the upsert key: it looks the existing row up by `(name, organization_id)` and writes `name` onto `sys_sharing_rule`, so the authored name decides whether a boot creates a second rule or updates the one already standing; packages/plugins/plugin-sharing/src/sharing-rule-service.ts#getRule resolves the REST by-id-or-name routes against the same column, and every `sys_record_share` row the rule materialises carries `reason: rule:{name}`.",
       "producer": "packages/plugins/plugin-sharing/src/declared-sharing-rules.ts#translateDeclaredSharingRule — `if (!r?.name || !r?.object) return { skip: { kind: 'unnamed' } }` refuses a declared rule that has no name before anything else runs, and carries the authored value as the served rule's `name` — which packages/plugins/plugin-sharing/src/sharing-rule-service.ts#projectDeclaredRule makes its `id` too, the `source_id` its grants carry; nothing else supplies one.",
-      "note": "Identity, not display: `titleFormat` is `{label}`, and `name` is the object's `displayNameField`/`nameField` plus the first of its `highlightFields`."
+      "note": "Identity as well as the record title: `name` is the object's `displayNameField`/`nameField` plus the first of its `highlightFields`."
     },
     "label": {
       "status": "live",
-      "verifiedAt": "2026-09-17",
+      "verifiedAt": "2026-11-02",
       "evidenceScope": "in-repo",
-      "evidence": "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts#SysSharingRule — `titleFormat: '{label}'` makes the authored label the record title of every `sys_sharing_rule` row, and `label` is a column of all four declared listViews (`active`, `inactive`, `by_object`, `all_rules`); ui/packages/components/src/renderers/layout/containers.tsx interpolates `objectSchema.titleFormat` for the rendered title, so the authored string is what an admin reads in Setup.",
+      "evidence": "packages/plugins/plugin-sharing/src/objects/sys-sharing-rule.object.ts#SysSharingRule — `label` is a column of all four declared listViews (`active`, `inactive`, `by_object`, `all_rules`) and the sort key of each, so the authored string is what an admin reads in Setup's rule lists.",
       "producer": "packages/plugins/plugin-sharing/src/declared-sharing-rules.ts#translateDeclaredSharingRule — `label: String(r.label ?? r.name)` threads the authored label into the served rule, which the sharing-rule service lists as the rule's `label`; without that thread the rule NAME would stand for every declared rule, which is exactly what an unauthored `label` still produces.",
       "note": "Display-shaped, so the #7131 split settles it: being shown to a human IS the whole of the claimed effect, and there is no second layer where a \"real\" consumer would live. The read point is the platform object's own record surface, NOT a metadata-admin preview — this type has none (enumerated in the file note above)."
     },

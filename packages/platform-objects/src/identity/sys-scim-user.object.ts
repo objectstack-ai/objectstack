@@ -36,7 +36,6 @@ export const SysScimUser = ObjectSchema.create({
   description: 'Per-connection projection of an IdP-provisioned user (SCIM 2.0 /Users)',
   displayNameField: 'user_name',
   nameField: 'user_name', // [ADR-0079] canonical primary-title pointer
-  titleFormat: '{user_name}',
   highlightFields: ['user_name', 'display_name', 'primary_email', 'active'],
 
   listViews: {
