@@ -1722,24 +1722,30 @@ function printAutomationSummary(a: AutomationReadySummary): string[] {
     }
     return restated;
   }
-  // [#29059] Printed BEFORE the `flowCount === 0` return: a boot whose every
-  // declared flow was refused registers none, and would otherwise print no
-  // Flows line at all. Boot continued either way; this only says so. The
+  // [#29059] Declared flows the engine refused at registration, beside the
+  // declared count. Boot continued either way; this only says so. The
   // engine's per-flow reason stays where it is, under Boot diagnostics.
-  if (a.refusedCount > 0) {
+  const printRefused = (): void => {
+    if (a.refusedCount === 0) return;
     console.error(
       chalk.yellow(
         `  ⚠ Flows:   ${a.declaredFlowCount} flow(s) declared, ${a.refusedCount} refused at registration — ` +
         `refused flows never run; each one's reason is under Boot diagnostics ('failed to register flow')`,
       ),
     );
+  };
+  // A boot whose every declared flow was refused registers none: it prints
+  // the refused line alone rather than no Flows line at all.
+  if (a.flowCount === 0) {
+    printRefused();
+    return restated;
   }
-  if (a.flowCount === 0) return restated;
 
   const parts = [`${a.flowCount} flow(s)`, `${a.boundCount} bound to triggers`];
   if (a.triggerTypes.length > 0) parts.push(`(${a.triggerTypes.join(', ')})`);
   if (a.draftCount > 0) parts.push(`· ${a.draftCount} draft`);
   console.error(chalk.dim(`  Flows:   ${parts.join(' ')}`));
+  printRefused();
 
   // #12028 — printed FIRST among the warnings because it re-reads every line
   // above it: the counts describe the ARMED bodies only, so when a name is
