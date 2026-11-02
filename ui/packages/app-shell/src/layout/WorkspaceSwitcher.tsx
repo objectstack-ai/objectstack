@@ -4,9 +4,10 @@
  * Header-left organization (workspace) switcher — the standard place users
  * expect "which org am I in / switch org" to live (Linear/Vercel/GitHub style).
  *
- * - Single-org users (the vast majority): render NOTHING. With one org there is
- *   nothing to switch to, so a dropdown here would control nothing. The
- *   switcher is a multi-org affordance. Where a tenancy wall IS in force the
+ * - Single-org users (the vast majority): render NOTHING on the web. With one
+ *   org there is nothing to switch to, so a dropdown here would control
+ *   nothing. The web switcher is a multi-org affordance (the mobile shell's
+ *   native switcher, below, is not). Where a tenancy wall IS in force the
  *   org name still matters at one membership — `CurrentOrganizationIndicator`
  *   renders it read-only there (objectui#5287), without a control.
  * - Multi-org users: the active org name + a dropdown to switch orgs inline
@@ -15,10 +16,12 @@
  * - No org context at all: renders nothing.
  *
  * Inside the ObjectStack mobile shell (`@object-ui/mobile`), when the shell
- * announces `showConnectionSwitcher`, the same button opens the shell's native
- * switcher instead of the dropdown: it lists the saved organizations and
- * company servers the shell holds, which the web menu cannot see. In a plain
- * browser, or a shell without the capability, the dropdown opens as before.
+ * announces `showConnectionSwitcher`, the button opens the shell's native
+ * switcher instead of the dropdown, and it renders whenever there is an active
+ * organization, at any membership count: the sheet lists the connections the
+ * shell holds across company servers, which this server's membership list
+ * cannot count. In a plain browser, or a shell without the capability, the
+ * rules above apply unchanged.
  *
  * Under `group` tenancy posture (ADR-0105) the switcher's meaning changes:
  * the active organization is only the WRITE target — reads span every
@@ -79,35 +82,6 @@ export function WorkspaceSwitcher() {
   // rather than an empty switcher or a guessed name.
   if (!current) return null;
 
-  // Single-org: render nothing. With only one org there's nothing to switch to,
-  // so a dropdown here would be a control that controls nothing. The switcher
-  // appears only once a second org exists. On a walled deployment the org NAME
-  // is still load-bearing context at one membership — `CurrentOrganizationIndicator`
-  // renders it read-only for exactly this case (objectui#5287); this rule is
-  // unchanged.
-  if (orgList.length <= 1) return null;
-
-  const handleSwitch = (org: AuthOrganization) => {
-    if (org.id === current.id) return;
-    // objectui#13231 — ask BEFORE `set-active` is sent. Asking at the reload
-    // would be too late: the server has already switched, and the page holding
-    // the edits reloads itself for the new organization (dropping them, and its
-    // leave prompt with them) before the document load starts. On Cancel
-    // nothing is sent: the organization, the URL and the edits stay.
-    confirmUnsavedLeave(async () => {
-      try {
-        await switchOrganization(org.id);
-        // switchOrganization only updates state; reload to the console root so the
-        // new active org propagates to every data scope app-wide AND
-        // RootLandingRedirect resolves the right landing (single-app workspace →
-        // that app, not the redundant launcher). Same as OrganizationsPage.
-        window.location.href = resolveRootUrl();
-      } catch (err) {
-        console.error('[WorkspaceSwitcher] switch failed', err);
-      }
-    });
-  };
-
   const triggerClassName =
     'ml-2 inline-flex max-w-[14rem] items-center gap-1.5 rounded-md px-1.5 py-1 text-sm font-medium text-foreground/80 transition-colors hover:bg-accent hover:text-foreground';
   const triggerContent = (
@@ -139,6 +113,35 @@ export function WorkspaceSwitcher() {
       </button>
     );
   }
+
+  // Single-org: render nothing. With only one org there's nothing to switch to,
+  // so a dropdown here would be a control that controls nothing. The switcher
+  // appears only once a second org exists. On a walled deployment the org NAME
+  // is still load-bearing context at one membership — `CurrentOrganizationIndicator`
+  // renders it read-only for exactly this case (objectui#5287); this rule is
+  // unchanged.
+  if (orgList.length <= 1) return null;
+
+  const handleSwitch = (org: AuthOrganization) => {
+    if (org.id === current.id) return;
+    // objectui#13231 — ask BEFORE `set-active` is sent. Asking at the reload
+    // would be too late: the server has already switched, and the page holding
+    // the edits reloads itself for the new organization (dropping them, and its
+    // leave prompt with them) before the document load starts. On Cancel
+    // nothing is sent: the organization, the URL and the edits stay.
+    confirmUnsavedLeave(async () => {
+      try {
+        await switchOrganization(org.id);
+        // switchOrganization only updates state; reload to the console root so the
+        // new active org propagates to every data scope app-wide AND
+        // RootLandingRedirect resolves the right landing (single-app workspace →
+        // that app, not the redundant launcher). Same as OrganizationsPage.
+        window.location.href = resolveRootUrl();
+      } catch (err) {
+        console.error('[WorkspaceSwitcher] switch failed', err);
+      }
+    });
+  };
 
   return (
     <DropdownMenu>
